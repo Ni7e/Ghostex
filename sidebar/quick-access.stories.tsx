@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useEffect, useMemo } from 'react';
+import type { GxserverStashedPrompt } from '../shared/gxserver-protocol';
 import { createDefaultSidebarCommandButtons } from '../shared/sidebar-commands';
 import type {
   SidebarPreviousSessionItem,
@@ -9,7 +10,9 @@ import type {
 import { CommandPalette } from './command-palette';
 import { PreviousSessionsModal } from './previous-sessions-modal';
 import { RecentProjectsModal } from './recent-projects-modal';
-import { createStoryPreviousSession } from './sidebar-story-fixture-helpers';
+import { useSidebarStore } from './sidebar-store';
+import { createStoryPreviousSession, createStorySession } from './sidebar-story-fixture-helpers';
+import { StashedPromptsModal } from './stashed-prompts-modal';
 import type { WebviewApi } from './webview-api';
 
 const STORY_PREVIOUS_SESSIONS: SidebarPreviousSessionItem[] = [
@@ -50,6 +53,27 @@ const STORY_OLDER_PREVIOUS_SESSIONS: SidebarPreviousSessionItem[] = [
   }),
 ];
 
+const STORY_OPEN_SESSIONS = [
+  createStorySession({
+    alias: 'Quick Access live session',
+    detail: 'OpenAI Codex',
+    isFocused: true,
+    isRunning: true,
+    isVisible: true,
+    lastInteractionAt: '2026-08-07T08:45:00.000Z',
+    sessionId: 'quick-access-open-session-1',
+    shortcutLabel: '⌘1',
+  }),
+  createStorySession({
+    alias: 'Review current workspace',
+    detail: 'Claude Code',
+    isRunning: true,
+    lastInteractionAt: '2026-08-07T08:00:00.000Z',
+    sessionId: 'quick-access-open-session-2',
+    shortcutLabel: '⌘2',
+  }),
+];
+
 const STORY_RECENT_PROJECTS: SidebarRecentProject[] = [
   {
     path: '/Users/demo/Ghostex',
@@ -71,6 +95,29 @@ const STORY_RECENT_PROJECTS: SidebarRecentProject[] = [
     recentClosedAt: '2026-08-06T19:05:00.000Z',
     sessionCount: 2,
     title: 'Release Tools',
+  },
+];
+
+const STORY_SAVED_PROMPTS: GxserverStashedPrompt[] = [
+  {
+    content: 'Review the current implementation and suggest the smallest reliable fix.',
+    createdAt: '2026-08-08T08:00:00.000Z',
+    cwd: '/Users/demo/Ghostex',
+    projectId: 'quick-access-project-1',
+    projectName: 'Ghostex',
+    promptId: 'quick-access-prompt-1',
+    sessionId: 'quick-access-open-session-1',
+    updatedAt: '2026-08-08T08:00:00.000Z',
+  },
+  {
+    content: 'Check the release flow for anything that could fail after publishing.',
+    createdAt: '2026-08-07T19:00:00.000Z',
+    cwd: '/Users/demo/Release Tools',
+    projectId: 'quick-access-project-3',
+    projectName: 'Release Tools',
+    promptId: 'quick-access-prompt-2',
+    sessionId: null,
+    updatedAt: '2026-08-07T19:00:00.000Z',
   },
 ];
 
@@ -121,6 +168,14 @@ function useQuickAccessStoryHost(respondToRequests = true): WebviewApi {
             recentProjects: STORY_RECENT_PROJECTS,
             type: 'recentProjectsResult',
           });
+          return;
+        }
+        if (message.type === 'requestStashedPrompts') {
+          dispatchStoryMessage({
+            prompts: STORY_SAVED_PROMPTS,
+            requestId: message.requestId,
+            type: 'stashedPromptsResult',
+          });
         }
       },
     }),
@@ -161,7 +216,43 @@ function RecentProjectsStory() {
 
 function RecentSessionsStory() {
   const vscode = useQuickAccessStoryHost();
+  useEffect(() => {
+    useSidebarStore.setState({
+      groupsById: {
+        'quick-access-story-group': {
+          groupId: 'quick-access-story-group',
+          isActive: true,
+          isFocusModeActive: false,
+          layoutVisibleCount: 1,
+          title: 'Ghostex',
+          viewMode: 'grid',
+          visibleCount: 1,
+        },
+      },
+      sessionIdsByGroup: {
+        'quick-access-story-group': STORY_OPEN_SESSIONS.map((session) => session.sessionId),
+      },
+      sessionsById: Object.fromEntries(STORY_OPEN_SESSIONS.map((session) => [session.sessionId, session])),
+    });
+    return () => {
+      useSidebarStore.getState().reset();
+    };
+  }, []);
   return <PreviousSessionsModal isOpen={true} onClose={() => undefined} vscode={vscode} />;
+}
+
+function SavedPromptsStory() {
+  const vscode = useQuickAccessStoryHost();
+  return (
+    <StashedPromptsModal
+      isOpen={true}
+      onClose={() => undefined}
+      projectId='quick-access-project-1'
+      sessionId='quick-access-open-session-1'
+      stashHintTooltipDefaultOpen={true}
+      vscode={vscode}
+    />
+  );
 }
 
 function RecentProjectsLoadingStory() {
@@ -188,6 +279,7 @@ type Story = StoryObj<typeof meta>;
 export const CommandPane: Story = { render: () => <CommandPaneStory /> };
 export const CommandPaneLoading: Story = { render: () => <CommandPaneLoadingStory /> };
 export const RecentProjects: Story = { render: () => <RecentProjectsStory /> };
-export const RecentSessions: Story = { render: () => <RecentSessionsStory /> };
+export const Sessions: Story = { render: () => <RecentSessionsStory /> };
+export const SavedPrompts: Story = { render: () => <SavedPromptsStory /> };
 export const RecentProjectsLoading: Story = { render: () => <RecentProjectsLoadingStory /> };
 export const RecentSessionsLoading: Story = { render: () => <RecentSessionsLoadingStory /> };

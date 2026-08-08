@@ -713,6 +713,8 @@ describe("normalizeghostexSettings", () => {
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.codex.hideBrowserFaviconUntilHover).toBe(false);
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.minimal.hideBrowserFaviconUntilHover).toBe(true);
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.detailed.hideBrowserFaviconUntilHover).toBe(false);
+    expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.minimal.showProjectIcons).toBe(false);
+    expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.showProjectIcons).toBe(true);
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideLastActiveTimeOnSessionCards).toBe(
       true,
     );
@@ -729,12 +731,14 @@ describe("normalizeghostexSettings", () => {
         hideProjectHeaderDiffStats: false,
         hideBrowserFaviconUntilHover: true,
         hideSessionAgentIconUntilHover: false,
+        showProjectIcons: false,
         useColoredSessionAgentIcons: true,
       }),
     ).toMatchObject({
       hideProjectHeaderDiffStats: false,
       hideBrowserFaviconUntilHover: true,
       hideSessionAgentIconUntilHover: false,
+      showProjectIcons: false,
       useColoredSessionAgentIcons: true,
     });
   });

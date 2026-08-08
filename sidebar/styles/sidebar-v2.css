@@ -200,6 +200,7 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
 }
 
 [data-sidebar-version="v2"] .sidebar-v2-row-item {
+  position: relative;
   list-style: none;
   /*
    * Long inboxes are the normal case here, so rows opt out of layout and paint
@@ -207,6 +208,41 @@ body[data-sidebar-theme^="light-"] [data-sidebar-version="v2"],
    * the scrollbar does not jump as rows realize.
    */
   content-visibility: auto;
+}
+
+[data-sidebar-version="v2"] .sidebar-v2-row-item[data-dragging="true"] {
+  opacity: 0.45;
+}
+
+[data-sidebar-version="v2"] .sidebar-v2-row-item[data-pinned-reorderable="true"] .sidebar-v2-row {
+  cursor: grab;
+}
+
+[data-sidebar-version="v2"] .sidebar-v2-row-item[data-dragging="true"] .sidebar-v2-row {
+  cursor: grabbing;
+}
+
+[data-sidebar-version="v2"] .sidebar-v2-row-item[data-drop-position]::before {
+  position: absolute;
+  z-index: 3;
+  right: 8px;
+  left: 8px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-button-background) 86%, #ffffff 14%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--app-button-background) 22%, transparent),
+    0 0 14px color-mix(in srgb, var(--app-button-background) 28%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+[data-sidebar-version="v2"] .sidebar-v2-row-item[data-drop-position="before"]::before {
+  top: 0;
+}
+
+[data-sidebar-version="v2"] .sidebar-v2-row-item[data-drop-position="after"]::before {
+  bottom: 0;
 }
 
 [data-sidebar-version="v2"] .sidebar-v2-row-item[data-variant="card"] {

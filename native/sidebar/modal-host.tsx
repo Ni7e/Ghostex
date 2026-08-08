@@ -1465,7 +1465,11 @@ function AppModalHost() {
         isOpen={activeModal === "previousSessions"}
         onClose={closeModal}
         onInitialLoadReady={handlePreviousSessionsInitialLoadReady}
-        shouldPreload={activeModal === "commandPalette"}
+        shouldPreload={
+          activeModal === "commandPalette" ||
+          activeModal === "recentProjects" ||
+          activeModal === "stashedPrompts"
+        }
         vscode={vscode}
       />
       <UpdateAvailableModal
@@ -1958,6 +1962,7 @@ function AppModalHost() {
           vscode.postMessage({
             details,
             event,
+            scenarioId: "native.terminal.focus",
             type: "sidebarDebugLog",
           });
         }}

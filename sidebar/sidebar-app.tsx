@@ -1,4 +1,4 @@
-import { Cursor, KeyboardSensor, PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
+import { Cursor, KeyboardSensor, PointerSensor } from "@dnd-kit/dom";
 import { move } from "@dnd-kit/helpers";
 import { DragDropProvider, type DragDropEventHandlers } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
@@ -50,7 +50,6 @@ import {
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
-  type RefObject,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -106,6 +105,10 @@ import {
   summarizeSidebarCollapseDebugGroupIds,
 } from "./sidebar-collapse-state-debug";
 import { postSidebarOrderReproLog } from "./sidebar-order-repro-log";
+import {
+  getSidebarReorderActivationConstraints,
+  SIDEBAR_REORDER_DISTANCE_PX,
+} from "./sidebar-reorder-activation";
 import { scrollElementIntoViewIfNeeded } from "./scroll-into-view-if-needed";
 import { resetSidebarStore, useSidebarStore } from "./sidebar-store";
 import {
@@ -199,6 +202,7 @@ import {
   getSidebarTitlebarForegroundForBackground,
   getSidebarTitlebarGradientColors,
   isDiagnosticLoggingScenarioEnabled,
+  type DiagnosticLoggingScenarioId,
   type ghostexSettings,
   type KeepAwakeDurationMinutes,
   type RemoteMachineSettings,
@@ -743,13 +747,7 @@ const REFERENCE_SECTION_CHILD_ANIMATION_RESET_MS = 420;
 
 const sensors = [
   PointerSensor.configure({
-    activationConstraints(event) {
-      if (event.pointerType === "touch") {
-        return [ new PointerActivationConstraints.Delay({ tolerance: 5, value: 250 }) ];
-      }
-
-      return [ new PointerActivationConstraints.Distance({ value: 6 }) ];
-    },
+    activationConstraints: getSidebarReorderActivationConstraints,
   }),
   KeyboardSensor,
 ];
@@ -761,19 +759,12 @@ const sensors = [
  */
 const remoteMachineSensors = [
   PointerSensor.configure({
-    activationConstraints(event) {
-      if (event.pointerType === "touch") {
-        return [ new PointerActivationConstraints.Delay({ tolerance: 5, value: 250 }) ];
-      }
-
-      return [ new PointerActivationConstraints.Distance({ value: 6 }) ];
-    },
+    activationConstraints: getSidebarReorderActivationConstraints,
   }),
 ];
 
 const SIDEBAR_STARTUP_INTERACTION_BLOCK_MS = 1500;
 const SIDEBAR_STARTUP_REPRO_WINDOW_MS = 15_000;
-const SIDEBAR_POINTER_DRAG_REORDER_THRESHOLD_PX = 8;
 const SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const SIDEBAR_GXSERVER_UNAVAILABLE_EMPTY_STATE_DELAY_MS = 20_000;
 const SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY = "ghostex-sidebar-ui-collapse-state";
@@ -1348,7 +1339,11 @@ export function SidebarApp({
     };
   }, []);
 
-  const postSidebarDebugLog = useEffectEvent((event: string, details: unknown) => {
+  const postSidebarDebugLog = useEffectEvent((
+    scenarioId: DiagnosticLoggingScenarioId,
+    event: string,
+    details: unknown,
+  ) => {
     if (!debuggingMode) {
       return;
     }
@@ -1357,6 +1352,7 @@ export function SidebarApp({
     vscode.postMessage({
       details,
       event,
+      scenarioId,
       type: "sidebarDebugLog",
     });
   });
@@ -1390,6 +1386,7 @@ export function SidebarApp({
           revision,
         },
         event: `${SIDEBAR_COLLAPSE_STATE_DEBUG_EVENT_PREFIX}${event}`,
+        scenarioId: "native.sidebar.collapse",
         type: "sidebarDebugLog",
       });
     },
@@ -1405,6 +1402,7 @@ export function SidebarApp({
     vscode.postMessage({
       details,
       event: `repro.pinnedSessionReorder.${event}`,
+      scenarioId: "native.pane.reorder",
       type: "sidebarDebugLog",
     });
   });
@@ -1420,6 +1418,7 @@ export function SidebarApp({
     vscode.postMessage({
       details,
       event: `repro.sidebarStartup.${event}`,
+      scenarioId: "native.sidebar.refresh",
       type: "sidebarDebugLog",
     });
   });
@@ -1735,7 +1734,7 @@ export function SidebarApp({
 
     if (event.data.type === "playCompletionSound") {
       const sessionId = event.data.sessionId;
-      postSidebarDebugLog("completionSound.messageReceived", {
+      postSidebarDebugLog("native.agent.detection", "completionSound.messageReceived", {
         sound: event.data.sound,
         sessionId,
       });
@@ -1763,7 +1762,7 @@ export function SidebarApp({
         completionFlashTimeoutBySessionIdRef.current.set(sessionId, timeout);
       }
       void playCompletionSound(event.data.sound, (soundEvent, details) => {
-        postSidebarDebugLog(soundEvent, details);
+        postSidebarDebugLog("native.agent.detection", soundEvent, details);
       });
       return;
     }
@@ -2893,8 +2892,28 @@ export function SidebarApp({
     [ displayedReferenceProjectGroupIds, remoteProjectGroupIdsByMachineId ],
   );
   const remoteMachines = settings?.remoteMachines ?? [];
+  /*
+   * CDXC:RemoteMachines 2026-08-08:
+   * Forgetting a collapsed machine id is only meaningful against the
+   * authoritative saved-machine list, and host settings arrive asynchronously.
+   * Before they do, `settings?.remoteMachines ?? []` means "not known yet", not
+   * "no machines" — pruning against that empty list deleted every restored
+   * collapsed machine within the first frames of launch, and the persistence
+   * effect below then wrote the emptied map back, so remote sections always
+   * reopened expanded and the saved state was destroyed for good. This is the
+   * same hazard `preserveUnknownCollapsedGroups` documents for project groups
+   * (see group-collapse.ts), so gate on the same hydrate signal. The dependency
+   * is a primitive id key because `remoteMachines` is a fresh array identity on
+   * every render and re-ran this pass constantly.
+   */
+  const savedRemoteMachineIdsKey = settings
+    ? JSON.stringify(settings.remoteMachines.map((machine) => machine.id))
+    : undefined;
   useEffect(() => {
-    const remoteMachineIds = new Set(remoteMachines.map((machine) => machine.id));
+    if (savedRemoteMachineIdsKey === undefined || !hasAppliedHydrateRef.current) {
+      return;
+    }
+    const remoteMachineIds = new Set<string>(JSON.parse(savedRemoteMachineIdsKey) as string[]);
     setCollapsedRemoteMachineSectionsById((previous) => {
       let next: Record<string, true> | undefined;
       for (const machineId of Object.keys(previous)) {
@@ -2905,7 +2924,7 @@ export function SidebarApp({
       }
       return next ?? previous;
     });
-  }, [ remoteMachines ]);
+  }, [ savedRemoteMachineIdsKey ]);
   const moveRemoteMachineSection = useEffectEvent(
     (sourceRemoteMachineId: string, target: SidebarRemoteMachineDropTarget) => {
       if (!settings) {
@@ -3085,6 +3104,7 @@ export function SidebarApp({
       vscode.postMessage({
         details,
         event: `repro.sidebarMultiSelect.${event}`,
+        scenarioId: "native.sidebar.refresh",
         type: "sidebarDebugLog",
       });
     },
@@ -3187,7 +3207,7 @@ export function SidebarApp({
   }, [ selectedSidebarSessionIds, sessionsById ]);
   const postSidebarWakeScrollLog = useEffectEvent(
     (event: string, targetSessionId: string, details: Record<string, unknown>) => {
-      postSidebarDebugLog(`repro.sidebarWakeScroll.${event}`, {
+      postSidebarDebugLog("native.sidebar.refresh", `repro.sidebarWakeScroll.${event}`, {
         ...details,
         ...summarizeSidebarWakeScrollOrderState({
           activeSessionsSortMode,
@@ -3224,7 +3244,15 @@ export function SidebarApp({
         : resolveVisibleSidebarSessionSlotId({
           focusedSessionId,
           slotNumber,
-          visibleSessionIds: readRenderedSidebarSessionSlotIds(root),
+          /*
+           * data-visible describes whether a session is already surfaced in a
+           * workspace pane, not whether its sidebar row is visible. Numbered
+           * shortcuts must include every rendered row so Cmd+N can surface the
+           * Nth session the user can actually see in the sidebar.
+           */
+          visibleSessionIds: readRenderedSidebarSessionSlotIds(root, {
+            skipPaneHiddenRows: false,
+          }),
         });
     if (!sessionId) {
       return;
@@ -3658,7 +3686,7 @@ export function SidebarApp({
 
   const unlockCompletionSoundPlayback = useEffectEvent(() => {
     void prepareCompletionSoundPlayback((soundEvent, details) => {
-      postSidebarDebugLog(soundEvent, details);
+      postSidebarDebugLog("native.agent.detection", soundEvent, details);
     });
   });
 
@@ -3670,9 +3698,12 @@ export function SidebarApp({
     }
 
     const sessionElement = target.closest<HTMLElement>("[data-sidebar-session-id]");
-    const groupElement = target.closest<HTMLElement>("[data-sidebar-group-id]");
+    const groupElement = target.closest<HTMLElement>(
+      "[data-sidebar-session-group-id], [data-sidebar-group-id]",
+    );
     const sessionId = sessionElement?.dataset.sidebarSessionId;
-    const groupId = groupElement?.dataset.sidebarGroupId;
+    const groupId =
+      groupElement?.dataset.sidebarSessionGroupId ?? groupElement?.dataset.sidebarGroupId;
     if (!sessionId || !groupId) {
       pointerDownSessionTargetRef.current = undefined;
       return;
@@ -4074,7 +4105,7 @@ export function SidebarApp({
         targetData: getSidebarDropData(event.operation.target),
       });
     }
-    postSidebarDebugLog("session.dragStart", {
+    postSidebarDebugLog("native.pane.reorder", "session.dragStart", {
       nativeEventType: nativeEvent?.type,
       pointerDragState: sessionPointerDragStateRef.current,
       point: getClientPoint(nativeEvent),
@@ -4132,7 +4163,7 @@ export function SidebarApp({
           sourceData,
         )
         : undefined;
-    postSidebarDebugLog("session.dragEnd", {
+    postSidebarDebugLog("native.pane.reorder", "session.dragEnd", {
       canceled: event.canceled,
       nativeEventType: nativeEvent?.type,
       pointerDragState: sessionPointerDragState,
@@ -4469,7 +4500,7 @@ export function SidebarApp({
           sourceData,
         });
       }
-      postSidebarDebugLog("session.dragEndIgnoredWithoutPointerMovement", {
+      postSidebarDebugLog("native.pane.reorder", "session.dragEndIgnoredWithoutPointerMovement", {
         point: getClientPoint(nativeEvent),
         sourceData,
       });
@@ -4596,7 +4627,7 @@ export function SidebarApp({
     const omittedSessionIds = Object.values(currentSessionIdsByGroup)
       .flat()
       .filter((sessionId) => !nextListedSessionIds.has(sessionId));
-    postSidebarDebugLog("session.dragComputedOrder", {
+    postSidebarDebugLog("native.pane.reorder", "session.dragComputedOrder", {
       currentSessionIdsByGroup,
       nextSessionIdsByGroup,
       omittedSessionIds,
@@ -4724,8 +4755,8 @@ export function SidebarApp({
      * the only active command surface.
      *
      * CDXC:CommandPalette 2026-06-13-22:18:
-     * Ghostex Quick Access gives Commands and Recent Sessions separate tabs.
-     * This launcher opens Commands; Cmd+P routes to the Recent Sessions modal
+     * Ghostex Quick Access gives Commands and Sessions separate tabs.
+     * This launcher opens Commands; Cmd+P routes to the Sessions modal
      * id instead of encoding a mode in this input query.
      *
    */
@@ -4825,22 +4856,6 @@ export function SidebarApp({
 
     return false;
   });
-
-  const toggleSessionSearch = () => {
-    dismissAppModalForSidebarNavigation("SettingsDismissal:sidebarSearch");
-    setIsDaemonSessionsOpen(false);
-    setIsPinnedPromptsOpen(false);
-    setIsPreviousSessionsOpen(false);
-    setIsScratchPadOpen(false);
-    setIsSessionSearchOpen((previous) => {
-      if (previous) {
-        setIsSessionSearchSelectionVisible(false);
-        setSessionSearchQuery("");
-      }
-
-      return !previous;
-    });
-  };
 
   const restoreSearchedPreviousSession = (historyId: string) => {
     vscode.postMessage({
@@ -5250,8 +5265,8 @@ export function SidebarApp({
     openQuickAccess("recentSessions");
   };
 
-  const searchPreviousSessionsByText = () => {
-    dismissAppModalForSidebarNavigation("SettingsDismissal:previousSessionsTextSearch");
+  const searchPreviousSessionsByPrompt = () => {
+    dismissAppModalForSidebarNavigation("SettingsDismissal:previousSessionsPromptSearch");
     setIsPinnedPromptsOpen(false);
     setIsDaemonSessionsOpen(false);
     setIsScratchPadOpen(false);
@@ -5330,8 +5345,6 @@ export function SidebarApp({
         {showCommandHotkeyOverlay ? <SidebarHotkeyOverlay hotkeys={settings?.hotkeys} /> : null}
         <SidebarReferenceTopChrome
           keepAwakeRuntime={sidebarKeepAwakeRuntime}
-          isSessionSearchOpen={isSessionSearchOpen}
-          onCloseSearch={closeSessionSearch}
           onOpenAgentsHub={openReferenceAgentsHub}
           onOpenAutomations={openReferenceAutomations}
           onOpenDiscord={() => {
@@ -5342,15 +5355,12 @@ export function SidebarApp({
           onOpenPowerSettings={openKeepAwakePowerSettings}
           onOpenPreviousSessions={openPreviousSessions}
           onRunKeepAwake={startSidebarKeepAwake}
-          onSearchPreviousSessionsByText={searchPreviousSessionsByText}
-          onSearch={toggleSessionSearch}
+          onSearchPreviousSessionsByPrompt={searchPreviousSessionsByPrompt}
+          onSearch={openPreviousSessions}
           onStopKeepAwake={stopSidebarKeepAwake}
           onTogglePetOverlay={() => {
             vscode.postMessage({ type: "togglePetOverlay" });
           }}
-          searchInputRef={searchInputRef}
-          sessionSearchQuery={sessionSearchQuery}
-          setSessionSearchQuery={setSessionSearchQuery}
           settings={effectiveSettings}
           showKeepAwakeButton={showSidebarKeepAwakeButton}
         />
@@ -5442,7 +5452,7 @@ export function SidebarApp({
                     containsActiveSession={[...groupIdsContainingActiveSession].some(
                       (groupId) => groupsById[groupId]?.isChatCollection !== true,
                     )}
-                    onFilterChats={toggleSessionSearch}
+                    onFilterChats={openPreviousSessions}
                     onSetActiveSessionsSortMode={setActiveSessionsSortMode}
                     onSetSidebarV2Layout={setSidebarV2Layout}
                     onSetSidebarVersion={setSidebarVersion}
@@ -5498,6 +5508,7 @@ export function SidebarApp({
                       groupDropIndicator={groupDropIndicator}
                       groupIds={sidebarV2DisplayedGroupIds}
                       isGroupReorderDisabled={!isManualActiveSessionsSort}
+                      isPinnedSessionReorderDisabled={isSessionSearchOpen}
                       groupsById={groupsById}
                       hostEmptyState={sidebarV2HostEmptyState}
                       isSearchFiltering={isSessionSearchFiltering}
@@ -5533,6 +5544,7 @@ export function SidebarApp({
                       onSetNewSessionsDefaultEnvMode={setNewSessionsDefaultEnvMode}
                       onSetProjectGroupingOverrides={setSidebarProjectGroupingOverrides}
                       onSetSidebarVersion={setSidebarVersion}
+                      pinnedSessionDropIndicator={pinnedSessionDropIndicator}
                       onSetLayout={setSidebarV2Layout}
                       onRunAgent={runSidebarV2Agent}
                       primaryAgentId={primaryAgentLauncherId}
@@ -6234,8 +6246,6 @@ type SidebarReferencePrimaryMenuKind = "keepAwake" | "settings";
 
 function SidebarReferenceTopChrome({
   keepAwakeRuntime,
-  isSessionSearchOpen,
-  onCloseSearch,
   onOpenAgentsHub,
   onOpenAutomations,
   onOpenDiscord,
@@ -6244,19 +6254,14 @@ function SidebarReferenceTopChrome({
   onOpenPowerSettings,
   onOpenPreviousSessions,
   onRunKeepAwake,
-  onSearchPreviousSessionsByText,
+  onSearchPreviousSessionsByPrompt,
   onSearch,
   onStopKeepAwake,
   onTogglePetOverlay,
-  searchInputRef,
-  sessionSearchQuery,
-  setSessionSearchQuery,
   settings,
   showKeepAwakeButton,
 }: {
   keepAwakeRuntime?: SidebarKeepAwakeRuntimeState;
-  isSessionSearchOpen: boolean;
-  onCloseSearch: () => void;
   onOpenAgentsHub: () => void;
   onOpenAutomations: () => void;
   onOpenDiscord: () => void;
@@ -6265,13 +6270,10 @@ function SidebarReferenceTopChrome({
   onOpenPowerSettings: () => void;
   onOpenPreviousSessions: () => void;
   onRunKeepAwake: (durationMinutes: KeepAwakeDurationMinutes) => void;
-  onSearchPreviousSessionsByText: () => void;
+  onSearchPreviousSessionsByPrompt: () => void;
   onSearch: () => void;
   onStopKeepAwake: () => void;
   onTogglePetOverlay: () => void;
-  searchInputRef: RefObject<HTMLInputElement | null>;
-  sessionSearchQuery: string;
-  setSessionSearchQuery: (query: string) => void;
   settings: ghostexSettings;
   showKeepAwakeButton: boolean;
 }) {
@@ -6381,7 +6383,7 @@ function SidebarReferenceTopChrome({
    *
    * CDXC:SidebarTopChrome 2026-07-04-17:26:
    * The visible top chrome is now Search plus More. Agents Hub, Automations,
-   * Mobile, Keep Awake, Search by Text, and Previous Sessions all live under
+   * Mobile, Keep Awake, Search by Prompt, and Previous Sessions all live under
    * More so the sidebar only spends one row on primary navigation.
    *
    * CDXC:SidebarFooter 2026-08-07:
@@ -6406,12 +6408,7 @@ function SidebarReferenceTopChrome({
           role="group"
         >
           <SidebarReferenceSearchNavItem
-            inputRef={searchInputRef}
-            isOpen={isSessionSearchOpen}
-            onCloseSearch={onCloseSearch}
             onSearch={onSearch}
-            query={sessionSearchQuery}
-            setQuery={setSessionSearchQuery}
             shortcut={formatSidebarMenuHotkeyLabel(settingsMenuHotkeys.openSessionSearchPalette)}
           />
           <div className="reference-sidebar-primary-menu-cell">
@@ -6437,7 +6434,9 @@ function SidebarReferenceTopChrome({
                 }}
                 onOpenMobile={() => closeMenuAndRun(onOpenMobile)}
                 onOpenPreviousSessions={() => closeMenuAndRun(onOpenPreviousSessions)}
-                onSearchPreviousSessionsByText={() => closeMenuAndRun(onSearchPreviousSessionsByText)}
+                onSearchPreviousSessionsByPrompt={() =>
+                  closeMenuAndRun(onSearchPreviousSessionsByPrompt)
+                }
                 onTogglePetOverlay={() => closeMenuAndRun(onTogglePetOverlay)}
                 showKeepAwakeButton={showKeepAwakeButton}
               />
@@ -6465,119 +6464,32 @@ function SidebarReferenceTopChrome({
 }
 
 function SidebarReferenceSearchNavItem({
-  inputRef,
-  isOpen,
-  onCloseSearch,
   onSearch,
-  query,
-  setQuery,
   shortcut,
 }: {
-  inputRef: RefObject<HTMLInputElement | null>;
-  isOpen: boolean;
-  onCloseSearch: () => void;
   onSearch: () => void;
-  query: string;
-  setQuery: (query: string) => void;
   shortcut?: string;
 }) {
-  const hasQuery = query.length > 0;
-  const clearQueryAndFocus = () => {
-    setQuery("");
-    inputRef.current?.focus();
-  };
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(query.length, query.length);
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [ inputRef, isOpen, query.length ]);
-
   return (
-    <div className="reference-sidebar-search-slot" data-active={String(isOpen)}>
-      {isOpen ? (
-        <div className="reference-sidebar-nav-item" data-inline-search="true">
-          {/*
-           * CDXC:SidebarSearch 2026-06-19-13:52:
-           * The top Search row should not swap into a boxed search bar. When
-           * active, the nav label itself becomes a transparent input with the
-           * Search text as its placeholder so typing happens in-place.
-           */}
-          <div
-            className="reference-sidebar-nav-button reference-sidebar-inline-search-row"
-            onClick={() => {
-              inputRef.current?.focus();
-            }}
-          >
-            <IconSearch
-              aria-hidden="true"
-              className="reference-sidebar-nav-icon reference-sidebar-search-icon"
-              size={15}
-              stroke={1.8}
-            />
-            <input
-              aria-label="Search current sessions and sessions to reopen"
-              className="reference-sidebar-inline-search-input"
-              onBlur={() => {
-                if (query.trim().length === 0) {
-                  onCloseSearch();
-                }
-              }}
-              onChange={(event) => {
-                setQuery(event.target.value);
-              }}
-              placeholder="Search"
-              ref={inputRef}
-              spellCheck={false}
-              type="text"
-              value={query}
-            />
-            {shortcut ? <kbd className="reference-sidebar-nav-shortcut">{shortcut}</kbd> : null}
-            {hasQuery ? (
-              <button
-                aria-label="Clear session search"
-                className="reference-sidebar-hover-action reference-sidebar-inline-search-clear"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  clearQueryAndFocus();
-                }}
-                type="button"
-              >
-                <IconX aria-hidden="true" size={15} stroke={1.9} />
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : (
-        <div className="reference-sidebar-nav-item">
-          <Button
-            className="reference-sidebar-nav-button"
-            onClick={onSearch}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <IconSearch
-              aria-hidden="true"
-              className="reference-sidebar-nav-icon reference-sidebar-search-icon"
-              size={15}
-              stroke={1.8}
-            />
-            <span className="reference-sidebar-nav-label">Search</span>
-            {shortcut ? <kbd className="reference-sidebar-nav-shortcut">{shortcut}</kbd> : null}
-          </Button>
-        </div>
-      )}
+    <div className="reference-sidebar-search-slot" data-active="false">
+      <div className="reference-sidebar-nav-item">
+        <Button
+          className="reference-sidebar-nav-button"
+          onClick={onSearch}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <IconSearch
+            aria-hidden="true"
+            className="reference-sidebar-nav-icon reference-sidebar-search-icon"
+            size={15}
+            stroke={1.8}
+          />
+          <span className="reference-sidebar-nav-label">Search</span>
+          {shortcut ? <kbd className="reference-sidebar-nav-shortcut">{shortcut}</kbd> : null}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -6690,7 +6602,7 @@ function SidebarReferenceSettingsDropdown({
   onOpenMobile,
   onOpenKeepAwakeMenu,
   onOpenPreviousSessions,
-  onSearchPreviousSessionsByText,
+  onSearchPreviousSessionsByPrompt,
   onTogglePetOverlay,
   showKeepAwakeButton,
 }: {
@@ -6703,7 +6615,7 @@ function SidebarReferenceSettingsDropdown({
   onOpenMobile: () => void;
   onOpenKeepAwakeMenu: () => void;
   onOpenPreviousSessions: () => void;
-  onSearchPreviousSessionsByText: () => void;
+  onSearchPreviousSessionsByPrompt: () => void;
   onTogglePetOverlay: () => void;
   showKeepAwakeButton: boolean;
 }) {
@@ -6711,14 +6623,14 @@ function SidebarReferenceSettingsDropdown({
     <div className="reference-sidebar-primary-dropdown" role="menu">
       <SidebarReferencePrimaryMenuItem
         icon={IconHistoryToggle}
-        label="Reopen a Session"
+        label="Sessions"
         onSelect={onOpenPreviousSessions}
         shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openSessionSearchPalette)}
       />
       <SidebarReferencePrimaryMenuItem
         icon={IconFileSearch}
-        label="Search All Sessions"
-        onSelect={onSearchPreviousSessionsByText}
+        label="Search by Prompt"
+        onSelect={onSearchPreviousSessionsByPrompt}
       />
       <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem
@@ -6784,7 +6696,7 @@ function SidebarReferenceFooter({
       <div className="reference-sidebar-search-slot reference-sidebar-footer-quick-access-slot">
         <div className="reference-sidebar-nav-item">
           <Button
-            aria-label="Commands & Recents"
+            aria-label="Commands"
             className="reference-sidebar-nav-button reference-sidebar-footer-quick-access-button"
             onClick={onOpenQuickAccess}
             size="sm"
@@ -6797,7 +6709,7 @@ function SidebarReferenceFooter({
               size={15}
               stroke={1.8}
             />
-            <span className="reference-sidebar-nav-label">Commands &amp; Recents</span>
+            <span className="reference-sidebar-nav-label">Commands</span>
             {commandPaletteHotkey ? (
               <kbd className="reference-sidebar-nav-shortcut">{commandPaletteHotkey}</kbd>
             ) : null}
@@ -8148,11 +8060,22 @@ function createPinnedSessionDropResolutionDebugState(
         top: bounds?.top,
       };
     });
+  const renderedPinnedBounds = targetMetrics
+    .filter((metric) => metric.elementFound && metric.top !== undefined && metric.height !== undefined)
+    .reduce<{ bottom: number; top: number; } | undefined>((bounds, metric) => {
+      const top = metric.top!;
+      const bottom = top + metric.height!;
+      return bounds
+        ? { bottom: Math.max(bounds.bottom, bottom), top: Math.min(bounds.top, top) }
+        : { bottom, top };
+    }, undefined);
   const pointInsideGroup =
     point !== undefined &&
-    groupBounds !== undefined &&
-    point.y >= groupBounds.top &&
-    point.y <= groupBounds.bottom;
+    (groupBounds !== undefined
+      ? point.y >= groupBounds.top && point.y <= groupBounds.bottom
+      : renderedPinnedBounds !== undefined &&
+        point.y >= renderedPinnedBounds.top &&
+        point.y <= renderedPinnedBounds.bottom);
 
   return {
     groupElementFound: Boolean(groupElement),
@@ -8274,10 +8197,6 @@ function resolvePinnedSessionDropTargetFromPoint(
 
   const groupElement = getSidebarGroupElementById(sourceData.groupId);
   const groupBounds = groupElement?.getBoundingClientRect();
-  if (!groupBounds || point.y < groupBounds.top || point.y > groupBounds.bottom) {
-    return undefined;
-  }
-
   const groupSessionIds = sessionIdsByGroup[ sourceData.groupId ] ?? [];
   const pinnedSessionIds = groupSessionIds.filter(
     (sessionId) => sessionsById[ sessionId ]?.isPinned === true,
@@ -8300,6 +8219,17 @@ function resolvePinnedSessionDropTargetFromPoint(
         : [];
     });
   if (targetSessionMetrics.length === 0) {
+    return undefined;
+  }
+  const renderedPinnedTop = Math.min(...targetSessionMetrics.map((target) => target.bounds.top));
+  const renderedPinnedBottom = Math.max(
+    ...targetSessionMetrics.map((target) => target.bounds.bottom),
+  );
+  if (
+    groupBounds
+      ? point.y < groupBounds.top || point.y > groupBounds.bottom
+      : point.y < renderedPinnedTop || point.y > renderedPinnedBottom
+  ) {
     return undefined;
   }
 
@@ -9173,7 +9103,7 @@ function hasPointerDragMovedPastThreshold(
 
   return (
     Math.hypot(currentPoint.x - startPoint.x, currentPoint.y - startPoint.y) >=
-    SIDEBAR_POINTER_DRAG_REORDER_THRESHOLD_PX
+    SIDEBAR_REORDER_DISTANCE_PX
   );
 }
 
@@ -9205,6 +9135,7 @@ function postSidebarAgentIconBoundaryLog(
   vscode.postMessage({
     details,
     event,
+    scenarioId: "native.agent.detection",
     type: "sidebarDebugLog",
   });
 }

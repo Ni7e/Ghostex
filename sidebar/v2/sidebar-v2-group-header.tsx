@@ -81,6 +81,7 @@ export type SidebarV2ProjectGroupSectionProps = {
   onSetCollapsed: (collapsed: boolean) => void;
   projectPath?: string;
   projectPathState?: "available" | "missing" | "notDirectory" | "unavailable";
+  showProjectIcons: boolean;
 };
 
 export function SidebarV2ProjectGroupSection({
@@ -99,6 +100,7 @@ export function SidebarV2ProjectGroupSection({
   onSetCollapsed,
   projectPath,
   projectPathState,
+  showProjectIcons,
 }: SidebarV2ProjectGroupSectionProps) {
   const sortable = useSortable({
     /*
@@ -163,7 +165,10 @@ export function SidebarV2ProjectGroupSection({
         ref={isDragDisabled ? undefined : sortable.handleRef}
       >
         <div className="group-title-wrap">
-          <div className="group-title-row" data-project-leading-icon="true">
+          <div
+            className="group-title-row"
+            data-project-leading-icon={String(showProjectIcons)}
+          >
             {/*
              * V1's collapse control, kept as a real button sibling of the title
              * button (a button inside a button is invalid markup). The chevron is
@@ -187,15 +192,17 @@ export function SidebarV2ProjectGroupSection({
                 stroke={2}
               />
             </button>
-            <SidebarV2ProjectIcon
-              discoveredIconDataUrl={group.discoveredIconDataUrl}
-              fallback={
-                group.isWorktree ? "worktree" : isCollapsed ? "folder" : "folder-open"
-              }
-              icon={group.icon}
-              iconDataUrl={group.iconDataUrl}
-              title={group.title}
-            />
+            {showProjectIcons ? (
+              <SidebarV2ProjectIcon
+                discoveredIconDataUrl={group.discoveredIconDataUrl}
+                fallback={
+                  group.isWorktree ? "worktree" : isCollapsed ? "folder" : "folder-open"
+                }
+                icon={group.icon}
+                iconDataUrl={group.iconDataUrl}
+                title={group.title}
+              />
+            ) : null}
             {projectPathState !== undefined && projectPathState !== "available" ? (
               <AppTooltip
                 content={projectPath ? `Folder not found: ${projectPath}` : "Project folder unavailable"}

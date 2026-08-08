@@ -700,6 +700,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
      * Project git-stat display controls belong with Sidebar settings because they change sidebar project rows, not editor behavior.
      * Use changed-file wording for the file-count toggle so it does not read like an editor-pane setting.
      */
+    "showProjectIcons",
     "hideSessionAgentIconUntilHover",
     "hideBrowserFaviconUntilHover",
     "showCloseButtonOnSessionCards",
@@ -939,7 +940,11 @@ const DIAGNOSTIC_LOGGING_DURATION_OPTIONS: ReadonlyArray<{
 ];
 
 const DEFAULT_DIAGNOSTIC_LOGGING_ENABLE_DURATION: DiagnosticLoggingDurationValue = "1h";
-const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI"] = ["macOS", "GPUI"];
+const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI", "gxserver"] = [
+  "macOS",
+  "GPUI",
+  "gxserver",
+];
 
 /*
  * CDXC:SettingsAdvanced 2026-06-16-01:35:
@@ -2020,6 +2025,11 @@ export function SettingsModal({
         options: SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
         subtitle: "Choose how project groups are marked in the sidebar.",
         title: "Project group style",
+      },
+      {
+        key: "showProjectIcons",
+        subtitle: "Show project artwork or a folder or worktree icon beside project names.",
+        title: "Show project icons",
       },
       /*
        * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
@@ -3630,6 +3640,15 @@ export function SettingsModal({
                * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
                * Users need every preset-mutated setting directly under the preset selector so applying Recommended, Codex, Minimal, or Detailed has an inspectable effect without hunting through Session Cards, Project rows, or Status Indicators.
                */}
+              {mainSettingVisible(settingsSearch.sidebar, "showProjectIcons") ? (
+              <ToggleField
+                checked={draft.showProjectIcons}
+                description="Show project artwork or a folder or worktree icon beside project names."
+                label="Show project icons"
+                {...getSettingModificationProps("showProjectIcons")}
+                onChange={(checked) => updateDraft("showProjectIcons", checked)}
+              />
+              ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "hideSessionAgentIconUntilHover") ? (
               <ToggleField
                 checked={draft.hideSessionAgentIconUntilHover}
@@ -12577,7 +12596,7 @@ function DiagnosticLoggingSettingsField({
   const idBase = useId();
   return (
     <SettingRow
-      description="Routine logs write only when Show debug UI controls is on. Enable only the repro area you need; important warnings, errors, and crashes remain captured."
+      description="Routine logs are off by default and write only when Show debug UI controls and their scenario are enabled. Enable only the repro area you need; important warnings, errors, and crashes remain captured."
       htmlFor={`${idBase}-native-terminal-focus`}
       isModified={isModified}
       label="Diagnostic disk logging scenarios"

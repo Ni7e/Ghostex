@@ -21,6 +21,7 @@ import type {
   ghostexSettings,
   ghostexSettingsPatch,
   ghostexSettingsUpdateSource,
+  DiagnosticLoggingScenarioId,
   KeepAwakeDurationMinutes,
 } from "./ghostex-settings";
 import type { ghostexHotkeyActionId } from "./ghostex-hotkeys";
@@ -2477,6 +2478,7 @@ export type SidebarToExtensionMessage =
     }
   | {
       content: string;
+      promptId?: string;
       projectId?: string;
       requestId: string;
       sessionId?: string;
@@ -2504,6 +2506,7 @@ export type SidebarToExtensionMessage =
       type: "sidebarDebugLog";
       event: string;
       details?: unknown;
+      scenarioId: DiagnosticLoggingScenarioId;
     }
   | {
       type: "createGroupFromSession";

@@ -158,7 +158,7 @@ export type DiagnosticLoggingSettings = {
   scenarios: Partial<Record<DiagnosticLoggingScenarioId, DiagnosticLoggingScenarioState>>;
   version: 1;
 };
-export type DiagnosticLoggingScenarioGroup = "macOS" | "GPUI";
+export type DiagnosticLoggingScenarioGroup = "macOS" | "GPUI" | "gxserver";
 export type DiagnosticLoggingScenarioDefinition = {
   description: string;
   group: DiagnosticLoggingScenarioGroup;
@@ -343,45 +343,46 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     label: "GPUI app modals and Settings",
     logFiles: ["gpui-app-modal-debug.jsonl"],
   },
+  {
+    description: "gxserver process startup, shutdown, and daemon lifecycle breadcrumbs.",
+    group: "gxserver",
+    id: "gxserver.lifecycle",
+    label: "Daemon lifecycle",
+    logFiles: ["gxserver.jsonl"],
+  },
+  {
+    description: "gxserver API request timing and status breadcrumbs.",
+    group: "gxserver",
+    id: "gxserver.requests",
+    label: "API requests",
+    logFiles: ["gxserver.jsonl"],
+  },
+  {
+    description: "gxserver typed-operation routing and result breadcrumbs.",
+    group: "gxserver",
+    id: "gxserver.typedOperations",
+    label: "Typed operations",
+    logFiles: ["gxserver.jsonl"],
+  },
+  {
+    description: "gxserver repository clone lifecycle breadcrumbs.",
+    group: "gxserver",
+    id: "gxserver.repositoryClone",
+    label: "Repository cloning",
+    logFiles: ["gxserver.jsonl"],
+  },
+  {
+    description: "gxserver Portless state and background synchronization breadcrumbs.",
+    group: "gxserver",
+    id: "gxserver.portless",
+    label: "Portless",
+    logFiles: ["gxserver.jsonl"],
+  },
 ] as const satisfies readonly DiagnosticLoggingScenarioDefinition[];
 
-const DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS: DiagnosticLoggingSettings["scenarios"] = {
-  /*
-   * CDXC:FirstLaunchSetupDiagnostics 2026-06-29-22:08:
-   * Temporarily keep app-modal diagnostics enabled for the setup slow-open
-   * repro so existing local settings cannot silently gate off the timing logs
-   * needed in the resolved Ghostex app-modal debug log.
-   *
-   * CDXC:RemoteMachines 2026-06-30-03:05:
-   * Remote gxserver install crashes happen immediately after the approval
-   * click, before users can re-open Settings. Keep the precise remote-install
-   * diagnostic scenario enabled by default so the Settings toggle is already on
-   * for repro logs while the writer still records only sanitized phase data.
-   *
-   * CDXC:ChromeResponsivenessDiagnostics 2026-06-30-23:52:
-   * Sidebar blanking, titlebar click loss, and heavy app lag can happen before
-   * users can enable diagnostics. Default the targeted sidebar/titlebar chrome,
-   * sidebar refresh, mode-switcher, and native lifecycle scenarios on so a repro
-   * captures sanitized WebKit lifecycle, route handoff, gxserver renderer, and
-   * titlebar sampler timing breadcrumbs immediately after update.
-   */
-  /*
-   * CDXC:TerminalLinkInAppBrowser 2026-07-02-14:20:
-   * Terminal links opening in the wrong browser was reported right after the
-   * in-app routing shipped. Keep the terminal-link scenario on by default so
-   * the first repro after update already captures the sanitized routing
-   * breadcrumbs; users can turn it off in Settings diagnostics when done.
-   */
-  "native.app.modal": { enabled: true },
-  "native.chrome.responsiveness": { enabled: true },
-  "native.host.lifecycle": { enabled: true },
-  "native.menuBar.status": { enabled: true },
-  "native.mode.switcher": { enabled: true },
-  "native.remote.gxserver.install": { enabled: true },
-  "native.sidebar.refresh": { enabled: true },
-  "native.terminal.links": { enabled: true },
-  "native.terminal.resize": { enabled: true },
-};
+// Routine diagnostic disk logging is opt-in. Agents enable only the scenario
+// needed for a repro and restore it when collection is complete.
+const DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS: DiagnosticLoggingSettings["scenarios"] = {};
 const DIAGNOSTIC_LOGGING_SCENARIO_IDS = new Set<string>(
   DIAGNOSTIC_LOGGING_SCENARIOS.map((scenario) => scenario.id),
 );
@@ -900,6 +901,8 @@ export type ghostexSettings = {
    */
   diagnosticLogging: DiagnosticLoggingSettings;
   renameSessionOnDoubleClick: boolean;
+  /** Show project artwork or the folder/worktree fallback beside project names. */
+  showProjectIcons: boolean;
   hideSessionAgentIconUntilHover: boolean;
   /**
    * CDXC:SidebarSessionAgentIcons 2026-06-29-23:58:
@@ -1256,6 +1259,7 @@ export function canSettingsUpdateSourceChangeRemoteMachines(
 }
 
 export const SIDEBAR_SETTINGS_PRESET_KEYS = [
+  "showProjectIcons",
   "hideSessionAgentIconUntilHover",
   "hideBrowserFaviconUntilHover",
   "showCloseButtonOnSessionCards",
@@ -1298,6 +1302,7 @@ export type SidebarSettingsPresetSettings = Pick<ghostexSettings, SidebarSetting
  */
 export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
   codex: {
+    showProjectIcons: true,
     hideSessionAgentIconUntilHover: true,
     hideBrowserFaviconUntilHover: false,
     showCloseButtonOnSessionCards: true,
@@ -1307,6 +1312,7 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
     hideMenuBarSessionStatusIndicators: true,
   },
   minimal: {
+    showProjectIcons: false,
     hideSessionAgentIconUntilHover: true,
     hideBrowserFaviconUntilHover: true,
     showCloseButtonOnSessionCards: true,
@@ -1316,6 +1322,7 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
     hideMenuBarSessionStatusIndicators: true,
   },
   detailed: {
+    showProjectIcons: true,
     hideSessionAgentIconUntilHover: false,
     hideBrowserFaviconUntilHover: false,
     showCloseButtonOnSessionCards: true,
@@ -1325,6 +1332,7 @@ export const SIDEBAR_SETTINGS_PRESET_SETTINGS = {
     hideMenuBarSessionStatusIndicators: false,
   },
   recommended: {
+    showProjectIcons: true,
     hideSessionAgentIconUntilHover: false,
     hideBrowserFaviconUntilHover: false,
     showCloseButtonOnSessionCards: true,
@@ -1521,6 +1529,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
     version: 1,
   },
   renameSessionOnDoubleClick: false,
+  showProjectIcons: SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.showProjectIcons,
   /**
    * CDXC:SidebarSessions 2026-05-16-08:46:
    * Agent identity remains configurable in Settings through an explicit
@@ -2528,6 +2537,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       source,
       "renameSessionOnDoubleClick",
       DEFAULT_ghostex_SETTINGS.renameSessionOnDoubleClick,
+    ),
+    showProjectIcons: readBoolean(
+      source,
+      "showProjectIcons",
+      DEFAULT_ghostex_SETTINGS.showProjectIcons,
     ),
     /**
      * CDXC:SidebarSessions 2026-05-16-08:46:

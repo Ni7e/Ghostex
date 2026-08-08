@@ -253,7 +253,11 @@ export function openAppModal(message: OpenAppModalMessage): void {
   postAppModalHostMessage(message, `AppModals:${message.modal}`);
 }
 
-export type QuickAccessPage = "commands" | "recentProjects" | "recentSessions";
+export type QuickAccessPage =
+  | "commands"
+  | "recentProjects"
+  | "recentSessions"
+  | "savedPrompts";
 
 type QuickAccessOpenOptions = {
   machineId?: string;
@@ -280,6 +284,10 @@ export function openQuickAccess(
   }
   if (page === "recentSessions") {
     openAppModal({ modal: "previousSessions", type: "open" });
+    return;
+  }
+  if (page === "savedPrompts") {
+    openAppModal({ modal: "stashedPrompts", type: "open" });
     return;
   }
   openAppModal({ initialQuery: "", modal: "commandPalette", type: "open" });

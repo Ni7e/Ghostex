@@ -3664,9 +3664,26 @@ function ManageHtmlRenderViewer({
     [annotationsEnabled, content, resourceBaseUrl],
   );
 
+  /*
+   * CDXC:ManageHtmlAgentation 2026-08-08:
+   * A feature named in `allow` without an explicit allowlist defaults to
+   * `'src'`, which resolves against the frame's `src` URL. This frame renders
+   * from `srcdoc` and has no `src`, so bare feature names matched no origin
+   * and disabled clipboard and fullscreen in the rendered document instead of
+   * granting them, leaving Agentation's copy button unable to write to the
+   * clipboard. Name `'self'` explicitly: the srcdoc document is same-origin
+   * with Manage, so it resolves and the grant is real.
+   *
+   * `clipboard-read` is denied rather than omitted. Omitting it inherits this
+   * surface's permissive policy, and a programmatic `clipboard.readText()`
+   * then hangs forever because Chromium wants a permission prompt that Alloy
+   * cannot show. Denying it turns that into an immediate NotAllowedError.
+   * User-initiated paste is unaffected: Cmd+V and the `paste` event carry
+   * their data through `clipboardData`, which this policy does not gate.
+   */
   return (
     <iframe
-      allow="clipboard-read; clipboard-write; fullscreen"
+      allow="clipboard-read 'none'; clipboard-write 'self'; fullscreen 'self'"
       aria-label="Rendered HTML document"
       className="manage-html-render-view"
       data-document-key={documentKey}

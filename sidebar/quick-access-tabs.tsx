@@ -6,7 +6,8 @@ export type QuickAccessTab = QuickAccessPage;
 const QUICK_ACCESS_TABS = [
   { hotkey: '⌘1', id: 'commands', label: 'Command Pane' },
   { hotkey: '⌘2', id: 'recentProjects', label: 'Recent Projects' },
-  { hotkey: '⌘3', id: 'recentSessions', label: 'Recent Sessions' },
+  { hotkey: '⌘3', id: 'recentSessions', label: 'Sessions' },
+  { hotkey: '⌘4', id: 'savedPrompts', label: 'Saved Prompts' },
 ] as const satisfies ReadonlyArray<{
   hotkey: string;
   id: QuickAccessTab;

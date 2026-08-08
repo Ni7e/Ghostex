@@ -37,6 +37,7 @@ export function postSidebarRefreshDebugLog(
   vscode.postMessage({
     details,
     event: `${SIDEBAR_REFRESH_DEBUG_EVENT_PREFIX}${event}`,
+    scenarioId: "native.sidebar.refresh",
     type: "sidebarDebugLog",
   });
 }

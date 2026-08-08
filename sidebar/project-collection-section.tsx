@@ -15,7 +15,7 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
-import { PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
+import { PointerSensor } from "@dnd-kit/dom";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { SidebarSessionItem } from "../shared/session-grid-contract";
@@ -26,6 +26,7 @@ import {
 import { SidebarContextMenuPortal } from "./sidebar-context-menu-portal";
 import { createProjectCollectionDragData } from "./sidebar-dnd";
 import { SidebarFixedTooltipButton } from "./sidebar-fixed-tooltip-button";
+import { getSidebarReorderActivationConstraints } from "./sidebar-reorder-activation";
 import { useSidebarCollapsiblePresence } from "./sidebar-collapse-animation";
 import {
   getAwakeTerminalAndBrowserCount,
@@ -92,10 +93,6 @@ type ContextMenuPosition = {
   y: number;
 };
 
-const PROJECT_COLLECTION_DRAG_DISTANCE_PX = 8;
-const TOUCH_PROJECT_COLLECTION_DRAG_HOLD_DELAY_MS = 320;
-const TOUCH_PROJECT_COLLECTION_DRAG_HOLD_TOLERANCE_PX = 12;
-
 /*
  * CDXC:CollectionReorder 2026-07-21:
  * Pointer-only on purpose. dnd-kit's KeyboardSensor starts a drag on
@@ -108,22 +105,7 @@ const TOUCH_PROJECT_COLLECTION_DRAG_HOLD_TOLERANCE_PX = 12;
  */
 const projectCollectionSensors = [
   PointerSensor.configure({
-    activationConstraints(event) {
-      if (event.pointerType === "touch") {
-        return [
-          new PointerActivationConstraints.Delay({
-            tolerance: TOUCH_PROJECT_COLLECTION_DRAG_HOLD_TOLERANCE_PX,
-            value: TOUCH_PROJECT_COLLECTION_DRAG_HOLD_DELAY_MS,
-          }),
-        ];
-      }
-
-      return [
-        new PointerActivationConstraints.Distance({
-          value: PROJECT_COLLECTION_DRAG_DISTANCE_PX,
-        }),
-      ];
-    },
+    activationConstraints: getSidebarReorderActivationConstraints,
   }),
 ];
 

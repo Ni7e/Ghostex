@@ -25,7 +25,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { CollisionPriority } from "@dnd-kit/abstract";
-import { PointerActivationConstraints, PointerSensor } from "@dnd-kit/dom";
+import { PointerSensor } from "@dnd-kit/dom";
 import { useDroppable } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
 import {
@@ -112,6 +112,7 @@ import {
   type PrimaryAgentLauncherChangedEvent,
 } from "./primary-agent-launcher";
 import { ProjectAgentLauncherIcon } from "./project-agent-launcher-icon";
+import { getSidebarReorderActivationConstraints } from "./sidebar-reorder-activation";
 
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 196;
@@ -120,23 +121,11 @@ const CONTEXT_MENU_VERTICAL_PADDING_PX = 12;
 const GROUP_CONTROL_MENU_MARGIN_PX = 12;
 const GROUP_AGENT_MENU_WIDTH_PX = 220;
 /**
- * CDXC:ProjectReorder 2026-06-13-05:19:
- * macOS sidebar project-header reorder should require a slightly longer hold
- * than session-card dragging so normal header clicks and small pointer moves
- * do not activate project drag too soon.
- *
- * CDXC:GroupReorder 2026-07-12:
- * Mouse drags also activate through a plain distance constraint so an
- * immediate header drag reorders without waiting out the hold delay; a fast
- * pointer move past the 12px hold tolerance used to silently cancel the delay
- * constraint and the drag never started. Touch keeps hold-only activation so
- * sidebar scrolling does not turn into group drags.
+ * CDXC:SidebarReorderActivation 2026-08-08:
+ * Project headers define the shared sidebar reorder gesture. Its timing and
+ * distance constraints now live in `sidebar-reorder-activation.ts` so session,
+ * collection, and machine rows cannot silently drift to a slower gesture.
  */
-const GROUP_DRAG_HOLD_DELAY_MS = 250;
-const GROUP_DRAG_HOLD_TOLERANCE_PX = 12;
-const GROUP_DRAG_DISTANCE_PX = 8;
-const TOUCH_GROUP_DRAG_HOLD_DELAY_MS = 320;
-const TOUCH_GROUP_DRAG_HOLD_TOLERANCE_PX = 12;
 const PROJECT_EDITOR_DISPLAY_MAX_FILES = 99;
 const EMPTY_PROJECT_NEW_SESSION_LABEL = "New Session";
 const DISABLED_GROUP_DND_AX_ATTRIBUTES = [
@@ -262,37 +251,14 @@ function getProjectThemeSwatchStyle(themeColor: string | undefined): CSSProperti
 
 /**
  * CDXC:SidebarV2GroupedProjectUX 2026-07-30:
- * Exported so Sidebar V2's grouped project headers drag with the EXACT same
- * activation constraints as V1's, instead of a second copy of the numbers. Two
- * of the properties below are load-bearing bug fixes, and a divergent copy would
- * silently lose them: the Distance constraint next to the Delay one (a fast
- * pointer move past the hold tolerance used to cancel the drag entirely), and
- * the deliberate absence of a KeyboardSensor (an uncommitted keyboard drag
- * leaves the shared dnd manager non-idle and disables EVERY pointer drag in the
- * sidebar).
+ * Exported so Sidebar V2's grouped project headers also inherit V1's control
+ * blocking and deliberate absence of a KeyboardSensor. The pointer timing and
+ * distance rules themselves live in `sidebar-reorder-activation.ts`, shared by
+ * every sidebar reorder surface.
  */
 export const groupSensors = [
   PointerSensor.configure({
-    activationConstraints(event) {
-      if (event.pointerType === "touch") {
-        return [
-          new PointerActivationConstraints.Delay({
-            tolerance: TOUCH_GROUP_DRAG_HOLD_TOLERANCE_PX,
-            value: TOUCH_GROUP_DRAG_HOLD_DELAY_MS,
-          }),
-        ];
-      }
-
-      return [
-        new PointerActivationConstraints.Delay({
-          tolerance: GROUP_DRAG_HOLD_TOLERANCE_PX,
-          value: GROUP_DRAG_HOLD_DELAY_MS,
-        }),
-        new PointerActivationConstraints.Distance({
-          value: GROUP_DRAG_DISTANCE_PX,
-        }),
-      ];
-    },
+    activationConstraints: getSidebarReorderActivationConstraints,
     preventActivation(event, source) {
       return shouldPreventGroupDragActivation(event.target, source.handle ?? source.element);
     },
@@ -861,6 +827,10 @@ export function SessionGroupSection({
       state.hud.settings?.showProjectEditorDiffFileCount ??
       DEFAULT_ghostex_SETTINGS.showProjectEditorDiffFileCount,
   );
+  const showProjectIcons = useSidebarStore(
+    (state) =>
+      state.hud.settings?.showProjectIcons ?? DEFAULT_ghostex_SETTINGS.showProjectIcons,
+  );
   const projectSessionListCollapsedCount = useSidebarStore(
     (state) =>
       clampProjectSessionListCollapsedCount(
@@ -1035,6 +1005,7 @@ export function SessionGroupSection({
         ...details,
       },
       event,
+      scenarioId: "native.pane.reorder",
       type: "sidebarDebugLog",
     });
   });
@@ -2013,7 +1984,7 @@ export function SessionGroupSection({
             ) : (
               <div
                 className="group-title-row"
-                data-project-leading-icon="true"
+                data-project-leading-icon={String(showProjectIcons)}
               >
                 {projectContext ? (
                   isChatCollection ? (
@@ -2079,7 +2050,7 @@ export function SessionGroupSection({
                     ) : null}
                   </button>
                 )}
-                {projectContext && !isChatCollection ? (
+                {showProjectIcons && projectContext && !isChatCollection ? (
                   <SidebarV2ProjectIcon
                     discoveredIconDataUrl={projectContext.discoveredIconDataUrl}
                     fallback={

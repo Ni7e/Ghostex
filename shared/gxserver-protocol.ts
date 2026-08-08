@@ -637,6 +637,8 @@ export interface GxserverStashedPrompt {
   /** Origin project's identity icon, shaped for `WorkspaceProjectIconSource`. */
   projectIcon?: unknown;
   projectIconDataUrl?: string | null;
+  /** Repository icon discovered by gxserver, matching the active sidebar project icon. */
+  projectDiscoveredIconDataUrl?: string | null;
   projectId: string | null;
   projectName: string | null;
   promptId: string;
@@ -647,6 +649,8 @@ export interface GxserverStashedPrompt {
 export interface GxserverSaveStashedPromptParams {
   content: string;
   cwd?: string;
+  /** When present, updates this saved prompt in place. */
+  promptId?: string;
   projectId?: string;
   sessionId?: string;
 }
