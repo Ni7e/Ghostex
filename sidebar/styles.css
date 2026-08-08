@@ -656,20 +656,27 @@ body {
   padding: 8px 12px;
 }
 
+.ghostex-stashed-prompt-day-list {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
 .ghostex-stashed-prompt-item > svg:last-child {
   display: none;
 }
 
 .ghostex-stashed-prompt-item .ghostex-command-palette-copy {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .ghostex-stashed-prompt-row-meta {
   align-items: center;
   color: var(--muted-foreground);
   display: flex;
-  flex: 0 1 42%;
+  flex: 0 0 42%;
   font-size: 12px;
   gap: 6px;
   margin-left: auto;
@@ -718,7 +725,9 @@ body {
 .ghostex-stashed-prompt-actions {
   align-items: center;
   display: none;
+  flex: 0 0 76px;
   gap: 2px;
+  justify-content: flex-end;
   margin-left: auto;
 }
 

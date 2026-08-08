@@ -44,6 +44,11 @@ export type StashedPromptsModalProps = {
 const TOOLTIP_LINE_COUNT = 30;
 const STASH_PROMPT_HINT = "Press Option + S while you're using an agent to stash your prompt (Local only for now)";
 
+type StashedPromptDayGroup = {
+  dayLabel: string;
+  prompts: GxserverStashedPrompt[];
+};
+
 /*
  * CDXC:StashedPrompts 2026-07-29:
  * Search matches on whitespace-collapsed prompt text plus the project name so
@@ -61,6 +66,40 @@ function stashedPromptTitle(prompt: GxserverStashedPrompt): string {
 function relativeTimeLabel(isoDate: string): string {
   const { suffix, value } = formatRelativeTime(isoDate, { allowJustNow: true });
   return suffix ? `${value} ${suffix}` : value;
+}
+
+function parseStashedPromptUpdatedAt(prompt: GxserverStashedPrompt): number {
+  const timestamp = Date.parse(prompt.updatedAt);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function groupStashedPromptsByDay(prompts: readonly GxserverStashedPrompt[]): StashedPromptDayGroup[] {
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'long',
+    weekday: 'long',
+    year: 'numeric',
+  });
+  const promptsByDay = new Map<string, GxserverStashedPrompt[]>();
+  const sortedPrompts = [...prompts].sort(
+    (left, right) =>
+      parseStashedPromptUpdatedAt(right) - parseStashedPromptUpdatedAt(left) ||
+      left.promptId.localeCompare(right.promptId)
+  );
+  for (const prompt of sortedPrompts) {
+    const timestamp = parseStashedPromptUpdatedAt(prompt);
+    const dayLabel = timestamp === 0 ? 'Earlier' : formatter.format(new Date(timestamp));
+    const grouped = promptsByDay.get(dayLabel);
+    if (grouped) {
+      grouped.push(prompt);
+    } else {
+      promptsByDay.set(dayLabel, [prompt]);
+    }
+  }
+  return [...promptsByDay.entries()].map(([dayLabel, dayPrompts]) => ({
+    dayLabel,
+    prompts: dayPrompts,
+  }));
 }
 
 export function StashedPromptsModal({
@@ -190,6 +229,7 @@ export function StashedPromptsModal({
     }
     return prompts.filter((prompt) => stashedPromptSearchText(prompt).includes(query));
   }, [prompts, searchQuery]);
+  const groupedVisiblePrompts = useMemo(() => groupStashedPromptsByDay(visiblePrompts), [visiblePrompts]);
   const normalizedSearchQuery = searchQuery.toLowerCase().replace(/\s+/g, ' ').trim();
   const showAddPrompt =
     normalizedSearchQuery.length === 0 || 'add saved prompt new prompt'.includes(normalizedSearchQuery);
@@ -328,7 +368,7 @@ export function StashedPromptsModal({
                   <CommandEmpty>No saved prompts match this search.</CommandEmpty>
                 ) : null}
                 {showAddPrompt || visiblePrompts.length > 0 ? (
-                  <CommandGroup heading='Saved Prompts'>
+                  <CommandGroup>
                     {showAddPrompt ? (
                       <CommandItem
                         onSelect={() => {
@@ -345,23 +385,30 @@ export function StashedPromptsModal({
                     {prompts === undefined ? (
                       <div className='ghostex-stashed-prompts-empty'>Loading saved prompts…</div>
                     ) : (
-                      visiblePrompts.map((prompt) => (
-                        <StashedPromptRow
-                          key={prompt.promptId}
-                          onDelete={() => {
-                            deletePrompt(prompt);
-                          }}
-                          onEdit={() => {
-                            setEditingPromptId(prompt.promptId);
-                            setDraftContent(prompt.content);
-                            setSaveError(undefined);
-                            setIsAddingPrompt(true);
-                          }}
-                          onSelect={() => {
-                            insertPrompt(prompt);
-                          }}
-                          prompt={prompt}
-                        />
+                      groupedVisiblePrompts.map((group) => (
+                        <section className='previous-sessions-day-group' key={group.dayLabel}>
+                          <div className='previous-sessions-day-label'>{group.dayLabel}</div>
+                          <div className='ghostex-stashed-prompt-day-list'>
+                            {group.prompts.map((prompt) => (
+                              <StashedPromptRow
+                                key={prompt.promptId}
+                                onDelete={() => {
+                                  deletePrompt(prompt);
+                                }}
+                                onEdit={() => {
+                                  setEditingPromptId(prompt.promptId);
+                                  setDraftContent(prompt.content);
+                                  setSaveError(undefined);
+                                  setIsAddingPrompt(true);
+                                }}
+                                onSelect={() => {
+                                  insertPrompt(prompt);
+                                }}
+                                prompt={prompt}
+                              />
+                            ))}
+                          </div>
+                        </section>
                       ))
                     )}
                   </CommandGroup>
