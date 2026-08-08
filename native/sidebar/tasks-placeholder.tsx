@@ -74,7 +74,10 @@ import {
 } from "@/components/ui/tooltip";
 import {
   BOARD_COLUMNS,
+  BOARD_SORT_OPTIONS,
+  DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES,
   PRIORITY_OPTIONS,
+  PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,
   TSHIRT_OPTIONS,
   appendImageMarkdownToDescription,
   beadsErrorMessage,
@@ -98,6 +101,7 @@ import {
   normalizeBeadsPayload,
   normalizeDisplayIssueKey,
   normalizeIssuePrefix,
+  normalizeProjectBoardViewPreferences,
   parseProjectBoardCommentText,
   parseBeadsJson,
   priorityLabel,
@@ -105,6 +109,7 @@ import {
   projectBoardRawProjectIdFromUrlParam,
   removeDescriptionImageReference,
   isDescriptionImageSource,
+  sortBoardTickets,
   ticketCreatorName,
   tshirtToEstimate,
   toBoardTickets,
@@ -113,7 +118,9 @@ import {
   type BeadsBridgeResponse,
   type BoardEstimateFilter,
   type BoardPriorityFilter,
+  type BoardSortOption,
   type ProjectBoardCommentMetadata,
+  type ProjectBoardViewPreferences,
   type BeadsIssue,
   type BoardStatusKey,
   type BoardTicket,
@@ -266,6 +273,16 @@ function readExperimentalFeaturesEnabled(searchParams: URLSearchParams): boolean
   return DEFAULT_ghostex_SETTINGS.showBetaFeatures;
 }
 
+function readProjectBoardViewPreferences(): ProjectBoardViewPreferences {
+  try {
+    return normalizeProjectBoardViewPreferences(
+      JSON.parse(window.localStorage.getItem(PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY) || "null"),
+    );
+  } catch {
+    return DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES;
+  }
+}
+
 const PROJECT_BOARD_START_LOCATION_SELECT_ITEMS: ReadonlyArray<{
   label: string;
   value: ProjectBoardStartLocation;
@@ -293,6 +310,8 @@ const PROJECT_BOARD_ESTIMATE_FILTER_SELECT_ITEMS: Array<{ label: string; value: 
   { label: "All estimates", value: "all" },
   ...PROJECT_BOARD_TSHIRT_SELECT_ITEMS,
 ];
+const PROJECT_BOARD_SORT_SELECT_ITEMS: Array<{ label: string; value: BoardSortOption }> =
+  BOARD_SORT_OPTIONS.map((option) => ({ label: option.label, value: option.value }));
 const PROJECT_AUTOMATION_TRIAGE_RECENT_COMPLETED_LIMIT = 5;
 
 type BoardRefreshMode = "background" | "initial" | "manual" | "mutation";
@@ -574,8 +593,14 @@ function ProjectBoardApp() {
   const [errorMessage, setErrorMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [priorityFilter, setPriorityFilter] = useState<BoardPriorityFilter>("all");
-  const [estimateFilter, setEstimateFilter] = useState<BoardEstimateFilter>("all");
+  const storedViewPreferences = useMemo(() => readProjectBoardViewPreferences(), []);
+  const [priorityFilter, setPriorityFilter] = useState<BoardPriorityFilter>(
+    storedViewPreferences.priorityFilter,
+  );
+  const [estimateFilter, setEstimateFilter] = useState<BoardEstimateFilter>(
+    storedViewPreferences.estimateFilter,
+  );
+  const [sortOption, setSortOption] = useState<BoardSortOption>(storedViewPreferences.sortOption);
   const [detail, setDetail] = useState<DetailDraft>(createEmptyDetailDraft);
   const [newTicketOpen, setNewTicketOpen] = useState(false);
   const [newTicket, setNewTicket] = useState<TicketFormDraft>(createEmptyTicketFormDraft);
@@ -821,6 +846,17 @@ function ProjectBoardApp() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,
+        JSON.stringify({ estimateFilter, priorityFilter, sortOption }),
+      );
+    } catch {
+      // Keep the current in-memory preferences when localStorage is unavailable.
+    }
+  }, [estimateFilter, priorityFilter, sortOption]);
 
   const openNewTicket = useCallback((status: BoardStatusKey = "todo") => {
     setNewTicket((current) => ({ ...current, status }));
@@ -1244,12 +1280,16 @@ function ProjectBoardApp() {
   const ticketsByColumn = useMemo(() => {
     return BOARD_COLUMNS.reduce<Record<BoardStatusKey, BoardTicket[]>>(
       (result, column) => {
-        result[column.key] = filteredTickets.filter((ticket) => ticket.boardStatus === column.key);
+        result[column.key] = sortBoardTickets(
+          filteredTickets.filter((ticket) => ticket.boardStatus === column.key),
+          sortOption,
+          column.key,
+        );
         return result;
       },
       { backlog: [], done: [], in_progress: [], review: [], test: [], todo: [] },
     );
-  }, [filteredTickets]);
+  }, [filteredTickets, sortOption]);
   const showInitialBoardLoadingOverlay =
     activeSurfaceTab === "board" && loadState === "loading" && !hasCompletedInitialBoardLoad;
 
@@ -2507,6 +2547,21 @@ function ProjectBoardApp() {
               ))}
             </SelectContent>
           </Select>
+          <select
+            aria-label="Sort tickets"
+            className="project-board-filter-select project-board-native-filter-select"
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setSortOption(value as BoardSortOption);
+            }}
+            value={sortOption}
+          >
+            {PROJECT_BOARD_SORT_SELECT_ITEMS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </section>
       ) : null}
 
@@ -6908,6 +6963,13 @@ styleElement.textContent = `
   .project-board-ticket-button {
     height: var(--project-board-control-height);
     min-width: 124px;
+  }
+
+  .project-board-native-filter-select {
+    appearance: auto;
+    color: var(--foreground);
+    font: inherit;
+    padding: 0 8px;
   }
 
   .project-board-ticket-button {

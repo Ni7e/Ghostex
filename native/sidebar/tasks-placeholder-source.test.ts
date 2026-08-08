@@ -344,6 +344,68 @@ describe("Project Board form event handling", () => {
     expect(saveSource).not.toContain('await loadTickets({ mode: "mutation" })');
   });
 
+  test("sorts lanes in the board toolbar before the visible ticket limit", () => {
+    /*
+     * CDXC:ProjectBoardSort 2026-08-07:
+     * The Kanban toolbar owns ticket order alongside the existing filters, and lane grouping must
+     * sort before BoardLane slices to PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN so the newest
+     * closed beads stay visible in Done.
+     */
+    const projectBoardSource = sourceBetween("function ProjectBoardApp()", "function TicketMetaFields(");
+    const filtersSource = sourceBetween(
+      '<section className="project-board-filters"',
+      '{activeSurfaceTab === "triage" ? (',
+    );
+    const laneSource = sourceBetween("function BoardLane({", "function TicketCard(");
+
+    expect(projectBoardSource).toContain(
+      "const [sortOption, setSortOption] = useState<BoardSortOption>(storedViewPreferences.sortOption);",
+    );
+    expect(projectBoardSource).toContain("result[column.key] = sortBoardTickets(");
+    expect(projectBoardSource).toContain("sortOption,\n          column.key,");
+    expect(filtersSource).toContain('aria-label="Sort tickets"');
+    expect(filtersSource).toContain("PROJECT_BOARD_SORT_SELECT_ITEMS");
+    expect(filtersSource).toContain("setSortOption(value as BoardSortOption)");
+    expect(laneSource).toContain(
+      "const visibleTickets = tickets.slice(0, PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN);",
+    );
+  });
+
+  test("restores and stores the board toolbar selections across projects", () => {
+    /*
+     * CDXC:ProjectBoardViewPreferences 2026-08-07:
+     * Switching away from the Kanban tab unmounts the board surface, so the toolbar must seed its
+     * priority, estimate, and sort state from the stored preferences and write every later
+     * selection back. The key and the write are project-independent so the selections follow the
+     * user into every board. Search stays out of that payload.
+     */
+    const projectBoardSource = sourceBetween("function ProjectBoardApp()", "function TicketMetaFields(");
+
+    expect(tasksPlaceholderSource).toContain(
+      "function readProjectBoardViewPreferences(): ProjectBoardViewPreferences {",
+    );
+    expect(tasksPlaceholderSource).toContain(
+      'JSON.parse(window.localStorage.getItem(PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY) || "null"),',
+    );
+    expect(tasksPlaceholderSource).toContain("return DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES;");
+    expect(projectBoardSource).toContain(
+      "const storedViewPreferences = useMemo(() => readProjectBoardViewPreferences(), []);",
+    );
+    expect(projectBoardSource).toContain(
+      "useState<BoardPriorityFilter>(\n    storedViewPreferences.priorityFilter,\n  );",
+    );
+    expect(projectBoardSource).toContain(
+      "useState<BoardEstimateFilter>(\n    storedViewPreferences.estimateFilter,\n  );",
+    );
+    expect(projectBoardSource).toContain("useState<BoardSortOption>(storedViewPreferences.sortOption);");
+    expect(projectBoardSource).toContain(
+      "try {\n      window.localStorage.setItem(\n        PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,\n        JSON.stringify({ estimateFilter, priorityFilter, sortOption }),\n      );\n    } catch {",
+    );
+    expect(projectBoardSource).toContain("}, [estimateFilter, priorityFilter, sortOption]);");
+    expect(projectBoardSource).not.toContain("JSON.stringify({ estimateFilter, priorityFilter, searchQuery");
+    expect(projectBoardSource).toContain('const [searchQuery, setSearchQuery] = useState("");');
+  });
+
   test("snapshots form values before functional state updaters", () => {
     /*
      * CDXC:ProjectBoardForms 2026-06-09-15:36:
