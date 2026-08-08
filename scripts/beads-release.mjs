@@ -26,7 +26,7 @@ const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 
 export const BEADS_VERSION = "1.1.0";
 export const BEADS_SOURCE_REVISION = "672d942083a1fd0c8603fa1e77620c58ba9d47c8";
-export const BEADS_SOURCE_REVISION_SHORT = BEADS_SOURCE_REVISION.slice(0, 7);
+export const BEADS_SOURCE_REVISION_SHORT = BEADS_SOURCE_REVISION.slice(0, 12);
 export const BEADS_SCHEMA_VERSION = 54;
 export const BEADS_PACKAGE_ID =
   `${BEADS_VERSION}-${BEADS_SOURCE_REVISION.slice(0, 12)}-schema${BEADS_SCHEMA_VERSION}`;

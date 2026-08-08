@@ -86,7 +86,7 @@ describe("schema-compatible Beads release packaging", () => {
         fakeBd,
         `#!/bin/sh
 if [ "\${1}" = version ]; then
-  echo "bd version 1.1.0 (672d942: fake)"
+  echo "bd version 1.1.0 (672d942083a1: fake)"
   exit 0
 fi
 echo "embedded Dolt requires a CGO build" >&2
