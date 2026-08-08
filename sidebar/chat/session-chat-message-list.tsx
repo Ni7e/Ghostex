@@ -363,19 +363,19 @@ export function SessionChatMessageList({
           onScroll={handleScroll}
           preserveScrollOnPrepend
         >
+          {hasMore ? (
+            <div className="flex justify-center px-4 pt-2 [direction:ltr]">
+              <Button
+                disabled={loadingEarlier}
+                onClick={onLoadEarlier}
+                size="sm"
+                variant="ghost"
+              >
+                {loadingEarlier ? "Loading…" : "Load earlier messages"}
+              </Button>
+            </div>
+          ) : null}
           <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-8 pb-4 [direction:ltr]">
-            {hasMore ? (
-              <div className="flex justify-center">
-                <Button
-                  disabled={loadingEarlier}
-                  onClick={onLoadEarlier}
-                  size="sm"
-                  variant="ghost"
-                >
-                  {loadingEarlier ? "Loading…" : "Load earlier messages"}
-                </Button>
-              </div>
-            ) : null}
             {rendered.map((message) => (
               <MessageScrollerItem
                 key={message.id}
