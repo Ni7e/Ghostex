@@ -89,20 +89,13 @@ impl GpuiDiagnosticScenario {
             Self::AppModal => "gpui.app.modal",
         }
     }
-
-    fn default_enabled(self) -> bool {
-        // Missing-key defaults mirror Swift NativeDiagnosticLogging
-        // (GhostexAppStorage.swift) so both apps agree immediately after an
-        // update, before Settings normalizes new scenario ids. `gpui.app.modal`
-        // is not in DEFAULT_DIAGNOSTIC_LOGGING_SCENARIOS, so it defaults off.
-        matches!(
-            self,
-            Self::HostLifecycle | Self::RemoteGxserverInstall | Self::SidebarRefresh
-        )
-    }
 }
 
 pub fn scenario_enabled(scenario: GpuiDiagnosticScenario) -> bool {
+    scenario_id_enabled(scenario.scenario_id())
+}
+
+pub fn scenario_id_enabled(scenario_id: &str) -> bool {
     let settings = shared_settings::shared_sidebar_settings_snapshot();
     let Some(state) = settings
         .object()
@@ -110,9 +103,9 @@ pub fn scenario_enabled(scenario: GpuiDiagnosticScenario) -> bool {
         .and_then(serde_json::Value::as_object)
         .and_then(|logging| logging.get("scenarios"))
         .and_then(serde_json::Value::as_object)
-        .and_then(|scenarios| scenarios.get(scenario.scenario_id()))
+        .and_then(|scenarios| scenarios.get(scenario_id))
     else {
-        return scenario.default_enabled();
+        return false;
     };
     if let Some(enabled) = state.as_bool() {
         return enabled;
@@ -152,13 +145,26 @@ pub fn append(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
     append_unconditionally(log, event, details);
 }
 
-/// Privacy-shaped temporary instrumentation. Routine temporary events follow
-/// "Show debug UI controls"; important diagnostics remain always available.
-pub fn append_temporary(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
-    if !is_important_diagnostic(log, event, &details) && !debug_ui_controls_enabled() {
+/// Appends a routine event whose scenario is selected by its caller. Missing,
+/// disabled, or expired scenarios never write; important diagnostics remain
+/// unconditional.
+pub fn append_for_scenario(
+    log: GpuiSupportLog,
+    scenario_id: &str,
+    event: &str,
+    details: serde_json::Value,
+) {
+    let important = is_important_diagnostic(log, event, &details);
+    if !important && (!debug_ui_controls_enabled() || !scenario_id_enabled(scenario_id)) {
         return;
     }
     append_unconditionally(log, event, details);
+}
+
+/// Privacy-shaped temporary instrumentation. Routine temporary events follow
+/// the same explicit scenario as their destination log.
+pub fn append_temporary(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
+    append(log, event, details);
 }
 
 fn debug_ui_controls_enabled() -> bool {

@@ -68,8 +68,8 @@ use crate::{
     identity::ensure_gxserver_identity,
     ids::{is_gxserver_project_id, is_gxserver_session_id},
     logging::{
-        log_level_from_status, query_gxserver_logs, GxserverLogInput, GxserverLogger, LogLevel,
-        LogQueryError,
+        log_level_from_status, query_gxserver_logs, DiagnosticLogScenario, GxserverLogInput,
+        GxserverLogger, LogLevel, LogQueryError,
     },
     paths::{get_gxserver_paths, GxserverPaths},
     platform::shell::command_shell,
@@ -397,16 +397,19 @@ pub async fn run_gxserver_foreground(
     })?;
 
     write_runtime_metadata(&paths, &metadata)?;
-    let _ = logger.log(GxserverLogInput {
-        level: crate::logging::LogLevel::Info,
-        event: "serverStarted".to_string(),
-        server_id: Some(metadata.server_id.clone()),
-        request_id: None,
-        client: None,
-        duration_ms: None,
-        error: None,
-        details: None,
-    });
+    let _ = logger.log_routine(
+        DiagnosticLogScenario::ServerLifecycle,
+        GxserverLogInput {
+            level: crate::logging::LogLevel::Info,
+            event: "serverStarted".to_string(),
+            server_id: Some(metadata.server_id.clone()),
+            request_id: None,
+            client: None,
+            duration_ms: None,
+            error: None,
+            details: None,
+        },
+    );
     state.event_hub.broadcast(json!({
         "protocolVersion": GXSERVER_PROTOCOL_VERSION,
         "serverId": metadata.server_id.clone(),
@@ -1207,20 +1210,22 @@ async fn handle_http_request(
         apply_cors_headers(&headers, &mut routed.response, &state.config);
     }
     let status = routed.response.status().as_u16();
-    let _ = state.logger.log(GxserverLogInput {
-        level: log_level_from_status(status),
-        event: "apiRequest".to_string(),
-        server_id: Some(state.metadata.server_id.clone()),
-        request_id: None,
-        client,
-        duration_ms: Some(started_at.elapsed().as_millis()),
-        error: None,
-        details: Some(json!({
-            "method": "http",
-            "path": routed.endpoint_path,
-            "statusCode": status,
-        })),
-    });
+    let _ = state
+        .logger
+        .log_routine(DiagnosticLogScenario::ApiRequests, GxserverLogInput {
+            level: log_level_from_status(status),
+            event: "apiRequest".to_string(),
+            server_id: Some(state.metadata.server_id.clone()),
+            request_id: None,
+            client,
+            duration_ms: Some(started_at.elapsed().as_millis()),
+            error: None,
+            details: Some(json!({
+                "method": "http",
+                "path": routed.endpoint_path,
+                "statusCode": status,
+            })),
+        });
     if let Some(endpoint_path) = routed.endpoint_path.clone() {
         state.event_hub.broadcast(json!({
             "path": endpoint_path,
@@ -4866,16 +4871,19 @@ async fn handle_typed_operation_http(
             } else {
                 crate::logging::LogLevel::Warn
             };
-            let _ = state.logger.log(GxserverLogInput {
-                level,
-                event: "typedOperation".to_string(),
-                server_id: Some(state.metadata.server_id.clone()),
-                request_id: Some(request_id.clone()),
-                client: None,
-                duration_ms: None,
-                error: None,
-                details: Some(typed_operation_log_details(&result)),
-            });
+            let _ = state.logger.log_routine(
+                DiagnosticLogScenario::TypedOperations,
+                GxserverLogInput {
+                    level,
+                    event: "typedOperation".to_string(),
+                    server_id: Some(state.metadata.server_id.clone()),
+                    request_id: Some(request_id.clone()),
+                    client: None,
+                    duration_ms: None,
+                    error: None,
+                    details: Some(typed_operation_log_details(&result)),
+                },
+            );
             routed_json(
                 Some(endpoint_path),
                 StatusCode::OK,
@@ -12307,28 +12315,30 @@ fn log_agent_hook_passive_identity_conflict(
     CDXC:AgentHooks 2026-06-22-08:31:
     Passive hook identity conflicts need the same support-bundle evidence as TypeScript without exposing thread ids, paths, titles, prompts, or hook payloads. Hash private agent-session ids at the writer boundary and log only enum fields, stable gxserver ids, and payload-shape booleans.
     */
-    let _ = state.logger.log(GxserverLogInput {
-        level: LogLevel::Debug,
-        event: "sessionIdentity.updateBlocked".to_string(),
-        server_id: Some(state.metadata.server_id.clone()),
-        request_id: None,
-        client: None,
-        duration_ms: None,
-        error: None,
-        details: Some(json!({
-            "agentId": agent_id,
-            "currentAgentSessionIdHash": hash_log_identity(current_agent_session_id),
-            "currentAgentSessionIdPresent": current_agent_session_id.is_some(),
-            "incomingAgentSessionIdHash": hash_log_identity(incoming_agent_session_id),
-            "incomingAgentSessionIdPresent": incoming_agent_session_id.is_some(),
-            "ownerProjectId": conflict.get("ownerProjectId").cloned(),
-            "ownerSessionId": conflict.get("ownerSessionId").cloned(),
-            "projectId": params.get("projectId").and_then(Value::as_str),
-            "reason": reason,
-            "sessionId": params.get("sessionId").and_then(Value::as_str),
-            "source": source,
-        })),
-    });
+    let _ = state
+        .logger
+        .log_routine(DiagnosticLogScenario::AgentDetection, GxserverLogInput {
+            level: LogLevel::Debug,
+            event: "sessionIdentity.updateBlocked".to_string(),
+            server_id: Some(state.metadata.server_id.clone()),
+            request_id: None,
+            client: None,
+            duration_ms: None,
+            error: None,
+            details: Some(json!({
+                "agentId": agent_id,
+                "currentAgentSessionIdHash": hash_log_identity(current_agent_session_id),
+                "currentAgentSessionIdPresent": current_agent_session_id.is_some(),
+                "incomingAgentSessionIdHash": hash_log_identity(incoming_agent_session_id),
+                "incomingAgentSessionIdPresent": incoming_agent_session_id.is_some(),
+                "ownerProjectId": conflict.get("ownerProjectId").cloned(),
+                "ownerSessionId": conflict.get("ownerSessionId").cloned(),
+                "projectId": params.get("projectId").and_then(Value::as_str),
+                "reason": reason,
+                "sessionId": params.get("sessionId").and_then(Value::as_str),
+                "source": source,
+            })),
+        });
     let hook_activity = normalize_agent_hook_activity(
         params.get("status"),
         params

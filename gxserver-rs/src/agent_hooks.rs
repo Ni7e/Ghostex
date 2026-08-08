@@ -315,13 +315,22 @@ pub fn repair_installed_agent_hook_paths(
         return Ok(Vec::new());
     }
 
-    let notify_stale = !is_notify_hook_current(&hook_paths.notify_hook_path);
+    let notify_hook_contents = read_file_text(&hook_paths.notify_hook_path);
+    let notify_stale = !is_notify_hook_current(&hook_paths, &notify_hook_contents);
     if !notify_stale && stale_targets.is_empty() {
         return Ok(Vec::new());
     }
 
     let mut repaired_paths = Vec::new();
     if notify_stale {
+        if let Some(previous_state_directory) = notify_hook_state_directory(&notify_hook_contents) {
+            for migrated_path in migrate_hook_session_sidecars(
+                &previous_state_directory,
+                &hook_paths.hook_state_directory,
+            )? {
+                push_unique_path(&mut repaired_paths, migrated_path);
+            }
+        }
         install_notify_hook(&hook_paths)?;
         push_unique_path(
             &mut repaired_paths,
@@ -732,6 +741,14 @@ fn normalized_hook_agent_key(value: &str) -> String {
 fn activity_for_hook_event(agent_key: &str, event_name: &str, payload: &Value) -> Option<String> {
     let normalized_event_name = normalize_prompt_text(event_name);
     let lower = normalized_event_name.to_ascii_lowercase();
+    if agent_key == "codex" {
+        if lower == "stop" {
+            return Some("attention".to_string());
+        }
+        if matches!(lower.as_str(), "sessionend" | "session-end") {
+            return Some("idle".to_string());
+        }
+    }
     if agent_key == "claude" {
         if matches!(lower.as_str(), "stop" | "idle" | "sessionend") {
             return Some("idle".to_string());
@@ -1180,7 +1197,8 @@ fn read_hook_status(
         .iter()
         .map(|path| path_string(path))
         .collect::<Vec<_>>();
-    let notify_current = is_notify_hook_current(&hook_paths.notify_hook_path);
+    let notify_hook_contents = read_file_text(&hook_paths.notify_hook_path);
+    let notify_current = is_notify_hook_current(hook_paths, &notify_hook_contents);
     let inspection = inspect_agent_hook_installation(definition, hook_paths, &provider_paths);
     let provider_current = inspection.current_hook_installed;
     let ghostex_hook_present = inspection.ghostex_hook_present;
@@ -2258,12 +2276,97 @@ fn remove_macos_notify_hook_execution_attributes(path: &Path) {
     }
 }
 
-fn is_notify_hook_current(path: &Path) -> bool {
+fn notify_hook_state_directory(contents: &str) -> Option<PathBuf> {
+    let value = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("DEFAULT_HOOK_STATE_DIR="))?;
+    let inner = value.strip_prefix('\'')?.strip_suffix('\'')?;
+    let path = PathBuf::from(inner.replace("'\\''", "'"));
+    (path.is_absolute() && path.file_name().and_then(|name| name.to_str()) == Some("agent-hooks"))
+        .then_some(path)
+}
+
+fn migrate_hook_session_sidecars(
+    source_directory: &Path,
+    destination_directory: &Path,
+) -> Result<Vec<String>, DomainStateError> {
+    if source_directory == destination_directory || !source_directory.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut migrated_paths = Vec::new();
+    for entry in fs::read_dir(source_directory).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        if !entry.file_type().map_err(io_error)?.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if !file_name.ends_with("-hook-sessions.json") {
+            continue;
+        }
+        let source_data = read_json_object(&read_file_text(&entry.path()));
+        let Some(source_sessions) = source_data.get("sessions").and_then(Value::as_object) else {
+            continue;
+        };
+        let destination_path = destination_directory.join(file_name);
+        let mut destination_data = read_json_object(&read_file_text(&destination_path));
+        let destination_object = destination_data.as_object_mut().expect("JSON object");
+        let destination_sessions = destination_object
+            .entry("sessions".to_string())
+            .or_insert_with(|| json!({}));
+        if !destination_sessions.is_object() {
+            *destination_sessions = json!({});
+        }
+        let destination_sessions = destination_sessions
+            .as_object_mut()
+            .expect("sessions object");
+        let mut changed = false;
+        for (session_id, source_session) in source_sessions {
+            let source_updated_at = source_session
+                .get("updatedAt")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            let destination_updated_at = destination_sessions
+                .get(session_id)
+                .and_then(|session| session.get("updatedAt"))
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            if !destination_sessions.contains_key(session_id)
+                || source_updated_at > destination_updated_at
+            {
+                destination_sessions.insert(session_id.clone(), source_session.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            write_json_file(&destination_path, &destination_data)?;
+            migrated_paths.push(path_string(&destination_path));
+        }
+    }
+    Ok(migrated_paths)
+}
+
+fn is_notify_hook_current(hook_paths: &HookPaths, contents: &str) -> bool {
     /*
     CDXC:AgentHooks 2026-06-22-08:23:
     Area 27 parity requires Rust status/install/uninstall to treat the TypeScript gxserver v6 hook marker as the shared notify-hook currency contract. Do not require Rust-only helper text here; existing gxserver-owned v6 hooks should stay installed instead of forcing a needless updateRequired state.
+
+    The marker alone is not enough when Ghostex's resolved state directory
+    changes (for example, after moving from the macOS Application Support
+    layout to XDG state). The hook embeds that directory at install time, so a
+    marker-current script pointing at a different directory is stale and must
+    be rewritten before live Codex identity repair can consume its sidecar.
     */
-    read_file_text(path).contains(&format!("{NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}"))
+    let state_directory_assignment = format!(
+        "DEFAULT_HOOK_STATE_DIR={}",
+        shell_quote(&path_string(&hook_paths.hook_state_directory))
+    );
+    contents.contains(&format!("{NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}"))
+        && contents
+            .lines()
+            .any(|line| line == state_directory_assignment)
 }
 
 fn hook_format(agent_id: &str) -> HookFormat {
@@ -3615,7 +3718,10 @@ mod tests {
         ));
         let claude_paths = provider_hook_paths("claude", &hook_paths);
         let inspection = inspect_agent_hook_installation(&claude, &hook_paths, &claude_paths);
-        assert!(is_notify_hook_current(&hook_paths.notify_hook_path));
+        assert!(is_notify_hook_current(
+            &hook_paths,
+            &read_file_text(&hook_paths.notify_hook_path)
+        ));
         assert!(inspection.current_hook_installed);
 
         let status = read_agent_hook_status(
@@ -3777,14 +3883,88 @@ mod tests {
     }
 
     #[test]
-    fn notify_hook_current_uses_typescript_marker_contract() {
+    fn notify_hook_current_requires_marker_and_resolved_state_directory() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let hook_path = temp.path().join("agent-shell-notify.sh");
+        let hook_paths = HookPaths::new(temp.path().to_path_buf());
+        let hook_path = hook_paths.notify_hook_path.clone();
         write_test_file(
             &hook_path,
-            &format!("#!/bin/zsh\n# {NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}\n"),
+            &format!(
+                "#!/bin/zsh\n# {NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}\nDEFAULT_HOOK_STATE_DIR={}\n",
+                shell_quote(&path_string(&hook_paths.hook_state_directory))
+            ),
         );
-        assert!(is_notify_hook_current(&hook_path));
+        assert!(is_notify_hook_current(
+            &hook_paths,
+            &read_file_text(&hook_path)
+        ));
+
+        write_test_file(
+            &hook_path,
+            &format!(
+                "#!/bin/zsh\n# {NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}\nDEFAULT_HOOK_STATE_DIR='/stale/ghostex/state'\n"
+            ),
+        );
+        assert!(!is_notify_hook_current(
+            &hook_paths,
+            &read_file_text(&hook_path)
+        ));
+    }
+
+    #[test]
+    fn codex_stop_persists_attention_in_the_hook_sidecar() {
+        assert_eq!(
+            activity_for_hook_event("codex", "Stop", &json!({})),
+            Some("attention".to_string())
+        );
+        assert_eq!(
+            activity_for_hook_event("codex", "SessionEnd", &json!({})),
+            Some("idle".to_string())
+        );
+    }
+
+    #[test]
+    fn hook_session_sidecar_migration_keeps_the_newest_identity_rows() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let source_directory = temp.path().join("legacy").join("agent-hooks");
+        let destination_directory = temp.path().join("current").join("agent-hooks");
+        let file_name = "codex-hook-sessions.json";
+        write_test_file(
+            &source_directory.join(file_name),
+            &format!(
+                "{}\n",
+                json!({
+                    "sessions": {
+                        "incoming": { "updatedAt": 20.0, "surfaceId": "surface-a" },
+                        "shared": { "updatedAt": 10.0, "surfaceId": "legacy" }
+                    }
+                })
+            ),
+        );
+        write_test_file(
+            &destination_directory.join(file_name),
+            &format!(
+                "{}\n",
+                json!({
+                    "sessions": {
+                        "shared": { "updatedAt": 30.0, "surfaceId": "current" }
+                    }
+                })
+            ),
+        );
+
+        let migrated = migrate_hook_session_sidecars(&source_directory, &destination_directory)
+            .expect("migrate sidecars");
+        assert_eq!(
+            migrated,
+            vec![path_string(&destination_directory.join(file_name))]
+        );
+        let result = read_json_object(&read_file_text(&destination_directory.join(file_name)));
+        assert_eq!(
+            result["sessions"]["incoming"]["surfaceId"],
+            json!("surface-a")
+        );
+        assert_eq!(result["sessions"]["shared"]["surfaceId"], json!("current"));
     }
 
     #[test]

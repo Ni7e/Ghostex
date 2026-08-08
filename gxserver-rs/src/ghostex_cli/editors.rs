@@ -10,6 +10,7 @@ use crate::ghostex_cli::args::{parse_args, FlagValue, Flags};
 use crate::ghostex_cli::rpc::{
     self, call_gxserver_rpc, unsupported_action_error, CliError, CliResult,
 };
+use crate::logging::read_routine_diagnostic_enabled;
 
 /*
 CDXC:GhostexRustCli 2026-07-13:
@@ -1776,17 +1777,8 @@ fn shared_settings_path() -> PathBuf {
     rpc::ghostex_config_home().join("native-sidebar-settings.json")
 }
 
-fn read_debugging_mode() -> bool {
-    let Ok(settings_json) = std::fs::read_to_string(shared_settings_path()) else {
-        return false;
-    };
-    if settings_json.is_empty() {
-        return false;
-    }
-    serde_json::from_str::<Value>(&settings_json)
-        .ok()
-        .map(|settings| settings.get("debuggingMode") == Some(&Value::Bool(true)))
-        .unwrap_or(false)
+fn prompt_editor_diagnostic_logging_enabled() -> bool {
+    read_routine_diagnostic_enabled(&shared_settings_path(), "native.prompt.editor")
 }
 
 fn append_log_line(path: &Path, line: &str) {
@@ -1805,10 +1797,10 @@ fn append_log_line(path: &Path, line: &str) {
 fn append_floating_editor_log(details: Value) {
     /*
     CDXC:Diagnostics 2026-05-16-07:23 (ported): honor the shared Settings
-    Debugging Mode switch before creating or appending
+    Debugging Mode and native.prompt.editor scenario before creating or appending
     ~/Library/Logs/ghostex/floating-editor.log.
     */
-    if !read_debugging_mode() {
+    if !prompt_editor_diagnostic_logging_enabled() {
         return;
     }
     let mut payload = details.as_object().cloned().unwrap_or_default();
@@ -1821,7 +1813,7 @@ fn append_floating_editor_log(details: Value) {
 }
 
 fn append_prompt_editor_timeline_log(event: &str, details: Value) {
-    if !read_debugging_mode() {
+    if !prompt_editor_diagnostic_logging_enabled() {
         return;
     }
     let mut payload = details.as_object().cloned().unwrap_or_default();

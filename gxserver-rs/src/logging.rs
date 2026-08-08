@@ -38,6 +38,31 @@ pub enum LogLevel {
     Error,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagnosticLogScenario {
+    AgentDetection,
+    ApiRequests,
+    Portless,
+    RepositoryClone,
+    ServerLifecycle,
+    TerminalFocus,
+    TypedOperations,
+}
+
+impl DiagnosticLogScenario {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::AgentDetection => "native.agent.detection",
+            Self::ApiRequests => "gxserver.requests",
+            Self::Portless => "gxserver.portless",
+            Self::RepositoryClone => "gxserver.repositoryClone",
+            Self::ServerLifecycle => "gxserver.lifecycle",
+            Self::TerminalFocus => "native.terminal.focus",
+            Self::TypedOperations => "gxserver.typedOperations",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct GxserverLogInput {
     pub level: LogLevel,
@@ -73,12 +98,13 @@ impl Default for LogRetentionOptions {
 #[derive(Debug)]
 struct DebuggingModeCache {
     checked_at: Instant,
-    enabled: bool,
+    debugging_mode: bool,
+    enabled_scenarios: HashSet<String>,
 }
 
 /*
 CDXC:GxserverLogs 2026-06-14-20:37:
-Persistent Rust logs must be safe for support bundles. Persist explicit warn/error entries and failure-like structured diagnostics unconditionally; require Debugging Mode for every routine entry. Rotate before append at the TypeScript size/count, and sanitize at the JSONL writer boundary so future call sites cannot leak paths, URLs, command text, stdout/stderr, tokens, or user-owned names.
+Persistent Rust logs must be safe for support bundles. Persist explicit warn/error entries and failure-like structured diagnostics unconditionally. Every routine entry must use `log_routine` with an explicit diagnostic scenario, and writes require both Debugging Mode and that unexpired scenario. Rotate before append at the TypeScript size/count, and sanitize at the JSONL writer boundary so future call sites cannot leak paths, URLs, command text, stdout/stderr, tokens, or user-owned names.
 
 CDXC:GxserverLogs 2026-06-19-14:45:
 Rust logger startup must match TypeScript support-bundle retention: schedule a one-minute delayed cleanup, keep only the active or newest gxserver JSONL split file, delete older rotations, and trim the retained file to 25,000 lines without logging cleanup failures back into the same file.
@@ -100,22 +126,40 @@ impl GxserverLogger {
             paths,
             debugging_mode_cache: Mutex::new(DebuggingModeCache {
                 checked_at: Instant::now() - Duration::from_millis(DEBUGGING_MODE_CACHE_MS),
-                enabled: false,
+                debugging_mode: false,
+                enabled_scenarios: HashSet::new(),
             }),
         }
     }
 
+    /// Persists only important diagnostics. Routine callers must use
+    /// `log_routine` so an explicit scenario is impossible to forget silently.
     pub fn log(&self, entry: GxserverLogInput) -> Result<()> {
-        if !self.should_persist(&entry) {
+        if !Self::is_important(&entry) {
             return Ok(());
         }
+        self.persist(entry)
+    }
+
+    pub fn log_routine(
+        &self,
+        scenario: DiagnosticLogScenario,
+        entry: GxserverLogInput,
+    ) -> Result<()> {
+        if !Self::is_important(&entry) && !self.routine_logging_enabled(scenario) {
+            return Ok(());
+        }
+        self.persist(entry)
+    }
+
+    fn persist(&self, entry: GxserverLogInput) -> Result<()> {
         fs::create_dir_all(&self.paths.logs_dir)
             .with_context(|| "create gxserver logs directory")?;
         let line = serde_json::to_string(&normalize_log_entry(entry))?;
         write_gxserver_log_line(&self.paths, &line)
     }
 
-    fn should_persist(&self, entry: &GxserverLogInput) -> bool {
+    fn is_important(entry: &GxserverLogInput) -> bool {
         matches!(entry.level, LogLevel::Warn | LogLevel::Error)
             || entry
                 .error
@@ -126,20 +170,21 @@ impl GxserverLogger {
                 .details
                 .as_ref()
                 .is_some_and(value_contains_important_diagnostic)
-            || self.debugging_mode_enabled()
     }
 
-    fn debugging_mode_enabled(&self) -> bool {
+    fn routine_logging_enabled(&self, scenario: DiagnosticLogScenario) -> bool {
         let mut cache = self
             .debugging_mode_cache
             .lock()
             .expect("debug cache poisoned");
         if cache.checked_at.elapsed() < Duration::from_millis(DEBUGGING_MODE_CACHE_MS) {
-            return cache.enabled;
+            return cache.debugging_mode && cache.enabled_scenarios.contains(scenario.id());
         }
+        let settings = read_diagnostic_logging_settings_file(&self.paths);
         cache.checked_at = Instant::now();
-        cache.enabled = read_debugging_mode_settings_file(&self.paths);
-        cache.enabled
+        cache.debugging_mode = settings.debugging_mode;
+        cache.enabled_scenarios = settings.enabled_scenarios;
+        cache.debugging_mode && cache.enabled_scenarios.contains(scenario.id())
     }
 }
 
@@ -624,15 +669,77 @@ fn summarize_url(value: &str) -> Value {
     }
 }
 
-pub(crate) fn read_debugging_mode_settings_file(paths: &GxserverPaths) -> bool {
+#[derive(Default)]
+struct DiagnosticLoggingSettingsSnapshot {
+    debugging_mode: bool,
+    enabled_scenarios: HashSet<String>,
+}
+
+fn read_diagnostic_logging_settings_file(
+    paths: &GxserverPaths,
+) -> DiagnosticLoggingSettingsSnapshot {
     let settings_path = paths.app_config_dir.join("native-sidebar-settings.json");
+    let Ok(text) = fs::read_to_string(settings_path) else {
+        return DiagnosticLoggingSettingsSnapshot::default();
+    };
+    let Ok(settings) = serde_json::from_str::<Value>(&text) else {
+        return DiagnosticLoggingSettingsSnapshot::default();
+    };
+    let debugging_mode = settings.get("debuggingMode").and_then(Value::as_bool) == Some(true);
+    let enabled_scenarios = settings
+        .get("diagnosticLogging")
+        .and_then(Value::as_object)
+        .and_then(|logging| logging.get("scenarios"))
+        .and_then(Value::as_object)
+        .map(|scenarios| {
+            scenarios
+                .iter()
+                .filter(|(_, state)| diagnostic_scenario_state_enabled(state))
+                .map(|(scenario_id, _)| scenario_id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    DiagnosticLoggingSettingsSnapshot {
+        debugging_mode,
+        enabled_scenarios,
+    }
+}
+
+fn diagnostic_scenario_state_enabled(state: &Value) -> bool {
+    if state.as_bool() == Some(true) {
+        return true;
+    }
+    let Some(state) = state.as_object() else {
+        return false;
+    };
+    if state.get("enabled").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    let Some(expires_at) = state
+        .get("expiresAt")
+        .and_then(Value::as_str)
+        .filter(|expires_at| !expires_at.trim().is_empty())
+    else {
+        return true;
+    };
+    DateTime::parse_from_rfc3339(expires_at).is_ok_and(|expires_at| expires_at > Utc::now())
+}
+
+pub(crate) fn read_routine_diagnostic_enabled(settings_path: &Path, scenario_id: &str) -> bool {
     let Ok(text) = fs::read_to_string(settings_path) else {
         return false;
     };
-    serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|value| value.get("debuggingMode").and_then(Value::as_bool))
-        == Some(true)
+    let Ok(settings) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
+    settings.get("debuggingMode").and_then(Value::as_bool) == Some(true)
+        && settings
+            .get("diagnosticLogging")
+            .and_then(Value::as_object)
+            .and_then(|logging| logging.get("scenarios"))
+            .and_then(Value::as_object)
+            .and_then(|scenarios| scenarios.get(scenario_id))
+            .is_some_and(diagnostic_scenario_state_enabled)
 }
 
 fn write_gxserver_log_line(paths: &GxserverPaths, line: &str) -> Result<()> {
@@ -1431,7 +1538,7 @@ mod tests {
         let disabled_paths = get_gxserver_paths(Some(disabled_temp.path().to_path_buf()));
         let disabled_logger = test_logger(disabled_paths.clone());
         disabled_logger
-            .log(GxserverLogInput {
+            .log_routine(DiagnosticLogScenario::ServerLifecycle, GxserverLogInput {
                 level: LogLevel::Info,
                 event: "routine.info".to_string(),
                 server_id: None,
@@ -1443,7 +1550,7 @@ mod tests {
             })
             .expect("info log");
         disabled_logger
-            .log(GxserverLogInput {
+            .log_routine(DiagnosticLogScenario::ServerLifecycle, GxserverLogInput {
                 level: LogLevel::Debug,
                 event: "routine.debug".to_string(),
                 server_id: None,
@@ -1455,7 +1562,7 @@ mod tests {
             })
             .expect("debug log");
         disabled_logger
-            .log(GxserverLogInput {
+            .log_routine(DiagnosticLogScenario::ServerLifecycle, GxserverLogInput {
                 level: LogLevel::Info,
                 event: "routine.health".to_string(),
                 server_id: None,
@@ -1487,7 +1594,7 @@ mod tests {
         let enabled_paths = get_gxserver_paths(Some(enabled_temp.path().to_path_buf()));
         let enabled_logger = test_logger_with_debugging_mode(enabled_paths.clone(), true);
         enabled_logger
-            .log(GxserverLogInput {
+            .log_routine(DiagnosticLogScenario::ServerLifecycle, GxserverLogInput {
                 level: LogLevel::Info,
                 event: "routine.info".to_string(),
                 server_id: None,
@@ -1499,7 +1606,7 @@ mod tests {
             })
             .expect("info log enabled");
         enabled_logger
-            .log(GxserverLogInput {
+            .log_routine(DiagnosticLogScenario::ServerLifecycle, GxserverLogInput {
                 level: LogLevel::Debug,
                 event: "routine.debug".to_string(),
                 server_id: None,
@@ -1510,9 +1617,22 @@ mod tests {
                 details: None,
             })
             .expect("debug log enabled");
+        enabled_logger
+            .log(GxserverLogInput {
+                level: LogLevel::Info,
+                event: "routine.unscoped".to_string(),
+                server_id: None,
+                request_id: None,
+                client: None,
+                duration_ms: None,
+                error: None,
+                details: None,
+            })
+            .expect("unscoped routine log ignored");
         let text = fs::read_to_string(enabled_paths.log_file).expect("read enabled logs");
         assert!(text.contains("\"routine.info\""));
         assert!(text.contains("\"routine.debug\""));
+        assert!(!text.contains("routine.unscoped"));
     }
 
     #[test]
@@ -1818,7 +1938,11 @@ mod tests {
             paths,
             debugging_mode_cache: Mutex::new(DebuggingModeCache {
                 checked_at: Instant::now(),
-                enabled: debugging_mode,
+                debugging_mode,
+                enabled_scenarios: debugging_mode
+                    .then(|| DiagnosticLogScenario::ServerLifecycle.id().to_string())
+                    .into_iter()
+                    .collect(),
             }),
         }
     }

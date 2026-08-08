@@ -36,14 +36,14 @@ use cef::{
     PermissionHandler, PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes,
     ImplResourceHandler, ImplResponse as _, ImplStreamReader as _, PopupFeatures, ProcessId,
     ProcessMessage, RenderProcessHandler, Request, RequestHandler, ResourceHandler,
-    ResourceReadCallback, ResourceRequestHandler, Response, SetCookieCallback, State, StreamReader,
-    Task, ThreadId, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
+    ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, SetCookieCallback, State,
+    StreamReader, Task, ThreadId, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
     WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler,
     WrapDisplayHandler, WrapFindHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
     WrapPermissionHandler, WrapRenderProcessHandler, WrapRequestHandler, WrapResourceHandler,
     WrapResourceRequestHandler, WrapSetCookieCallback, WrapTask, WrapV8Handler, ZoomCommand,
     post_task, stream_reader_create_for_file, string_multimap_alloc, string_multimap_append,
-    currently_on, wrap_app, wrap_browser_process_handler, wrap_client, wrap_context_menu_handler,
+    wrap_app, wrap_browser_process_handler, wrap_client, wrap_context_menu_handler,
     wrap_display_handler, wrap_find_handler, wrap_focus_handler, wrap_life_span_handler,
     wrap_load_handler, wrap_permission_handler, wrap_render_process_handler, wrap_request_handler,
     wrap_resource_handler, wrap_resource_request_handler, wrap_set_cookie_callback, wrap_task,
@@ -1292,54 +1292,24 @@ fn manage_docs_resource_relative_path(url: &str) -> Option<String> {
     Some(relative_path.to_string())
 }
 
-// TEMPORARY DIAGNOSTIC (2026-08-07) - remove once the Docs resource failure is root-caused.
-fn manage_docs_diag(message: &str) {
-    use std::io::Write as _;
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/ghostex-docs-diag.log")
-    {
-        let _ = writeln!(file, "{message}");
-    }
-}
-
 /// Opens a Docs resource. Runs on a CEF worker sequence, never the IO thread.
 fn open_manage_docs_resource(
     source: &ManageDocsResourceSource,
     relative_path: &str,
 ) -> Option<ManageDocsResourceBody> {
-    // TEMPORARY DIAGNOSTIC: proves whether the handler mechanics work at all,
-    // independent of any filesystem or project-root resolution.
-    if relative_path == "__ghostex_docs_selftest__" {
-        manage_docs_diag("selftest: serving constant buffer");
-        return Some(ManageDocsResourceBody::Buffer {
-            data: b"/* ghostex docs selftest ok */\nbody{}".to_vec(),
-            offset: 0,
-        });
-    }
     match source {
         ManageDocsResourceSource::Local {
             project_root,
             allowed_relative_roots,
         } => {
-            manage_docs_diag(&format!(
-                "open local: relative_path={relative_path:?} project_root={project_root:?} roots={allowed_relative_roots:?}"
-            ));
-            let Ok(project_root) = std::fs::canonicalize(project_root) else {
-                manage_docs_diag("  reject: project_root canonicalize failed");
-                return None;
-            };
-            let Ok(candidate) = std::fs::canonicalize(
+            let project_root = std::fs::canonicalize(project_root).ok()?;
+            let candidate = std::fs::canonicalize(
                 relative_path
                     .split('/')
                     .fold(project_root.clone(), |path, component| path.join(component)),
-            ) else {
-                manage_docs_diag("  reject: candidate canonicalize failed");
-                return None;
-            };
+            )
+            .ok()?;
             if !candidate.is_file() || !candidate.starts_with(&project_root) {
-                manage_docs_diag(&format!("  reject: not a file/outside root: {candidate:?}"));
                 return None;
             }
             let allowed = allowed_relative_roots.iter().any(|relative_root| {
@@ -1349,26 +1319,14 @@ fn open_manage_docs_resource(
                     .is_some_and(|root| root.starts_with(&project_root) && candidate.starts_with(root))
             });
             if !allowed {
-                manage_docs_diag("  reject: outside allowed docs roots");
                 return None;
             }
             let file_name = candidate.to_string_lossy();
-            let Some(stream) =
-                stream_reader_create_for_file(Some(&CefString::from(file_name.as_ref())))
-            else {
-                manage_docs_diag("  reject: stream_reader_create_for_file returned None");
-                return None;
-            };
-            manage_docs_diag("  ok: stream opened");
+            let stream = stream_reader_create_for_file(Some(&CefString::from(file_name.as_ref())))?;
             Some(ManageDocsResourceBody::Stream(stream))
         }
         ManageDocsResourceSource::Remote { loader } => {
-            manage_docs_diag(&format!("open remote: relative_path={relative_path:?}"));
-            let Some(data) = loader(relative_path) else {
-                manage_docs_diag("  reject: remote loader returned None");
-                return None;
-            };
-            manage_docs_diag(&format!("  ok: remote bytes={}", data.len()));
+            let data = loader(relative_path)?;
             Some(ManageDocsResourceBody::Buffer { data, offset: 0 })
         }
     }
@@ -1431,26 +1389,8 @@ wrap_resource_handler! {
             // Handled synchronously on this worker sequence; blocking here is
             // the documented contract for `open`, unlike the IO thread. The
             // file open and the remote fetch below both depend on that.
-            debug_assert_eq!(
-                currently_on(ThreadId::IO),
-                0,
-                "open must not be called on the IO thread"
-            );
-            debug_assert_eq!(
-                currently_on(ThreadId::UI),
-                0,
-                "open must not be called on the UI thread"
-            );
-            manage_docs_diag(&format!(
-                "open() called: relative_path={:?} on_io={} on_ui={}",
-                self.relative_path,
-                currently_on(ThreadId::IO),
-                currently_on(ThreadId::UI)
-            ));
             if let Some(handle_request) = handle_request {
                 *handle_request = 1;
-            } else {
-                manage_docs_diag("  WARNING: handle_request was None");
             }
             let Some(opened) = open_manage_docs_resource(&self.source, &self.relative_path) else {
                 // Outside the Docs roots or unreadable: cancel the request.
@@ -1509,11 +1449,6 @@ wrap_resource_handler! {
             bytes_read: Option<&mut c_int>,
             _callback: Option<&mut ResourceReadCallback>,
         ) -> c_int {
-            debug_assert_eq!(
-                currently_on(ThreadId::IO),
-                0,
-                "read must not be called on the IO thread"
-            );
             if bytes_to_read < 1 {
                 return 0;
             }
@@ -1551,6 +1486,25 @@ wrap_resource_request_handler! {
     }
 
     impl ResourceRequestHandler {
+        /*
+        CDXC:GPUIManageHtmlResources 2026-08-08:
+        CEF consults on_before_resource_load BEFORE resource_handler, and the
+        generated cef-rs binding's inherited default returns
+        ReturnValue::default() == RV_CANCEL. Without this explicit CONTINUE
+        override, every Docs subresource request was aborted
+        (net::ERR_ABORTED, canceled) before the resource handler was ever
+        queried, so no image/CSS/JS in rendered HTML Docs could load.
+        */
+        fn on_before_resource_load(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut Frame>,
+            _request: Option<&mut Request>,
+            _callback: Option<&mut Callback>,
+        ) -> ReturnValue {
+            ReturnValue::CONTINUE
+        }
+
         fn resource_handler(
             &self,
             _browser: Option<&mut cef::Browser>,
@@ -1558,11 +1512,7 @@ wrap_resource_request_handler! {
             request: Option<&mut Request>,
         ) -> Option<ResourceHandler> {
             let request_url = CefString::from(&request?.url()).to_string();
-            manage_docs_diag(&format!("resource_handler: url={request_url:?}"));
-            let Some(relative_path) = manage_docs_resource_relative_path(&request_url) else {
-                manage_docs_diag("  no handler: url did not parse to a docs relative path");
-                return None;
-            };
+            let relative_path = manage_docs_resource_relative_path(&request_url)?;
             Some(GhostexManageDocsResourceHandler::new(
                 self.source.clone(),
                 relative_path,

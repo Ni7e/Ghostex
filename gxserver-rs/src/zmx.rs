@@ -18,7 +18,7 @@ use crate::{
     agents::{apply_created_session_identity, get_agent_startup_text_for_session},
     constants::GXSERVER_PROTOCOL_VERSION,
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
-    logging::{read_debugging_mode_settings_file, GxserverLogInput, GxserverLogger, LogLevel},
+    logging::{DiagnosticLogScenario, GxserverLogInput, GxserverLogger, LogLevel},
     paths::get_gxserver_paths,
     platform::shell::{command_shell, user_login_shell_exec_command},
     session_status::compute_activity_update,
@@ -73,30 +73,28 @@ pub(crate) fn log_temporary_zmx_input_write(
         return;
     }
     let paths = get_gxserver_paths(None);
-    if !read_debugging_mode_settings_file(&paths) {
-        return;
-    }
     let logger = TEMPORARY_TERMINAL_INPUT_LOGGER.get_or_init(|| GxserverLogger::new(paths));
-    let _ = logger.log(GxserverLogInput {
-        // Debug entries are persisted only while the user-facing "Show debug
-        // UI controls" setting (`debuggingMode`) is enabled.
-        level: LogLevel::Debug,
-        event: "temporaryTerminalInputWrite".to_string(),
-        server_id: None,
-        request_id: None,
-        client: None,
-        duration_ms: None,
-        error: None,
-        details: Some(json!({
-            "byteLength": bytes.len(),
-            "controls": controls,
-            "operation": operation.trim_start_matches("/api/"),
-            "projectId": project_id,
-            "providerSessionId": zmx_name,
-            "sessionId": session_id,
-            "source": source,
-        })),
-    });
+    let _ = logger.log_routine(
+        DiagnosticLogScenario::TerminalFocus,
+        GxserverLogInput {
+            level: LogLevel::Debug,
+            event: "temporaryTerminalInputWrite".to_string(),
+            server_id: None,
+            request_id: None,
+            client: None,
+            duration_ms: None,
+            error: None,
+            details: Some(json!({
+                "byteLength": bytes.len(),
+                "controls": controls,
+                "operation": operation.trim_start_matches("/api/"),
+                "projectId": project_id,
+                "providerSessionId": zmx_name,
+                "sessionId": session_id,
+                "source": source,
+            })),
+        },
+    );
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

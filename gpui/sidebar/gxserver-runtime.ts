@@ -3476,15 +3476,6 @@ class GpuiSidebarRuntime {
       this.activeGroupId !== nextActiveGroupId ||
       this.focusedSessionId !== nextFocusedSessionId ||
       !sameStringSet(this.visibleSessionIds, nextVisibleSessionIds);
-    // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
-    console.log("GXRESTORE bootstrap.applied", {
-      initialActiveProjectId: bootstrap.initialActiveProjectId,
-      nextActiveProjectId,
-      nextActiveGroupId,
-      nextFocusedSessionId,
-      visibleCount: nextVisibleSessionIds.size,
-      didChange,
-    });
     this.activeProjectId = nextActiveProjectId;
     this.activeGroupId = nextActiveGroupId;
     this.focusedSessionId = nextFocusedSessionId;
@@ -3820,15 +3811,16 @@ class GpuiSidebarRuntime {
 
   private autoMaterializeStartupFocusedSession(): void {
     /*
-    Restore eagerness (Decision #3, 2026-07-02): the session the user was
-    looking at when the app quit re-materializes automatically on relaunch.
-    Rust persists the presentation focus state across restarts and replays it
-    through the bootstrap; once the first presentation hydrate confirms that
-    focused session is still a running local session, re-attach it through the
-    normal workspace focus bridge. Sleeping, background, and remote sessions
-    stay lazy, and Rust's attach guard currently admits only the focused
-    session, so additional previously-visible split sessions are not yet
-    eagerly re-attached.
+    Restore eagerness (Decision #3, 2026-07-02, revised 2026-08-07): the
+    session the user was looking at when the app quit re-materializes
+    automatically on relaunch. Rust persists the presentation focus state
+    across restarts and replays it through the bootstrap; once the first
+    presentation hydrate confirms that focused session is still a running local
+    session, re-attach it through the normal workspace focus bridge. This
+    covers the focused session only. Every other surfaced session — the other
+    panes of a split, remote attach tabs, and sessions whose provider went to
+    sleep while the app was closed — is now restored by Rust from the workspace
+    model it already owns, so nothing further is needed here.
     */
     if (this.didAutoMaterializeStartupSession) {
       return;
@@ -3836,30 +3828,14 @@ class GpuiSidebarRuntime {
     this.didAutoMaterializeStartupSession = true;
     const focusedSessionId = this.focusedSessionId;
     if (!focusedSessionId || !this.visibleSessionIds.has(focusedSessionId)) {
-      // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
-      console.log("GXRESTORE autoMaterialize.skip.noFocusedOrNotVisible", {
-        focusedSessionId,
-        visibleCount: this.visibleSessionIds.size,
-      });
       return;
     }
     const session = this.presentation?.sessions.find(
       (presentationSession) => presentationSession.sessionId === focusedSessionId,
     );
     if (!session || session.lifecycleState !== "running") {
-      // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
-      console.log("GXRESTORE autoMaterialize.skip.notRunningLocal", {
-        focusedSessionId,
-        found: Boolean(session),
-        lifecycleState: session?.lifecycleState,
-      });
       return;
     }
-    // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
-    console.log("GXRESTORE autoMaterialize.focus", {
-      projectId: session.projectId,
-      focusedSessionId,
-    });
     this.postLocalWorkspaceTerminalFocus(session.projectId, focusedSessionId);
   }
 
@@ -4914,15 +4890,6 @@ class GpuiSidebarRuntime {
           activeRemoteReference.projectId,
         )
       : this.activeProjectId;
-    // GXRESTORE: temporary restore-diagnosis log — remove before handoff.
-    console.log("GXRESTORE postFocusState", {
-      activeProjectId,
-      localActiveProjectId: this.activeProjectId,
-      activeGroupId: this.activeGroupId,
-      tabSessionCount: activeTabSessions.length,
-      focusedSessionId: this.focusedSessionId,
-      visibleSessionIds: [...this.visibleSessionIds],
-    });
     const payload = JSON.stringify({
       activeProjectId,
       tabSessions: activeTabSessions,
@@ -5791,6 +5758,14 @@ class GpuiSidebarRuntime {
 
   private async handleSidebarMessage(message: SidebarToExtensionMessage): Promise<void> {
     switch (message.type) {
+      case "sidebarDebugLog":
+        window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
+          details: message.details,
+          event: message.event,
+          scenarioId: message.scenarioId,
+          type: "sidebarDiagnosticLog",
+        });
+        return;
       case "focusGroup":
         this.focusGroup(message.groupId, message);
         return;
@@ -8555,11 +8530,32 @@ class GpuiSidebarRuntime {
         request.replacementSessionId &&
         replacementProject.machineId === remoteProject.machineId
       ) {
-        this.setRemotePresentationSessionFocus({
+        const replacementReference = {
           machineId: replacementProject.machineId,
           projectId: replacementProject.projectId,
           sessionId: request.replacementSessionId,
-        });
+        };
+        /*
+        CDXC:GPUIRemoteWorkspaceLifecycle 2026-08-08:
+        A remote direct close must focus its surviving terminal through the
+        same native open/focus bridge as a remote sidebar session click. A
+        presentation-only focus update selects the replacement row but never
+        transfers AppKit/GPUI keyboard ownership, leaving both the Agents pane
+        and project-editor companion unable to type until clicked.
+        */
+        this.postRemoteSessionNativeAction(
+          "openRemoteSessionTerminal",
+          replacementReference,
+          {
+            sessionId: createGpuiRemotePresentationSessionId(
+              replacementReference.machineId,
+              replacementReference.projectId,
+              replacementReference.sessionId,
+            ),
+            type: "focusSession",
+          },
+        );
+        this.setRemotePresentationSessionFocus(replacementReference);
       }
     };
 
