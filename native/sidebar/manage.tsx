@@ -5076,7 +5076,7 @@ function ManageExcalidrawEditor({
   const data = parsed.data;
   const drawingElements = data.elements ?? [];
   return (
-    <div className="manage-drawing-editor" onKeyDownCapture={suppressManageExcalidrawToolKeyBeep}>
+    <div className="manage-drawing-editor" onKeyDownCapture={handleManageExcalidrawKeyDown}>
       {parseError ? (
         <div className="manage-drawing-error">
           <IconAlertTriangle aria-hidden="true" size={15} />
@@ -5130,6 +5130,32 @@ function ManageExcalidrawEditor({
       />
     </div>
   );
+}
+
+function handleManageExcalidrawKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  /*
+   * CDXC:ManageDrawingRedoHotkey 2026-08-08:
+   * Excalidraw intentionally binds Ctrl+Y only on Windows, but Docs promises
+   * Command+Y as redo on macOS. Invoke the mounted editor's own stable redo
+   * action button so the upstream history remains the sole owner of the
+   * operation and autosave observes the normal scene change.
+   */
+  if (
+    !event.nativeEvent.isComposing &&
+    event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLocaleLowerCase() === "y"
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget
+      .querySelector<HTMLButtonElement>('[data-testid="button-redo"]:not(:disabled)')
+      ?.click();
+    return;
+  }
+  suppressManageExcalidrawToolKeyBeep(event);
 }
 
 function suppressManageExcalidrawToolKeyBeep(event: ReactKeyboardEvent<HTMLDivElement>): void {

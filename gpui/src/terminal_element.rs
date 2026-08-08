@@ -577,6 +577,8 @@ pub struct TerminalLayout {
 pub struct TerminalView {
     model: TerminalModel,
     font: TerminalFontConfig,
+    /// Settings/config-derived size restored by the focused-surface reset shortcut.
+    configured_font_size: Pixels,
     frame: Option<TerminalSnapshot>,
     row_cache: Vec<Option<Arc<RowLayout>>>,
     cached_metrics: Option<CellMetrics>,
@@ -659,6 +661,7 @@ impl TerminalView {
         font: TerminalFontConfig,
         cx: &mut Context<Self>,
     ) -> Self {
+        let configured_font_size = font.size;
         cx.spawn(async move |this, cx| {
             while let Some(event) = event_rx.next().await {
                 let Ok(()) = this.update(cx, |view, cx| view.handle_event(event, cx)) else {
@@ -690,6 +693,7 @@ impl TerminalView {
         Self {
             model,
             font,
+            configured_font_size,
             frame: None,
             row_cache: Vec::new(),
             cached_metrics: None,
@@ -747,12 +751,31 @@ impl TerminalView {
     }
 
     pub fn apply_font(&mut self, font: TerminalFontConfig) {
+        self.configured_font_size = font.size;
         if self.font == font {
             return;
         }
         self.font = font;
         self.cached_metrics = None;
         self.row_cache.fill(None);
+    }
+
+    pub fn adjust_font_size(&mut self, delta: f32, min: f32, max: f32) -> bool {
+        self.set_font_size(px((self.font.size.as_f32() + delta).clamp(min, max)))
+    }
+
+    pub fn reset_font_size(&mut self) -> bool {
+        self.set_font_size(self.configured_font_size)
+    }
+
+    fn set_font_size(&mut self, size: Pixels) -> bool {
+        if self.font.size == size {
+            return false;
+        }
+        self.font.size = size;
+        self.cached_metrics = None;
+        self.row_cache.fill(None);
+        true
     }
 
     pub fn set_input_suppressed(&mut self, suppressed: bool, cx: &mut Context<Self>) {

@@ -48,6 +48,7 @@ int GhostexGpuiKeyboardRouteNativeEvent(
   const char* charactersIgnoringModifiers,
   const char* characters);
 int GhostexGpuiKeyboardOwnerIsSourceWorkareaCef(void* gpuiRootView);
+int GhostexGpuiKeyboardOwnerUsesRendererEditHotkeys(void* gpuiRootView);
 bool GhostexGpuiNativeViewContainsResponder(void* rootNativeView, void* responder);
 
 // ABI contract with cef/shell.rs CefEditCommand::from_raw.
@@ -245,6 +246,15 @@ static BOOL GhostexGpuiCEFSourceWorkareaOwnsKeyboardInWindow(NSWindow* window) {
   return gpuiRootView &&
     gpuiRootView.window == window &&
     GhostexGpuiKeyboardOwnerIsSourceWorkareaCef((__bridge void*)gpuiRootView) != 0;
+}
+
+static BOOL GhostexGpuiCEFRendererEditHotkeysOwnKeyboardInWindow(NSWindow* window) {
+  GhostexGpuiFirstResponderObserver* observer =
+    objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey);
+  NSView* gpuiRootView = observer.gpuiRootView;
+  return gpuiRootView &&
+    gpuiRootView.window == window &&
+    GhostexGpuiKeyboardOwnerUsesRendererEditHotkeys((__bridge void*)gpuiRootView) != 0;
 }
 
 /*
@@ -734,53 +744,54 @@ static void GhostexGpuiCEFInstallStandardEditMenu(void) {
   }
 
   /*
-   CDXC:GPUISourceViewHotkeyPassthrough 2026-08-03:
-   Embedded VS Code owns its editing shortcuts in Monaco. While Source is the
-   proven window keyboard owner, keep the standard Edit menu actions clickable
-   but remove their key equivalents so AppKit cannot translate Cmd+Z,
-   Cmd+Shift+Z, Cmd+X/C/V, or Cmd+A into responder selectors before Chromium
-   receives the original trusted key event. Reinstalling the normal menu after
-   focus leaves Source restores every standard equivalent for Browser and
-   native text controls.
+   CDXC:GPUICefRendererEditHotkeyPassthrough 2026-08-08:
+   Source and Docs own renderer-level editing histories (Monaco, CodeMirror,
+   and Excalidraw). While either exact workarea is the proven window keyboard
+   owner, keep the standard Edit menu actions clickable but remove their key
+   equivalents so AppKit cannot translate Cmd+Z, Cmd+Shift+Z, Cmd+X/C/V, or
+   Cmd+A into responder selectors before Chromium receives the original
+   trusted key event. Reinstalling the normal menu after focus leaves those
+   workareas restores every standard equivalent for Browser and native text
+   controls.
    */
-  BOOL sourceHotkeyPassthrough =
-    GhostexGpuiCEFSourceWorkareaOwnsKeyboardInWindow(NSApp.keyWindow);
+  BOOL rendererEditHotkeyPassthrough =
+    GhostexGpuiCEFRendererEditHotkeysOwnKeyboardInWindow(NSApp.keyWindow);
   GhostexGpuiCEFSetEditMenuKeyEquivalent(
     editMenu,
     @selector(undo:),
     @"z",
     NSEventModifierFlagCommand,
-    sourceHotkeyPassthrough);
+    rendererEditHotkeyPassthrough);
   GhostexGpuiCEFSetEditMenuKeyEquivalent(
     editMenu,
     @selector(redo:),
     @"Z",
     NSEventModifierFlagCommand | NSEventModifierFlagShift,
-    sourceHotkeyPassthrough);
+    rendererEditHotkeyPassthrough);
   GhostexGpuiCEFSetEditMenuKeyEquivalent(
     editMenu,
     @selector(cut:),
     @"x",
     NSEventModifierFlagCommand,
-    sourceHotkeyPassthrough);
+    rendererEditHotkeyPassthrough);
   GhostexGpuiCEFSetEditMenuKeyEquivalent(
     editMenu,
     @selector(copy:),
     @"c",
     NSEventModifierFlagCommand,
-    sourceHotkeyPassthrough);
+    rendererEditHotkeyPassthrough);
   GhostexGpuiCEFSetEditMenuKeyEquivalent(
     editMenu,
     @selector(paste:),
     @"v",
     NSEventModifierFlagCommand,
-    sourceHotkeyPassthrough);
+    rendererEditHotkeyPassthrough);
   GhostexGpuiCEFSetEditMenuKeyEquivalent(
     editMenu,
     @selector(selectAll:),
     @"a",
     NSEventModifierFlagCommand,
-    sourceHotkeyPassthrough);
+    rendererEditHotkeyPassthrough);
 }
 
 void GhostexGpuiCEFSetNativeViewFrame(
