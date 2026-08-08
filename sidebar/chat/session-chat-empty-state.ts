@@ -35,9 +35,6 @@ export function sessionChatEmptyStateCopy(
         title: "No conversation here",
       };
     case "starting":
-      return {
-        detail: "The transcript will appear once the agent writes its first turn.",
-        title: "Waiting for the agent session…",
-      };
+      return sessionChatEmptyStateCopy("empty", agentLabel);
   }
 }
