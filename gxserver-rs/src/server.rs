@@ -120,7 +120,7 @@ use crate::{
         T3RuntimeStatusPayload,
     },
     terminal_ws::{handle_terminal_socket, TerminalWsState},
-    toolchain::{get_gxserver_tool_statuses, require_bundled_zmx},
+    toolchain::{get_gxserver_tool_statuses, require_bundled_bd, require_bundled_zmx},
     typed_operations::{
         create_pull_request_for_project, dispatch_typed_operation_endpoint,
         dispatch_worktree_path_operation, typed_operation_log_details, typed_operation_log_level,
@@ -159,6 +159,9 @@ enum ExistingGxserverState {
 struct AppState {
     auth_token: String,
     automation_runtime: AutomationRuntime,
+    /// Serializes `/api/startBoardWork` so concurrent calls for one bead
+    /// cannot both observe "no usable link" and create two worker sessions.
+    board_start_work_gate: Arc<Mutex<()>>,
     build_identity: String,
     config: GxserverConfig,
     event_hub: GxserverEventHub,
@@ -352,6 +355,7 @@ pub async fn run_gxserver_foreground(
     let state = Arc::new(AppState {
         auth_token: auth.token,
         automation_runtime,
+        board_start_work_gate: Arc::new(Mutex::new(())),
         build_identity,
         config,
         event_hub,
@@ -2675,6 +2679,9 @@ async fn route_http(
                 ))
             },
         ),
+        "/api/startBoardWork" => {
+            handle_board_start_work_http(&state, endpoint.path, request_id, &body_json).await
+        }
         "/api/generateCommitMessage" => {
             handle_generate_commit_message_http(&state, endpoint.path, request_id, &body_json).await
         }
@@ -3009,6 +3016,154 @@ where
     }
 }
 
+/*
+CDXC:BoardStartWork 2026-08-07:
+The daemon-owned Project Board "Start work" dispatch. The whole
+resolve → reuse-check → create → link sequence runs while holding the
+process-wide start-work gate, so two concurrent calls for one bead serialize
+and the second reuses the first call's link (`created: false`) instead of
+creating a duplicate worker. The zmx provider start happens after the gate is
+released: the link is already durable, so a concurrent caller reuses the
+session whether or not its provider has finished materializing.
+*/
+async fn handle_board_start_work_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let bd = match require_bundled_bd() {
+        Ok(bd) => bd,
+        Err(message) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "dependencyUnavailable",
+                    message,
+                },
+            );
+        }
+    };
+    let paths = state.paths.clone();
+    let server_id = state.metadata.server_id.clone();
+    let gate = Arc::clone(&state.board_start_work_gate);
+    let bd_executable_path = bd.executable_path;
+    let outcome = tokio::task::spawn_blocking(move || {
+        let _gate = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let db = open_gxserver_database(&paths).map_err(|error| DomainStateError {
+            code: "internalError",
+            message: format!("SQLite gxserver state error: {error}"),
+        })?;
+        let repository = DomainRepository::new(&db, &server_id);
+        crate::board_start_work::start_board_work(
+            &repository,
+            &db,
+            &server_id,
+            &params,
+            &bd_executable_path,
+        )
+    })
+    .await;
+    let mut outcome = match outcome {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(error)) => return domain_error_response(endpoint_path, request_id, error),
+        Err(error) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: format!("Board start-work task failed: {error}"),
+                },
+            )
+        }
+    };
+    let db = match open_gxserver_database(&state.paths) {
+        Ok(db) => db,
+        Err(error) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: format!("SQLite gxserver state error: {error}"),
+                },
+            )
+        }
+    };
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    if let Some((project_id, session_id)) = outcome.created_session.clone() {
+        if let Err(error) =
+            schedule_presentation_session_delta(state, &db, &repository, &project_id, &session_id)
+        {
+            return domain_error_response(endpoint_path, request_id, error);
+        }
+        // Materialize the zmx provider like `ghostex create-agent`, so the
+        // staged bead prompt reaches a live agent instead of an inert row.
+        let context = ZmxServerContext {
+            auth_token_file: state.paths.auth_token_file.to_string_lossy().to_string(),
+            base_url: format!(
+                "http://{}:{}",
+                state.config.listeners.local.host, state.config.listeners.local.port
+            ),
+        };
+        let agent_settings = match read_agent_settings(&db) {
+            Ok(settings) => settings,
+            Err(error) => return domain_error_response(endpoint_path, request_id, error),
+        };
+        let mut provider_params = Map::new();
+        provider_params.insert("projectId".to_string(), json!(&project_id));
+        provider_params.insert("sessionId".to_string(), json!(&session_id));
+        let provider_start = dispatch_zmx_lifecycle_endpoint(
+            &repository,
+            "/api/startSessionProvider",
+            &provider_params,
+            &context,
+            &agent_settings,
+        );
+        if let Some(result) = outcome.result.as_object_mut() {
+            match provider_start {
+                Ok(_) => {
+                    result.insert("providerStarted".to_string(), Value::Bool(true));
+                }
+                Err(error) => {
+                    let message = match error {
+                        ZmxEndpointError::DependencyUnavailable(message) => message,
+                        ZmxEndpointError::Domain(error) => error.message,
+                    };
+                    let _ = state.logger.log(GxserverLogInput {
+                        level: LogLevel::Warn,
+                        event: "boardStartWork.providerStartFailed".to_string(),
+                        server_id: Some(state.metadata.server_id.clone()),
+                        request_id: Some(request_id.clone()),
+                        client: None,
+                        duration_ms: None,
+                        error: Some(message.clone()),
+                        details: Some(json!({
+                            "projectId": project_id,
+                            "sessionId": session_id,
+                        })),
+                    });
+                    result.insert("providerStarted".to_string(), Value::Bool(false));
+                    result.insert("providerStartError".to_string(), Value::String(message));
+                }
+            }
+        }
+        let _ =
+            schedule_presentation_session_delta(state, &db, &repository, &project_id, &session_id);
+    }
+    routed_json(
+        Some(endpoint_path),
+        StatusCode::OK,
+        rpc_success(request_id, outcome.result),
+    )
+}
+
 fn create_quick_project_params(
     home_dir: &Path,
     params: &Map<String, Value>,
@@ -3074,6 +3229,7 @@ fn domain_error_response(
         "notFound" => StatusCode::NOT_FOUND,
         "corruptState" => StatusCode::CONFLICT,
         "projectPathUnavailable" => StatusCode::CONFLICT,
+        "dependencyUnavailable" => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     routed_json(
@@ -15564,6 +15720,7 @@ mod tests {
         Arc::new(AppState {
             auth_token: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             automation_runtime,
+            board_start_work_gate: Arc::new(Mutex::new(())),
             build_identity: "test-build".to_string(),
             config,
             event_hub: GxserverEventHub::new(metadata.server_id.clone()),
