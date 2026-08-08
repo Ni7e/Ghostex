@@ -82,6 +82,9 @@ import {
   boardStatusBeadsValue,
   boardStatusLabel,
   buildAgentWorkPrompt,
+  conversationLinkActionKind,
+  conversationLinkLabel,
+  conversationLinkStatusText,
   ensureIssuePrefix,
   ensureWorkflowStatuses,
   extractDescriptionImageReferences,
@@ -91,6 +94,7 @@ import {
   formatShortDate,
   getBlockedByIds,
   getBlockingIds,
+  isUsableConversationLink,
   normalizeBeadsPayload,
   normalizeDisplayIssueKey,
   normalizeIssuePrefix,
@@ -117,6 +121,8 @@ import {
   type TshirtSize,
 } from "./project-board-shared";
 import {
+  indexBeadConversationLinksByBead,
+  selectBeadConversationLinks,
   type ProjectBoardAgentOption,
   type ProjectBoardBridgeRequest,
   type ProjectBoardBridgeResponse,
@@ -1247,16 +1253,13 @@ function ProjectBoardApp() {
   const showInitialBoardLoadingOverlay =
     activeSurfaceTab === "board" && loadState === "loading" && !hasCompletedInitialBoardLoad;
 
-  const linksByBeadId = useMemo(() => {
-    const result = new Map<string, ProjectBoardConversationLinkView[]>();
-    const newestFirstLinks = [...conversationState.links].sort(compareConversationLinksNewestFirst);
-    for (const link of newestFirstLinks) {
-      const current = result.get(link.beadId) ?? [];
-      current.push(link);
-      result.set(link.beadId, current);
-    }
-    return result;
-  }, [conversationState.links]);
+  const linksByBeadKey = useMemo(
+    () =>
+      indexBeadConversationLinksByBead(
+        [...conversationState.links].sort(compareConversationLinksNewestFirst),
+      ),
+    [conversationState.links],
+  );
 
   const ticketOptions = useMemo(
     () =>
@@ -2229,14 +2232,21 @@ function ProjectBoardApp() {
     }
   };
 
-  const detailConversationLinks = detail.ticket ? (linksByBeadId.get(detail.ticket.id) ?? []) : [];
+  const detailConversationLinks = detail.ticket
+    ? selectBeadConversationLinks(linksByBeadKey, detail.ticket.id)
+    : [];
   const detailPrimaryConversationLink = getPrimaryUsableConversationLink(detailConversationLinks);
   const detailCommentMetadataLink = detailPrimaryConversationLink ?? detailConversationLinks[0];
+  const detailPrimaryActionKind = conversationLinkActionKind(detailPrimaryConversationLink);
   const detailPrimaryActionLabel =
     conversationAction?.kind === "jump" && conversationAction.linkId === detailPrimaryConversationLink?.id
-      ? "Opening"
+      ? detailPrimaryActionKind === "resume"
+        ? "Resuming"
+        : "Opening"
       : detailPrimaryConversationLink
-        ? "Go to Session"
+        ? detailPrimaryActionKind === "resume"
+          ? "Resume Session"
+          : "Go to Session"
         : conversationAction?.kind === "start" && conversationAction.beadId === detail.ticket?.id
           ? "Starting"
           : "Start work";
@@ -2312,9 +2322,13 @@ function ProjectBoardApp() {
     ? tickets.find((ticket) => ticket.id === ticketContextMenu.ticketId)
     : undefined;
   const contextMenuPrimaryLink = contextMenuTicket
-    ? getPrimaryUsableConversationLink(linksByBeadId.get(contextMenuTicket.id) ?? [])
+    ? getPrimaryUsableConversationLink(selectBeadConversationLinks(linksByBeadKey, contextMenuTicket.id))
     : undefined;
-  const contextMenuPrimaryActionLabel = contextMenuPrimaryLink ? "Go to Session" : "Start work";
+  const contextMenuPrimaryActionLabel = contextMenuPrimaryLink
+    ? conversationLinkActionKind(contextMenuPrimaryLink) === "resume"
+      ? "Resume Session"
+      : "Go to Session"
+    : "Start work";
   const contextMenuPrimaryActionDisabled =
     Boolean(conversationAction) || (!contextMenuPrimaryLink && conversationState.agents.length === 0);
 
@@ -2677,7 +2691,7 @@ function ProjectBoardApp() {
                     column={column}
                     conversationAction={conversationAction}
                     key={column.key}
-                    linksByBeadId={linksByBeadId}
+                    linksByBeadKey={linksByBeadKey}
                     onAddTicket={openNewTicket}
                     onJumpToConversation={jumpToConversation}
                     onOpenContextMenu={(ticket, point) =>
@@ -3243,7 +3257,11 @@ function ProjectBoardApp() {
                 variant="outline"
               >
                 {detailPrimaryConversationLink ? (
-                  <IconExternalLink data-icon="inline-start" />
+                  detailPrimaryActionKind === "resume" ? (
+                    <IconPlayerPlay data-icon="inline-start" />
+                  ) : (
+                    <IconExternalLink data-icon="inline-start" />
+                  )
                 ) : (
                   <IconLink data-icon="inline-start" />
                 )}
@@ -3890,6 +3908,7 @@ function ConversationSection({
           <div className="project-ticket-conversation-list">
             {links.map((link) => {
               const label = conversationLinkLabel(link);
+              const actionKind = conversationLinkActionKind(link);
               return (
                 <div className="project-ticket-conversation-row" key={link.id}>
                   <div className="project-ticket-conversation-main">
@@ -3903,14 +3922,18 @@ function ConversationSection({
                   </div>
                   <div className="project-ticket-conversation-actions">
                     <Button
-                      aria-label="Jump to linked conversation"
-                      disabled={!isUsableConversationLink(link) || hasActiveConversationAction}
+                      aria-label={
+                        actionKind === "resume"
+                          ? "Resume linked conversation"
+                          : "Jump to linked conversation"
+                      }
+                      disabled={actionKind === "none" || hasActiveConversationAction}
                       onClick={() => onJumpToConversation(link)}
                       size="icon-sm"
                       type="button"
                       variant="ghost"
                     >
-                      <IconExternalLink />
+                      {actionKind === "resume" ? <IconPlayerPlay /> : <IconExternalLink />}
                     </Button>
                     <Button
                       aria-label="Unlink conversation"
@@ -3935,14 +3958,6 @@ function ConversationSection({
   );
 }
 
-function conversationLinkLabel(link: ProjectBoardConversationLinkView): string {
-  return link.sessionTitle || link.agentName || link.agentId || link.agentSessionId || "Agent session";
-}
-
-function isUsableConversationLink(link: ProjectBoardConversationLinkView | undefined): boolean {
-  return Boolean(link?.isLive || link?.isRestorable);
-}
-
 function getPrimaryUsableConversationLink(
   links: ProjectBoardConversationLinkView[],
 ): ProjectBoardConversationLinkView | undefined {
@@ -3962,18 +3977,6 @@ function ConversationLinkName({
       <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
   );
-}
-
-function conversationLinkStatusText(link: ProjectBoardConversationLinkView): string {
-  const sessionStatus = link.isSleeping
-    ? "Sleeping"
-    : link.isLive
-      ? "Live"
-      : link.isRestorable
-        ? "Restorable"
-        : "Unavailable";
-  const agentSessionPreview = link.agentSessionId ? ` · ${link.agentSessionId.slice(0, 8)}` : "";
-  return `${sessionStatus}${agentSessionPreview}`;
 }
 
 function projectBoardCommentMetadataFromLink(
@@ -4058,7 +4061,7 @@ function automationTriageStatusWeight(status: AutomationRun["status"]): number {
 function BoardLane({
   column,
   conversationAction,
-  linksByBeadId,
+  linksByBeadKey,
   onAddTicket,
   onJumpToConversation,
   onOpenContextMenu,
@@ -4067,7 +4070,7 @@ function BoardLane({
 }: {
   column: (typeof BOARD_COLUMNS)[number];
   conversationAction: ConversationActionState;
-  linksByBeadId: Map<string, ProjectBoardConversationLinkView[]>;
+  linksByBeadKey: Map<string, ProjectBoardConversationLinkView[]>;
   onAddTicket: (status: BoardStatusKey) => void;
   onJumpToConversation: (link: ProjectBoardConversationLinkView) => void;
   onOpenContextMenu: (ticket: BoardTicket, point: { x: number; y: number }) => void;
@@ -4113,7 +4116,7 @@ function BoardLane({
             <TicketCard
               conversationAction={conversationAction}
               key={ticket.id}
-              links={linksByBeadId.get(ticket.id) ?? []}
+              links={selectBeadConversationLinks(linksByBeadKey, ticket.id)}
               onJumpToConversation={onJumpToConversation}
               onOpenContextMenu={onOpenContextMenu}
               onOpenTicket={onOpenTicket}
@@ -4157,9 +4160,8 @@ function TicketCard({
   const primaryLink = getPrimaryUsableConversationLink(links) ?? links[0];
   const additionalLinkCount = primaryLink ? links.length - 1 : 0;
   const primaryLinkLabel = primaryLink ? conversationLinkLabel(primaryLink) : "";
-  const jumpDisabled =
-    !isUsableConversationLink(primaryLink) ||
-    Boolean(conversationAction);
+  const primaryLinkActionKind = conversationLinkActionKind(primaryLink);
+  const jumpDisabled = primaryLinkActionKind === "none" || Boolean(conversationAction);
 
   return (
     <Card
@@ -4243,7 +4245,11 @@ function TicketCard({
               </span>
             </TooltipProvider>
             <Button
-              aria-label="Jump to linked conversation"
+              aria-label={
+                primaryLinkActionKind === "resume"
+                  ? "Resume linked conversation"
+                  : "Jump to linked conversation"
+              }
               disabled={jumpDisabled}
               onClick={(event) => {
                 event.stopPropagation();
@@ -4253,7 +4259,7 @@ function TicketCard({
               type="button"
               variant="ghost"
             >
-              <IconExternalLink />
+              {primaryLinkActionKind === "resume" ? <IconPlayerPlay /> : <IconExternalLink />}
             </Button>
           </div>
         ) : null}
