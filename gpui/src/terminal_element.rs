@@ -2322,16 +2322,22 @@ impl Render for TerminalView {
         }
         if self.agent_actions_visible {
             // Agent Actions is always present for the focused agent terminal.
-            // Chat View joins it only after the provider session identity is
-            // known, because that identity is required to resolve a transcript.
+            // Prompts stays directly to its left. Chat View joins the cluster
+            // once the provider session identity can resolve a transcript.
             if self.chat_view_action_visible {
                 root = root.child(terminal_agent_action_button(
                     TerminalAgentAction::ToggleChatView,
-                    1,
+                    2,
                     TerminalAgentActionRow::Cluster,
                     cx,
                 ));
             }
+            root = root.child(terminal_agent_action_button(
+                TerminalAgentAction::StashedPrompts,
+                1,
+                TerminalAgentActionRow::Cluster,
+                cx,
+            ));
             root = root.child(terminal_agent_action_button(
                 TerminalAgentAction::ToggleMenu,
                 0,
@@ -2341,7 +2347,6 @@ impl Render for TerminalView {
             if self.agent_actions_expanded {
                 for (column_from_right, action) in [
                     TerminalAgentAction::AttachPath,
-                    TerminalAgentAction::StashedPrompts,
                     TerminalAgentAction::StashPrompt,
                     TerminalAgentAction::PromptEditor,
                     TerminalAgentAction::FullReload,
@@ -2368,7 +2373,7 @@ impl Render for TerminalView {
 }
 
 /// Which overlay row a button belongs to: the always-visible cluster
-/// ([Chat View][Agent Actions]) or the expanded Agent Actions menu bar below.
+/// ([Chat View][Prompts][Agent Actions]) or the expanded menu bar below.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TerminalAgentActionRow {
     Cluster,
