@@ -43,7 +43,6 @@ import {
   type GxserverSessionChatEvent,
 } from "../../shared/session-chat";
 import { createDisplaySessionLayout } from "../../shared/active-sessions-sort";
-import { T3CODE_ENABLED } from "../../shared/feature-flags";
 import {
   createEmptyGpuiWorkspaceSessionGroupsState,
   createGpuiWorkspaceSessionSubgroup,
@@ -257,7 +256,6 @@ export type GhostexGpuiSidebarBridge = {
   gxserverBootstrap?: GpuiGxserverBootstrap;
   onCommandPaletteRunSidebarCommand?: (payload: unknown) => void;
   onCommandPaletteSessionFocus?: (payload: unknown) => void;
-  onT3SessionBrowserAccessResult?: (payload: unknown) => void;
   onCommandPaneSessionsChanged?: (sessions: readonly GpuiCommandPaneSessionSummary[]) => void;
   onWorkspaceSessionDelayedSendsChanged?: (
     sessions: readonly GpuiWorkspaceSessionDelayedSendSummary[],
@@ -293,7 +291,6 @@ export type GhostexGpuiSidebarBridge = {
   pendingCommandPaletteRunSidebarCommands?: unknown[];
   pendingCommandPaletteSessionFocusRequests?: unknown[];
   pendingGitCommitModalCommands?: unknown[];
-  pendingT3SessionBrowserAccessResults?: unknown[];
   pendingMenuBarProjectActivations?: unknown[];
   pendingMenuBarSessionActivations?: unknown[];
   pendingNativeAppShotPromptResults?: unknown[];
@@ -327,9 +324,6 @@ export type GhostexGpuiSidebarBridge = {
   postSessionCompletionSound?: (payload: string) => boolean;
   postGlobalActions?: (payload: string) => boolean;
   postSessionStatusIndicators?: (payload: string) => boolean;
-  postT3SessionBrowserAccessRequest?: (payload: string) => boolean;
-  postT3SessionCreate?: (payload: string) => boolean;
-  postT3SessionFocus?: (payload: string) => boolean;
   postTitlebarGitMenuState?: (payload: string) => boolean;
   postWorkspaceTerminalEnter?: (payload: string) => boolean;
   postWorkspaceTerminalFocus?: (payload: string) => boolean;
@@ -608,10 +602,6 @@ const GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalFocus";
-const GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_VERSION = 1;
-const GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_TYPE = "ghostex.gpui.sidebar.t3SessionFocus";
-const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_VERSION = 1;
-const GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE = "ghostex.gpui.sidebar.t3SessionCreate";
 const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_OPEN_BROWSER_URL_MESSAGE_TYPE = "ghostex.gpui.sidebar.openBrowserUrl";
 const GPUI_SIDEBAR_OPEN_BROWSER_URL_MAX_CHARS = 16 * 1024;
@@ -637,16 +627,6 @@ stays the authority and rejects anything else, so this set exists to keep the
 board from offering a Resume the daemon would refuse.
 */
 const GPUI_PROJECT_BOARD_RESUMABLE_AGENT_IDS = new Set(["claude", "codex", "pi"]);
-const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION = 1;
-const GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_TYPE =
-  "ghostex.gpui.sidebar.t3SessionBrowserAccessRequest";
-const GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS = 160;
-const GPUI_T3_BROWSER_ACCESS_MODES = new Set([
-  "external",
-  "local-network",
-  "local-only",
-  "tailscale",
-]);
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_RENAME_COMMAND_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalRenameCommand";
@@ -1356,9 +1336,6 @@ class GpuiSidebarRuntime {
     gpuiBridge.onCommandPaletteRunSidebarCommand = (payload) => {
       this.handleGpuiCommandPaletteRunSidebarCommand(payload);
     };
-    gpuiBridge.onT3SessionBrowserAccessResult = (payload) => {
-      this.handleGpuiT3SessionBrowserAccessResult(payload);
-    };
     gpuiBridge.onProjectBoardConversationRequest = (payload) => {
       void this.handleGpuiProjectBoardConversationRequest(payload);
     };
@@ -1459,14 +1436,6 @@ class GpuiSidebarRuntime {
       : [];
     for (const payload of pendingCommandPaletteRunSidebarCommands) {
       this.handleGpuiCommandPaletteRunSidebarCommand(payload);
-    }
-    const pendingT3SessionBrowserAccessResults = Array.isArray(
-      gpuiBridge.pendingT3SessionBrowserAccessResults,
-    )
-      ? gpuiBridge.pendingT3SessionBrowserAccessResults.splice(0)
-      : [];
-    for (const payload of pendingT3SessionBrowserAccessResults) {
-      this.handleGpuiT3SessionBrowserAccessResult(payload);
     }
     const pendingProjectBoardConversationRequests = Array.isArray(
       gpuiBridge.pendingProjectBoardConversationRequests,
@@ -1988,118 +1957,6 @@ class GpuiSidebarRuntime {
     this.runSidebarCommand(selection.message.commandId, selection.message, selection.scope);
   }
 
-  private requestT3SessionBrowserAccess(sessionId: string): void {
-    if (!T3CODE_ENABLED) {
-      return;
-    }
-    /*
-    macOS `requestNativeT3SessionBrowserAccess` parity for the T3 card's
-    Remote Access action. The runtime revalidates the local T3 presentation
-    row and sends Rust only the bounded project/session ids plus a display
-    title; Rust owns the bearer read, the pairing-token issue, and the
-    network-address detection (no runtime start — Decision #7).
-    */
-    if (parseGpuiRemotePresentationSessionId(sessionId)) {
-      return;
-    }
-    const reference = parseGxserverPresentationProjectSessionId(sessionId);
-    if (
-      !reference ||
-      !this.isLocalPresentationT3Session(reference.projectId, reference.sessionId)
-    ) {
-      return;
-    }
-    const sessionTitle = (
-      this.presentation?.sessions.find(
-        (session) =>
-          session.projectId === reference.projectId && session.sessionId === reference.sessionId,
-      )?.title ?? "Chat"
-    ).slice(0, GPUI_SIDEBAR_T3_BROWSER_ACCESS_TITLE_MAX_CHARS);
-    const post = window.ghostexGpui?.postT3SessionBrowserAccessRequest;
-    if (typeof post !== "function") {
-      this.postT3RemoteAccessToast("error", "Remote Access unavailable", {
-        description: "The native Remote Access bridge is not installed.",
-      });
-      return;
-    }
-    post(
-      JSON.stringify({
-        projectId: reference.projectId,
-        sessionId: reference.sessionId,
-        sessionTitle,
-        type: GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_TYPE,
-        version: GPUI_SIDEBAR_T3_BROWSER_ACCESS_REQUEST_MESSAGE_VERSION,
-      }),
-    );
-  }
-
-  private handleGpuiT3SessionBrowserAccessResult(payload: unknown): void {
-    /*
-    Rust posts the resolved pairing link (or an honest error) back here; the
-    success path travels the macOS route: a `showT3BrowserAccess` SidebarApp
-    message whose handler opens the shared QR modal through the app-modal
-    host bridge.
-    */
-    if (typeof payload !== "object" || payload === null) {
-      return;
-    }
-    const record = payload as Record<string, unknown>;
-    if (record.ok !== true) {
-      const description =
-        typeof record.message === "string" && record.message.trim()
-          ? record.message.trim()
-          : "Could not create the T3 remote access link.";
-      this.postT3RemoteAccessToast("error", "Remote Access failed", { description });
-      return;
-    }
-    const endpointUrl = typeof record.endpointUrl === "string" ? record.endpointUrl.trim() : "";
-    const localUrl = typeof record.localUrl === "string" ? record.localUrl.trim() : "";
-    const mode = typeof record.mode === "string" ? record.mode : "";
-    const note = typeof record.note === "string" ? record.note : "";
-    const projectId = typeof record.projectId === "string" ? record.projectId : "";
-    const sessionId = typeof record.sessionId === "string" ? record.sessionId : "";
-    const sessionTitle = typeof record.sessionTitle === "string" ? record.sessionTitle : "";
-    const tailscaleEnabled = record.tailscaleEnabled === true;
-    const urlsAreHttp = [endpointUrl, localUrl].every(
-      (url) => url.startsWith("http://") || url.startsWith("https://"),
-    );
-    if (
-      !endpointUrl ||
-      !localUrl ||
-      !urlsAreHttp ||
-      !GPUI_T3_BROWSER_ACCESS_MODES.has(mode) ||
-      !projectId ||
-      !sessionId
-    ) {
-      return;
-    }
-    this.messageSource.postMessage({
-      endpointUrl,
-      localUrl,
-      mode,
-      note,
-      sessionId: createGxserverPresentationProjectSessionId(projectId, sessionId),
-      sessionTitle,
-      tailscaleEnabled,
-      type: "showT3BrowserAccess",
-    });
-  }
-
-  private postT3RemoteAccessToast(
-    level: AppToastLevel,
-    title: string,
-    options: { description?: string } = {},
-  ): void {
-    try {
-      postAppModalHostMessage(
-        createAppToastRequest(level, title, options.description, {}),
-        "AppModals:gpuiT3BrowserAccess",
-      );
-    } catch {
-      // The missing toast bridge is a presentation problem only.
-    }
-  }
-
   private async handleGpuiProjectBoardConversationRequest(payload: unknown): Promise<void> {
     /*
     macOS `handleProjectBoardRequest` parity for the conversation half of the
@@ -2353,13 +2210,13 @@ class GpuiSidebarRuntime {
   private createGpuiProjectBoardAgentOptions(): ProjectBoardAgentOption[] {
     // macOS `createProjectBoardAgentOptions` sources the configured prompt
     // agents; GPUI's configured agent registry is the gxserver-fetched HUD
-    // (the same source the daemon's automation agent list reads). T3 and
-    // commandless agents cannot run board prompts.
+    // (the same source the daemon's automation agent list reads). Commandless
+    // agents cannot run board prompts.
     const agents: SidebarAgentButton[] = this.sidebarHud
       ? ([...this.sidebarHud.agents] as SidebarAgentButton[])
       : createSidebarAgentButtons([], []);
     return agents
-      .filter((agent) => agent.agentId !== "t3" && Boolean(agent.command?.trim()))
+      .filter((agent) => Boolean(agent.command?.trim()))
       .map((agent) => ({
         agentId: agent.agentId,
         command: agent.command,
@@ -5323,7 +5180,7 @@ class GpuiSidebarRuntime {
         continue;
       }
       const kind = session.sessionKind;
-      if (kind !== "terminal" && kind !== "t3") {
+      if (kind !== "terminal") {
         continue;
       }
       const projectId = remoteReference
@@ -5570,15 +5427,6 @@ class GpuiSidebarRuntime {
         isActive: isActiveGroup,
         sessions: group.sessions.map((session) => ({
           ...session,
-          ...(session.sessionKind === "t3"
-            ? {
-                alias: gpuiAgentGuiTitle(session.alias),
-                displayTitle: gpuiAgentGuiTitle(session.displayTitle),
-                displayTitleTooltip: gpuiAgentGuiTitle(session.displayTitleTooltip),
-                primaryTitle: gpuiAgentGuiTitle(session.primaryTitle),
-                terminalTitle: gpuiAgentGuiTitle(session.terminalTitle),
-              }
-            : {}),
           isFocused:
             isActiveGroup &&
             (session.sessionKind === "browser"
@@ -6266,9 +6114,6 @@ class GpuiSidebarRuntime {
       case "toggleCloseAfterDone":
         this.toggleCloseAfterDone(message.sessionId);
         return;
-      case "requestT3SessionBrowserAccess":
-        this.requestT3SessionBrowserAccess(message.sessionId);
-        return;
       case "openAutomationsPage":
         /*
         CDXC:GPUIAutomationsOverview 2026-07-08:
@@ -6780,26 +6625,8 @@ class GpuiSidebarRuntime {
     CDXC:GPUISidebarSessionFocus 2026-06-26-04:42:
     Local GPUI sidebar clicks must match the macOS sidebar ownership model: the SidebarApp adapter applies local focus immediately and publishes the CEF bootstrap focus hint, but it must not call gxserver `/api/focusSession`. That endpoint is an external renderer-command route and can bounce focus when another renderer is the first open gxserver subscriber.
     */
-    if (this.isLocalPresentationT3Session(reference.projectId, reference.sessionId)) {
-      this.focusLocalT3Session(reference.projectId, reference.sessionId);
-    } else {
-      this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId);
-    }
+    this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId);
     this.publishPresentation("patch");
-  }
-
-  private focusLocalT3Session(projectId: string, sessionId: string): void {
-    /*
-    CDXC:GPUIT3SessionFocus 2026-06-28-22:27:
-    GPUI T3 Code session-card clicks must activate T3 through a dedicated id-only bridge, not the terminal attach bridge. T3 rows already carry durable gxserver runtime metadata, so Rust owns route resolution and the renderer may send only bounded project/session ids.
-    */
-    const normalizedProjectId = normalizeNonEmptyString(projectId);
-    const normalizedSessionId = normalizeNonEmptyString(sessionId);
-    if (!normalizedProjectId || !normalizedSessionId) {
-      return;
-    }
-    this.setLocalPresentationSessionFocus(normalizedProjectId, normalizedSessionId);
-    this.postLocalT3SessionFocus(normalizedProjectId, normalizedSessionId);
   }
 
   private focusLocalWorkspaceSession(
@@ -6848,40 +6675,6 @@ class GpuiSidebarRuntime {
       version: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_VERSION,
     });
     postFocus(payload);
-  }
-
-  private postLocalT3SessionFocus(projectId: string, sessionId: string): void {
-    const postFocus = window.ghostexGpui?.postT3SessionFocus;
-    if (typeof postFocus !== "function") {
-      return;
-    }
-    const payload = JSON.stringify({
-      projectId,
-      sessionId,
-      type: GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_TYPE,
-      version: GPUI_SIDEBAR_T3_SESSION_FOCUS_MESSAGE_VERSION,
-    });
-    postFocus(payload);
-  }
-
-  private postLocalT3SessionCreate(projectId: string): void {
-    if (!T3CODE_ENABLED) {
-      return;
-    }
-    /*
-    CDXC:GPUIT3SessionCreate 2026-06-29-01:22:
-    The sidebar project-header T3 Code create button must start a project-scoped T3 draft chat, not the generic `npx --yes t3` agent launcher. Send only the gxserver project id to Rust so the native side can create the `kind: "t3"` row, resolve T3 owner-only project metadata, and open the draft composer without renderer-owned URLs, paths, commands, tokens, or daemon responses.
-    */
-    const postCreate = window.ghostexGpui?.postT3SessionCreate;
-    if (typeof postCreate !== "function") {
-      return;
-    }
-    const payload = JSON.stringify({
-      projectId,
-      type: GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_TYPE,
-      version: GPUI_SIDEBAR_T3_SESSION_CREATE_MESSAGE_VERSION,
-    });
-    postCreate(payload);
   }
 
   private createFirstPromptTitleRuntimeSettings(
@@ -7361,12 +7154,6 @@ class GpuiSidebarRuntime {
       ? parseGxserverPresentationProjectGroupId(groupId)
       : this.activeProjectId;
     if (projectId && !this.ensureLocalProjectPathAvailable(projectId)) {
-      return;
-    }
-    if (T3CODE_ENABLED && agentId.trim() === "t3") {
-      if (projectId) {
-        this.postLocalT3SessionCreate(projectId);
-      }
       return;
     }
     const agent = this.resolveSidebarAgent(agentId);
@@ -9095,17 +8882,6 @@ class GpuiSidebarRuntime {
           session.projectId === projectId &&
           session.sessionId === sessionId &&
           session.lifecycleState === "running",
-      ) ?? false
-    );
-  }
-
-  private isLocalPresentationT3Session(projectId: string, sessionId: string): boolean {
-    return (
-      this.presentation?.sessions.some(
-        (session) =>
-          session.projectId === projectId &&
-          session.sessionId === sessionId &&
-          session.kind === "t3",
       ) ?? false
     );
   }
@@ -16330,11 +16106,10 @@ function createGpuiSidebarHudState({
    * CDXC:SidebarHudContract 2026-06-24-20:34:
    * GPUI SidebarApp uses gxserver's `/api/readSidebarHud` projection for read-side agent/action buttons so live sidebar and app-modal Settings share one production contract. The local shared defaults are only for pre-bootstrap or unavailable gxserver state; project metadata is not re-normalized here.
    */
-  const agents = (
+  const agents =
     sidebarHud
       ? ([...sidebarHud.agents] as SidebarAgentButton[])
-      : createSidebarAgentButtons([], [])
-  ).filter((agent) => T3CODE_ENABLED || agent.agentId !== "t3");
+      : createSidebarAgentButtons([], []);
   /*
    * CDXC:ProjectActions 2026-08-01:
    * `showOnProjectRow` is optional on the gxserver contract because a daemon
@@ -16959,9 +16734,6 @@ function gpuiAutoSleepSessionHasAgentResumeReference(
 }
 
 function isGpuiAutoSleepAgentTerminalSession(session: GxserverPresentationSession): boolean {
-  if (session.kind === "t3") {
-    return false;
-  }
   if (session.surface !== "workspace" && session.surface !== "commands") {
     return false;
   }
@@ -17291,13 +17063,6 @@ function boundedGpuiActiveWorkspaceTabSessionTitle(value: string): string {
   return normalized.length > GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS
     ? normalized.slice(0, GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS)
     : normalized;
-}
-
-function gpuiAgentGuiTitle(value: string | undefined): string | undefined {
-  const normalized = value?.trim().toLocaleLowerCase();
-  return normalized === "agent gui" || normalized === "t3 code" || normalized === "t3 code (alpha)"
-    ? "Chat"
-    : value;
 }
 
 function normalizeGpuiStatusPetActivation(
