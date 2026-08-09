@@ -75,11 +75,11 @@ use gpui::{
     EntityInputHandler, EventEmitter, ExternalPaths, FocusHandle, Focusable, Font, FontStyle,
     FontWeight, Global, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement,
     IntoElement, KeyContext, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers,
-    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Pixels, Point, Render, RenderImage, Rgba, ScrollDelta, ScrollWheelEvent, ShapedLine,
-    SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign, TextRun, UTF16Selection,
-    UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill, outline, point,
-    prelude::FluentBuilder as _, px, size, svg,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Pixels, Point, Render, RenderImage, Rgba, ScrollDelta, ScrollWheelEvent,
+    ShapedLine, SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign, TextRun,
+    UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill, outline,
+    point, prelude::FluentBuilder as _, px, size, svg,
 };
 use gpui_component::{
     native_menu::NativeMenu,
@@ -93,8 +93,7 @@ use crate::ghostty_vt::{
 use crate::terminal_model::{
     Rgb, SnapshotCell, SnapshotRow, TerminalConfirmCloseBehavior, TerminalEvent, TerminalEventSink,
     TerminalExit, TerminalModel, TerminalPasteDiagnostic, TerminalSnapshot, TerminalSpawnConfig,
-    TerminalTextRow,
-    UnderlineStyle as CellUnderline, WheelRoute,
+    TerminalTextRow, UnderlineStyle as CellUnderline, WheelRoute,
 };
 
 gpui::actions!(

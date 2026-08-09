@@ -30,23 +30,22 @@ use cef::{
     ImplMediaAccessCallback as _, ImplMenuModel as _, ImplPermissionHandler,
     ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
     ImplRequest as _, ImplRequestContext as _, ImplRequestHandler, ImplResourceHandler,
-    ImplResourceRequestHandler, ImplResponse as _, ImplStreamReader as _,
-    ImplTask, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler,
+    ImplResourceRequestHandler, ImplResponse as _, ImplStreamReader as _, ImplTask,
+    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler,
     MediaAccessCallback, MediaAccessPermissionTypes, MenuModel, PermissionHandler,
     PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes, PopupFeatures,
     ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler, ResourceHandler,
-    ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, State,
-    StreamReader, Task, ThreadId, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
+    ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, State, StreamReader, Task,
+    ThreadId, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
     WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler,
     WrapDisplayHandler, WrapFindHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
     WrapPermissionHandler, WrapRenderProcessHandler, WrapRequestHandler, WrapResourceHandler,
-    WrapResourceRequestHandler, WrapTask, WrapV8Handler, ZoomCommand,
-    post_task, stream_reader_create_for_file, string_multimap_alloc, string_multimap_append,
-    wrap_app, wrap_browser_process_handler, wrap_client, wrap_context_menu_handler,
-    wrap_display_handler, wrap_find_handler, wrap_focus_handler, wrap_life_span_handler,
-    wrap_load_handler, wrap_permission_handler, wrap_render_process_handler, wrap_request_handler,
-    wrap_resource_handler, wrap_resource_request_handler, wrap_task,
-    wrap_v8_handler,
+    WrapResourceRequestHandler, WrapTask, WrapV8Handler, ZoomCommand, post_task,
+    stream_reader_create_for_file, string_multimap_alloc, string_multimap_append, wrap_app,
+    wrap_browser_process_handler, wrap_client, wrap_context_menu_handler, wrap_display_handler,
+    wrap_find_handler, wrap_focus_handler, wrap_life_span_handler, wrap_load_handler,
+    wrap_permission_handler, wrap_render_process_handler, wrap_request_handler,
+    wrap_resource_handler, wrap_resource_request_handler, wrap_task, wrap_v8_handler,
 };
 use gpui::{Bounds, Pixels};
 use percent_encoding::percent_decode_str;
@@ -3591,30 +3590,31 @@ impl CefBrowser {
             .map(ManageDocsResourceScope::request_handler);
         let is_shared_sidebar_surface =
             sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some());
-        let load_handler = if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
-            Some(GhostexGpuiSidebarProjectContextLoadHandler::new(
-                sidebar_runtime_settings.unwrap_or_default(),
-                sidebar_gxserver_bootstrap,
-            ))
-        } else if sidebar_gxserver_bootstrap.is_some() {
-            /*
-            CDXC:GPUISessionChatSurface 2026-07-31:
-            A bootstrap without the sidebar bridge handler identifies the
-            per-session Session Chat surface: it gets only the bootstrap
-            install message so the bundled chat page can reach the local
-            gxserver, while Browser, workarea, and modal clients keep passing
-            no bootstrap at all.
-            */
-            Some(GhostexGpuiSessionChatGxserverBootstrapLoadHandler::new(
-                sidebar_gxserver_bootstrap,
-            ))
-        } else if project_workarea_bridge_event_handler.is_some() {
-            Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new(
-                manage_docs_resource_base_url,
-            ))
-        } else {
-            page_metadata_handler.map(GhostexGpuiBrowserPageLoadHandler::new)
-        };
+        let load_handler =
+            if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
+                Some(GhostexGpuiSidebarProjectContextLoadHandler::new(
+                    sidebar_runtime_settings.unwrap_or_default(),
+                    sidebar_gxserver_bootstrap,
+                ))
+            } else if sidebar_gxserver_bootstrap.is_some() {
+                /*
+                CDXC:GPUISessionChatSurface 2026-07-31:
+                A bootstrap without the sidebar bridge handler identifies the
+                per-session Session Chat surface: it gets only the bootstrap
+                install message so the bundled chat page can reach the local
+                gxserver, while Browser, workarea, and modal clients keep passing
+                no bootstrap at all.
+                */
+                Some(GhostexGpuiSessionChatGxserverBootstrapLoadHandler::new(
+                    sidebar_gxserver_bootstrap,
+                ))
+            } else if project_workarea_bridge_event_handler.is_some() {
+                Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new(
+                    manage_docs_resource_base_url,
+                ))
+            } else {
+                page_metadata_handler.map(GhostexGpuiBrowserPageLoadHandler::new)
+            };
         // Every GPUI CEF browser needs the client's life-span handler so
         // DoClose is always handled and CEF can never close the host GPUI
         // window when a browser is dropped.
