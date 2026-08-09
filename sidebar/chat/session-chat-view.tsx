@@ -63,13 +63,14 @@ export type { SessionChatHostAction, SessionChatHostActions, SessionChatHostLink
 
 export interface SessionChatHostComposerActions {
   focus: () => void;
+  handoffToTerminal: () => Promise<string>;
   insertPrompt: (content: string) => boolean;
   requestStash: () => void;
 }
 
 export interface SessionChatHostComposerBridge {
   register: (actions: SessionChatHostComposerActions) => () => void;
-  stashPrompt: (content: string) => Promise<void>;
+  stashPrompt: (content: string, options?: { transient?: boolean }) => Promise<void>;
 }
 
 export interface SessionChatViewProps {
@@ -280,16 +281,35 @@ export function SessionChatView({
         // Keep the draft intact so a failed stash can be retried.
       });
   }, [hostComposerBridge]);
+  const handoffComposerDraft = useCallback(async (): Promise<string> => {
+    const composer = composerRef.current;
+    const draft = composer?.getDraft() ?? "";
+    if (!hostComposerBridge || !draft.trim()) {
+      if (draft.length > 0) {
+        composer?.clearDraft(draft);
+      }
+      return "";
+    }
+    await hostComposerBridge.stashPrompt(draft, { transient: true });
+    // The exact snapshot that became durable must still own the composer.
+    // If more text arrived during the save, remain in chat with all text
+    // intact instead of switching with a partial draft.
+    if (composerRef.current?.clearDraft(draft) !== true) {
+      throw new Error("The draft changed while it was being moved.");
+    }
+    return draft;
+  }, [hostComposerBridge]);
   useEffect(() => {
     if (!hostComposerBridge) {
       return;
     }
     return hostComposerBridge.register({
       focus: () => composerRef.current?.focus(),
+      handoffToTerminal: handoffComposerDraft,
       insertPrompt: (content) => composerRef.current?.insertTypedText(content) ?? false,
       requestStash: stashComposerDraft,
     });
-  }, [hostComposerBridge, stashComposerDraft]);
+  }, [handoffComposerDraft, hostComposerBridge, stashComposerDraft]);
   const pasteImage = useMemo(() => {
     const saveImage = transport.saveImage?.bind(transport);
     return saveImage

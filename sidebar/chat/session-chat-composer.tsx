@@ -307,6 +307,8 @@ export const SessionChatComposer = forwardRef<
   draftRef.current = draft;
   const monacoApiRef = useRef<SessionChatComposerInputApi | null>(null);
   const pendingFocusRef = useRef(false);
+  const pendingInsertTextRef = useRef("");
+  const sendInFlightRef = useRef(false);
   const useMonaco = monacoVsBaseUrl !== undefined && !monacoFailed;
 
   // Previews mirror the draft: deleting a reference (by any means, including
@@ -392,9 +394,16 @@ export const SessionChatComposer = forwardRef<
     useMonaco ? monacoApiRef.current : textareaApi;
 
   useEffect(() => {
-    if (!useMonaco && pendingFocusRef.current && textareaRef.current) {
-      pendingFocusRef.current = false;
-      textareaRef.current.focus();
+    if (!useMonaco && textareaRef.current) {
+      if (pendingInsertTextRef.current) {
+        const pending = pendingInsertTextRef.current;
+        pendingInsertTextRef.current = "";
+        textareaApi.insertText(pending);
+      }
+      if (pendingFocusRef.current) {
+        pendingFocusRef.current = false;
+        textareaRef.current.focus();
+      }
     }
   }, [useMonaco]);
 
@@ -429,22 +438,44 @@ export const SessionChatComposer = forwardRef<
       if (disabled) {
         return false;
       }
-      return getInputApi()?.insertText(text) ?? false;
+      const input = getInputApi();
+      if (!input) {
+        pendingInsertTextRef.current += text;
+        return true;
+      }
+      return input.insertText(text);
     },
   }));
 
   const send = (text: string = draft): void => {
-    if (text.trim() === "" || disabled) {
+    if (text.trim() === "" || disabled || sendInFlightRef.current) {
       return;
     }
-    void onSend(text);
-    writeStoredSessionChatDraft(sessionKey, "");
-    draftRef.current = "";
-    setHistory((current) => pushSessionChatComposerHistory(current, text));
-    setDraft("");
-    getInputApi()?.applyValue("", 0);
-    setSlashDismissed(false);
-    setSlashIndex(0);
+    sendInFlightRef.current = true;
+    void Promise.resolve()
+      .then(() => onSend(text))
+      .then(() => {
+        // Preservation and terminal submission are asynchronous. Clear only
+        // the exact snapshot that succeeded; text added while the request was
+        // in flight remains the next draft.
+        const current = getInputApi()?.getValue() ?? draftRef.current;
+        if (current === text) {
+          writeStoredSessionChatDraft(sessionKey, "");
+          draftRef.current = "";
+          setDraft("");
+          getInputApi()?.applyValue("", 0);
+        }
+        setHistory((value) => pushSessionChatComposerHistory(value, text));
+        setSlashDismissed(false);
+        setSlashIndex(0);
+      })
+      .catch(() => {
+        // The transport rejected the send before submission. Keep the exact
+        // chat draft so preserving terminal input can be retried safely.
+      })
+      .finally(() => {
+        sendInFlightRef.current = false;
+      });
   };
 
   const insertReference = (reference: string): void => {
@@ -858,6 +889,11 @@ export const SessionChatComposer = forwardRef<
             placeholder={placeholder ?? "Send a message…"}
             registerApi={(api) => {
               monacoApiRef.current = api;
+              if (api && pendingInsertTextRef.current) {
+                const pending = pendingInsertTextRef.current;
+                pendingInsertTextRef.current = "";
+                api.insertText(pending);
+              }
               if (api && pendingFocusRef.current) {
                 pendingFocusRef.current = false;
                 api.focus();
@@ -934,7 +970,7 @@ export const SessionChatComposer = forwardRef<
                   <span className="inline-flex">
                     <Button
                       aria-label="Attach an Image, File, or Folder"
-                      className="ghostex-chat-footer-control"
+                      className="ghostex-chat-footer-control rounded-full"
                       disabled={disabled}
                       onClick={() => {
                         if (onPickPaths) {
