@@ -18,6 +18,7 @@ const GIT_BASELINE_MAX_BYTES: usize = 1024 * 1024;
 const RESOURCE_MAX_BYTES: u64 = 12 * 1024 * 1024;
 const SESSION_CONTEXT_MAX_BYTES: usize = 300_000;
 const DOCS_RELATIVE_PATH: &str = "docs";
+const BUILT_IN_DOCS_RELATIVE_PATHS: &[&str] = &[DOCS_RELATIVE_PATH, "artifacts", "ai"];
 const ANNOTATIONS_SIDECAR_RELATIVE_PATH: &str = ".ghostex/manage-annotations.json";
 const ROOT_ARTIFACT_FILE_EXTENSIONS: &[&str] = &[
     "excalidraw",
@@ -345,7 +346,8 @@ fn additional_docs_folder_relative_paths(value: &str) -> Vec<String> {
             continue;
         }
         let folder = parts.join("/");
-        if folder != DOCS_RELATIVE_PATH && seen.insert(folder.to_lowercase()) {
+        let key = folder.to_lowercase();
+        if !BUILT_IN_DOCS_RELATIVE_PATHS.contains(&key.as_str()) && seen.insert(key) {
             folders.push(folder);
         }
     }
@@ -353,7 +355,10 @@ fn additional_docs_folder_relative_paths(value: &str) -> Vec<String> {
 }
 
 fn scan_roots(additional_docs_folders: &str) -> Vec<String> {
-    let mut roots = vec![DOCS_RELATIVE_PATH.to_string()];
+    let mut roots = BUILT_IN_DOCS_RELATIVE_PATHS
+        .iter()
+        .map(|path| (*path).to_string())
+        .collect::<Vec<_>>();
     roots.extend(additional_docs_folder_relative_paths(
         additional_docs_folders,
     ));
