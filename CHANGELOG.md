@@ -1,5 +1,17 @@
 # Changelog
 
+## 7.5.0 - 2026-08-10
+
+- Major
+  - Session Chat now protects unfinished drafts, moves prompts safely between chat and terminal, detects agent model and effort details, and keeps completed work compact until you choose to expand it.
+  - Project Board can start work with the agent assigned to a ticket, making it faster to move directly from planning into the right conversation, thanks to @banozz.
+- Minor
+  - Docs now discovers files in artifact and AI folders by default and handles find, replace, redo, and common editing shortcuts more naturally.
+  - Quick Access and sidebar modals rank results more clearly, preserve pinned-section boundaries, group stashed prompts by day, and make keyboard selection more dependable.
+  - Settings adds a preferred interface for newly launched agents, chat appearance controls, optional titlebar chrome, and more reliable plugin reinstalls.
+  - Focused terminals can be zoomed more easily, while Windows runtime startup, on-demand components, and WSL packaging are more dependable.
+  - The Android app adds light and dark Session Chat themes and a clearer outline around the active session.
+
 ## 7.4.0 - 2026-08-08
 
 - Major
