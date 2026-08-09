@@ -61,12 +61,12 @@ finally {
     Pop-Location
 }
 
-# 2) Rust binaries (main app + CEF helper). Requires MSVC toolchain, cmake,
+# 2) Rust binaries (bootstrap, main app, and CEF helper). Requires MSVC toolchain, cmake,
 # and ninja (cef-dll-sys builds libcef_dll_wrapper), plus a Zig 0.15.x for
 # libghostty-vt (GHOSTEX_ZIG override honored by gpui/build.rs).
 Push-Location $GpuiDir
 try {
-    cargo build --release --bins
+    cargo build --release --bin ghostex-gpui-cef-bootstrap --bin ghostex-gpui --bin ghostex-gpui-cef-helper
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 }
 finally {
@@ -163,13 +163,15 @@ if ($OnDemandComponents) {
     }
     if ($SwiftshaderIcd) { Copy-Item -LiteralPath $SwiftshaderIcd $CefComponentStage }
     Copy-Item -Recurse -LiteralPath $Locales -Destination (Join-Path $CefComponentStage "locales")
-    & bash (Join-Path $RepoRoot "scripts/release-gpui/create-deterministic-tar.sh") $CefComponentStage $CefComponentAsset
+    & bash (Join-Path $RepoRoot "scripts/release-gpui/create-deterministic-tar.sh") $CefComponentStage $CefComponentAsset --windows-component
     if ($LASTEXITCODE -ne 0) { throw "Could not create the deterministic Windows CEF component asset" }
     Remove-Item -Recurse -Force $CefComponentStage
     & node (Join-Path $RepoRoot "scripts/release-gpui/publish-component.mjs") `
         --metadata-only `
+        --reuse-published `
         --component cef `
         --version $CefComponentVersion `
+        --platform "windows-$ReleaseArch" `
         --asset-dir $ComponentAssetDir `
         --output $ComponentManifest
     if ($LASTEXITCODE -ne 0) { throw "Could not seal Windows CEF component metadata" }
@@ -233,7 +235,7 @@ if ($WslCodeServerArchive -and (Test-Path $WslCodeServerArchive)) {
     New-Item -ItemType Directory -Force -Path $ComponentStage | Out-Null
     Copy-Item $WslCodeServerArchive (Join-Path $ComponentStage $InnerArchiveName)
     Copy-Item "$WslCodeServerArchive.sha256" (Join-Path $ComponentStage "$InnerArchiveName.sha256")
-    & bash (Join-Path $RepoRoot "scripts/release-gpui/create-deterministic-tar.sh") $ComponentStage $ComponentAsset
+    & bash (Join-Path $RepoRoot "scripts/release-gpui/create-deterministic-tar.sh") $ComponentStage $ComponentAsset --windows-component
     if ($LASTEXITCODE -ne 0) { throw "Could not create the deterministic Windows code-server component asset" }
     Remove-Item -Recurse -Force $ComponentStage
     $ComponentAssetSha = (Get-FileHash -Algorithm SHA256 $ComponentAsset).Hash.ToLowerInvariant()
@@ -244,8 +246,10 @@ if ($WslCodeServerArchive -and (Test-Path $WslCodeServerArchive)) {
     )
     & node (Join-Path $RepoRoot "scripts/release-gpui/publish-component.mjs") `
         --metadata-only `
+        --reuse-published `
         --component code-server `
         --version $ComponentVersion `
+        --platform "windows-$ReleaseArch" `
         --asset-dir $ComponentAssetDir `
         --require-sha256-sidecars `
         --output $ComponentManifest

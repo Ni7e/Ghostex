@@ -1,12 +1,11 @@
 pub use super::sidebar_bridge_manifest::AppModalHostBridgeSurface;
 use super::sidebar_bridge_manifest::{
     APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS, APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME,
-    APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY, APP_MODAL_HOST_BRIDGE_SURFACE_SPECS,
-    APP_MODAL_HOST_ID_JS_FIELD, APP_MODAL_HOST_ID_VALUE, APP_MODAL_HOST_SURFACE_JS_FIELD,
-    APP_MODAL_HOST_SURFACE_VALUE, NATIVE_HOST_BRIDGE_PAYLOAD_MAX_CHARS,
-    NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS,
-    PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
-    PROJECT_WORKAREA_MANAGE_DOCS_RESOURCE_BASE_URL,
+    APP_MODAL_HOST_BRIDGE_SURFACE_SPECS, APP_MODAL_HOST_ID_JS_FIELD, APP_MODAL_HOST_ID_VALUE,
+    APP_MODAL_HOST_SURFACE_JS_FIELD, APP_MODAL_HOST_SURFACE_VALUE,
+    NATIVE_HOST_BRIDGE_PAYLOAD_MAX_CHARS, NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME,
+    PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS, PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME,
+    PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS, PROJECT_WORKAREA_MANAGE_DOCS_RESOURCE_BASE_URL,
     PROJECT_WORKAREA_MANAGE_DOCS_RESOURCE_BASE_URL_JS_FIELD, ProjectWorkareaBridgeFunctionId,
     SIDEBAR_BRIDGE_FUNCTION_SPECS, SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS,
     SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME, SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE,
@@ -57,7 +56,7 @@ use std::{
     rc::Rc as StdRc,
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Instant,
 };
@@ -86,6 +85,7 @@ struct CefRuntimeState {
 }
 
 static CEF_RUNTIME: OnceLock<Mutex<Option<CefRuntimeState>>> = OnceLock::new();
+static CEF_CONTEXT_INITIALIZED: AtomicBool = AtomicBool::new(false);
 const SIDEBAR_PROJECT_CONTEXT_INSTALL_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.installActiveProjectContextBridge";
 const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
@@ -298,59 +298,10 @@ fn app_modal_host_bridge_surface_for_frame_url(url: &str) -> Option<AppModalHost
         .map(|spec| spec.surface)
 }
 
-fn app_modal_host_bridge_extra_info(surface: AppModalHostBridgeSurface) -> Option<DictionaryValue> {
-    let dictionary = cef::dictionary_value_create()?;
-    let key = CefString::from(APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY);
-    let value = CefString::from(surface.extra_info_value());
-    if dictionary.set_string(Some(&key), Some(&value)) == 0 {
-        return None;
-    }
-    Some(dictionary)
-}
-
-fn app_modal_host_bridge_surface_from_extra_info(
-    extra_info: Option<&mut DictionaryValue>,
-) -> Option<AppModalHostBridgeSurface> {
-    let extra_info = extra_info?;
-    let key = CefString::from(APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY);
-    if extra_info.get_type(Some(&key)) != ValueType::STRING {
-        return None;
-    }
-    let surface = CefString::from(&extra_info.string(Some(&key))).to_string();
-    AppModalHostBridgeSurface::from_extra_info_value(surface.as_str())
-}
-
-fn remember_app_modal_host_bridge_surface_for_browser(
-    browser: Option<&mut cef::Browser>,
-    surface: AppModalHostBridgeSurface,
-) {
-    let Some(browser) = browser else {
-        return;
-    };
-    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID.with(|surfaces| {
-        surfaces.borrow_mut().insert(browser.identifier(), surface);
-    });
-}
-
-fn forget_app_modal_host_bridge_surface_for_browser(browser: Option<&mut cef::Browser>) {
-    let Some(browser) = browser else {
-        return;
-    };
-    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID.with(|surfaces| {
-        surfaces.borrow_mut().remove(&browser.identifier());
-    });
-}
-
-fn app_modal_host_bridge_surface_for_browser_id(
-    browser_id: c_int,
-) -> Option<AppModalHostBridgeSurface> {
-    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID
-        .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
-}
-
 thread_local! {
     static CEF_BROWSERS_BY_NATIVE_VIEW: RefCell<HashMap<usize, cef::Browser>> = RefCell::new(HashMap::new());
     static KEYBOARD_ZOOM_CEF_NATIVE_VIEWS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
+    static CEF_GLOBAL_REQUEST_CONTEXT: RefCell<Option<cef::RequestContext>> = const { RefCell::new(None) };
     static CEF_REQUEST_CONTEXTS_BY_PROFILE: RefCell<HashMap<String, cef::RequestContext>> = RefCell::new(HashMap::new());
     static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
     // Native views the app has explicitly hidden via CefBrowser::set_visible.
@@ -771,17 +722,8 @@ pub fn initialize(cx: &gpui::App) -> Result<()> {
     Ok(())
 }
 
-pub fn shutdown() {
-    let Some(state) = CEF_RUNTIME.get() else {
-        return;
-    };
-    let Ok(mut state) = state.lock() else {
-        return;
-    };
-    if state.take().is_some() {
-        platform::invalidate_message_pump();
-        cef::shutdown();
-    }
+pub fn context_initialized() -> bool {
+    CEF_CONTEXT_INITIALIZED.load(Ordering::Acquire)
 }
 
 wrap_app! {
@@ -827,6 +769,16 @@ wrap_browser_process_handler! {
     struct GhostexGpuiBrowserProcessHandler;
 
     impl BrowserProcessHandler {
+        fn on_context_initialized(&self) {
+            /*
+            CEF's global request context and synchronous browser creation are
+            valid only after this callback. cef::initialize returning does not
+            imply that Chromium has reached that point, especially with a new
+            profile on first launch.
+            */
+            CEF_CONTEXT_INITIALIZED.store(true, Ordering::Release);
+        }
+
         fn on_before_child_process_launch(&self, command_line: Option<&mut CommandLine>) {
             if let Some(command_line) = command_line {
                 command_line.append_switch(Some(&CefString::from("disable-background-mode")));
@@ -1630,27 +1582,9 @@ wrap_render_process_handler! {
     struct GhostexGpuiRenderProcessHandler;
 
     impl RenderProcessHandler {
-        fn on_browser_created(
-            &self,
-            browser: Option<&mut cef::Browser>,
-            extra_info: Option<&mut DictionaryValue>,
-        ) {
-            let mut extra_info = extra_info;
-            let Some(surface) =
-                app_modal_host_bridge_surface_from_extra_info(extra_info.as_deref_mut())
-            else {
-                return;
-            };
-            remember_app_modal_host_bridge_surface_for_browser(browser, surface);
-        }
-
-        fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
-            forget_app_modal_host_bridge_surface_for_browser(browser);
-        }
-
         fn on_context_created(
             &self,
-            browser: Option<&mut cef::Browser>,
+            _browser: Option<&mut cef::Browser>,
             frame: Option<&mut Frame>,
             context: Option<&mut cef::V8Context>,
         ) {
@@ -1661,10 +1595,7 @@ wrap_render_process_handler! {
                 return;
             }
             let frame_url = CefString::from(&frame.url()).to_string();
-            let browser_id = browser.as_ref().map(|browser| browser.identifier());
-            let browser_surface = browser_id.and_then(app_modal_host_bridge_surface_for_browser_id);
-            let surface = browser_surface
-                .or_else(|| app_modal_host_bridge_surface_for_frame_url(&frame_url));
+            let surface = app_modal_host_bridge_surface_for_frame_url(&frame_url);
             let Some(surface) = surface else {
                 return;
             };
@@ -3401,6 +3332,28 @@ fn cef_origins_match(lhs: &str, rhs: &str) -> bool {
     }
 }
 
+#[allow(dead_code)]
+pub fn shutdown() {
+    let Some(state) = CEF_RUNTIME.get() else {
+        return;
+    };
+    let mut state = state
+        .lock()
+        .expect("CEF runtime mutex should not be poisoned");
+    if state.take().is_none() {
+        return;
+    }
+    CEF_REQUEST_CONTEXTS_BY_PROFILE.with(|contexts| {
+        contexts.borrow_mut().clear();
+    });
+    CEF_GLOBAL_REQUEST_CONTEXT.with(|context| {
+        context.borrow_mut().take();
+    });
+    platform::invalidate_message_pump();
+    cef::shutdown();
+    CEF_CONTEXT_INITIALIZED.store(false, Ordering::Release);
+}
+
 fn apply_browser_page_appearance(browser: &cef::Browser) {
     let Some(host) = browser.host() else {
         return;
@@ -3546,6 +3499,11 @@ impl CefBrowser {
             browser_settings.javascript_dom_paste = State::ENABLED;
         }
         let requested_url = url.to_string();
+        if let Some(expected_surface) = app_modal_host_bridge_surface
+            && app_modal_host_bridge_surface_for_frame_url(&requested_url) != Some(expected_surface)
+        {
+            return Err("app-modal CEF surface does not match its first-party entry URL".into());
+        }
         let creation_url = if uses_system_page_appearance {
             "about:blank"
         } else {
@@ -3631,8 +3589,6 @@ impl CefBrowser {
             permission_handler,
             Some(GhostexGpuiCefFocusHandler::new()),
         ));
-        let mut app_modal_host_bridge_extra_info =
-            app_modal_host_bridge_surface.and_then(app_modal_host_bridge_extra_info);
         let mut request_context = cef_request_context_for_profile(profile)
             .map_err(|error| format!("failed to create GPUI CEF request context: {error}"))?;
         if let Some(origin) = trusted_clipboard_origin.as_deref() {
@@ -3649,7 +3605,7 @@ impl CefBrowser {
             client.as_mut(),
             Some(&creation_url),
             Some(&browser_settings),
-            app_modal_host_bridge_extra_info.as_mut(),
+            None,
             Some(&mut request_context),
         )
         .ok_or_else(|| {
@@ -4094,8 +4050,15 @@ fn cef_request_context_for_profile(profile: &str) -> Result<cef::RequestContext>
         .unwrap_or("default")
         .to_string();
     if cef_profile_is_app_ui(&profile_segment) || profile_segment == "default" {
-        return cef::request_context_get_global_context()
-            .context("failed to access GPUI CEF global persistent request context");
+        return CEF_GLOBAL_REQUEST_CONTEXT.with(|cached| {
+            if let Some(context) = cached.borrow().as_ref() {
+                return Ok(context.clone());
+            }
+            let context = cef::request_context_get_global_context()
+                .context("failed to access GPUI CEF global persistent request context")?;
+            *cached.borrow_mut() = Some(context.clone());
+            Ok(context)
+        });
     }
     CEF_REQUEST_CONTEXTS_BY_PROFILE.with(|contexts| {
         if let Some(context) = contexts.borrow().get(&profile_segment) {

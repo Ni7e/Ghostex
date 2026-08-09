@@ -139,6 +139,41 @@ function runGh(args, { allowFailure = false } = {}) {
   return result;
 }
 
+function reusePublishedAsset({ assetDir, component, componentVersion, platform, repo }) {
+  const tag = `${component}-${componentVersion}`;
+  const assetName = `${component}-${componentVersion}-${platform}.tar.gz`;
+  const release = inspectRelease({ repo, tag });
+  if (!release.exists) return false;
+  const remote = release.assets.find((asset) => asset.name === assetName);
+  if (!remote) return false;
+
+  mkdirSync(assetDir, { recursive: true });
+  runGh([
+    "release",
+    "download",
+    tag,
+    "--repo",
+    repo,
+    "--pattern",
+    assetName,
+    "--dir",
+    assetDir,
+    "--clobber",
+  ]);
+  const localPath = path.resolve(assetDir, assetName);
+  const localSize = statSync(localPath).size;
+  const localDigest = sha256File(localPath);
+  const remoteDigest = normalizedRemoteDigest(remote);
+  if (Number(remote.size) !== localSize || (remoteDigest && remoteDigest !== localDigest)) {
+    throw new Error(
+      `Downloaded component asset ${assetName} does not match GitHub metadata: ` +
+        `${localSize}/${localDigest}; expected ${remote.size ?? "unknown"}/${remoteDigest || "unavailable"}`,
+    );
+  }
+  console.log(`Reused published component asset ${tag}/${assetName}`);
+  return true;
+}
+
 export function inspectRelease({ repo, tag }) {
   const result = runGh(["release", "view", tag, "--repo", repo, "--json", "assets"], { allowFailure: true });
   if (result.status !== 0) {
@@ -182,7 +217,7 @@ function uploadAssetIdempotently({ asset, repo, tag }) {
 }
 
 function parseArguments(argv) {
-  const options = { dryRun: false, metadataOnly: false };
+  const options = { dryRun: false, metadataOnly: false, reusePublished: false };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--dry-run") {
@@ -191,6 +226,10 @@ function parseArguments(argv) {
     }
     if (argument === "--metadata-only") {
       options.metadataOnly = true;
+      continue;
+    }
+    if (argument === "--reuse-published") {
+      options.reusePublished = true;
       continue;
     }
     if (argument === "--require-sha256-sidecars") {
@@ -250,6 +289,16 @@ async function main() {
   const tag = options.tag ?? `${component}-${componentVersion}`;
   requireIdentifier(tag, "tag");
   if (!options["asset-dir"]) throw new Error("--asset-dir is required");
+  if (options.reusePublished) {
+    const platform = requireIdentifier(options.platform, "platform");
+    reusePublishedAsset({
+      assetDir: options["asset-dir"],
+      component,
+      componentVersion,
+      platform,
+      repo,
+    });
+  }
   const assets = componentAssetsFromDirectory({ assetDir: options["asset-dir"], component, componentVersion });
   const checksumSidecars = options.requireSha256Sidecars ? componentChecksumSidecars(assets) : [];
   const publishedAssets = options.requireSha256Sidecars

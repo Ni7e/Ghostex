@@ -543,6 +543,55 @@ exec "$node" "$repo_root/out/node/entry.js" \
         Ok(translated.to_string())
     }
 
+    pub(super) fn windows_path_for_wsl_path(path: &Path) -> Result<PathBuf, String> {
+        /*
+        CDXC:GPUIWindowsDocsWslPath 2026-08-09:
+        Windows project paths are authoritative paths inside the selected WSL2
+        distribution. Docs performs filesystem operations in the native GPUI
+        process, so translate that exact WSL path through the retained
+        distribution into its Win32 drive or UNC representation before probing
+        it. Never treat a POSIX path as a native Windows path and never select a
+        second distribution from the path itself.
+        */
+        let wsl_path = path.to_string_lossy();
+        validated_wsl_path(&wsl_path)
+            .ok_or_else(|| "The project path is not a valid WSL path.".to_string())?;
+        let ResolvedWindowsTerminalBackend::Wsl { distribution } =
+            resolve(super::current_preference())?
+        else {
+            unreachable!("PowerShell is not a selectable Windows terminal backend")
+        };
+        let output = hidden_command("wsl.exe")
+            .args([
+                "--distribution",
+                distribution.as_str(),
+                "--exec",
+                "wslpath",
+                "-a",
+                "-w",
+                "--",
+            ])
+            .arg(path)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|_| "Could not translate the WSL project path into Windows.".to_string())?;
+        if !output.status.success() {
+            return Err("Could not translate the WSL project path into Windows.".to_string());
+        }
+        let translated = decode_windows_command_output(&output.stdout);
+        let translated = translated.trim();
+        let translated_path = PathBuf::from(translated);
+        if translated.is_empty()
+            || translated.len() > 32_768
+            || translated.chars().any(char::is_control)
+            || !translated_path.is_absolute()
+        {
+            return Err("WSL returned an invalid Windows project path.".to_string());
+        }
+        Ok(translated_path)
+    }
+
     fn validated_wsl_path(path: &str) -> Option<String> {
         (path.starts_with('/')
             && path.len() <= 32_768
@@ -1336,6 +1385,13 @@ pub(crate) fn source_code_server_open_file_command(
 #[cfg(target_os = "windows")]
 pub(crate) fn wsl_path_for_windows_path(path: &std::path::Path) -> Result<String, String> {
     platform::wsl_path_for_windows_path(path)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_path_for_wsl_path(
+    path: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    platform::windows_path_for_wsl_path(path)
 }
 
 #[cfg(not(target_os = "windows"))]

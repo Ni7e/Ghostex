@@ -258,7 +258,7 @@ printf '%s\r\n' \
   'if errorlevel 1 exit /b %errorlevel%' \
   "\"$WINDOWS_RUSTUP_WIN\" target add $RUST_TARGET" \
   'if errorlevel 1 exit /b %errorlevel%' \
-  "\"$WINDOWS_CARGO_WIN\" build --release --bins --target $RUST_TARGET" \
+  "\"$WINDOWS_CARGO_WIN\" build --release --bin ghostex-gpui-cef-bootstrap --bin ghostex-gpui --bin ghostex-gpui-cef-helper --target $RUST_TARGET" \
   'exit /b %errorlevel%' \
   >"$WINDOWS_BUILD_BATCH"
 report_build_phase "Building the native Windows GPUI shell..."
@@ -457,12 +457,14 @@ if [[ "$ON_DEMAND_COMPONENTS" == "1" ]]; then
     fi
   done
   cp -R "$LOCALES_DIR" "$CEF_STAGE/locales"
-  "$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$CEF_STAGE" "$CEF_ASSET"
+  "$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$CEF_STAGE" "$CEF_ASSET" --windows-component
   rm -rf "$CEF_STAGE"
   node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
     --metadata-only \
+    --reuse-published \
     --component cef \
     --version "$CEF_COMPONENT_VERSION" \
+    --platform "windows-$RELEASE_ARCH" \
     --asset-dir "$COMPONENT_ASSET_DIR" \
     --output "$COMPONENT_MANIFEST"
 fi
@@ -503,6 +505,7 @@ stage_current_wsl_runtime_archive() {
   local staged_name="$2"
   local staged_archive="$APP_DIR/resources/wsl/$staged_name"
   local package_dir staged_temp_archive package_cleanup_command
+  local base_identity current_fingerprint package_version source_dirty source_revision
   if [[ ! -f "$source_archive" ]]; then
     if [[ "${GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME:-1}" == "0" ]]; then
       return 0
@@ -527,6 +530,32 @@ stage_current_wsl_runtime_archive() {
   cp "$WSL_ZMX_CURRENT_BIN" "$package_dir/bin/zmx"
   chmod 755 "$package_dir/bin/gxserver"
   chmod 755 "$package_dir/bin/zmx"
+
+  # The package identity participates in gxserver's restart decision. Keeping
+  # the base archive's identity after replacing its daemon would let an older
+  # running daemon look current and survive an app update. Seal the identity
+  # from both the base package and the exact replacement binaries.
+  base_identity="$(cat "$package_dir/build-identity.json" 2>/dev/null || true)"
+  package_version="$(node -e 'const value=JSON.parse(process.argv[1]||"{}").packageVersion; process.stdout.write(typeof value==="string"&&value?value:"0.1.0")' "$base_identity")"
+  current_fingerprint="sha256:$(
+    {
+      printf '%s\0' "$base_identity"
+      sha256sum "$package_dir/bin/gxserver" "$package_dir/bin/zmx"
+    } | sha256sum | awk '{print $1}'
+  )"
+  source_revision="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  source_dirty=false
+  if ! git -C "$REPO_ROOT" diff --quiet --ignore-submodules -- ||
+    ! git -C "$REPO_ROOT" diff --cached --quiet --ignore-submodules --; then
+    source_dirty=true
+  fi
+  GHOSTEX_PACKAGE_IDENTITY_PATH="$package_dir/build-identity.json" \
+    GHOSTEX_PACKAGE_VERSION="$package_version" \
+    GHOSTEX_PACKAGE_FINGERPRINT="$current_fingerprint" \
+    GHOSTEX_PACKAGE_SOURCE_DIRTY="$source_dirty" \
+    GHOSTEX_PACKAGE_SOURCE_REVISION="$source_revision" \
+    node -e 'const fs=require("node:fs"); const version=process.env.GHOSTEX_PACKAGE_VERSION; const fingerprint=process.env.GHOSTEX_PACKAGE_FINGERPRINT; fs.writeFileSync(process.env.GHOSTEX_PACKAGE_IDENTITY_PATH, JSON.stringify({buildIdentity:`gxserver:${version}:${fingerprint}`,fingerprint,packageVersion:version,sourceDirty:process.env.GHOSTEX_PACKAGE_SOURCE_DIRTY==="true",sourceRevision:process.env.GHOSTEX_PACKAGE_SOURCE_REVISION},null,2)+"\n")'
+
   mkdir -p "$(dirname "$staged_archive")"
   tar -czf "$staged_temp_archive" -C "$package_dir" .
   sha256sum "$staged_temp_archive" | awk '{print $1}' >"$staged_archive.sha256"
@@ -565,20 +594,21 @@ elif [[ "$ON_DEMAND_COMPONENTS" == "1" || "${GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME
 fi
 report_build_phase "Packaging the bundled WSL runtime archives..."
 stage_current_wsl_runtime_archive "$WSL_GXSERVER_ARCHIVE" "gxserver-linux-$RELEASE_ARCH.tar.gz"
-stage_wsl_archive "$WSL_GXSERVER_ARCHIVE" "gxserver-linux-$RELEASE_ARCH.tar.gz"
 if [[ "$ON_DEMAND_COMPONENTS" == "1" ]]; then
   CODE_SERVER_STAGE="$(mktemp -d "$GPUI_DIR/build/code-server-windows-component-XXXXXX")"
   CODE_SERVER_ASSET="$COMPONENT_ASSET_DIR/code-server-$CODE_SERVER_VERSION-windows-$RELEASE_ARCH.tar.gz"
   cp "$WSL_CODE_SERVER_ARCHIVE" "$CODE_SERVER_STAGE/$CODE_SERVER_ARCHIVE_NAME"
   cp "$WSL_CODE_SERVER_ARCHIVE.sha256" "$CODE_SERVER_STAGE/$CODE_SERVER_ARCHIVE_NAME.sha256"
-  "$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$CODE_SERVER_STAGE" "$CODE_SERVER_ASSET"
+  "$REPO_ROOT/scripts/release-gpui/create-deterministic-tar.sh" "$CODE_SERVER_STAGE" "$CODE_SERVER_ASSET" --windows-component
   rm -rf "$CODE_SERVER_STAGE"
   CODE_SERVER_ASSET_SHA256="$(sha256sum "$CODE_SERVER_ASSET" | awk '{print $1}')"
   printf '%s  %s\n' "$CODE_SERVER_ASSET_SHA256" "$(basename "$CODE_SERVER_ASSET")" >"$CODE_SERVER_ASSET.sha256"
   node "$REPO_ROOT/scripts/release-gpui/publish-component.mjs" \
     --metadata-only \
+    --reuse-published \
     --component code-server \
     --version "$CODE_SERVER_VERSION" \
+    --platform "windows-$RELEASE_ARCH" \
     --asset-dir "$COMPONENT_ASSET_DIR" \
     --require-sha256-sidecars \
     --output "$COMPONENT_MANIFEST"

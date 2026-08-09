@@ -524,6 +524,8 @@ impl ComponentStore {
                 component.name, component.component_version
             )
         })?;
+        let component_root = self.root.join(&component.name);
+        let version_root = component_root.join(&component.component_version);
         emit(
             progress,
             component,
@@ -534,6 +536,7 @@ impl ComponentStore {
         let current =
             self.query_for_platform(&component.name, &component.component_version, platform)?;
         if current.installed {
+            prune_temporary_install_artifacts(&version_root);
             emit(
                 progress,
                 component,
@@ -544,8 +547,6 @@ impl ComponentStore {
             return Ok(current);
         }
 
-        let component_root = self.root.join(&component.name);
-        let version_root = component_root.join(&component.component_version);
         fs::create_dir_all(&version_root).map_err(|error| {
             format!(
                 "Could not create component store directory {}: {error}",
@@ -641,6 +642,16 @@ impl ComponentStore {
         let installed =
             self.query_for_platform(&component.name, &component.component_version, platform)?;
         replacement.commit()?;
+
+        /*
+        CDXC:ComponentStoreInterruptedInstallCleanup 2026-08-09:
+        A process terminated after downloading or unpacking cannot run its
+        normal error cleanup. Once this version has been installed atomically,
+        every remaining .download-* or .install-* sibling is obsolete; remove
+        those artifacts so a killed first launch does not permanently retain a
+        full component archive.
+        */
+        prune_temporary_install_artifacts(&version_root);
 
         emit(
             progress,
@@ -2025,6 +2036,29 @@ fn directory_size(path: &Path) -> Result<u64, String> {
         }
     }
     Ok(total)
+}
+
+fn prune_temporary_install_artifacts(version_root: &Path) {
+    let Ok(entries) = fs::read_dir(version_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with(".download-") && !name.starts_with(".install-") {
+            continue;
+        }
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => {
+                let _ = fs::remove_dir_all(path);
+            }
+            Ok(_) => {
+                let _ = fs::remove_file(path);
+            }
+            Err(_) => {}
+        }
+    }
 }
 
 fn prune_other_versions(component_root: &Path, retained_version: &str) -> Result<(), String> {
