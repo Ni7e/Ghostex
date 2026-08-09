@@ -2667,6 +2667,7 @@ async fn route_http(
         }
         "/api/sendSessionChatMessage" => {
             handle_send_session_chat_message_http(&state, endpoint.path, request_id, &body_json)
+                .await
         }
         "/api/saveSessionChatImage" => {
             handle_save_session_chat_image_http(&state, endpoint.path, request_id, &body_json)
@@ -10497,7 +10498,7 @@ fn resolve_session_chat_send_target(
     })
 }
 
-fn handle_send_session_chat_message_http(
+async fn handle_send_session_chat_message_http(
     state: &AppState,
     endpoint_path: String,
     request_id: String,
@@ -10594,14 +10595,31 @@ fn handle_send_session_chat_message_http(
             },
         );
     }
-    let steps = crate::session_chat_send::build_session_chat_message_steps(&text, &image_paths);
-    crate::session_chat_send::enqueue_session_chat_send(
+    let mut steps = crate::session_chat_send::build_session_chat_message_steps(&text, &image_paths);
+    steps.insert(
+        0,
+        crate::session_chat_send::SessionChatSendStep::PreserveTerminalDraft {
+            state_dir: state.paths.app_state_dir.clone(),
+        },
+    );
+    if let Err(message) = crate::session_chat_send::execute_session_chat_send(
         &target.project_id,
         &target.session_id,
         &target.zmx_name,
         "session-chat-message",
         steps,
-    );
+    )
+    .await
+    {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "dependencyUnavailable",
+                message,
+            },
+        );
+    }
     // An option command changes what the statusline reports: read it back.
     let agent = session_chat_agent_for_session(&target.session);
     if crate::session_chat_options::is_session_chat_option_command_text(agent.as_deref(), &text) {
