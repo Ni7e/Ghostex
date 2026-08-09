@@ -1,4 +1,9 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 #![cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+
+#[cfg(target_os = "windows")]
+#[path = "../windows_updater.rs"]
+mod windows_updater;
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 #[path = "../cef_component_window.rs"]
@@ -7,12 +12,14 @@ mod cef_component_window;
 #[path = "../component_store.rs"]
 mod component_store;
 
+#[cfg(target_os = "linux")]
+use std::sync::OnceLock;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::{
     env,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -35,6 +42,22 @@ struct GhostexGpuiApp {
     cef_component_window: Option<WindowHandle<cef_component_window::GpuiCefComponentWindow>>,
     cef_component_install_generation: u64,
 }
+
+/*
+CDXC:WindowsCefBootstrapLifetime 2026-08-09:
+Context::spawn deliberately gives asynchronous work only a WeakEntity. Keep
+the bootstrap controller strongly owned by GPUI global state until the process
+quits; otherwise the local Entity created in main is released after the run
+callback, leaving a completed CEF install unable to update its window or launch
+the real runtime.
+*/
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+struct BootstrapAppEntity {
+    _entity: Entity<GhostexGpuiApp>,
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+impl gpui::Global for BootstrapAppEntity {}
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 impl GhostexGpuiApp {
@@ -83,14 +106,31 @@ impl GhostexGpuiApp {
             .env(cef_component_window::CEF_RUNTIME_DIR_ENV, &runtime_dir)
             .stdin(Stdio::null());
         #[cfg(target_os = "windows")]
+        if let Some(user_profile) = env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+        {
+            /*
+            CDXC:WindowsInstalledCwd 2026-08-09:
+            Velopack starts Ghostex with its installed `current` directory as
+            the working directory. The real runtime launches long-lived WSL
+            processes, so inheriting that directory keeps it open after the UI
+            exits and prevents uninstall from removing the install root. Give
+            the runtime a stable per-user working directory before it creates
+            any descendants; explicit terminal/project cwd handling remains in
+            the Windows terminal backend.
+            */
+            command.current_dir(user_profile);
+        }
+        #[cfg(target_os = "windows")]
         let loader_path_variable = "PATH";
         #[cfg(target_os = "linux")]
         let loader_path_variable = "LD_LIBRARY_PATH";
-        let loader_paths = std::iter::once(runtime_dir.as_os_str().to_owned()).chain(
-            env::var_os(loader_path_variable)
-                .into_iter()
-                .flat_map(|paths| env::split_paths(&paths).map(|path| path.into_os_string())),
-        );
+        let mut loader_paths = vec![runtime_dir.as_os_str().to_owned()];
+        if let Some(existing_paths) = env::var_os(loader_path_variable) {
+            loader_paths
+                .extend(env::split_paths(&existing_paths).map(|path| path.into_os_string()));
+        }
         let loader_path = match env::join_paths(loader_paths) {
             Ok(path) => path,
             Err(error) => {
@@ -181,6 +221,9 @@ fn on_demand_component_store() -> Result<Option<component_store::ComponentStore>
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn main() {
+    #[cfg(target_os = "windows")]
+    windows_updater::run_startup_hooks();
+
     let application = gpui_platform::application();
     application.run(|cx| {
         gpui_component::init(cx);
@@ -189,6 +232,7 @@ fn main() {
             cef_component_install_generation: 0,
         });
         app.update(cx, |app, cx| app.begin_cef_startup(cx));
+        cx.set_global(BootstrapAppEntity { _entity: app });
     });
 }
 

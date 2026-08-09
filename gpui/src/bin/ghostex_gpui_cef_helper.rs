@@ -1,17 +1,18 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use cef::rc::Rc as _;
 use cef::{
-    App, CefString, DictionaryValue, Frame, ImplApp, ImplBrowser as _, ImplDictionaryValue as _,
-    ImplDomnode as _, ImplFrame as _, ImplListValue as _, ImplProcessMessage as _,
-    ImplRenderProcessHandler, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, ProcessId,
-    RenderProcessHandler, V8Handler, V8Propertyattribute, V8Value, ValueType, WrapApp,
-    WrapRenderProcessHandler, WrapV8Handler, wrap_app, wrap_render_process_handler,
-    wrap_v8_handler,
+    App, CefString, Frame, ImplApp, ImplBrowser as _, ImplDomnode as _, ImplFrame as _,
+    ImplListValue as _, ImplProcessMessage as _, ImplRenderProcessHandler, ImplV8Context as _,
+    ImplV8Handler, ImplV8Value as _, ProcessId, RenderProcessHandler, V8Handler,
+    V8Propertyattribute, V8Value, ValueType, WrapApp, WrapRenderProcessHandler, WrapV8Handler,
+    wrap_app, wrap_render_process_handler, wrap_v8_handler,
 };
 #[path = "../cef/sidebar_bridge_manifest.rs"]
 mod sidebar_bridge_manifest;
 use sidebar_bridge_manifest::{
     APP_MODAL_HOST_BRIDGE_PAYLOAD_MAX_CHARS, APP_MODAL_HOST_BRIDGE_PROCESS_MESSAGE_NAME,
-    APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY, APP_MODAL_HOST_BRIDGE_SURFACE_SPECS,
+    APP_MODAL_HOST_BRIDGE_SURFACE_SPECS,
     APP_MODAL_HOST_ID_JS_FIELD, APP_MODAL_HOST_ID_VALUE, APP_MODAL_HOST_SURFACE_JS_FIELD,
     APP_MODAL_HOST_SURFACE_VALUE, AppModalHostBridgeSurface,
     NATIVE_HOST_BRIDGE_PROCESS_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_FUNCTION_SPECS,
@@ -104,7 +105,6 @@ struct SidebarGxserverBootstrap {
 }
 
 thread_local! {
-    static APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID: RefCell<HashMap<c_int, AppModalHostBridgeSurface>> = RefCell::new(HashMap::new());
     static SIDEBAR_EDITABLE_FOCUS_BY_BROWSER_ID: RefCell<HashMap<c_int, bool>> = RefCell::new(HashMap::new());
 }
 
@@ -222,26 +222,11 @@ wrap_render_process_handler! {
     struct GhostexGpuiRenderProcessHandler;
 
     impl RenderProcessHandler {
-        fn on_browser_created(
-            &self,
-            browser: Option<&mut cef::Browser>,
-            extra_info: Option<&mut DictionaryValue>,
-        ) {
-            let mut extra_info = extra_info;
-            let Some(surface) =
-                app_modal_host_bridge_surface_from_extra_info(extra_info.as_deref_mut())
-            else {
-                return;
-            };
-            remember_app_modal_host_bridge_surface_for_browser(browser, surface);
-        }
-
         fn on_browser_destroyed(&self, browser: Option<&mut cef::Browser>) {
             if let Some(browser_id) = browser.as_ref().map(|browser| browser.identifier()) {
                 SIDEBAR_EDITABLE_FOCUS_BY_BROWSER_ID
                     .with(|states| states.borrow_mut().remove(&browser_id));
             }
-            forget_app_modal_host_bridge_surface_for_browser(browser);
         }
 
         fn on_focused_node_changed(
@@ -268,9 +253,12 @@ wrap_render_process_handler! {
                 return;
             };
             let browser_id = browser.identifier();
-            if app_modal_host_bridge_surface_for_browser_id(browser_id)
-                != Some(AppModalHostBridgeSurface::Sidebar)
-            {
+            let is_sidebar = browser.main_frame().is_some_and(|frame| {
+                let frame_url = CefString::from(&frame.url()).to_string();
+                app_modal_host_bridge_surface_for_frame_url(&frame_url)
+                    == Some(AppModalHostBridgeSurface::Sidebar)
+            });
+            if !is_sidebar {
                 return;
             }
             let focused = node.is_some_and(|node| node.is_editable() != 0);
@@ -307,7 +295,7 @@ wrap_render_process_handler! {
 
         fn on_context_created(
             &self,
-            browser: Option<&mut cef::Browser>,
+            _browser: Option<&mut cef::Browser>,
             frame: Option<&mut Frame>,
             context: Option<&mut cef::V8Context>,
         ) {
@@ -318,10 +306,7 @@ wrap_render_process_handler! {
                 return;
             }
             let frame_url = CefString::from(&frame.url()).to_string();
-            let browser_id = browser.as_ref().map(|browser| browser.identifier());
-            let browser_surface = browser_id.and_then(app_modal_host_bridge_surface_for_browser_id);
-            let surface = browser_surface
-                .or_else(|| app_modal_host_bridge_surface_for_frame_url(&frame_url));
+            let surface = app_modal_host_bridge_surface_for_frame_url(&frame_url);
             let Some(surface) = surface else {
                 return;
             };
@@ -891,46 +876,6 @@ fn app_modal_host_bridge_surface_for_frame_url(url: &str) -> Option<AppModalHost
         .iter()
         .find(|spec| is_gpui_first_party_cef_entry_url(url, spec.entry_file_name))
         .map(|spec| spec.surface)
-}
-
-fn app_modal_host_bridge_surface_from_extra_info(
-    extra_info: Option<&mut DictionaryValue>,
-) -> Option<AppModalHostBridgeSurface> {
-    let extra_info = extra_info?;
-    let key = CefString::from(APP_MODAL_HOST_BRIDGE_SURFACE_EXTRA_INFO_KEY);
-    if extra_info.get_type(Some(&key)) != ValueType::STRING {
-        return None;
-    }
-    let surface = CefString::from(&extra_info.string(Some(&key))).to_string();
-    AppModalHostBridgeSurface::from_extra_info_value(surface.as_str())
-}
-
-fn remember_app_modal_host_bridge_surface_for_browser(
-    browser: Option<&mut cef::Browser>,
-    surface: AppModalHostBridgeSurface,
-) {
-    let Some(browser) = browser else {
-        return;
-    };
-    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID.with(|surfaces| {
-        surfaces.borrow_mut().insert(browser.identifier(), surface);
-    });
-}
-
-fn forget_app_modal_host_bridge_surface_for_browser(browser: Option<&mut cef::Browser>) {
-    let Some(browser) = browser else {
-        return;
-    };
-    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID.with(|surfaces| {
-        surfaces.borrow_mut().remove(&browser.identifier());
-    });
-}
-
-fn app_modal_host_bridge_surface_for_browser_id(
-    browser_id: c_int,
-) -> Option<AppModalHostBridgeSurface> {
-    APP_MODAL_HOST_BRIDGE_SURFACES_BY_BROWSER_ID
-        .with(|surfaces| surfaces.borrow().get(&browser_id).copied())
 }
 
 fn v8_object_property_or_new(parent: &V8Value, key: &str) -> Option<V8Value> {
