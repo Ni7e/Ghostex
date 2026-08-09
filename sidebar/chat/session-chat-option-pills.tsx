@@ -177,7 +177,7 @@ function PillTrigger({
         render={
           <Button
             aria-label={ariaLabel}
-            className="ghostex-chat-footer-control max-w-40 text-muted-foreground"
+            className="ghostex-chat-footer-control max-w-40 rounded-full text-muted-foreground"
             disabled={disabled}
             size="xs"
             variant="ghost"

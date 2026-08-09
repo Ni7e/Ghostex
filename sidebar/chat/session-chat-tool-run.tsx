@@ -8,7 +8,7 @@ import {
   IconTool,
   IconWorldSearch,
 } from "@tabler/icons-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   SessionChatToolCallBlock,
   SessionChatToolResultBlock,
@@ -19,6 +19,10 @@ import {
   diffFromSessionChatToolCall,
   type SessionChatDiffLine,
 } from "./session-chat-diff";
+import {
+  centerSessionChatExpansion,
+  SessionChatExpansion,
+} from "./session-chat-expansion";
 import { pairSessionChatToolBlocks } from "./session-chat-tool-fold";
 import {
   formatSessionChatToolInput,
@@ -111,6 +115,7 @@ function ToolLine({
   result?: SessionChatToolResultBlock;
 }) {
   const [open, setOpen] = useState(expandSignal);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   useEffect(() => setOpen(expandSignal), [expandSignal]);
 
   const name = call?.name ?? "Result";
@@ -140,9 +145,13 @@ function ToolLine({
         disabled={!hasDetail}
         onClick={() => {
           if (hasDetail) {
+            if (!open) {
+              centerSessionChatExpansion(triggerRef.current);
+            }
             setOpen((current) => !current);
           }
         }}
+        ref={triggerRef}
         type="button"
       >
         <span className="ghostex-chat-work-icon">{toolIcon(name)}</span>
@@ -157,7 +166,11 @@ function ToolLine({
         ) : null}
       </button>
       {hasDetail && open ? (
-        <div className="ghostex-chat-work-detail">
+        <SessionChatExpansion
+          className="ghostex-chat-work-detail"
+          label={`Collapse ${name}`}
+          onCollapse={() => setOpen(false)}
+        >
           {inputAddsInfo && (!diff || commandTool) ? (
             <ToolBody
               label={commandTool ? "Command" : result ? "Input" : undefined}
@@ -172,7 +185,7 @@ function ToolLine({
               text={result.output}
             />
           ) : null}
-        </div>
+        </SessionChatExpansion>
       ) : null}
     </div>
   );
