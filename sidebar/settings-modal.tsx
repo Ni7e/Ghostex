@@ -161,6 +161,7 @@ import {
   GHOSTTY_SCROLLBAR_OPTIONS,
   GHOSTTY_THEME_SETTING_OPTIONS,
   KEEP_AWAKE_DURATION_OPTIONS,
+  PREFERRED_AGENT_INTERFACE_OPTIONS,
   MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MIN_TERMINAL_PANE_PADDING_PX,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
@@ -205,6 +206,7 @@ import {
   type GhosttyScrollbar,
   type KeepAwakeDurationMinutes,
   type PortlessProtocol,
+  type PreferredAgentInterface,
   type RemoteMachineSettings,
   type SessionPersistenceProvider,
   type SettingsModalNavigationState,
@@ -640,10 +642,11 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "appIconSourceId",
   ],
   sidebar: [
+    "preferredAgentInterface",
     /*
      * CDXC:SidebarV2 2026-07-29:
-     * Sidebar version is the first General setting, so it also leads this
-     * section's key list for search, section-visibility, and jump targets.
+     * Sidebar version follows the agent-interface preference near the top of
+     * General, ahead of its own V2-only sub-settings.
      */
     "sidebarVersion",
     "sidebarV2Layout",
@@ -1982,6 +1985,13 @@ export function SettingsModal({
         : [],
     ),
     sidebar: getSettingsSectionSearch(settingsSearchQuery, "Sidebar", [
+      {
+        key: "preferredAgentInterface",
+        options: PREFERRED_AGENT_INTERFACE_OPTIONS,
+        subtitle:
+          "Choose which interface opens first for newly launched agents that support chat. The terminal still starts in the background.",
+        title: "Preferred interface for agents",
+      },
       /*
        * CDXC:SidebarV2 2026-07-29:
        * Sidebar version must be findable by searching for the new Inbox
@@ -3574,10 +3584,21 @@ export function SettingsModal({
             ) : null}
             {mainSubsectionVisible("sidebar", settingsSearch.sidebar) ? (
               <SettingsSection sectionRef={sidebarSectionRef} title="Sidebar">
+              {mainSettingVisible(settingsSearch.sidebar, "preferredAgentInterface") ? (
+              <PreferredAgentInterfaceField
+                description="Choose which interface opens first for newly launched agents that support chat. The terminal still starts in the background."
+                label="Preferred interface for agents"
+                {...getSettingModificationProps("preferredAgentInterface")}
+                onChange={(preferredAgentInterface) =>
+                  updateDraft("preferredAgentInterface", preferredAgentInterface)
+                }
+                value={draft.preferredAgentInterface}
+              />
+              ) : null}
               {/*
                * CDXC:SidebarV2 2026-07-29:
-               * Sidebar version is the very first control on the General tab so
-               * the opt-in Inbox sidebar is discoverable without scrolling. Its
+               * Sidebar version stays near the top of the General tab so the
+               * opt-in Inbox sidebar is discoverable without scrolling. Its
                * Group by Project sub-mode only appears while V2 is selected,
                * because the classic sidebar has no such layout.
                */}
@@ -12907,8 +12928,8 @@ function SidebarProjectGroupStyleField({
 /*
  * CDXC:SidebarV2 2026-07-29:
  * The sidebar version selector reuses the Preset toggle-group shape so the
- * first General setting reads as one two-option switch, with a New badge on the
- * row label while the Inbox sidebar is still rolling out.
+ * sidebar version setting reads as one two-option switch, with a New badge on
+ * the row label while the Inbox sidebar is still rolling out.
  */
 function SidebarVersionField({
   advanced,
@@ -12951,6 +12972,55 @@ function SidebarVersionField({
         variant="outline"
       >
         {SIDEBAR_VERSION_OPTIONS.map((option, index) => (
+          <ToggleGroupItem
+            aria-label={option.label}
+            id={index === 0 ? id : undefined}
+            key={option.value}
+            value={option.value}
+          >
+            {option.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </SettingRow>
+  );
+}
+
+function PreferredAgentInterfaceField({
+  description,
+  isModified,
+  label,
+  onChange,
+  onResetToDefault,
+  value,
+}: {
+  description?: string;
+  label: string;
+  onChange: (value: PreferredAgentInterface) => void;
+  value: PreferredAgentInterface;
+} & SettingModificationProps) {
+  const id = useId();
+  return (
+    <SettingRow
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
+      <ToggleGroup
+        aria-label={label}
+        className="w-full [&>[data-slot=toggle-group-item]]:flex-1"
+        onValueChange={(nextValue) => {
+          const [nextInterface] = nextValue as PreferredAgentInterface[];
+          if (nextInterface) {
+            onChange(nextInterface);
+          }
+        }}
+        value={[value]}
+        variant="outline"
+      >
+        {PREFERRED_AGENT_INTERFACE_OPTIONS.map((option, index) => (
           <ToggleGroupItem
             aria-label={option.label}
             id={index === 0 ? id : undefined}

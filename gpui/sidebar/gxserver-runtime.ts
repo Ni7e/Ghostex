@@ -137,7 +137,11 @@ import {
   type ProjectBoardConversationState,
   type ProjectBoardSessionOption,
 } from "../../shared/bead-conversation-links";
-import { normalizeghostexSettings, type ghostexSettings } from "../../shared/ghostex-settings";
+import {
+  normalizeghostexSettings,
+  type ghostexSettings,
+  type PreferredAgentInterface,
+} from "../../shared/ghostex-settings";
 import {
   buildSidebarGitMenuItems,
   createDefaultSidebarGitState,
@@ -6632,7 +6636,7 @@ class GpuiSidebarRuntime {
   private focusLocalWorkspaceSession(
     projectId: string,
     sessionId: string,
-    options?: { forceRemount?: boolean },
+    options?: { forceRemount?: boolean; preferredInterface?: PreferredAgentInterface },
   ): void {
     /*
     CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:18:
@@ -6656,7 +6660,7 @@ class GpuiSidebarRuntime {
     projectId: string,
     sessionId: string,
     placementTargetSessionId?: string,
-    options?: { forceRemount?: boolean },
+    options?: { forceRemount?: boolean; preferredInterface?: PreferredAgentInterface },
   ): void {
     /*
     CDXC:GPUIWorkspaceSessionFocus 2026-06-26-06:08:
@@ -6669,6 +6673,9 @@ class GpuiSidebarRuntime {
     const payload = JSON.stringify({
       ...(placementTargetSessionId ? { placementTargetSessionId } : {}),
       ...(options?.forceRemount ? { forceRemount: true } : {}),
+      ...(options?.preferredInterface
+        ? { preferredInterface: options.preferredInterface }
+        : {}),
       projectId,
       sessionId,
       type: GPUI_SIDEBAR_WORKSPACE_TERMINAL_FOCUS_MESSAGE_TYPE,
@@ -7145,6 +7152,20 @@ class GpuiSidebarRuntime {
             projectId: createdProjectId,
             sessionId: createdSessionId,
           });
+          if (
+            createGpuiSidebarSettings(this.runtimeSettings).preferredAgentInterface === "chat"
+          ) {
+            this.postRemoteSessionNativeAction(
+              "openRemoteSessionTerminal",
+              {
+                machineId: remoteGroup.machineId,
+                projectId: createdProjectId,
+                sessionId: createdSessionId,
+              },
+              { agentId, groupId, type: "runSidebarAgent" },
+              { preferredInterface: "chat" },
+            );
+          }
         }
         this.refreshRemotePresentationFromGxserver(remoteGroup.machineId).catch(() => undefined);
       }
@@ -7192,9 +7213,13 @@ class GpuiSidebarRuntime {
     }
     const createdSessionId = normalizeNonEmptyString(response.session?.sessionId);
     if (createdSessionId) {
+      const preferredAgentInterface = createGpuiSidebarSettings(
+        this.runtimeSettings,
+      ).preferredAgentInterface;
       this.focusLocalWorkspaceSession(
         normalizeNonEmptyString(response.session?.projectId) ?? projectId,
         createdSessionId,
+        preferredAgentInterface === "chat" ? { preferredInterface: "chat" } : undefined,
       );
     }
   }
@@ -14447,6 +14472,7 @@ class GpuiSidebarRuntime {
     >,
     reference: { machineId: string; projectId: string; sessionId: string },
     originalMessage: SidebarToExtensionMessage,
+    options: { preferredInterface?: PreferredAgentInterface } = {},
   ): boolean {
     return this.postNativeProjectPathAction(
       action,
@@ -14456,6 +14482,7 @@ class GpuiSidebarRuntime {
         reference.sessionId,
       ),
       originalMessage,
+      options,
     );
   }
 
@@ -14487,7 +14514,7 @@ class GpuiSidebarRuntime {
     action: GpuiSidebarNativeProjectPathAction,
     projectId: string,
     originalMessage: SidebarToExtensionMessage,
-    options: { filePath?: string } = {},
+    options: { filePath?: string; preferredInterface?: PreferredAgentInterface } = {},
   ): boolean {
     const normalizedProjectId = projectId.trim();
     if (!normalizedProjectId) {
@@ -14502,6 +14529,9 @@ class GpuiSidebarRuntime {
     const payload = JSON.stringify({
       action,
       ...(options.filePath ? { filePath: options.filePath } : {}),
+      ...(options.preferredInterface
+        ? { preferredInterface: options.preferredInterface }
+        : {}),
       projectId: normalizedProjectId,
       type: GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
       version: GPUI_SIDEBAR_NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,

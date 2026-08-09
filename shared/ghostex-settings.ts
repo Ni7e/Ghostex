@@ -90,6 +90,8 @@ export function clampSidebarCollapseAnimationDurationMs(value: number): number {
  * hosts that only persist unknown keys need no change to support it.
  */
 export type SidebarVersion = "v1" | "v2";
+/** The surface shown first when a newly launched agent supports Session Chat. */
+export type PreferredAgentInterface = "terminal" | "chat";
 /**
  * CDXC:SidebarV2 2026-07-29:
  * Sidebar V2 renders one flat session inbox by default and can switch to
@@ -1006,6 +1008,8 @@ export type ghostexSettings = {
   sessionStatusIndicatorSize: SessionStatusIndicatorSize;
   sessionPersistenceProvider: SessionPersistenceProvider;
   showSessionIdInTerminalPanes: boolean;
+  /** Newly launched supported agents still start a terminal, then show this surface first. */
+  preferredAgentInterface: PreferredAgentInterface;
   /**
    * CDXC:SidebarV2 2026-07-29:
    * The sidebar version selector is the rollout switch for the Inbox sidebar.
@@ -1758,6 +1762,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * identifiers unless they explicitly enable the pane overlay.
    */
   showSessionIdInTerminalPanes: false,
+  preferredAgentInterface: "terminal",
   /**
    * CDXC:SidebarV2 2026-07-29:
    * The classic sidebar stays the default for every user. Sidebar V2 must be
@@ -2096,6 +2101,14 @@ export const SIDEBAR_VERSION_OPTIONS: ReadonlyArray<{
 }> = [
   { label: "Standard", value: "v1" },
   { label: "Inbox (Beta)", value: "v2" },
+];
+
+export const PREFERRED_AGENT_INTERFACE_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: PreferredAgentInterface;
+}> = [
+  { label: "Terminal", value: "terminal" },
+  { label: "Chat", value: "chat" },
 ];
 
 export const SIDEBAR_V2_LAYOUT_OPTIONS: ReadonlyArray<{
@@ -2924,6 +2937,13 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     sidebarVersion: normalizeSidebarVersion(
       readString(source, "sidebarVersion", DEFAULT_ghostex_SETTINGS.sidebarVersion),
     ),
+    preferredAgentInterface: normalizePreferredAgentInterface(
+      readString(
+        source,
+        "preferredAgentInterface",
+        DEFAULT_ghostex_SETTINGS.preferredAgentInterface,
+      ),
+    ),
     sidebarV2Layout: normalizeSidebarV2Layout(
       readString(source, "sidebarV2Layout", DEFAULT_ghostex_SETTINGS.sidebarV2Layout),
     ),
@@ -3732,6 +3752,12 @@ function normalizeSidebarProjectGroupStyle(
 
 function normalizeSidebarVersion(value: string | undefined): SidebarVersion {
   return value === "v2" ? "v2" : DEFAULT_ghostex_SETTINGS.sidebarVersion;
+}
+
+function normalizePreferredAgentInterface(
+  value: string | undefined,
+): PreferredAgentInterface {
+  return value === "chat" ? "chat" : DEFAULT_ghostex_SETTINGS.preferredAgentInterface;
 }
 
 function normalizeSidebarV2Layout(value: string | undefined): SidebarV2Layout {
