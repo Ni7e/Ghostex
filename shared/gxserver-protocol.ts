@@ -655,6 +655,8 @@ export interface GxserverSaveStashedPromptParams {
 }
 
 export interface GxserverSaveStashedPromptResult {
+  /** True only when this save inserted a new stash row. */
+  created: boolean;
   prompt: GxserverStashedPrompt;
 }
 

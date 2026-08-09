@@ -455,7 +455,7 @@ impl<'a> DomainRepository<'a> {
             let prompt = read_stashed_prompt_row(self.db, &prompt_id)?.ok_or_else(|| {
                 DomainStateError::corrupt_state("Saved prompt vanished during update.")
             })?;
-            return Ok(json!({ "prompt": prompt }));
+            return Ok(json!({ "created": false, "prompt": prompt }));
         }
         let existing_prompt_id: Option<String> = self
             .db
@@ -471,7 +471,7 @@ impl<'a> DomainRepository<'a> {
             )
             .optional()
             .map_err(sql_error)?;
-        let prompt_id = match existing_prompt_id {
+        let (prompt_id, created) = match existing_prompt_id {
             Some(prompt_id) => {
                 self.db
                     .execute(
@@ -485,7 +485,7 @@ impl<'a> DomainRepository<'a> {
                         params![prompt_id, session_id, cwd, timestamp],
                     )
                     .map_err(sql_error)?;
-                prompt_id
+                (prompt_id, false)
             }
             None => {
                 let prompt_id = create_unique_stashed_prompt_id(self.db)?;
@@ -512,13 +512,13 @@ impl<'a> DomainRepository<'a> {
                         params![MAX_STASHED_PROMPTS],
                     )
                     .map_err(sql_error)?;
-                prompt_id
+                (prompt_id, true)
             }
         };
         let prompt = read_stashed_prompt_row(self.db, &prompt_id)?.ok_or_else(|| {
             DomainStateError::corrupt_state("Stashed prompt vanished during save.")
         })?;
-        Ok(json!({ "prompt": prompt }))
+        Ok(json!({ "created": created, "prompt": prompt }))
     }
 
     pub fn list_stashed_prompts(&self, params: &Map<String, Value>) -> DomainResult<Value> {
