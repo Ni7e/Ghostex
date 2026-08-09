@@ -51,6 +51,7 @@ interface ChatBridgeNamespace {
   gxserverBootstrap?: ChatGxserverBootstrap;
   onGxserverBootstrapChanged?: (bootstrap: ChatGxserverBootstrap) => void;
   onSessionChatFocusComposerRequested?: () => void;
+  onSessionChatHandoffToTerminalRequested?: () => void;
   onSessionChatInsertPromptRequested?: (payload: { content?: unknown }) => void;
   onSessionChatStashPromptRequested?: () => void;
 }
@@ -378,14 +379,31 @@ function createGpuiSessionChatComposerBridge(
         }
       };
       const requestFocus = (): void => actions.focus();
+      const requestHandoffToTerminal = (): void => {
+        void actions
+          .handoffToTerminal()
+          .then((content) => {
+            postSessionChatHostAction("draftHandoffToTerminalComplete", { content });
+          })
+          .catch(() => {
+            postSessionChatHostAction("draftHandoffToTerminalFailed");
+          });
+      };
       const requestStash = (): void => actions.requestStash();
       namespace.onSessionChatFocusComposerRequested = requestFocus;
+      namespace.onSessionChatHandoffToTerminalRequested = requestHandoffToTerminal;
       namespace.onSessionChatInsertPromptRequested = insertPrompt;
       namespace.onSessionChatStashPromptRequested = requestStash;
       postSessionChatHostAction("composerReady");
       return () => {
         if (namespace.onSessionChatFocusComposerRequested === requestFocus) {
           delete namespace.onSessionChatFocusComposerRequested;
+        }
+        if (
+          namespace.onSessionChatHandoffToTerminalRequested ===
+          requestHandoffToTerminal
+        ) {
+          delete namespace.onSessionChatHandoffToTerminalRequested;
         }
         if (namespace.onSessionChatInsertPromptRequested === insertPrompt) {
           delete namespace.onSessionChatInsertPromptRequested;
@@ -395,12 +413,24 @@ function createGpuiSessionChatComposerBridge(
         }
       };
     },
-    async stashPrompt(content) {
-      await rpc(bootstrap, "/api/saveStashedPrompt", {
+    async stashPrompt(content, options) {
+      const result = await rpc<{
+        created?: boolean;
+        prompt?: { promptId?: string };
+      }>(bootstrap, "/api/saveStashedPrompt", {
         content,
         projectId,
         sessionId,
       });
+      const promptId = result.prompt?.promptId;
+      if (options?.transient && result.created === true && promptId) {
+        try {
+          await rpc(bootstrap, "/api/deleteStashedPrompt", { promptId });
+        } catch {
+          // The draft is already durable. Cleanup can be retried from Prompts
+          // without turning a successful handoff into lost composer text.
+        }
+      }
     },
   };
 }
