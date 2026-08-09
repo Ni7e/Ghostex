@@ -84,10 +84,14 @@ pub(super) fn load_cef_runtime() -> Result<PlatformCefRuntime> {
     if !library.is_file() {
         anyhow::bail!("verified CEF runtime is missing {}", library.display());
     }
-    eprintln!(
-        "Ghostex CEF runtime: verified Linux component {}",
-        runtime_dir.display()
-    );
+    if crate::shared_settings::shared_sidebar_settings_snapshot().debugging_mode()
+        && crate::support_logs::scenario_id_enabled("native.host.lifecycle")
+    {
+        eprintln!(
+            "Ghostex CEF runtime: verified Linux component {}",
+            runtime_dir.display()
+        );
+    }
     Ok(PlatformCefRuntime)
 }
 
@@ -363,8 +367,7 @@ pub(super) fn apply_platform_settings(settings: &mut cef::Settings) {
     let runtime_dir = std::env::var_os(crate::cef_component_window::CEF_RUNTIME_DIR_ENV)
         .map(std::path::PathBuf::from)
         .expect("verified CEF runtime directory must be configured before CEF initialization");
-    settings.resources_dir_path =
-        cef::CefString::from(runtime_dir.to_string_lossy().as_ref());
+    settings.resources_dir_path = cef::CefString::from(runtime_dir.to_string_lossy().as_ref());
     settings.locales_dir_path =
         cef::CefString::from(runtime_dir.join("locales").to_string_lossy().as_ref());
 }

@@ -21,6 +21,8 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { TOOLTIP_MOTION_CLASS_NAME } from "../components/ui/tooltip-config";
+import { cn } from "../lib/utils";
 import {
   DEFAULT_TERMINAL_SESSION_TITLE,
   type SidebarSessionItem,
@@ -43,13 +45,7 @@ import { formatRelativeTime } from "./relative-time";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import { useRelativeTimeTick } from "./use-relative-time-tick";
 
-/*
- * CDXC:SessionTooltips 2026-05-18-14:53:
- * Session hover tooltips should wait one second longer than the app-wide
- * tooltip delay so incidental cursor movement over session rows does not
- * immediately cover the sidebar while users scan active work.
- */
-const SESSION_HOVER_TOOLTIP_DELAY_MS = TOOLTIP_DELAY_MS + 1_000;
+const SESSION_HOVER_TOOLTIP_DELAY_MS = TOOLTIP_DELAY_MS;
 const SESSION_TOOLTIP_VIEWPORT_MARGIN_PX = 8;
 const SESSION_TOOLTIP_TRIGGER_OFFSET_PX = 8;
 const CLOSE_AFTER_DONE_ARMED_REMAINING_LABEL = "03:00";
@@ -1212,18 +1208,19 @@ function CloseAfterDoneSidebarIcon({
     ? `Close After Done in ${remainingLabel}`
     : "Close After Done armed";
   return (
-    <button
-      aria-label={tooltip}
-      className={className}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick?.();
-      }}
-      title={tooltip}
-      type="button"
-    >
-      <IconClock aria-hidden="true" size={16} stroke={1.9} />
-    </button>
+    <AppTooltip content={tooltip}>
+      <button
+        aria-label={tooltip}
+        className={className}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick?.();
+        }}
+        type="button"
+      >
+        <IconClock aria-hidden="true" size={16} stroke={1.9} />
+      </button>
+    </AppTooltip>
   );
 }
 
@@ -1626,7 +1623,9 @@ export function OverflowTooltipText({
       {isOpen && tooltipContent
         ? createPortal(
             <div
-              className="session-local-tooltip-popup"
+              className={cn("session-local-tooltip-popup", TOOLTIP_MOTION_CLASS_NAME)}
+              data-side="bottom"
+              data-state="delayed-open"
               ref={tooltipPopupRef}
               role="tooltip"
               style={

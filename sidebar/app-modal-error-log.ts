@@ -28,7 +28,7 @@ declare global {
  * CDXC:AppModals 2026-04-27-14:25
  * Modal-host errors must be persisted even when debugging mode is disabled.
  * Send every captured exception to the native host so it can append a timestamped
- * area-tagged line under ~/.ghostex/logs for post-failure diagnosis.
+ * area-tagged line under the resolved Ghostex logs directory for post-failure diagnosis.
  */
 export function logAppModalError(area: string, error: unknown): void {
   const payload: AppModalErrorLogPayload = {

@@ -83,6 +83,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ButtonHTMLAttributes,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
   type FormEvent,
@@ -93,79 +94,21 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { AppTooltip, TooltipProvider } from "../../sidebar/app-tooltip";
 import { SidebarContextMenuPortal } from "../../sidebar/sidebar-context-menu-portal";
+import "../../sidebar/styles/session-overlays.css";
+import {
+  requestProjectDocsFromHost,
+  type ProjectDocsFileEntry as ManageFileEntry,
+  type ProjectDocsFilePreview as ManageFilePreview,
+  type ProjectDocsGitBaseline as ManageGitBaseline,
+  type ProjectDocsGitBaselineReason as ManageGitBaselineReason,
+  type ProjectDocsRequest as ManageFilesBridgeRequest,
+  type ProjectDocsResponse as ManageFilesBridgeResponse,
+} from "../../shared/project-docs";
 import { createEditor as createMeoEditor } from "./meo/editor";
 import { applyThemeSettings as applyMeoThemeSettings } from "./meo/helpers/theme";
 import "./meo/styles.css";
-
-type ManageFileEntry = {
-  depth: number;
-  kind: "directory" | "file";
-  modifiedAt?: string;
-  name: string;
-  path: string;
-  size?: number;
-};
-
-type ManageGitBaselineReason =
-  | "binary"
-  | "error"
-  | "git-unavailable"
-  | "ignored"
-  | "not-file"
-  | "not-repo"
-  | "too-large";
-
-type ManageGitBaseline = {
-  available: boolean;
-  baseText?: string | null;
-  headOid?: string | null;
-  maxBytesExceeded?: boolean;
-  reason?: ManageGitBaselineReason;
-  tracked: boolean;
-};
-
-type ManageFilePreview = {
-  content?: string;
-  error?: string;
-  gitBaseline?: ManageGitBaseline;
-  kind: "text" | "unsupported";
-  modifiedAt?: string;
-  name: string;
-  path: string;
-  size?: number;
-};
-
-type ManageFilesBridgeRequest = {
-  action:
-    | "addToSessionContext"
-    | "list"
-    | "read"
-    | "stat"
-    | "save"
-    | "rename"
-    | "delete"
-    | "duplicate"
-    | "createFolder"
-    | "move"
-    | "revealInFinder"
-    | "openDocsFoldersSettings";
-  content?: string;
-  newPath?: string;
-  path?: string;
-  projectEditorId: string;
-  projectId: string;
-  requestId: string;
-};
-
-type ManageFilesBridgeResponse = {
-  action: ManageFilesBridgeRequest["action"];
-  entries?: ManageFileEntry[];
-  error?: string;
-  file?: ManageFilePreview;
-  requestId: string;
-  rootName?: string;
-};
 
 type ManageAnnotationType = "comment" | "redline";
 
@@ -178,6 +121,18 @@ type ManageQuickLabel = {
   id: ManageQuickLabelId;
   text: string;
 };
+
+type ManageTooltipButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  tooltip: ReactNode;
+};
+
+function ManageTooltipButton({ tooltip, ...buttonProps }: ManageTooltipButtonProps) {
+  return (
+    <AppTooltip content={tooltip}>
+      <button {...buttonProps} />
+    </AppTooltip>
+  );
+}
 
 type ManageAnnotationImage = {
   dataUrl: string;
@@ -241,6 +196,7 @@ type ManageFileContextMenuState = {
 type ManageFileOperationState = {
   action:
     | "addToSessionContext"
+    | "copyFullPath"
     | "createFile"
     | "createFolder"
     | "delete"
@@ -1249,6 +1205,35 @@ function ManageApp() {
     }
   }, []);
 
+  const copyEntryFullPath = useCallback(
+    async (entry: ManageFileEntry) => {
+      if (fileOperation) {
+        return;
+      }
+      setFileOperation({ action: "copyFullPath", path: entry.path });
+      setError(undefined);
+      try {
+        const response = await requestManageFiles({
+          action: "copyFullPath",
+          path: entry.path,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        setFileContextMenu(undefined);
+      } catch (copyError) {
+        setError(copyError instanceof Error ? copyError.message : "Could not copy full path.");
+      } finally {
+        setFileOperation((current) =>
+          current?.action === "copyFullPath" && current.path === entry.path ? undefined : current,
+        );
+      }
+    },
+    [fileOperation, projectEditorId, projectId],
+  );
+
   const revealEntryInFinder = useCallback(
     async (entry: ManageFileEntry) => {
       if (fileOperation) {
@@ -2256,18 +2241,18 @@ function ManageApp() {
               value={query}
             />
             {query.length > 0 ? (
-              <button
+              <ManageTooltipButton
                 aria-label="Clear file search"
                 className="manage-search-clear-button"
                 onClick={() => {
                   setQuery("");
                   searchInputRef.current?.focus({ preventScroll: true });
                 }}
-                title="Clear file search"
+                tooltip="Clear file search"
                 type="button"
               >
                 <IconX aria-hidden="true" size={14} stroke={1.8} />
-              </button>
+              </ManageTooltipButton>
             ) : null}
           </div>
           <div
@@ -2329,19 +2314,20 @@ function ManageApp() {
         </button>
       )}
       {!sidebarHidden && !sidebarFloating ? (
-        <div
-          aria-label="Resize file sidebar"
-          aria-orientation="vertical"
-          aria-valuemax={MANAGE_SIDEBAR_MAX_WIDTH}
-          aria-valuemin={MANAGE_SIDEBAR_MIN_WIDTH}
-          aria-valuenow={Math.round(sidebarWidth)}
-          className="manage-sidebar-resizer"
-          onKeyDown={handleSidebarResizeKeyDown}
-          onPointerDown={handleSidebarResizePointerDown}
-          role="separator"
-          tabIndex={0}
-          title="Resize file sidebar"
-        />
+        <AppTooltip content="Resize file sidebar">
+          <div
+            aria-label="Resize file sidebar"
+            aria-orientation="vertical"
+            aria-valuemax={MANAGE_SIDEBAR_MAX_WIDTH}
+            aria-valuemin={MANAGE_SIDEBAR_MIN_WIDTH}
+            aria-valuenow={Math.round(sidebarWidth)}
+            className="manage-sidebar-resizer"
+            onKeyDown={handleSidebarResizeKeyDown}
+            onPointerDown={handleSidebarResizePointerDown}
+            role="separator"
+            tabIndex={0}
+          />
+        </AppTooltip>
       ) : null}
       <section className="manage-preview">
         <ManagePreview
@@ -2353,6 +2339,7 @@ function ManageApp() {
           hasExternalChanges={hasExternalChanges}
           onAnnotationsChange={updateAnnotationsForSelectedFile}
           onDraftContentChange={setDraftContent}
+          onOpenDocument={(path) => void readFile(path)}
           onReload={() => {
             if (selectedPath) {
               void readFile(selectedPath);
@@ -2378,6 +2365,7 @@ function ManageApp() {
             fileOperation.path === contextMenuEntry.path
           }
           onAddToSessionContext={() => void addFileToSessionContext(contextMenuEntry)}
+          onCopyFullPath={() => void copyEntryFullPath(contextMenuEntry)}
           onCopyPath={() => void copyEntryPath(contextMenuEntry)}
           onCreateFileHere={(kind) => {
             if (contextMenuCanCreateHere) {
@@ -2511,7 +2499,7 @@ function ManageSidebarActions({
 
   return (
     <div className="manage-sidebar-actions" ref={wrapperRef}>
-      <button
+      <ManageTooltipButton
         aria-label={bulkDirectoryActionLabel}
         className="manage-icon-button manage-sidebar-tree-toggle"
         disabled={!hasExpandableDirectories}
@@ -2520,12 +2508,12 @@ function ManageSidebarActions({
           setMenuOpen(false);
           onToggleAllDirectories();
         }}
-        title={bulkDirectoryActionLabel}
+        tooltip={bulkDirectoryActionLabel}
         type="button"
       >
         <BulkDirectoryIcon aria-hidden="true" size={14} stroke={1.9} />
-      </button>
-      <button
+      </ManageTooltipButton>
+      <ManageTooltipButton
         aria-expanded={createMenuOpen}
         aria-haspopup="menu"
         aria-label="Create docs item"
@@ -2535,11 +2523,11 @@ function ManageSidebarActions({
           setCreateMenuOpen((current) => !current);
           setMenuOpen(false);
         }}
-        title="Create docs item"
+        tooltip="Create docs item"
         type="button"
       >
         <IconPlus aria-hidden="true" size={15} stroke={1.9} />
-      </button>
+      </ManageTooltipButton>
       {/*
         CDXC:DocsSidebar 2026-06-30-21:26:
         The Docs sidebar header should place the overflow menu before the Hide sidebar control so the two rightmost buttons match the requested visual order while keeping their existing actions unchanged.
@@ -2758,6 +2746,7 @@ function ManageFileContextMenu({
   creatingKind,
   isCreatingFolder,
   onAddToSessionContext,
+  onCopyFullPath,
   onCopyPath,
   onCreateFileHere,
   onCreateFolderHere,
@@ -2777,6 +2766,7 @@ function ManageFileContextMenu({
   creatingKind?: ManageArtifactKind;
   isCreatingFolder: boolean;
   onAddToSessionContext: () => void;
+  onCopyFullPath: () => void;
   onCopyPath: () => void;
   onCreateFileHere: (kind: ManageArtifactKind) => void;
   onCreateFolderHere: () => void;
@@ -2792,7 +2782,7 @@ function ManageFileContextMenu({
   const isBusy = Boolean(pendingAction);
   return (
     <SidebarContextMenuPortal
-      menuClassName="manage-file-context-menu"
+      menuClassName="session-context-menu manage-file-context-menu"
       menuStyle={{
         left: `${position.x}px`,
         position: "fixed",
@@ -2801,48 +2791,58 @@ function ManageFileContextMenu({
       onDismiss={onDismiss}
     >
       <button
-        className="manage-file-context-menu-item"
+        className="session-context-menu-item manage-file-context-menu-item"
         disabled={isBusy}
         onClick={onRevealInFinder}
         role="menuitem"
         type="button"
       >
-        <IconFolderOpen aria-hidden="true" size={14} stroke={1.8} />
+        <IconFolderOpen aria-hidden="true" className="session-context-menu-icon" size={14} stroke={1.8} />
         {pendingAction === "revealInFinder" ? "Revealing" : "Reveal in Finder"}
       </button>
       <button
-        className="manage-file-context-menu-item"
+        className="session-context-menu-item manage-file-context-menu-item"
         onClick={onCopyPath}
         role="menuitem"
         type="button"
       >
-        <IconCopy aria-hidden="true" size={14} stroke={1.8} />
+        <IconCopy aria-hidden="true" className="session-context-menu-icon" size={14} stroke={1.8} />
         Copy Relative Path
+      </button>
+      <button
+        className="session-context-menu-item manage-file-context-menu-item"
+        disabled={isBusy}
+        onClick={onCopyFullPath}
+        role="menuitem"
+        type="button"
+      >
+        <IconCopy aria-hidden="true" className="session-context-menu-icon" size={14} stroke={1.8} />
+        {pendingAction === "copyFullPath" ? "Copying Full Path" : "Copy Full Path"}
       </button>
       {canAddToSessionContext ? (
         <button
-          className="manage-file-context-menu-item"
+          className="session-context-menu-item manage-file-context-menu-item"
           disabled={isBusy}
           onClick={onAddToSessionContext}
           role="menuitem"
           type="button"
         >
-          <IconMessagePlus aria-hidden="true" size={14} stroke={1.8} />
+          <IconMessagePlus aria-hidden="true" className="session-context-menu-icon" size={14} stroke={1.8} />
           {pendingAction === "addToSessionContext" ? "Adding context" : "Add to Session Context"}
         </button>
       ) : null}
       {canCreateHere ? (
         <>
-          <div className="manage-file-context-menu-divider" role="separator" />
+          <div className="session-context-menu-divider manage-file-context-menu-divider" role="separator" />
           <button
             aria-expanded={createFileMenuOpen}
-            className="manage-file-context-menu-item"
+            className="session-context-menu-item manage-file-context-menu-item"
             disabled={isBusy}
             onClick={() => setCreateFileMenuOpen((current) => !current)}
             role="menuitem"
             type="button"
           >
-            <IconFile aria-hidden="true" size={14} stroke={1.8} />
+            <IconFile aria-hidden="true" className="session-context-menu-icon" size={14} stroke={1.8} />
             <span>New File Here</span>
             <span className="manage-file-context-menu-spacer" />
             <IconChevronRight
@@ -2856,7 +2856,7 @@ function ManageFileContextMenu({
           {createFileMenuOpen ? (
             <div className="manage-file-context-menu-nested" role="group">
               <button
-                className="manage-file-context-menu-item manage-file-context-menu-subitem"
+                className="session-context-menu-item manage-file-context-menu-item manage-file-context-menu-subitem"
                 disabled={isBusy}
                 onClick={() => onCreateFileHere("markdown")}
                 role="menuitem"
@@ -2866,7 +2866,7 @@ function ManageFileContextMenu({
                 {creatingKind === "markdown" ? "Creating Markdown" : "Markdown"}
               </button>
               <button
-                className="manage-file-context-menu-item manage-file-context-menu-subitem"
+                className="session-context-menu-item manage-file-context-menu-item manage-file-context-menu-subitem"
                 disabled={isBusy}
                 onClick={() => onCreateFileHere("html")}
                 role="menuitem"
@@ -2876,7 +2876,7 @@ function ManageFileContextMenu({
                 {creatingKind === "html" ? "Creating HTML" : "HTML"}
               </button>
               <button
-                className="manage-file-context-menu-item manage-file-context-menu-subitem"
+                className="session-context-menu-item manage-file-context-menu-item manage-file-context-menu-subitem"
                 disabled={isBusy}
                 onClick={() => onCreateFileHere("excalidraw")}
                 role="menuitem"
@@ -2888,7 +2888,7 @@ function ManageFileContextMenu({
             </div>
           ) : null}
           <button
-            className="manage-file-context-menu-item"
+            className="session-context-menu-item manage-file-context-menu-item"
             disabled={isBusy}
             onClick={onCreateFolderHere}
             role="menuitem"
@@ -2901,9 +2901,9 @@ function ManageFileContextMenu({
       ) : null}
       {canDuplicate ? (
         <>
-          <div className="manage-file-context-menu-divider" role="separator" />
+          <div className="session-context-menu-divider manage-file-context-menu-divider" role="separator" />
           <button
-            className="manage-file-context-menu-item"
+            className="session-context-menu-item manage-file-context-menu-item"
             disabled={isBusy}
             onClick={onDuplicate}
             role="menuitem"
@@ -2916,9 +2916,9 @@ function ManageFileContextMenu({
       ) : null}
       {canRenameOrDelete ? (
         <>
-          {!canDuplicate ? <div className="manage-file-context-menu-divider" role="separator" /> : null}
+          {!canDuplicate ? <div className="session-context-menu-divider manage-file-context-menu-divider" role="separator" /> : null}
           <button
-            className="manage-file-context-menu-item"
+            className="session-context-menu-item manage-file-context-menu-item"
             disabled={isBusy}
             onClick={onRename}
             role="menuitem"
@@ -2928,7 +2928,7 @@ function ManageFileContextMenu({
             Rename
           </button>
           <button
-            className="manage-file-context-menu-item manage-file-context-menu-item-danger"
+            className="session-context-menu-item session-context-menu-item-danger manage-file-context-menu-item manage-file-context-menu-item-danger"
             data-confirming={String(confirmingDelete)}
             disabled={isBusy}
             onClick={onDelete}
@@ -3041,6 +3041,7 @@ function ManagePreview({
   isDirty,
   onAnnotationsChange,
   onDraftContentChange,
+  onOpenDocument,
   onReload,
   preview,
   previewState,
@@ -3055,6 +3056,7 @@ function ManagePreview({
   isDirty: boolean;
   onAnnotationsChange: (updater: (annotations: ManageAnnotation[]) => ManageAnnotation[]) => void;
   onDraftContentChange: (content: string) => void;
+  onOpenDocument: (path: string) => void;
   onReload: () => void;
   preview?: ManageFilePreview;
   previewState: "idle" | "loading" | "ready" | "error";
@@ -3471,24 +3473,24 @@ function ManagePreview({
         </div>
         {isMarkdown ? (
           <div className="manage-preview-header-actions">
-            <button
+            <ManageTooltipButton
               aria-label="Add global comment"
               onClick={(event) =>
                 openGlobalComment(
                   selectionAnchorFromRect(event.currentTarget.getBoundingClientRect()) ?? defaultManageSelectionAnchor(),
                 )
               }
-              title="Add global comment"
+              tooltip="Add global comment"
               type="button"
             >
               <IconMessagePlus aria-hidden="true" size={14} />
               <span>Comment</span>
-            </button>
-            <button
+            </ManageTooltipButton>
+            <ManageTooltipButton
               aria-label="Copy feedback"
               disabled={annotations.length === 0}
               onClick={() => void copyFeedback()}
-              title="Copy feedback"
+              tooltip="Copy feedback"
               type="button"
             >
               {feedbackCopyState === "copied" ? (
@@ -3497,14 +3499,14 @@ function ManagePreview({
                 <IconCopy aria-hidden="true" size={14} />
               )}
               <span>{feedbackCopyState === "copied" ? "Copied" : "Copy"}</span>
-            </button>
-            <button
+            </ManageTooltipButton>
+            <ManageTooltipButton
               aria-label="Clear all annotations"
               className="manage-clear-annotations-button"
               data-confirming={String(clearAnnotationsConfirming)}
               disabled={annotations.length === 0}
               onClick={clearAllAnnotations}
-              title="Clear All Annotations"
+              tooltip="Clear All Annotations"
               type="button"
             >
               {/*
@@ -3513,59 +3515,59 @@ function ManagePreview({
               */}
               <IconX aria-hidden="true" size={14} />
               <span>{clearAnnotationsConfirming ? "Confirm" : "Clear"}</span>
-            </button>
+            </ManageTooltipButton>
             <div className="manage-annotation-dropdown-shell" ref={annotationsDropdownRef}>
-              <button
+              <ManageTooltipButton
                 aria-controls="manage-markdown-annotation-dropdown"
                 aria-expanded={annotationsDropdownOpen}
                 aria-haspopup="dialog"
                 aria-label="Show annotations"
                 className="manage-annotation-dropdown-trigger"
                 onClick={() => setAnnotationsDropdownOpen((current) => !current)}
-                title={`Annotations (${annotations.length}) · ${annotationPersistenceTitle}`}
+                tooltip={`Annotations (${annotations.length}) · ${annotationPersistenceTitle}`}
                 type="button"
               >
                 <IconMessages aria-hidden="true" size={14} />
                 <span className="manage-count-badge">{annotations.length}</span>
-              </button>
+              </ManageTooltipButton>
               {annotationsDropdownOpen ? (
                 <ManageAnnotationDropdown annotations={annotations} onRemoveAnnotation={removeAnnotation} />
               ) : null}
             </div>
-            <button
+            <ManageTooltipButton
               aria-label={hasExternalChanges ? "Reload file with new changes" : "Reload file"}
               className="manage-file-reload-button"
               data-changes-available={String(hasExternalChanges)}
               onClick={onReload}
-              title={hasExternalChanges ? "Reload to show new changes" : "Reload file"}
+              tooltip={hasExternalChanges ? "Reload to show new changes" : "Reload file"}
               type="button"
             >
               <IconRefresh aria-hidden="true" size={14} />
               {hasExternalChanges ? <span aria-hidden="true" className="manage-file-change-indicator" /> : null}
-            </button>
+            </ManageTooltipButton>
           </div>
         ) : isHtml ? (
           <div className="manage-preview-header-actions">
-            <button
+            <ManageTooltipButton
               aria-label="Toggle annotations"
               aria-pressed={htmlAnnotationEnabled}
               className="manage-annotation-toggle"
               onClick={() => setHtmlAnnotationEnabled((current) => !current)}
-              title={htmlAnnotationEnabled ? "Disable annotations" : "Enable annotations"}
+              tooltip={htmlAnnotationEnabled ? "Disable annotations" : "Enable annotations"}
               type="button"
             >
               <IconMessagePlus aria-hidden="true" size={14} />
               <span>Annotate</span>
-            </button>
-            <button
+            </ManageTooltipButton>
+            <ManageTooltipButton
               aria-label="Reload HTML file"
               className="manage-file-reload-button"
               onClick={onReload}
-              title="Reload HTML file"
+              tooltip="Reload HTML file"
               type="button"
             >
               <IconRefresh aria-hidden="true" size={14} />
-            </button>
+            </ManageTooltipButton>
           </div>
         ) : null}
       </header>
@@ -3587,6 +3589,7 @@ function ManagePreview({
           annotationsEnabled={htmlAnnotationEnabled}
           content={draftContent}
           documentKey={preview.path}
+          onOpenDocument={onOpenDocument}
         />
       ) : isMarkdown ? (
         <>
@@ -3644,26 +3647,102 @@ function ManageHtmlRenderViewer({
   annotationsEnabled,
   content,
   documentKey,
+  onOpenDocument,
 }: {
   annotationsEnabled: boolean;
   content: string;
   documentKey: string;
+  onOpenDocument: (path: string) => void;
 }) {
+  const resourceBaseUrl = manageHtmlResourceBaseUrl(documentKey);
   const renderedHtml = useMemo(
     () =>
       buildManageHtmlDocument(content, {
         injectAgentation: annotationsEnabled,
-        resourceBaseUrl: manageHtmlResourceBaseUrl(documentKey),
+        resourceBaseUrl,
       }),
-    [annotationsEnabled, content, documentKey],
+    [annotationsEnabled, content, resourceBaseUrl],
   );
 
+  /*
+   * CDXC:ManageHtmlAgentation 2026-08-08:
+   * A feature named in `allow` without an explicit allowlist defaults to
+   * `'src'`, which resolves against the frame's `src` URL. This frame renders
+   * from `srcdoc` and has no `src`, so bare feature names matched no origin
+   * and disabled clipboard and fullscreen in the rendered document instead of
+   * granting them, leaving Agentation's copy button unable to write to the
+   * clipboard. Name `'self'` explicitly: the srcdoc document is same-origin
+   * with Manage, so it resolves and the grant is real.
+   *
+   * `clipboard-read` is denied rather than omitted. Omitting it inherits this
+   * surface's permissive policy, and a programmatic `clipboard.readText()`
+   * then hangs forever because Chromium wants a permission prompt that Alloy
+   * cannot show. Denying it turns that into an immediate NotAllowedError.
+   * User-initiated paste is unaffected: Cmd+V and the `paste` event carry
+   * their data through `clipboardData`, which this policy does not gate.
+   */
   return (
     <iframe
-      allow="clipboard-read; clipboard-write; fullscreen"
+      allow="clipboard-read 'none'; clipboard-write 'self'; fullscreen 'self'"
       aria-label="Rendered HTML document"
       className="manage-html-render-view"
       data-document-key={documentKey}
+      onLoad={(event) => {
+        /*
+         * CDXC:ManageHtmlDocumentNavigation 2026-08-06:
+         * The synthetic folder base that makes sibling assets work also changes
+         * fragment-link resolution inside srcdoc. Keep fragments owned by the
+         * rendered document, and hand sibling HTML files back to Docs so its
+         * selected path, header, and preview remain synchronized.
+         */
+        const renderedDocument = event.currentTarget.contentDocument;
+        if (!renderedDocument) {
+          return;
+        }
+        renderedDocument.addEventListener("click", (clickEvent) => {
+          const mouseEvent = clickEvent as MouseEvent;
+          if (
+            clickEvent.defaultPrevented ||
+            mouseEvent.button !== 0 ||
+            mouseEvent.altKey ||
+            mouseEvent.ctrlKey ||
+            mouseEvent.metaKey ||
+            mouseEvent.shiftKey
+          ) {
+            return;
+          }
+          const eventTarget = clickEvent.target as {
+            closest?: (selector: string) => Element | null;
+          } | null;
+          const anchor = eventTarget?.closest?.("a[href]") as HTMLAnchorElement | null;
+          const href = anchor?.getAttribute("href")?.trim();
+          if (
+            !anchor ||
+            !href ||
+            anchor.hasAttribute("download") ||
+            (anchor.target && anchor.target !== "_self")
+          ) {
+            return;
+          }
+          if (href.startsWith("#")) {
+            const targetId = decodeManageHtmlFragment(href);
+            const target = targetId
+              ? renderedDocument.getElementById(targetId)
+              : renderedDocument.documentElement;
+            if (target) {
+              clickEvent.preventDefault();
+              target.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+            return;
+          }
+          const linkedDocumentPath = manageHtmlLinkedDocumentPath(href, resourceBaseUrl);
+          if (!linkedDocumentPath || linkedDocumentPath === documentKey) {
+            return;
+          }
+          clickEvent.preventDefault();
+          onOpenDocument(linkedDocumentPath);
+        }, true);
+      }}
       sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-same-origin allow-scripts"
       srcDoc={renderedHtml}
       title={documentKey}
@@ -4236,49 +4315,49 @@ function ManageMeoTopToolbar({
     >
       <div aria-label="Formatting" className="format-group" role="group">
         <div className="heading-wrapper">
-          <button
+          <ManageTooltipButton
             className="format-button"
             data-action="heading"
             onClick={() => onFormat("heading", 1)}
-            title="Heading"
+            tooltip="Heading"
             type="button"
           >
             <MeoHeadingIcon aria-hidden="true" size={18} />
-          </button>
+          </ManageTooltipButton>
           <div className="heading-dropdown-wrapper">
             <div aria-label="Heading levels" className="heading-dropdown" role="menu">
               {headingIcons.map((HeadingIcon, index) => {
                 const level = index + 1;
                 return (
-                  <button
+                  <ManageTooltipButton
                     className="heading-dropdown-option"
                     data-level={level}
                     key={level}
                     onClick={() => onFormat("heading", level)}
-                    title={`Heading ${level}`}
+                    tooltip={`Heading ${level}`}
                     type="button"
                   >
                     <HeadingIcon aria-hidden="true" size={18} />
-                  </button>
+                  </ManageTooltipButton>
                 );
               })}
             </div>
           </div>
         </div>
-        <button className="format-button" data-action="bulletList" onClick={() => onFormat("bulletList")} title="Bullet List" type="button">
+        <ManageTooltipButton className="format-button" data-action="bulletList" onClick={() => onFormat("bulletList")} tooltip="Bullet List" type="button">
           <MeoListIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="numberedList" onClick={() => onFormat("numberedList")} title="Numbered List" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="numberedList" onClick={() => onFormat("numberedList")} tooltip="Numbered List" type="button">
           <MeoListOrderedIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="task" onClick={() => onFormat("task")} title="Task" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="task" onClick={() => onFormat("task")} tooltip="Task" type="button">
           <MeoListTodoIcon aria-hidden="true" size={18} />
-        </button>
+        </ManageTooltipButton>
         <div className="format-separator" role="separator" />
         <div className="table-wrapper">
-          <button className="format-button" data-action="table" onClick={() => onFormat("table", tableSize)} title="Table" type="button">
+          <ManageTooltipButton className="format-button" data-action="table" onClick={() => onFormat("table", tableSize)} tooltip="Table" type="button">
             <MeoTable2Icon aria-hidden="true" size={18} />
-          </button>
+          </ManageTooltipButton>
           <div className="table-dropdown-wrapper">
             <div className="table-dropdown">
               <div className="table-grid">
@@ -4304,27 +4383,27 @@ function ManageMeoTopToolbar({
             </div>
           </div>
         </div>
-        <button className="format-button" data-action="codeBlock" onClick={() => onFormat("codeBlock")} title="Code Block" type="button">
+        <ManageTooltipButton className="format-button" data-action="codeBlock" onClick={() => onFormat("codeBlock")} tooltip="Code Block" type="button">
           <MeoCodeIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="link" onClick={() => onFormat("link")} title="Link" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="link" onClick={() => onFormat("link")} tooltip="Link" type="button">
           <MeoLinkIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="wikiLink" onClick={() => onFormat("wikiLink")} title="Wiki Link" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="wikiLink" onClick={() => onFormat("wikiLink")} tooltip="Wiki Link" type="button">
           <MeoBracketsIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="image" onClick={() => onFormat("image")} title="Image" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="image" onClick={() => onFormat("image")} tooltip="Image" type="button">
           <MeoImageIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="quote" onClick={() => onFormat("quote")} title="Quote" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="quote" onClick={() => onFormat("quote")} tooltip="Quote" type="button">
           <MeoQuoteIcon aria-hidden="true" size={18} />
-        </button>
-        <button className="format-button" data-action="hr" onClick={() => onFormat("hr")} title="Horizontal Rule" type="button">
+        </ManageTooltipButton>
+        <ManageTooltipButton className="format-button" data-action="hr" onClick={() => onFormat("hr")} tooltip="Horizontal Rule" type="button">
           <MeoMinusIcon aria-hidden="true" size={18} />
-        </button>
+        </ManageTooltipButton>
       </div>
       <div className="right-group">
-        <button
+        <ManageTooltipButton
           aria-pressed={findOpen}
           className={`format-button toggle-button${findOpen ? " is-active" : ""}`}
           data-action="find"
@@ -4335,47 +4414,47 @@ function ManageMeoTopToolbar({
             }
             onFindOpenChange(true);
           }}
-          title="Find and Replace"
+          tooltip="Find and Replace"
           type="button"
         >
           <MeoSearchIcon aria-hidden="true" size={18} />
-        </button>
-        <button
+        </ManageTooltipButton>
+        <ManageTooltipButton
           aria-pressed={contentMaxWidthEnabled}
           className={`format-button toggle-button manage-toolbar-optional-button${contentMaxWidthEnabled ? " is-active" : ""}`}
           data-action="contentMaxWidth"
           hidden={hideOptionalControls}
           onClick={onToggleContentMaxWidth}
-          title={contentMaxWidthEnabled ? "Use Full Content Width" : "Constrain Content Width"}
+          tooltip={contentMaxWidthEnabled ? "Use Full Content Width" : "Constrain Content Width"}
           type="button"
         >
           <MeoPanelLeftRightDashedIcon aria-hidden="true" size={18} />
-        </button>
-        <button
+        </ManageTooltipButton>
+        <ManageTooltipButton
           aria-pressed={lineNumbersVisible}
           className={`format-button toggle-button manage-toolbar-optional-button${lineNumbersVisible ? " is-active" : ""}`}
           data-action="lineNumbers"
           hidden={hideOptionalControls}
           onClick={onToggleLineNumbers}
-          title={lineNumbersVisible ? "Hide Line Numbers" : "Show Line Numbers"}
+          tooltip={lineNumbersVisible ? "Hide Line Numbers" : "Show Line Numbers"}
           type="button"
         >
           <MeoHashIcon aria-hidden="true" size={18} />
-        </button>
-        <button
+        </ManageTooltipButton>
+        <ManageTooltipButton
           aria-pressed={gitGutterVisible}
           className={`format-button toggle-button manage-toolbar-optional-button${gitGutterVisible ? " is-active" : ""}`}
           data-action="gitChangesGutter"
           hidden={hideOptionalControls}
           onClick={onToggleGitGutter}
-          title={gitGutterVisible ? "Hide Git Changes" : "Show Git Changes"}
+          tooltip={gitGutterVisible ? "Hide Git Changes" : "Show Git Changes"}
           type="button"
         >
           <MeoGitCompareIcon aria-hidden="true" size={18} />
-        </button>
+        </ManageTooltipButton>
       </div>
       <div aria-label="Markdown mode" className="mode-group" role="group">
-        <button
+        <ManageTooltipButton
           aria-label={`Markdown mode: ${currentMode === "live" ? "Live" : "Source"}. Switch to ${
             currentMode === "live" ? "Source" : "Live"
           }.`}
@@ -4383,11 +4462,11 @@ function ManageMeoTopToolbar({
           className="mode-button manage-mode-toggle is-active"
           data-mode={currentMode}
           onClick={() => onModeChange(currentMode === "live" ? "source" : "live")}
-          title={currentMode === "live" ? "Switch to Source" : "Switch to Live"}
+          tooltip={currentMode === "live" ? "Switch to Source" : "Switch to Live"}
           type="button"
         >
           {currentMode === "live" ? "Live" : "Source"}
-        </button>
+        </ManageTooltipButton>
       </div>
       <div aria-label="Find and replace" className={`find-panel${findOpen ? " is-visible" : ""}`} role="search">
         <div className="find-row">
@@ -4404,32 +4483,32 @@ function ManageMeoTopToolbar({
             />
             <span className={`find-status${findStatusIsError ? " is-error" : ""}`}>{findStatus}</span>
           </div>
-          <button
+          <ManageTooltipButton
             aria-label="Whole Word"
             aria-pressed={findWholeWord}
             className={`format-button toggle-button find-option-button${findWholeWord ? " is-active" : ""}`}
             onClick={() => onFindWholeWordChange(!findWholeWord)}
-            title="Whole Word"
+            tooltip="Whole Word"
             type="button"
           >
             <MeoWholeWordIcon aria-hidden="true" size={16} />
-          </button>
-          <button
+          </ManageTooltipButton>
+          <ManageTooltipButton
             aria-label="Case Sensitive"
             aria-pressed={findCaseSensitive}
             className={`format-button toggle-button find-option-button${findCaseSensitive ? " is-active" : ""}`}
             onClick={() => onFindCaseSensitiveChange(!findCaseSensitive)}
-            title="Case Sensitive"
+            tooltip="Case Sensitive"
             type="button"
           >
             <MeoCaseSensitiveIcon aria-hidden="true" size={16} />
-          </button>
-          <button className="format-button" onClick={() => onRunFind(true)} title="Previous Match" type="button">
+          </ManageTooltipButton>
+          <ManageTooltipButton className="format-button" onClick={() => onRunFind(true)} tooltip="Previous Match" type="button">
             <MeoChevronUpIcon aria-hidden="true" size={16} />
-          </button>
-          <button className="format-button" onClick={() => onRunFind(false)} title="Next Match" type="button">
+          </ManageTooltipButton>
+          <ManageTooltipButton className="format-button" onClick={() => onRunFind(false)} tooltip="Next Match" type="button">
             <MeoChevronDownIcon aria-hidden="true" size={16} />
-          </button>
+          </ManageTooltipButton>
         </div>
         <div className="find-row">
           <input
@@ -4441,16 +4520,16 @@ function ManageMeoTopToolbar({
             type="text"
             value={findReplacement}
           />
-          <button className="format-button" onClick={onReplaceCurrent} title="Replace Current Match" type="button">
+          <ManageTooltipButton className="format-button" onClick={onReplaceCurrent} tooltip="Replace Current Match" type="button">
             <MeoReplaceIcon aria-hidden="true" size={16} />
-          </button>
-          <button className="format-button" onClick={onReplaceAll} title="Replace All Matches" type="button">
+          </ManageTooltipButton>
+          <ManageTooltipButton className="format-button" onClick={onReplaceAll} tooltip="Replace All Matches" type="button">
             <MeoReplaceAllIcon aria-hidden="true" size={16} />
-          </button>
+          </ManageTooltipButton>
           <span aria-hidden="true" className="find-button-spacer" />
-          <button aria-label="Close Find" className="format-button find-close-button" onClick={onCloseFind} title="Close Find" type="button">
+          <ManageTooltipButton aria-label="Close Find" className="format-button find-close-button" onClick={onCloseFind} tooltip="Close Find" type="button">
             <MeoXIcon aria-hidden="true" size={16} />
-          </button>
+          </ManageTooltipButton>
         </div>
       </div>
     </div>
@@ -4480,36 +4559,36 @@ function ManageMeoSelectionFormatToolbar({
       role="toolbar"
       style={{ left: position.left, top: position.top }}
     >
-      <button
+      <ManageTooltipButton
         aria-label="Annotations"
         className="selection-inline-button manage-selection-inline-mode-button"
         onClick={onAnnotate}
-        title="Annotations"
+        tooltip="Annotations"
         type="button"
       >
         <IconMessagePlus aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Bold" className="selection-inline-button" data-action="bold" onClick={() => formatAction("bold")} title="Bold" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Bold" className="selection-inline-button" data-action="bold" onClick={() => formatAction("bold")} tooltip="Bold" type="button">
         <MeoBoldIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Italic" className="selection-inline-button" data-action="italic" onClick={() => formatAction("italic")} title="Italic" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Italic" className="selection-inline-button" data-action="italic" onClick={() => formatAction("italic")} tooltip="Italic" type="button">
         <MeoItalicIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Lineover" className="selection-inline-button" data-action="lineover" onClick={() => formatAction("lineover")} title="Lineover" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Lineover" className="selection-inline-button" data-action="lineover" onClick={() => formatAction("lineover")} tooltip="Lineover" type="button">
         <MeoStrikethroughIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Inline Code" className="selection-inline-button" data-action="inlineCode" onClick={() => formatAction("inlineCode")} title="Inline Code" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Inline Code" className="selection-inline-button" data-action="inlineCode" onClick={() => formatAction("inlineCode")} tooltip="Inline Code" type="button">
         <MeoTerminalIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Link" className="selection-inline-button" data-action="link" onClick={() => formatAction("link")} title="Link" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Link" className="selection-inline-button" data-action="link" onClick={() => formatAction("link")} tooltip="Link" type="button">
         <MeoLinkIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Wiki Link" className="selection-inline-button" data-action="wikiLink" onClick={() => formatAction("wikiLink")} title="Wiki Link" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Wiki Link" className="selection-inline-button" data-action="wikiLink" onClick={() => formatAction("wikiLink")} tooltip="Wiki Link" type="button">
         <MeoBracketsIcon aria-hidden="true" size={16} />
-      </button>
-      <button aria-label="Kbd" className="selection-inline-button" data-action="kbd" onClick={() => formatAction("kbd")} title="Kbd" type="button">
+      </ManageTooltipButton>
+      <ManageTooltipButton aria-label="Kbd" className="selection-inline-button" data-action="kbd" onClick={() => formatAction("kbd")} tooltip="Kbd" type="button">
         <MeoKeyboardIcon aria-hidden="true" size={16} />
-      </button>
+      </ManageTooltipButton>
       <div aria-label="Suggested replacements" className="selection-inline-suggestions" hidden role="group" />
     </div>,
     document.body,
@@ -4537,45 +4616,48 @@ function ManageAnnotationToolbar({
         top: Math.max(8, anchor.top - 46),
       }}
     >
-      <button
-        aria-label="Comment"
-        data-tooltip="Comment"
-        onClick={onComment}
-        style={manageToolbarActionStyle(MANAGE_COMMENT_ANNOTATION_COLOR)}
-        type="button"
-      >
-        <IconMessagePlus aria-hidden="true" size={15} />
-      </button>
-      <button
-        aria-label="Formatting"
-        data-tooltip="Formatting"
-        onClick={onFormatting}
-        style={manageToolbarActionStyle(MANAGE_MEO_HEADING_COLOR)}
-        type="button"
-      >
-        <MeoBoldIcon aria-hidden="true" size={15} />
-      </button>
-      {MANAGE_QUICK_LABELS.map((label) => (
+      <AppTooltip content="Comment" side="top">
         <button
-          aria-label={label.text}
-          data-tooltip={label.text}
-          key={label.id}
-          onClick={() => onQuickLabel(label)}
-          style={manageToolbarActionStyle(label.color)}
+          aria-label="Comment"
+          onClick={onComment}
+          style={manageToolbarActionStyle(MANAGE_COMMENT_ANNOTATION_COLOR)}
           type="button"
         >
-          {renderManageQuickLabelIcon(label.id)}
+          <IconMessagePlus aria-hidden="true" size={15} />
         </button>
+      </AppTooltip>
+      <AppTooltip content="Formatting" side="top">
+        <button
+          aria-label="Formatting"
+          onClick={onFormatting}
+          style={manageToolbarActionStyle(MANAGE_MEO_HEADING_COLOR)}
+          type="button"
+        >
+          <MeoBoldIcon aria-hidden="true" size={15} />
+        </button>
+      </AppTooltip>
+      {MANAGE_QUICK_LABELS.map((label) => (
+        <AppTooltip content={label.text} key={label.id} side="top">
+          <button
+            aria-label={label.text}
+            onClick={() => onQuickLabel(label)}
+            style={manageToolbarActionStyle(label.color)}
+            type="button"
+          >
+            {renderManageQuickLabelIcon(label.id)}
+          </button>
+        </AppTooltip>
       ))}
-      <button
-        aria-label="Dismiss"
-        data-tooltip="Dismiss"
-        onClick={onDismiss}
-        style={manageToolbarActionStyle(MANAGE_DISMISS_TOOLBAR_COLOR)}
-        type="button"
-      >
-        <IconX aria-hidden="true" size={15} />
-      </button>
+      <AppTooltip content="Dismiss" side="top">
+        <button
+          aria-label="Dismiss"
+          onClick={onDismiss}
+          style={manageToolbarActionStyle(MANAGE_DISMISS_TOOLBAR_COLOR)}
+          type="button"
+        >
+          <IconX aria-hidden="true" size={15} />
+        </button>
+      </AppTooltip>
     </div>,
     document.body,
   );
@@ -4608,7 +4690,7 @@ function ManageAnnotationPreviewCard({
           </span>
         ) : null}
       </header>
-      <button
+      <ManageTooltipButton
         aria-label="Remove annotation"
         className="manage-annotation-preview-remove-button manage-icon-button"
         onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -4619,11 +4701,11 @@ function ManageAnnotationPreviewCard({
           event.preventDefault();
           event.stopPropagation();
         }}
-        title="Remove annotation"
+        tooltip="Remove annotation"
         type="button"
       >
         <IconX aria-hidden="true" size={14} />
-      </button>
+      </ManageTooltipButton>
       <p>{note}</p>
     </aside>,
     document.body,
@@ -4649,15 +4731,15 @@ function ManageCommentPopover({
   const canSubmit = Boolean(draft.note.trim()) || draft.attachments.length > 0;
   return createPortal(
     <div className="manage-comment-popover" style={commentPopoverStyle(draft.anchor)}>
-      <button
+      <ManageTooltipButton
         aria-label="Close comment composer"
         className="manage-comment-popover-close manage-icon-button"
         onClick={onCancel}
-        title="Close"
+        tooltip="Close"
         type="button"
       >
         <IconX aria-hidden="true" size={14} />
-      </button>
+      </ManageTooltipButton>
       <textarea
         aria-label="Annotation note"
         autoFocus
@@ -4768,15 +4850,15 @@ function ManageAnnotationDropdown({
             >
               <div className="manage-annotation-card-header">
                 <span>{annotationTypeLabel(annotation)}</span>
-                <button
+                <ManageTooltipButton
                   aria-label="Remove annotation"
                   className="manage-annotation-remove-button manage-icon-button"
                   onClick={() => onRemoveAnnotation(annotation.id)}
-                  title="Remove annotation"
+                  tooltip="Remove annotation"
                   type="button"
                 >
                   <IconX aria-hidden="true" size={14} />
-                </button>
+                </ManageTooltipButton>
               </div>
               {annotation.scope === "selection" ? <blockquote>{annotation.quote}</blockquote> : null}
               {note ? <p>{note}</p> : null}
@@ -4994,7 +5076,7 @@ function ManageExcalidrawEditor({
   const data = parsed.data;
   const drawingElements = data.elements ?? [];
   return (
-    <div className="manage-drawing-editor" onKeyDownCapture={suppressManageExcalidrawToolKeyBeep}>
+    <div className="manage-drawing-editor" onKeyDownCapture={handleManageExcalidrawKeyDown}>
       {parseError ? (
         <div className="manage-drawing-error">
           <IconAlertTriangle aria-hidden="true" size={15} />
@@ -5050,6 +5132,32 @@ function ManageExcalidrawEditor({
   );
 }
 
+function handleManageExcalidrawKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  /*
+   * CDXC:ManageDrawingRedoHotkey 2026-08-08:
+   * Excalidraw intentionally binds Ctrl+Y only on Windows, but Docs promises
+   * Command+Y as redo on macOS. Invoke the mounted editor's own stable redo
+   * action button so the upstream history remains the sole owner of the
+   * operation and autosave observes the normal scene change.
+   */
+  if (
+    !event.nativeEvent.isComposing &&
+    event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLocaleLowerCase() === "y"
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget
+      .querySelector<HTMLButtonElement>('[data-testid="button-redo"]:not(:disabled)')
+      ?.click();
+    return;
+  }
+  suppressManageExcalidrawToolKeyBeep(event);
+}
+
 function suppressManageExcalidrawToolKeyBeep(event: ReactKeyboardEvent<HTMLDivElement>): void {
   /*
    * CDXC:ManageDrawings 2026-06-28-05:12:
@@ -5095,27 +5203,11 @@ function requestManageFiles(
   if (!bridge) {
     return Promise.reject(new Error("Docs is unavailable in this host."));
   }
-  const requestId = `manage-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const message: ManageFilesBridgeRequest = {
-    ...request,
-    requestId,
-  };
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      window.removeEventListener(MANAGE_FILES_RESPONSE_EVENT, handleResponse);
-      reject(new Error("Docs request timed out."));
-    }, MANAGE_BRIDGE_TIMEOUT_MS);
-    function handleResponse(event: Event) {
-      const response = (event as CustomEvent<ManageFilesBridgeResponse>).detail;
-      if (response?.requestId !== requestId) {
-        return;
-      }
-      window.clearTimeout(timeout);
-      window.removeEventListener(MANAGE_FILES_RESPONSE_EVENT, handleResponse);
-      resolve(response);
-    }
-    window.addEventListener(MANAGE_FILES_RESPONSE_EVENT, handleResponse);
-    bridge.postMessage(message);
+  return requestProjectDocsFromHost(request, {
+    eventName: MANAGE_FILES_RESPONSE_EVENT,
+    eventTarget: window,
+    postMessage: (message) => bridge.postMessage(message),
+    timeoutMs: MANAGE_BRIDGE_TIMEOUT_MS,
   });
 }
 
@@ -6538,6 +6630,54 @@ function manageHtmlResourceBaseUrl(documentPath: string): string | undefined {
   return new URL(`${parentPath}/`, baseUrl).toString();
 }
 
+function decodeManageHtmlFragment(href: string): string | undefined {
+  try {
+    return decodeURIComponent(href.slice(1));
+  } catch {
+    return undefined;
+  }
+}
+
+function manageHtmlLinkedDocumentPath(
+  href: string,
+  resourceBaseUrl: string | undefined,
+): string | undefined {
+  if (!resourceBaseUrl) {
+    return undefined;
+  }
+  let baseUrl: URL;
+  let linkedUrl: URL;
+  try {
+    baseUrl = new URL(resourceBaseUrl);
+    linkedUrl = new URL(href, baseUrl);
+  } catch {
+    return undefined;
+  }
+  if (linkedUrl.origin !== baseUrl.origin) {
+    return undefined;
+  }
+  const encodedComponents = linkedUrl.pathname.split("/").filter(Boolean);
+  if (encodedComponents.length === 0) {
+    return undefined;
+  }
+  let components: string[];
+  try {
+    components = encodedComponents.map(decodeURIComponent);
+  } catch {
+    return undefined;
+  }
+  if (
+    components.some(
+      (component) =>
+        !component || component === "." || component === ".." || component.includes("\\"),
+    )
+  ) {
+    return undefined;
+  }
+  const path = components.join("/");
+  return isHtmlPath(path) ? path : undefined;
+}
+
 function injectManageHtmlResourceBase(
   documentValue: Document,
   resourceBaseUrl: string | undefined,
@@ -7642,17 +7782,11 @@ styleElement.textContent = `
   }
 
   /*
-   * CDXC:ManageFileActions 2026-06-28-04:35:
-   * The standalone Manage page does not load the shared sidebar overlay stylesheet. Define the right-click file menu and rename dialog locally so file actions remain viewport-clamped and dismissible inside the project-editor WebKit surface.
-   *
-   * CDXC:ManageFileActions 2026-06-30-01:37:
-   * The Docs file-row Rename/Delete context menu should match the polished dark popover treatment used by the sidebar dropdowns while staying anchored to the right-click coordinates. Keep the danger action visibly red, but use rounded rows, softened borders, and restrained hover chrome instead of a hard rectangular block.
-   *
-   * CDXC:ManageFileActions 2026-06-30-02:30:
-   * Docs file context menus should share the same flat #0e0e0e background and 1px #595959 border as the sidebar dropdown instead of using a gradient surface.
-   *
-   * CDXC:ManageFileActions 2026-06-30-02:45:
-   * Docs file context menu corners should match the reduced dropdown roundness with a 4px outer radius and 3px row radius.
+   * CDXC:ManageFileActions 2026-08-08:
+   * Docs uses the shared sidebar context-menu stylesheet and class contract.
+   * Keep only Docs-specific tokens and nested-row layout here so its menu
+   * surface, spacing, square corners, hover, dividers, and danger rows cannot
+   * drift from the GPUI sidebar menu again.
    */
   .sidebar-context-menu-backdrop,
   .manage-rename-backdrop {
@@ -7667,52 +7801,20 @@ styleElement.textContent = `
   }
 
   .manage-file-context-menu {
-    backdrop-filter: blur(18px);
-    background: #0e0e0e;
-    border: 1px solid #595959;
-    border-radius: 4px;
-    box-shadow:
-      0 18px 42px rgba(0, 0, 0, 0.38),
-      0 4px 12px rgba(0, 0, 0, 0.28),
-      inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    color: rgba(244, 244, 245, 0.9);
-    display: grid;
-    gap: 3px;
-    min-width: 166px;
-    padding: 6px;
-    position: fixed;
-    z-index: 61;
+    --app-border: var(--manage-border);
+    --app-card: var(--manage-panel);
+    --app-context-menu-hover-background: var(--manage-row-surface);
+    color: var(--manage-text);
+    font-size: 12px;
+    font-weight: 400;
   }
 
   .manage-file-context-menu-item {
-    align-items: center;
-    background: transparent;
-    border: 0;
-    border-radius: 3px;
-    color: inherit;
-    display: flex;
-    font-size: 12.5px;
-    font-weight: 620;
-    gap: 9px;
     line-height: 16px;
-    min-height: 34px;
-    padding: 8px 10px 8px 9px;
-    text-align: left;
-    white-space: nowrap;
-    width: 100%;
   }
 
   .manage-file-context-menu-item svg {
-    color: rgba(244, 244, 245, 0.72);
-    flex: 0 0 auto;
-    height: 15px;
-    width: 15px;
-  }
-
-  .manage-file-context-menu-divider {
-    background: rgba(255, 255, 255, 0.09);
-    height: 1px;
-    margin: 3px 4px;
+    color: currentColor;
   }
 
   .manage-file-context-menu-nested {
@@ -7740,64 +7842,13 @@ styleElement.textContent = `
     transform: rotate(90deg);
   }
 
-  .manage-file-context-menu-item:hover,
-  .manage-file-context-menu-item:focus-visible {
-    background: rgba(255, 255, 255, 0.105);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
-    color: rgba(250, 250, 250, 0.98);
-    outline: none;
-  }
-
-  .manage-file-context-menu-item:hover svg,
-  .manage-file-context-menu-item:focus-visible svg {
-    color: rgba(250, 250, 250, 0.92);
-  }
-
   .manage-file-context-menu-item:disabled {
-    color: var(--manage-subtle);
     cursor: wait;
-  }
-
-  .manage-file-context-menu-item:disabled svg {
-    color: color-mix(in srgb, var(--manage-subtle) 72%, transparent);
-  }
-
-  .manage-file-context-menu-item-danger {
-    color: rgba(253, 164, 175, 0.9);
-  }
-
-  .manage-file-context-menu-item-danger svg {
-    color: rgba(253, 164, 175, 0.82);
-  }
-
-  .manage-file-context-menu-item-danger:hover,
-  .manage-file-context-menu-item-danger:focus-visible {
-    background: rgba(253, 164, 175, 0.125);
-    box-shadow: inset 0 0 0 1px rgba(253, 164, 175, 0.08);
-    color: var(--manage-red);
-  }
-
-  .manage-file-context-menu-item-danger:hover svg,
-  .manage-file-context-menu-item-danger:focus-visible svg {
-    color: var(--manage-red);
+    opacity: 0.42;
   }
 
   .manage-file-context-menu-item-danger[data-confirming="true"] {
-    background: rgba(253, 164, 175, 0.12);
-    box-shadow: inset 0 0 0 1px rgba(253, 164, 175, 0.12);
-    color: var(--manage-red);
-  }
-
-  .manage-file-context-menu-item:disabled:hover,
-  .manage-file-context-menu-item:disabled:focus-visible {
-    background: transparent;
-    box-shadow: none;
-    color: var(--manage-subtle);
-  }
-
-  .manage-file-context-menu-item:disabled:hover svg,
-  .manage-file-context-menu-item:disabled:focus-visible svg {
-    color: color-mix(in srgb, var(--manage-subtle) 72%, transparent);
+    background: color-mix(in srgb, #ff7b72 18%, transparent);
   }
 
   .manage-rename-backdrop {
@@ -8942,50 +8993,6 @@ styleElement.textContent = `
     outline: none;
   }
 
-  .manage-markdown-selection-toolbar button::before,
-  .manage-markdown-selection-toolbar button::after {
-    left: 50%;
-    opacity: 0;
-    pointer-events: none;
-    position: absolute;
-    transition:
-      opacity 120ms ease,
-      transform 120ms ease;
-    z-index: 2;
-  }
-
-  .manage-markdown-selection-toolbar button::before {
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 5px solid color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
-    content: "";
-    top: -7px;
-    transform: translate(-50%, 4px);
-  }
-
-  .manage-markdown-selection-toolbar button::after {
-    background: color-mix(in srgb, var(--manage-panel-raised) 92%, #000 8%);
-    border: 1px solid color-mix(in srgb, var(--manage-toolbar-action-color) 42%, var(--manage-border-strong));
-    border-radius: var(--ghostex-tooltip-radius, 5px);
-    color: var(--manage-text);
-    content: attr(data-tooltip);
-    font-size: 11px;
-    font-weight: 720;
-    line-height: 1;
-    padding: 6px 8px;
-    top: -33px;
-    transform: translate(-50%, 4px);
-    white-space: nowrap;
-  }
-
-  .manage-markdown-selection-toolbar button:hover::before,
-  .manage-markdown-selection-toolbar button:hover::after,
-  .manage-markdown-selection-toolbar button:focus-visible::before,
-  .manage-markdown-selection-toolbar button:focus-visible::after {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-
   .manage-annotation-preview-card {
     --manage-annotation-color: ${MANAGE_COMMENT_ANNOTATION_COLOR};
     background: color-mix(in srgb, var(--manage-panel-raised) 96%, var(--manage-annotation-color) 4%);
@@ -9256,4 +9263,8 @@ styleElement.textContent = `
 `;
 document.head.append(styleElement);
 
-createRoot(document.getElementById("root")!).render(<ManageApp />);
+createRoot(document.getElementById("root")!).render(
+  <TooltipProvider>
+    <ManageApp />
+  </TooltipProvider>,
+);

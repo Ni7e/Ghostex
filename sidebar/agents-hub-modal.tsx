@@ -23,7 +23,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "./agent-logos";
+import { getBrandAgentLogoStyle } from "./agent-logos";
 import type { WebviewApi } from "./webview-api";
 import { applySavedAgentsHubContents } from "../shared/agents-hub-catalog";
 import type {
@@ -567,11 +567,7 @@ function ProfileRow({ profiles, vscode }: { profiles: AgentsHubProfile[]; vscode
                     aria-hidden="true"
                     className="agents-hub-agent-logo"
                     data-agent-icon={profile.agentIcon}
-                    style={{
-                      backgroundColor: AGENT_LOGO_COLORS[profile.agentIcon],
-                      maskImage: `url("${AGENT_LOGOS[profile.agentIcon]}")`,
-                      WebkitMaskImage: `url("${AGENT_LOGOS[profile.agentIcon]}")`,
-                    }}
+                    style={getBrandAgentLogoStyle(profile.agentIcon)}
                   />
                   {profileBadge ? (
                     <span className="agents-hub-agent-badge">{profileBadge}</span>

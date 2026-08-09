@@ -73,7 +73,7 @@ pub fn usage() -> String {
         ),
         format_help_command("resume | r [selector]", "Alias for attach"),
         format_help_command(
-            "attach | a --session-id <id> [--project-id id] [--prompt-editor monaco]",
+            "attach | a --session-id <id> [--project-id id] [--prompt-editor monaco|code-server]",
             "Flag form used by mobile and desktop remote session attach",
         ),
         format_help_command(
@@ -89,8 +89,8 @@ pub fn usage() -> String {
             "Wake one session or every listed session",
         ),
         format_help_command(
-            "focus <selector> [--json]",
-            "Unsupported in gxserver cutover until renderer focus events land",
+            "focus <selector> [--json] | focus --agent-session-id <id> --agent <agent> --if-running",
+            "Focus a live Ghostex session, including one owning an agent conversation",
         ),
         format_help_command(
             "(sleep|wake|kill) --session-id <id> [--json]",
@@ -122,6 +122,10 @@ pub fn usage() -> String {
             "create-agent <agentId> --project-id id [--group-id id]",
             "Create and start a configured agent session",
         ),
+        format_help_command(
+            "board start-work <bead-id> [--agent id] [--project-id id] [--json]",
+            "Dispatch a Project Board bead: reuse its usable linked session or create the worker",
+        ),
         format_help_command("run-agent <agentId>", "Run a configured agent button"),
         format_help_command(
             "run-command <commandId>",
@@ -142,6 +146,10 @@ pub fn usage() -> String {
         format_help_command(
             "add-project <path> [--name name] [--create-if-missing]",
             "Add a project to Ghostex; --create-if-missing creates the folder first",
+        ),
+        format_help_command(
+            "group-project (--project-id id|--path path|--name name) --group title",
+            "Move a project into a named sidebar group, creating the group when needed",
         ),
         format_help_command(
             "browse-directories <partialPath> [--cwd dir] [--limit n] --json",
@@ -277,6 +285,10 @@ pub fn usage() -> String {
             "Show embedded CEF browser control and MCP setup",
         ),
         format_help_command(
+            "browser-use --help",
+            "Show Cua Driver browser-page skill setup",
+        ),
+        format_help_command(
             "computer-use --help",
             "Show Ghostex Computer Use skill setup for Cua Driver",
         ),
@@ -287,6 +299,10 @@ pub fn usage() -> String {
         format_help_command(
             "fable-5.6-orchestration --help",
             "Show Ghostex Fable 5.6 Orchestration skill setup",
+        ),
+        format_help_command(
+            "find-prev-session --help",
+            "Show Ghostex Find Previous Session skill setup",
         ),
         format_help_command(
             "generate-title --help",
@@ -468,13 +484,44 @@ Examples:
 Behavior:
   save-command writes to the live gxserver project store and refreshes normal project state.
   Reusing a command id replaces that action definition in the same ordered position; a new id is appended.
-  Do not edit workspace-state.json or ~/.ghostex/gxserver/state.db directly.
+  Do not edit workspace-state.json or the Ghostex state database directly.
   Terminal and Browser quick actions are project customCommands, not agent buttons; do not use save-agent.
   Use run-action to execute them; run-command and click-button are renderer-only legacy paths.
 
 Inspect:
   ghostex state
   ghostex state | jq '.projects[] | {{projectId, name, path, customCommands, customCommandOrder}}'
+"
+    )
+}
+
+/// Render CLI help for Project Board worker dispatch.
+pub fn board_usage() -> String {
+    let commands = [format_help_command(
+        "board start-work <bead-id> [--agent id] [--project-id id] [--json]",
+        "Dispatch a Project Board bead through gxserver",
+    )]
+    .join("\n");
+
+    format!(
+        "Ghostex Project Board - dispatch bead work through gxserver
+
+Usage:
+  ghostex board start-work <bead-id> [--agent <agentId>] [--project-id <id>] [--json]
+  gx board start-work <bead-id>
+
+Commands:
+{commands}
+
+Behavior:
+  start-work IS the dispatch: it creates and starts the visible worker session with the bead's
+  canonical work prompt and links the conversation to the card. Do not also launch a worker yourself.
+  Repeated calls are safe: an existing usable linked conversation (live, sleeping, or restorable)
+  is returned as {{ \"projectId\": ..., \"sessionId\": ..., \"created\": false }} instead of creating a second worker.
+  Without --agent, the bead assignee is matched case-insensitively against configured agents,
+  falling back to the default prompt agent.
+  Without --project-id, the bead is located across the registered project boards; pass --project-id
+  when the same bead id exists on more than one board.
 "
     )
 }
@@ -533,7 +580,7 @@ pub fn browser_usage() -> String {
         ),
         format_help_command(
             "browser install-skill [--json]",
-            "Install the $ghostex-browser-use skill with the external skills CLI",
+            "Install the $ghostex-embedded-browser-use skill with the external skills CLI",
         ),
         format_help_command(
             "browser open [url] [project/reuse flags]",
@@ -584,7 +631,7 @@ pub fn browser_usage() -> String {
     .join("\n");
 
     format!(
-        "Ghostex Browser Use - control embedded CEF panes from agents
+        "Ghostex Embedded Browser Use - control embedded CEF panes from agents
 
 Usage:
   gx browser --help
@@ -751,6 +798,28 @@ Boundary:
     .to_string()
 }
 
+pub fn find_prev_session_usage() -> String {
+    "Ghostex Find Previous Session - install the agent skill for Zehn history search
+
+Usage:
+  gx find-prev-session --help
+  gx find-prev-session install-skill [--json]
+
+Agent skill:
+  Use $ghostex-find-prev-session when a user wants to find, inspect, resume, or
+  fork a previous agent session with Ghostex's bundled Zehn search.
+
+Supported agents:
+  Claude Code, Codex, Pi, OpenCode, Cursor Agent, and Grok.
+
+What the skill teaches:
+  Read ghostex find --help, narrow by a distinctive prompt phrase and optional
+  --agent filter, then use Zehn's interactive picker to inspect, resume, copy,
+  or fork the selected session without guessing session ids.
+"
+    .to_string()
+}
+
 pub fn computer_use_usage() -> String {
     "Ghostex Computer Use - install the agent skill for native macOS app control
 
@@ -770,7 +839,31 @@ Desktop Control requirements:
 
 Boundary:
   Use $ghostex-computer-use for native macOS apps.
-  Use $ghostex-browser-use and gx browser --help for embedded Ghostex browser panes.
+  Use $ghostex-browser-use for supported external browser page content.
+  Use $ghostex-embedded-browser-use and gx browser --help for embedded Ghostex browser panes.
+"
+    .to_string()
+}
+
+pub fn browser_use_usage() -> String {
+    "Ghostex Browser Use - install the Cua Driver browser-page agent skill
+
+Usage:
+  gx browser-use --help
+  gx browser-use install-skill [--json]
+
+Agent skill:
+  Use $ghostex-browser-use for supported Chrome, Chromium, Edge, and Electron
+  page content through Cua Driver's typed browser tools.
+
+Requirements:
+  Cua Driver must be installed. Browser preparation and existing-profile access
+  require the explicit approvals described by the installed Cua Driver skill.
+
+Boundary:
+  Use $ghostex-browser-use for supported external browser page content.
+  Use $ghostex-embedded-browser-use and gx browser --help for browser panes built into Ghostex.
+  Use $ghostex-computer-use for native apps, browser chrome, and native dialogs.
 "
     .to_string()
 }

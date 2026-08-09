@@ -1,5 +1,64 @@
 # Changelog
 
+## 7.4.0 - 2026-08-08
+
+- Major
+  - Project Board now remembers your filters and sorting, offers both sort directions, shows ticket creators and assignees, and can resume linked conversations even after project or ticket names change.
+  - Quick Access can progressively load older sessions, while command panes and existing agent conversations reconnect more reliably when you return to them.
+- Minor
+  - Global Actions are available directly from project rows and refresh immediately after changes, thanks to @banozz.
+  - Stashed Prompts, Previous Sessions, project collections, session groups, and sidebar drag-and-drop have clearer controls and more dependable behavior.
+  - Project Board scrollbars can be clicked and dragged normally, and completed lanes default to showing the newest work first, thanks to @banozz.
+  - Session Chat loads images and completed Codex messages more smoothly, while the Android chat stays ready in the background and handles the on-screen keyboard more reliably.
+  - Windows terminal sessions, agent hooks, remote cloning, project icons, support diagnostics, and long-running gxserver connections are more dependable.
+
+## 7.3.0 - 2026-08-07
+
+- Major
+  - Quick Access now brings the Command Pane, Recent Projects, and Recent Sessions into one fast, tabbed workflow with consistent search and keyboard shortcuts.
+  - Remote projects can open Source and Prompt Editor through their connected machine, while Docs can browse and manage files on that remote workspace.
+- Minor
+  - Remote machines can be reordered directly in the sidebar, sidebar sections collapse more smoothly, and active sessions stay clearly visible through collapsed groups.
+  - Previous-session search preserves exact word and phrase matches, and choosing an already-running conversation focuses its existing terminal instead of opening a duplicate agent.
+  - Windows browser keyboard input and popup focus are more reliable, while menus, tooltips, and scrollbars have cleaner sizing and placement across the desktop app.
+  - Terminal selection, agent waits, prompt delivery, support logs, and live session tracking are more dependable during longer-running work.
+  - The Android app shows useful working, attention, and awake counts when machine and project sections are collapsed.
+
+## 7.2.0 - 2026-08-06
+
+- Major
+  - Switching between projects and machines now preserves each workspace's live terminal panes, tabs, scrollback, and chat state, so returning to a project restores the view exactly where you left it without dropping sessions.
+  - Project groups now offer quiet, header, and branched visual styles, a broader color palette across desktop and Android, and a new CLI command that can create a group or move a project into one by name.
+- Minor
+  - Remote projects can create and open workspace terminals more reliably from the desktop app, with safer connection and session validation.
+  - Existing installations get a safer storage migration that keeps legacy gxserver and log paths working while moving data into the operating system's standard locations.
+  - Web terminals keep their connections mounted across tab and chat switches while keyboard focus follows only the active terminal.
+  - OMP sessions now keep the correct conversation identity, show cleaner live titles, and use refreshed full-color branding across desktop and Android.
+  - Popup menus on macOS stay open reliably when invoked from the active Ghostex window.
+
+## 7.1.0 - 2026-08-05
+
+- Major
+  - Ghostex now keeps settings, app data, caches, logs, and runtime files in the standard locations for each operating system, automatically migrating existing installations while preserving compatibility with saved prompts, attachments, agent hooks, and bundled tools.
+- Minor
+  - Stashed prompts save and refresh more reliably, including prompts tied to a specific project or session.
+  - New sidebar opacity controls let you tune group and project surfaces independently on desktop and Android.
+  - Remote chat attachments and pasted images consistently use the connected machine's configured Ghostex storage location.
+  - Tooltips and compact controls are clearer and more consistent across the desktop workspace, Project Board, Settings, and the web app.
+
+## 7.0.0 - 2026-08-04
+
+- Major
+  - Ghostex for Windows now uses installable x64 and ARM64 packages with built-in automatic updates from GitHub Releases; existing 6.x Windows users need to install 7.0.0 once to move onto the new updater.
+  - Session Automations can wait for agents to finish before sending a prompt, while missing project folders are detected and can be relocated without losing the project setup.
+  - Session Chat adds attach-anything uploads, larger image previews, broader agent transcript support, continuation tracking, and clearer live model and action state across desktop, web, and Android.
+  - Ghostex can download large app components only when needed and provides a dedicated Plugins window, reducing the size of the core desktop installation.
+- Minor
+  - Existing Codex and other agent integrations automatically repair Ghostex hook paths after the storage-folder migration, preventing PreToolUse and UserPromptSubmit hook failures.
+  - Global Actions can appear directly in the tab strip, and Global Defaults can configure common project settings once for every project, thanks to @banozz.
+  - Remote project collections, flexible GitHub clone inputs, terminal background images, multi-monitor popup placement, session reconciliation, and Windows startup reliability make everyday workspace management steadier, with Windows startup improvements from @yossifyahya16.
+  - The Android app adds Session Automations, chat attachment uploads, a simpler unified terminal menu, clearer quick actions, and the latest session-status improvements.
+
 ## 6.13.0 - 2026-08-01
 
 - Major

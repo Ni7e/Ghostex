@@ -39,7 +39,7 @@ export interface SessionChatTransport {
   sendKey?(key: SessionChatSendKey): Promise<void>;
   /**
    * Saves composer-pasted image bytes onto the session's machine and returns
-   * the absolute path there (terminal-paste contract: ~/.ghostex/i). Hosts
+   * the absolute path there (the shared terminal-paste path contract). Hosts
    * without an upload path (e.g. the mobile WebView) omit this, which
    * disables the composer's image paste.
    */
@@ -48,7 +48,7 @@ export interface SessionChatTransport {
     suggestedName?: string;
   }): Promise<GxserverSaveSessionChatImageResult>;
   /**
-   * Saves any attached file's bytes onto the session's machine (~/.ghostex/f)
+   * Saves any attached file's bytes into Ghostex storage on the session's machine
    * and returns the absolute path for the "[File #N](path)" reference. Hosts
    * without an upload path omit it, which limits the attach button to images.
    */

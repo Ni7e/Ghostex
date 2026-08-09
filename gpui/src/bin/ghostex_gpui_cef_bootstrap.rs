@@ -127,9 +127,8 @@ impl GhostexGpuiApp {
         #[cfg(target_os = "linux")]
         let loader_path_variable = "LD_LIBRARY_PATH";
         let mut loader_paths = vec![runtime_dir.as_os_str().to_owned()];
-        if let Some(existing_paths) = env::var_os(loader_path_variable) {
-            loader_paths
-                .extend(env::split_paths(&existing_paths).map(|path| path.into_os_string()));
+        if let Some(paths) = env::var_os(loader_path_variable) {
+            loader_paths.extend(env::split_paths(&paths).map(|path| path.into_os_string()));
         }
         let loader_path = match env::join_paths(loader_paths) {
             Ok(path) => path,

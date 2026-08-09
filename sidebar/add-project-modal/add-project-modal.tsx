@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { CommandDialog } from "@/components/ui/command";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
+import { AppTooltip } from "../app-tooltip";
 import {
   appendBrowsePathSegment,
   canNavigateUp,
@@ -717,25 +718,26 @@ function AddProjectModalBody(props: AddProjectModalProps) {
           submenu: sourceReadiness.ready,
           title,
           trailing: sourceReadiness.ready ? undefined : (
-            <Button
-              aria-label={`${addProjectSourceLabel(source)} setup required`}
-              className="ml-auto h-5 rounded-none px-1.5 text-[10px]"
-              data-add-project-field="setupRequired"
-              data-add-project-source={source}
-              onClick={(event) => {
-                event.stopPropagation();
-                propsRef.current.onOpenSourceControlSettings?.(source as AddProjectProviderId);
-              }}
-              onMouseDown={(event) => {
-                event.preventDefault();
-              }}
-              size="xs"
-              title={sourceReadiness.hint ?? undefined}
-              type="button"
-              variant="outline"
-            >
-              Setup Required
-            </Button>
+            <AppTooltip content={sourceReadiness.hint}>
+              <Button
+                aria-label={`${addProjectSourceLabel(source)} setup required`}
+                className="ml-auto h-5 rounded-none px-1.5 text-[10px]"
+                data-add-project-field="setupRequired"
+                data-add-project-source={source}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  propsRef.current.onOpenSourceControlSettings?.(source as AddProjectProviderId);
+                }}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                }}
+                size="xs"
+                type="button"
+                variant="outline"
+              >
+                Setup Required
+              </Button>
+            </AppTooltip>
           ),
           value: `source:${source}`,
         });

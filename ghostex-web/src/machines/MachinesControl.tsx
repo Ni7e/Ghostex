@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type MouseEvent,
 } from "react";
+import { AppTooltip } from "@/sidebar/app-tooltip";
 import {
   getConnectionStates,
   subscribeConnectionStates,
@@ -28,14 +29,16 @@ export function MachinesControl() {
 
   return (
     <>
-      <button
-        aria-label="Machines"
-        className="web-titlebar__icon-button web-titlebar__machines"
-        onClick={() => setOpen(true)}
-        type="button"
-      >
-        <MachinesIcon />
-      </button>
+      <AppTooltip content="Machines">
+        <button
+          aria-label="Machines"
+          className="web-titlebar__icon-button web-titlebar__machines"
+          onClick={() => setOpen(true)}
+          type="button"
+        >
+          <MachinesIcon />
+        </button>
+      </AppTooltip>
       {open && <MachinesModal onClose={() => setOpen(false)} />}
     </>
   );
@@ -106,9 +109,11 @@ function MachinesModal({ onClose }: { onClose(): void }) {
             <h2 id="machines-modal-title">Machines</h2>
             <p>Connect this browser to additional gxservers.</p>
           </div>
-          <button aria-label="Close machines" className="machines-modal__close" onClick={onClose} type="button">
-            ×
-          </button>
+          <AppTooltip content="Close machines">
+            <button aria-label="Close machines" className="machines-modal__close" onClick={onClose} type="button">
+              ×
+            </button>
+          </AppTooltip>
         </header>
 
         <div className="machines-list">
@@ -194,10 +199,14 @@ function MachineRow({
 }) {
   return (
     <div className="machines-list__row">
-      <span aria-label={status} className={`machines-status machines-status--${status}`} title={status} />
+      <AppTooltip content={status}>
+        <span aria-label={status} className={`machines-status machines-status--${status}`} />
+      </AppTooltip>
       <div className="machines-list__identity">
         <strong>{label}</strong>
-        <span title={baseUrl}>{baseUrl}</span>
+        <AppTooltip content={baseUrl}>
+          <span>{baseUrl}</span>
+        </AppTooltip>
       </div>
       {onRemove && (
         <button className="machines-list__remove" onClick={onRemove} type="button">
@@ -217,4 +226,3 @@ function MachinesIcon() {
     </svg>
   );
 }
-

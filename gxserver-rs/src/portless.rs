@@ -67,7 +67,7 @@ CDXC:PortlessSlugAllocation 2026-06-22-22:49:
 Collision handling is append-only: the earliest existing or backfilled record keeps the clean label, while later records receive a deterministic stable-id suffix. Existing persisted labels are reserved and never reshuffled during later backfills.
 
 CDXC:PortlessState 2026-06-22-23:05:
-Portless active route state is mirrored directly to ~/.ghostex/gxserver/portless/routes.json using Portless 0.14.0's array schema with hostname, port, and pid fields. Ghostex live routes must carry the actual listener pid; pid 0 remains Portless's static-alias convention and is rejected here.
+Portless active route state is mirrored directly to the resolved Ghostex Portless state directory using Portless 0.14.0's array schema with hostname, port, and pid fields. Ghostex live routes must carry the actual listener pid; pid 0 remains Portless's static-alias convention and is rejected here.
 
 CDXC:PortlessState 2026-06-22-23:05:
 The Portless package serializes empty route sets as an empty routes.json array rather than removing the file, so Ghostex cleanup writes [] to replace stale routes. The writer takes routes.lock as a directory lock, writes a same-directory temp file, flushes it, then renames over routes.json without persistent logging.
@@ -94,7 +94,7 @@ CDXC:PortlessServiceDetection 2026-06-22-23:58:
 Phase 10 detects the global macOS Portless service from launchd plist metadata before route sync. The classification stores only setup/runtime enums: missing means Install, standalone means takeover prompt, Ghostex config mismatch means Reconfigure, Ghostex unreachable means Retry, and active means routes may be mirrored.
 
 CDXC:PortlessServiceDetection 2026-06-22-23:58:
-Ghostex ownership requires the launchd service to use Ghostex's bundled code-server Node, bundled Portless CLI, and ~/.ghostex/gxserver/portless state directory. HTTPS/HTTP, standard proxy port, .localhost TLD, LAN off, wildcard off, expected Node, expected CLI, expected state dir, hosts sync off, and non-persistent launchd stdout/stderr sinks are strict reconfigure facts; first-version Ghostex must not accept LAN service config or persistent proxy output files.
+Ghostex ownership requires the launchd service to use Ghostex's bundled code-server Node, bundled Portless CLI, and resolved Portless state directory. HTTPS/HTTP, standard proxy port, .localhost TLD, LAN off, wildcard off, expected Node, expected CLI, expected state dir, hosts sync off, and non-persistent launchd stdout/stderr sinks are strict reconfigure facts; first-version Ghostex must not accept LAN service config or persistent proxy output files.
 
 CDXC:PortlessServiceDetection 2026-06-23-05:11:
 Phase 10-12 verification requires old Ghostex-marked launchd plists to be treated as reconfigure-needed when they would let the root Portless service write /etc/hosts or persist proxy stdout/stderr under Ghostex support-bundle state. Service inspection therefore checks PORTLESS_SYNC_HOSTS=0 plus /dev/null launchd output paths as ownership facts, not optional diagnostics.
@@ -1057,22 +1057,25 @@ pub fn log_portless_background_sync_outcome(
     outcome: &PortlessBackgroundSyncOutcome,
     duration_ms: u128,
 ) {
-    let _ = logger.log(crate::logging::GxserverLogInput {
-        level: crate::logging::LogLevel::Info,
-        event: "portless.backgroundSync".to_string(),
-        server_id: None,
-        request_id: None,
-        client: None,
-        duration_ms: Some(duration_ms),
-        error: None,
-        details: Some(json!({
-            "action": outcome.action.as_str(),
-            "desiredRouteCount": outcome.desired_route_count,
-            "liveListenerCount": outcome.live_listener_count,
-            "routeCount": outcome.desired_route_count,
-            "status": outcome.status.as_str(),
-        })),
-    });
+    let _ = logger.log_routine(
+        crate::logging::DiagnosticLogScenario::Portless,
+        crate::logging::GxserverLogInput {
+            level: crate::logging::LogLevel::Info,
+            event: "portless.backgroundSync".to_string(),
+            server_id: None,
+            request_id: None,
+            client: None,
+            duration_ms: Some(duration_ms),
+            error: None,
+            details: Some(json!({
+                "action": outcome.action.as_str(),
+                "desiredRouteCount": outcome.desired_route_count,
+                "liveListenerCount": outcome.live_listener_count,
+                "routeCount": outcome.desired_route_count,
+                "status": outcome.status.as_str(),
+            })),
+        },
+    );
 }
 
 pub fn log_portless_background_sync_failure(
@@ -1115,16 +1118,19 @@ pub fn log_portless_state_update_success(
             json!(record.state.setup_status.as_str()),
         );
     }
-    let _ = logger.log(crate::logging::GxserverLogInput {
-        level: crate::logging::LogLevel::Info,
-        event: "portless.stateUpdate".to_string(),
-        server_id: None,
-        request_id: None,
-        client: None,
-        duration_ms: Some(duration_ms),
-        error: None,
-        details: Some(details),
-    });
+    let _ = logger.log_routine(
+        crate::logging::DiagnosticLogScenario::Portless,
+        crate::logging::GxserverLogInput {
+            level: crate::logging::LogLevel::Info,
+            event: "portless.stateUpdate".to_string(),
+            server_id: None,
+            request_id: None,
+            client: None,
+            duration_ms: Some(duration_ms),
+            error: None,
+            details: Some(details),
+        },
+    );
 }
 
 pub fn log_portless_state_update_failure(
@@ -6089,7 +6095,11 @@ LISTEN 0 511 *:4242 *:* users:(("bad",pid=0,fd=24))
             .join("native-sidebar-settings.json");
         fs::create_dir_all(settings_path.parent().expect("settings parent"))
             .expect("create settings dir");
-        fs::write(settings_path, r#"{"debuggingMode":true}"#).expect("write debugging setting");
+        fs::write(
+            settings_path,
+            r#"{"debuggingMode":true,"diagnosticLogging":{"scenarios":{"gxserver.portless":{"enabled":true}},"version":1}}"#,
+        )
+        .expect("write debugging setting");
     }
 
     fn assert_portless_log_text_has_no_forbidden_raw_values(text: &str) {

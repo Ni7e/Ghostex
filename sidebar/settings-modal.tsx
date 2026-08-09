@@ -77,6 +77,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { AppTooltip } from "./app-tooltip";
 import { DisabledSettingControlTooltip } from "./disabled-setting-control-tooltip";
 import { SidebarSessionSearchField } from "./sidebar-session-search-overlay";
 import {
@@ -162,6 +163,7 @@ import {
   SESSION_PERSISTENCE_PROVIDER_OPTIONS,
   SESSION_TITLE_GENERATION_AGENT_OPTIONS,
   SIDEBAR_AUTO_SETTLE_AFTER_DAYS_OPTIONS,
+  SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_VERSION_OPTIONS,
@@ -171,9 +173,12 @@ import {
   getSessionTitleGenerationCommandPreview,
   getSidebarSettingsPresetId,
   MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
+  MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
   MAX_SIDEBAR_DEFAULT_WIDTH_PX,
   MIN_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
+  MIN_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
   MIN_SIDEBAR_DEFAULT_WIDTH_PX,
+  SIDEBAR_COLLAPSE_ANIMATION_DURATION_STEP_MS,
   normalizeTerminalDevServerIgnoredPortRuleInput,
   normalizeTerminalDevServerIgnoredPortRules,
   normalizeSettingsModalNavigationState,
@@ -197,6 +202,7 @@ import {
   type SettingsModalNavigationState,
   type SessionTitleGenerationAgent,
   type SidebarSettingsPresetId,
+  type SidebarProjectGroupStyle,
   type SidebarSide,
   type SidebarVersion,
   type TerminalBackgroundImageFit,
@@ -264,7 +270,7 @@ import type {
   NativePortlessAdminAction,
   NativePortlessAdminInstallAction,
 } from "../shared/native-ghostty-host-protocol";
-import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "./agent-logos";
+import { getBrandAgentLogoStyle } from "./agent-logos";
 import { EditorBrandIcon, getEditorBrandIconId } from "./brand-icons";
 import { BundledAgentSkillsPanel } from "./bundled-agent-skills-panel";
 import { HotkeyRecorderField } from "./hotkey-recorder-field";
@@ -633,7 +639,10 @@ type MainSettingsSectionRefs = Record<
 
 /*
  * CDXC:DebuggingSettings 2026-06-28-18:14:
- * Show debug UI controls is the visibility gate for the support/debugging settings below it. When off, hide diagnostic scenario logging and session context-menu debug utilities instead of leaving disabled rows on screen.
+ * Show debug UI controls is the visibility and routine-logging gate for the
+ * support/debugging settings below it. When off, hide diagnostic scenario
+ * logging and session context-menu debug utilities instead of leaving disabled
+ * rows on screen.
  */
 const DEBUGGING_MODE_DEPENDENT_SETTING_KEYS = [
   "diagnosticLogging",
@@ -691,6 +700,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
      * Project git-stat display controls belong with Sidebar settings because they change sidebar project rows, not editor behavior.
      * Use changed-file wording for the file-count toggle so it does not read like an editor-pane setting.
      */
+    "showProjectIcons",
     "hideSessionAgentIconUntilHover",
     "hideBrowserFaviconUntilHover",
     "showCloseButtonOnSessionCards",
@@ -699,6 +709,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "showProjectEditorDiffFileCount",
     "hideMenuBarSessionStatusIndicators",
     "sidebarSide",
+    "sidebarCollapseAnimationDurationMs",
     "sidebarDefaultWidthPx",
     "commandsPanelDefaultHeightPx",
     "projectSessionListCollapsedCount",
@@ -929,7 +940,11 @@ const DIAGNOSTIC_LOGGING_DURATION_OPTIONS: ReadonlyArray<{
 ];
 
 const DEFAULT_DIAGNOSTIC_LOGGING_ENABLE_DURATION: DiagnosticLoggingDurationValue = "1h";
-const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI"] = ["macOS", "GPUI"];
+const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI", "gxserver"] = [
+  "macOS",
+  "GPUI",
+  "gxserver",
+];
 
 /*
  * CDXC:SettingsAdvanced 2026-06-16-01:35:
@@ -1271,9 +1286,11 @@ export type SettingsModalProps = {
   onGhosttySettingsAction?: (action: GhosttySettingsAction) => void;
   onInstallAgentOrchestrationSkill?: () => void;
   onInstallBrowserControl?: () => void;
+  onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
   onInstallFable56OrchestrationSkill?: () => void;
+  onInstallFindPrevSessionSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
@@ -1327,9 +1344,11 @@ export function SettingsModal({
   onGhosttySettingsAction,
   onInstallAgentOrchestrationSkill,
   onInstallBrowserControl,
+  onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
   onInstallFable56OrchestrationSkill,
+  onInstallFindPrevSessionSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
   onInstallMoveCodexSessionSkill,
@@ -2001,6 +2020,17 @@ export function SettingsModal({
         subtitle: "Apply a sidebar UI preset or show Custom when controlled settings diverge.",
         title: "Preset",
       },
+      {
+        key: "sidebarProjectGroupStyle",
+        options: SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
+        subtitle: "Choose how project groups are marked in the sidebar.",
+        title: "Project group style",
+      },
+      {
+        key: "showProjectIcons",
+        subtitle: "Show project artwork or a folder or worktree icon beside project names.",
+        title: "Show project icons",
+      },
       /*
        * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
        * Search metadata follows the visible row order: preset-controlled rows
@@ -2049,6 +2079,11 @@ export function SettingsModal({
         title: "Side",
       },
       {
+        key: "sidebarCollapseAnimationDurationMs",
+        subtitle: "Set how quickly sidebar sections, groups, and projects expand or collapse. Set to 0 for no animation.",
+        title: "Collapse animation speed",
+      },
+      {
         key: "sidebarDefaultWidthPx",
         subtitle: "Width restored when double-clicking the sidebar resize handle.",
         title: "Default Width",
@@ -2062,11 +2097,6 @@ export function SettingsModal({
         key: "projectSessionListCollapsedCount",
         subtitle: "Number of project sessions kept visible after Show less.",
         title: "Show Less Count",
-      },
-      {
-        key: "projectGroupHeaderOpacityPercent",
-        subtitle: "Opacity of project-group header backgrounds, borders, and side lines.",
-        title: "Project Group Header Opacity",
       },
       {
         key: "agentManagerZoomPercent",
@@ -2163,7 +2193,7 @@ export function SettingsModal({
           { label: "Folder sizes", value: "folderSizes" },
           { label: "Disk usage", value: "diskUsage" },
         ],
-        subtitle: "Show ~/.ghostex folder sizes and open the Ghostex storage folder.",
+        subtitle: "Show Ghostex data-folder sizes and open the resolved storage folder.",
         title: "Ghostex folder",
       },
     ]),
@@ -2413,7 +2443,10 @@ export function SettingsModal({
     debugging: getSettingsSectionSearch(settingsSearchQuery, "Debugging", [
       /*
        * CDXC:DiagnosticsSettings 2026-06-06-07:09:
-       * Debugging Mode previously combined diagnostic disk logging and debug UI exposure. Scenario-specific logging now owns disk writes so broad Debugging Mode can remain a UI/debug-control gate without turning on every persistent log.
+       * Show debug UI controls is the global gate for routine diagnostic disk
+       * logging as well as debug-only UI. Scenario controls narrow which
+       * routine log area writes while the global gate is on; important
+       * warnings, errors, and crashes remain available independently.
        *
        * CDXC:DebuggingSettings 2026-06-15-21:34:
        * The Debugging section owns support and diagnostic toggles at the bottom of Settings, including command copy actions and Copy details, so users can find debug-only context-menu features together.
@@ -2425,7 +2458,7 @@ export function SettingsModal({
        */
       {
         key: "debuggingMode",
-        subtitle: "Show debug-only UI controls without enabling routine disk logging.",
+        subtitle: "Show debug-only UI controls and allow enabled routine diagnostic logs.",
         title: "Show debug UI controls",
       },
       {
@@ -2434,7 +2467,7 @@ export function SettingsModal({
           { label: scenario.label, value: scenario.id },
           ...scenario.logFiles.map((logFile) => ({ label: logFile, value: logFile })),
         ]),
-        subtitle: "Enable exact macOS and GPUI repro logging scenarios. Warnings, errors, and crashes remain captured when scenarios are off.",
+        subtitle: "Choose routine repro log areas while Show debug UI controls is on. Important warnings, errors, and crashes remain captured when it is off.",
         title: "Diagnostic disk logging scenarios",
       },
       {
@@ -3594,10 +3627,28 @@ export function SettingsModal({
                 onResetToDefault={() => updateSidebarSettingsPreset("codex")}
               />
               ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "sidebarProjectGroupStyle") ? (
+              <SidebarProjectGroupStyleField
+                description="Choose how project groups are marked without adding group or project card borders."
+                label="Project group style"
+                {...getSettingModificationProps("sidebarProjectGroupStyle")}
+                onChange={(value) => updateDraft("sidebarProjectGroupStyle", value)}
+                value={draft.sidebarProjectGroupStyle}
+              />
+              ) : null}
               {/*
                * CDXC:SidebarSettingsPresets 2026-06-30-22:22:
                * Users need every preset-mutated setting directly under the preset selector so applying Recommended, Codex, Minimal, or Detailed has an inspectable effect without hunting through Session Cards, Project rows, or Status Indicators.
                */}
+              {mainSettingVisible(settingsSearch.sidebar, "showProjectIcons") ? (
+              <ToggleField
+                checked={draft.showProjectIcons}
+                description="Show project artwork or a folder or worktree icon beside project names."
+                label="Show project icons"
+                {...getSettingModificationProps("showProjectIcons")}
+                onChange={(checked) => updateDraft("showProjectIcons", checked)}
+              />
+              ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "hideSessionAgentIconUntilHover") ? (
               <ToggleField
                 checked={draft.hideSessionAgentIconUntilHover}
@@ -3695,6 +3746,21 @@ export function SettingsModal({
                 />
               </>
               ) : null}
+              {mainSettingVisible(settingsSearch.sidebar, "sidebarCollapseAnimationDurationMs") ? (
+              <SliderNumberField
+                description="Duration in milliseconds for expanding and collapsing sidebar sections, groups, and projects. Set to 0 for instant changes."
+                label="Collapse Animation Duration"
+                {...getSettingModificationProps("sidebarCollapseAnimationDurationMs")}
+                max={MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS}
+                min={MIN_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS}
+                onCommit={(value) => updateDraft("sidebarCollapseAnimationDurationMs", value)}
+                onChange={(value) =>
+                  updateDraftDebounced("sidebarCollapseAnimationDurationMs", value)
+                }
+                step={SIDEBAR_COLLAPSE_ANIMATION_DURATION_STEP_MS}
+                value={draft.sidebarCollapseAnimationDurationMs}
+              />
+              ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "commandsPanelDefaultHeightPx") ? (
               <SliderNumberField
                 description="Used when opening the command pane (F12 or sidebar) and when double-clicking its top resize rail."
@@ -3728,21 +3794,6 @@ export function SettingsModal({
                   value={draft.projectSessionListCollapsedCount}
                 />
               </>
-              ) : null}
-              {mainSettingVisible(settingsSearch.sidebar, "projectGroupHeaderOpacityPercent") ? (
-              <SliderNumberField
-                description="Adjust project-group header backgrounds, borders, and side lines without changing labels, counts, or status circles."
-                label="Project Group Header Opacity"
-                {...getSettingModificationProps("projectGroupHeaderOpacityPercent")}
-                max={100}
-                min={0}
-                onCommit={(value) => updateDraft("projectGroupHeaderOpacityPercent", value)}
-                onChange={(value) =>
-                  updateDraftDebounced("projectGroupHeaderOpacityPercent", value)
-                }
-                step={1}
-                value={draft.projectGroupHeaderOpacityPercent}
-              />
               ) : null}
               {mainSettingVisible(settingsSearch.sidebar, "agentManagerZoomPercent") ? (
               /*
@@ -5092,8 +5143,8 @@ export function SettingsModal({
                     checked={draft.debuggingMode}
                     description={
                       draft.debuggingMode
-                        ? "Shows debug-only UI controls. Use the scenarios below for targeted diagnostic disk logging."
-                        : "Turn on to reveal debug-only UI controls and related diagnostic settings."
+                        ? "Shows debug-only UI controls and allows the enabled diagnostic scenarios below to write routine logs."
+                        : "Turn on to reveal debug-only controls and allow routine diagnostic logging. Important warnings, errors, and crashes remain captured."
                     }
                     label="Show debug UI controls"
                     {...getSettingModificationProps("debuggingMode")}
@@ -5223,9 +5274,11 @@ export function SettingsModal({
               }
               onInstallAgentOrchestrationSkill={onInstallAgentOrchestrationSkill}
               onInstallBrowserControl={onInstallBrowserControl}
+              onInstallBrowserUseSkill={onInstallBrowserUseSkill}
               onInstallComputerUseSkill={onInstallComputerUseSkill}
               onInstallCuaDriver={onInstallCuaDriver}
               onInstallFable56OrchestrationSkill={onInstallFable56OrchestrationSkill}
+              onInstallFindPrevSessionSkill={onInstallFindPrevSessionSkill}
               onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
               onInstallGhostexCli={onInstallGhostexCli}
               onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
@@ -6342,9 +6395,10 @@ function formatRemoteMachineSshTarget(machine: RemoteMachineSettings): string {
  */
 function InheritedSettingBadge() {
   return (
-    <span className="settings-inherited-badge" title="Using the Global Default set above">
-      Inherited
-    </span>
+    <Tooltip>
+      <TooltipTrigger render={<span className="settings-inherited-badge">Inherited</span>} />
+      <TooltipContent sideOffset={6}>Using the Global Default set above</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -7829,8 +7883,10 @@ function hasInstalledBundledAgentSkills(
   return (
     ghostexCliStatus?.agentOrchestrationSkillInstalled === true ||
     ghostexCliStatus?.browserSkillInstalled === true ||
+    ghostexCliStatus?.embeddedBrowserSkillInstalled === true ||
     ghostexCliStatus?.computerUseSkillInstalled === true ||
     ghostexCliStatus?.fable56OrchestrationSkillInstalled === true ||
+    ghostexCliStatus?.findPrevSessionSkillInstalled === true ||
     ghostexCliStatus?.generateTitleSkillInstalled === true ||
     ghostexCliStatus?.moveCodexSessionSkillInstalled === true
   );
@@ -7849,9 +7905,11 @@ function IntegrationsSettingsTab({
   onAppShotsMetadataEnabledChange,
   onInstallAgentOrchestrationSkill,
   onInstallBrowserControl,
+  onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
   onInstallFable56OrchestrationSkill,
+  onInstallFindPrevSessionSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
   onInstallMoveCodexSessionSkill,
@@ -7876,9 +7934,11 @@ function IntegrationsSettingsTab({
   onAppShotsMetadataEnabledChange: (checked: boolean) => void;
   onInstallAgentOrchestrationSkill?: () => void;
   onInstallBrowserControl?: () => void;
+  onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
   onInstallFable56OrchestrationSkill?: () => void;
+  onInstallFindPrevSessionSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
   onInstallMoveCodexSessionSkill?: () => void;
@@ -8024,9 +8084,11 @@ function IntegrationsSettingsTab({
             ghostexCliStatusLoading={ghostexCliStatusLoading}
             onInstallSkill={{
               agentOrchestration: onInstallAgentOrchestrationSkill,
-              browserUse: onInstallBrowserControl,
+              browserUse: onInstallBrowserUseSkill,
               computerUse: onInstallComputerUseSkill,
+              embeddedBrowserUse: onInstallBrowserControl,
               fable56Orchestration: onInstallFable56OrchestrationSkill,
+              findPrevSession: onInstallFindPrevSessionSkill,
               generateTitle: onInstallGenerateTitleSkill,
               moveCodexSession: onInstallMoveCodexSessionSkill,
             }}
@@ -10148,11 +10210,7 @@ function SettingsAgentIcon({ agent }: { agent: SidebarAgentButton }) {
       <span
         aria-hidden="true"
         className="configure-agents-list-agent-icon"
-        style={{
-          backgroundColor: AGENT_LOGO_COLORS[agent.icon],
-          maskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
-          WebkitMaskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
-        }}
+        style={getBrandAgentLogoStyle(agent.icon)}
       />
     );
   }
@@ -10396,7 +10454,7 @@ function GhostexFolderStatsSection({
         <div className="min-w-0">
           <div className="text-sm font-medium text-foreground">Ghostex folder</div>
           <div className="mt-1 truncate text-xs text-muted-foreground">
-            {stats?.folderPath ?? "~/.ghostex"}
+            {stats?.folderPath ?? "~/.local/share/ghostex"}
           </div>
         </div>
         <SettingButton
@@ -12177,40 +12235,41 @@ function WebColorPickerField({
         {SIDEBAR_TITLEBAR_TINT_SWATCHES.map((swatch) => {
           const isSelected = colorValue === swatch.value;
           return (
-            <Button
-              aria-label={`Use ${swatch.label} tint`}
-              aria-pressed={isSelected}
-              className={cn(
-                "size-7 min-w-0 shrink-0 border p-0",
-                isSelected ? "border-ring ring-2 ring-ring/45" : "border-border/80",
-              )}
-              key={swatch.value}
-              onClick={() => commitColor(swatch.value)}
-              style={{ backgroundColor: swatch.value }}
-              title={swatch.label}
-              type="button"
-              variant="ghost"
-            />
+            <AppTooltip content={swatch.label} key={swatch.value}>
+              <Button
+                aria-label={`Use ${swatch.label} tint`}
+                aria-pressed={isSelected}
+                className={cn(
+                  "size-7 min-w-0 shrink-0 border p-0",
+                  isSelected ? "border-ring ring-2 ring-ring/45" : "border-border/80",
+                )}
+                onClick={() => commitColor(swatch.value)}
+                style={{ backgroundColor: swatch.value }}
+                type="button"
+                variant="ghost"
+              />
+            </AppTooltip>
           );
         })}
-        <Button
-          aria-label={`${label} custom color picker`}
-          className="h-8 min-w-0 gap-2 px-2 text-xs"
-          onClick={() => {
-            setPickerValue(colorValue);
-            setPickerOpen(true);
-          }}
-          title="Pick custom tint color"
-          type="button"
-          variant="outline"
-        >
-          <span
-            aria-hidden="true"
-            className="size-4 shrink-0 border border-border"
-            style={{ backgroundColor: colorValue }}
-          />
-          <IconPalette aria-hidden="true" data-icon="inline-end" />
-        </Button>
+        <AppTooltip content="Pick custom tint color">
+          <Button
+            aria-label={`${label} custom color picker`}
+            className="h-8 min-w-0 gap-2 px-2 text-xs"
+            onClick={() => {
+              setPickerValue(colorValue);
+              setPickerOpen(true);
+            }}
+            type="button"
+            variant="outline"
+          >
+            <span
+              aria-hidden="true"
+              className="size-4 shrink-0 border border-border"
+              style={{ backgroundColor: colorValue }}
+            />
+            <IconPalette aria-hidden="true" data-icon="inline-end" />
+          </Button>
+        </AppTooltip>
         <Dialog
           open={pickerOpen}
           onOpenChange={(open) => {
@@ -12360,6 +12419,58 @@ function SidebarPresetField({
   );
 }
 
+function SidebarProjectGroupStyleField({
+  advanced,
+  description,
+  isModified,
+  label,
+  onChange,
+  onResetToDefault,
+  value,
+}: {
+  advanced?: boolean;
+  description?: string;
+  label: string;
+  onChange: (value: SidebarProjectGroupStyle) => void;
+  value: SidebarProjectGroupStyle;
+} & SettingModificationProps) {
+  const id = useId();
+  return (
+    <SettingRow
+      advanced={advanced}
+      description={description}
+      htmlFor={id}
+      isModified={isModified}
+      label={label}
+      onResetToDefault={onResetToDefault}
+    >
+      <ToggleGroup
+        aria-label={label}
+        className="w-full [&>[data-slot=toggle-group-item]]:flex-1"
+        onValueChange={(nextValues) => {
+          const [nextValue] = nextValues as SidebarProjectGroupStyle[];
+          if (nextValue) {
+            onChange(nextValue);
+          }
+        }}
+        value={[value]}
+        variant="outline"
+      >
+        {SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS.map((option, index) => (
+          <ToggleGroupItem
+            aria-label={option.label}
+            id={index === 0 ? id : undefined}
+            key={option.value}
+            value={option.value}
+          >
+            {option.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </SettingRow>
+  );
+}
+
 /*
  * CDXC:SidebarV2 2026-07-29:
  * The sidebar version selector reuses the Preset toggle-group shape so the
@@ -12485,7 +12596,7 @@ function DiagnosticLoggingSettingsField({
   const idBase = useId();
   return (
     <SettingRow
-      description="Failures, warnings, and crashes still write when scenarios are off. Enable only the repro area you need for routine debug logs."
+      description="Routine logs are off by default and write only when Show debug UI controls and their scenario are enabled. Enable only the repro area you need; important warnings, errors, and crashes remain captured."
       htmlFor={`${idBase}-native-terminal-focus`}
       isModified={isModified}
       label="Diagnostic disk logging scenarios"

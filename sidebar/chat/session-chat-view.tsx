@@ -3,9 +3,13 @@
 // the composer while showing. Hosts inject a SessionChatTransport; everything
 // else is derived by useSessionChat.
 
+import { IconRobot } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { cn } from "../../lib/utils";
+import { getDefaultSidebarAgentById } from "../../shared/sidebar-agents";
+import { getBrandAgentLogoStyle } from "../agent-logos";
+import { TooltipProvider } from "../app-tooltip";
 import {
   SessionChatComposer,
   type SessionChatComposerHandle,
@@ -94,18 +98,63 @@ export interface SessionChatViewProps {
 
 function EmptyState({
   detail,
-  spinning,
   title,
 }: {
   detail: string;
-  spinning: boolean;
   title: string;
 }) {
   return (
     <div className="ghostex-chat-empty-state">
-      {spinning ? <span className="ghostex-chat-empty-spinner" /> : null}
       <div className="ghostex-chat-empty-title">{title}</div>
       <div className="ghostex-chat-empty-detail">{detail}</div>
+    </div>
+  );
+}
+
+function displayAgentName(agentLabel?: string | null): string | null {
+  const normalized = agentLabel?.trim();
+  if (!normalized) {
+    return null;
+  }
+  return (
+    getDefaultSidebarAgentById(normalized)?.name ??
+    normalized
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase())
+  );
+}
+
+function NewSessionWelcome({ agentLabel }: { agentLabel?: string | null }) {
+  const agent = agentLabel ? getDefaultSidebarAgentById(agentLabel) : undefined;
+  const agentName = displayAgentName(agentLabel);
+
+  return (
+    <div className="ghostex-chat-new-session">
+      <div
+        aria-label={agentName ?? "Agent"}
+        className="ghostex-chat-new-session-agent"
+        role="img"
+      >
+        {agent?.icon ? (
+          <span
+            aria-hidden="true"
+            className="ghostex-chat-new-session-agent-logo"
+            style={getBrandAgentLogoStyle(agent.icon)}
+          />
+        ) : (
+          <IconRobot aria-hidden="true" size={28} stroke={1.7} />
+        )}
+      </div>
+      <div className="ghostex-chat-new-session-title">
+        {agentName ? (
+          <>
+            What should we build with{" "}
+            <span className="ghostex-chat-new-session-agent-name">{agentName}</span>?
+          </>
+        ) : (
+          "What should we work on?"
+        )}
+      </div>
     </div>
   );
 }
@@ -148,9 +197,9 @@ export function SessionChatView({
     ...(sessionKey !== undefined ? { sessionKey } : {}),
   });
   /*
-  What the agent is actually running, read by gxserver out of the session's
-  terminal. Keyed on detectedAt so a repeated identical detection does not
-  re-run the fold, and a no-detection session never enters it at all.
+  What the agent is actually running, confirmed by gxserver from structured
+  transcript metadata and the terminal statusline. Keyed on detectedAt so a
+  repeated identical detection does not re-run the fold.
   */
   const applyDetectedOptions = sessionOptions.applyDetected;
   const detectedOptions = chat.selectedOptions;
@@ -253,10 +302,13 @@ export function SessionChatView({
       : chat.view.kind === "error"
         ? ("error" as const)
         : chat.view.kind;
+  const showNewSessionWelcome =
+    emptyKind === "loading" || emptyKind === "starting" || emptyKind === "empty";
 
   return (
-    <div
-      className={cn(
+    <TooltipProvider>
+      <div
+        className={cn(
         // The app theme zeroes --radius for its square chrome; restore the
         // shadcn default inside the chat so bubbles and cards keep their
         // rounded look. The scope class lifts the SquareTheme border-radius
@@ -264,9 +316,9 @@ export function SessionChatView({
         "ghostex-session-chat-scope relative flex h-full min-h-0 flex-col bg-background text-foreground outline-none [--radius:0.625rem]",
         className,
       )}
-      onKeyDownCapture={handleKeyDownCapture}
-      tabIndex={-1}
-    >
+        onKeyDownCapture={handleKeyDownCapture}
+        tabIndex={-1}
+      >
       <SessionChatImageViewerProvider
         {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
       >
@@ -274,7 +326,18 @@ export function SessionChatView({
       {hostActions ? (
         <SessionChatHostActionsCluster hostActions={hostActions} surface="chat" />
       ) : null}
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          showNewSessionWelcome && "justify-center",
+        )}
+      >
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          showNewSessionWelcome && "flex-none",
+        )}
+      >
         {chat.view.kind === "ready" ? (
           <SessionChatMessageList
             hasMore={chat.hasMore}
@@ -283,17 +346,17 @@ export function SessionChatView({
             messages={chat.messages}
             onLoadEarlier={chat.loadEarlier}
           />
+        ) : showNewSessionWelcome ? (
+          <NewSessionWelcome agentLabel={agentLabel} />
         ) : emptyKind ? (
           chat.view.kind === "error" ? (
             <EmptyState
               detail={sessionChatEmptyStateCopy("error").detail}
-              spinning={false}
               title={sessionChatEmptyStateCopy("error").title}
             />
           ) : (
             <EmptyState
               detail={sessionChatEmptyStateCopy(emptyKind, agentLabel).detail}
-              spinning={emptyKind === "loading" || emptyKind === "starting"}
               title={sessionChatEmptyStateCopy(emptyKind, agentLabel).title}
             />
           )
@@ -341,8 +404,10 @@ export function SessionChatView({
           />
         )}
       </div>
+      </div>
       </SessionChatHostLinksProvider>
       </SessionChatImageViewerProvider>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

@@ -68,8 +68,8 @@ use crate::{
     identity::ensure_gxserver_identity,
     ids::{is_gxserver_project_id, is_gxserver_session_id},
     logging::{
-        log_level_from_status, query_gxserver_logs, GxserverLogInput, GxserverLogger, LogLevel,
-        LogQueryError,
+        log_level_from_status, query_gxserver_logs, DiagnosticLogScenario, GxserverLogInput,
+        GxserverLogger, LogLevel, LogQueryError,
     },
     paths::{get_gxserver_paths, GxserverPaths},
     platform::shell::command_shell,
@@ -85,7 +85,7 @@ use crate::{
         increment_presentation_revision, list_previous_sessions, read_presentation_snapshot,
         search_presentation_sessions,
     },
-    project_git_remote, project_icon,
+    project_docs, project_git_remote, project_icon,
     protocol::{
         endpoint_for, is_remote_endpoint_allowed, protocol_mismatch_error, rpc_error, rpc_success,
         ApiPermission, ListenerKind, MigrationStatus, MinimalHealthResponse, RuntimeMetadata,
@@ -107,7 +107,8 @@ use crate::{
         GlobalSidebarCommandUpdate,
     },
     sidebar_project_collections::{
-        read_sidebar_project_collections, update_sidebar_project_collections,
+        assign_project_to_sidebar_collection, read_sidebar_project_collections,
+        update_sidebar_project_collections,
     },
     source_control::{dispatch_source_control_endpoint, SourceControlError},
     storage::{
@@ -119,7 +120,7 @@ use crate::{
         T3RuntimeStatusPayload,
     },
     terminal_ws::{handle_terminal_socket, TerminalWsState},
-    toolchain::{get_gxserver_tool_statuses, require_bundled_zmx},
+    toolchain::{get_gxserver_tool_statuses, require_bundled_bd, require_bundled_zmx},
     typed_operations::{
         create_pull_request_for_project, dispatch_typed_operation_endpoint,
         dispatch_worktree_path_operation, typed_operation_log_details, typed_operation_log_level,
@@ -158,6 +159,9 @@ enum ExistingGxserverState {
 struct AppState {
     auth_token: String,
     automation_runtime: AutomationRuntime,
+    /// Serializes `/api/startBoardWork` so concurrent calls for one bead
+    /// cannot both observe "no usable link" and create two worker sessions.
+    board_start_work_gate: Arc<Mutex<()>>,
     build_identity: String,
     config: GxserverConfig,
     event_hub: GxserverEventHub,
@@ -351,6 +355,7 @@ pub async fn run_gxserver_foreground(
     let state = Arc::new(AppState {
         auth_token: auth.token,
         automation_runtime,
+        board_start_work_gate: Arc::new(Mutex::new(())),
         build_identity,
         config,
         event_hub,
@@ -396,16 +401,19 @@ pub async fn run_gxserver_foreground(
     })?;
 
     write_runtime_metadata(&paths, &metadata)?;
-    let _ = logger.log(GxserverLogInput {
-        level: crate::logging::LogLevel::Info,
-        event: "serverStarted".to_string(),
-        server_id: Some(metadata.server_id.clone()),
-        request_id: None,
-        client: None,
-        duration_ms: None,
-        error: None,
-        details: None,
-    });
+    let _ = logger.log_routine(
+        DiagnosticLogScenario::ServerLifecycle,
+        GxserverLogInput {
+            level: crate::logging::LogLevel::Info,
+            event: "serverStarted".to_string(),
+            server_id: Some(metadata.server_id.clone()),
+            request_id: None,
+            client: None,
+            duration_ms: None,
+            error: None,
+            details: None,
+        },
+    );
     state.event_hub.broadcast(json!({
         "protocolVersion": GXSERVER_PROTOCOL_VERSION,
         "serverId": metadata.server_id.clone(),
@@ -617,10 +625,10 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
             let pass_result = tokio::task::spawn_blocking(move || {
                 /*
                 CDXC:SidebarV2DataGate 2026-07-29:
-                All three passes below feed Sidebar V2 surfaces and nothing else,
-                so they run only while this machine is ON V2 — the same
+                The two git-backed passes below feed Sidebar V2 surfaces and
+                nothing else, so they run only while this machine is ON V2 — the same
                 `sidebarVersion` gate the auto-settle sweep already applies. One
-                settings read per PASS, shared by the three, and deliberately
+                settings read per PASS, shared by the two, and deliberately
                 inside the loop rather than hoisted to task spawn: flipping the
                 toggle then takes effect within one interval instead of needing a
                 daemon restart.
@@ -653,11 +661,12 @@ fn spawn_session_git_status_refresh_task(state: &Arc<AppState>) -> tokio::task::
                 same wake-up as the two git passes above, for the same reasons:
                 it is bounded filesystem work feeding a TTL cache presentation
                 only reads, and with a 10/30-minute TTL almost every pass here
-                finds nothing stale and touches no files at all. Independent
-                statement, so a failure in one pass never skips another.
+                finds nothing stale and touches no files at all. Project icons
+                render in both sidebar versions, so this pass deliberately does
+                not share the V2-only git-data gate. Independent statement, so a
+                failure in one pass never skips another.
                 */
-                if let Err(error) = run_project_icon_refresh_once(&pass_state, sidebar_v2_selected)
-                {
+                if let Err(error) = run_project_icon_refresh_once(&pass_state) {
                     log_project_icon_refresh_failure(&pass_state, &error.message);
                 }
             })
@@ -874,12 +883,7 @@ failure, a budget, or a TTL change on either side stays local to that probe.
 */
 fn run_project_icon_refresh_once(
     state: &Arc<AppState>,
-    sidebar_v2_selected: bool,
 ) -> std::result::Result<(), DomainStateError> {
-    // Same gate, same reason as the two git passes above.
-    if !sidebar_v2_selected {
-        return Ok(());
-    }
     let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
         code: "internalError",
         message: format!("SQLite gxserver state error: {error}"),
@@ -900,10 +904,9 @@ fn run_project_icon_refresh_once(
         }
     }
 
-    let changed: HashSet<String> =
-        project_icon::refresh_project_icon_cache(&paths, sidebar_v2_selected)
-            .into_iter()
-            .collect();
+    let changed: HashSet<String> = project_icon::refresh_project_icon_cache(&paths)
+        .into_iter()
+        .collect();
     if changed.is_empty() {
         return Ok(());
     }
@@ -1211,20 +1214,22 @@ async fn handle_http_request(
         apply_cors_headers(&headers, &mut routed.response, &state.config);
     }
     let status = routed.response.status().as_u16();
-    let _ = state.logger.log(GxserverLogInput {
-        level: log_level_from_status(status),
-        event: "apiRequest".to_string(),
-        server_id: Some(state.metadata.server_id.clone()),
-        request_id: None,
-        client,
-        duration_ms: Some(started_at.elapsed().as_millis()),
-        error: None,
-        details: Some(json!({
-            "method": "http",
-            "path": routed.endpoint_path,
-            "statusCode": status,
-        })),
-    });
+    let _ = state
+        .logger
+        .log_routine(DiagnosticLogScenario::ApiRequests, GxserverLogInput {
+            level: log_level_from_status(status),
+            event: "apiRequest".to_string(),
+            server_id: Some(state.metadata.server_id.clone()),
+            request_id: None,
+            client,
+            duration_ms: Some(started_at.elapsed().as_millis()),
+            error: None,
+            details: Some(json!({
+                "method": "http",
+                "path": routed.endpoint_path,
+                "statusCode": status,
+            })),
+        });
     if let Some(endpoint_path) = routed.endpoint_path.clone() {
         state.event_hub.broadcast(json!({
             "path": endpoint_path,
@@ -2338,6 +2343,7 @@ async fn route_http(
                     mutation.global_command_update,
                     Some(GlobalSidebarCommandUpdate::Order { .. })
                 );
+                let global_command_written = mutation.global_command_update.is_some();
                 let mut updated_projects = Vec::new();
                 for update in mutation.updates {
                     let project = repository.update_project(&update.params)?;
@@ -2353,9 +2359,20 @@ async fn route_http(
                 /*
                 CDXC:GlobalActions 2026-08-01-16:00:
                 A Global Action write touches no project row, so it schedules no
-                projectUpdated presentation delta. Clients pick the new list up
-                from the refreshed HUD this call returns and from their next HUD
-                poll, the same way they already do for action edits.
+                projectUpdated presentation delta.
+
+                CDXC:GlobalActions 2026-08-07:
+                It announces itself with its own event instead. Only the caller
+                sees the refreshed HUD this response carries; every other live
+                surface learns about HUD changes from a broadcast, and none of
+                them polls the HUD on a timer. The GPUI sidebar refetches it
+                when a projectUpdated delta arrives, which is why a project
+                Action edit reaches the row at once and a Global Action edit did
+                not — the row kept the stale list until some unrelated project
+                delta happened to fire. The event carries no list, because
+                /api/readSidebarHud stays the single projection of it, and it
+                bumps the presentation revision so snapshot pollers converge as
+                well, exactly like the sidebar-collection writes below.
                 */
                 match mutation.global_command_update {
                     Some(GlobalSidebarCommandUpdate::Save {
@@ -2369,6 +2386,16 @@ async fn route_http(
                         repository.order_global_sidebar_commands(&command_ids)?
                     }
                     None => {}
+                }
+                if global_command_written {
+                    let _event_sequence = lock_presentation_event_sequence(&state)?;
+                    let revision = increment_presentation_revision(db)?;
+                    state.event_hub.broadcast(json!({
+                        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+                        "revision": revision,
+                        "serverId": state.metadata.server_id.clone(),
+                        "type": "globalSidebarCommandsChanged",
+                    }));
                 }
                 let projects = repository.list_projects()?;
                 let mut hud = read_sidebar_hud(&projects, hud_active_project_id.as_deref());
@@ -2482,6 +2509,41 @@ async fn route_http(
                 Ok(json!({ "sidebarProjectCollections": collections }))
             },
         ),
+        "/api/assignProjectToSidebarCollection" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, db, params, _| {
+                let project_id = resolve_sidebar_collection_project_id(repository, params)?;
+                let collection_title = params
+                    .get("collectionTitle")
+                    .or_else(|| params.get("group"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|title| !title.is_empty())
+                    .ok_or_else(|| {
+                        DomainStateError::bad_request(
+                            "group-project requires a non-empty sidebar group title.",
+                        )
+                    })?;
+                let _event_sequence = lock_presentation_event_sequence(&state)?;
+                let collections =
+                    assign_project_to_sidebar_collection(db, &project_id, collection_title)?;
+                let revision = increment_presentation_revision(db)?;
+                state.event_hub.broadcast(json!({
+                    "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+                    "revision": revision,
+                    "serverId": state.metadata.server_id.clone(),
+                    "sidebarProjectCollections": collections.clone(),
+                    "type": "sidebarProjectCollectionsChanged",
+                }));
+                Ok(json!({
+                    "projectId": project_id,
+                    "sidebarProjectCollections": collections,
+                }))
+            },
+        ),
         "/api/readAppUserData" => handle_domain_http(
             &state,
             endpoint.path,
@@ -2592,6 +2654,33 @@ async fn route_http(
         | "/api/runProjectSetupCommand"
         | "/api/runBeadsAction" => {
             handle_typed_operation_http(&state, endpoint.path, request_id, &body_json).await
+        }
+        "/api/runProjectDocsAction" => handle_domain_http(
+            &state,
+            endpoint.path,
+            request_id,
+            &body_json,
+            |repository, _db, params, _| {
+                let project_id = read_project_id(params)?;
+                let project = repository.get_project(&project_id)?.ok_or_else(|| {
+                    DomainStateError::not_found(format!("Project {project_id} does not exist."))
+                })?;
+                let project_path = project
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|path| !path.is_empty())
+                    .ok_or_else(|| {
+                        DomainStateError::bad_request("Project has no filesystem path.")
+                    })?;
+                Ok(project_docs::run_project_docs_action(
+                    Path::new(project_path),
+                    params,
+                ))
+            },
+        ),
+        "/api/startBoardWork" => {
+            handle_board_start_work_http(&state, endpoint.path, request_id, &body_json).await
         }
         "/api/generateCommitMessage" => {
             handle_generate_commit_message_http(&state, endpoint.path, request_id, &body_json).await
@@ -2927,6 +3016,154 @@ where
     }
 }
 
+/*
+CDXC:BoardStartWork 2026-08-07:
+The daemon-owned Project Board "Start work" dispatch. The whole
+resolve → reuse-check → create → link sequence runs while holding the
+process-wide start-work gate, so two concurrent calls for one bead serialize
+and the second reuses the first call's link (`created: false`) instead of
+creating a duplicate worker. The zmx provider start happens after the gate is
+released: the link is already durable, so a concurrent caller reuses the
+session whether or not its provider has finished materializing.
+*/
+async fn handle_board_start_work_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let bd = match require_bundled_bd() {
+        Ok(bd) => bd,
+        Err(message) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "dependencyUnavailable",
+                    message,
+                },
+            );
+        }
+    };
+    let paths = state.paths.clone();
+    let server_id = state.metadata.server_id.clone();
+    let gate = Arc::clone(&state.board_start_work_gate);
+    let bd_executable_path = bd.executable_path;
+    let outcome = tokio::task::spawn_blocking(move || {
+        let _gate = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let db = open_gxserver_database(&paths).map_err(|error| DomainStateError {
+            code: "internalError",
+            message: format!("SQLite gxserver state error: {error}"),
+        })?;
+        let repository = DomainRepository::new(&db, &server_id);
+        crate::board_start_work::start_board_work(
+            &repository,
+            &db,
+            &server_id,
+            &params,
+            &bd_executable_path,
+        )
+    })
+    .await;
+    let mut outcome = match outcome {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(error)) => return domain_error_response(endpoint_path, request_id, error),
+        Err(error) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: format!("Board start-work task failed: {error}"),
+                },
+            )
+        }
+    };
+    let db = match open_gxserver_database(&state.paths) {
+        Ok(db) => db,
+        Err(error) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: format!("SQLite gxserver state error: {error}"),
+                },
+            )
+        }
+    };
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    if let Some((project_id, session_id)) = outcome.created_session.clone() {
+        if let Err(error) =
+            schedule_presentation_session_delta(state, &db, &repository, &project_id, &session_id)
+        {
+            return domain_error_response(endpoint_path, request_id, error);
+        }
+        // Materialize the zmx provider like `ghostex create-agent`, so the
+        // staged bead prompt reaches a live agent instead of an inert row.
+        let context = ZmxServerContext {
+            auth_token_file: state.paths.auth_token_file.to_string_lossy().to_string(),
+            base_url: format!(
+                "http://{}:{}",
+                state.config.listeners.local.host, state.config.listeners.local.port
+            ),
+        };
+        let agent_settings = match read_agent_settings(&db) {
+            Ok(settings) => settings,
+            Err(error) => return domain_error_response(endpoint_path, request_id, error),
+        };
+        let mut provider_params = Map::new();
+        provider_params.insert("projectId".to_string(), json!(&project_id));
+        provider_params.insert("sessionId".to_string(), json!(&session_id));
+        let provider_start = dispatch_zmx_lifecycle_endpoint(
+            &repository,
+            "/api/startSessionProvider",
+            &provider_params,
+            &context,
+            &agent_settings,
+        );
+        if let Some(result) = outcome.result.as_object_mut() {
+            match provider_start {
+                Ok(_) => {
+                    result.insert("providerStarted".to_string(), Value::Bool(true));
+                }
+                Err(error) => {
+                    let message = match error {
+                        ZmxEndpointError::DependencyUnavailable(message) => message,
+                        ZmxEndpointError::Domain(error) => error.message,
+                    };
+                    let _ = state.logger.log(GxserverLogInput {
+                        level: LogLevel::Warn,
+                        event: "boardStartWork.providerStartFailed".to_string(),
+                        server_id: Some(state.metadata.server_id.clone()),
+                        request_id: Some(request_id.clone()),
+                        client: None,
+                        duration_ms: None,
+                        error: Some(message.clone()),
+                        details: Some(json!({
+                            "projectId": project_id,
+                            "sessionId": session_id,
+                        })),
+                    });
+                    result.insert("providerStarted".to_string(), Value::Bool(false));
+                    result.insert("providerStartError".to_string(), Value::String(message));
+                }
+            }
+        }
+        let _ =
+            schedule_presentation_session_delta(state, &db, &repository, &project_id, &session_id);
+    }
+    routed_json(
+        Some(endpoint_path),
+        StatusCode::OK,
+        rpc_success(request_id, outcome.result),
+    )
+}
+
 fn create_quick_project_params(
     home_dir: &Path,
     params: &Map<String, Value>,
@@ -2992,6 +3229,7 @@ fn domain_error_response(
         "notFound" => StatusCode::NOT_FOUND,
         "corruptState" => StatusCode::CONFLICT,
         "projectPathUnavailable" => StatusCode::CONFLICT,
+        "dependencyUnavailable" => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     routed_json(
@@ -3320,7 +3558,8 @@ fn schedule_fork_initial_rename(state: AppState, target: ForkInitialRenameTarget
     Fork provider startup already owns the resumed CLI process. Give its prompt
     editor the same four-second readiness window used by automated agent
     prompts, then submit the provisional `Fork: <old title>` through zmx's
-    separate text/Enter path. Pi uses `/name`; Codex and Claude use `/rename`.
+    separate text/Enter path. Pi uses `/name`, Hermes Agent uses `/title`, and
+    Codex and Claude use `/rename`.
     If the user has already sent the fork's first prompt, its generated-title
     job wins and this provisional rename is skipped.
     */
@@ -3343,14 +3582,14 @@ fn schedule_fork_initial_rename(state: AppState, target: ForkInitialRenameTarget
         {
             return;
         }
-        let command = if normalize_agent_name(Some(&target.agent_name)).as_deref() == Some("pi") {
-            format!("/name {}", target.title)
-        } else {
-            format!("/rename {}", target.title)
-        };
+        let command = agent_session_title_command(Some(&target.agent_name), &target.title);
         let mut params = Map::new();
         params.insert("projectId".to_string(), json!(target.project_id.clone()));
         params.insert("sessionId".to_string(), json!(target.session_id.clone()));
+        params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("fork-title-command"),
+        );
         params.insert("submit".to_string(), Value::Bool(true));
         params.insert("text".to_string(), Value::String(command));
         let status = if dispatch_zmx_session_interaction_endpoint(
@@ -3522,6 +3761,10 @@ async fn run_first_prompt_auto_title_job(
         let mut send_params = Map::new();
         send_params.insert("projectId".to_string(), json!(project_id.clone()));
         send_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        send_params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("auto-title-command"),
+        );
         send_params.insert("text".to_string(), json!(command_text));
         dispatch_zmx_session_interaction_endpoint(
             &repository,
@@ -3558,6 +3801,10 @@ async fn run_first_prompt_auto_title_job(
     let mut enter_params = Map::new();
     enter_params.insert("projectId".to_string(), json!(project_id.clone()));
     enter_params.insert("sessionId".to_string(), json!(session_id.clone()));
+    enter_params.insert(
+        "diagnosticInputSource".to_string(),
+        json!("auto-title-submit"),
+    );
     dispatch_zmx_session_interaction_endpoint(&repository, "/api/sendSessionEnter", &enter_params)
         .map_err(|_| ())?;
 
@@ -3696,10 +3943,9 @@ where
     let Ok(db) = open_gxserver_database(&state.paths) else {
         return false;
     };
-    let Ok(transaction) = rusqlite::Transaction::new_unchecked(
-        &db,
-        rusqlite::TransactionBehavior::Immediate,
-    ) else {
+    let Ok(transaction) =
+        rusqlite::Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate)
+    else {
         return false;
     };
     let repository = DomainRepository::new(&transaction, state.metadata.server_id.as_str());
@@ -3969,15 +4215,8 @@ async fn run_manual_session_title_generation_job(
     )
     .await
     .map_err(|_| ())?;
-    let session_agent = session
-        .get("agentId")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase());
-    let command_text = if session_agent.as_deref() == Some("pi") {
-        format!("/name {title}")
-    } else {
-        format!("/rename {title}")
-    };
+    let command_text =
+        agent_session_title_command(first_prompt_agent_name(&session).as_deref(), &title);
     {
         let db = open_gxserver_database(&state.paths).map_err(|_| ())?;
         let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
@@ -3994,6 +4233,10 @@ async fn run_manual_session_title_generation_job(
         let mut kill_params = Map::new();
         kill_params.insert("projectId".to_string(), json!(project_id.clone()));
         kill_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        kill_params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("manual-title-draft-kill"),
+        );
         kill_params.insert("text".to_string(), json!("\u{15}"));
         dispatch_zmx_session_interaction_endpoint(
             &repository,
@@ -4004,6 +4247,10 @@ async fn run_manual_session_title_generation_job(
         let mut send_params = Map::new();
         send_params.insert("projectId".to_string(), json!(project_id.clone()));
         send_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        send_params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("manual-title-command"),
+        );
         send_params.insert("text".to_string(), json!(command_text));
         dispatch_zmx_session_interaction_endpoint(
             &repository,
@@ -4031,6 +4278,10 @@ async fn run_manual_session_title_generation_job(
         let mut enter_params = Map::new();
         enter_params.insert("projectId".to_string(), json!(project_id.clone()));
         enter_params.insert("sessionId".to_string(), json!(session_id.clone()));
+        enter_params.insert(
+            "diagnosticInputSource".to_string(),
+            json!("manual-title-submit"),
+        );
         dispatch_zmx_session_interaction_endpoint(
             &repository,
             "/api/sendSessionEnter",
@@ -4074,6 +4325,10 @@ async fn run_manual_session_title_generation_job(
     let mut yank_params = Map::new();
     yank_params.insert("projectId".to_string(), json!(project_id.clone()));
     yank_params.insert("sessionId".to_string(), json!(session_id.clone()));
+    yank_params.insert(
+        "diagnosticInputSource".to_string(),
+        json!("manual-title-draft-restore"),
+    );
     yank_params.insert("text".to_string(), json!("\u{19}"));
     let _ = dispatch_zmx_session_interaction_endpoint(
         &repository,
@@ -4188,8 +4443,17 @@ fn normalize_agent_name(value: Option<&str>) -> Option<String> {
         "openai codex" | "codex cli" => Some("codex".to_string()),
         "claude code" => Some("claude".to_string()),
         "cursor cli" | "cursor agent" | "cursor-agent" => Some("cursor".to_string()),
+        "hermes" | "hermes agent" | "hermes-agent" => Some("hermes-agent".to_string()),
         "π" => Some("pi".to_string()),
         other => Some(other.to_string()),
+    }
+}
+
+fn agent_session_title_command(agent_name: Option<&str>, title: &str) -> String {
+    match normalize_agent_name(agent_name).as_deref() {
+        Some("pi") => format!("/name {title}"),
+        Some("hermes-agent") => format!("/title {title}"),
+        _ => format!("/rename {title}"),
     }
 }
 
@@ -4464,20 +4728,24 @@ fn build_title_generation_command(
     Ok(match agent {
         "codex" => create_here_doc_command(
             &format!(
-                "{command} exec --ephemeral --skip-git-repo-check -m gpt-5.4-mini -c 'model_reasoning_effort=\"low\"'"
+                "{command} exec --ephemeral --skip-git-repo-check -m gpt-5.6-luna -c 'model_reasoning_effort=\"low\"'"
             ),
             delimiter,
             prompt,
         ),
         "cursor" => format!(
-            "{command} --print --yolo --trust --output-format text {}",
+            "{command} --print --yolo --trust --model cursor-grok-4.5-low --output-format text {}",
             quote_shell_arg(prompt)
         ),
         "claude" => {
-            create_here_doc_command(&format!("{command} -p --model haiku"), delimiter, prompt)
+            create_here_doc_command(
+                &format!("{command} -p --model haiku --effort low"),
+                delimiter,
+                prompt,
+            )
         }
         "grok" => format!(
-            "{command} -p --model grok-composer-2.5-fast --output-format plain --no-alt-screen --no-plan --no-subagents --disable-web-search --max-turns 1 {}",
+            "{command} --model grok-4.5 --reasoning-effort low --output-format plain --no-alt-screen --no-plan --no-subagents --disable-web-search --max-turns 1 --single {}",
             quote_shell_arg(prompt)
         ),
         "custom" => create_here_doc_command(command, delimiter, prompt),
@@ -4781,16 +5049,19 @@ async fn handle_typed_operation_http(
             } else {
                 crate::logging::LogLevel::Warn
             };
-            let _ = state.logger.log(GxserverLogInput {
-                level,
-                event: "typedOperation".to_string(),
-                server_id: Some(state.metadata.server_id.clone()),
-                request_id: Some(request_id.clone()),
-                client: None,
-                duration_ms: None,
-                error: None,
-                details: Some(typed_operation_log_details(&result)),
-            });
+            let _ = state.logger.log_routine(
+                DiagnosticLogScenario::TypedOperations,
+                GxserverLogInput {
+                    level,
+                    event: "typedOperation".to_string(),
+                    server_id: Some(state.metadata.server_id.clone()),
+                    request_id: Some(request_id.clone()),
+                    client: None,
+                    duration_ms: None,
+                    error: None,
+                    details: Some(typed_operation_log_details(&result)),
+                },
+            );
             routed_json(
                 Some(endpoint_path),
                 StatusCode::OK,
@@ -7238,6 +7509,75 @@ fn normalize_project_path_for_comparison(path: &str) -> String {
     }
 }
 
+fn resolve_sidebar_collection_project_id(
+    repository: &DomainRepository<'_>,
+    params: &Map<String, Value>,
+) -> Result<String, DomainStateError> {
+    if let Some(project_id) = params
+        .get("projectId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|project_id| !project_id.is_empty())
+    {
+        return repository
+            .get_project(project_id)?
+            .map(|_| project_id.to_string())
+            .ok_or_else(|| {
+                DomainStateError::not_found(format!("Project {project_id} does not exist."))
+            });
+    }
+    let projects = repository.list_projects()?;
+    let matches: Vec<&Value> = if let Some(path) = params
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        let requested = normalize_project_path_for_comparison(path);
+        projects
+            .iter()
+            .filter(|project| {
+                project
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .is_some_and(|candidate| {
+                        normalize_project_path_for_comparison(candidate) == requested
+                    })
+            })
+            .collect()
+    } else if let Some(name) = params
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        projects
+            .iter()
+            .filter(|project| {
+                project
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
+            })
+            .collect()
+    } else {
+        return Err(DomainStateError::bad_request(
+            "group-project requires --project-id, --path, or --name.",
+        ));
+    };
+    if matches.len() > 1 {
+        return Err(DomainStateError::bad_request(
+            "The project selector matched more than one project; pass --project-id.",
+        ));
+    }
+    matches
+        .first()
+        .and_then(|project| project.get("projectId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| DomainStateError::not_found("No Ghostex project matched that selector."))
+}
+
 fn path_file_name_for_project(path: &str) -> String {
     Path::new(path)
         .file_name()
@@ -8857,10 +9197,9 @@ fn schedule_presentation_project_delta(
     */
     /*
     CDXC:SidebarV2DataGate 2026-07-29:
-    Both warms are Sidebar V2 data, so both answer to the same `sidebarVersion`
-    gate as the background passes. The HOOK stays wired on every daemon and the
-    PROBE is what the gate stops (see `ensure_project_git_remote_probed`), so a
-    V1 machine's projectAdded is an ordinary delta that spawns nothing.
+    The git-remote warm answers to the same `sidebarVersion` gate as its
+    background pass. The icon warm below is intentionally ungated because both
+    sidebar versions render discovered project icons.
     */
     if let Some(project) = repository.get_project(project_id)? {
         let sidebar_v2_selected = session_lifecycle::read_sidebar_v2_selected(&state.paths);
@@ -8876,7 +9215,7 @@ fn schedule_presentation_project_delta(
         until the next background pass. Same bounded cost — the warm reads the
         candidate list once per NEW family root and never again.
         */
-        project_icon::ensure_published_project_icon_probed(&project, sidebar_v2_selected);
+        project_icon::ensure_published_project_icon_probed(&project);
     }
     let _event_sequence = lock_presentation_event_sequence(state)?;
     let delta = build_presentation_project_delta(repository, project_id, delta_type)?;
@@ -9306,8 +9645,9 @@ fn session_chat_hook_working(session: &Value) -> bool {
 
 /*
 CDXC:SessionChatDetectedOptions 2026-08-01:
-Model/effort detection reads the session's zmx scrollback, which costs one
-short-lived process, so it is NEVER done per frame or per long-poll tick.
+Model/effort detection reads structured transcript metadata plus the session's
+zmx scrollback. The latter costs one short-lived process, so the combined read
+is NEVER done per frame or per long-poll tick.
 Every trigger goes through this 5s-TTL per-session cache: chat reads, the
 +2s/+6s probes after a dispatched `/model`//`/effort`//`/fast`, and the
 follower's ~30s piggyback. A miss is cached too — a session whose agent prints
@@ -10029,10 +10369,11 @@ async fn handle_read_session_chat_http(
         result.insert("agentSessionId".to_string(), json!(agent_session_id));
     }
     /*
-    The pills' "what is the agent ACTUALLY running" value. Read through the 5s
-    cache, so a mobile long-poll loop or a paced follow-up read is free; a
-    session that is not running (or whose agent has no table) never spawns
-    anything and simply omits the field.
+    The pills' "what is the agent ACTUALLY running" value. Structured
+    transcript metadata fills values absent from the terminal footer. Read
+    through the 5s cache, so a mobile long-poll loop or a paced follow-up read
+    is free; a session that is not running (or whose agent has no table) never
+    spawns anything and simply omits the field.
     */
     if lifecycle_running {
         if let Some(detected) = SessionChatOptionDetector::new(state)
@@ -10303,6 +10644,7 @@ fn handle_send_session_chat_message_http(
             &target.project_id,
             &target.session_id,
             &target.zmx_name,
+            "session-chat-key",
             steps,
         );
         return routed_json(
@@ -10352,6 +10694,7 @@ fn handle_send_session_chat_message_http(
         &target.project_id,
         &target.session_id,
         &target.zmx_name,
+        "session-chat-message",
         steps,
     );
     // An option command changes what the statusline reports: read it back.
@@ -10377,7 +10720,7 @@ fn handle_send_session_chat_message_http(
 /*
 CDXC:SessionChatImagePaste 2026-08-01:
 Chat-composer image paste mirrors the gpui terminal paste contract: bytes
-land in ~/.ghostex/i/<epochMillis>.<ext> on THIS machine (the machine the
+land in the resolved Ghostex image directory on THIS machine (the machine the
 session runs on — remote clients reach here via their per-machine RPC), and
 the returned absolute path is what the client interpolates into
 "[Image #N](path)". suggestedName is only ever mined for its extension;
@@ -10535,7 +10878,7 @@ fn handle_save_session_chat_image_http(
 /*
 CDXC:SessionChatAttachments 2026-08-02:
 Non-image sibling of the image paste: any attached file's bytes land in
-~/.ghostex/f/<epochMillis>-<sanitized-name> on THIS machine and the returned
+the resolved Ghostex attachment directory on THIS machine and the returned
 absolute path becomes the composer's "[File #N](path)" reference. The
 suggested name is sanitized to one flat file name (path segments and
 non-portable characters stripped), so no caller-controlled path components
@@ -10972,6 +11315,7 @@ fn handle_answer_session_chat_prompt_http(
             &target.project_id,
             &target.session_id,
             &target.zmx_name,
+            "session-chat-answer",
             steps,
         );
     }
@@ -11003,6 +11347,7 @@ fn handle_interrupt_session_chat_http(
         &target.project_id,
         &target.session_id,
         &target.zmx_name,
+        "session-chat-interrupt",
         vec![crate::session_chat_send::SessionChatSendStep::Write(
             crate::session_chat_send::SESSION_CHAT_INTERRUPT.to_string(),
         )],
@@ -11385,7 +11730,8 @@ fn sync_live_zmx_process_identities(
         .iter()
         .map(|(_, _, zmx_name)| zmx_name.clone())
         .collect::<Vec<_>>();
-    let Ok(identities) = read_zmx_session_process_identities(&session_names) else {
+    let Ok(identities) = read_zmx_session_process_identities(&session_names, &state.paths.home_dir)
+    else {
         return Ok(());
     };
     let codex_hook_identities = read_codex_hook_session_identities(&state.paths);
@@ -12149,28 +12495,30 @@ fn log_agent_hook_passive_identity_conflict(
     CDXC:AgentHooks 2026-06-22-08:31:
     Passive hook identity conflicts need the same support-bundle evidence as TypeScript without exposing thread ids, paths, titles, prompts, or hook payloads. Hash private agent-session ids at the writer boundary and log only enum fields, stable gxserver ids, and payload-shape booleans.
     */
-    let _ = state.logger.log(GxserverLogInput {
-        level: LogLevel::Debug,
-        event: "sessionIdentity.updateBlocked".to_string(),
-        server_id: Some(state.metadata.server_id.clone()),
-        request_id: None,
-        client: None,
-        duration_ms: None,
-        error: None,
-        details: Some(json!({
-            "agentId": agent_id,
-            "currentAgentSessionIdHash": hash_log_identity(current_agent_session_id),
-            "currentAgentSessionIdPresent": current_agent_session_id.is_some(),
-            "incomingAgentSessionIdHash": hash_log_identity(incoming_agent_session_id),
-            "incomingAgentSessionIdPresent": incoming_agent_session_id.is_some(),
-            "ownerProjectId": conflict.get("ownerProjectId").cloned(),
-            "ownerSessionId": conflict.get("ownerSessionId").cloned(),
-            "projectId": params.get("projectId").and_then(Value::as_str),
-            "reason": reason,
-            "sessionId": params.get("sessionId").and_then(Value::as_str),
-            "source": source,
-        })),
-    });
+    let _ = state
+        .logger
+        .log_routine(DiagnosticLogScenario::AgentDetection, GxserverLogInput {
+            level: LogLevel::Debug,
+            event: "sessionIdentity.updateBlocked".to_string(),
+            server_id: Some(state.metadata.server_id.clone()),
+            request_id: None,
+            client: None,
+            duration_ms: None,
+            error: None,
+            details: Some(json!({
+                "agentId": agent_id,
+                "currentAgentSessionIdHash": hash_log_identity(current_agent_session_id),
+                "currentAgentSessionIdPresent": current_agent_session_id.is_some(),
+                "incomingAgentSessionIdHash": hash_log_identity(incoming_agent_session_id),
+                "incomingAgentSessionIdPresent": incoming_agent_session_id.is_some(),
+                "ownerProjectId": conflict.get("ownerProjectId").cloned(),
+                "ownerSessionId": conflict.get("ownerSessionId").cloned(),
+                "projectId": params.get("projectId").and_then(Value::as_str),
+                "reason": reason,
+                "sessionId": params.get("sessionId").and_then(Value::as_str),
+                "source": source,
+            })),
+        });
     let hook_activity = normalize_agent_hook_activity(
         params.get("status"),
         params
@@ -12674,6 +13022,8 @@ fn json_body_limit_bytes(endpoint_path: &str) -> usize {
         crate::constants::GXSERVER_IMAGE_BODY_LIMIT_BYTES
     } else if endpoint_path == "/api/saveSessionChatAttachment" {
         crate::constants::GXSERVER_ATTACHMENT_BODY_LIMIT_BYTES
+    } else if endpoint_path == "/api/runProjectDocsAction" {
+        3 * 1024 * 1024
     } else {
         GXSERVER_JSON_BODY_LIMIT_BYTES
     }
@@ -13214,6 +13564,26 @@ mod tests {
     }
 
     #[test]
+    fn agent_session_title_command_uses_provider_specific_slash_command() {
+        assert_eq!(
+            agent_session_title_command(Some("hermes-agent"), "Investigate hooks"),
+            "/title Investigate hooks"
+        );
+        assert_eq!(
+            agent_session_title_command(Some("Hermes Agent"), "Investigate hooks"),
+            "/title Investigate hooks"
+        );
+        assert_eq!(
+            agent_session_title_command(Some("pi"), "Investigate hooks"),
+            "/name Investigate hooks"
+        );
+        assert_eq!(
+            agent_session_title_command(Some("codex"), "Investigate hooks"),
+            "/rename Investigate hooks"
+        );
+    }
+
+    #[test]
     fn first_prompt_auto_title_attempt_rejects_stale_same_prompt_job() {
         let session = json!({
             "runtimeSettings": {
@@ -13381,6 +13751,75 @@ mod tests {
         let body = response_json(missing.response).await;
         assert_eq!(body["error"], json!("notFound"));
         assert_eq!(body["message"], json!("Project P9zzz does not exist."));
+    }
+
+    /*
+    CDXC:GlobalActions 2026-08-07:
+    Only the caller reads this response. The sidebar row that renders Global
+    Actions lives in another surface that refetches the HUD when the daemon
+    announces a change and never polls it, so a Global Action write has to
+    broadcast the way a project Action write already does through its
+    projectUpdated delta. Without the announcement the row kept the stale list
+    until an unrelated project delta happened to fire.
+    */
+    #[tokio::test]
+    async fn global_sidebar_command_write_broadcasts_a_hud_change_event() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        /*
+        `ensure_gxserver_storage_layout` creates the state directories but not
+        the config directory, so a temp home has nowhere to write the default
+        config. A real install always has one.
+        */
+        std::fs::create_dir_all(paths.config_file.parent().expect("config directory"))
+            .expect("create config directory");
+        let state = test_app_state(paths);
+        let token = state.auth_token.clone();
+        let mut events = state.event_hub.subscribe();
+
+        let saved = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/mutateSidebarHudSettings",
+                &token,
+                json!({
+                    "params": {
+                        "actionType": "terminal",
+                        "command": "echo global",
+                        "commandId": "custom-global-action",
+                        "name": "Global Action",
+                        "operation": "save",
+                        "showOnProjectRow": true,
+                        "target": "globalCommand"
+                    }
+                }),
+            ),
+            "request-save-global-sidebar-command".to_string(),
+        )
+        .await;
+        assert_eq!(saved.response.status(), StatusCode::OK);
+        let body = response_json(saved.response).await;
+        assert_eq!(
+            body["result"]["hud"]["globalCommands"][0]["commandId"],
+            json!("custom-global-action")
+        );
+        assert_eq!(
+            body["result"]["hud"]["globalCommands"][0]["showOnProjectRow"],
+            json!(true)
+        );
+
+        let mut broadcast_types = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let Some(event_type) = event["type"].as_str() {
+                broadcast_types.push(event_type.to_string());
+            }
+        }
+        assert!(
+            broadcast_types
+                .iter()
+                .any(|event_type| event_type == "globalSidebarCommandsChanged"),
+            "expected a globalSidebarCommandsChanged broadcast, saw {broadcast_types:?}"
+        );
     }
 
     #[tokio::test]
@@ -15281,6 +15720,7 @@ mod tests {
         Arc::new(AppState {
             auth_token: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             automation_runtime,
+            board_start_work_gate: Arc::new(Mutex::new(())),
             build_identity: "test-build".to_string(),
             config,
             event_hub: GxserverEventHub::new(metadata.server_id.clone()),

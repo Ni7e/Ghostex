@@ -138,6 +138,7 @@ bundled_cli_skill_assets=(
 	ghostex-computer-use
 	ghostex-agent-orchestration
 	ghostex-fable-5.6-orchestration
+	ghostex-find-prev-session
 	ghostex-auto-rename-session
 	ghostex-manage-beads
 	ghostex-move-codex-session
@@ -629,6 +630,8 @@ stage_on_demand_remote_gxserver_manifest() {
 		manifest_args+=(--component-manifest "$component_manifest")
 	fi
 	node "$REPO_ROOT/scripts/release-gpui/on-demand-manifest.mjs" "${manifest_args[@]}"
+	node "$REPO_ROOT/scripts/release-gpui/on-demand-manifest.mjs" validate-macos \
+		--manifest "$WEB_DIR/on-demand-resources.json"
 	rm -rf "$WEB_DIR/gxserver-linux-x64" "$WEB_DIR/gxserver-linux-arm64" "$WEB_DIR/gxserver-linux-amd64" "$WEB_DIR/gxserver-linux-aarch64"
 }
 
@@ -798,10 +801,12 @@ stage_framework_directory() {
 }
 
 cef_component_version() {
-	local raw_version
-	raw_version="$(sed -n 's/^#define CEF_VERSION "\([^"]*\)"$/\1/p' "$CEF_CACHE_DIR/include/cef_version.h" | head -n 1)"
+	local cef_distribution_root version_header raw_version
+	cef_distribution_root="$(dirname "$CEF_FRAMEWORK")"
+	version_header="$cef_distribution_root/include/cef_version.h"
+	raw_version="$(sed -n 's/^#define CEF_VERSION "\([^"]*\)"$/\1/p' "$version_header" | head -n 1)"
 	if [[ -z "$raw_version" ]]; then
-		echo "Could not resolve the cef-rs CEF version from $CEF_CACHE_DIR/include/cef_version.h" >&2
+		echo "Could not resolve the cef-rs CEF version from $version_header" >&2
 		exit 1
 	fi
 	printf '%s\n' "$raw_version" | sed 's/[^A-Za-z0-9._-]/-/g'
@@ -1094,7 +1099,7 @@ cat >"$APP_PATH/Contents/Info.plist" <<EOF_PLIST
 	<!-- The GHOSTEXHomeDirectoryName/.ghostex-gpui keys were removed as
 	vestigial and misleading: only the macOS Swift host's GhostexAppStorage
 	reads them and none of it ships in this bundle. GPUI Rust resolves
-	GHOSTEX_HOME env else ~/.ghostex (shared_settings.rs ghostex_home_root). -->
+	GHOSTEX_HOME or the same XDG storage directories used on Linux. -->
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>NSHighResolutionCapable</key>

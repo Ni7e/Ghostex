@@ -36,7 +36,7 @@ export function dismissSidebarTooltips() {
  * window listener is the one place that sees every scroller (main sidebar,
  * inner project session lists, modal bodies). The dismiss dispatch is
  * rate-limited so momentum scrolling does not spam every mounted tooltip's
- * listener each frame; the shortest tooltip open delay (750ms) is far above
+ * listener each frame; the shared tooltip open delay (300ms) is far above
  * the limit, so nothing can open and survive between dismissals mid-scroll.
  */
 const SCROLL_DISMISS_MIN_INTERVAL_MS = 100;

@@ -169,7 +169,8 @@ final class EditorSession {
 
     /*
      * The thumbnail shelf must load every image path already present in the
-     * Monaco text. Resolve short ~/.ghostex/i paths natively and send
+     * Monaco text. Resolve short home-relative image paths, including legacy
+     * ~/.ghostex/i references, natively and send
      * display-safe data URLs back to the web layer so WKWebView local-file
      * read limits do not block thumbnail or popup rendering. Decode and
      * downsample off the main queue so large images cannot stall typing.
@@ -216,6 +217,16 @@ final class EditorSession {
     let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedPath.hasPrefix("file://"), let url = URL(string: trimmedPath), url.isFileURL {
       return url
+    }
+    if trimmedPath.hasPrefix("~/.ghostex/") {
+      let relativePath = String(trimmedPath.dropFirst("~/.ghostex/".count))
+      return ghostexDataDirectory().appendingPathComponent(relativePath)
+    }
+    let legacyAbsolutePrefix = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".ghostex", isDirectory: true).path + "/"
+    if trimmedPath.hasPrefix(legacyAbsolutePrefix) {
+      let relativePath = String(trimmedPath.dropFirst(legacyAbsolutePrefix.count))
+      return ghostexDataDirectory().appendingPathComponent(relativePath)
     }
     if trimmedPath.hasPrefix("~/") {
       let relativePath = String(trimmedPath.dropFirst(2))
@@ -296,9 +307,9 @@ final class EditorSession {
    * Pasting an image must insert a durable Markdown file reference, never
    * binary content, and the inserted path must stay short enough to read on
    * one prompt-editor line. Native owns path resolution: clipboard image
-   * files are copied and unsaved bitmaps saved under ~/.ghostex/i with a
-   * compact timestamp filename, then the tilde path is returned to the web
-   * layer for [Image #N](path) insertion.
+   * files are copied and unsaved bitmaps saved under the resolved Ghostex data
+   * directory with a compact timestamp filename, then a home-relative or
+   * absolute path is returned to the web layer for [Image #N](path) insertion.
    */
   private static func resolveClipboardImagePath() throws -> String {
     let pasteboard = NSPasteboard.general
@@ -419,9 +430,31 @@ final class EditorSession {
   }
 
   private static func imageStoreDirectory() -> URL {
-    FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(".ghostex", isDirectory: true)
-      .appendingPathComponent("i", isDirectory: true)
+    ghostexDataDirectory().appendingPathComponent("i", isDirectory: true)
+  }
+
+  private static func ghostexDataDirectory() -> URL {
+    let environment = ProcessInfo.processInfo.environment
+    if let ghostexHome = absoluteEnvironmentDirectory("GHOSTEX_HOME", environment: environment) {
+      return ghostexHome
+    }
+    let dataRoot = absoluteEnvironmentDirectory("XDG_DATA_HOME", environment: environment)
+      ?? FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".local/share", isDirectory: true)
+    return dataRoot.appendingPathComponent("ghostex", isDirectory: true)
+  }
+
+  private static func absoluteEnvironmentDirectory(
+    _ name: String,
+    environment: [String: String]
+  ) -> URL? {
+    guard let value = environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !value.isEmpty,
+      (value as NSString).isAbsolutePath
+    else {
+      return nil
+    }
+    return URL(fileURLWithPath: value, isDirectory: true).standardizedFileURL
   }
 
   private static func normalizedImageFileExtension(_ pathExtension: String) -> String {
@@ -436,6 +469,15 @@ final class EditorSession {
   }
 
   private static func displayImagePath(for fileURL: URL) -> String {
-    "~/.ghostex/i/\(fileURL.lastPathComponent)"
+    let path = fileURL.standardizedFileURL.path
+    let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    if path == home {
+      return "~"
+    }
+    let homePrefix = home.hasSuffix("/") ? home : "\(home)/"
+    if path.hasPrefix(homePrefix) {
+      return "~/\(path.dropFirst(homePrefix.count))"
+    }
+    return path
   }
 }

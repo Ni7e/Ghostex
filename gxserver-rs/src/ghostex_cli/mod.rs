@@ -2,6 +2,7 @@ pub mod actions;
 pub mod args;
 pub mod attach;
 pub mod automations;
+pub mod board;
 pub mod browser_mcp;
 pub mod diagnostics;
 pub mod editors;
@@ -30,7 +31,9 @@ sees identical behavior after the Node CLI deletion.
 pub fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let result = crate::paths::migrate_legacy_storage()
-        .map_err(|error| CliError::Other(format!("Could not migrate legacy Ghostex storage: {error}")))
+        .map_err(|error| {
+            CliError::Other(format!("Could not migrate legacy Ghostex storage: {error}"))
+        })
         .and_then(|_| dispatch(&argv));
     rpc::stop_all_gxserver_ssh_tunnels();
     match result {
@@ -49,16 +52,19 @@ pub fn run() -> i32 {
 
 /// Commands whose own `-h/--help` handling must not be swallowed by the
 /// global help gate.
-const HELP_GATE_EXCLUDED: [&str; 17] = [
+const HELP_GATE_EXCLUDED: &[&str] = &[
     "agent-orchestration",
     "bd",
     "beads",
+    "board",
     "browser",
+    "browser-use",
     "computer-use",
     "editor-daemon",
     "f",
     "fable-5.6-orchestration",
     "find",
+    "find-prev-session",
     "generate-title",
     "h",
     "history",
@@ -122,7 +128,7 @@ fn exit_code() -> i32 {
 }
 
 fn is_known_command(name: &str) -> bool {
-    const NAMES: [&str; 117] = [
+    const NAMES: &[&str] = &[
         "sessions",
         "2",
         "s",
@@ -173,6 +179,7 @@ fn is_known_command(name: &str) -> bool {
         "switch-project",
         "move-project",
         "add-project",
+        "group-project",
         "browse-directories",
         "discover-source-control",
         "lookup-repository",
@@ -212,20 +219,25 @@ fn is_known_command(name: &str) -> bool {
         "open-browser",
         "open-browser-pane",
         "browser",
+        "browser-use",
         "browser-devtools-mcp",
         "browser-mcp",
         "bd",
         "beads",
+        "board",
         "server",
         "web",
         "install-browser-skill",
         "install-browser-mcp-skill",
+        "install-browser-use-skill",
         "computer-use",
         "install-computer-use-skill",
         "agent-orchestration",
         "install-agent-orchestration-skill",
         "fable-5.6-orchestration",
         "install-fable-5.6-orchestration-skill",
+        "find-prev-session",
+        "install-find-prev-session-skill",
         "generate-title",
         "install-generate-title-skill",
         "manage-beads",
@@ -327,6 +339,12 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             run_bridge_action("moveProject", Parser::ProjectMove, fail_on_not_ok, args)
         }
         "add-project" => run_bridge_action("addProject", Parser::ProjectPath, plain, args),
+        "group-project" => run_bridge_action(
+            "assignProjectToSidebarCollection",
+            Parser::ProjectCollection,
+            fail_on_not_ok,
+            args,
+        ),
         /*
         CDXC:AddProjectDialog 2026-07-30:
         The Add Project flow's four gxserver reads/writes are exposed as CLI
@@ -339,12 +357,9 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             fail_on_not_ok,
             args,
         ),
-        "discover-source-control" => run_bridge_action(
-            "discoverSourceControl",
-            Parser::None,
-            fail_on_not_ok,
-            args,
-        ),
+        "discover-source-control" => {
+            run_bridge_action("discoverSourceControl", Parser::None, fail_on_not_ok, args)
+        }
         "lookup-repository" => run_bridge_action(
             "lookupRepository",
             Parser::LookupRepository,
@@ -456,12 +471,9 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             fail_on_not_ok,
             args,
         ),
-        "interrupt-session-chat" => run_bridge_action(
-            "interruptSessionChat",
-            Parser::SessionSelector,
-            plain,
-            args,
-        ),
+        "interrupt-session-chat" => {
+            run_bridge_action("interruptSessionChat", Parser::SessionSelector, plain, args)
+        }
         "wait-for-text" => wait::wait_for_text_command(args),
         "rename-command" => {
             run_resolved_session_bridge_action("renameCommand", Parser::Rename, plain, args)
@@ -473,13 +485,16 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "open-browser" => run_bridge_action("openBrowser", Parser::Url, plain, args),
         "open-browser-pane" => run_bridge_action("openBrowserPane", Parser::None, plain, args),
         "browser" => browser_mcp::browser_command(args),
+        "browser-use" => skills::browser_use_command(args),
         "browser-devtools-mcp" | "browser-mcp" => browser_mcp::browser_devtools_mcp_command(args),
         "bd" | "beads" => launchers::beads_command(args),
+        "board" => board::board_command(args),
         "server" => server_command(args),
         "web" => web::web_command(args),
         "install-browser-skill" | "install-browser-mcp-skill" => {
             skills::install_browser_skill_command(args)
         }
+        "install-browser-use-skill" => skills::install_browser_use_skill_command(args),
         "computer-use" => skills::computer_use_command(args),
         "install-computer-use-skill" => skills::install_computer_use_skill_command(args),
         "agent-orchestration" => skills::agent_orchestration_command(args),
@@ -490,6 +505,8 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "install-fable-5.6-orchestration-skill" => {
             skills::install_fable56_orchestration_skill_command(args)
         }
+        "find-prev-session" => skills::find_prev_session_command(args),
+        "install-find-prev-session-skill" => skills::install_find_prev_session_skill_command(args),
         "generate-title" => skills::generate_title_command(args),
         "install-generate-title-skill" => skills::install_generate_title_skill_command(args),
         "manage-beads" => skills::manage_beads_command(args),

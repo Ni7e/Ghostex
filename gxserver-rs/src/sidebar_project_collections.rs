@@ -1,5 +1,6 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
+use uuid::Uuid;
 
 use crate::domain::DomainStateError;
 
@@ -25,16 +26,9 @@ const MAX_NEXT_COLLECTION_NUMBER: i64 = 1_000_000;
 
 /// Mirrors SIDEBAR_PROJECT_COLLECTION_COLORS in sidebar/project-collections.ts
 /// so server-side fallback colors rotate exactly like the desktop client.
-const SIDEBAR_PROJECT_COLLECTION_COLORS: [&str; 9] = [
-    "transparent",
-    "#808080",
-    "#7c6df2",
-    "#3aa675",
-    "#d6873f",
-    "#d75b72",
-    "#3f8fc7",
-    "#b36ad4",
-    "#8c9b45",
+const SIDEBAR_PROJECT_COLLECTION_COLORS: [&str; 13] = [
+    "#4f5663", "#808080", "#7c6df2", "#3aa675", "#d6873f", "#d75b72", "#3f8fc7", "#b36ad4",
+    "#8c9b45", "#c95353", "#c4a23d", "#2f9b95", "#596fd1",
 ];
 
 pub fn empty_sidebar_project_collections_state() -> Value {
@@ -97,6 +91,121 @@ pub fn update_sidebar_project_collections(
         message: format!("SQLite sidebar project collections error: {error}"),
     })?;
     Ok(normalized)
+}
+
+/// Move one project into a collection selected by its human-readable title.
+///
+/// This is the daemon-owned primitive behind `ghostex group-project`. Keeping
+/// the read/modify/write here makes the move atomic with respect to the
+/// presentation mutation lock held by the HTTP route, instead of requiring CLI
+/// callers to replace the entire collections document themselves.
+pub fn assign_project_to_sidebar_collection(
+    db: &Connection,
+    project_id: &str,
+    collection_title: &str,
+) -> Result<Value, DomainStateError> {
+    let project_id =
+        trimmed_bounded_text(Some(&Value::String(project_id.to_string())), MAX_ID_CHARS)
+            .ok_or_else(|| DomainStateError::bad_request("Project id must be non-empty."))?;
+    let collection_title = trimmed_bounded_text(
+        Some(&Value::String(collection_title.to_string())),
+        MAX_TITLE_CHARS,
+    )
+    .ok_or_else(|| {
+        DomainStateError::bad_request(format!(
+            "Sidebar group title must be between 1 and {MAX_TITLE_CHARS} characters."
+        ))
+    })?;
+    let mut state = read_sidebar_project_collections(db)?;
+    let mut collections = state
+        .get("collections")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut order = state
+        .get("order")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let target_collection_id = order
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|collection_id| {
+            collections
+                .get(*collection_id)
+                .and_then(|collection| collection.get("title"))
+                .and_then(Value::as_str)
+                .is_some_and(|title| title.eq_ignore_ascii_case(&collection_title))
+        })
+        .map(str::to_string)
+        .or_else(|| {
+            collections.iter().find_map(|(collection_id, collection)| {
+                collection
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .filter(|title| title.eq_ignore_ascii_case(&collection_title))
+                    .map(|_| collection_id.clone())
+            })
+        });
+
+    // A project belongs to at most one collection. Remove it everywhere first,
+    // including from the target, so re-running the command remains idempotent.
+    for collection in collections.values_mut() {
+        if let Some(project_ids) = collection
+            .get_mut("projectIds")
+            .and_then(Value::as_array_mut)
+        {
+            project_ids.retain(|candidate| candidate.as_str() != Some(project_id.as_str()));
+        }
+    }
+
+    let target_collection_id = match target_collection_id {
+        Some(collection_id) => collection_id,
+        None => {
+            let next_collection_number = state
+                .get("nextCollectionNumber")
+                .and_then(Value::as_i64)
+                .filter(|value| *value >= 1 && *value <= MAX_NEXT_COLLECTION_NUMBER)
+                .unwrap_or((collections.len() as i64) + 1);
+            let collection_id = format!(
+                "project-collection-{next_collection_number}-{}",
+                Uuid::new_v4().simple()
+            );
+            let color_index = usize::try_from(next_collection_number.saturating_sub(1))
+                .unwrap_or_default()
+                % SIDEBAR_PROJECT_COLLECTION_COLORS.len();
+            collections.insert(
+                collection_id.clone(),
+                json!({
+                    "collapsed": false,
+                    "collectionId": collection_id,
+                    "color": SIDEBAR_PROJECT_COLLECTION_COLORS[color_index],
+                    "projectIds": [],
+                    "title": collection_title,
+                }),
+            );
+            order.push(Value::String(collection_id.clone()));
+            state["nextCollectionNumber"] = Value::Number(
+                next_collection_number
+                    .saturating_add(1)
+                    .min(MAX_NEXT_COLLECTION_NUMBER)
+                    .into(),
+            );
+            collection_id
+        }
+    };
+    let target_project_ids = collections
+        .get_mut(&target_collection_id)
+        .and_then(|collection| collection.get_mut("projectIds"))
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| DomainStateError {
+            code: "internalError",
+            message: "Sidebar group state lost its project list.".to_string(),
+        })?;
+    target_project_ids.push(Value::String(project_id));
+    state["collections"] = Value::Object(collections);
+    state["order"] = Value::Array(order);
+    update_sidebar_project_collections(db, &Map::from_iter([("state".to_string(), state)]))
 }
 
 pub fn normalize_sidebar_project_collections_state(state: &Value) -> Value {
@@ -202,6 +311,10 @@ pub fn normalize_sidebar_project_collections_state(state: &Value) -> Value {
 
 fn normalized_collection_color(value: Option<&Value>, fallback_index: usize) -> String {
     if let Some(color) = value.and_then(Value::as_str) {
+        // Migrate the removed Transparent option to the new Dark Gray default.
+        if color == "transparent" {
+            return SIDEBAR_PROJECT_COLLECTION_COLORS[0].to_string();
+        }
         if is_valid_collection_color(color) {
             return color.to_string();
         }
@@ -211,9 +324,6 @@ fn normalized_collection_color(value: Option<&Value>, fallback_index: usize) -> 
 }
 
 fn is_valid_collection_color(color: &str) -> bool {
-    if color == "transparent" {
-        return true;
-    }
     let mut chars = color.chars();
     chars.next() == Some('#')
         && color.len() == 7
@@ -250,7 +360,7 @@ mod tests {
                 "c2": {
                     "collapsed": false,
                     "collectionId": "c2",
-                    "color": "transparent",
+                    "color": "#4f5663",
                     "projectIds": ["P3"],
                     "title": "Group 2",
                 },
@@ -265,6 +375,22 @@ mod tests {
             normalize_sidebar_project_collections_state(&normalized),
             normalized
         );
+    }
+
+    #[test]
+    fn normalize_migrates_removed_transparent_color_to_dark_gray() {
+        let normalized = normalize_sidebar_project_collections_state(&json!({
+            "collections": {
+                "c1": {
+                    "color": "transparent",
+                    "projectIds": ["P1"],
+                    "title": "Legacy group",
+                },
+            },
+            "nextCollectionNumber": 2,
+            "order": ["c1"],
+        }));
+        assert_eq!(normalized["collections"]["c1"]["color"], json!("#4f5663"));
     }
 
     #[test]
@@ -299,7 +425,7 @@ mod tests {
                     "c1": {
                         "collapsed": false,
                         "collectionId": "c1",
-                        "color": "transparent",
+                        "color": "#4f5663",
                         "projectIds": ["P1", "P2"],
                         "title": "Keep",
                     },
@@ -372,6 +498,67 @@ mod tests {
             read_sidebar_project_collections(&db).expect("read back"),
             updated
         );
+    }
+
+    #[test]
+    fn assign_moves_project_by_case_insensitive_title_and_creates_missing_group() {
+        let db = rusqlite::Connection::open_in_memory().expect("open");
+        db.execute_batch(
+            "CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL);",
+        )
+        .expect("schema");
+        let mut params = Map::new();
+        params.insert(
+            "state".to_string(),
+            json!({
+                "collections": {
+                    "personal": {
+                        "collapsed": true,
+                        "color": "transparent",
+                        "projectIds": ["P1", "P2"],
+                        "title": "Personal",
+                    },
+                    "shortpoint": {
+                        "collapsed": false,
+                        "color": "#3f8fc7",
+                        "projectIds": ["P3"],
+                        "title": "ShortPoint",
+                    },
+                },
+                "nextCollectionNumber": 3,
+                "order": ["personal", "shortpoint"],
+            }),
+        );
+        update_sidebar_project_collections(&db, &params).expect("seed");
+
+        let moved = assign_project_to_sidebar_collection(&db, "P1", "shortpoint")
+            .expect("move to existing group");
+        assert_eq!(
+            moved["collections"]["personal"]["projectIds"],
+            json!(["P2"])
+        );
+        assert_eq!(
+            moved["collections"]["shortpoint"]["projectIds"],
+            json!(["P3", "P1"])
+        );
+
+        let created = assign_project_to_sidebar_collection(&db, "P2", "Clients")
+            .expect("create missing group");
+        assert!(created["collections"].get("personal").is_none());
+        let clients_id = created["order"]
+            .as_array()
+            .expect("order")
+            .iter()
+            .filter_map(Value::as_str)
+            .find(|collection_id| {
+                created["collections"][collection_id]["title"] == json!("Clients")
+            })
+            .expect("clients group");
+        assert_eq!(
+            created["collections"][clients_id]["projectIds"],
+            json!(["P2"])
+        );
+        assert_eq!(created["nextCollectionNumber"], json!(4));
     }
 
     #[test]

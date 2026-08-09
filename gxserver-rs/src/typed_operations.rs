@@ -316,10 +316,7 @@ fn resolve_project_operation_context(
             &crate::global_project_defaults::read_global_project_defaults().beads_directory,
         )
         .map(|path| {
-            normalize_existing_directory_path_value(
-                Some(&Value::String(path)),
-                "beadsDirectory",
-            )
+            normalize_existing_directory_path_value(Some(&Value::String(path)), "beadsDirectory")
         })
         .transpose()?
     } else {
@@ -517,9 +514,8 @@ async fn run_project_setup_command(
             .and_then(Value::as_str),
         &crate::global_project_defaults::read_global_project_defaults().worktree_command,
     );
-    let command_text = normalize_project_setup_command(
-        resolved_setup_command.map(Value::String).as_ref(),
-    )?;
+    let command_text =
+        normalize_project_setup_command(resolved_setup_command.map(Value::String).as_ref())?;
     if command_text.is_empty() {
         return Ok(json!({
             "action": action,

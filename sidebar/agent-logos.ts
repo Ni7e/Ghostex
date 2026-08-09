@@ -18,6 +18,7 @@ import qoderLogo from "../src/assets/qoder.svg" with { type: "text" };
 import rovoDevLogo from "../src/assets/rovo-dev.svg" with { type: "text" };
 import t3Logo from "../src/assets/t3.svg" with { type: "text" };
 import type { SidebarAgentIcon } from "../shared/sidebar-agents";
+import type { CSSProperties } from "react";
 
 /**
  * CDXC:AgentDetection 2026-04-27-07:07
@@ -114,7 +115,7 @@ export const AGENT_LOGO_COLORS: Record<SidebarAgentIcon, string> = {
   "grok-build": "#ffffff",
   "hermes-agent": "#f3c46b",
   kiro: "#a6e3ff",
-  omp: "#c8ff62",
+  omp: "#a663ed",
   opencode: "#6d96c0",
   pi: "#c8ff62",
   qoder: "#a991ff",
@@ -159,3 +160,27 @@ export const COLORED_AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
   "rovo-dev": svgTextToColorizedDataUrl(rovoDevLogo, AGENT_LOGO_COLORS["rovo-dev"]),
   t3: svgTextToColorizedDataUrl(t3Logo, AGENT_LOGO_COLORS.t3),
 };
+
+/**
+ * Brand-colored picker and settings icons normally use a monochrome SVG mask
+ * tinted with the provider color. OMP's supplied logo is intentionally
+ * multicolor, so render its artwork directly instead of flattening it to the
+ * legacy lime mask color.
+ */
+export function getBrandAgentLogoStyle(icon: SidebarAgentIcon): CSSProperties {
+  if (icon === "omp") {
+    return {
+      backgroundColor: "transparent",
+      backgroundImage: `url("${AGENT_LOGOS[icon]}")`,
+      backgroundPosition: "center",
+      backgroundRepeat: "no-repeat",
+      backgroundSize: "contain",
+    };
+  }
+
+  return {
+    backgroundColor: AGENT_LOGO_COLORS[icon],
+    maskImage: `url("${AGENT_LOGOS[icon]}")`,
+    WebkitMaskImage: `url("${AGENT_LOGOS[icon]}")`,
+  };
+}

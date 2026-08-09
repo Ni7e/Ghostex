@@ -18,11 +18,16 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { PointerSensor } from "@dnd-kit/dom";
+import { useSortable } from "@dnd-kit/react/sortable";
 import type {
   SidebarSessionGitStatus,
   SidebarSessionItem,
 } from "../../shared/session-grid-contract";
 import type { SidebarV2Status } from "../../shared/sidebar-v2-status";
+import { AppTooltip } from "../app-tooltip";
+import { createSessionDragData } from "../sidebar-dnd";
+import { getSidebarReorderActivationConstraints } from "../sidebar-reorder-activation";
 import { formatSessionHeadingText } from "../session-card-content";
 import { SidebarV2ProjectIcon, SidebarV2SessionIcon } from "./sidebar-v2-icons";
 import type { SidebarV2ProjectIdentity } from "./sidebar-v2-view-model";
@@ -80,6 +85,9 @@ export type SidebarV2SessionRowLifecycle = {
 };
 
 export type SidebarV2SessionRowProps = {
+  dragGroupId?: string;
+  dragIndex?: number;
+  dropPosition?: "after" | "before";
   /** Extra label rendered instead of the status label on slim shelf rows. */
   slimLabel?: string;
   /**
@@ -112,9 +120,11 @@ export type SidebarV2SessionRowProps = {
   onRenameCommit: (title: string) => void;
   onRenameStart: () => void;
   onTogglePinned: (pinned: boolean) => void;
+  pinnedReorderEnabled?: boolean;
   /** Omitted in grouped mode: the project header already states the project. */
   project?: SidebarV2ProjectIdentity;
   session: SidebarSessionItem;
+  showProjectIcons: boolean;
   status: SidebarV2Status;
   useColoredAgentIcons: boolean;
   variant: SidebarV2SessionRowVariant;
@@ -134,6 +144,18 @@ const SIDEBAR_V2_NO_LIFECYCLE: SidebarV2SessionRowLifecycle = {
 function isInteractiveTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest("button, a, input") !== null;
 }
+
+const sidebarV2PinnedSessionSensors = [
+  PointerSensor.configure({
+    activationConstraints: getSidebarReorderActivationConstraints,
+    preventActivation(event, source) {
+      const target = event.target instanceof Element ? event.target : undefined;
+      return Boolean(
+        target && target !== source.element && target.closest("button, a, input, textarea, select"),
+      );
+    },
+  }),
+];
 
 /*
  * CDXC:SidebarV2Git 2026-07-29:
@@ -214,10 +236,10 @@ function PrBadge({ git }: { git: SidebarV2GitDisplay }) {
   }
   return (
     <span
+      aria-label={`#${git.prNumber} · ${SIDEBAR_V2_PR_STATE_LABELS[git.prState]}`}
       className="sidebar-v2-row-pr"
       data-pr-state={git.prState}
       data-sidebar-v2-pr="true"
-      title={`#${git.prNumber} · ${SIDEBAR_V2_PR_STATE_LABELS[git.prState]}`}
     >
       {`#${git.prNumber}`}
     </span>
@@ -242,6 +264,9 @@ function StatusLabel({ status }: { status: SidebarV2Status }) {
 }
 
 export function SidebarV2SessionRow({
+  dragGroupId,
+  dragIndex = 0,
+  dropPosition,
   slimLabel,
   gitStatus,
   isActive,
@@ -255,8 +280,10 @@ export function SidebarV2SessionRow({
   onRenameCommit,
   onRenameStart,
   onTogglePinned,
+  pinnedReorderEnabled = false,
   project,
   session,
+  showProjectIcons,
   status,
   useColoredAgentIcons,
   variant,
@@ -268,6 +295,24 @@ export function SidebarV2SessionRow({
   const renameCommittedRef = useRef(false);
   const isBrowser = session.kind === "browser" || session.sessionKind === "browser";
   const isPinned = session.isPinned === true;
+  const isPinnedDragEnabled =
+    pinnedReorderEnabled &&
+    isPinned &&
+    !isBrowser &&
+    !isMenuOpen &&
+    !isRenaming &&
+    Boolean(dragGroupId);
+  const sortable = useSortable({
+    accept: "session",
+    data: createSessionDragData(dragGroupId ?? "", session.sessionId),
+    disabled: !isPinnedDragEnabled,
+    feedback: "clone",
+    group: dragGroupId ?? "",
+    id: session.sessionId,
+    index: dragIndex,
+    sensors: sidebarV2PinnedSessionSensors,
+    type: "session",
+  });
   /*
    * In-flight rows (working, or blocked on the user) are not the user's
    * problem yet, so they soften to 70% until hovered. `recede` from the shared
@@ -582,7 +627,12 @@ export function SidebarV2SessionRow({
     <li
       className="sidebar-v2-row-item"
       data-card-lines={variant === "card" ? String(cardLineCount) : undefined}
+      data-dragging={String(Boolean(sortable.isDragging))}
+      data-drop-position={sortable.isDragging ? undefined : dropPosition}
+      data-pinned-reorderable={String(isPinnedDragEnabled)}
+      data-sidebar-session-group-id={dragGroupId}
       data-variant={variant}
+      ref={sortable.ref}
     >
       {/*
        * `data-woke` is a state hook on the ROW (tests, future affordances); the
@@ -599,10 +649,12 @@ export function SidebarV2SessionRow({
         data-pinned={String(isPinned)}
         data-recede={String(shouldRecede)}
         data-session-id={session.sessionId}
+        data-sidebar-session-id={session.sessionId}
         data-sidebar-v2-row="true"
         data-status-kind={status.kind}
         data-variant={variant}
         data-woke={String(lifecycle.isWoke)}
+        ref={isPinnedDragEnabled ? sortable.handleRef : undefined}
         onClick={(event) => {
           if (isRenaming || isInteractiveTarget(event.target)) {
             return;
@@ -647,12 +699,15 @@ export function SidebarV2SessionRow({
           <>
             {project ? (
               <div className="sidebar-v2-row-line" data-line="project">
-                <SidebarV2ProjectIcon
-                  discoveredIconDataUrl={project.discoveredIconDataUrl}
-                  icon={project.icon}
-                  iconDataUrl={project.iconDataUrl}
-                  title={project.title}
-                />
+                {showProjectIcons ? (
+                  <SidebarV2ProjectIcon
+                    discoveredIconDataUrl={project.discoveredIconDataUrl}
+                    fallback={project.isWorktree ? "worktree" : "folder"}
+                    icon={project.icon}
+                    iconDataUrl={project.iconDataUrl}
+                    title={project.title}
+                  />
+                ) : null}
                 <span className="sidebar-v2-row-project">{project.title}</span>
                 {rightSlot}
               </div>
@@ -678,11 +733,8 @@ export function SidebarV2SessionRow({
                 data-meta={git ? "git" : "machine"}
               >
                 {git ? (
-                  <span
-                    className="sidebar-v2-row-git"
-                    data-sidebar-v2-git="true"
-                    title={git.tooltip}
-                  >
+                  <AppTooltip content={git.tooltip}>
+                    <span className="sidebar-v2-row-git" data-sidebar-v2-git="true">
                     {git.branch === "" ? (
                       <span className="sidebar-v2-row-git-spacer" />
                     ) : (
@@ -702,7 +754,8 @@ export function SidebarV2SessionRow({
                         <span className="sidebar-v2-row-diff-removed">{`−${git.deletions}`}</span>
                       </span>
                     ) : null}
-                  </span>
+                    </span>
+                  </AppTooltip>
                 ) : null}
                 {machineBadgeName ? (
                   <span className="sidebar-v2-row-machine" data-sidebar-v2-machine="true">

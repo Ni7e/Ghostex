@@ -24,6 +24,8 @@ tmp/imagegen/
 storybook-static/
 gpui/runtime/
 editor/macos/.build/
+ghostex-paths/target/
+ghostex-paths/Cargo.lock
 tmp/
 ghostty/zig-pkg/
 .zig-cache/
@@ -51,6 +53,9 @@ ghostty/zig-pkg/
 # CDXC:RepoSafety 2026-07-06: The standalone GhostexEditor SwiftPM build writes
 # compiler outputs under editor/macos/.build. Keep those local build products
 # ignored so release commits contain source changes only.
+# CDXC:RepoSafety 2026-08-05: The standalone ghostex-paths library writes Cargo
+# build output and a library-local lockfile. Keep those generated files out of
+# release commits while the workspace lockfile remains the source of truth.
 # CDXC:GPUIRuntimeOwnership 2026-07-14: GPUI-owned macOS runtime staging contains
 # generated native binaries, bundled Node/code-server payloads, and compiled web
 # assets. Keep it local like the retired host's Web staging tree; source inputs
@@ -79,7 +84,8 @@ react-doctor.config.json
 # per-file ignore rules.
 .tmp-*
 
-# CDXC:LocalMachineDocs 2026-06-29-13:56: Ubuntu container RDP/SSH notes include local machine addresses and credentials for this developer-only VM. Keep the exact machine note out of source control while allowing public docs to remain tracked.
-docs/machines/ubuntu-vm.md
-# CDXC:LocalMachineDocs 2026-06-30-02:54: The Tart macOS sandbox VM notes include local NAT addresses, credentials, and VNC access details for this developer-only machine. Keep the exact machine note out of source control while preserving the local runbook.
-docs/machines/macOS-vm.md
+# CDXC:LocalDocs 2026-08-09: Keep the entire docs/ tree on this machine only.
+# Planning notes, product drafts, and agent reports are local working material
+# and are not part of the public Ghostex source tree.
+docs/
+

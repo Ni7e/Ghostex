@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     domain::{read_project_id, read_session_id, DomainRepository, DomainStateError},
     ids::is_gxserver_session_id,
-    presentation::project_session_title_projection,
+    presentation::{normalize_pi_terminal_title, project_session_title_projection},
     session_status::{
         compute_activity_update, is_stale_activity_event, normalize_agent_activity_value,
         parse_iso_ms, ActivityUpdate,
@@ -4054,8 +4054,20 @@ pub(crate) fn normalize_agent_hook_activity(
     let lower = event.to_ascii_lowercase();
     /*
     CDXC:AgentHookStatus 2026-06-22-08:31:
-    Server-side hook ingestion must use TypeScript gxserver's provider event semantics before trusting sidecar status. This keeps direct RPC events, legacy sidecars, and installed helper payloads from turning settled Stop/agent-response boundaries into false attention states.
+    Server-side hook ingestion must use provider event semantics before trusting
+    sidecar status. Codex Stop is an authoritative completed-turn boundary, so
+    it enters attention; SessionEnd still clears the session to idle. Keeping
+    the event mapping here aligned with the hook helper prevents a later
+    sidecar sync from erasing the attention transition.
     */
+    if normalized_agent.as_deref() == Some("codex") {
+        if lower == "stop" {
+            return Some("attention".to_string());
+        }
+        if matches!(lower.as_str(), "sessionend" | "session-end") {
+            return Some("idle".to_string());
+        }
+    }
     if normalized_agent.as_deref() == Some("claude") {
         if matches!(lower.as_str(), "stop" | "idle") {
             return Some("idle".to_string());
@@ -5081,28 +5093,6 @@ fn normalize_antigravity_terminal_title(title: &str) -> Option<Option<String>> {
         }
     }
     None
-}
-
-fn normalize_pi_terminal_title(title: &str) -> Option<String> {
-    let rest = title
-        .trim()
-        .strip_prefix('\u{03c0}')?
-        .trim_start()
-        .strip_prefix('-')?
-        .trim();
-    if rest.is_empty() {
-        return None;
-    }
-    let parts = rest
-        .split(" - ")
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.len() < 2 {
-        Some("\u{03c0}".to_string())
-    } else {
-        Some(parts[..parts.len() - 1].join(" - "))
-    }
 }
 
 fn is_ghost_placeholder_session_title(title: &str) -> bool {
@@ -6672,8 +6662,7 @@ mod tests {
         let agent_session_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
         let (lifecycle, session) =
             create_codex_agent_session(&repository, agent_session_id, temp.path());
-        let stored_prompt =
-            r#"{"kind":"question","questions":[{"question":"Which color?","options":[{"label":"Red"},{"label":"Blue"}]}]}"#;
+        let stored_prompt = r#"{"kind":"question","questions":[{"question":"Which color?","options":[{"label":"Red"},{"label":"Blue"}]}]}"#;
         let activity_at = "2026-08-01T05:30:00.000Z";
         let mut runtime_settings = object_field(&session, "runtimeSettings");
         runtime_settings.insert(
@@ -6882,7 +6871,8 @@ mod tests {
         let (temp, db) = open_test_database();
         let repository = DomainRepository::new(&db, "test-server");
         let agent_session_id = "codex-zmx-status-title";
-        let (lifecycle, _session) = create_codex_agent_session(&repository, agent_session_id);
+        let (lifecycle, _session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
         let codex_dir = temp.path().join(".codex");
         std::fs::create_dir_all(&codex_dir).expect("create codex dir");
         std::fs::write(
@@ -7930,6 +7920,22 @@ mod tests {
         );
         assert_eq!(
             normalize_agent_hook_activity(
+                Some(&json!("idle")),
+                Some(&json!("Stop")),
+                Some(&json!("Codex"))
+            ),
+            Some("attention".to_string())
+        );
+        assert_eq!(
+            normalize_agent_hook_activity(
+                Some(&json!("attention")),
+                Some(&json!("SessionEnd")),
+                Some(&json!("Codex"))
+            ),
+            Some("idle".to_string())
+        );
+        assert_eq!(
+            normalize_agent_hook_activity(
                 Some(&json!("attention")),
                 Some(&json!("Notification")),
                 Some(&json!("GitHub Copilot"))
@@ -7956,6 +7962,63 @@ mod tests {
             normalize_agent_hook_activity(None, Some(&json!("session_shutdown")), None),
             Some("idle".to_string())
         );
+    }
+
+    #[test]
+    fn codex_stop_hook_enters_attention_from_working() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let agent_session_id = "019e7af5-c610-7f62-a129-db7bb510b48d";
+        let (lifecycle, session) =
+            create_codex_agent_session(&repository, agent_session_id, temp.path());
+        let mut runtime_settings = object_field(&session, "runtimeSettings");
+        runtime_settings.insert(
+            "agentActivity".to_string(),
+            json!({
+                "activity": "working",
+                "agentName": "codex",
+                "hasSeenWorking": true,
+                "isAcknowledged": false,
+                "lastChangedAt": "2026-08-08T01:00:00.000Z",
+                "lastMeaningfulActivityAt": "2026-08-08T01:00:00.000Z",
+                "workingSource": "hook",
+                "workingStartedAt": "2026-08-08T01:00:00.000Z"
+            }),
+        );
+        let mut update = lifecycle_update(&lifecycle);
+        update.insert(
+            "runtimeSettings".to_string(),
+            Value::Object(runtime_settings),
+        );
+        repository.update_session(&update).expect("working session");
+
+        let result = ingest_agent_hook_event(
+            &repository,
+            &lifecycle,
+            json!({
+                "agentName": "codex",
+                "agentSessionId": agent_session_id,
+                "eventName": "Stop",
+                "status": "idle",
+                "statusUpdatedAt": "2026-08-08T01:00:05.000Z"
+            })
+            .as_object()
+            .expect("hook params"),
+            temp.path(),
+        )
+        .expect("hook result");
+
+        assert_eq!(result.get("previousActivity"), Some(&json!("working")));
+        assert_eq!(result.get("enteredAttention"), Some(&json!(true)));
+        let activity = result
+            .get("activity")
+            .and_then(Value::as_object)
+            .expect("activity");
+        assert_eq!(activity.get("activity"), Some(&json!("attention")));
+        assert!(activity
+            .get("attentionEventId")
+            .and_then(Value::as_str)
+            .is_some());
     }
 
     /*

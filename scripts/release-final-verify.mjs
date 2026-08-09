@@ -14,6 +14,10 @@ import {
 import { validateMacosAppBundle } from "./validate-macos-app-bundle.mjs";
 import { validateOnDemandManifestV2 } from "./release-gpui/on-demand-manifest.mjs";
 import { inspectRelease, verifyPublishedComponent } from "./release-gpui/publish-component.mjs";
+import {
+  validateWindowsUpdateFeed,
+  windowsUpdateArtifactNames,
+} from "./release-gpui/windows-update-feed.mjs";
 
 /*
  CDXC:ReleaseAutomation 2026-07-02-14:10:
@@ -265,6 +269,52 @@ async function main() {
 
   const dmgAsset = releaseAssets.find((asset) => asset.name === `ghostex-${version}-arm64.dmg`);
   const dmgDigest = parseAssetSha(dmgAsset);
+
+  await check("windows-update-feeds", async () => {
+    const arches = ["x64", "arm64"].filter((arch) => {
+      const names = windowsUpdateArtifactNames(version, arch);
+      return [names.installer, names.portable, names.feed, names.fullPackage]
+        .some((name) => releaseAssets.some((asset) => asset.name === name));
+    });
+    if (arches.length === 0) {
+      return { warn: "Release has no Velopack Windows update channels (legacy or Windows-excluded release)." };
+    }
+    const temporary = await mkdtemp(path.join(tmpdir(), `ghostex-windows-update-verify-${version}-`));
+    const validated = [];
+    for (const arch of arches) {
+      const names = windowsUpdateArtifactNames(version, arch);
+      const channelNames = new Set([
+        names.installer,
+        names.portable,
+        names.feed,
+        names.fullPackage,
+        names.deltaPackage,
+      ]);
+      const channelAssets = releaseAssets
+        .filter((asset) => channelNames.has(asset.name))
+        .map((asset) => ({ name: asset.name, sha256: parseAssetSha(asset), size: asset.size }));
+      for (const required of [names.installer, names.portable, names.feed, names.fullPackage]) {
+        const asset = channelAssets.find((candidate) => candidate.name === required);
+        if (!asset) throw new Error(`Windows ${arch} release is missing ${required}.`);
+        if (!asset.sha256) throw new Error(`GitHub reports no digest for ${required}.`);
+      }
+      await capture(
+        `env -u GH_TOKEN -u GITHUB_TOKEN gh release download ${shellQuote(`v${version}`)} ` +
+          `--repo ${shellQuote(githubRepo)} --pattern ${shellQuote(names.feed)} --dir ${shellQuote(temporary)}`,
+      );
+      const result = validateWindowsUpdateFeed({
+        arch,
+        artifacts: channelAssets,
+        feedText: await readFile(path.join(temporary, names.feed), "utf8"),
+        version,
+      });
+      if (!releaseBody.includes(channelAssets.find((asset) => asset.name === names.fullPackage).sha256)) {
+        throw new Error(`Release notes do not contain the ${arch} full update package SHA256.`);
+      }
+      validated.push(`${result.channel}${result.delta ? " with delta" : " full"}`);
+    }
+    return validated.join(", ");
+  });
 
   const onDemandReleaseAssets = onDemandAssetNames
     .map((name) => releaseAssets.find((asset) => asset.name === name))

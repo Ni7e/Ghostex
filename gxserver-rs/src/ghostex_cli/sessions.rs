@@ -1157,19 +1157,19 @@ fn start_missing_provider_for_cli_attach(
 fn prompt_editor_attach_mode_from_flags(flags: &Flags) -> Option<&'static str> {
     /*
      * CDXC:PromptEditor 2026-06-11-18:24:
-     * `ghostex attach --prompt-editor monaco` is the SSH-safe desktop
-     * capability advertisement; every other attach omits it so gxserver
-     * returns zmx attach commands without Monaco capability.
+     * `ghostex attach --prompt-editor monaco` advertises the local desktop
+     * daemon, while `code-server` advertises an editor that owns files on the
+     * attached machine. Every other attach omits editor capability.
      */
     let value = flags
         .text("promptEditor")
         .unwrap_or_default()
         .trim()
         .to_lowercase();
-    if value == "monaco" {
-        Some("monaco")
-    } else {
-        None
+    match value.as_str() {
+        "monaco" => Some("monaco"),
+        "code-server" => Some("code-server"),
+        _ => None,
     }
 }
 
@@ -1328,7 +1328,7 @@ pub fn resolve_gxserver_inventory_session(
 
 /// fetchSessionList(flags, options): returns the CLI session objects
 /// (toCliSession shape). The bool mirrors the Node CLI's only option,
-/// `writeCache` (refresh ~/.ghostex/cli/session-aliases.json).
+/// `writeCache` (refresh the session-alias cache in Ghostex state storage).
 pub fn fetch_session_list(flags: &Flags, write_cache: bool) -> CliResult<Vec<Value>> {
     let result = fetch_session_list_result(flags, write_cache)?;
     Ok(result

@@ -918,7 +918,7 @@ export function createNativeSidebarGxserverClient(
   function createHeaders(): Record<string, string> {
     if (!config.authToken) {
       throw new Error(
-        `gxserver auth token is not available. Expected native bootstrap to read ${config.tokenFile ?? "~/.ghostex/gxserver/auth/token"}.`,
+        `gxserver auth token is not available. Expected native bootstrap to read the token from the resolved Ghostex state directory${config.tokenFile ? ` (${config.tokenFile})` : ""}.`,
       );
     }
     return {
@@ -1324,6 +1324,8 @@ function describeGxserverOperation(path: GxserverEndpointPath): string {
       return "load sidebar project collections";
     case "/api/updateSidebarProjectCollections":
       return "save sidebar project collections";
+    case "/api/assignProjectToSidebarCollection":
+      return "move the project into its sidebar group";
     case "/api/readAutomationState":
       return "load automation state";
     case "/api/saveAutomation":

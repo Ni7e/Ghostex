@@ -12,8 +12,10 @@
 import { useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { AppTooltip } from "../app-tooltip";
 import {
   isSessionChatImageHref,
+  SessionChatInlineImage,
   sessionChatImageTargetForHref,
   useSessionChatImageViewer,
   type SessionChatImageViewerApi,
@@ -54,18 +56,19 @@ function markdownComponents(
         const openUrl = hostLinks?.openUrl;
         if (openUrl) {
           return (
-            <a
-              // Kept an anchor so the URL shows in the status/tooltip and the
-              // context menu still offers Copy Link; the host owns the open.
-              href={target.url}
-              onClick={(event) => {
-                event.preventDefault();
-                openUrl(target.url, { external: event.shiftKey });
-              }}
-              title={target.url}
-            >
-              {children}
-            </a>
+            <AppTooltip content={target.url}>
+              <a
+                // Kept an anchor so the URL shows in the status bar and the
+                // context menu still offers Copy Link; the host owns the open.
+                href={target.url}
+                onClick={(event) => {
+                  event.preventDefault();
+                  openUrl(target.url, { external: event.shiftKey });
+                }}
+              >
+                {children}
+              </a>
+            </AppTooltip>
           );
         }
         return (
@@ -77,17 +80,22 @@ function markdownComponents(
       if (target.kind === "file" && hostLinks?.openFile) {
         const openFile = hostLinks.openFile;
         return (
-          <button
-            className="ghostex-chat-file-link"
-            onClick={() => openFile(target.path)}
-            title={target.path}
-            type="button"
-          >
-            {children}
-          </button>
+          <AppTooltip content={target.path}>
+            <button
+              className="ghostex-chat-file-link"
+              onClick={() => openFile(target.path)}
+              type="button"
+            >
+              {children}
+            </button>
+          </AppTooltip>
         );
       }
-      return <span title={target.kind === "file" ? target.path : undefined}>{children}</span>;
+      return (
+        <AppTooltip content={target.kind === "file" ? target.path : undefined}>
+          <span>{children}</span>
+        </AppTooltip>
+      );
     },
     img: ({ alt, src }) => {
       if (viewer && typeof src === "string" && src !== "") {
@@ -96,14 +104,21 @@ function markdownComponents(
           ...(alt ? { alt } : {}),
         };
         if (viewer.canOpen(target)) {
+          // An image the agent wrote as an image renders as one; the named
+          // button stays as the stand-in when its bytes cannot be read.
           return (
-            <button
-              className="ghostex-chat-image-link"
-              onClick={() => viewer.open(target)}
-              type="button"
-            >
-              {alt || "Image"}
-            </button>
+            <SessionChatInlineImage
+              fallback={
+                <button
+                  className="ghostex-chat-image-link"
+                  onClick={() => viewer.open(target)}
+                  type="button"
+                >
+                  {alt || "Image"}
+                </button>
+              }
+              target={target}
+            />
           );
         }
       }

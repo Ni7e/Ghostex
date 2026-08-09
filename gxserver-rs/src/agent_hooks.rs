@@ -21,7 +21,7 @@ use crate::{
 };
 
 const NOTIFY_HOOK_MARKER: &str = "ghostex-gxserver-agent-notify-hook-marker";
-const NOTIFY_HOOK_VERSION: usize = 6;
+const NOTIFY_HOOK_VERSION: usize = 7;
 const OPENCODE_PLUGIN_MARKER: &str = "ghostex-opencode-session-plugin-marker";
 const OPENCODE_PLUGIN_SPEC: &str = "./plugins/ghostex-session.js";
 const AMP_PLUGIN_MARKER: &str = "ghostex-amp-session-extension-marker";
@@ -197,26 +197,18 @@ pub fn read_agent_hook_status(
     let hook_paths = HookPaths::from_paths(paths);
     let agent_ids = normalize_agent_ids(params.get("agentIds"));
     let auto_upgrade = params.get("autoUpgradeInstalled").and_then(Value::as_bool) != Some(false);
-    let mut auto_upgraded_paths = Vec::new();
+    let auto_upgraded_paths = if auto_upgrade {
+        repair_installed_agent_hook_paths(paths)?
+    } else {
+        Vec::new()
+    };
     let mut rows = Vec::new();
     for agent_id in agent_ids {
         if let Some(definition) = HOOK_DEFINITIONS
             .iter()
             .find(|definition| definition.agent_id == agent_id)
         {
-            let mut row = read_hook_status(definition, &hook_paths)?;
-            if auto_upgrade
-                && row.get("status").and_then(Value::as_str) == Some("updateRequired")
-                && row.get("cliInstalled").and_then(Value::as_bool) == Some(true)
-            {
-                install_notify_hook(&hook_paths)?;
-                auto_upgraded_paths.push(path_string(&hook_paths.notify_hook_path));
-                for upgraded_path in install_agent_hook(definition, &hook_paths)? {
-                    push_unique_path(&mut auto_upgraded_paths, upgraded_path);
-                }
-                row = read_hook_status(definition, &hook_paths)?;
-            }
-            rows.push(row);
+            rows.push(read_hook_status(definition, &hook_paths)?);
         }
     }
     let mut result = Map::new();
@@ -266,6 +258,93 @@ pub fn install_agent_hooks(
     Ok(Value::Object(status))
 }
 
+/*
+CDXC:AgentHookRepair 2026-08-05-03:35:
+Platform-native storage moved the shared notify executable out of ~/.ghostex,
+and older installers could write a current path without the shell quoting it
+needs. Provider configuration files live outside Ghostex storage, so repair
+every already-installed Ghostex hook at daemon startup without depending on
+whether that provider CLI is visible on the launch daemon's PATH. A
+Ghostex-owned command that does not exactly match the current generated command
+is stale. This remains idempotent: absent providers and user-owned hooks stay
+untouched, while main and profile configs that already contain Ghostex hooks
+are upgraded in place.
+*/
+pub fn repair_installed_agent_hook_paths(
+    paths: &GxserverPaths,
+) -> Result<Vec<String>, DomainStateError> {
+    let hook_paths = HookPaths::from_paths(paths);
+    let mut stale_targets = Vec::new();
+    let mut has_installed_ghostex_hook = false;
+
+    for definition in HOOK_DEFINITIONS {
+        let provider_paths = provider_hook_paths(definition.agent_id, &hook_paths);
+        if hook_format(definition.agent_id) == HookFormat::Opencode {
+            let inspection =
+                inspect_agent_hook_installation(definition, &hook_paths, &provider_paths);
+            if inspection.ghostex_hook_present {
+                has_installed_ghostex_hook = true;
+                if !inspection.current_hook_installed {
+                    stale_targets.push((definition, provider_paths));
+                }
+            }
+            continue;
+        }
+
+        let mut stale_paths = Vec::new();
+        for provider_path in provider_paths {
+            let inspection = inspect_agent_hook_installation(
+                definition,
+                &hook_paths,
+                std::slice::from_ref(&provider_path),
+            );
+            if !inspection.ghostex_hook_present {
+                continue;
+            }
+            has_installed_ghostex_hook = true;
+            if !inspection.current_hook_installed {
+                stale_paths.push(provider_path);
+            }
+        }
+        if !stale_paths.is_empty() {
+            stale_targets.push((definition, stale_paths));
+        }
+    }
+
+    if !has_installed_ghostex_hook {
+        return Ok(Vec::new());
+    }
+
+    let notify_hook_contents = read_file_text(&hook_paths.notify_hook_path);
+    let notify_stale = !is_notify_hook_current(&hook_paths, &notify_hook_contents);
+    if !notify_stale && stale_targets.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut repaired_paths = Vec::new();
+    if notify_stale {
+        if let Some(previous_state_directory) = notify_hook_state_directory(&notify_hook_contents) {
+            for migrated_path in migrate_hook_session_sidecars(
+                &previous_state_directory,
+                &hook_paths.hook_state_directory,
+            )? {
+                push_unique_path(&mut repaired_paths, migrated_path);
+            }
+        }
+        install_notify_hook(&hook_paths)?;
+        push_unique_path(
+            &mut repaired_paths,
+            path_string(&hook_paths.notify_hook_path),
+        );
+    }
+    for (definition, provider_paths) in stale_targets {
+        for repaired_path in repair_agent_hook_paths(definition, &hook_paths, provider_paths)? {
+            push_unique_path(&mut repaired_paths, repaired_path);
+        }
+    }
+    Ok(repaired_paths)
+}
+
 pub fn uninstall_agent_hooks(
     paths: &GxserverPaths,
     params: &Map<String, Value>,
@@ -311,14 +390,28 @@ struct HookPaths {
     home_dir: PathBuf,
     hook_state_directory: PathBuf,
     notify_hook_path: PathBuf,
+    respect_config_environment: bool,
 }
 
 impl HookPaths {
     fn from_paths(paths: &GxserverPaths) -> Self {
+        /*
+        CDXC:AgentHookIsolation 2026-08-06-21:35:
+        GHOSTEX_HOME and explicit daemon homes are isolated profiles. Their
+        hook discovery and writes must stay inside that profile instead of
+        following the process HOME or absolute provider-config environment
+        variables back into the real user's Claude, Codex, or other agent
+        configuration. Production paths continue to honor provider-specific
+        environment variables.
+        */
+        let isolated_home_dir = paths.isolated_agent_home_dir.as_ref();
         Self {
-            home_dir: paths.home_dir.clone(),
+            home_dir: isolated_home_dir
+                .cloned()
+                .unwrap_or_else(|| paths.home_dir.clone()),
             hook_state_directory: paths.app_state_dir.join("agent-hooks"),
             notify_hook_path: paths.app_data_dir.join("hooks/agent-shell-notify.sh"),
+            respect_config_environment: isolated_home_dir.is_none(),
         }
     }
 
@@ -330,6 +423,7 @@ impl HookPaths {
                 .join("hooks")
                 .join("agent-shell-notify.sh"),
             home_dir,
+            respect_config_environment: false,
         }
     }
 }
@@ -647,6 +741,14 @@ fn normalized_hook_agent_key(value: &str) -> String {
 fn activity_for_hook_event(agent_key: &str, event_name: &str, payload: &Value) -> Option<String> {
     let normalized_event_name = normalize_prompt_text(event_name);
     let lower = normalized_event_name.to_ascii_lowercase();
+    if agent_key == "codex" {
+        if lower == "stop" {
+            return Some("attention".to_string());
+        }
+        if matches!(lower.as_str(), "sessionend" | "session-end") {
+            return Some("idle".to_string());
+        }
+    }
     if agent_key == "claude" {
         if matches!(lower.as_str(), "stop" | "idle" | "sessionend") {
             return Some("idle".to_string());
@@ -1095,7 +1197,8 @@ fn read_hook_status(
         .iter()
         .map(|path| path_string(path))
         .collect::<Vec<_>>();
-    let notify_current = is_notify_hook_current(&hook_paths.notify_hook_path);
+    let notify_hook_contents = read_file_text(&hook_paths.notify_hook_path);
+    let notify_current = is_notify_hook_current(hook_paths, &notify_hook_contents);
     let inspection = inspect_agent_hook_installation(definition, hook_paths, &provider_paths);
     let provider_current = inspection.current_hook_installed;
     let ghostex_hook_present = inspection.ghostex_hook_present;
@@ -1154,11 +1257,14 @@ fn hook_detail(
 fn provider_hook_paths(agent_id: &str, hook_paths: &HookPaths) -> Vec<PathBuf> {
     match agent_id {
         "codex" => {
-            let mut paths =
-                vec![
-                    resolve_config_directory(&hook_paths.home_dir, "CODEX_HOME", ".codex", None)
-                        .join("hooks.json"),
-                ];
+            let mut paths = vec![resolve_config_directory(
+                &hook_paths.home_dir,
+                hook_paths.respect_config_environment,
+                "CODEX_HOME",
+                ".codex",
+                None,
+            )
+            .join("hooks.json")];
             paths.extend(list_profile_hook_paths(
                 &hook_paths.home_dir,
                 ".codex-profiles",
@@ -1180,6 +1286,7 @@ fn provider_hook_paths(agent_id: &str, hook_paths: &HookPaths) -> Vec<PathBuf> {
         "opencode" => {
             let config_dir = resolve_config_directory(
                 &hook_paths.home_dir,
+                hook_paths.respect_config_environment,
                 "OPENCODE_CONFIG_DIR",
                 ".config/opencode",
                 None,
@@ -1195,15 +1302,22 @@ fn provider_hook_paths(agent_id: &str, hook_paths: &HookPaths) -> Vec<PathBuf> {
             .join("amp")
             .join("plugins")
             .join("ghostex-session.ts")],
-        "pi" => pi_extension_paths(&hook_paths.home_dir),
-        "omp" => vec![resolve_omp_agent_directory(&hook_paths.home_dir)
-            .join("extensions")
-            .join("ghostex-omp-session.ts")],
+        "pi" => pi_extension_paths(&hook_paths.home_dir, hook_paths.respect_config_environment),
+        "omp" => vec![resolve_omp_agent_directory(
+            &hook_paths.home_dir,
+            hook_paths.respect_config_environment,
+        )
+        .join("extensions")
+        .join("ghostex-omp-session.ts")],
         "grok" => {
-            vec![
-                resolve_config_directory(&hook_paths.home_dir, "GROK_HOME", ".grok/hooks", None)
-                    .join("ghostex-session.json"),
-            ]
+            vec![resolve_config_directory(
+                &hook_paths.home_dir,
+                hook_paths.respect_config_environment,
+                "GROK_HOME",
+                ".grok/hooks",
+                None,
+            )
+            .join("ghostex-session.json")]
         }
         "antigravity" => vec![hook_paths
             .home_dir
@@ -1212,37 +1326,51 @@ fn provider_hook_paths(agent_id: &str, hook_paths: &HookPaths) -> Vec<PathBuf> {
             .join("hooks.json")],
         "kiro" => vec![resolve_config_directory(
             &hook_paths.home_dir,
+            hook_paths.respect_config_environment,
             "KIRO_HOME",
             ".kiro/agents",
             Some("agents"),
         )
         .join("ghostex.json")],
         "copilot" => {
-            vec![
-                resolve_config_directory(&hook_paths.home_dir, "COPILOT_HOME", ".copilot", None)
-                    .join("config.json"),
-            ]
+            vec![resolve_config_directory(
+                &hook_paths.home_dir,
+                hook_paths.respect_config_environment,
+                "COPILOT_HOME",
+                ".copilot",
+                None,
+            )
+            .join("config.json")]
         }
         "droid" => vec![hook_paths.home_dir.join(".factory").join("settings.json")],
         "rovodev" => vec![hook_paths.home_dir.join(".rovodev").join("config.yml")],
         "hermes-agent" => {
-            vec![
-                resolve_config_directory(&hook_paths.home_dir, "HERMES_HOME", ".hermes", None)
-                    .join("config.yaml"),
-            ]
+            vec![resolve_config_directory(
+                &hook_paths.home_dir,
+                hook_paths.respect_config_environment,
+                "HERMES_HOME",
+                ".hermes",
+                None,
+            )
+            .join("config.yaml")]
         }
         "codebuddy" => vec![resolve_config_directory(
             &hook_paths.home_dir,
+            hook_paths.respect_config_environment,
             "CODEBUDDY_CONFIG_DIR",
             ".codebuddy",
             None,
         )
         .join("settings.json")],
         "qoder" => {
-            vec![
-                resolve_config_directory(&hook_paths.home_dir, "QODER_CONFIG_DIR", ".qoder", None)
-                    .join("settings.json"),
-            ]
+            vec![resolve_config_directory(
+                &hook_paths.home_dir,
+                hook_paths.respect_config_environment,
+                "QODER_CONFIG_DIR",
+                ".qoder",
+                None,
+            )
+            .join("settings.json")]
         }
         _ => Vec::new(),
     }
@@ -1375,53 +1503,51 @@ fn remove_json_hook(
         return Ok(false);
     }
     let mut data = read_json_object(&current_text);
-    let events = all_hook_events(definition.agent_id);
-    let mut changed = false;
-    if hook_format(definition.agent_id) == HookFormat::Antigravity {
-        if let Some(ghostex) = data.get_mut("ghostex").and_then(Value::as_object_mut) {
-            for event_name in events {
-                let Some(entries) = ghostex.get_mut(event_name).and_then(Value::as_array_mut)
-                else {
-                    continue;
-                };
-                let next_entries = remove_antigravity_entries(entries, command);
-                changed = changed || next_entries != *entries;
-                *entries = next_entries;
-            }
-        }
-    } else if matches!(
-        hook_format(definition.agent_id),
-        HookFormat::FlatJson | HookFormat::KiroJson
-    ) {
-        if let Some(hooks) = data.get_mut("hooks").and_then(Value::as_object_mut) {
-            for event_name in events {
-                let Some(entries) = hooks.get_mut(event_name).and_then(Value::as_array_mut) else {
-                    continue;
-                };
-                let next_entries = entries
-                    .iter()
-                    .filter(|entry| !is_ghostex_owned_hook_command(entry, command))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                changed = changed || next_entries.len() != entries.len();
-                *entries = next_entries;
-            }
-        }
-    } else if let Some(hooks) = data.get_mut("hooks").and_then(Value::as_object_mut) {
-        for event_name in events {
-            let Some(groups) = hooks.get_mut(event_name).and_then(Value::as_array_mut) else {
-                continue;
-            };
-            let next_groups = remove_nested_hook_groups(groups, command);
-            changed = changed || next_groups != *groups;
-            *groups = next_groups;
-        }
-    }
+    let changed = remove_owned_json_hooks(&mut data, hook_format(definition.agent_id), command);
     if !changed {
         return Ok(false);
     }
     write_json_file(config_path, &data)?;
     Ok(true)
+}
+
+fn remove_owned_json_hooks(data: &mut Value, format: HookFormat, command: &str) -> bool {
+    let event_groups = if format == HookFormat::Antigravity {
+        data.get_mut("ghostex").and_then(Value::as_object_mut)
+    } else {
+        data.get_mut("hooks").and_then(Value::as_object_mut)
+    };
+    let Some(event_groups) = event_groups else {
+        return false;
+    };
+
+    let mut changed = false;
+    let mut emptied_events = Vec::new();
+    for (event_name, entries) in event_groups
+        .iter_mut()
+        .filter_map(|(event_name, value)| value.as_array_mut().map(|entries| (event_name, entries)))
+    {
+        let next_entries = match format {
+            HookFormat::Antigravity => remove_antigravity_entries(entries, command),
+            HookFormat::FlatJson | HookFormat::KiroJson => entries
+                .iter()
+                .filter(|entry| !is_ghostex_owned_hook_command(entry, command))
+                .cloned()
+                .collect::<Vec<_>>(),
+            HookFormat::NestedJson => remove_nested_hook_groups(entries, command),
+            HookFormat::Opencode | HookFormat::PluginFile | HookFormat::MarkedYaml => continue,
+        };
+        let event_changed = next_entries != *entries;
+        if event_changed && next_entries.is_empty() {
+            emptied_events.push(event_name.clone());
+        }
+        changed = changed || event_changed;
+        *entries = next_entries;
+    }
+    for event_name in emptied_events {
+        event_groups.remove(&event_name);
+    }
+    changed
 }
 
 fn remove_antigravity_entries(entries: &[Value], command: &str) -> Vec<Value> {
@@ -1607,19 +1733,16 @@ fn inspect_agent_hook_installation(
                 .iter()
                 .map(|path| inspect_json_hook_config(path, &command))
                 .collect::<Vec<_>>();
+            let installed_inspections = inspections
+                .iter()
+                .filter(|inspection| inspection.ghostex_hook_present)
+                .collect::<Vec<_>>();
             HookInspection {
-                current_hook_installed: if matches!(definition.agent_id, "codex" | "claude") {
-                    inspections
+                current_hook_installed: !installed_inspections.is_empty()
+                    && installed_inspections
                         .iter()
-                        .all(|inspection| inspection.current_hook_installed)
-                } else {
-                    inspections
-                        .iter()
-                        .any(|inspection| inspection.current_hook_installed)
-                },
-                ghostex_hook_present: inspections
-                    .iter()
-                    .any(|inspection| inspection.ghostex_hook_present),
+                        .all(|inspection| inspection.current_hook_installed),
+                ghostex_hook_present: !installed_inspections.is_empty(),
             }
         }
     }
@@ -1627,10 +1750,29 @@ fn inspect_agent_hook_installation(
 
 fn inspect_json_hook_config(config_path: &Path, command: &str) -> HookInspection {
     let data = read_json_object(&read_file_text(config_path));
+    let stale_ghostex_hook_present = json_contains_stale_ghostex_owned_hook_command(&data, command);
     HookInspection {
-        current_hook_installed: json_contains_hook_command(&data, command),
+        current_hook_installed: json_contains_hook_command(&data, command)
+            && !stale_ghostex_hook_present,
         ghostex_hook_present: json_contains_ghostex_owned_hook_command(&data, command),
     }
+}
+
+fn json_contains_stale_ghostex_owned_hook_command(value: &Value, command: &str) -> bool {
+    if is_ghostex_owned_hook_command(value, command) && !is_hook_command(value, command) {
+        return true;
+    }
+    if let Some(array) = value.as_array() {
+        return array
+            .iter()
+            .any(|item| json_contains_stale_ghostex_owned_hook_command(item, command));
+    }
+    if let Some(object) = value.as_object() {
+        return object
+            .values()
+            .any(|item| json_contains_stale_ghostex_owned_hook_command(item, command));
+    }
+    false
 }
 
 fn json_contains_hook_command(value: &Value, command: &str) -> bool {
@@ -1742,6 +1884,50 @@ fn install_agent_hook(
     }
 }
 
+fn repair_agent_hook_paths(
+    definition: &HookDefinition,
+    hook_paths: &HookPaths,
+    config_paths: Vec<PathBuf>,
+) -> Result<Vec<String>, DomainStateError> {
+    match hook_format(definition.agent_id) {
+        HookFormat::Opencode => install_opencode_hook(hook_paths),
+        HookFormat::PluginFile => {
+            let source =
+                build_plugin_file_source(definition.agent_id, &hook_paths.notify_hook_path);
+            let mut repaired_paths = Vec::new();
+            for config_path in config_paths {
+                if let Some(parent) = config_path.parent() {
+                    fs::create_dir_all(parent).map_err(io_error)?;
+                }
+                fs::write(&config_path, &source).map_err(io_error)?;
+                repaired_paths.push(path_string(&config_path));
+            }
+            Ok(repaired_paths)
+        }
+        HookFormat::MarkedYaml => {
+            let command = command_for_agent(definition, &hook_paths.notify_hook_path);
+            let mut repaired_paths = Vec::new();
+            for config_path in config_paths {
+                install_marked_yaml_hook(&config_path, definition.agent_id, &command)?;
+                repaired_paths.push(path_string(&config_path));
+            }
+            Ok(repaired_paths)
+        }
+        HookFormat::Antigravity
+        | HookFormat::FlatJson
+        | HookFormat::KiroJson
+        | HookFormat::NestedJson => {
+            let command = command_for_agent(definition, &hook_paths.notify_hook_path);
+            let mut repaired_paths = Vec::new();
+            for config_path in config_paths {
+                merge_json_hook(&config_path, definition, &command)?;
+                repaired_paths.push(path_string(&config_path));
+            }
+            Ok(repaired_paths)
+        }
+    }
+}
+
 fn merge_json_hook(
     config_path: &Path,
     definition: &HookDefinition,
@@ -1749,7 +1935,9 @@ fn merge_json_hook(
 ) -> Result<(), DomainStateError> {
     let mut data = read_json_object(&read_file_text(config_path));
     let events = all_hook_events(definition.agent_id);
-    match hook_format(definition.agent_id) {
+    let format = hook_format(definition.agent_id);
+    remove_owned_json_hooks(&mut data, format, command);
+    match format {
         HookFormat::Antigravity => {
             let object = ensure_json_object(&mut data);
             let ghostex = ensure_object_property(object, "ghostex");
@@ -1809,7 +1997,7 @@ fn merge_json_hook(
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
-                let mut next_groups = remove_nested_hook_groups(&groups, command);
+                let mut next_groups = groups;
                 if !next_groups
                     .iter()
                     .any(|group| group_contains_hook_command(group, command))
@@ -2088,12 +2276,97 @@ fn remove_macos_notify_hook_execution_attributes(path: &Path) {
     }
 }
 
-fn is_notify_hook_current(path: &Path) -> bool {
+fn notify_hook_state_directory(contents: &str) -> Option<PathBuf> {
+    let value = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("DEFAULT_HOOK_STATE_DIR="))?;
+    let inner = value.strip_prefix('\'')?.strip_suffix('\'')?;
+    let path = PathBuf::from(inner.replace("'\\''", "'"));
+    (path.is_absolute() && path.file_name().and_then(|name| name.to_str()) == Some("agent-hooks"))
+        .then_some(path)
+}
+
+fn migrate_hook_session_sidecars(
+    source_directory: &Path,
+    destination_directory: &Path,
+) -> Result<Vec<String>, DomainStateError> {
+    if source_directory == destination_directory || !source_directory.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut migrated_paths = Vec::new();
+    for entry in fs::read_dir(source_directory).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        if !entry.file_type().map_err(io_error)?.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if !file_name.ends_with("-hook-sessions.json") {
+            continue;
+        }
+        let source_data = read_json_object(&read_file_text(&entry.path()));
+        let Some(source_sessions) = source_data.get("sessions").and_then(Value::as_object) else {
+            continue;
+        };
+        let destination_path = destination_directory.join(file_name);
+        let mut destination_data = read_json_object(&read_file_text(&destination_path));
+        let destination_object = destination_data.as_object_mut().expect("JSON object");
+        let destination_sessions = destination_object
+            .entry("sessions".to_string())
+            .or_insert_with(|| json!({}));
+        if !destination_sessions.is_object() {
+            *destination_sessions = json!({});
+        }
+        let destination_sessions = destination_sessions
+            .as_object_mut()
+            .expect("sessions object");
+        let mut changed = false;
+        for (session_id, source_session) in source_sessions {
+            let source_updated_at = source_session
+                .get("updatedAt")
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            let destination_updated_at = destination_sessions
+                .get(session_id)
+                .and_then(|session| session.get("updatedAt"))
+                .and_then(Value::as_f64)
+                .unwrap_or_default();
+            if !destination_sessions.contains_key(session_id)
+                || source_updated_at > destination_updated_at
+            {
+                destination_sessions.insert(session_id.clone(), source_session.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            write_json_file(&destination_path, &destination_data)?;
+            migrated_paths.push(path_string(&destination_path));
+        }
+    }
+    Ok(migrated_paths)
+}
+
+fn is_notify_hook_current(hook_paths: &HookPaths, contents: &str) -> bool {
     /*
     CDXC:AgentHooks 2026-06-22-08:23:
     Area 27 parity requires Rust status/install/uninstall to treat the TypeScript gxserver v6 hook marker as the shared notify-hook currency contract. Do not require Rust-only helper text here; existing gxserver-owned v6 hooks should stay installed instead of forcing a needless updateRequired state.
+
+    The marker alone is not enough when Ghostex's resolved state directory
+    changes (for example, after moving from the macOS Application Support
+    layout to XDG state). The hook embeds that directory at install time, so a
+    marker-current script pointing at a different directory is stale and must
+    be rewritten before live Codex identity repair can consume its sidecar.
     */
-    read_file_text(path).contains(&format!("{NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}"))
+    let state_directory_assignment = format!(
+        "DEFAULT_HOOK_STATE_DIR={}",
+        shell_quote(&path_string(&hook_paths.hook_state_directory))
+    );
+    contents.contains(&format!("{NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}"))
+        && contents
+            .lines()
+            .any(|line| line == state_directory_assignment)
 }
 
 fn hook_format(agent_id: &str) -> HookFormat {
@@ -2960,7 +3233,7 @@ fn command_for_agent(definition: &HookDefinition, notify_hook_path: &Path) -> St
             shell_quote(agent),
             shell_quote(&notify_hook_path)
         ),
-        None => notify_hook_path,
+        None => shell_quote(&notify_hook_path),
     }
 }
 
@@ -3076,11 +3349,15 @@ fn normalize_requested_agent_id(value: &Value) -> Option<String> {
 
 fn resolve_config_directory(
     home_dir: &Path,
+    respect_environment: bool,
     env_key: &str,
     fallback_relative_path: &str,
     env_subpath: Option<&str>,
 ) -> PathBuf {
-    match normalize_environment_path(std::env::var(env_key).ok().as_deref(), home_dir) {
+    let configured_path = respect_environment
+        .then(|| std::env::var(env_key).ok())
+        .flatten();
+    match normalize_environment_path(configured_path.as_deref(), home_dir) {
         Some(path) => env_subpath
             .map(|subpath| path.join(subpath))
             .unwrap_or(path),
@@ -3088,20 +3365,22 @@ fn resolve_config_directory(
     }
 }
 
-fn resolve_omp_agent_directory(home_dir: &Path) -> PathBuf {
-    if let Some(pi_agent_root) = normalize_environment_path(
-        std::env::var("PI_CODING_AGENT_DIR").ok().as_deref(),
-        home_dir,
-    ) {
+fn resolve_omp_agent_directory(home_dir: &Path, respect_environment: bool) -> PathBuf {
+    let pi_agent_root = respect_environment
+        .then(|| std::env::var("PI_CODING_AGENT_DIR").ok())
+        .flatten();
+    if let Some(pi_agent_root) = normalize_environment_path(pi_agent_root.as_deref(), home_dir) {
         return pi_agent_root;
     }
-    let config_dir =
-        normalize_environment_path(std::env::var("PI_CONFIG_DIR").ok().as_deref(), home_dir)
-            .unwrap_or_else(|| home_dir.join(".omp"));
+    let configured_path = respect_environment
+        .then(|| std::env::var("PI_CONFIG_DIR").ok())
+        .flatten();
+    let config_dir = normalize_environment_path(configured_path.as_deref(), home_dir)
+        .unwrap_or_else(|| home_dir.join(".omp"));
     config_dir.join("agent")
 }
 
-fn pi_extension_paths(home_dir: &Path) -> Vec<PathBuf> {
+fn pi_extension_paths(home_dir: &Path, respect_environment: bool) -> Vec<PathBuf> {
     /*
     CDXC:AgentHooks 2026-06-23-05:09:
     Pi's active extension loader uses the Pi root extensions directory, while
@@ -3110,7 +3389,13 @@ fn pi_extension_paths(home_dir: &Path) -> Vec<PathBuf> {
     new installs, but keep inspecting the previous agent-scoped locations so
     existing current hooks do not warn and stale hooks report updateRequired.
     */
-    let agent_dir = resolve_config_directory(home_dir, "PI_CODING_AGENT_DIR", ".pi/agent", None);
+    let agent_dir = resolve_config_directory(
+        home_dir,
+        respect_environment,
+        "PI_CODING_AGENT_DIR",
+        ".pi/agent",
+        None,
+    );
     let root_dir = agent_dir
         .parent()
         .map(Path::to_path_buf)
@@ -3433,7 +3718,10 @@ mod tests {
         ));
         let claude_paths = provider_hook_paths("claude", &hook_paths);
         let inspection = inspect_agent_hook_installation(&claude, &hook_paths, &claude_paths);
-        assert!(is_notify_hook_current(&hook_paths.notify_hook_path));
+        assert!(is_notify_hook_current(
+            &hook_paths,
+            &read_file_text(&hook_paths.notify_hook_path)
+        ));
         assert!(inspection.current_hook_installed);
 
         let status = read_agent_hook_status(
@@ -3595,14 +3883,88 @@ mod tests {
     }
 
     #[test]
-    fn notify_hook_current_uses_typescript_marker_contract() {
+    fn notify_hook_current_requires_marker_and_resolved_state_directory() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let hook_path = temp.path().join("agent-shell-notify.sh");
+        let hook_paths = HookPaths::new(temp.path().to_path_buf());
+        let hook_path = hook_paths.notify_hook_path.clone();
         write_test_file(
             &hook_path,
-            &format!("#!/bin/zsh\n# {NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}\n"),
+            &format!(
+                "#!/bin/zsh\n# {NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}\nDEFAULT_HOOK_STATE_DIR={}\n",
+                shell_quote(&path_string(&hook_paths.hook_state_directory))
+            ),
         );
-        assert!(is_notify_hook_current(&hook_path));
+        assert!(is_notify_hook_current(
+            &hook_paths,
+            &read_file_text(&hook_path)
+        ));
+
+        write_test_file(
+            &hook_path,
+            &format!(
+                "#!/bin/zsh\n# {NOTIFY_HOOK_MARKER} v{NOTIFY_HOOK_VERSION}\nDEFAULT_HOOK_STATE_DIR='/stale/ghostex/state'\n"
+            ),
+        );
+        assert!(!is_notify_hook_current(
+            &hook_paths,
+            &read_file_text(&hook_path)
+        ));
+    }
+
+    #[test]
+    fn codex_stop_persists_attention_in_the_hook_sidecar() {
+        assert_eq!(
+            activity_for_hook_event("codex", "Stop", &json!({})),
+            Some("attention".to_string())
+        );
+        assert_eq!(
+            activity_for_hook_event("codex", "SessionEnd", &json!({})),
+            Some("idle".to_string())
+        );
+    }
+
+    #[test]
+    fn hook_session_sidecar_migration_keeps_the_newest_identity_rows() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let source_directory = temp.path().join("legacy").join("agent-hooks");
+        let destination_directory = temp.path().join("current").join("agent-hooks");
+        let file_name = "codex-hook-sessions.json";
+        write_test_file(
+            &source_directory.join(file_name),
+            &format!(
+                "{}\n",
+                json!({
+                    "sessions": {
+                        "incoming": { "updatedAt": 20.0, "surfaceId": "surface-a" },
+                        "shared": { "updatedAt": 10.0, "surfaceId": "legacy" }
+                    }
+                })
+            ),
+        );
+        write_test_file(
+            &destination_directory.join(file_name),
+            &format!(
+                "{}\n",
+                json!({
+                    "sessions": {
+                        "shared": { "updatedAt": 30.0, "surfaceId": "current" }
+                    }
+                })
+            ),
+        );
+
+        let migrated = migrate_hook_session_sidecars(&source_directory, &destination_directory)
+            .expect("migrate sidecars");
+        assert_eq!(
+            migrated,
+            vec![path_string(&destination_directory.join(file_name))]
+        );
+        let result = read_json_object(&read_file_text(&destination_directory.join(file_name)));
+        assert_eq!(
+            result["sessions"]["incoming"]["surfaceId"],
+            json!("surface-a")
+        );
+        assert_eq!(result["sessions"]["shared"]["surfaceId"], json!("current"));
     }
 
     #[test]

@@ -1,5 +1,7 @@
 import Fuse from "fuse.js";
 
+import type { ProjectBoardConversationLinkView } from "../../shared/bead-conversation-links";
+
 /*
   CDXC:ProjectBoard 2026-05-23-14:10:
   Shared Beads board helpers keep display-id formatting, t-shirt estimate mapping, and filter logic consistent between the Project WKWebView surface and future Storybook coverage.
@@ -34,9 +36,11 @@ export type BeadsIssue = {
   assignee?: string;
   blocked_by?: string[];
   blocks?: string[];
+  closed_at?: string;
   comment_count?: number;
   comments?: BeadsComment[];
   created_at?: string;
+  created_by?: string;
   dependencies?: BeadsDependency[];
   dependency_count?: number;
   dependent_count?: number;
@@ -162,6 +166,56 @@ export const TSHIRT_OPTIONS = [
 export type TshirtSize = (typeof TSHIRT_OPTIONS)[number]["label"];
 export type BoardPriorityFilter = "all" | (typeof PRIORITY_OPTIONS)[number]["value"];
 export type BoardEstimateFilter = "all" | "none" | TshirtSize;
+export type BoardSortDirection = "asc" | "desc";
+export type BoardSortKey = "created" | "priority" | "updated";
+export type BoardSortOption = "default" | `${BoardSortKey}-${BoardSortDirection}`;
+
+/*
+  CDXC:ProjectBoardSort 2026-08-07:
+  Each sort key is offered in both directions as its own option instead of a separate direction toggle, because the toolbar's other controls are single dropdowns and a direction control would have nothing to act on while Default order is selected.
+  Direction values describe the underlying field, so `asc` means oldest first for timestamps and urgent first for priority; the visible labels carry that meaning for users.
+*/
+export const BOARD_SORT_OPTIONS: ReadonlyArray<{ label: string; value: BoardSortOption }> = [
+  { label: "Default order", value: "default" },
+  { label: "Last updated (newest first)", value: "updated-desc" },
+  { label: "Last updated (oldest first)", value: "updated-asc" },
+  { label: "Created (newest first)", value: "created-desc" },
+  { label: "Created (oldest first)", value: "created-asc" },
+  { label: "Priority (urgent first)", value: "priority-asc" },
+  { label: "Priority (low first)", value: "priority-desc" },
+];
+
+export type ProjectBoardViewPreferences = {
+  estimateFilter: BoardEstimateFilter;
+  priorityFilter: BoardPriorityFilter;
+  sortOption: BoardSortOption;
+};
+
+/*
+  CDXC:ProjectBoardViewPreferences 2026-08-07:
+  The Kanban is its own web surface, so leaving the board tears it down and every toolbar selection dies with it. Priority, estimate, and sort are durable view settings and are restored on the next mount; ticket search stays ephemeral because a restored query would hide most of the board without an obvious cause.
+  The three selections describe how the user wants to read a board rather than anything about a particular project, so one app-wide set follows them into every project instead of each board keeping its own.
+  Stored values outlive the option lists that produced them, so a preference that no longer matches a current option falls back to its default instead of leaving the toolbar showing a value the board cannot filter or sort by.
+*/
+export const DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES: ProjectBoardViewPreferences = {
+  estimateFilter: "all",
+  priorityFilter: "all",
+  sortOption: "default",
+};
+
+export const PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY = "ghostex-project-board-view";
+const BOARD_PRIORITY_FILTER_VALUES: ReadonlyArray<BoardPriorityFilter> = [
+  "all",
+  ...PRIORITY_OPTIONS.map((option) => option.value),
+];
+const BOARD_ESTIMATE_FILTER_VALUES: ReadonlyArray<BoardEstimateFilter> = [
+  "all",
+  "none",
+  ...TSHIRT_OPTIONS.map((option) => option.label),
+];
+const BOARD_SORT_OPTION_VALUES: ReadonlyArray<BoardSortOption> = BOARD_SORT_OPTIONS.map(
+  (option) => option.value,
+);
 
 const REQUIRED_CUSTOM_STATUS_CONFIG = "backlog,test,review";
 const PROJECT_BOARD_COMMENT_METADATA_SEPARATOR = "---";
@@ -276,6 +330,19 @@ export function toBoardTickets(
     }));
 }
 
+/*
+  CDXC:ProjectBoardCreator 2026-08-07-07:52:
+  Cards and Edit ticket show who created a bead next to who is assigned to it. The creator is
+  redundant noise when it is the same person as the assignee, so display surfaces resolve the
+  creator through here instead of each deciding when to hide it.
+*/
+export function ticketCreatorName(
+  createdBy: string | undefined,
+  assignee: string | undefined,
+): string | undefined {
+  return createdBy && createdBy !== assignee ? createdBy : undefined;
+}
+
 export function estimateToTshirt(estimate: number | null | undefined): TshirtSize | undefined {
   if (estimate === null || estimate === undefined) {
     return undefined;
@@ -367,6 +434,40 @@ export function projectBoardRawProjectIdFromUrlParam(projectId: string): string 
   }
 }
 
+export function normalizeProjectBoardViewPreferences(
+  candidate: unknown,
+): ProjectBoardViewPreferences {
+  const stored =
+    typeof candidate === "object" && candidate !== null
+      ? (candidate as Record<string, unknown>)
+      : {};
+  return {
+    estimateFilter: normalizeBoardViewPreference(
+      stored.estimateFilter,
+      BOARD_ESTIMATE_FILTER_VALUES,
+      DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES.estimateFilter,
+    ),
+    priorityFilter: normalizeBoardViewPreference(
+      stored.priorityFilter,
+      BOARD_PRIORITY_FILTER_VALUES,
+      DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES.priorityFilter,
+    ),
+    sortOption: normalizeBoardViewPreference(
+      stored.sortOption,
+      BOARD_SORT_OPTION_VALUES,
+      DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES.sortOption,
+    ),
+  };
+}
+
+function normalizeBoardViewPreference<TValue extends string>(
+  candidate: unknown,
+  allowedValues: ReadonlyArray<TValue>,
+  fallback: TValue,
+): TValue {
+  return allowedValues.includes(candidate as TValue) ? (candidate as TValue) : fallback;
+}
+
 export async function ensureWorkflowStatuses(
   runBeads: (request: Omit<BeadsBridgeRequest, "cwd" | "requestId">) => Promise<unknown>,
 ): Promise<void> {
@@ -426,6 +527,87 @@ export function filterBoardTickets(
     threshold: 0.38,
   });
   return fuse.search(normalizedQuery).map((result) => result.item);
+}
+
+/*
+  CDXC:ProjectBoardSort 2026-08-07:
+  Lanes only render their first PROJECT_BOARD_MAX_VISIBLE_TICKETS_PER_COLUMN cards, so ticket order is a board-level concern rather than a lane-render detail.
+  Beads returns no meaningful order for `list --all`, which leaves a Done lane of hundreds of closed beads hiding the work that just finished behind that cap.
+  Done therefore defaults to newest-closed-first while the other lanes keep the Beads order they have always shown, and an explicit sort selection applies to every lane in its chosen direction.
+  Direction also drives the priority tie-break so the two priority views are exact reverses of each other rather than differing only in their tiers.
+*/
+export function sortBoardTickets(
+  tickets: BoardTicket[],
+  sort: BoardSortOption,
+  column: BoardStatusKey,
+): BoardTicket[] {
+  if (sort === "default") {
+    return column === "done"
+      ? [...tickets].sort((left, right) =>
+          compareBoardTicketTimes(boardTicketClosedTime(left), boardTicketClosedTime(right), "desc"),
+        )
+      : tickets;
+  }
+  const [sortKey, sortDirection] = sort.split("-") as [BoardSortKey, BoardSortDirection];
+  if (sortKey === "priority") {
+    return [...tickets].sort((left, right) => {
+      const priorityDelta =
+        Number(prioritySelectValue(left.priority)) - Number(prioritySelectValue(right.priority));
+      return priorityDelta !== 0
+        ? applyBoardSortDirection(priorityDelta, sortDirection)
+        : compareBoardTicketTimes(
+            boardTicketUpdatedTime(left),
+            boardTicketUpdatedTime(right),
+            sortDirection,
+          );
+    });
+  }
+  const ticketTime = sortKey === "created" ? boardTicketCreatedTime : boardTicketUpdatedTime;
+  return [...tickets].sort((left, right) =>
+    compareBoardTicketTimes(ticketTime(left), ticketTime(right), sortDirection),
+  );
+}
+
+function boardTicketClosedTime(ticket: BoardTicket): number {
+  return parseBoardTicketTime(ticket.closed_at ?? ticket.updated_at ?? ticket.created_at);
+}
+
+function boardTicketUpdatedTime(ticket: BoardTicket): number {
+  return parseBoardTicketTime(ticket.updated_at ?? ticket.created_at);
+}
+
+function boardTicketCreatedTime(ticket: BoardTicket): number {
+  return parseBoardTicketTime(ticket.created_at);
+}
+
+function parseBoardTicketTime(value: string | undefined): number {
+  const parsed = Date.parse(value ?? "");
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+}
+
+function compareBoardTicketTimes(
+  left: number,
+  right: number,
+  direction: BoardSortDirection,
+): number {
+  if (left === right) {
+    return 0;
+  }
+  /*
+    CDXC:ProjectBoardSort 2026-08-07:
+    A bead whose timestamp is missing or unparseable is unknown rather than oldest, so it stays at the bottom of the lane in both directions instead of leading the oldest-first views.
+  */
+  if (left === Number.NEGATIVE_INFINITY) {
+    return 1;
+  }
+  if (right === Number.NEGATIVE_INFINITY) {
+    return -1;
+  }
+  return applyBoardSortDirection(left > right ? 1 : -1, direction);
+}
+
+function applyBoardSortDirection(ascendingComparison: number, direction: BoardSortDirection): number {
+  return direction === "asc" ? ascendingComparison : -ascendingComparison;
 }
 
 export function appendImageMarkdownToDescription(
@@ -712,6 +894,59 @@ function normalizeCommentMetadataValue(value: string | undefined): string | unde
   return normalized || undefined;
 }
 
+/*
+ * CDXC:ProjectBoardStartWork 2026-08-07-07:01:
+ * A bead's assignee names who should do the work, so opening a ticket must
+ * preselect the configured agent that assignee refers to instead of always
+ * showing the board default agent.
+ * Compare the assignee case-insensitively against each configured agent's label
+ * and agent id so both a custom agent named "Dobby" and a built-in agent id like
+ * "claude" resolve, and return nothing when no agent matches so unassigned and
+ * human-assigned beads keep the existing default.
+ */
+/*
+ * CDXC:ProjectBoardStartWorkToolSuffix 2026-08-08-15:22:
+ * Boards name an assignee after the tool a worker runs, and that name usually
+ * carries the suffix the product ships with — "claude-code" for Claude Code,
+ * "gemini-cli" for Gemini CLI — while the configured agent is the bare "claude"
+ * or "gemini". An exact match alone leaves those beads on the board default,
+ * which is the one case this preselect exists to fix.
+ * Retry once with a trailing "-code" or "-cli" dropped, and only after the exact
+ * pass fails, so an agent literally named "claude-code" still wins over "claude"
+ * and no bead resolves to an agent the exact pass could already reach.
+ */
+const AGENT_TOOL_NAME_SUFFIXES = ["-code", "-cli"] as const;
+
+export function resolveAssignedAgentId(
+  assignee: string | undefined,
+  agents: readonly { agentId: string; label: string }[],
+): string | undefined {
+  const normalizedAssignee = assignee?.trim().toLowerCase();
+  if (!normalizedAssignee) {
+    return undefined;
+  }
+  const matchAgentName = (candidate: string): string | undefined =>
+    agents.find(
+      (agent) =>
+        agent.label.trim().toLowerCase() === candidate ||
+        agent.agentId.trim().toLowerCase() === candidate,
+    )?.agentId;
+  const exactMatch = matchAgentName(normalizedAssignee);
+  if (exactMatch) {
+    return exactMatch;
+  }
+  for (const suffix of AGENT_TOOL_NAME_SUFFIXES) {
+    if (normalizedAssignee.endsWith(suffix) && normalizedAssignee.length > suffix.length) {
+      const withoutSuffix = normalizedAssignee.slice(0, -suffix.length);
+      const suffixMatch = matchAgentName(withoutSuffix);
+      if (suffixMatch) {
+        return suffixMatch;
+      }
+    }
+  }
+  return undefined;
+}
+
 export function getBlockedByIds(issue: BeadsIssue): string[] {
   return (issue.dependencies ?? []).map((dependency) => dependency.depends_on_id).filter(Boolean);
 }
@@ -733,5 +968,54 @@ export function formatShortDate(value?: string): string {
     return "";
   }
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+export function conversationLinkLabel(link: ProjectBoardConversationLinkView): string {
+  return link.sessionTitle || link.agentName || link.agentId || link.agentSessionId || "Agent session";
+}
+
+export type ProjectBoardConversationLinkActionKind = "jump" | "none" | "resume";
+
+export function conversationLinkActionKind(
+  link: ProjectBoardConversationLinkView | undefined,
+): ProjectBoardConversationLinkActionKind {
+  /*
+   * CDXC:ProjectBoardBeads 2026-08-07:
+   * Ghostex can open a live or restorable session directly. When the session
+   * row is gone from restorable history the agent conversation it worked can
+   * still be resumed into a fresh session, which is a different promise to the
+   * user and gets its own affordance.
+   */
+  if (link?.isLive || link?.isRestorable) {
+    return "jump";
+  }
+  return link?.isResumable ? "resume" : "none";
+}
+
+export function isUsableConversationLink(
+  link: ProjectBoardConversationLinkView | undefined,
+): boolean {
+  return conversationLinkActionKind(link) !== "none";
+}
+
+export function conversationLinkStatusText(link: ProjectBoardConversationLinkView): string {
+  /*
+   * CDXC:ProjectBoardBeads 2026-08-07:
+   * A closed agent session is the normal end state of bead work, not a broken
+   * link, so the card keeps the worker as history ("Last worked 6 Aug")
+   * instead of showing a dangling "Unavailable".
+   */
+  const lastWorkedDate = formatShortDate(link.updatedAt);
+  const sessionStatus = link.isSleeping
+    ? "Sleeping"
+    : link.isLive
+      ? "Live"
+      : link.isRestorable
+        ? "Restorable"
+        : lastWorkedDate
+          ? `Last worked ${lastWorkedDate}`
+          : "Last worked";
+  const agentSessionPreview = link.agentSessionId ? ` · ${link.agentSessionId.slice(0, 8)}` : "";
+  return `${sessionStatus}${agentSessionPreview}`;
 }
 

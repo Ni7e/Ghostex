@@ -42,13 +42,13 @@ Default search posture:
 Search these app-owned areas first by task:
 
 - Desktop app shell, window lifecycle, app startup, terminals/panes, titlebar, session restore/fork launch plans, terminal host integration: `gpui/src/`, `gpui/sidebar/`, `gpui/native/macos/`, `gpui/scripts/`, `sidebar/`, `shared/`, and `scripts/`.
-- Frontend UI, React components, settings, project/sidebar interactions, Storybook stories: `sidebar/`, `components/`, `components/ui/`, `shared/`, `gpui/sidebar/`, `native/sidebar/` (for the gpui-owned modal/titlebar/manage/kanban hosts listed above), and `docs/`.
+- Frontend UI, React components, settings, project/sidebar interactions, Storybook stories: `sidebar/`, `components/`, `components/ui/`, `shared/`, `gpui/sidebar/`, `native/sidebar/` (for the gpui-owned modal/titlebar/manage/kanban hosts listed above).
 - Web app: `ghostex-web/`, then the shared `sidebar/` and `shared/` code it builds on.
 - Session grid, prompts, agent metadata, workspace/project state, contracts, shared tests: `shared/`, then the consuming surface in `sidebar/`, `gpui/sidebar/`, `native/sidebar/`, `mobile/`, or `gxserver-rs/`.
-- Server, remote protocol, hooks, authentication, remote setup: `gxserver-rs/`, `shared/`, `scripts/`, and `docs/`.
+- Server, remote protocol, hooks, authentication, remote setup: `gxserver-rs/`, `shared/`, `scripts/`.
 - TUI or zmx behavior: `tui2/`, `zmx/src/`, and `zmx/test/`; keep `tui2/vendor/**` excluded unless the task is specifically about the vendored VT library.
 - Mobile app work: `mobile/` is the only active mobile app and releases Android through the React Native/Expo project. The retired native `iOS/` and Termux-fork `android/` repositories live under `/Users/madda/dev/_active/ghostex-deprecated/` and must not be restored as active release inputs.
-- Assets, sounds, icons, docs, and release notes: `media/`, `gpui/assets/`, `src/assets/`, `docs/`, `release/`, and the relevant script under `scripts/`.
+- Assets, sounds, icons, and release notes: `media/`, `gpui/assets/`, `src/assets/`, `release/`, and the relevant script under `scripts/`.
 - Deprecated macOS Swift/AppKit app (`native/`, `src/`): search here only to *understand* legacy behavior or to touch the gpui-consumed files listed in "Active apps vs deprecated apps". Never as the destination for new work.
 
 Search imported Ghostty code only when the task is explicitly about upstream Ghostty behavior, the embedded Ghostty source, Zig terminal internals, Ghostty macOS internals, or a build/test failure whose failing file is already under `ghostty/**`. Even then, target the relevant subfolder such as `ghostty/src/`, `ghostty/macos/`, `ghostty/pkg/`, or `ghostty/test/`, and continue excluding `ghostty/.zig-cache/**` and `ghostty/zig-out/**`.
@@ -149,6 +149,14 @@ Corollary: after you verify a surgical bug fix, tell the user it should be commi
 ### Rules for running commands
 
 - Never run "bun run start" or any command that would restart the app unless I ask you to.
+
+### Diagnostic logging workflow
+
+- Routine disk logs must have an explicit **Diagnostic disk logging scenario** and may write only while both **Show debug UI controls** and that unexpired scenario are enabled. Do not add unscoped routine disk logging. Errors, crashes, and important warnings remain unconditional.
+- Before testing or requesting a reproduction that needs diagnostic logs, record the current logging settings, enable only the smallest set of scenarios needed, and prefer the shortest useful expiry.
+- Reproduce the issue yourself when authorized and practical. Otherwise, ask the user to reproduce it after confirming the required scenarios are enabled.
+- As soon as the needed evidence is collected—or the logging attempt is abandoned—restore the previous settings and turn off every scenario and debug switch that you enabled. Never leave extra diagnostics running because they can consume disk, CPU, and make the user's computer lag while they continue working.
+- Do not turn off scenarios or debug settings that were already enabled by the user; restore exactly the state observed before the diagnostic session.
 
 ###  Don't switch the repo to another branch ever
   - We run multiple agents at a time on 1 worktree so agents should never switch the branch this folder is on away from main

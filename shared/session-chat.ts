@@ -138,17 +138,17 @@ export interface SessionChatQuestionSelection {
 
 /*
 CDXC:SessionChatDetectedOptions 2026-08-01:
-What the agent is ACTUALLY running, read by gxserver out of the session's
-terminal scrollback (the agent TUIs print it in their statusline/footer). The
-field is omitted when nothing was detected — an older daemon, an agent with no
-known statusline grammar, or a screen that simply does not show it — and
-clients then keep behaving exactly as before. There is no guessed value.
+What the agent is ACTUALLY running, read by gxserver from structured transcript
+metadata and, when available, the terminal statusline/footer. The field is
+omitted when neither source proves a value. There is no guessed value.
 */
 export interface SessionChatDetectedChoice {
   /** Catalog id the option pills key their state by (`fable`, `gpt-5.6-sol`). */
   value: string;
-  /** The raw text the terminal rendered (`Fable 5`), shown verbatim. */
+  /** The agent-reported label (`Fable 5`), shown verbatim. */
   label: string;
+  /** Evidence source; absent only when talking to an older daemon. */
+  source?: "terminal" | "transcript";
 }
 
 export interface SessionChatDetectedOptions {
@@ -236,7 +236,7 @@ export interface GxserverSendSessionChatMessageResult {
 
 /*
 CDXC:SessionChatImagePaste 2026-08-01:
-saveSessionChatImage writes composer-pasted image bytes into ~/.ghostex/i on
+saveSessionChatImage writes composer-pasted image bytes into the Ghostex image directory on
 the machine the session runs on (clients call it over their per-machine RPC,
 so a remote session's image lands on the remote machine). The returned
 absolute path is what the composer interpolates into "[Image #N](path)" —
@@ -259,7 +259,7 @@ export interface GxserverSaveSessionChatImageResult {
 /*
 CDXC:SessionChatAttachments 2026-08-02:
 saveSessionChatAttachment is the non-image sibling of saveSessionChatImage:
-any file's bytes land in ~/.ghostex/f on the session's machine and the
+any file's bytes land in the Ghostex attachment directory on the session's machine and the
 returned absolute path is what the composer interpolates into
 "[File #N](path)". The sanitized original file name is kept in the stored
 name (after a generated epoch prefix) so agents see a meaningful extension.

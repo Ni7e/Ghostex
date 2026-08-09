@@ -10,6 +10,7 @@ import {
 import { useState } from "react";
 import type { SidebarNewSessionEnvMode } from "../../shared/ghostex-settings";
 import type { SidebarAgentButton } from "../../shared/sidebar-agents";
+import { AppTooltip } from "../app-tooltip";
 import { ProjectAgentLauncherIcon } from "../project-agent-launcher-icon";
 import { SidebarContextMenuPortal } from "../sidebar-context-menu-portal";
 import type { WebviewApi } from "../webview-api";
@@ -134,22 +135,23 @@ export function SidebarV2CreateButton({
 
   return (
     <div className="sidebar-v2-create-split" data-can-worktree={String(canCreateWorktree)}>
-      <button
-        aria-label={label}
-        className="sidebar-v2-create-button"
-        onClick={(event) => {
-          event.stopPropagation();
-          if (worktreeIsDefault) {
-            onOpenWorktreePopover(popoverPositionFrom(event.currentTarget));
-            return;
-          }
-          onCreateInstantSession();
-        }}
-        title={worktreeIsDefault ? "New worktree session" : label}
-        type="button"
-      >
-        <IconPlus aria-hidden="true" size={14} stroke={2} />
-      </button>
+      <AppTooltip content={worktreeIsDefault ? "New worktree session" : label}>
+        <button
+          aria-label={label}
+          className="sidebar-v2-create-button"
+          onClick={(event) => {
+            event.stopPropagation();
+            if (worktreeIsDefault) {
+              onOpenWorktreePopover(popoverPositionFrom(event.currentTarget));
+              return;
+            }
+            onCreateInstantSession();
+          }}
+          type="button"
+        >
+          <IconPlus aria-hidden="true" size={14} stroke={2} />
+        </button>
+      </AppTooltip>
       {hasMenu ? (
         <button
           aria-expanded={menuPosition !== undefined}

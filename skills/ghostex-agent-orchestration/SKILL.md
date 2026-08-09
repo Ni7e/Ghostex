@@ -152,5 +152,7 @@ aliases come from the last `ghostex sessions` or `gx sessions` list.
 
 - Do not drive Ghostex panes through raw zmx/tmux commands when a Ghostex CLI
   command exists.
-- Use `$ghostex-browser-use` for embedded CEF browser panes.
+- Use `$ghostex-embedded-browser-use` for embedded CEF browser panes.
+- Use `$ghostex-browser-use` for supported external browser page content
+  through Cua Driver.
 - Use `$ghostex-computer-use` for native macOS apps outside Ghostex.

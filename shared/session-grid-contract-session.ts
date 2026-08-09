@@ -863,7 +863,19 @@ function normalizeCursorTerminalTitle(title: string): string | undefined | null 
 }
 
 function normalizePiTerminalTitle(title: string): string | undefined {
-  const match = /^π\s*-\s*(.+)$/u.exec(title.trim());
+  const normalizedTitle = title.trim();
+  const ompMatch = /^π\s*(?:>|[\u2800-\u28ff])\s*(.*)$/u.exec(normalizedTitle);
+  if (ompMatch) {
+    /**
+     * CDXC:OmpTerminalTitles 2026-08-06:
+     * Omp prefixes its human title with `π >` while idle and `π <braille>`
+     * while working. The braille character is an animated spinner, so strip
+     * the whole status prefix and trim the remaining title for every client.
+     */
+    return ompMatch[1]?.trim() || "π";
+  }
+
+  const match = /^π\s*-\s*(.+)$/u.exec(normalizedTitle);
   if (!match) {
     return undefined;
   }

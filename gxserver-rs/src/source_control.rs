@@ -203,8 +203,9 @@ async fn discover_provider(provider: ProviderKind, cwd: &Path) -> Value {
     let version_probe = match version_probe {
         Ok(output) if output.exit_code == 0 => output,
         Ok(output) => {
-            let detail = first_safe_auth_line(&output.combined())
-                .unwrap_or_else(|| format!("`{executable} --version` exited {}.", output.exit_code));
+            let detail = first_safe_auth_line(&output.combined()).unwrap_or_else(|| {
+                format!("`{executable} --version` exited {}.", output.exit_code)
+            });
             return provider_discovery_item(
                 provider,
                 Some(executable),
@@ -243,14 +244,7 @@ async fn discover_provider(provider: ProviderKind, cwd: &Path) -> Value {
         },
         Err(detail) => unknown_auth(Some(detail)),
     };
-    provider_discovery_item(
-        provider,
-        Some(executable),
-        "available",
-        version,
-        None,
-        auth,
-    )
+    provider_discovery_item(provider, Some(executable), "available", version, None, auth)
 }
 
 fn provider_discovery_item(
@@ -318,7 +312,11 @@ fn parse_github_auth_accounts(stdout: &str) -> Option<Vec<GitHubAuthAccount>> {
     let mut accounts = Vec::new();
     for entries in hosts.values() {
         for entry in entries.as_array()? {
-            let host = entry.get("host").and_then(Value::as_str)?.trim().to_string();
+            let host = entry
+                .get("host")
+                .and_then(Value::as_str)?
+                .trim()
+                .to_string();
             let login = entry
                 .get("login")
                 .and_then(Value::as_str)?
@@ -368,9 +366,14 @@ fn parse_github_auth(output: &ProbeOutput) -> Value {
             "unauthenticated",
             None,
             failed.map(|entry| entry.host.clone()),
-            Some(failed.and_then(|entry| entry.error.clone()).unwrap_or_else(|| {
-                "Run `gh auth login` to authenticate GitHub CLI with an active account.".to_string()
-            })),
+            Some(
+                failed
+                    .and_then(|entry| entry.error.clone())
+                    .unwrap_or_else(|| {
+                        "Run `gh auth login` to authenticate GitHub CLI with an active account."
+                            .to_string()
+                    }),
+            ),
         );
     }
     if output.exit_code != 0 {
@@ -379,15 +382,15 @@ fn parse_github_auth(output: &ProbeOutput) -> Value {
             None,
             None,
             Some(
-                first_safe_auth_line(&combined)
-                    .unwrap_or_else(|| "Run `gh auth login` to authenticate GitHub CLI.".to_string()),
+                first_safe_auth_line(&combined).unwrap_or_else(|| {
+                    "Run `gh auth login` to authenticate GitHub CLI.".to_string()
+                }),
             ),
         );
     }
-    unknown_auth(Some(
-        first_safe_auth_line(&combined)
-            .unwrap_or_else(|| "GitHub CLI auth status could not be parsed.".to_string()),
-    ))
+    unknown_auth(Some(first_safe_auth_line(&combined).unwrap_or_else(|| {
+        "GitHub CLI auth status could not be parsed.".to_string()
+    })))
 }
 
 fn parse_gitlab_auth(output: &ProbeOutput) -> Value {
@@ -738,9 +741,7 @@ fn percent_encode_path_segment(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.as_bytes() {
         let character = *byte as char;
-        if character.is_ascii_alphanumeric()
-            || matches!(character, '-' | '_' | '.' | '~')
-        {
+        if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | '~') {
             encoded.push(character);
         } else {
             encoded.push_str(&format!("%{byte:02X}"));

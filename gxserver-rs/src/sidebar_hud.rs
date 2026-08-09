@@ -863,7 +863,7 @@ pub fn read_sidebar_hud_global_commands(stored_definitions: &[Value]) -> Value {
     )
 }
 
-fn sidebar_agent_buttons_from_projects(projects: &[Value]) -> Value {
+pub(crate) fn sidebar_agent_buttons_from_projects(projects: &[Value]) -> Value {
     let (stored_agents, stored_order) = sidebar_agent_state_from_projects(projects);
     sidebar_agent_buttons_from_state(&stored_agents, &stored_order)
 }
@@ -1163,7 +1163,10 @@ fn sidebar_command_button_value(command: &StoredSidebarCommand) -> Value {
     }
     button.insert("isDefault".to_string(), Value::Bool(command.is_default));
     if !command.links.is_empty() {
-        button.insert("links".to_string(), sidebar_command_links_value(&command.links));
+        button.insert(
+            "links".to_string(),
+            sidebar_command_links_value(&command.links),
+        );
     }
     button.insert("name".to_string(), Value::String(command.name.clone()));
     button.insert(

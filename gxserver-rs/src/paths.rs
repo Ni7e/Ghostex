@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf};
+use std::{env, io, path::PathBuf};
 
 use ghostex_paths::GhostexPaths;
 
@@ -13,6 +13,7 @@ pub struct GxserverPaths {
     pub config_file: PathBuf,
     pub home_dir: PathBuf,
     pub identity_file: PathBuf,
+    pub isolated_agent_home_dir: Option<PathBuf>,
     pub logs_dir: PathBuf,
     pub log_file: PathBuf,
     pub migrations_dir: PathBuf,
@@ -26,12 +27,18 @@ pub struct GxserverPaths {
 
 /*
 CDXC:GxserverStorage 2026-06-14-20:37:
-The Rust daemon must use the same durable path contract as the TypeScript source of truth: shared daemon state stays under ~/.ghostex/gxserver, while support-bundle-safe JSONL diagnostics stay under ~/.ghostex/logs.
+The Rust daemon must use the shared Ghostex XDG/GHOSTEX_HOME path contract: daemon state stays in the resolved state directory, while support-bundle-safe JSONL diagnostics stay in the resolved logs directory.
 
 CDXC:PortlessState 2026-06-22-23:05:
-Ghostex-managed Portless state belongs under ~/.ghostex/gxserver/portless, not ~/.portless. gxserver-rs owns this path so the native root service can read mirrored routes while the user daemon remains the only writer.
+Ghostex-managed Portless state belongs under Ghostex's resolved gxserver state directory, not ~/.portless. gxserver-rs owns this path so the native root service can read mirrored routes while the user daemon remains the only writer.
 */
 pub fn get_gxserver_paths(home_dir: Option<PathBuf>) -> GxserverPaths {
+    let isolated_agent_home_dir = home_dir.clone().or_else(|| {
+        env::var_os("GHOSTEX_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    });
     let storage = home_dir
         .map(GhostexPaths::for_explicit_home)
         .unwrap_or_else(GhostexPaths::resolve);
@@ -55,6 +62,7 @@ pub fn get_gxserver_paths(home_dir: Option<PathBuf>) -> GxserverPaths {
         config_file,
         home_dir,
         identity_file: root_dir.join("identity.json"),
+        isolated_agent_home_dir,
         log_file: logs_dir.join("gxserver.jsonl"),
         logs_dir,
         migrations_dir,

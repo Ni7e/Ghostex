@@ -34,6 +34,7 @@ import {
   SESSION_STATUS_INDICATOR_SIZE_OPTIONS,
   SIDEBAR_SETTINGS_PRESET_SETTINGS,
   SIDEBAR_SETTINGS_PRESETS,
+  SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
   SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   TERMINAL_DEV_SERVER_OPEN_TARGET_OPTIONS,
@@ -493,10 +494,19 @@ describe("normalizeghostexSettings", () => {
   test("previews session title generation commands", () => {
     /*
     CDXC:GxserverSessionTitle 2026-06-04-22:44:
-    The Settings and first-time modal title-agent dropdowns must show the exact command template Ghostex sends, including Grok Build's Composer 2.5 model id from the local `grok models` contract.
+    The Settings and first-time modal title-agent dropdowns must show the exact command template Ghostex sends, including model ids from each installed CLI's local model catalog.
     */
+    expect(getSessionTitleGenerationCommandPreview("codex")).toBe(
+      "codex exec --ephemeral --skip-git-repo-check -m gpt-5.6-luna -c 'model_reasoning_effort=\"low\"' <<'PROMPT'\n<title generation prompt>\nPROMPT",
+    );
+    expect(getSessionTitleGenerationCommandPreview("cursor")).toBe(
+      "cursor-agent --print --yolo --trust --model cursor-grok-4.5-low --output-format text '<title generation prompt>'",
+    );
+    expect(getSessionTitleGenerationCommandPreview("claude")).toBe(
+      "claude -p --model haiku --effort low <<'PROMPT'\n<title generation prompt>\nPROMPT",
+    );
     expect(getSessionTitleGenerationCommandPreview("grok")).toBe(
-      "grok -p --model grok-composer-2.5-fast --output-format plain --no-alt-screen --no-plan --no-subagents --disable-web-search --max-turns 1 '<title generation prompt>'",
+      "grok --model grok-4.5 --reasoning-effort low --output-format plain --no-alt-screen --no-plan --no-subagents --disable-web-search --max-turns 1 --single '<title generation prompt>'",
     );
     expect(getSessionTitleGenerationCommandPreview("custom", { command: "title-wrapper" })).toBe(
       "title-wrapper <<'PROMPT'\n<title generation prompt>\nPROMPT",
@@ -703,6 +713,8 @@ describe("normalizeghostexSettings", () => {
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.codex.hideBrowserFaviconUntilHover).toBe(false);
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.minimal.hideBrowserFaviconUntilHover).toBe(true);
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.detailed.hideBrowserFaviconUntilHover).toBe(false);
+    expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.minimal.showProjectIcons).toBe(false);
+    expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.showProjectIcons).toBe(true);
     expect(SIDEBAR_SETTINGS_PRESET_SETTINGS.recommended.hideLastActiveTimeOnSessionCards).toBe(
       true,
     );
@@ -719,12 +731,14 @@ describe("normalizeghostexSettings", () => {
         hideProjectHeaderDiffStats: false,
         hideBrowserFaviconUntilHover: true,
         hideSessionAgentIconUntilHover: false,
+        showProjectIcons: false,
         useColoredSessionAgentIcons: true,
       }),
     ).toMatchObject({
       hideProjectHeaderDiffStats: false,
       hideBrowserFaviconUntilHover: true,
       hideSessionAgentIconUntilHover: false,
+      showProjectIcons: false,
       useColoredSessionAgentIcons: true,
     });
   });
@@ -1080,6 +1094,30 @@ describe("normalizeghostexSettings", () => {
     expect(SIDEBAR_SIDE_OPTIONS).toEqual([
       { label: "Left", value: "left" },
       { label: "Right", value: "right" },
+    ]);
+  });
+
+  test("normalizes the selectable project group rail style", () => {
+    expect(DEFAULT_ghostex_SETTINGS.sidebarProjectGroupStyle).toBe("branched");
+    expect(normalizeghostexSettings({})).toMatchObject({
+      sidebarProjectGroupStyle: "branched",
+    });
+    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: "quiet" })).toMatchObject({
+      sidebarProjectGroupStyle: "quiet",
+    });
+    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: "header" })).toMatchObject({
+      sidebarProjectGroupStyle: "header",
+    });
+    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: "branched" })).toMatchObject({
+      sidebarProjectGroupStyle: "branched",
+    });
+    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: "boxed" })).toMatchObject({
+      sidebarProjectGroupStyle: "branched",
+    });
+    expect(SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS).toEqual([
+      { label: "Quiet rail", value: "quiet" },
+      { label: "Header rail", value: "header" },
+      { label: "Branched rail", value: "branched" },
     ]);
   });
 

@@ -46,8 +46,6 @@ export const GXSERVER_LOCAL_API_PORT = 58744 as const;
 export const GXSERVER_REMOTE_API_HOST = "0.0.0.0" as const;
 export const GXSERVER_REMOTE_API_PORT = 58745 as const;
 export const GXSERVER_MACOS_BRIDGE_PORT = 58743 as const;
-export const GXSERVER_RUNTIME_METADATA_PATH = "~/.ghostex/gxserver/runtime/server.json" as const;
-export const GXSERVER_STORAGE_ROOT_PATH = "~/.ghostex/gxserver" as const;
 export const GXSERVER_TERMINAL_WS_ENDPOINT = "/api/terminal" as const;
 export const GXSERVER_WEB_BOOTSTRAP_ENDPOINT = "/api/webBootstrap" as const;
 
@@ -141,6 +139,7 @@ export type GxserverEndpointPath =
   | "/api/updateWorkspaceSessionGroups"
   | "/api/readSidebarProjectCollections"
   | "/api/updateSidebarProjectCollections"
+  | "/api/assignProjectToSidebarCollection"
   | "/api/readAutomationState"
   | "/api/saveAutomation"
   | "/api/deleteAutomation"
@@ -638,6 +637,8 @@ export interface GxserverStashedPrompt {
   /** Origin project's identity icon, shaped for `WorkspaceProjectIconSource`. */
   projectIcon?: unknown;
   projectIconDataUrl?: string | null;
+  /** Repository icon discovered by gxserver, matching the active sidebar project icon. */
+  projectDiscoveredIconDataUrl?: string | null;
   projectId: string | null;
   projectName: string | null;
   promptId: string;
@@ -648,6 +649,8 @@ export interface GxserverStashedPrompt {
 export interface GxserverSaveStashedPromptParams {
   content: string;
   cwd?: string;
+  /** When present, updates this saved prompt in place. */
+  promptId?: string;
   projectId?: string;
   sessionId?: string;
 }
@@ -777,15 +780,15 @@ export interface GxserverLookupRepositoryResult {
 }
 
 export interface GxserverStoragePaths {
-  authToken: "~/.ghostex/gxserver/auth/token";
-  config: "~/.ghostex/gxserver/config.json";
-  identity: "~/.ghostex/gxserver/identity.json";
-  logs: "~/.ghostex/gxserver/logs/gxserver.jsonl";
-  migrations: "~/.ghostex/gxserver/migrations";
-  root: typeof GXSERVER_STORAGE_ROOT_PATH;
-  runtime: "~/.ghostex/gxserver/runtime";
-  stateDb: "~/.ghostex/gxserver/state.db";
-  zmx: "~/.ghostex/gxserver/zmx";
+  authToken: string;
+  config: string;
+  identity: string;
+  logs: string;
+  migrations: string;
+  root: string;
+  runtime: string;
+  stateDb: string;
+  zmx: string;
 }
 
 export interface GxserverLogEntry {
@@ -2074,6 +2077,8 @@ export interface GxserverPresentationSession {
   agentName?: string;
   agentSessionId?: string;
   agentSessionPath?: string;
+  /** Stable Action identity used to reuse an existing command-surface session. */
+  commandId?: string;
   attention?: GxserverPresentationAttentionState;
   createdAt: string;
   cwd?: string;
@@ -2384,7 +2389,7 @@ export interface GxserverSessionRenameRequestResult {
 }
 
 export interface GxserverAttachSessionMetadataParams extends GxserverSessionLifecycleParams {
-  promptEditor?: "monaco";
+  promptEditor?: "code-server" | "monaco";
   startupText?: string;
 }
 
@@ -2543,7 +2548,7 @@ export type GxserverTerminalWsControlMessage =
   | GxserverTerminalWsServerControlMessage;
 
 export interface GxserverStartSessionProviderParams extends GxserverSessionLifecycleParams {
-  promptEditor?: "monaco";
+  promptEditor?: "code-server" | "monaco";
   startupText?: string;
 }
 
@@ -2628,6 +2633,20 @@ export type GxserverEvent =
       serverId: GxserverServerId;
       sidebarProjectCollections: GxserverSidebarProjectCollectionsState;
       type: "sidebarProjectCollectionsChanged";
+    }
+  /*
+   * CDXC:GlobalActions 2026-08-07:
+   * A Global Action write is not a project write, so it produces no
+   * presentation delta and live surfaces would otherwise keep a stale list.
+   * The event announces the change and bumps the presentation revision; it
+   * carries no commands, because `/api/readSidebarHud` stays the single
+   * projection of the Global Actions list.
+   */
+  | {
+      protocolVersion: GxserverProtocolVersion;
+      revision: GxserverPresentationRevision;
+      serverId: GxserverServerId;
+      type: "globalSidebarCommandsChanged";
     }
   | GxserverSessionChatSnapshotEvent
   | GxserverSessionChatAppendedEvent

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { SidebarAgentButton } from "../shared/sidebar-agents";
 import { AgentConfigModal, type AgentConfigDraft } from "./agent-config-modal";
-import { AGENT_LOGO_COLORS, AGENT_LOGOS } from "./agent-logos";
+import { getBrandAgentLogoStyle } from "./agent-logos";
 import { useSidebarStore } from "./sidebar-store";
 import type { WebviewApi } from "./webview-api";
 
@@ -282,11 +282,7 @@ function ConfigureAgentIcon({ agent }: { agent: SidebarAgentButton }) {
       <span
         aria-hidden="true"
         className="configure-agents-list-agent-icon"
-        style={{
-          backgroundColor: AGENT_LOGO_COLORS[agent.icon],
-          maskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
-          WebkitMaskImage: `url("${AGENT_LOGOS[agent.icon]}")`,
-        }}
+        style={getBrandAgentLogoStyle(agent.icon)}
       />
     );
   }

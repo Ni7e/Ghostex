@@ -1,8 +1,10 @@
 export type BundledGhostexAgentSkillId =
   | "browserUse"
+  | "embeddedBrowserUse"
   | "computerUse"
   | "agentOrchestration"
   | "fable56Orchestration"
+  | "findPrevSession"
   | "generateTitle"
   | "moveCodexSession";
 
@@ -19,7 +21,7 @@ export type BundledGhostexAgentSkill = {
  * Bundled Ghostex skills must be visible as individual user-installed items in
  * first launch and Settings. Keep the product copy and install commands in one
  * shared catalog so onboarding, settings, and status checks describe the same
- * four bundled skills without hiding them behind CLI installation.
+ * bundled skills without hiding them behind CLI installation.
  *
  * CDXC:CodexSessionMove 2026-06-26-13:24:
  * Bundle the Codex session-move guidance as its own installable skill so first
@@ -27,12 +29,20 @@ export type BundledGhostexAgentSkill = {
  */
 export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] = [
   {
-    command: "ghostex browser install-skill",
+    command: "ghostex browser-use install-skill",
     description:
-      "Teaches agents to inspect Ghostex browser panes, read console logs, capture screenshots, and interact with pages through the Ghostex Browser Use MCP server.",
+      "Teaches agents to inspect and operate supported external browser pages through Cua Driver's typed browser tools.",
     id: "browserUse",
     name: "Ghostex Browser Use",
     skillName: "ghostex-browser-use",
+  },
+  {
+    command: "ghostex browser install-skill",
+    description:
+      "Teaches agents to inspect Ghostex embedded browser panes, read console logs, capture screenshots, and interact with pages through the embedded browser MCP server.",
+    id: "embeddedBrowserUse",
+    name: "Ghostex Embedded Browser Use",
+    skillName: "ghostex-embedded-browser-use",
   },
   {
     command: "ghostex computer-use install-skill",
@@ -57,6 +67,14 @@ export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] =
     id: "fable56Orchestration",
     name: "Ghostex Fable 5.6 Orchestration",
     skillName: "ghostex-fable-5.6-orchestration",
+  },
+  {
+    command: "ghostex find-prev-session install-skill",
+    description:
+      "Teaches agents to find, inspect, resume, or fork previous Claude Code, Codex, Pi, OpenCode, Cursor Agent, and Grok sessions with Ghostex's bundled Zehn search.",
+    id: "findPrevSession",
+    name: "Ghostex Find Previous Session",
+    skillName: "ghostex-find-prev-session",
   },
   {
     command: "ghostex generate-title install-skill",

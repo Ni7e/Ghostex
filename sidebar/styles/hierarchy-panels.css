@@ -4,7 +4,7 @@
  * levels were hard to tell apart (machine headers looked weaker than group
  * headers, project titles matched session rows, kind labels were near
  * invisible). Each container level now reads as its own elevation step:
- *   1. Sections (Quick/Projects/remote machines) = small uppercase labels;
+ *   1. Sections (Projects/remote machines) = small uppercase labels;
  *      disconnected machines add a trailing gray status dot.
  *   2. Project groups (.project-collection) = rounded panels with flat headers.
  *   3. Projects (.group[data-project-group]) = cards inside the panel.
@@ -21,7 +21,16 @@
 
 /* ------------------- level 1: section labels ------------------- */
 
+.sidebar-reference-layout[data-reference-sidebar="true"] {
+  --sidebar-active-session-border: color-mix(
+    in srgb,
+    var(--app-foreground) 48%,
+    transparent
+  );
+}
+
 .reference-sidebar-section-heading {
+  align-self: stretch;
   color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
   /*
    * Mixed-case labels (no forced uppercase per user request) sized to match the
@@ -34,8 +43,13 @@
   line-height: 18px;
 }
 
+.reference-sidebar-section-icon {
+  color: inherit;
+  flex: none;
+}
+
 /*
- * Remote machines use the exact same label treatment as Quick/Projects.
+ * Remote machines use the exact same label treatment as Projects.
  * Disconnected machines carry no separate status dot: the always-visible
  * Connect/busy/error control that sits right after the title already states
  * the connection state, so a second rest-state indicator only added noise and
@@ -47,13 +61,23 @@
 }
 
 /*
- * Section labels (Quick / Projects / machine names) and the Search row sit
- * 16px farther left so they align with the outdented panel column instead of
- * the old deeply-inset text column. The row surface and right-side action
- * cluster keep their positions; only the leading padding shrinks.
+ * Section labels (Projects / machine names) and the Search row align with the
+ * outdented panel column instead of the old deeply-inset text column. Keep the
+ * row itself inside the scroll viewport and compensate its leading padding so
+ * the label does not move; otherwise overflow clipping removes the left side of
+ * the collapsed-active outline. Match the 34px / 5px session-row geometry.
  */
 .reference-sidebar-section-row {
-  padding-left: calc(6px + var(--reference-sidebar-scroll-row-bleed-left));
+  border-radius: 5px;
+  height: 34px;
+  margin-left: 0;
+  min-height: 34px;
+  padding-left: 6px;
+}
+
+.reference-sidebar-section-row[data-collapsed="true"][data-contains-active-session="true"] {
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 2px var(--sidebar-active-session-border);
 }
 
 /*
@@ -90,7 +114,10 @@
   .reference-sidebar-nav-label,
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-search-slot
-  .reference-sidebar-inline-search-input {
+  .reference-sidebar-inline-search-input,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot
+  .reference-sidebar-search-icon {
   color: color-mix(in srgb, var(--app-foreground) 52%, transparent);
 }
 
@@ -99,7 +126,10 @@
   .reference-sidebar-nav-label,
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-sidebar-search-slot:hover
-  .reference-sidebar-inline-search-input {
+  .reference-sidebar-inline-search-input,
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .reference-sidebar-search-slot:hover
+  .reference-sidebar-search-icon {
   color: var(--app-foreground);
 }
 
@@ -158,63 +188,85 @@
   display: none;
 }
 
-/* ------------------- level 2: project group panels ------------------- */
+/* ------------------- level 2: project group rails ------------------- */
 
 /*
- * The user-picked group color (--project-collection-color, set inline per
- * collection) tints the panel border (~28%) and, barely, the panel fill (~5%)
- * so the whole container quietly carries the group identity without the old
- * loud colored header bar. The neutral fg component of the border (14%) is
- * strong enough that even a transparent group color leaves a visible outline
- * (the mix dilutes it to ~10% fg) instead of vanishing. Margins mirror the
- * top-level project cards (3px left / 5px right) so grouped and groupless
- * containers align exactly. Expanded groups use the darker background-derived
- * surface; their project cards use the lighter foreground-derived surface.
- * Collapsed groups use that same lighter surface so they read like collapsed
- * ungrouped projects.
+ * Project groups are marked by a colored rail instead of nested bordered
+ * panels. The rail is an independently positioned visual so its one-pixel
+ * separation from the header and its exact vertical endpoints do not affect
+ * normal content layout.
  */
 section.project-collection {
   --project-collection-expanded-surface: color-mix(
     in srgb,
-    var(--project-collection-color) 5%,
-    color-mix(in srgb, var(--app-background) 96%, #000000 4%)
+    var(--app-background) 96%,
+    #000000 4%
   );
-  background: var(--project-collection-expanded-surface);
-  border: 1px solid
-    color-mix(
-      in srgb,
-      var(--project-collection-color) 28%,
-      color-mix(in srgb, var(--app-foreground) 14%, transparent)
-    );
-  border-radius: 5px;
+  --project-group-rail-color: var(--project-collection-color);
+  --project-group-rail-width: 3px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   margin: 0 5px 10px 3px;
-  padding: 0;
+  padding: 0 0 5px calc(var(--project-group-rail-width) + 10px);
+  position: relative;
 }
 
-section.project-collection[data-collapsed="true"] {
-  background: color-mix(in srgb, var(--app-foreground) 4.5%, transparent);
+section.project-collection::after {
+  background: var(--project-group-rail-color);
+  bottom: 5px;
+  content: "";
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 1px;
+  width: var(--project-group-rail-width);
 }
 
-/*
- * The panel owns group identity now, so the header drops its colored pill
- * background and reads as a flat row that fills the panel's full width; its
- * top corners follow the panel radius (4px inner against the 1px border).
- * Drag-grab cursor, hover actions, and drop-target box-shadow are untouched.
- */
+.sidebar-reference-layout[data-project-group-style="quiet"] section.project-collection {
+  --project-group-rail-color: color-mix(
+    in srgb,
+    var(--project-collection-color) 55%,
+    color-mix(in srgb, var(--app-foreground) 42%, transparent) 45%
+  );
+  --project-group-rail-width: 1px;
+}
+
+.sidebar-reference-layout[data-project-group-style="branched"] section.project-collection {
+  --project-group-rail-color: color-mix(
+    in srgb,
+    var(--project-collection-color) 18%,
+    transparent
+  );
+  --project-group-rail-width: 2px;
+}
+
+.sidebar-reference-layout[data-project-group-style="branched"] section.project-collection::after {
+  top: 0;
+}
+
 section.project-collection > .project-collection-header {
   background: transparent;
   border: none;
-  border-radius: 4px 4px 0 0;
-  /*
-   * Same 30px surface and 8px right inset as a project card header so the two
-   * rows (and their trailing count/diff indicators) line up exactly.
-   */
+  border-radius: 0;
+  margin-left: -9px;
   min-height: 30px;
-  padding: 0 8px 0 2px;
+  padding: 0 8px 0 5px;
+  width: calc(100% + 9px);
 }
 
-section.project-collection[data-collapsed="true"] > .project-collection-header {
-  border-radius: 4px;
+.sidebar-reference-layout[data-project-group-style="header"]
+  section.project-collection
+  > .project-collection-header {
+  background: color-mix(in srgb, var(--project-collection-color) 12%, transparent);
+}
+
+.sidebar-reference-layout[data-project-group-style="branched"]
+  section.project-collection
+  > .project-collection-header {
+  background: color-mix(in srgb, var(--project-collection-color) 18%, transparent);
+  margin-left: -10px;
+  width: calc(100% + 10px);
 }
 
 /*
@@ -224,10 +276,6 @@ section.project-collection[data-collapsed="true"] > .project-collection-header {
  * Matches the fixed neutral #c8cdd5 project drop line so both reorder flows
  * read identically.
  */
-section.project-collection {
-  position: relative;
-}
-
 section.project-collection[data-collection-drop-position]::before {
   background: #c8cdd5;
   content: "";
@@ -250,39 +298,51 @@ section.project-collection[data-collection-drop-position="after"]::before {
 }
 
 section.project-collection > .project-collection-header:hover {
-  background: color-mix(in srgb, var(--app-foreground) 5%, transparent);
+  background: color-mix(in srgb, var(--project-collection-color) 22%, transparent);
+}
+
+section.project-collection[data-collapsed="true"][data-contains-active-session="true"]
+  > .project-collection-header {
+  box-shadow: inset 0 0 0 2px var(--sidebar-active-session-border);
 }
 
 /*
- * Group titles and project titles share one explicit type treatment so the
- * two header rows read as the same rank of control.
+ * Group titles and project titles share the session title's type size so the
+ * hierarchy does not rely on smaller text. A single weight step above session
+ * titles keeps the headers distinct without making them visually heavy.
  */
 .project-collection-title,
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .group[data-project-group="true"]
   .group-title {
   color: color-mix(in srgb, var(--app-foreground) 92%, #ffffff 8%);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 15.55px;
   letter-spacing: 0.01em;
   text-transform: none;
 }
 
+.project-collection-title {
+  font-weight: 800;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .group-title {
+  font-weight: 700;
+}
+
 /*
- * The panel border now owns group containment, so the per-group colored side
- * line is retired. Match the project cards' horizontal inset to their bottom
- * inset: 7px side padding plus the card's 3px margin equals the 3px bottom
- * padding plus its 7px trailing margin.
+ * Projects sit inside the rail without their previous card borders or fills.
  */
 .project-collection-projects {
-  padding: 2px 7px 3px;
+  padding: 5px 0 0 8px;
 }
 
 .project-collection-projects::before {
   display: none;
 }
 
-/* ------------------- level 3: project cards ------------------- */
+/* ------------------- level 3: projects ------------------- */
 
 /*
  * The reference layout flattens .group to a full-bleed borderless block
@@ -302,30 +362,26 @@ section.project-collection > .project-collection-header:hover {
    */
   --reference-sidebar-scroll-row-bleed-left: 0px;
   --reference-sidebar-scroll-row-bleed-right: 0px;
-  background: color-mix(in srgb, var(--app-foreground) 4.5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-foreground) 13%, transparent);
-  border-radius: 5px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   margin-bottom: 5px;
-  margin-left: 3px;
-  margin-right: 3px;
-  /*
-   * No card padding: the header must fill the card edge-to-edge so its hover
-   * surface reaches the border (it used to float with a 3px gap on the left,
-   * right, and bottom). The session area re-adds the inner inset below.
-   */
+  margin-left: 0;
+  margin-right: 0;
   padding: 0;
-  width: calc(100% - 6px);
+  width: 100%;
 }
 
 /*
- * Top-level (groupless) cards keep 2px more air on the right against the
- * sidebar edge; cards nested inside a collection panel stay symmetric.
+ * Top-level (groupless) project headers start farther inward while keeping
+ * their existing right edge; cards nested inside a collection stay symmetric.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .reference-project-group-list
   > .group[data-project-group="true"] {
+  margin-left: 18px;
   margin-right: 5px;
-  width: calc(100% - 8px);
+  width: calc(100% - 23px);
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -351,24 +407,15 @@ section.project-collection > .project-collection-header:hover {
 }
 
 /*
- * Compact project headers: the old reference header stacked 5.5px paddings on
- * a 32px title row (43px total). Keep the hover surface aligned with the
- * card's rounded corners and remove the legacy leading indent so the title
- * starts at the card edge like the session icons below it.
+ * Compact project headers remain normal-flow rows with no resting surface.
  */
 .sidebar-reference-layout[data-reference-sidebar="true"]
   .group[data-project-group="true"]
   .group-head {
-  border-radius: 4px 4px 0 0;
+  border-radius: 5px;
   margin-left: 0;
   margin-right: 0;
   padding: 2px 8px;
-}
-
-.sidebar-reference-layout[data-reference-sidebar="true"]
-  .group[data-project-group="true"][data-collapsed="true"]
-  .group-head {
-  border-radius: 4px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar="true"]
@@ -389,12 +436,53 @@ section.project-collection > .project-collection-header:hover {
   margin-left: 0;
 }
 
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-project-group="true"]
+  .sidebar-v2-project-icon
+  + .group-title-handle {
+  margin-left: 10px;
+}
+
+
+/* Branched mode adds a short visual link from the group rail to each project. */
+.sidebar-reference-layout[data-project-group-style="branched"]
+  .project-collection-projects
+  > .group[data-project-group="true"]
+  .group-title-wrap::before {
+  background: var(--project-group-rail-color);
+  content: "";
+  height: 2px;
+  left: -43px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(50% - 1px);
+  width: 39px;
+}
+
+/* Top-level projects keep the same branch marker without inventing a parent rail. */
+.sidebar-reference-layout[data-project-group-style="branched"]
+  .reference-project-group-list
+  > .group[data-project-group="true"]
+  .group-title-wrap::before {
+  background: color-mix(
+    in srgb,
+    var(--workspace-project-theme-color, var(--app-foreground)) 18%,
+    transparent
+  );
+  content: "";
+  height: 2px;
+  left: -21px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(50% - 1px);
+  width: 13px;
+}
 
 /* Non-reference contexts (Storybook grid stories, legacy layouts). */
 .group[data-project-group="true"] {
-  background: color-mix(in srgb, var(--app-foreground) 4.5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--app-foreground) 13%, transparent);
-  border-radius: 5px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   padding-bottom: calc(4px * var(--sidebar-density-scale));
   padding-top: calc(2px * var(--sidebar-density-scale));
 }
@@ -445,6 +533,11 @@ section.project-collection > .project-collection-header:hover {
     var(--session-expanded-group-surface) 70%,
     var(--app-foreground) 30%
   );
+  --session-hover-surface: color-mix(
+    in srgb,
+    var(--session-expanded-group-surface) 78%,
+    var(--app-foreground) 22%
+  );
   --session-focused-surface: color-mix(
     in srgb,
     var(--session-light-surface) 90%,
@@ -465,6 +558,27 @@ section.project-collection > .project-collection-header:hover {
 
 .sidebar-reference-layout[data-reference-sidebar="true"] .session[data-focused="true"] {
   --session-surface: var(--session-focused-surface);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session:not([data-focused="true"]):is(:hover, :focus-visible) {
+  --session-surface: var(--session-hover-surface);
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .session[data-focused="true"] {
+  /*
+   * The focused row owns its active outline directly. Do not make this depend
+   * on ancestor propagation, and do not let hover/focus-visible shadows replace
+   * it while the session remains active.
+   */
+  box-shadow: inset 0 0 0 2px var(--sidebar-active-session-border) !important;
+}
+
+.sidebar-reference-layout[data-reference-sidebar="true"]
+  .group[data-collapsed="true"][data-contains-active-session="true"]
+  > .group-head::before {
+  box-shadow: inset 0 0 0 2px var(--sidebar-active-session-border) !important;
 }
 
 /*

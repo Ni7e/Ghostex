@@ -9,6 +9,7 @@ import type {
   SidebarCommandButton,
   SidebarCommandLink,
   SidebarCommandRunMode,
+  SidebarCommandScope,
 } from "./sidebar-commands";
 import type {
   SidebarGitAction,
@@ -21,6 +22,7 @@ import type {
   ghostexSettings,
   ghostexSettingsPatch,
   ghostexSettingsUpdateSource,
+  DiagnosticLoggingScenarioId,
   KeepAwakeDurationMinutes,
 } from "./ghostex-settings";
 import type { ghostexHotkeyActionId } from "./ghostex-hotkeys";
@@ -172,6 +174,8 @@ export type SidebarGhostexCliStatusMessage = {
    */
   browserSkillInstalled: boolean;
   browserSkillPath?: string;
+  embeddedBrowserSkillInstalled: boolean;
+  embeddedBrowserSkillPath?: string;
   computerUseSkillInstalled: boolean;
   computerUseSkillPath?: string;
   agentOrchestrationSkillInstalled: boolean;
@@ -184,6 +188,8 @@ export type SidebarGhostexCliStatusMessage = {
    */
   fable56OrchestrationSkillInstalled?: boolean;
   fable56OrchestrationSkillPath?: string;
+  findPrevSessionSkillInstalled?: boolean;
+  findPrevSessionSkillPath?: string;
   generateTitleSkillInstalled: boolean;
   generateTitleSkillPath?: string;
   moveCodexSessionSkillInstalled: boolean;
@@ -1142,7 +1148,7 @@ export type SidebarGhostexFolderStat = {
 
 /**
  * CDXC:SettingsStorage 2026-05-09-15:25
- * Settings exposes ~/.ghostex disk usage only after the user scrolls to the
+ * Settings exposes Ghostex data-directory usage only after the user scrolls to the
  * bottom of the modal. The native sidebar sends per-folder byte counts back as
  * a sidebar message so the full-window modal can render stats without owning
  * filesystem access or accepting client-provided paths.
@@ -1193,6 +1199,19 @@ export type SidebarStashedPromptsResultMessage = {
   prompts: GxserverStashedPrompt[];
   requestId: string;
   type: "stashedPromptsResult";
+};
+
+/**
+ * Result of creating a prompt directly from the saved-prompts modal. The host
+ * returns the canonical gxserver row so the modal never has to invent ids,
+ * timestamps, or project presentation metadata optimistically.
+ */
+export type SidebarSaveStashedPromptResultMessage = {
+  error?: string;
+  ok: boolean;
+  prompt?: GxserverStashedPrompt;
+  requestId: string;
+  type: "saveStashedPromptResult";
 };
 
 /*
@@ -1344,6 +1363,7 @@ export type ExtensionToSidebarMessage =
   | SidebarShowT3ThreadIdModalMessage
   | SidebarPreviousSessionsResultMessage
   | SidebarStashedPromptsResultMessage
+  | SidebarSaveStashedPromptResultMessage
   | SidebarWorktreeSessionResultMessage
   | SidebarSessionWorktreeRemovalResultMessage
   | SidebarRecentProjectsResultMessage
@@ -1427,7 +1447,7 @@ export type SidebarToExtensionMessage =
   | {
       /**
        * CDXC:SettingsStorage 2026-05-09-15:25
-       * The settings modal can request ~/.ghostex folder stats lazily, but native
+       * The settings modal can request Ghostex folder stats lazily, but native
        * resolves the folder path itself and never trusts a path from React.
        */
       type: "requestGhostexFolderStats" | "openGhostexFolder";
@@ -1467,9 +1487,11 @@ export type SidebarToExtensionMessage =
       type:
         | "installGhostexCli"
         | "installBrowserControl"
+        | "installBrowserUseSkill"
         | "installComputerUseSkill"
         | "installAgentOrchestrationSkill"
         | "installFable56OrchestrationSkill"
+        | "installFindPrevSessionSkill"
         | "installGenerateTitleSkill"
         | "installMoveCodexSessionSkill"
         | "uninstallBundledAgentSkills"
@@ -2456,6 +2478,14 @@ export type SidebarToExtensionMessage =
       type: "deleteStashedPrompt";
     }
   | {
+      content: string;
+      promptId?: string;
+      projectId?: string;
+      requestId: string;
+      sessionId?: string;
+      type: "saveStashedPrompt";
+    }
+  | {
       /**
        * CDXC:StashedPrompts 2026-07-29:
        * Selecting a stashed prompt inserts its text into the named terminal
@@ -2477,6 +2507,7 @@ export type SidebarToExtensionMessage =
       type: "sidebarDebugLog";
       event: string;
       details?: unknown;
+      scenarioId: DiagnosticLoggingScenarioId;
     }
   | {
       type: "createGroupFromSession";
@@ -2543,11 +2574,20 @@ export type SidebarToExtensionMessage =
       project, activates that project through the existing focus flow, and only
       then dispatches the trusted launch — the message never gains launch
       metadata or project paths.
+
+      CDXC:GlobalActions 2026-08-07:
+      Project rows also render Global Actions flagged showOnProjectRow, so the
+      selector must say which list its id belongs to: the two scopes are
+      separate id spaces and an id alone cannot pick one. Scope stays optional
+      and absent means project, so senders that only ever run Project Actions
+      are unchanged. A global selector may still carry the row's group id —
+      that names the project the Action runs in, not the list it came from.
       */
       type: "runSidebarCommand";
       commandId: string;
       groupId?: string;
       runMode?: SidebarCommandRunMode;
+      scope?: SidebarCommandScope;
     }
   | {
       type: "endSidebarCommandRun";
@@ -2686,6 +2726,14 @@ export type SidebarToExtensionMessage =
       links?: SidebarCommandLink[];
       name: string;
       playCompletionSound: boolean;
+      /*
+       * CDXC:GlobalActions 2026-08-07:
+       * Settings offers the project-row toggle on Global Actions too, and
+       * gxserver stores it for both lists. The field was missing here, so the
+       * host had nothing to forward and every global save wrote the flag back
+       * as false — the toggle looked saved and did nothing.
+       */
+      showOnProjectRow: boolean;
       command?: string;
       url?: string;
     }

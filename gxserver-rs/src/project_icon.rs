@@ -17,6 +17,10 @@ manually attached in Ghostex. This is the server half of that: gxserver discover
 a representative icon file inside a project's checkout and publishes it as a data
 URL on `GxserverPresentationProject.discoveredIconDataUrl`.
 
+Both sidebar versions render this value. Icon discovery therefore follows the
+published-project lifecycle itself and must never be gated by which sidebar
+layout happens to be selected.
+
 The discovery logic is a faithful port of t3code's
 `apps/server/src/project/ProjectFaviconResolver.ts` (the reference implementation
 named in `plans/009-sidebar-v2-inbox.md`), including its candidate list and its
@@ -329,18 +333,7 @@ pub fn run_project_icon_refresh_pass(
     paths: &[String],
     prober: &dyn ProjectIconProber,
     monotonic_now_ms: i64,
-    sidebar_v2_selected: bool,
 ) -> Vec<String> {
-    /*
-    CDXC:SidebarV2DataGate 2026-07-29:
-    Discovered icons are read by Sidebar V2 alone (V1 renders the user's own
-    project icon), so a V1 machine must not spend the scan. Same gate as the two
-    git passes, checked BEFORE `plan_refresh` for the same three reasons: no
-    filesystem work, no delta, no eviction of what an earlier V2 stretch cached.
-    */
-    if !sidebar_v2_selected {
-        return Vec::new();
-    }
     let targets = {
         let Ok(mut cache) = cache.lock() else {
             return Vec::new();
@@ -381,15 +374,12 @@ fn monotonic_now_ms() -> i64 {
 
 /// Runs one pass against the process-wide cache with the real filesystem prober.
 /// Blocking: callers must be on a blocking worker, never on a request path.
-/// `sidebar_v2_selected` must come from `session_lifecycle::
-/// read_sidebar_v2_selected`, resolved once per pass.
-pub fn refresh_project_icon_cache(paths: &[String], sidebar_v2_selected: bool) -> Vec<String> {
+pub fn refresh_project_icon_cache(paths: &[String]) -> Vec<String> {
     run_project_icon_refresh_pass(
         project_icon_cache(),
         paths,
         &SystemProjectIconProber,
         monotonic_now_ms(),
-        sidebar_v2_selected,
     )
 }
 
@@ -427,15 +417,7 @@ brand-new registration would otherwise show a folder glyph until the next
 background pass. Probes ONLY when the cache has no entry for the path at all, so
 every later delta for the same project is a pure cache read.
 */
-pub fn ensure_project_icon_probed(project: &Value, sidebar_v2_selected: bool) {
-    /*
-    CDXC:SidebarV2DataGate 2026-07-29:
-    Gated at the PROBE, exactly like `ensure_project_git_remote_probed`: the warm
-    stays wired on every daemon, and on a V1 machine it simply discovers nothing.
-    */
-    if !sidebar_v2_selected {
-        return;
-    }
+pub fn ensure_project_icon_probed(project: &Value) {
     let Some(path) = project_icon_key(project) else {
         return;
     };
@@ -462,11 +444,11 @@ path set and therefore evicted, so probing one would only feed a cache entry the
 next pass throws away — while a project that RETURNS to presentation must carry
 its icon in the delta that restores it rather than a minute later.
 */
-pub fn ensure_published_project_icon_probed(project: &Value, sidebar_v2_selected: bool) {
+pub fn ensure_published_project_icon_probed(project: &Value) {
     if !crate::presentation::should_include_presentation_project(project) {
         return;
     }
-    ensure_project_icon_probed(project, sidebar_v2_selected);
+    ensure_project_icon_probed(project);
 }
 
 #[cfg(test)]
@@ -635,9 +617,7 @@ fn resolve_within_root(canonical_root: &Path, relative_path: &str) -> Option<Pat
 
     let absolute = canonical_root.join(&safe);
     let canonical = std::fs::canonicalize(&absolute).ok()?;
-    canonical
-        .starts_with(canonical_root)
-        .then_some(canonical)
+    canonical.starts_with(canonical_root).then_some(canonical)
 }
 
 fn normalize_relative_display_path(relative_path: &str) -> String {
@@ -724,9 +704,9 @@ fn extract_attribute_value(chunk: &str, name: &str, separator: char) -> Option<S
             continue;
         }
         let rest = &chunk[cursor..];
-        let mut characters = rest.char_indices().skip_while(|(_, character)| {
-            character.is_whitespace()
-        });
+        let mut characters = rest
+            .char_indices()
+            .skip_while(|(_, character)| character.is_whitespace());
         let Some((separator_index, found)) = characters.next() else {
             continue;
         };
@@ -756,7 +736,8 @@ fn extract_attribute_value(chunk: &str, name: &str, separator: char) -> Option<S
 /// reference (absolute URLs, data URLs, protocol-relative URLs).
 fn clean_icon_href(href: &str) -> Option<String> {
     let without_query = href.split(['?', '#']).next().unwrap_or_default().trim();
-    if without_query.is_empty() || without_query.starts_with("//") || without_query.contains("://") {
+    if without_query.is_empty() || without_query.starts_with("//") || without_query.contains("://")
+    {
         return None;
     }
     if without_query.starts_with("data:") {
@@ -864,7 +845,10 @@ mod tests {
         assert_eq!(icon.source_relative_path, "ghostex-web/public/favicon.png");
         assert_eq!(
             icon.data_url,
-            format!("data:image/png;base64,{}", BASE64_STANDARD.encode(PNG_BYTES)),
+            format!(
+                "data:image/png;base64,{}",
+                BASE64_STANDARD.encode(PNG_BYTES)
+            ),
             "the published value is the file's bytes, typed by extension"
         );
     }
@@ -877,7 +861,9 @@ mod tests {
         write(root, "t3.json", br#"{"iconPath":"assets/missing.png"}"#);
 
         assert_eq!(
-            discovered(root).expect("fallback icon").source_relative_path,
+            discovered(root)
+                .expect("fallback icon")
+                .source_relative_path,
             "public/favicon.png",
             "a stale declaration must not blind the resolver to a real favicon"
         );
@@ -885,7 +871,9 @@ mod tests {
         // Same for a `t3.json` that is not valid JSON at all.
         write(root, "t3.json", b"{ not json");
         assert_eq!(
-            discovered(root).expect("fallback icon").source_relative_path,
+            discovered(root)
+                .expect("fallback icon")
+                .source_relative_path,
             "public/favicon.png"
         );
     }
@@ -905,7 +893,9 @@ mod tests {
         }
         for candidate in FAVICON_CANDIDATES {
             assert_eq!(
-                discovered(root).expect("candidate icon").source_relative_path,
+                discovered(root)
+                    .expect("candidate icon")
+                    .source_relative_path,
                 *candidate,
                 "expected {candidate} to be the next winner"
             );
@@ -929,14 +919,18 @@ mod tests {
         write(root, "public/brand/logo.svg", b"<svg/>");
         write(root, "brand/logo.svg", b"<svg/>");
         assert_eq!(
-            discovered(root).expect("declared icon").source_relative_path,
+            discovered(root)
+                .expect("declared icon")
+                .source_relative_path,
             "public/brand/logo.svg",
             "the href is a served url, so `public/` is tried first"
         );
 
         std::fs::remove_file(root.join("public/brand/logo.svg")).expect("remove public copy");
         assert_eq!(
-            discovered(root).expect("declared icon").source_relative_path,
+            discovered(root)
+                .expect("declared icon")
+                .source_relative_path,
             "brand/logo.svg"
         );
     }
@@ -958,7 +952,9 @@ mod tests {
         );
         write(root, "icon.png", PNG_BYTES);
         assert_eq!(
-            discovered(root).expect("declared icon").source_relative_path,
+            discovered(root)
+                .expect("declared icon")
+                .source_relative_path,
             "icon.png"
         );
     }
@@ -1196,57 +1192,11 @@ mod tests {
             "/repos/ghostex".to_string(),
             " /repos/ghostex ".to_string(),
         ];
-        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0, true);
+        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0);
 
         assert_eq!(prober.probes.load(Ordering::SeqCst), 1);
         assert_eq!(changed, vec!["/repos/ghostex".to_string()]);
         assert_eq!(icon_of(&cache, "/repos/ghostex"), Some(icon(1)));
-    }
-
-    /*
-    CDXC:SidebarV2DataGate 2026-07-29:
-    Discovered icons render in Sidebar V2 only, so a V1 machine must not read a
-    single candidate file, publish nothing, and evict nothing — and must resume
-    on the first pass after the user selects V2, without a daemon restart.
-    */
-    #[test]
-    fn sidebar_v1_probes_nothing_and_flipping_to_v2_warms_in_the_next_pass() {
-        let cache = cache();
-        let prober = FakeProber::default();
-        prober.set("/repos/ghostex", Some(icon(1)));
-        cache
-            .lock()
-            .expect("cache")
-            .set("/repos/gone", Some(icon(9)), 0);
-        let paths = vec!["/repos/ghostex".to_string()];
-
-        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0, false);
-        assert!(
-            changed.is_empty(),
-            "a gated pass publishes no delta: {changed:?}"
-        );
-        assert_eq!(
-            prober.probes.load(Ordering::SeqCst),
-            0,
-            "a machine on Sidebar V1 reads no candidate files"
-        );
-        assert!(icon_of(&cache, "/repos/ghostex").is_none());
-        assert!(
-            icon_of(&cache, "/repos/gone").is_some(),
-            "a gated pass evicts nothing an earlier V2 stretch cached"
-        );
-
-        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0, true);
-        assert_eq!(
-            changed,
-            vec!["/repos/ghostex".to_string()],
-            "the first pass after the flip warms the cache and publishes"
-        );
-        assert_eq!(prober.probes.load(Ordering::SeqCst), 1);
-        assert!(
-            icon_of(&cache, "/repos/gone").is_none(),
-            "and normal eviction resumes with it"
-        );
     }
 
     #[test]
@@ -1257,28 +1207,28 @@ mod tests {
         prober.set("/home/notes", None);
         let paths = vec!["/repos/ghostex".to_string(), "/home/notes".to_string()];
 
-        run_project_icon_refresh_pass(&cache, &paths, &prober, 0, true);
+        run_project_icon_refresh_pass(&cache, &paths, &prober, 0);
         assert_eq!(prober.probes.load(Ordering::SeqCst), 2);
         assert!(
             icon_of(&cache, "/home/notes").is_none(),
             "a project with no icon caches as a negative entry"
         );
 
-        run_project_icon_refresh_pass(&cache, &paths, &prober, PROJECT_ICON_TTL_MS - 1, true);
+        run_project_icon_refresh_pass(&cache, &paths, &prober, PROJECT_ICON_TTL_MS - 1);
         assert_eq!(
             prober.probes.load(Ordering::SeqCst),
             2,
             "nothing is re-probed inside the TTL"
         );
 
-        run_project_icon_refresh_pass(&cache, &paths, &prober, PROJECT_ICON_TTL_MS, true);
+        run_project_icon_refresh_pass(&cache, &paths, &prober, PROJECT_ICON_TTL_MS);
         assert_eq!(
             prober.probes.load(Ordering::SeqCst),
             3,
             "only the project WITH an icon is due at the ten-minute mark"
         );
 
-        run_project_icon_refresh_pass(&cache, &paths, &prober, MISSING_PROJECT_ICON_TTL_MS, true);
+        run_project_icon_refresh_pass(&cache, &paths, &prober, MISSING_PROJECT_ICON_TTL_MS);
         assert_eq!(
             prober.probes.load(Ordering::SeqCst),
             5,
@@ -1300,11 +1250,14 @@ mod tests {
         prober.set("/repos/quiet", None);
         let paths = vec!["/repos/ghostex".to_string(), "/repos/quiet".to_string()];
 
-        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0, true);
-        assert_eq!(changed.len(), 1, "only the project that HAS an icon changed");
+        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0);
+        assert_eq!(
+            changed.len(),
+            1,
+            "only the project that HAS an icon changed"
+        );
 
-        let changed =
-            run_project_icon_refresh_pass(&cache, &paths, &prober, PROJECT_ICON_TTL_MS, true);
+        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, PROJECT_ICON_TTL_MS);
         assert!(
             changed.is_empty(),
             "an unchanged icon publishes no delta: {changed:?}"
@@ -1319,26 +1272,16 @@ mod tests {
                 ..icon(1)
             }),
         );
-        let changed = run_project_icon_refresh_pass(
-            &cache,
-            &paths,
-            &prober,
-            MISSING_PROJECT_ICON_TTL_MS,
-            true,
-        );
+        let changed =
+            run_project_icon_refresh_pass(&cache, &paths, &prober, MISSING_PROJECT_ICON_TTL_MS);
         assert!(
             changed.is_empty(),
             "the published value is the bytes, not where they were found: {changed:?}"
         );
 
         prober.set("/repos/ghostex", Some(icon(2)));
-        let changed = run_project_icon_refresh_pass(
-            &cache,
-            &paths,
-            &prober,
-            MISSING_PROJECT_ICON_TTL_MS * 2,
-            true,
-        );
+        let changed =
+            run_project_icon_refresh_pass(&cache, &paths, &prober, MISSING_PROJECT_ICON_TTL_MS * 2);
         assert_eq!(
             changed,
             vec!["/repos/ghostex".to_string()],
@@ -1346,13 +1289,8 @@ mod tests {
         );
 
         prober.set("/repos/ghostex", None);
-        let changed = run_project_icon_refresh_pass(
-            &cache,
-            &paths,
-            &prober,
-            MISSING_PROJECT_ICON_TTL_MS * 3,
-            true,
-        );
+        let changed =
+            run_project_icon_refresh_pass(&cache, &paths, &prober, MISSING_PROJECT_ICON_TTL_MS * 3);
         assert_eq!(
             changed,
             vec!["/repos/ghostex".to_string()],
@@ -1371,7 +1309,7 @@ mod tests {
             paths.push(path);
         }
 
-        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0, true);
+        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 0);
         assert_eq!(changed.len(), MAX_PROJECT_ICON_PROBES_PER_PASS);
         assert_eq!(
             prober.probes.load(Ordering::SeqCst),
@@ -1379,11 +1317,11 @@ mod tests {
             "one pass never spends more than its budget"
         );
 
-        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 1, true);
+        let changed = run_project_icon_refresh_pass(&cache, &paths, &prober, 1);
         assert_eq!(changed.len(), 4, "the never-probed remainder goes next");
 
         let survivor = paths[0].clone();
-        run_project_icon_refresh_pass(&cache, std::slice::from_ref(&survivor), &prober, 2, true);
+        run_project_icon_refresh_pass(&cache, std::slice::from_ref(&survivor), &prober, 2);
         assert_eq!(cache.lock().expect("cache").len(), 1);
         assert!(icon_of(&cache, &survivor).is_some());
         assert!(icon_of(&cache, &paths[1]).is_none());
@@ -1429,7 +1367,7 @@ mod tests {
             .to_string();
         let cache_key = project_icon_key(&project).expect("cache key");
 
-        ensure_published_project_icon_probed(&project, true);
+        ensure_published_project_icon_probed(&project);
         let delta = crate::presentation::build_presentation_project_delta(
             &repository,
             &project_id,
@@ -1449,13 +1387,8 @@ mod tests {
         forget_cached_project_icon_for_test(&cache_key);
     }
 
-    /*
-    CDXC:SidebarV2DataGate 2026-07-29:
-    The icon warm answers to the same version gate as the pass, gated at the
-    PROBE so a V1 daemon's projectAdded is an ordinary delta that reads no files.
-    */
     #[test]
-    fn the_registration_warm_probes_nothing_while_sidebar_v1_is_selected() {
+    fn the_registration_warm_probes_visible_projects_without_a_sidebar_version_gate() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path().join("repo");
         std::fs::create_dir_all(&root).expect("repo dir");
@@ -1468,16 +1401,10 @@ mod tests {
         let cache_key = project_icon_key(&project).expect("cache key");
         forget_cached_project_icon_for_test(&cache_key);
 
-        ensure_published_project_icon_probed(&project, false);
-        assert!(
-            cached_project_icon(&cache_key).is_none(),
-            "a V1 daemon's projectAdded must not scan the checkout"
-        );
-
-        ensure_published_project_icon_probed(&project, true);
+        ensure_published_project_icon_probed(&project);
         assert!(
             cached_project_icon(&cache_key).is_some(),
-            "the same hook on a V2 daemon warms the cache as before"
+            "every visible project warm must discover the icon used by both sidebar versions"
         );
         forget_cached_project_icon_for_test(&cache_key);
     }
@@ -1506,14 +1433,14 @@ mod tests {
             .expect("project id")
             .to_string();
         let cache_key = project_icon_key(&project).expect("cache key");
-        ensure_published_project_icon_probed(&project, true);
+        ensure_published_project_icon_probed(&project);
         assert!(cached_project_icon(&cache_key).is_some());
 
         let parked = repository
             .close_project_to_recent(&project_id)
             .expect("parked");
         forget_cached_project_icon_for_test(&cache_key);
-        ensure_published_project_icon_probed(&parked, true);
+        ensure_published_project_icon_probed(&parked);
         assert!(
             cached_project_icon(&cache_key).is_none(),
             "a parked project must never be probed: the next pass would evict it again"
@@ -1522,7 +1449,7 @@ mod tests {
         let restored = repository
             .restore_recent_project(&project_id)
             .expect("restored");
-        ensure_published_project_icon_probed(&restored, true);
+        ensure_published_project_icon_probed(&restored);
         let delta = crate::presentation::build_presentation_project_delta(
             &repository,
             &project_id,

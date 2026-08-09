@@ -27,8 +27,8 @@ params (projectId/sessionId/agentId), and the gxserver bootstrap
 window.ghostexGpui.gxserverBootstrap through the chat bootstrap process
 message. The page owns its own /api/events websocket with
 subscribeSessionChat and filters frames client-side, so the sidebar runtime
-never proxies chat data. Local sessions only in v1: remote machines have no
-direct HTTP path from this page.
+never proxies chat data. Remote sessions use the same transport through the
+localhost port already owned by that machine's SSH tunnel.
 */
 
 interface ChatGxserverBootstrap {
@@ -145,6 +145,7 @@ function createGpuiSessionChatTransport(
   bootstrap: { authToken: string; baseUrl: string },
   projectId: string,
   sessionId: string,
+  remote: boolean,
 ): SessionChatTransport {
   return {
     async answerPrompt(params) {
@@ -209,11 +210,16 @@ function createGpuiSessionChatTransport(
         { path: params.path },
       );
     },
-    // Local sessions only in v1 (see the surface note above), so paths from
-    // the native macOS picker are already valid on the session's machine.
-    pickAttachmentPaths() {
-      return requestNativeAttachmentPaths();
-    },
+    // Native picker paths are valid only for sessions on this Mac. Remote
+    // chats omit this hook so the composer uses byte upload through the
+    // remote gxserver tunnel and receives a path on the session's machine.
+    ...(remote
+      ? {}
+      : {
+          pickAttachmentPaths() {
+            return requestNativeAttachmentPaths();
+          },
+        }),
     subscribe({ currentLimit, onEvent }) {
       /*
       Own /api/events socket per subscription: send subscribeSessionChat on
@@ -455,13 +461,19 @@ const searchParams = new URLSearchParams(window.location.search);
 const projectId = searchParams.get("projectId")?.trim() ?? "";
 const sessionId = searchParams.get("sessionId")?.trim() ?? "";
 const agentId = searchParams.get("agentId")?.trim() ?? "";
+const remote = searchParams.get("remote") === "true";
 
 if (!projectId || !sessionId) {
   renderFailure(root, "This chat surface was opened without a session identity.");
 } else {
   waitForBootstrap()
     .then((bootstrap) => {
-      const transport = createGpuiSessionChatTransport(bootstrap, projectId, sessionId);
+      const transport = createGpuiSessionChatTransport(
+        bootstrap,
+        projectId,
+        sessionId,
+        remote,
+      );
       const agentLabel = agentId
         ? resolveSessionChatTranscriptAgent(agentId) ?? agentId
         : null;
@@ -483,7 +495,7 @@ if (!projectId || !sessionId) {
     .catch(() => {
       renderFailure(
         root,
-        "The local Ghostex server is not reachable from this window. Toggle back to the terminal and try again.",
+        "The session's Ghostex server is not reachable from this window. Toggle back to the terminal and try again.",
       );
     });
 }

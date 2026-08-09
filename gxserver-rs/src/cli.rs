@@ -10,7 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{Map, Value};
 
 use crate::{
-    agent_hooks::run_notify_hook,
+    agent_hooks::{repair_installed_agent_hook_paths, run_notify_hook},
     agent_skills::{install_agent_skills, read_agent_skill_status},
     auth::read_gxserver_auth_token,
     config::read_selected_local_api_port,
@@ -38,10 +38,26 @@ CDXC:GxserverCli 2026-06-22-04:47:
 `gxserver status` reports any reachable same-product, same-protocol daemon as running; build identity is a start-time replacement decision. `gxserver start` must match TypeScript by requesting control-plane shutdown for a running build-identity mismatch instead of returning a Rust-only portConflict status.
 */
 pub async fn run(args: Vec<String>) -> Result<()> {
+    let command = args.first().map(String::as_str);
+    /*
+    `setup` is the recovery boundary for an uploaded managed package. It must
+    not depend on the existing storage layout being migratable: setup replaces
+    stale package/tool links, after which the newly activated runtime can run
+    the normal migration path. This also lets setup repair legacy links whose
+    targets were moved into XDG storage by an interrupted older migration.
+    */
+    if command == Some("setup") {
+        crate::setup::run_setup(args.iter().skip(1).cloned().collect())?;
+        return Ok(());
+    }
     migrate_legacy_storage().context("migrate legacy Ghostex storage")?;
+    if matches!(command, None | Some("--foreground")) {
+        let paths = get_gxserver_paths(None);
+        repair_installed_agent_hook_paths(&paths)
+            .context("repair installed Ghostex agent hook paths")?;
+    }
     let version = GXSERVER_VERSION.to_string();
     let build_identity = read_current_build_identity(&version)?;
-    let command = args.first().map(String::as_str);
     match command {
         None | Some("--foreground") => {
             let result = run_gxserver_foreground(GxserverForegroundOptions {
@@ -83,9 +99,6 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         }
         Some("agent-hook-notify") => {
             run_notify_hook(args.iter().skip(1).cloned().collect())?;
-        }
-        Some("setup") => {
-            crate::setup::run_setup(args.iter().skip(1).cloned().collect())?;
         }
         Some("resume-lookup") => {
             crate::resume_lookup::run_resume_lookup(args.iter().skip(1).cloned().collect())?;

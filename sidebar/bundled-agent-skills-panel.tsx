@@ -3,6 +3,7 @@ import {
   IconDeviceDesktop,
   IconDownload,
   IconGitPullRequest,
+  IconHistory,
   IconPencil,
   IconRefresh,
   IconSitemap,
@@ -16,6 +17,7 @@ import {
   FieldTitle,
 } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
+import { AppTooltip } from "./app-tooltip";
 import { DisabledSettingControlTooltip } from "./disabled-setting-control-tooltip";
 import {
   BUNDLED_GHOSTEX_AGENT_SKILLS,
@@ -49,7 +51,9 @@ const BUNDLED_AGENT_SKILL_ICONS: Record<
   agentOrchestration: IconGitPullRequest,
   browserUse: IconBrowser,
   computerUse: IconDeviceDesktop,
+  embeddedBrowserUse: IconBrowser,
   fable56Orchestration: IconSitemap,
+  findPrevSession: IconHistory,
   generateTitle: IconPencil,
   moveCodexSession: IconGitPullRequest,
 };
@@ -195,17 +199,18 @@ function BundledAgentSkillRow({
               disabled={uninstallDisabled}
               reason={uninstallDisabledReason}
             >
-              <Button
-                aria-label={`Uninstall ${skill.name}`}
-                disabled={uninstallDisabled}
-                onClick={onUninstall}
-                size="icon"
-                title={`Uninstall ${skill.name}`}
-                type="button"
-                variant="destructive"
-              >
-                <IconTrash aria-hidden="true" />
-              </Button>
+              <AppTooltip content={`Uninstall ${skill.name}`}>
+                <Button
+                  aria-label={`Uninstall ${skill.name}`}
+                  disabled={uninstallDisabled}
+                  onClick={onUninstall}
+                  size="icon"
+                  type="button"
+                  variant="destructive"
+                >
+                  <IconTrash aria-hidden="true" />
+                </Button>
+              </AppTooltip>
             </DisabledSettingControlTooltip>
           ) : null}
         </div>
@@ -221,12 +226,16 @@ function isBundledGhostexAgentSkillInstalled(
   switch (skillId) {
     case "browserUse":
       return status?.browserSkillInstalled === true;
+    case "embeddedBrowserUse":
+      return status?.embeddedBrowserSkillInstalled === true;
     case "computerUse":
       return status?.computerUseSkillInstalled === true;
     case "agentOrchestration":
       return status?.agentOrchestrationSkillInstalled === true;
     case "fable56Orchestration":
       return status?.fable56OrchestrationSkillInstalled === true;
+    case "findPrevSession":
+      return status?.findPrevSessionSkillInstalled === true;
     case "generateTitle":
       return status?.generateTitleSkillInstalled === true;
     case "moveCodexSession":

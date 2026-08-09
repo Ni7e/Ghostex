@@ -396,7 +396,6 @@ export function validateStateIdentity(state, { sourceSha, version }) {
 function sourcePathAffectsPackage(file, packageName) {
   if (
     file === "CHANGELOG.md" ||
-    file === "docs/product/AllFeatures.md" ||
     file.startsWith(".agents/skills/ghostex-release-operator/") ||
     file === "scripts/release-assemble-resumable.mjs" ||
     file === "scripts/release-resumable.mjs" ||

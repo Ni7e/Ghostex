@@ -396,6 +396,18 @@
   visibility: hidden;
 }
 
+/*
+ * Inactive tab terminals stay attached in the same pane-sized rectangle.
+ * Absolute parking prevents them from taking layout space while preserving
+ * their xterm instances, websocket clients, scrollback, and measured size.
+ */
+.workspace-surface-layer--parked {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .workspace-surface-layer--chat {
   display: flex;
   position: absolute;

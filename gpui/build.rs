@@ -1,7 +1,7 @@
 use std::{
     env,
-    fs,
     fmt::Write as _,
+    fs,
     io::Cursor,
     path::{Path, PathBuf},
     process::Command,
@@ -13,8 +13,7 @@ const GHOSTTYKIT_ARCHIVE: &str =
     "../ghostty/macos/GhosttyKit.xcframework/macos-arm64_x86_64/ghostty-internal.a";
 const GPUI_MACOS_DEPLOYMENT_TARGET_FLAG: &str = "-mmacosx-version-min=13.0";
 const LIBGHOSTTY_VT_BUILD_SCRIPT: &str = "scripts/build-libghostty-vt.sh";
-const WINDOWS_APP_ICON_SOURCE: &str =
-    "resources/AppIcon.appiconset/icon_512x512.png";
+const WINDOWS_APP_ICON_SOURCE: &str = "resources/AppIcon.appiconset/icon_512x512.png";
 const WINDOWS_APP_ICON_SIZES: [u32; 5] = [16, 32, 64, 128, 256];
 
 struct LibGhosttyVtBuild {
@@ -326,8 +325,7 @@ fn build_windows_app_resource(manifest_dir: &Path) {
     let source_image = image::open(&source_path)
         .unwrap_or_else(|error| panic!("failed to decode {}: {error}", source_path.display()))
         .into_rgba8();
-    let (source_x, source_y, source_width, source_height) =
-        image_alpha_bounds(&source_image);
+    let (source_x, source_y, source_width, source_height) = image_alpha_bounds(&source_image);
     let artwork = image::imageops::crop_imm(
         &source_image,
         source_x,
