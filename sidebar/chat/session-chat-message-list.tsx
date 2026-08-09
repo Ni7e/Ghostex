@@ -47,6 +47,7 @@ import {
 } from "../../components/ui/message-scroller";
 import { orderSessionChatMessages } from "./session-chat-assembler";
 import { SessionChatMarkdown } from "./session-chat-markdown";
+import { isSessionChatPendingMessageId } from "./session-chat-pending";
 import {
   dropSessionChatHiddenMessages,
   sessionChatSuppressedTurnLabel,
@@ -176,7 +177,7 @@ function CopyFooter({ markdown }: { markdown: string }) {
 function SuppressedTurn({ label, text }: { label: string; text: string }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="flex w-full min-w-0 flex-col gap-1.5">
+    <div className="flex w-full min-w-0 flex-col gap-1.5 pb-2">
       <button
         aria-expanded={expanded}
         className="flex min-w-0 items-center gap-1 self-start text-xs text-muted-foreground transition-colors hover:text-foreground"
@@ -197,6 +198,56 @@ function SuppressedTurn({ label, text }: { label: string; text: string }) {
       ) : null}
     </div>
   );
+}
+
+function ReasoningRow({ markdown }: { markdown: string }) {
+  const text = markdown
+    .replace(/```(?:[^\n]*)\n?([\s\S]*?)```/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+/gm, "")
+    .replace(/(?:\*\*|__|\*|_|~~)/g, "")
+    .replace(/\\([\\`*_[\]{}()#+\-.!>])/g, "$1")
+    .trim();
+
+  return <div className="ghostex-chat-thinking-row">{text}</div>;
+}
+
+/*
+Codex can fold rapid/steered inputs into one transcript turn with a line that
+contains only "---". Rendering that transport separator as Markdown turns the
+entire preceding paragraph into a Setext h2. It can also repeat an earlier
+input after the separator (the repeated part is normally a prefix of the
+combined part). Present those inputs as ordinary paragraphs and collapse the
+repeated prefix instead of exposing transport syntax in the user's bubble.
+*/
+const USER_TURN_SEPARATOR = /\r?\n[\t ]*---[\t ]*(?:\r?\n|$)/;
+
+function normalizeUserMessageMarkdown(markdown: string): string {
+  const parts = markdown.split(USER_TURN_SEPARATOR).map((part) => part.trim());
+  if (parts.length === 1) {
+    return markdown;
+  }
+
+  const visible: string[] = [];
+  for (const part of parts) {
+    if (!part) {
+      continue;
+    }
+    const containingIndex = visible.findIndex((candidate) =>
+      candidate.startsWith(part),
+    );
+    if (containingIndex < 0) {
+      visible.push(part);
+      continue;
+    }
+
+    const remainder =
+      visible[containingIndex]?.slice(part.length).trimStart() ?? "";
+    visible[containingIndex] = remainder ? `${part}\n\n${remainder}` : part;
+  }
+  return visible.join("\n\n");
 }
 
 function MessageRow({
@@ -230,48 +281,55 @@ function MessageRow({
 
   if (isSystem) {
     return (
-      <Marker>
+      <Marker className="pb-2">
         <MarkerContent>{markdown}</MarkerContent>
       </Marker>
     );
   }
 
+  if (
+    isReasoning &&
+    markdown.length > 0 &&
+    images.length === 0 &&
+    tools.length === 0
+  ) {
+    return <ReasoningRow markdown={markdown} />;
+  }
+
   if (isUser) {
+    const userMarkdown = normalizeUserMessageMarkdown(markdown);
     // Optimistic echoes render IDENTICALLY to real turns — no muting, no
     // "Queued" label — so replacement by the transcript turn causes no
     // visible state change.
     return (
-      <Message align="end" data-role="user">
+      <Message align="end" className="pb-4" data-role="user">
         <MessageContent>
           {/* justify-end keeps wrapped rows against the user's side. */}
           <ImageAttachments blocks={images} className="self-end justify-end" />
-          {markdown.length > 0 ? (
+          {userMarkdown.length > 0 ? (
             <Bubble
               align="end"
-              className="*:data-[slot=bubble-content]:bg-[#141414] *:data-[slot=bubble-content]:text-[#f4f4f4]"
+              className="ghostex-chat-user-bubble"
               variant="default"
             >
               <BubbleContent>
-                <SessionChatMarkdown markdown={markdown} />
+                <SessionChatMarkdown markdown={userMarkdown} />
               </BubbleContent>
             </Bubble>
           ) : null}
-          {showControls ? <CopyFooter markdown={markdown} /> : null}
+          {showControls ? <CopyFooter markdown={userMarkdown} /> : null}
         </MessageContent>
       </Message>
     );
   }
 
   return (
-    <Message align="start" data-role={message.role}>
+    <Message align="start" className="pb-4" data-role={message.role}>
       <MessageContent>
         <ImageAttachments blocks={images} />
         {markdown.length > 0 ? (
-          <Bubble
-            className={isReasoning ? "text-muted-foreground" : undefined}
-            variant="ghost"
-          >
-            <BubbleContent className={isReasoning ? "text-[0.8125rem]" : undefined}>
+          <Bubble className="ghostex-chat-agent-bubble" variant="ghost">
+            <BubbleContent>
               <SessionChatMarkdown markdown={markdown} />
             </BubbleContent>
           </Bubble>
@@ -375,17 +433,17 @@ export function SessionChatMessageList({
               </Button>
             </div>
           ) : null}
-          <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-8 pb-4 [direction:ltr]">
+          <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-0 px-4 pt-8 pb-4 [direction:ltr]">
             {rendered.map((message) => (
               <MessageScrollerItem
                 key={message.id}
                 messageId={message.id}
-                // Collapsed harness markers are user-role rows but must never
-                // become the scroll anchor for a turn.
-                scrollAnchor={
-                  message.role === "user" &&
-                  sessionChatSuppressedTurnLabel(message) === null
-                }
+                // Anchor the optimistic row exactly once when a local send is
+                // appended. The authoritative transcript replaces that row
+                // with a new id shortly afterwards; anchoring the replacement
+                // makes message-scroller treat reconciliation as another new
+                // turn and jump the viewport back to that message.
+                scrollAnchor={isSessionChatPendingMessageId(message.id)}
               >
                 <MessageRow expandToolRuns={expandToolRuns} message={message} />
               </MessageScrollerItem>
