@@ -23,6 +23,23 @@ pub(crate) enum ResolvedWindowsTerminalBackend {
     PowerShell,
 }
 
+#[cfg(target_os = "windows")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WindowsWslGhostexCliStatus {
+    pub(crate) agent_orchestration_skill_path: Option<String>,
+    pub(crate) browser_skill_path: Option<String>,
+    pub(crate) computer_use_skill_path: Option<String>,
+    pub(crate) embedded_browser_skill_path: Option<String>,
+    pub(crate) fable56_orchestration_skill_path: Option<String>,
+    pub(crate) find_prev_session_skill_path: Option<String>,
+    pub(crate) generate_title_skill_path: Option<String>,
+    pub(crate) ghostex_path: Option<String>,
+    pub(crate) gx_blocked_by_existing_command: bool,
+    pub(crate) gx_path: Option<String>,
+    pub(crate) gx_usable: bool,
+    pub(crate) move_codex_session_skill_path: Option<String>,
+}
+
 pub(crate) fn current_preference() -> WindowsTerminalBackendPreference {
     let settings = crate::shared_settings::shared_sidebar_settings_snapshot();
     WindowsTerminalBackendPreference::from_settings_value(
@@ -35,7 +52,10 @@ pub(crate) fn current_preference() -> WindowsTerminalBackendPreference {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use super::{ResolvedWindowsTerminalBackend, WindowsTerminalBackendPreference};
+    use super::{
+        ResolvedWindowsTerminalBackend, WindowsTerminalBackendPreference,
+        WindowsWslGhostexCliStatus,
+    };
     use std::{
         env,
         ffi::OsString,
@@ -125,6 +145,132 @@ printf '%s\n%s\n' "$ghostex_data_dir" "$ghostex_state_dir"
 
     pub(super) fn auth_token() -> Option<String> {
         state().lock().ok()?.auth_token.clone()
+    }
+
+    pub(super) fn ghostex_cli_status() -> Result<WindowsWslGhostexCliStatus, String> {
+        /*
+        CDXC:GPUIWindowsCliStatus 2026-08-10:
+        Windows terminals and gxserver live in the selected WSL2 distribution,
+        so Settings must inspect that distribution's app-managed package and
+        public CLI links. The Win32 process PATH/HOME describe the CEF shell,
+        not the environment where `ghostex` and `gx` run. Validate the resolved
+        commands against the exact installed package inode so an unrelated
+        same-named command is never reported as Ghostex-owned.
+        */
+        let ResolvedWindowsTerminalBackend::Wsl { distribution } =
+            resolve(super::current_preference())?
+        else {
+            unreachable!("PowerShell is not a selectable Windows terminal backend")
+        };
+        let paths = resolve_wsl_ghostex_paths(&distribution)?;
+        let package_dir = paths.data_path("gxserver/package");
+        let script = format!(
+            r#"set -eu
+package_dir={}
+ghostex_target="$package_dir/bin/ghostex"
+ghostex_candidate="$(command -v ghostex 2>/dev/null || true)"
+gx_candidate="$(command -v gx 2>/dev/null || true)"
+ghostex_path=
+gx_path=
+gx_usable=0
+gx_blocked=0
+if [ -n "$ghostex_candidate" ] && [ -x "$ghostex_target" ] && [ "$ghostex_candidate" -ef "$ghostex_target" ]; then
+  ghostex_path="$ghostex_candidate"
+fi
+if [ -n "$gx_candidate" ]; then
+  gx_path="$gx_candidate"
+  if [ -x "$ghostex_target" ] && [ "$gx_candidate" -ef "$ghostex_target" ]; then
+    gx_usable=1
+  else
+    gx_blocked=1
+  fi
+fi
+skills_root="$HOME/.agents/skills"
+printf '%s\n' \
+  "$HOME" \
+  "$ghostex_path" \
+  "$gx_path" \
+  "$gx_usable" \
+  "$gx_blocked" \
+  "$(test -f "$skills_root/ghostex-browser-use/SKILL.md" && printf 1 || printf 0)" \
+  "$(test -f "$skills_root/ghostex-embedded-browser-use/SKILL.md" && printf 1 || printf 0)" \
+  "$(test -f "$skills_root/ghostex-computer-use/SKILL.md" && printf 1 || printf 0)" \
+  "$(test -f "$skills_root/ghostex-agent-orchestration/SKILL.md" && printf 1 || printf 0)" \
+  "$(test -f "$skills_root/ghostex-fable-5.6-orchestration/SKILL.md" && printf 1 || printf 0)" \
+  "$(test -f "$skills_root/ghostex-find-prev-session/SKILL.md" && printf 1 || printf 0)" \
+  "$(test -f "$skills_root/ghostex-auto-rename-session/SKILL.md" && printf 1 || printf 0)" \
+  "$(test -f "$skills_root/ghostex-move-codex-session/SKILL.md" && printf 1 || printf 0)"
+"#,
+            posix_single_quote(&package_dir),
+        );
+        let output = run_wsl_capture(&distribution, &script).ok_or_else(|| {
+            "Could not inspect Ghostex CLI status inside the selected WSL2 distribution."
+                .to_string()
+        })?;
+        let mut lines = output.lines();
+        let home = lines
+            .next()
+            .and_then(validated_wsl_path)
+            .ok_or_else(|| "WSL returned an invalid home directory.".to_string())?;
+        let ghostex_path = validated_optional_wsl_path(lines.next())?;
+        let gx_path = validated_optional_wsl_path(lines.next())?;
+        let gx_usable = parse_status_flag(lines.next())?;
+        let gx_blocked_by_existing_command = parse_status_flag(lines.next())?;
+        let skill_names = [
+            "ghostex-browser-use",
+            "ghostex-embedded-browser-use",
+            "ghostex-computer-use",
+            "ghostex-agent-orchestration",
+            "ghostex-fable-5.6-orchestration",
+            "ghostex-find-prev-session",
+            "ghostex-auto-rename-session",
+            "ghostex-move-codex-session",
+        ];
+        let mut skill_paths = Vec::with_capacity(skill_names.len());
+        for skill_name in skill_names {
+            let installed = parse_status_flag(lines.next())?;
+            skill_paths.push(installed.then(|| {
+                format!("{home}/.agents/skills/{skill_name}/SKILL.md")
+            }));
+        }
+        if lines.next().is_some() {
+            return Err("WSL returned an invalid Ghostex CLI status response.".to_string());
+        }
+        let mut skill_paths = skill_paths.into_iter();
+        Ok(WindowsWslGhostexCliStatus {
+            browser_skill_path: skill_paths.next().flatten(),
+            embedded_browser_skill_path: skill_paths.next().flatten(),
+            computer_use_skill_path: skill_paths.next().flatten(),
+            agent_orchestration_skill_path: skill_paths.next().flatten(),
+            fable56_orchestration_skill_path: skill_paths.next().flatten(),
+            find_prev_session_skill_path: skill_paths.next().flatten(),
+            generate_title_skill_path: skill_paths.next().flatten(),
+            move_codex_session_skill_path: skill_paths.next().flatten(),
+            ghostex_path,
+            gx_blocked_by_existing_command,
+            gx_path,
+            gx_usable,
+        })
+    }
+
+    fn validated_optional_wsl_path(line: Option<&str>) -> Result<Option<String>, String> {
+        let Some(path) = line else {
+            return Err("WSL returned an invalid Ghostex CLI status response.".to_string());
+        };
+        if path.is_empty() {
+            return Ok(None);
+        }
+        validated_wsl_path(path)
+            .map(Some)
+            .ok_or_else(|| "WSL returned an invalid Ghostex CLI path.".to_string())
+    }
+
+    fn parse_status_flag(line: Option<&str>) -> Result<bool, String> {
+        match line {
+            Some("0") => Ok(false),
+            Some("1") => Ok(true),
+            _ => Err("WSL returned an invalid Ghostex CLI status response.".to_string()),
+        }
     }
 
     pub(super) fn t3_runtime_launch_plan() -> Result<(PathBuf, PathBuf), String> {
@@ -1398,6 +1544,11 @@ pub(crate) fn reset() {
 #[cfg(target_os = "windows")]
 pub(crate) fn auth_token() -> Option<String> {
     platform::auth_token()
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn ghostex_cli_status() -> Result<WindowsWslGhostexCliStatus, String> {
+    platform::ghostex_cli_status()
 }
 
 #[cfg(target_os = "windows")]

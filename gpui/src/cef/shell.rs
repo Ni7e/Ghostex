@@ -31,22 +31,26 @@ use cef::{
     ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
     ImplRequest as _, ImplRequestContext as _, ImplRequestHandler, ImplResourceHandler,
     ImplResourceRequestHandler, ImplResponse as _, ImplSetCookieCallback, ImplStreamReader as _,
-    ImplTask, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler,
-    MediaAccessCallback, MediaAccessPermissionTypes, MenuModel, PermissionHandler,
-    PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes, PopupFeatures,
-    ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler, ResourceHandler,
-    ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, SetCookieCallback, State,
-    StreamReader, Task, ThreadId, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
-    WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler,
-    WrapDisplayHandler, WrapFindHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
-    WrapPermissionHandler, WrapRenderProcessHandler, WrapRequestHandler, WrapResourceHandler,
-    WrapResourceRequestHandler, WrapSetCookieCallback, WrapTask, WrapV8Handler, ZoomCommand,
-    post_task, stream_reader_create_for_file, string_multimap_alloc, string_multimap_append,
-    wrap_app, wrap_browser_process_handler, wrap_client, wrap_context_menu_handler,
-    wrap_display_handler, wrap_find_handler, wrap_focus_handler, wrap_life_span_handler,
-    wrap_load_handler, wrap_permission_handler, wrap_render_process_handler, wrap_request_handler,
-    wrap_resource_handler, wrap_resource_request_handler, wrap_set_cookie_callback, wrap_task,
-    wrap_v8_handler,
+    ImplTask, ImplV8Context as _, ImplV8Handler, ImplV8Value as _, KeyboardHandler,
+    LifeSpanHandler, LoadHandler, MediaAccessCallback, MediaAccessPermissionTypes, MenuModel,
+    PermissionHandler, PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes,
+    PopupFeatures, ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler,
+    ResourceHandler, ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue,
+    SetCookieCallback, State, StreamReader, Task, ThreadId, V8Handler, V8Propertyattribute,
+    V8Value, ValueType, WindowInfo, WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler,
+    WrapClient, WrapContextMenuHandler, WrapDisplayHandler, WrapFindHandler, WrapFocusHandler,
+    WrapLifeSpanHandler, WrapLoadHandler, WrapPermissionHandler, WrapRenderProcessHandler,
+    WrapRequestHandler, WrapResourceHandler, WrapResourceRequestHandler, WrapSetCookieCallback,
+    WrapTask, WrapV8Handler, ZoomCommand, post_task, stream_reader_create_for_file,
+    string_multimap_alloc, string_multimap_append, wrap_app, wrap_browser_process_handler,
+    wrap_client, wrap_context_menu_handler, wrap_display_handler, wrap_find_handler,
+    wrap_focus_handler, wrap_life_span_handler, wrap_load_handler, wrap_permission_handler,
+    wrap_render_process_handler, wrap_request_handler, wrap_resource_handler,
+    wrap_resource_request_handler, wrap_set_cookie_callback, wrap_task, wrap_v8_handler,
+};
+#[cfg(target_os = "windows")]
+use cef::{
+    ImplKeyboardHandler, KeyEvent, KeyEventType, WrapKeyboardHandler, wrap_keyboard_handler,
 };
 use gpui::{Bounds, Pixels};
 use percent_encoding::percent_decode_str;
@@ -240,6 +244,7 @@ enum SidebarBridgeEventKind {
     SidebarCommandRunEnd,
     GhostexHotkeyAction,
     GxserverPresentationFocusState,
+    CreateProjectAgent,
     CreateProjectTerminal,
     WorkspaceTerminalFocus,
     T3SessionFocus,
@@ -284,6 +289,7 @@ impl SidebarBridgeEventKind {
             SidebarBridgeFunctionId::GxserverPresentationFocusState => {
                 Self::GxserverPresentationFocusState
             }
+            SidebarBridgeFunctionId::CreateProjectAgent => Self::CreateProjectAgent,
             SidebarBridgeFunctionId::CreateProjectTerminal => Self::CreateProjectTerminal,
             SidebarBridgeFunctionId::WorkspaceTerminalFocus => Self::WorkspaceTerminalFocus,
             SidebarBridgeFunctionId::T3SessionFocus => Self::T3SessionFocus,
@@ -675,6 +681,7 @@ pub enum SidebarBridgeEvent {
     SidebarCommandRunEnd(String),
     GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
+    CreateProjectAgent(String),
     CreateProjectTerminal(String),
     WorkspaceTerminalFocus(String),
     T3SessionFocus(String),
@@ -731,6 +738,7 @@ impl SidebarBridgeEventKind {
             Self::GxserverPresentationFocusState => {
                 SidebarBridgeEvent::GxserverPresentationFocusState(payload)
             }
+            Self::CreateProjectAgent => SidebarBridgeEvent::CreateProjectAgent(payload),
             Self::CreateProjectTerminal => SidebarBridgeEvent::CreateProjectTerminal(payload),
             Self::WorkspaceTerminalFocus => SidebarBridgeEvent::WorkspaceTerminalFocus(payload),
             Self::T3SessionFocus => SidebarBridgeEvent::T3SessionFocus(payload),
@@ -1171,6 +1179,71 @@ wrap_focus_handler! {
 }
 
 /*
+CDXC:GPUICefPaneZoomShortcutsWindows 2026-08-12:
+Windowed CEF owns keyboard focus in its Chromium child HWND on Windows, so
+GPUI's Ctrl+=, Ctrl+-, and Ctrl+0 bindings cannot observe those keystrokes.
+Install this handler only on Browser and main project-workarea clients (the
+same surfaces registered for macOS keyboard zoom) and consume the Windows
+primary-modifier chord through Chromium's browser-host zoom API. Sidebar,
+modal, titlebar, companion, and DevTools clients deliberately receive no
+handler. The macOS AppKit responder path remains unchanged.
+*/
+#[cfg(target_os = "windows")]
+wrap_keyboard_handler! {
+    struct GhostexGpuiWindowsZoomKeyboardHandler;
+
+    impl KeyboardHandler {
+        fn on_pre_key_event(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            event: Option<&KeyEvent>,
+            _os_event: Option<&mut cef::sys::MSG>,
+            _is_keyboard_shortcut: Option<&mut c_int>,
+        ) -> c_int {
+            const VK_0: c_int = 0x30;
+            const VK_OEM_PLUS: c_int = 0xBB;
+            const VK_OEM_MINUS: c_int = 0xBD;
+            const CONTROL_DOWN: u32 =
+                cef::sys::cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0 as u32;
+            const ALT_DOWN: u32 = cef::sys::cef_event_flags_t::EVENTFLAG_ALT_DOWN.0 as u32;
+            const COMMAND_DOWN: u32 =
+                cef::sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0 as u32;
+
+            let Some(event) = event else {
+                return 0;
+            };
+            if event.type_ != KeyEventType::RAWKEYDOWN
+                || event.modifiers & CONTROL_DOWN == 0
+                || event.modifiers & (ALT_DOWN | COMMAND_DOWN) != 0
+            {
+                return 0;
+            }
+            let command = match event.windows_key_code {
+                VK_OEM_PLUS => ZoomCommand::IN,
+                VK_OEM_MINUS => ZoomCommand::OUT,
+                VK_0 => ZoomCommand::RESET,
+                _ => return 0,
+            };
+            let Some(host) = browser.and_then(|browser| browser.host()) else {
+                return 0;
+            };
+            host.zoom(command);
+            1
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn keyboard_zoom_handler(enabled: bool) -> Option<KeyboardHandler> {
+    enabled.then(GhostexGpuiWindowsZoomKeyboardHandler::new)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn keyboard_zoom_handler(_enabled: bool) -> Option<KeyboardHandler> {
+    None
+}
+
+/*
 CDXC:GPUIManageHtmlResources 2026-07-14:
 Manage renders authored HTML through srcdoc, whose default base is the bundled
 manage.html file. Give only the Manage CEF client a synthetic HTTPS resource
@@ -1524,11 +1597,16 @@ wrap_client! {
         request_handler: Option<RequestHandler>,
         permission_handler: Option<PermissionHandler>,
         focus_handler: Option<FocusHandler>,
+        keyboard_handler: Option<KeyboardHandler>,
     }
 
     impl Client {
         fn focus_handler(&self) -> Option<FocusHandler> {
             self.focus_handler.clone()
+        }
+
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            self.keyboard_handler.clone()
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
@@ -3274,6 +3352,7 @@ fn show_browser_dev_tools(
         None,
         None,
         Some(GhostexGpuiCefFocusHandler::new()),
+        None,
     ));
     host.show_dev_tools(
         Some(&window_info),
@@ -4017,6 +4096,7 @@ impl CefBrowser {
             request_handler,
             permission_handler,
             Some(GhostexGpuiCefFocusHandler::new()),
+            keyboard_zoom_handler(keyboard_zoom_enabled),
         ));
         let mut request_context = cef_request_context_for_profile(profile)
             .map_err(|error| format!("failed to create GPUI CEF request context: {error}"))?;

@@ -44,10 +44,11 @@ use crate::{
     agent_skills::{install_agent_skills, read_agent_skill_status},
     agents::{
         apply_created_session_identity, apply_live_process_session_identity,
-        create_agent_session_params_for_project, default_agent_command, dispatch_agent_endpoint,
-        get_visible_terminal_title, normalize_agent_hook_activity, read_agent_settings,
-        read_text_from_map, reconcile_agent_metadata_title_for_session,
-        resolve_project_agent_config, AgentEndpointError, FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY,
+        codex_metadata_title_revision, create_agent_session_params_for_project,
+        default_agent_command, dispatch_agent_endpoint, get_visible_terminal_title,
+        normalize_agent_hook_activity, read_agent_settings, read_text_from_map,
+        reconcile_agent_metadata_title_for_session, resolve_project_agent_config,
+        AgentEndpointError, FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY,
     },
     auth::{
         ensure_gxserver_auth_token, is_authorized_headers, is_expected_gxserver_auth_token,
@@ -265,6 +266,7 @@ const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "waitFor",
 ];
 const PORTLESS_BACKGROUND_SYNC_INTERVAL: Duration = Duration::from_secs(10);
+const CODEX_METADATA_TITLE_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 const SESSION_LIFECYCLE_SWEEP_INTERVAL: Duration =
     Duration::from_secs(session_lifecycle::SESSION_LIFECYCLE_SWEEP_INTERVAL_SECONDS);
 const SESSION_GIT_STATUS_REFRESH_INTERVAL: Duration =
@@ -422,6 +424,7 @@ pub async fn run_gxserver_foreground(
     state.automation_runtime.start(shutdown_tx.subscribe());
     sync_zmx_title_observers_for_all_sessions(&state, "server-start");
     sync_session_chat_followers_for_all_sessions(&state, "server-start");
+    let codex_metadata_title_sync_task = spawn_codex_metadata_title_sync_task(&state);
     let portless_background_sync_task = spawn_portless_background_sync_task(&state);
     let session_lifecycle_sweep_task = spawn_session_lifecycle_sweep_task(&state);
     let session_git_status_refresh_task = spawn_session_git_status_refresh_task(&state);
@@ -441,6 +444,7 @@ pub async fn run_gxserver_foreground(
             let _ = shutdown_rx.recv().await;
         })
         .await;
+    codex_metadata_title_sync_task.abort();
     portless_background_sync_task.abort();
     session_lifecycle_sweep_task.abort();
     session_git_status_refresh_task.abort();
@@ -452,6 +456,90 @@ pub async fn run_gxserver_foreground(
     stop_all_session_chat_followers(&state);
     state.t3_runtime.abort_background_tasks();
     Ok(GxserverForegroundResult { reused: false })
+}
+
+/*
+CDXC:GxserverAgentTitles 2026-08-11:
+Codex `/rename` writes the canonical thread name to session_index.jsonl but
+does not update its OSC terminal title or emit a provider hook. Track the index
+revision for each live, identified Codex session on gxserver's clock and only
+reconcile when that file changes. The sidebar then receives the ordinary
+authoritative presentation delta without client-local title state.
+*/
+fn spawn_codex_metadata_title_sync_task(state: &Arc<AppState>) -> tokio::task::JoinHandle<()> {
+    let sync_state = state.clone();
+    let revisions = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+    let mut shutdown_rx = state.shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            let pass_state = sync_state.clone();
+            let pass_revisions = revisions.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                run_codex_metadata_title_sync_once(&pass_state, &pass_revisions)
+            })
+            .await;
+
+            tokio::select! {
+                _ = shutdown_rx.recv() => break,
+                _ = tokio::time::sleep(CODEX_METADATA_TITLE_SYNC_INTERVAL) => {}
+            }
+        }
+    })
+}
+
+fn run_codex_metadata_title_sync_once(
+    state: &Arc<AppState>,
+    revisions: &Arc<Mutex<HashMap<String, String>>>,
+) -> std::result::Result<(), DomainStateError> {
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let sessions = repository.list_sessions(None)?;
+    let mut live_keys = HashSet::new();
+    for session in sessions {
+        if read_session_text(&session, "lifecycleState").as_deref() != Some("running") {
+            continue;
+        }
+        let Some(project_id) = read_session_text(&session, "projectId") else {
+            continue;
+        };
+        let Some(session_id) = read_session_text(&session, "sessionId") else {
+            continue;
+        };
+        let Some(revision) = codex_metadata_title_revision(&state.paths.home_dir, &session) else {
+            continue;
+        };
+        let key = session_observer_key(&project_id, &session_id);
+        live_keys.insert(key.clone());
+        let already_checked = revisions
+            .lock()
+            .ok()
+            .and_then(|checked| checked.get(&key).cloned())
+            .as_deref()
+            == Some(revision.as_str());
+        if already_checked {
+            continue;
+        }
+        let changed = reconcile_agent_metadata_title_for_session(
+            &repository,
+            &project_id,
+            &session_id,
+            &state.paths.home_dir,
+            "metadata-mismatch",
+        )?;
+        if changed {
+            schedule_presentation_session_delta(state, &db, &repository, &project_id, &session_id)?;
+        }
+        if let Ok(mut checked) = revisions.lock() {
+            checked.insert(key, revision);
+        }
+    }
+    if let Ok(mut checked) = revisions.lock() {
+        checked.retain(|key, _| live_keys.contains(key));
+    }
+    Ok(())
 }
 
 fn spawn_portless_background_sync_task(state: &Arc<AppState>) -> tokio::task::JoinHandle<()> {

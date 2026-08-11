@@ -102,6 +102,7 @@ pub struct ZmxProcessIdentity {
     pub agent_id: Option<String>,
     pub agent_session_id: Option<String>,
     pub agent_session_path: Option<String>,
+    process_id: Option<i64>,
     pub(crate) terminal_name: Option<String>,
 }
 
@@ -1265,6 +1266,27 @@ pub fn read_zmx_session_process_identities(
     let mut identities =
         parse_zmx_session_process_identities(&ps_output, session_names, &zmx_list_output);
     for identity in identities.values_mut() {
+        if identity.agent_id.as_deref() == Some("codex")
+            && (identity.agent_session_id.is_none() || identity.agent_session_path.is_none())
+        {
+            /*
+            CDXC:GxserverAgentTitles 2026-08-11:
+            A live Codex process started as plain `codex` can resume or switch
+            threads inside the TUI, so argv contains no conversation id. Codex
+            keeps the exact active rollout open for append; resolve that
+            process-owned file descriptor instead of guessing from cwd or
+            transcript recency. This gives title reconciliation the canonical
+            session_index identity after desktop restore as well as first run.
+            */
+            if let Some((agent_session_id, agent_session_path)) =
+                read_codex_process_session_identity(identity.process_id)
+            {
+                identity.agent_session_id.get_or_insert(agent_session_id);
+                identity
+                    .agent_session_path
+                    .get_or_insert(agent_session_path);
+            }
+        }
         if identity.agent_id.as_deref() != Some("omp")
             || (identity.agent_session_id.is_some() && identity.agent_session_path.is_some())
         {
@@ -1530,6 +1552,7 @@ fn resolve_process_tree_agent_identity(
         if let Some(row) = rows_by_pid.get(&pid) {
             if let Some(mut observation) = resolve_process_command_agent_identity(&row.command) {
                 if observation.identity.agent_id.is_some() {
+                    observation.identity.process_id = Some(row.pid);
                     observation.identity.terminal_name = row.terminal_name.clone();
                     candidates.push(ProcessIdentityCandidate {
                         confidence: observation.confidence,
@@ -1645,9 +1668,49 @@ fn resolve_agent_process_invocation(
             agent_id: Some(agent_id),
             agent_session_id,
             agent_session_path: None,
+            process_id: None,
             terminal_name: None,
         },
     })
+}
+
+fn read_codex_process_session_identity(process_id: Option<i64>) -> Option<(String, String)> {
+    let process_id = process_id.filter(|process_id| *process_id > 0)?;
+    let fd_dir = PathBuf::from(format!("/proc/{process_id}/fd"));
+    let mut identities = HashMap::<String, PathBuf>::new();
+    for entry in fs::read_dir(fd_dir).ok()?.flatten() {
+        let Ok(target) = fs::read_link(entry.path()) else {
+            continue;
+        };
+        let Some(agent_session_id) = codex_session_id_from_transcript_path(&target) else {
+            continue;
+        };
+        identities.entry(agent_session_id).or_insert(target);
+    }
+    if identities.len() != 1 {
+        return None;
+    }
+    identities
+        .into_iter()
+        .next()
+        .map(|(agent_session_id, path)| (agent_session_id, path.to_string_lossy().into_owned()))
+}
+
+fn codex_session_id_from_transcript_path(path: &Path) -> Option<String> {
+    if path.extension().and_then(|extension| extension.to_str()) != Some("jsonl")
+        || !path
+            .ancestors()
+            .filter_map(Path::file_name)
+            .filter_map(|name| name.to_str())
+            .any(|name| name == "sessions")
+    {
+        return None;
+    }
+    let stem = path.file_stem()?.to_str()?;
+    if !stem.starts_with("rollout-") || stem.len() < 36 {
+        return None;
+    }
+    normalize_codex_session_id(&stem[stem.len() - 36..])
 }
 
 /*
@@ -3703,6 +3766,42 @@ mod tests {
             Some("019eb8d0-d27b-7f30-b6d7-7a04ab8fae78")
         );
         assert_eq!(identity.agent_session_path, None);
+    }
+
+    #[test]
+    fn codex_rollout_path_resolves_exact_session_identity() {
+        let path = Path::new(
+            "/home/person/.codex/sessions/2026/08/07/rollout-2026-08-07T08-15-34-019fda6e-fdbe-7570-a4fd-347e9e0bfb40.jsonl",
+        );
+        assert_eq!(
+            codex_session_id_from_transcript_path(path).as_deref(),
+            Some("019fda6e-fdbe-7570-a4fd-347e9e0bfb40")
+        );
+        assert_eq!(
+            codex_session_id_from_transcript_path(Path::new(
+                "/home/person/.codex/archive/rollout-2026-08-07T08-15-34-019fda6e-fdbe-7570-a4fd-347e9e0bfb40.jsonl"
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn codex_process_open_rollout_resolves_exact_session_identity() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let sessions = temp
+            .path()
+            .join("sessions")
+            .join("2026")
+            .join("08")
+            .join("11");
+        fs::create_dir_all(&sessions).expect("sessions directory");
+        let rollout =
+            sessions.join("rollout-2026-08-11T20-15-34-019fda6e-fdbe-7570-a4fd-347e9e0bfb40.jsonl");
+        let _open_rollout = fs::File::create(&rollout).expect("open rollout");
+        let identity = read_codex_process_session_identity(Some(i64::from(std::process::id())))
+            .expect("process rollout identity");
+        assert_eq!(identity.0, "019fda6e-fdbe-7570-a4fd-347e9e0bfb40");
+        assert_eq!(Path::new(&identity.1), rollout);
     }
 
     #[test]

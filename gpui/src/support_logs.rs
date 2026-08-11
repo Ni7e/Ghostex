@@ -36,6 +36,7 @@ pub enum GpuiSupportLog {
     TerminalFocus,
     ProjectBoard,
     AppModal,
+    TitlebarPopupRepro,
     CrashReports,
 }
 
@@ -50,6 +51,7 @@ impl GpuiSupportLog {
             // Filename from the shared `gpui.app.modal` scenario definition
             // (shared/ghostex-settings.ts logFiles).
             Self::AppModal => "gpui-app-modal-debug.jsonl",
+            Self::TitlebarPopupRepro => "gpui-titlebar-popup-repro.jsonl",
             Self::CrashReports => "gpui-crash-reports.log",
         }
     }
@@ -62,6 +64,7 @@ impl GpuiSupportLog {
             Self::TerminalFocus => Some(GpuiDiagnosticScenario::TerminalFocus),
             Self::ProjectBoard => Some(GpuiDiagnosticScenario::ProjectBoard),
             Self::AppModal => Some(GpuiDiagnosticScenario::AppModal),
+            Self::TitlebarPopupRepro => None,
             // Crash reports are always-on failure diagnostics.
             Self::CrashReports => None,
         }
@@ -165,6 +168,13 @@ pub fn append_for_scenario(
 /// the same explicit scenario as their destination log.
 pub fn append_temporary(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
     append(log, event, details);
+}
+
+/// Always-on, privacy-sanitized breadcrumbs for a user-requested reproduction.
+/// Keep callers narrowly scoped and remove them after the underlying issue is
+/// diagnosed; unlike routine support logs these do not depend on Debugging Mode.
+pub fn append_repro(log: GpuiSupportLog, event: &str, details: serde_json::Value) {
+    append_unconditionally(log, event, details);
 }
 
 fn debug_ui_controls_enabled() -> bool {
@@ -326,6 +336,7 @@ pub fn prune_gpui_support_logs() {
         GpuiSupportLog::TerminalFocus,
         GpuiSupportLog::ProjectBoard,
         GpuiSupportLog::AppModal,
+        GpuiSupportLog::TitlebarPopupRepro,
         GpuiSupportLog::CrashReports,
     ] {
         let retained = logs_directory.join(log.file_name());

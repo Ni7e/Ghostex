@@ -28,6 +28,7 @@ import {
   type GxserverSessionId,
   type GxserverSessionRenameRequestResult,
   type GxserverSessionTransitionResult,
+  type GxserverTerminalTitleEventResult,
   type GxserverSidebarHudResponse,
   type GxserverSidebarHudSettingsMutationParams,
   type GxserverSidebarHudSettingsMutationResult,
@@ -84,6 +85,7 @@ import { orderProjectsWithWorktrees } from "../../shared/project-worktree-order"
 import {
   createAgentSessionDefaultTitle,
   DEFAULT_TERMINAL_SESSION_TITLE,
+  getVisibleTerminalTitle,
   GRID_COLUMN_COUNT,
   resolveSidebarTheme,
   type ExtensionToSidebarMessage,
@@ -287,6 +289,7 @@ export type GhostexGpuiSidebarBridge = {
   onWorkspaceSessionAttentionAcknowledge?: (payload: unknown) => void;
   onWorkspaceTabSessionSelected?: (payload: unknown) => void;
   onWorkspaceTerminalBell?: (payload: unknown) => void;
+  onWorkspaceTerminalTitleChanged?: (payload: unknown) => void;
   onWorkspaceTerminalEscapePressed?: (payload: unknown) => void;
   onWorkspaceTerminalLifecycleRequest?: (payload: unknown) => void;
   onWorkspaceTerminalRuntimeAction?: (payload: unknown) => void;
@@ -308,11 +311,13 @@ export type GhostexGpuiSidebarBridge = {
   pendingWorkspaceSessionAttentionAcknowledgements?: unknown[];
   pendingWorkspaceTabSessionSelections?: unknown[];
   pendingWorkspaceTerminalBells?: unknown[];
+  pendingWorkspaceTerminalTitleChanges?: unknown[];
   pendingWorkspaceTerminalEscapePresses?: unknown[];
   pendingWorkspaceTerminalLifecycleRequests?: unknown[];
   pendingWorkspaceTerminalRuntimeActions?: unknown[];
   postActiveProjectContext?: (payload: string) => boolean;
   postBrowserTabFocus?: (payload: string) => boolean;
+  postCreateProjectAgent?: (payload: string) => boolean;
   postCreateProjectTerminal?: (payload: string) => boolean;
   postGxserverPresentationFocusState?: (payload: string) => boolean;
   postGhostexHotkeyAction?: (payload: string) => boolean;
@@ -676,6 +681,11 @@ const GPUI_SIDEBAR_WORKSPACE_TERMINAL_LIFECYCLE_RESULT_MESSAGE_TYPE =
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_BELL_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalBell";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_VERSION = 1;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_TYPE =
+  "ghostex.gpui.sidebar.workspaceTerminalTitleChanged";
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_MAX_CHARS = 512;
+const GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_SETTLE_MS = 1_500;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_VERSION = 1;
 const GPUI_SIDEBAR_WORKSPACE_TERMINAL_ESCAPE_PRESSED_MESSAGE_TYPE =
   "ghostex.gpui.sidebar.workspaceTerminalEscapePressed";
@@ -1084,6 +1094,11 @@ class GpuiSidebarRuntime {
   private closeAfterDoneTimersBySessionId = new Map<string, GpuiCloseAfterDoneTimer>();
   private commandPaneSessions: GpuiCommandPaneSessionSummary[] = [];
   private workspaceSessionDelayedSends = new Map<string, GpuiWorkspaceSessionDelayedSendSummary>();
+  private workspaceTerminalTitleObservations = new Map<
+    string,
+    GpuiWorkspaceTerminalTitleChangedPayload
+  >();
+  private workspaceTerminalTitleSettleTimeouts = new Map<string, number>();
   private domainProjects: GxserverProjectDomainState[] = [];
   private focusedSessionId: string | undefined;
   private gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
@@ -1374,6 +1389,9 @@ class GpuiSidebarRuntime {
     gpuiBridge.onWorkspaceTerminalBell = (payload) => {
       void this.handleGpuiWorkspaceTerminalBell(payload);
     };
+    gpuiBridge.onWorkspaceTerminalTitleChanged = (payload) => {
+      this.handleGpuiWorkspaceTerminalTitleChanged(payload);
+    };
     // Bridge handler for `ghostex.gpui.sidebar.workspaceTerminalEscapePressed`.
     gpuiBridge.onWorkspaceTerminalEscapePressed = (payload) => {
       this.handleGpuiWorkspaceTerminalEscapePressed(payload);
@@ -1520,6 +1538,14 @@ class GpuiSidebarRuntime {
       : [];
     for (const payload of pendingWorkspaceTerminalBells) {
       void this.handleGpuiWorkspaceTerminalBell(payload);
+    }
+    const pendingWorkspaceTerminalTitleChanges = Array.isArray(
+      gpuiBridge.pendingWorkspaceTerminalTitleChanges,
+    )
+      ? gpuiBridge.pendingWorkspaceTerminalTitleChanges.splice(0)
+      : [];
+    for (const payload of pendingWorkspaceTerminalTitleChanges) {
+      this.handleGpuiWorkspaceTerminalTitleChanged(payload);
     }
     const pendingWorkspaceTerminalEscapePresses = Array.isArray(
       gpuiBridge.pendingWorkspaceTerminalEscapePresses,
@@ -3297,6 +3323,73 @@ class GpuiSidebarRuntime {
       });
     } catch {
       // gxserver attention sync is best-effort, matching macOS's log-only failure path.
+    }
+  }
+
+  private handleGpuiWorkspaceTerminalTitleChanged(payload: unknown): void {
+    const observation = normalizeGpuiWorkspaceTerminalTitleChanged(payload);
+    if (!observation) {
+      return;
+    }
+    const key = createGxserverPresentationProjectSessionId(
+      observation.projectId,
+      observation.sessionId,
+    );
+    this.workspaceTerminalTitleObservations.set(key, observation);
+    const previousTimeout = this.workspaceTerminalTitleSettleTimeouts.get(key);
+    if (previousTimeout !== undefined) {
+      window.clearTimeout(previousTimeout);
+    }
+    const timeout = window.setTimeout(() => {
+      this.workspaceTerminalTitleSettleTimeouts.delete(key);
+      const settled = this.workspaceTerminalTitleObservations.get(key);
+      this.workspaceTerminalTitleObservations.delete(key);
+      if (settled) {
+        void this.ingestGpuiWorkspaceTerminalTitle(settled);
+      }
+    }, GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_SETTLE_MS);
+    this.workspaceTerminalTitleSettleTimeouts.set(key, timeout);
+  }
+
+  private async ingestGpuiWorkspaceTerminalTitle(
+    observation: GpuiWorkspaceTerminalTitleChangedPayload,
+  ): Promise<void> {
+    if (!this.client) {
+      return;
+    }
+    const visibleTitle = getVisibleTerminalTitle(observation.rawTitle)?.trim();
+    if (!visibleTitle) {
+      return;
+    }
+    const session = this.presentation?.sessions.find(
+      (candidate) =>
+        candidate.projectId === observation.projectId &&
+        candidate.sessionId === observation.sessionId,
+    );
+    if (!session || (session.kind !== "terminal" && session.kind !== "agent")) {
+      return;
+    }
+    const storedVisibleTitle = getVisibleTerminalTitle(session.terminalTitle)?.trim();
+    if (
+      storedVisibleTitle &&
+      storedVisibleTitle.replace(/\s+/gu, " ") === visibleTitle.replace(/\s+/gu, " ")
+    ) {
+      return;
+    }
+    try {
+      await this.client.rpc<GxserverTerminalTitleEventResult>("/api/ingestTerminalTitleEvent", {
+        ...(session.agentName || session.agentId
+          ? { agentName: session.agentName ?? session.agentId }
+          : {}),
+        projectId: observation.projectId,
+        rawTitle: observation.rawTitle,
+        sessionId: observation.sessionId,
+        ...(session.sessionPersistenceProvider
+          ? { sessionPersistenceProvider: session.sessionPersistenceProvider }
+          : {}),
+      });
+    } catch {
+      // A later terminal observation or presentation recovery retries without inventing local state.
     }
   }
 
@@ -7366,6 +7459,41 @@ class GpuiSidebarRuntime {
     if (T3CODE_ENABLED && agentId.trim() === "t3") {
       if (projectId) {
         this.postLocalT3SessionCreate(projectId);
+      }
+      return;
+    }
+    const isWindowsHost =
+      typeof navigator !== "undefined" && /Windows/iu.test(navigator.userAgent);
+    if (isWindowsHost) {
+      /*
+      CDXC:GPUIWindowsProjectAgent 2026-08-11:
+      Windows agent creation and attachment must stay in the Rust-owned WSL
+      gxserver path. Splitting creation across CEF fetch and native attach can
+      address different backend state during WSL bootstrap and leaves the
+      project-header click with no materialized terminal. Send only the
+      bounded project and agent ids; Rust resolves the configured command,
+      starts the provider, obtains its attach plan, and opens the exact tab.
+      */
+      const postCreate = window.ghostexGpui?.postCreateProjectAgent;
+      const normalizedAgentId = agentId.trim();
+      if (!projectId || !normalizedAgentId || typeof postCreate !== "function") {
+        this.postSidebarActionToast("warning", "Agent unavailable");
+        return;
+      }
+      try {
+        const accepted = postCreate(
+          JSON.stringify({
+            agentId: normalizedAgentId,
+            projectId,
+            type: "ghostex.gpui.sidebar.createProjectAgent",
+            version: 1,
+          }),
+        );
+        if (!accepted) {
+          this.postSidebarActionToast("warning", "Agent unavailable");
+        }
+      } catch {
+        this.postSidebarActionToast("warning", "Agent unavailable");
       }
       return;
     }
@@ -17651,6 +17779,12 @@ type GpuiWorkspaceTerminalBellPayload = {
   sessionId: string;
 };
 
+type GpuiWorkspaceTerminalTitleChangedPayload = {
+  projectId: string;
+  rawTitle: string;
+  sessionId: string;
+};
+
 type GpuiWorkspaceTerminalEscapePressedPayload = {
   projectId: string;
   sessionId: string;
@@ -17689,6 +17823,39 @@ type GpuiWorkspaceTerminalRuntimeActionPayload =
     }
   | { action: "sleepAllDaemonSessions" }
   | { action: "sleepInactiveSessions" };
+
+function normalizeGpuiWorkspaceTerminalTitleChanged(
+  value: unknown,
+): GpuiWorkspaceTerminalTitleChangedPayload | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).some(
+      (key) => !["projectId", "rawTitle", "sessionId", "type", "version"].includes(key),
+    ) ||
+    record.type !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_TYPE ||
+    record.version !== GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_CHANGED_MESSAGE_VERSION
+  ) {
+    return undefined;
+  }
+  const projectId = normalizeNonEmptyString(record.projectId)?.trim();
+  const sessionId = normalizeNonEmptyString(record.sessionId)?.trim();
+  const rawTitle = typeof record.rawTitle === "string" ? record.rawTitle : undefined;
+  if (
+    !projectId ||
+    !sessionId ||
+    !rawTitle ||
+    rawTitle.length > GPUI_SIDEBAR_WORKSPACE_TERMINAL_TITLE_MAX_CHARS ||
+    /[\u0000-\u001f\u007f]/u.test(rawTitle) ||
+    !gpuiLocalWorkspaceLifecycleProjectIdAllowed(projectId) ||
+    !gpuiLocalWorkspaceLifecycleSessionIdAllowed(sessionId)
+  ) {
+    return undefined;
+  }
+  return { projectId, rawTitle, sessionId };
+}
 
 function normalizeGpuiWorkspaceTerminalRuntimeAction(
   value: unknown,

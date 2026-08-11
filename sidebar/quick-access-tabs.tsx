@@ -1,13 +1,15 @@
 import { useEffect } from 'react';
+import { ghostexHotkeyTextFromKeyboardEvent } from '../shared/ghostex-hotkeys';
 import { openQuickAccess, type QuickAccessPage } from './app-modal-host-bridge';
+import { formatSidebarHotkeyLabel } from './hotkey-label';
 
 export type QuickAccessTab = QuickAccessPage;
 
 const QUICK_ACCESS_TABS = [
-  { hotkey: '⌘1', id: 'commands', label: 'Command Pane' },
-  { hotkey: '⌘2', id: 'recentProjects', label: 'Recent Projects' },
-  { hotkey: '⌘3', id: 'recentSessions', label: 'Sessions' },
-  { hotkey: '⌘4', id: 'savedPrompts', label: 'Saved Prompts' },
+  { hotkey: 'cmd+1', id: 'commands', label: 'Command Pane' },
+  { hotkey: 'cmd+2', id: 'recentProjects', label: 'Recent Projects' },
+  { hotkey: 'cmd+3', id: 'recentSessions', label: 'Sessions' },
+  { hotkey: 'cmd+4', id: 'savedPrompts', label: 'Saved Prompts' },
 ] as const satisfies ReadonlyArray<{
   hotkey: string;
   id: QuickAccessTab;
@@ -17,10 +19,8 @@ const QUICK_ACCESS_TABS = [
 export function QuickAccessHeader({ activeTab }: { activeTab: QuickAccessTab }) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) {
-        return;
-      }
-      const tab = QUICK_ACCESS_TABS[Number(event.key) - 1]?.id;
+      const hotkey = ghostexHotkeyTextFromKeyboardEvent(event);
+      const tab = QUICK_ACCESS_TABS.find((candidate) => candidate.hotkey === hotkey)?.id;
       if (!tab) {
         return;
       }
@@ -44,7 +44,7 @@ export function QuickAccessHeader({ activeTab }: { activeTab: QuickAccessTab }) 
           type='button'
         >
           <span>{tab.label}</span>
-          <kbd>{tab.hotkey}</kbd>
+          <kbd>{formatSidebarHotkeyLabel(tab.hotkey)}</kbd>
         </button>
       ))}
     </nav>
