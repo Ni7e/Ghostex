@@ -488,7 +488,6 @@ fn default_agent_session_title_name(agent_id: &str) -> Option<&'static str> {
         "pi" => Some("Pi"),
         "qoder" => Some("Qoder"),
         "rovodev" => Some("Rovo Dev"),
-        "t3" => Some("T3 Code"),
         _ => None,
     }
 }
@@ -4782,7 +4781,6 @@ fn default_agent_icon_to_id(icon: &str) -> Option<&'static str> {
         "pi" => Some("pi"),
         "qoder" => Some("qoder"),
         "rovo-dev" => Some("rovodev"),
-        "t3" => Some("t3"),
         _ => None,
     }
 }
@@ -4806,7 +4804,6 @@ pub(crate) fn default_agent_command(agent_id: &str) -> Option<&'static str> {
         "pi" => Some("pi"),
         "qoder" => Some("qodercli"),
         "rovodev" => Some("acli rovodev run"),
-        "t3" => Some("npx --yes t3"),
         _ => None,
     }
 }
@@ -4947,7 +4944,6 @@ fn is_ignored_placeholder_session_title_text(lower: &str) -> bool {
             | "rovo dev session"
             | "rovo session"
             | "rovodev session"
-            | "t3 code session"
     )
 }
 

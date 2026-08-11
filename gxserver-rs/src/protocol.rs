@@ -6,7 +6,6 @@ use crate::constants::{
     GXSERVER_REMOTE_API_HOST, GXSERVER_REMOTE_API_PORT,
 };
 use crate::portless::PortlessStatusPayload;
-use crate::t3_runtime::T3RuntimeStatusPayload;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApiPermission {
@@ -186,8 +185,6 @@ pub struct ServerHealthResponse {
     pub port: u16,
     pub server_id: String,
     pub started_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub t3_runtime: Option<T3RuntimeStatusPayload>,
     pub tools: Vec<ToolCapabilityStatus>,
 }
 
@@ -427,6 +424,15 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/removeProject"
         | "/api/deleteWorktreeProject"
         /*
+        CDXC:WorktreeRename 2026-08-09-18:40:
+        Renaming a worktree is remote-allowed for the same reason deleting one
+        is: a GPUI sidebar showing a remote machine's projects has to be able to
+        rename a worktree there. `projectId` is an opaque selector and `name` is
+        validated against the daemon's own ref policy before it reaches git; the
+        destination folder is computed by the daemon, never named by the caller.
+        */
+        | "/api/renameWorktreeProject"
+        /*
         CDXC:SidebarV2Worktrees 2026-07-29-00:00:
         Worktree sessions are remote-allowed for the same reason the other
         worktree RPCs are: a GPUI sidebar showing a remote machine's projects has
@@ -439,7 +445,6 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/createWorktreeSession"
         | "/api/removeSessionWorktree"
         | "/api/updateSession"
-        | "/api/syncT3EmbeddedSession"
         | "/api/updateSessionOrder"
         /*
         CDXC:SidebarV2Lifecycle 2026-07-29-00:00:
@@ -535,10 +540,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/installTool"
         | "/api/browseFilesystem"
         | "/api/destructiveAdminAction"
-        | "/api/t3Runtime/status"
-        | "/api/t3Runtime/start"
-        | "/api/t3Runtime/stop"
-        | "/api/t3Runtime/panes" => remote_blocked(path),
+        => return None,
         _ => return None,
     })
 }

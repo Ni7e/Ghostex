@@ -116,10 +116,6 @@ use crate::{
         create_gxserver_migration_status, initialize_gxserver_storage, open_gxserver_database,
         open_gxserver_database_with_busy_timeout,
     },
-    t3_runtime::{
-        parse_t3_runtime_panes_params, parse_t3_runtime_start_params, T3RuntimeManager,
-        T3RuntimeStatusPayload,
-    },
     terminal_ws::{handle_terminal_socket, TerminalWsState},
     toolchain::{get_gxserver_tool_statuses, require_bundled_bd, require_bundled_zmx},
     typed_operations::{
@@ -178,7 +174,6 @@ struct AppState {
     session_chat_option_cache: Arc<Mutex<HashMap<String, SessionChatOptionCacheEntry>>>,
     shutdown_tx: broadcast::Sender<()>,
     stale_activity_timers: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
-    t3_runtime: T3RuntimeManager,
     version: String,
     zmx_title_observers: Arc<Mutex<HashMap<String, ZmxTitleObserverTask>>>,
 }
@@ -371,7 +366,6 @@ pub async fn run_gxserver_foreground(
         session_chat_option_cache: Arc::new(Mutex::new(HashMap::new())),
         shutdown_tx: shutdown_tx.clone(),
         stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
-        t3_runtime: T3RuntimeManager::new(&paths),
         version,
         zmx_title_observers: Arc::new(Mutex::new(HashMap::new())),
     });
@@ -454,7 +448,6 @@ pub async fn run_gxserver_foreground(
     remove_runtime_metadata(&paths)?;
     stop_all_zmx_title_observers(&state);
     stop_all_session_chat_followers(&state);
-    state.t3_runtime.abort_background_tasks();
     Ok(GxserverForegroundResult { reused: false })
 }
 
@@ -2098,6 +2091,9 @@ async fn route_http(
         "/api/deleteWorktreeProject" => {
             handle_delete_worktree_project_http(&state, endpoint.path, request_id, &body_json).await
         }
+        "/api/renameWorktreeProject" => {
+            handle_rename_worktree_project_http(&state, endpoint.path, request_id, &body_json).await
+        }
         /*
         CDXC:SidebarV2Worktrees 2026-07-29-00:00:
         Sidebar V2's worktree flow. Unlike `createProjectWorktree`, these
@@ -2185,25 +2181,6 @@ async fn route_http(
             &body_json,
             |repository, db, params, _| {
                 let session = repository.update_session(params)?;
-                let project_id = value_text(&session, "projectId")?;
-                let session_id = value_text(&session, "sessionId")?;
-                schedule_presentation_session_delta(
-                    &state,
-                    db,
-                    repository,
-                    &project_id,
-                    &session_id,
-                )?;
-                Ok(json!({ "session": session }))
-            },
-        ),
-        "/api/syncT3EmbeddedSession" => handle_domain_http(
-            &state,
-            endpoint.path,
-            request_id,
-            &body_json,
-            |repository, db, params, _| {
-                let session = sync_t3_embedded_session(repository, params)?;
                 let project_id = value_text(&session, "projectId")?;
                 let session_id = value_text(&session, "sessionId")?;
                 schedule_presentation_session_delta(
@@ -2761,8 +2738,19 @@ async fn route_http(
                     .ok_or_else(|| {
                         DomainStateError::bad_request("Project has no filesystem path.")
                     })?;
+                /*
+                CDXC:DocsRootDirectory 2026-08-09:
+                Docs reads the project's own folder plus its configured Docs
+                directory (then the Global Default). Resolving here keeps
+                `run_project_docs_action` taking a plain root.
+
+                CDXC:DocsRootAdditive 2026-08-09: a bad Docs directory no longer
+                fails the request. It comes back as one unavailable mount inside
+                the listing, so the project's own docs still show and the panel
+                still names the path that could not be opened.
+                */
                 Ok(project_docs::run_project_docs_action(
-                    Path::new(project_path),
+                    &project_docs::resolve_project_docs_root(&project, project_path),
                     params,
                 ))
             },
@@ -2781,6 +2769,7 @@ async fn route_http(
         }
         "/api/sendSessionChatMessage" => {
             handle_send_session_chat_message_http(&state, endpoint.path, request_id, &body_json)
+                .await
         }
         "/api/saveSessionChatImage" => {
             handle_save_session_chat_image_http(&state, endpoint.path, request_id, &body_json)
@@ -2818,12 +2807,6 @@ async fn route_http(
         }
         "/api/resolveGitRootForPath" => {
             handle_resolve_git_root_for_path_http(&state, endpoint.path, request_id, &body_json)
-        }
-        "/api/t3Runtime/status"
-        | "/api/t3Runtime/start"
-        | "/api/t3Runtime/stop"
-        | "/api/t3Runtime/panes" => {
-            handle_t3_runtime_http(&state, endpoint.path, request_id, &body_json).await
         }
         "/api/control/stop" => {
             broadcast_server_stopping(&state);
@@ -2902,68 +2885,6 @@ fn handle_query_logs_http(
                 Some(request_id),
             ),
         ),
-    }
-}
-
-async fn handle_t3_runtime_http(
-    state: &Arc<AppState>,
-    endpoint_path: String,
-    request_id: String,
-    body: &Value,
-) -> RoutedResponse {
-    let params = match read_domain_rpc_params(body) {
-        Ok(params) => params,
-        Err(error) => return domain_error_response(endpoint_path, request_id, error),
-    };
-    let result = match endpoint_path.as_str() {
-        "/api/t3Runtime/status" => t3_runtime_status_snapshot(state).await,
-        "/api/t3Runtime/start" => match parse_t3_runtime_start_params(&params) {
-            Ok(request) => {
-                state.t3_runtime.request_start(request);
-                t3_runtime_status_snapshot(state).await
-            }
-            Err(error) => Err(error),
-        },
-        "/api/t3Runtime/stop" => {
-            let manager = state.t3_runtime.clone();
-            tokio::task::spawn_blocking(move || manager.stop_runtime())
-                .await
-                .map_err(t3_runtime_task_error)
-        }
-        "/api/t3Runtime/panes" => match parse_t3_runtime_panes_params(&params) {
-            Ok((client_id, session_ids)) => {
-                state.t3_runtime.update_panes(client_id, session_ids);
-                t3_runtime_status_snapshot(state).await
-            }
-            Err(error) => Err(error),
-        },
-        _ => Err(DomainStateError::not_found(format!(
-            "{endpoint_path} is not a T3 runtime endpoint."
-        ))),
-    };
-    match result {
-        Ok(status) => routed_json(
-            Some(endpoint_path),
-            StatusCode::OK,
-            rpc_success(request_id, json!({ "t3Runtime": status })),
-        ),
-        Err(error) => domain_error_response(endpoint_path, request_id, error),
-    }
-}
-
-async fn t3_runtime_status_snapshot(
-    state: &Arc<AppState>,
-) -> std::result::Result<T3RuntimeStatusPayload, DomainStateError> {
-    let manager = state.t3_runtime.clone();
-    tokio::task::spawn_blocking(move || manager.status_snapshot())
-        .await
-        .map_err(t3_runtime_task_error)
-}
-
-fn t3_runtime_task_error(error: tokio::task::JoinError) -> DomainStateError {
-    DomainStateError {
-        code: "internalError",
-        message: format!("T3 runtime task failed: {error}"),
     }
 }
 
@@ -5648,7 +5569,6 @@ fn default_agent_name(agent_id: &str) -> Option<&'static str> {
         "pi" => Some("Pi Agent"),
         "qoder" => Some("Qoder"),
         "rovodev" => Some("Rovo Dev"),
-        "t3" => Some("T3 Code"),
         _ => None,
     }
 }
@@ -6522,7 +6442,7 @@ async fn run_worktree_session_setup_command(
 }
 
 /*
-`startFromOrigin` means what it means in t3code: fetch the remote first and base
+`startFromOrigin` fetches the remote first and bases
 the new branch on the REMOTE tip, not on whatever the local branch happens to
 point at. Without it the base is the requested branch, or the repository's own
 default branch resolved by the shared P3 rules.
@@ -8096,7 +8016,7 @@ async fn remove_worktree_checkout(
     let mut remove =
         run_delete_worktree_action(&plan.projects, "remove", &plan.parent_path, extra).await?;
     let mut retried_for_submodules = false;
-    if exit_code(&remove) != 0 && !force_initial_remove && is_submodule_removal_refusal(&remove) {
+    if exit_code(&remove) != 0 && !force_initial_remove && is_submodule_worktree_refusal(&remove) {
         retried_for_submodules = true;
         let mut retry_extra = Map::new();
         retry_extra.insert(
@@ -8258,6 +8178,833 @@ fn delete_worktree_project_error_response(
     }
 }
 
+/*
+CDXC:WorktreeRename 2026-08-09-18:40:
+Renaming a worktree is a multi-step git + database mutation, so it lives behind
+ONE endpoint for exactly the reason `deleteWorktreeProject` does: the rollback
+must not depend on a renderer that may not survive the operation. The order is
+pre-flight, branch, folder, database, delta — every step checked, and everything
+reversible until the folder actually moves. If the branch rename lands and the
+move then fails, this rolls the branch back before returning, so a failed rename
+leaves nothing half-applied.
+
+The caller sends a NAME, never a path. The daemon slugs it into
+`<ParentFolder>-<slug>` next to the parent checkout itself, which is what keeps a
+renderer from pointing the move at a directory the user never named, and what
+keeps the typed operation's family-root guard meaningful.
+*/
+#[derive(Clone)]
+struct RenameWorktreeProjectParams {
+    name: String,
+    project_id: String,
+    rename_branch: bool,
+}
+
+struct RenameWorktreeProjectPlan {
+    destination_path: String,
+    moves_folder: bool,
+    params: RenameWorktreeProjectParams,
+    parent_path: String,
+    parent_project_name: String,
+    projects: Vec<Value>,
+    worktree_branch: Option<String>,
+    worktree_path: String,
+    /*
+    CDXC:WorktreeRename 2026-08-10:
+    The same folder can be spelled two ways on macOS — `/tmp/rt-old` and
+    `/private/tmp/rt-old` — and nothing forces a session's stored `cwd` to use
+    the spelling the project row happens to carry. Rebasing compares strings, so
+    a session recorded through the other spelling matched no prefix, kept an
+    absolute path into a folder that had just moved, and broke on its next cold
+    start (`start_session_provider` bakes the cwd into the run script).
+
+    Resolve the alias here, at plan time, because it is the last moment the old
+    folder still exists to resolve. `None` when it cannot be resolved or adds
+    nothing, so the lexical comparison stays the only one that runs.
+    */
+    worktree_path_resolved: Option<String>,
+}
+
+enum RenameWorktreeProjectError {
+    Domain(DomainStateError),
+    ProjectPath(ProjectPathHttpError),
+    Typed(TypedOperationError),
+}
+
+impl From<DomainStateError> for RenameWorktreeProjectError {
+    fn from(error: DomainStateError) -> Self {
+        Self::Domain(error)
+    }
+}
+
+impl From<ProjectPathHttpError> for RenameWorktreeProjectError {
+    fn from(error: ProjectPathHttpError) -> Self {
+        Self::ProjectPath(error)
+    }
+}
+
+impl From<TypedOperationError> for RenameWorktreeProjectError {
+    fn from(error: TypedOperationError) -> Self {
+        Self::Typed(error)
+    }
+}
+
+async fn handle_rename_worktree_project_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let result = match prepare_rename_worktree_project_plan(state, &params) {
+        Ok(plan) => rename_worktree_project_from_plan(state, plan).await,
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(result) => routed_json(
+            Some(endpoint_path),
+            StatusCode::OK,
+            rpc_success(request_id, result),
+        ),
+        Err(error) => rename_worktree_project_error_response(endpoint_path, request_id, error),
+    }
+}
+
+fn normalize_rename_worktree_project_params(
+    params: &Map<String, Value>,
+) -> std::result::Result<RenameWorktreeProjectParams, DomainStateError> {
+    let project_id = read_project_id(params)?;
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    if let Some(error) = worktree_rename_name_error(&name) {
+        return Err(DomainStateError::bad_request(error));
+    }
+    Ok(RenameWorktreeProjectParams {
+        name,
+        project_id,
+        rename_branch: params.get("renameBranch").and_then(Value::as_bool) == Some(true),
+    })
+}
+
+/*
+CDXC:WorktreeRename 2026-08-09-18:40:
+The daemon re-validates the typed name with the same nine rules the sidebar field
+enforces (`shared/worktree-rename-name.ts`), because the field is a courtesy and
+this is the boundary. Rules 1-6 are gxserver's existing ref policy; 7-9 are the
+shapes git refuses that the character allowlist alone would let through.
+*/
+fn worktree_rename_name_error(name: &str) -> Option<&'static str> {
+    const CHARACTER_ERROR: &str =
+        "Use letters, numbers, and . _ / - only, starting with a letter or number.";
+    const SEPARATOR_ERROR: &str = "Names cannot contain \"..\", \"//\", or end with \"/\".";
+    if name.chars().count() > 200 {
+        return Some("Name is too long (200 characters max).");
+    }
+    if !name
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_alphanumeric())
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '/' | '-'))
+        || name.ends_with('.')
+        || name
+            .split('/')
+            .any(|component| component.starts_with('.') || component.ends_with(".lock"))
+    {
+        return Some(CHARACTER_ERROR);
+    }
+    if name.contains("..") || name.contains("//") || name.ends_with('/') {
+        return Some(SEPARATOR_ERROR);
+    }
+    None
+}
+
+fn prepare_rename_worktree_project_plan(
+    state: &AppState,
+    params: &Map<String, Value>,
+) -> std::result::Result<RenameWorktreeProjectPlan, RenameWorktreeProjectError> {
+    let params = normalize_rename_worktree_project_params(params)?;
+    let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+        code: "internalError",
+        message: format!("SQLite gxserver state error: {error}"),
+    })?;
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    let projects = repository.list_projects()?;
+    let worktree_project = repository.get_project(&params.project_id)?.ok_or_else(|| {
+        DomainStateError::not_found(format!("Project {} does not exist.", params.project_id))
+    })?;
+    let worktree_project_path = worktree_project
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| DomainStateError::bad_request("Worktree project has no filesystem path."))?;
+    let worktree = normalize_worktree_metadata(worktree_project.get("worktree"))
+        .ok_or_else(|| DomainStateError::bad_request("Only worktree projects can be renamed."))?;
+    let parent_project = resolve_worktree_parent_project(&projects, &worktree)?;
+    let parent_project_path = parent_project
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| {
+            DomainStateError::not_found(format!(
+                "Parent project {} does not exist.",
+                worktree.parent_project_id
+            ))
+        })?;
+    let parent_project_name = parent_project
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let worktree_path_value = Value::String(worktree_project_path.to_string());
+    let parent_path_value = Value::String(parent_project_path.to_string());
+    let worktree_path = normalize_existing_directory_path(
+        Some(&worktree_path_value),
+        "project.path",
+        &state.paths.home_dir,
+    )?;
+    let parent_path = normalize_existing_directory_path(
+        Some(&parent_path_value),
+        "parentProject.path",
+        &state.paths.home_dir,
+    )?;
+
+    /*
+    CDXC:WorktreeRename 2026-08-09-18:40:
+    The typed operation scopes every worktree command to "inside the parent's
+    family directory" and compares paths LEXICALLY, by design — it collapses
+    `.`/`..` but deliberately does not resolve symlinks. So two rows that
+    describe the same folder through different symlink forms fail that guard
+    with a sentence about `worktreePath`, which means nothing to whoever just
+    clicked Rename. It happens for real on macOS: register a project as
+    `/tmp/rt` and its worktree resolves to `/private/tmp/rt-old`, because
+    `git worktree list` reports the resolved path while the project kept the
+    typed one.
+
+    Catch it here, where both paths are known, and say which two disagree. The
+    typed-operation guard stays the backstop; this only replaces the message.
+    */
+    let family_root = Path::new(&parent_path)
+        .parent()
+        .map(path_to_string)
+        .unwrap_or_else(|| parent_path.clone());
+    if !worktree_path.starts_with(&format!("{family_root}/")) {
+        return Err(DomainStateError::bad_request(
+            "This worktree and its project are registered under different paths, so Ghostex cannot tell they are siblings. This usually means one path goes through a symlink. Re-add the project using the same path form as the worktree.",
+        )
+        .into());
+    }
+
+    let destination_path = worktree_rename_destination_path(&parent_path, &params.name)
+        .ok_or_else(|| {
+            DomainStateError::bad_request(
+                "Use letters, numbers, and . _ / - only, starting with a letter or number.",
+            )
+        })?;
+    let moves_folder = destination_path != worktree_path;
+    if !moves_folder && !params.rename_branch {
+        return Err(DomainStateError::bad_request("Nothing to rename.").into());
+    }
+    if moves_folder {
+        if destination_path == parent_path {
+            return Err(
+                DomainStateError::bad_request("That name would collide with the main checkout.")
+                    .into(),
+            );
+        }
+        if Path::new(&destination_path).exists() {
+            return Err(DomainStateError::bad_request(format!(
+                "A folder named \"{}\" already exists next to the project.",
+                path_file_name_for_rename(&destination_path)
+            ))
+            .into());
+        }
+        if projects.iter().any(|project| {
+            project.get("projectId").and_then(Value::as_str) != Some(params.project_id.as_str())
+                && project
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(|path| {
+                        path_to_string(&resolve_path_syntax(PathBuf::from(path)))
+                            == destination_path
+                    })
+                    .unwrap_or(false)
+        }) {
+            return Err(DomainStateError::bad_request(
+                "Another project is already registered at that folder.",
+            )
+            .into());
+        }
+        /*
+        CDXC:WorktreeRename 2026-08-10:
+        These two probes exist to refuse early, with a sentence the user can act
+        on, and they are not authoritative. `worktree_is_locked` matches
+        `worktree_path` against what `git worktree list --porcelain` prints, and
+        git prints the symlink-resolved path while `normalize_existing_directory_path`
+        deliberately does not resolve one — a worktree registered through an
+        alias that still sits lexically inside the family root passes the guard
+        above and then reads as "not locked" here. A submodule can also be
+        initialised between this check and the move. `move_worktree_project_checkout`
+        re-classifies both refusals off git's own output and produces the same
+        sentences, so it, not this, is what actually enforces them.
+        */
+        if worktree_sessions::worktree_has_populated_submodules(&worktree_path) {
+            return Err(DomainStateError::bad_request(
+                "This worktree has initialised submodules, and git cannot move those. Remove them (git submodule deinit --all) or move the folder yourself.",
+            )
+            .into());
+        }
+        if worktree_sessions::worktree_is_locked(&parent_path, &worktree_path) {
+            return Err(DomainStateError::bad_request(
+                "This worktree is locked. Unlock it before renaming.",
+            )
+            .into());
+        }
+    }
+
+    let worktree_path_resolved = std::fs::canonicalize(&worktree_path)
+        .ok()
+        .map(|path| path_to_string(&path))
+        .filter(|resolved| resolved != &worktree_path);
+
+    Ok(RenameWorktreeProjectPlan {
+        destination_path,
+        moves_folder,
+        params,
+        parent_path,
+        parent_project_name,
+        projects,
+        worktree_branch: worktree.branch,
+        worktree_path,
+        worktree_path_resolved,
+    })
+}
+
+/// `<dirname(parent)>/<basename(parent)>-<slug(name)>`. Worktrees stay siblings
+/// of the parent checkout because the typed operation's family-root guard is
+/// written in those terms; a destination anywhere else could not pass it.
+fn worktree_rename_destination_path(parent_path: &str, name: &str) -> Option<String> {
+    let slug = worktree_sessions::worktree_rename_folder_slug(name);
+    if slug.is_empty() {
+        return None;
+    }
+    let parent = Path::new(parent_path);
+    let folder = parent.file_name()?.to_string_lossy().to_string();
+    let family_root = parent.parent()?;
+    Some(path_to_string(
+        &family_root.join(format!("{folder}-{slug}")),
+    ))
+}
+
+fn path_file_name_for_rename(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+async fn rename_worktree_project_from_plan(
+    state: &AppState,
+    plan: RenameWorktreeProjectPlan,
+) -> std::result::Result<Value, RenameWorktreeProjectError> {
+    let current_branch = resolve_renamed_worktree_branch_name(&plan).await?;
+    /*
+    CDXC:WorktreeRename 2026-08-10:
+    "Nothing to rename" cannot be decided from the checkbox alone. Asking to
+    rename the branch to the name it already has, on a folder that is already
+    correct, is a request to change nothing — and reporting success for that
+    tells the user something happened when it did not. The plan-time check
+    catches the checkbox-off case; this catches the one that needs git.
+    */
+    if !plan.moves_folder
+        && current_branch
+            .as_deref()
+            .is_some_and(|branch| branch == plan.params.name)
+    {
+        return Err(DomainStateError::bad_request("Nothing to rename.").into());
+    }
+    let renamed_branch = rename_worktree_project_branch(&plan, current_branch.as_deref()).await?;
+    if plan.moves_folder {
+        if let Err(error) = move_worktree_project_checkout(&plan).await {
+            /*
+            CDXC:WorktreeRename 2026-08-09-18:40:
+            The branch rename is the only step that already landed, and it is
+            trivially reversible, so undo it before reporting the move failure.
+            A user who sees "could not rename" must not then discover their
+            branch was renamed anyway.
+            */
+            if let (Some(from), Some(to)) = (current_branch.as_deref(), renamed_branch.as_deref()) {
+                /*
+                CDXC:WorktreeRename 2026-08-10:
+                The undo is the only thing standing between the user and the
+                state the comment above forbids, so a failed undo is exactly the
+                case worth recording. Dropping it left the branch renamed, the
+                request reporting the move error, and nothing anywhere saying
+                the two had diverged. The user still gets the move error — the
+                rename genuinely did not happen — but support can now see it.
+                */
+                let rollback = run_rename_worktree_action(
+                    &plan.projects,
+                    "renameBranch",
+                    &plan.parent_path,
+                    rename_branch_params(to, from),
+                )
+                .await;
+                let rollback_failure = match &rollback {
+                    Err(_) => Some("branch rollback dispatch failed".to_string()),
+                    Ok(result) if exit_code(result) != 0 => {
+                        Some(format!("git exited {}", exit_code(result)))
+                    }
+                    Ok(_) => None,
+                };
+                if let Some(reason) = rollback_failure {
+                    let _ = state.logger.log(GxserverLogInput {
+                        level: LogLevel::Warn,
+                        event: "worktreeRenameBranchRollbackFailed".to_string(),
+                        server_id: Some(state.metadata.server_id.clone()),
+                        request_id: None,
+                        client: None,
+                        duration_ms: None,
+                        error: Some(reason),
+                        details: Some(json!({ "projectId": plan.params.project_id })),
+                    });
+                }
+            }
+            return Err(error);
+        }
+    }
+    let project = apply_renamed_worktree_project_state(state, &plan, renamed_branch.as_deref())?;
+    Ok(json!({
+        "movedFolder": plan.moves_folder,
+        "project": project,
+        "renamedBranch": renamed_branch,
+    }))
+}
+
+async fn resolve_renamed_worktree_branch_name(
+    plan: &RenameWorktreeProjectPlan,
+) -> std::result::Result<Option<String>, RenameWorktreeProjectError> {
+    let mut extra = Map::new();
+    extra.insert("action".to_string(), Value::String("branch".to_string()));
+    extra.insert(
+        "projectPath".to_string(),
+        Value::String(plan.worktree_path.clone()),
+    );
+    let branch = dispatch_typed_operation_endpoint("/api/runGitAction", &extra, plan.projects.clone())
+        .await?;
+    if exit_code(&branch) == 0 {
+        if let Some(branch_name) = branch
+            .get("stdout")
+            .and_then(Value::as_str)
+            .and_then(normalize_branch_name)
+        {
+            return Ok(Some(branch_name));
+        }
+    }
+    Ok(plan.worktree_branch.clone())
+}
+
+async fn rename_worktree_project_branch(
+    plan: &RenameWorktreeProjectPlan,
+    current_branch: Option<&str>,
+) -> std::result::Result<Option<String>, RenameWorktreeProjectError> {
+    if !plan.params.rename_branch {
+        return Ok(None);
+    }
+    let Some(current_branch) = current_branch else {
+        return Err(DomainStateError::bad_request(
+            "This worktree has no branch checked out, so there is no branch to rename.",
+        )
+        .into());
+    };
+    if current_branch == plan.params.name {
+        return Ok(None);
+    }
+    if worktree_sessions::worktree_branch_exists(&plan.parent_path, &plan.params.name) {
+        return Err(DomainStateError::bad_request(format!(
+            "Branch \"{}\" already exists.",
+            plan.params.name
+        ))
+        .into());
+    }
+    let result = run_rename_worktree_action(
+        &plan.projects,
+        "renameBranch",
+        &plan.parent_path,
+        rename_branch_params(current_branch, &plan.params.name),
+    )
+    .await?;
+    if exit_code(&result) != 0 {
+        return Err(DomainStateError::bad_request("Could not rename the branch.").into());
+    }
+    Ok(Some(plan.params.name.clone()))
+}
+
+fn rename_branch_params(branch: &str, new_branch: &str) -> Map<String, Value> {
+    let mut params = Map::new();
+    params.insert("branch".to_string(), Value::String(branch.to_string()));
+    params.insert(
+        "newBranch".to_string(),
+        Value::String(new_branch.to_string()),
+    );
+    params
+}
+
+async fn move_worktree_project_checkout(
+    plan: &RenameWorktreeProjectPlan,
+) -> std::result::Result<(), RenameWorktreeProjectError> {
+    let mut extra = Map::new();
+    extra.insert(
+        "worktreePath".to_string(),
+        Value::String(plan.worktree_path.clone()),
+    );
+    extra.insert(
+        "destinationPath".to_string(),
+        Value::String(plan.destination_path.clone()),
+    );
+    let result =
+        run_rename_worktree_action(&plan.projects, "move", &plan.parent_path, extra).await?;
+    if exit_code(&result) == 0 {
+        return Ok(());
+    }
+    /*
+    CDXC:WorktreeRename 2026-08-09-18:40:
+    git's stderr never reaches the user (typed-operation results are bounded by
+    contract), so translate the two refusals that are actionable and fall back to
+    a plain sentence for everything else. Submodules are re-checked here as well
+    as in the pre-flight because one can be initialised between the two.
+    */
+    if is_submodule_worktree_refusal(&result) {
+        return Err(DomainStateError::bad_request(
+            "This worktree has initialised submodules, and git cannot move those. Remove them (git submodule deinit --all) or move the folder yourself.",
+        )
+        .into());
+    }
+    if is_locked_worktree_refusal(&result) {
+        return Err(DomainStateError::bad_request(
+            "This worktree is locked. Unlock it before renaming.",
+        )
+        .into());
+    }
+    Err(DomainStateError::bad_request("Could not move the worktree folder.").into())
+}
+
+async fn run_rename_worktree_action(
+    projects: &[Value],
+    action: &str,
+    project_path: &str,
+    mut extra_params: Map<String, Value>,
+) -> std::result::Result<Value, RenameWorktreeProjectError> {
+    extra_params.insert("action".to_string(), Value::String(action.to_string()));
+    extra_params.insert(
+        "projectPath".to_string(),
+        Value::String(project_path.to_string()),
+    );
+    dispatch_typed_operation_endpoint("/api/runWorktreeAction", &extra_params, projects.to_vec())
+        .await
+        .map_err(Into::into)
+}
+
+fn is_locked_worktree_refusal(result: &Value) -> bool {
+    let text = format!(
+        "{}\n{}",
+        result
+            .get("stderr")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        result
+            .get("stdout")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    );
+    text.to_lowercase()
+        .contains("cannot move a locked working tree")
+}
+
+/*
+CDXC:WorktreeRename 2026-08-09-18:40:
+Everything that mirrors the worktree's location has to move with it in one pass,
+because the alternative is a sidebar row pointing at a folder that no longer
+exists — worse than not having the feature. The full list, each traced rather
+than guessed:
+
+- `projects.path`, through `relocate_project` so the destination is validated and
+  a collision with another registered project is still refused;
+- `projects.name`, the derived `<ParentProjectName>-<slug>` label;
+- `projects.worktreeJson`, re-detected from git at the new path (its `name` and
+  `branch` are stamped once at registration and never recomputed otherwise);
+- every `sessions.cwd` under the old folder — V2 worktree sessions store an
+  absolute cwd, and `start_session_provider` bakes that cwd into the generated
+  run script, so a stale one breaks the next cold start;
+- the V2 worktree session marker's `path`, which is the only authority the
+  branch auto-rename trusts and silently no-ops when it points nowhere;
+- `projectBoardConfig.beadsDirectory`, but only when it is an absolute path
+  inside the worktree; it defaults to the project path, which the relocate fixes.
+
+Caches are deliberately absent: the git-status cache, the worktree-topology probe
+(60s TTL), and the project-icon cache are all keyed by path and self-heal.
+*/
+fn apply_renamed_worktree_project_state(
+    state: &AppState,
+    plan: &RenameWorktreeProjectPlan,
+    renamed_branch: Option<&str>,
+) -> std::result::Result<Value, RenameWorktreeProjectError> {
+    /*
+    The busy handler is the point of this entry point: the transaction below
+    reserves the writer, and the daemon has other writers (lifecycle sweeps,
+    session updates). Without lock waiting, a concurrent write would fail this
+    one outright — after the folder has already moved, which is the one moment
+    there is nothing to retry.
+    */
+    let db = open_gxserver_database_with_busy_timeout(&state.paths, Duration::from_secs(10))
+        .map_err(|error| DomainStateError {
+            code: "internalError",
+            message: format!("SQLite gxserver state error: {error}"),
+        })?;
+    let project_id = plan.params.project_id.as_str();
+    /*
+    CDXC:WorktreeRename 2026-08-10:
+    The folder has already moved by the time any of this runs, so these rows are
+    the only remaining description of where it went — and the list above only has
+    value whole. Written one statement at a time, a session write that failed
+    halfway left the project row pointing at the new folder while the sessions
+    behind it still named the old one: a state no later request can tell apart
+    from a rename that worked. One transaction makes the failure mean "the
+    database still describes the old folder", which the returned error then says.
+    Following `create_session_transactional`: IMMEDIATE so the writer reservation
+    is held before the first read the writes depend on.
+    */
+    let transaction =
+        rusqlite::Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| DomainStateError {
+                code: "internalError",
+                message: format!("SQLite gxserver state error: {error}"),
+            })?;
+    let project = {
+        let repository = DomainRepository::new(&transaction, state.metadata.server_id.as_str());
+        write_renamed_worktree_project_state(&repository, plan, renamed_branch)
+            .map_err(|error| unrecorded_worktree_rename_error(plan, error))?
+    };
+    transaction
+        .commit()
+        .map_err(|error| DomainStateError {
+            code: "internalError",
+            message: format!("SQLite gxserver state error: {error}"),
+        })
+        .map_err(|error| unrecorded_worktree_rename_error(plan, error.into()))?;
+
+    let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+    schedule_presentation_project_delta(state, &db, &repository, project_id, "projectUpdated")?;
+    Ok(project)
+}
+
+/// The transaction rolled back, so the database still describes the old folder
+/// while the filesystem no longer has one there. Say both halves: without the
+/// paths, "SQLite error" gives nobody enough to put the two back in step.
+fn unrecorded_worktree_rename_error(
+    plan: &RenameWorktreeProjectPlan,
+    error: RenameWorktreeProjectError,
+) -> RenameWorktreeProjectError {
+    if !plan.moves_folder {
+        return error;
+    }
+    let RenameWorktreeProjectError::Domain(domain) = error else {
+        return error;
+    };
+    DomainStateError {
+        code: domain.code,
+        message: format!(
+            "The worktree folder moved to \"{}\", but Ghostex could not record it and still points at \"{}\". Nothing else was changed. ({})",
+            plan.destination_path, plan.worktree_path, domain.message
+        ),
+    }
+    .into()
+}
+
+fn write_renamed_worktree_project_state(
+    repository: &DomainRepository<'_>,
+    plan: &RenameWorktreeProjectPlan,
+    renamed_branch: Option<&str>,
+) -> std::result::Result<Value, RenameWorktreeProjectError> {
+    let project_id = plan.params.project_id.as_str();
+
+    if plan.moves_folder {
+        let mut relocate = Map::new();
+        relocate.insert("projectId".to_string(), json!(project_id));
+        relocate.insert("path".to_string(), json!(plan.destination_path.clone()));
+        repository.relocate_project(&relocate)?;
+    }
+
+    let projects = repository.list_projects()?;
+    let project_name = renamed_worktree_project_name(plan);
+    let mut update = Map::new();
+    update.insert("projectId".to_string(), json!(project_id));
+    update.insert("name".to_string(), json!(project_name.clone()));
+    if let Some(worktree) = crate::domain::detect_registered_git_worktree_metadata(
+        &projects,
+        &plan.destination_path,
+        &project_name,
+    ) {
+        let mut worktree = worktree;
+        /*
+        The worktree's `createdAt` records when the checkout was made, so keep
+        the registered value instead of stamping the rename as a creation.
+        */
+        if let Some(created_at) = projects
+            .iter()
+            .find(|candidate| candidate.get("projectId").and_then(Value::as_str) == Some(project_id))
+            .and_then(|candidate| candidate.get("worktree"))
+            .and_then(Value::as_object)
+            .and_then(|current| current.get("createdAt"))
+            .cloned()
+        {
+            worktree.insert("createdAt".to_string(), created_at);
+        }
+        update.insert("worktree".to_string(), Value::Object(worktree));
+    }
+    if let Some(board_config) = renamed_worktree_board_config(&projects, plan) {
+        update.insert("projectBoardConfig".to_string(), Value::Object(board_config));
+    }
+    let project = repository.update_project(&update)?;
+
+    if plan.moves_folder {
+        for session in repository.list_sessions(Some(project_id))? {
+            let Some(session_id) = session.get("sessionId").and_then(Value::as_str) else {
+                continue;
+            };
+            let mut session_update = Map::new();
+            let moved_cwd = session
+                .get("cwd")
+                .and_then(Value::as_str)
+                .and_then(|cwd| rebase_renamed_worktree_path(cwd, plan));
+            if let Some(cwd) = moved_cwd {
+                session_update.insert("cwd".to_string(), json!(cwd));
+            }
+            if let Some(runtime_settings) =
+                worktree_sessions::runtime_settings_with_moved_worktree_path(
+                    &session,
+                    &plan.destination_path,
+                    renamed_branch,
+                )
+            {
+                session_update.insert(
+                    "runtimeSettings".to_string(),
+                    Value::Object(runtime_settings),
+                );
+            }
+            if session_update.is_empty() {
+                continue;
+            }
+            session_update.insert("projectId".to_string(), json!(project_id));
+            session_update.insert("sessionId".to_string(), json!(session_id));
+            repository.update_session(&session_update)?;
+        }
+    } else if let Some(branch) = renamed_branch {
+        for session in repository.list_sessions(Some(project_id))? {
+            let Some(session_id) = session.get("sessionId").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(runtime_settings) = worktree_sessions::runtime_settings_with_moved_worktree_path(
+                &session,
+                &plan.worktree_path,
+                Some(branch),
+            ) else {
+                continue;
+            };
+            let mut session_update = Map::new();
+            session_update.insert("projectId".to_string(), json!(project_id));
+            session_update.insert("sessionId".to_string(), json!(session_id));
+            session_update.insert(
+                "runtimeSettings".to_string(),
+                Value::Object(runtime_settings),
+            );
+            repository.update_session(&session_update)?;
+        }
+    }
+
+    Ok(project)
+}
+
+fn renamed_worktree_project_name(plan: &RenameWorktreeProjectPlan) -> String {
+    let suffix = path_file_name_for_rename(&plan.destination_path);
+    let parent_folder = path_file_name_for_rename(&plan.parent_path);
+    let slug = suffix
+        .strip_prefix(&format!("{parent_folder}-"))
+        .unwrap_or(&suffix);
+    let parent_label = if plan.parent_project_name.trim().is_empty() {
+        parent_folder.as_str()
+    } else {
+        plan.parent_project_name.trim()
+    };
+    format!("{parent_label}-{slug}")
+}
+
+fn renamed_worktree_board_config(
+    projects: &[Value],
+    plan: &RenameWorktreeProjectPlan,
+) -> Option<Map<String, Value>> {
+    if !plan.moves_folder {
+        return None;
+    }
+    let mut board_config = projects
+        .iter()
+        .find(|candidate| {
+            candidate.get("projectId").and_then(Value::as_str)
+                == Some(plan.params.project_id.as_str())
+        })?
+        .get("projectBoardConfig")
+        .and_then(Value::as_object)
+        .cloned()?;
+    let directory = board_config.get("beadsDirectory").and_then(Value::as_str)?;
+    let moved = rebase_renamed_worktree_path(directory, plan)?;
+    board_config.insert("beadsDirectory".to_string(), json!(moved));
+    Some(board_config)
+}
+
+/// `<old worktree>/x` becomes `<new worktree>/x`; anything outside the moved
+/// folder is left exactly as it is. The old folder is recognised through either
+/// spelling it had before the move — see `worktree_path_resolved`.
+fn rebase_renamed_worktree_path(path: &str, plan: &RenameWorktreeProjectPlan) -> Option<String> {
+    let normalized = path_to_string(&resolve_path_syntax(PathBuf::from(path)));
+    let roots =
+        std::iter::once(plan.worktree_path.as_str()).chain(plan.worktree_path_resolved.as_deref());
+    for root in roots {
+        if normalized == root {
+            return Some(plan.destination_path.clone());
+        }
+        if let Some(rest) = normalized.strip_prefix(&format!("{root}/")) {
+            return Some(format!("{}/{rest}", plan.destination_path));
+        }
+    }
+    None
+}
+
+fn rename_worktree_project_error_response(
+    endpoint_path: String,
+    request_id: String,
+    error: RenameWorktreeProjectError,
+) -> RoutedResponse {
+    match error {
+        RenameWorktreeProjectError::Domain(error) => {
+            domain_error_response(endpoint_path, request_id, error)
+        }
+        RenameWorktreeProjectError::ProjectPath(error) => {
+            project_path_error_response(endpoint_path, request_id, error)
+        }
+        RenameWorktreeProjectError::Typed(error) => {
+            typed_operation_error_response(endpoint_path, request_id, error)
+        }
+    }
+}
+
 fn is_allowed_git_remote_name(value: &str) -> bool {
     value.chars().enumerate().all(|(index, ch)| {
         (index == 0 && ch.is_ascii_alphanumeric())
@@ -8281,7 +9028,9 @@ fn has_porcelain_status_changes(stdout: &str) -> bool {
     })
 }
 
-fn is_submodule_removal_refusal(result: &Value) -> bool {
+/// git refuses `worktree remove` and `worktree move` on a checkout with
+/// initialised submodules through the same message, so both verbs classify here.
+fn is_submodule_worktree_refusal(result: &Value) -> bool {
     let text = format!(
         "{}\n{}",
         result
@@ -8558,7 +9307,7 @@ fn browse_project_directories(
     A path browser walks directories the user may not be allowed to read, and a
     hard error there would replace the suggestion list with a failure every time
     the caret crosses one. Permission failures therefore answer with an empty
-    entry list for the resolved parent (the t3code `filesystem.browse`
+    entry list for the resolved parent (the shared filesystem browse
     contract); every other read failure still surfaces as `notFound`.
     */
     let dirents = match fs::read_dir(&parent_path) {
@@ -10680,7 +11429,7 @@ fn resolve_session_chat_send_target(
     })
 }
 
-fn handle_send_session_chat_message_http(
+async fn handle_send_session_chat_message_http(
     state: &AppState,
     endpoint_path: String,
     request_id: String,
@@ -10777,14 +11526,31 @@ fn handle_send_session_chat_message_http(
             },
         );
     }
-    let steps = crate::session_chat_send::build_session_chat_message_steps(&text, &image_paths);
-    crate::session_chat_send::enqueue_session_chat_send(
+    let mut steps = crate::session_chat_send::build_session_chat_message_steps(&text, &image_paths);
+    steps.insert(
+        0,
+        crate::session_chat_send::SessionChatSendStep::PreserveTerminalDraft {
+            state_dir: state.paths.app_state_dir.clone(),
+        },
+    );
+    if let Err(message) = crate::session_chat_send::execute_session_chat_send(
         &target.project_id,
         &target.session_id,
         &target.zmx_name,
         "session-chat-message",
         steps,
-    );
+    )
+    .await
+    {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "dependencyUnavailable",
+                message,
+            },
+        );
+    }
     // An option command changes what the statusline reports: read it back.
     let agent = session_chat_agent_for_session(&target.session);
     if crate::session_chat_options::is_session_chat_option_command_text(agent.as_deref(), &text) {
@@ -12229,322 +12995,6 @@ fn read_session_text(session: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn sync_t3_object_field(value: &Value, key: &str) -> Map<String, Value> {
-    value
-        .get(key)
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn sync_t3_param_text(params: &Map<String, Value>, key: &str) -> Option<String> {
-    read_text_from_map(params, key)
-        .filter(|value| value.chars().count() <= 1024 && !value.chars().any(char::is_control))
-}
-
-fn sync_t3_required_param_text(
-    params: &Map<String, Value>,
-    key: &str,
-) -> std::result::Result<String, DomainStateError> {
-    sync_t3_param_text(params, key)
-        .ok_or_else(|| DomainStateError::bad_request(format!("{key} is required.")))
-}
-
-fn sync_t3_metadata_text(
-    runtime_t3: &Map<String, Value>,
-    provider_t3: &Map<String, Value>,
-    key: &str,
-) -> Option<String> {
-    read_text_from_map(runtime_t3, key).or_else(|| read_text_from_map(provider_t3, key))
-}
-
-fn sync_t3_thread_is_placeholder(thread_id: &str) -> bool {
-    let normalized = thread_id.trim().to_ascii_lowercase();
-    normalized.starts_with("ghostex-thread-")
-        || normalized.starts_with("ghostex-draft-")
-        || normalized.starts_with("pending-")
-}
-
-fn sync_t3_normalize_activity(value: Option<&Value>) -> Option<&'static str> {
-    match value.and_then(Value::as_str).map(str::trim) {
-        Some("attention") => Some("attention"),
-        Some("idle") => Some("idle"),
-        Some("working") => Some("working"),
-        _ => None,
-    }
-}
-
-fn sync_t3_normalize_lifecycle(value: Option<&Value>) -> Option<&'static str> {
-    match value.and_then(Value::as_str).map(str::trim) {
-        Some("missing") => Some("missing"),
-        Some("running") => Some("running"),
-        Some("sleeping") => Some("sleeping"),
-        Some("stopped") => Some("stopped"),
-        Some("unknown") => Some("unknown"),
-        _ => None,
-    }
-}
-
-fn sync_t3_sidebar_mode(value: Option<&Value>) -> &'static str {
-    match value.and_then(Value::as_str).map(str::trim) {
-        Some("normal") => "normal",
-        _ => "collapsed",
-    }
-}
-
-fn sync_t3_normalize_title(value: Option<&Value>) -> Option<String> {
-    let normalized = value
-        .and_then(Value::as_str)?
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let normalized = normalized.trim();
-    if normalized.is_empty() || normalized.chars().any(char::is_control) {
-        return None;
-    }
-    let lower = normalized.to_ascii_lowercase();
-    if matches!(
-        lower.as_str(),
-        "t3 code" | "t3 code (alpha)" | "no active thread" | "pick a thread to continue"
-    ) {
-        return None;
-    }
-    Some(normalized.chars().take(240).collect())
-}
-
-fn sync_t3_agent_activity(activity: &str, previous: Option<&Value>) -> Value {
-    let now = now_iso();
-    let previous_seen_working = previous
-        .and_then(Value::as_object)
-        .and_then(|activity| activity.get("hasSeenWorking"))
-        .and_then(Value::as_bool)
-        == Some(true);
-    json!({
-        "activity": activity,
-        "hasSeenWorking": previous_seen_working || activity == "working",
-        "isAcknowledged": activity != "attention",
-        "lastChangedAt": now,
-        "suppressedUntil": now,
-    })
-}
-
-fn sync_t3_embedded_session(
-    repository: &DomainRepository<'_>,
-    params: &Map<String, Value>,
-) -> std::result::Result<Value, DomainStateError> {
-    /*
-    CDXC:T3SessionOwnership 2026-07-01-02:17:
-    Embedded T3 sync updates exactly one existing Ghostex `kind: "t3"` row by Ghostex project/session id. Do not create fallback rows from T3 thread ids; validate the workspace/thread binding and then update only provider metadata, lifecycle/activity, title provenance, and cleanup-safe markers.
-    */
-    let ghostex_project_id = sync_t3_required_param_text(params, "ghostexProjectId")?;
-    let ghostex_session_id = sync_t3_required_param_text(params, "ghostexSessionId")?;
-    if !is_gxserver_project_id(&ghostex_project_id) || !is_gxserver_session_id(&ghostex_session_id)
-    {
-        return Err(DomainStateError::bad_request(
-            "Ghostex T3 sync target identity is invalid.",
-        ));
-    }
-    let current = repository
-        .get_session(&ghostex_project_id, &ghostex_session_id)?
-        .ok_or_else(|| DomainStateError::not_found("Ghostex T3 session does not exist."))?;
-    if read_session_text(&current, "kind").as_deref() != Some("t3") {
-        return Err(DomainStateError::bad_request(
-            "Ghostex T3 sync target must be a T3 session.",
-        ));
-    }
-
-    let mut runtime_settings = sync_t3_object_field(&current, "runtimeSettings");
-    let mut provider_state = sync_t3_object_field(&current, "providerState");
-    let mut runtime_t3 = runtime_settings
-        .get("t3")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let mut provider_t3 = provider_state
-        .get("t3")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-
-    let incoming_workspace_root = sync_t3_param_text(params, "workspaceRoot");
-    let current_workspace_root = sync_t3_metadata_text(&runtime_t3, &provider_t3, "workspaceRoot")
-        .or_else(|| read_session_text(&current, "cwd"));
-    if let (Some(current_workspace_root), Some(incoming_workspace_root)) =
-        (&current_workspace_root, &incoming_workspace_root)
-    {
-        if current_workspace_root != incoming_workspace_root {
-            return Err(DomainStateError::bad_request(
-                "T3 sync workspace does not match the Ghostex session.",
-            ));
-        }
-    }
-    let workspace_root = incoming_workspace_root.or(current_workspace_root);
-
-    let incoming_t3_project_id = sync_t3_param_text(params, "t3ProjectId")
-        .or_else(|| sync_t3_param_text(params, "projectId"));
-    let current_t3_project_id = sync_t3_metadata_text(&runtime_t3, &provider_t3, "projectId");
-    if let (Some(current_t3_project_id), Some(incoming_t3_project_id)) =
-        (&current_t3_project_id, &incoming_t3_project_id)
-    {
-        if current_t3_project_id != incoming_t3_project_id {
-            return Err(DomainStateError::bad_request(
-                "T3 sync project does not match the Ghostex session binding.",
-            ));
-        }
-    }
-    let t3_project_id = incoming_t3_project_id.or(current_t3_project_id);
-
-    let incoming_thread_id = sync_t3_param_text(params, "threadId");
-    let current_thread_id = sync_t3_metadata_text(&runtime_t3, &provider_t3, "boundThreadId")
-        .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "threadId"));
-    let allow_rebind = params.get("allowThreadRebind").and_then(Value::as_bool) == Some(true);
-    if let (Some(current_thread_id), Some(incoming_thread_id)) =
-        (&current_thread_id, &incoming_thread_id)
-    {
-        if current_thread_id != incoming_thread_id
-            && !allow_rebind
-            && !sync_t3_thread_is_placeholder(current_thread_id)
-        {
-            return Err(DomainStateError::bad_request(
-                "T3 sync thread does not match the Ghostex session binding.",
-            ));
-        }
-    }
-    let thread_id = incoming_thread_id.or(current_thread_id).ok_or_else(|| {
-        DomainStateError::bad_request("T3 sync requires thread binding metadata.")
-    })?;
-
-    runtime_t3.insert(
-        "ghostexProjectId".to_string(),
-        Value::String(ghostex_project_id.clone()),
-    );
-    runtime_t3.insert(
-        "ghostexSessionId".to_string(),
-        Value::String(ghostex_session_id.clone()),
-    );
-    provider_t3.insert(
-        "ghostexProjectId".to_string(),
-        Value::String(ghostex_project_id.clone()),
-    );
-    provider_t3.insert(
-        "ghostexSessionId".to_string(),
-        Value::String(ghostex_session_id.clone()),
-    );
-    if let Some(t3_project_id) = t3_project_id {
-        runtime_t3.insert(
-            "projectId".to_string(),
-            Value::String(t3_project_id.clone()),
-        );
-        provider_t3.insert("projectId".to_string(), Value::String(t3_project_id));
-    }
-    if let Some(server_origin) = sync_t3_param_text(params, "serverOrigin")
-        .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "serverOrigin"))
-    {
-        runtime_t3.insert(
-            "serverOrigin".to_string(),
-            Value::String(server_origin.clone()),
-        );
-        provider_t3.insert("serverOrigin".to_string(), Value::String(server_origin));
-    }
-    if let Some(environment_id) = sync_t3_param_text(params, "environmentId")
-        .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "environmentId"))
-    {
-        runtime_t3.insert(
-            "environmentId".to_string(),
-            Value::String(environment_id.clone()),
-        );
-        provider_t3.insert("environmentId".to_string(), Value::String(environment_id));
-    }
-    runtime_t3.insert(
-        "boundThreadId".to_string(),
-        Value::String(thread_id.clone()),
-    );
-    runtime_t3.insert("threadId".to_string(), Value::String(thread_id.clone()));
-    provider_t3.insert(
-        "boundThreadId".to_string(),
-        Value::String(thread_id.clone()),
-    );
-    provider_t3.insert("threadId".to_string(), Value::String(thread_id));
-    if let Some(workspace_root) = workspace_root {
-        runtime_t3.insert(
-            "workspaceRoot".to_string(),
-            Value::String(workspace_root.clone()),
-        );
-        provider_t3.insert("workspaceRoot".to_string(), Value::String(workspace_root));
-    }
-    if let Some(created_at) = sync_t3_param_text(params, "createdAt")
-        .or_else(|| sync_t3_metadata_text(&runtime_t3, &provider_t3, "createdAt"))
-    {
-        runtime_t3.insert("createdAt".to_string(), Value::String(created_at.clone()));
-        provider_t3.insert("createdAt".to_string(), Value::String(created_at));
-    }
-    runtime_t3.insert(
-        "createdBy".to_string(),
-        Value::String("ghostex-embedded".to_string()),
-    );
-    provider_t3.insert(
-        "createdBy".to_string(),
-        Value::String("ghostex-embedded".to_string()),
-    );
-    let sidebar_mode = sync_t3_sidebar_mode(params.get("t3SidebarMode"));
-    runtime_t3.insert(
-        "t3SidebarMode".to_string(),
-        Value::String(sidebar_mode.to_string()),
-    );
-    provider_t3.insert(
-        "t3SidebarMode".to_string(),
-        Value::String(sidebar_mode.to_string()),
-    );
-
-    runtime_settings.insert("provider".to_string(), Value::String("t3code".to_string()));
-    runtime_settings.insert("t3".to_string(), Value::Object(runtime_t3));
-    provider_state.insert("provider".to_string(), Value::String("t3code".to_string()));
-    provider_state.insert("t3".to_string(), Value::Object(provider_t3));
-    if let Some(lifecycle) = sync_t3_normalize_lifecycle(params.get("lifecycleState")) {
-        provider_state.insert(
-            "lifecycleState".to_string(),
-            Value::String(
-                if lifecycle == "stopped" {
-                    "missing"
-                } else {
-                    "unknown"
-                }
-                .to_string(),
-            ),
-        );
-    }
-    if let Some(title_source) = sync_t3_param_text(params, "titleSource") {
-        runtime_settings.insert("titleSource".to_string(), Value::String(title_source));
-    }
-    if let Some(activity) = sync_t3_normalize_activity(params.get("activity")) {
-        let previous = runtime_settings.get("agentActivity").cloned();
-        runtime_settings.insert(
-            "agentActivity".to_string(),
-            sync_t3_agent_activity(activity, previous.as_ref()),
-        );
-    }
-
-    let mut update = Map::new();
-    update.insert("kind".to_string(), Value::String("t3".to_string()));
-    update.insert("projectId".to_string(), Value::String(ghostex_project_id));
-    update.insert("sessionId".to_string(), Value::String(ghostex_session_id));
-    update.insert(
-        "runtimeSettings".to_string(),
-        Value::Object(runtime_settings),
-    );
-    update.insert("providerState".to_string(), Value::Object(provider_state));
-    if let Some(lifecycle) = sync_t3_normalize_lifecycle(params.get("lifecycleState")) {
-        update.insert(
-            "lifecycleState".to_string(),
-            Value::String(lifecycle.to_string()),
-        );
-    }
-    if let Some(title) = sync_t3_normalize_title(params.get("title")) {
-        update.insert("title".to_string(), Value::String(title));
-    }
-    repository.update_session(&update)
-}
-
 fn result_activity(result: &Value) -> Option<&str> {
     result
         .get("activity")
@@ -13094,7 +13544,6 @@ fn create_authenticated_health(state: &AppState) -> ServerHealthResponse {
         port: state.metadata.port,
         server_id: state.metadata.server_id.clone(),
         started_at: state.metadata.started_at.clone(),
-        t3_runtime: Some(state.t3_runtime.status_snapshot()),
         tools: get_gxserver_tool_statuses(),
     }
 }
@@ -14790,6 +15239,432 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn renaming_a_worktree_updates_the_project_path_and_every_session_cwd() {
+        /*
+        CDXC:WorktreeRename 2026-08-09-18:40:
+        The lockstep contract. A rename that moves the folder but leaves the
+        database describing the old one is worse than no feature: the sidebar row
+        points at a dead path, `start_session_provider` refuses to start anything
+        there, and the V2 worktree marker silently stops being renameable. Assert
+        the whole set in one pass — project path, derived label, re-detected
+        worktree metadata, every session cwd, and the marker path — because they
+        only have value together.
+        */
+        if !git_available() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("rename-worktree-parent");
+        let worktree = paths.root_dir.join("rename-worktree-parent-old");
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(&parent, &["branch", "ghostex/0123abcd"]);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                path_to_string(&worktree).as_str(),
+                "ghostex/0123abcd",
+            ],
+        );
+
+        let parent_project =
+            add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+        let worktree_project =
+            add_project_path_for_server_test(state.clone(), &token, &worktree, None).await;
+        assert_eq!(
+            worktree_project["worktree"]["parentProjectId"],
+            parent_project["projectId"]
+        );
+
+        let marker = worktree_sessions::worktree_session_marker_value(
+            "ghostex/0123abcd",
+            &path_to_string(&worktree),
+            "Codex Session",
+            "2026-07-29T00:00:00.000Z",
+        );
+        let created = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/createSession",
+                &token,
+                json!({
+                    "params": {
+                        "cwd": path_to_string(&worktree.join("packages/app")),
+                        "kind": "terminal",
+                        "projectId": worktree_project["projectId"],
+                        "runtimeSettings": {
+                            worktree_sessions::WORKTREE_SESSION_RUNTIME_KEY: marker,
+                        },
+                        "title": "Codex Session",
+                    }
+                }),
+            ),
+            "request-create-rename-session".to_string(),
+        )
+        .await;
+        assert_eq!(created.response.status(), StatusCode::OK);
+        let session = response_json(created.response).await["result"]["session"].clone();
+
+        let response = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/renameWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "name": "feat/kanban-assignee",
+                        "projectId": worktree_project["projectId"],
+                        "renameBranch": true
+                    }
+                }),
+            ),
+            "request-rename-worktree".to_string(),
+        )
+        .await;
+        assert_eq!(response.response.status(), StatusCode::OK);
+        let body = response_json(response.response).await;
+        let renamed = paths
+            .root_dir
+            .join("rename-worktree-parent-feat-kanban-assignee");
+
+        assert_eq!(body["result"]["movedFolder"], json!(true));
+        assert_eq!(body["result"]["renamedBranch"], json!("feat/kanban-assignee"));
+        assert_eq!(body["result"]["project"]["path"], json!(path_to_string(&renamed)));
+        assert_eq!(
+            body["result"]["project"]["name"],
+            json!("Parent-feat-kanban-assignee")
+        );
+        assert_eq!(
+            body["result"]["project"]["worktree"]["name"],
+            json!("rename-worktree-parent-feat-kanban-assignee")
+        );
+        assert_eq!(
+            body["result"]["project"]["worktree"]["branch"],
+            json!("feat/kanban-assignee")
+        );
+        assert_eq!(
+            body["result"]["project"]["worktree"]["createdAt"],
+            worktree_project["worktree"]["createdAt"],
+            "a rename is not a new checkout"
+        );
+        assert!(renamed.is_dir());
+        assert!(!worktree.exists());
+        assert_eq!(
+            run_git_for_server_test(&renamed, &["branch", "--show-current"]).trim(),
+            "feat/kanban-assignee"
+        );
+
+        let sessions = route_http(
+            state,
+            rpc_request(
+                "/api/listSessions",
+                &token,
+                json!({ "params": { "projectId": worktree_project["projectId"] } }),
+            ),
+            "request-list-renamed-sessions".to_string(),
+        )
+        .await;
+        let sessions = response_json(sessions.response).await;
+        let moved = sessions["result"]["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .find(|candidate| candidate["sessionId"] == session["sessionId"])
+            .cloned()
+            .expect("renamed session");
+        assert_eq!(
+            moved["cwd"],
+            json!(path_to_string(&renamed.join("packages/app"))),
+            "a cwd inside the moved folder follows it"
+        );
+        let moved_marker =
+            &moved["runtimeSettings"][worktree_sessions::WORKTREE_SESSION_RUNTIME_KEY];
+        assert_eq!(moved_marker["path"], json!(path_to_string(&renamed)));
+        assert_eq!(moved_marker["branch"], json!("feat/kanban-assignee"));
+        assert_eq!(moved_marker["initialTitle"], json!("Codex Session"));
+    }
+
+    #[test]
+    fn a_session_cwd_recorded_through_the_resolved_path_form_still_follows_the_move() {
+        /*
+        CDXC:WorktreeRename 2026-08-10:
+        Nothing forces a session's stored `cwd` to use the same spelling of a
+        folder that the project row happens to carry, and on macOS every path
+        under `/tmp` or `/var` has two: `/tmp/rt-old` and `/private/tmp/rt-old`.
+        Compared lexically against the project row's spelling alone, a cwd
+        recorded through the other one matched no prefix, was left untouched, and
+        pointed into a folder that had just moved — which breaks that session's
+        next cold start, because `start_session_provider` bakes the cwd into the
+        generated run script. Both spellings of the old folder rebase; anything
+        genuinely outside it still does not.
+        */
+        let plan = RenameWorktreeProjectPlan {
+            destination_path: "/tmp/rt-new".to_string(),
+            moves_folder: true,
+            params: RenameWorktreeProjectParams {
+                name: "new".to_string(),
+                project_id: "project-1".to_string(),
+                rename_branch: false,
+            },
+            parent_path: "/tmp/rt".to_string(),
+            parent_project_name: "Parent".to_string(),
+            projects: Vec::new(),
+            worktree_branch: None,
+            worktree_path: "/tmp/rt-old".to_string(),
+            worktree_path_resolved: Some("/private/tmp/rt-old".to_string()),
+        };
+
+        assert_eq!(
+            rebase_renamed_worktree_path("/tmp/rt-old/packages/app", &plan).as_deref(),
+            Some("/tmp/rt-new/packages/app"),
+            "the spelling the project row carries"
+        );
+        assert_eq!(
+            rebase_renamed_worktree_path("/private/tmp/rt-old/packages/app", &plan).as_deref(),
+            Some("/tmp/rt-new/packages/app"),
+            "the spelling the filesystem resolves to"
+        );
+        assert_eq!(
+            rebase_renamed_worktree_path("/private/tmp/rt-old", &plan).as_deref(),
+            Some("/tmp/rt-new")
+        );
+        assert_eq!(
+            rebase_renamed_worktree_path("/private/tmp/rt-older/src", &plan),
+            None,
+            "a sibling that merely shares a prefix is not inside the moved folder"
+        );
+        assert_eq!(
+            rebase_renamed_worktree_path("/tmp/somewhere-else", &plan),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn renaming_a_worktree_refuses_a_taken_folder_and_a_taken_branch() {
+        /*
+        CDXC:WorktreeRename 2026-08-09-18:40:
+        Both refusals must land BEFORE anything is touched, and both must say
+        which name is in the way. The folder case is the important one: with the
+        destination already present, `git worktree move` exits 0 and nests the
+        checkout one level deeper, so "no error" would otherwise mean "the folder
+        is somewhere nobody asked for".
+        */
+        if !git_available() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let parent = paths.root_dir.join("rename-guard-parent");
+        let worktree = paths.root_dir.join("rename-guard-parent-old");
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(&parent, &["branch", "ghostex/0123abcd"]);
+        run_git_for_server_test(&parent, &["branch", "feat/taken"]);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                path_to_string(&worktree).as_str(),
+                "ghostex/0123abcd",
+            ],
+        );
+        fs::create_dir_all(paths.root_dir.join("rename-guard-parent-busy")).expect("busy dir");
+
+        add_project_path_for_server_test(state.clone(), &token, &parent, Some("Parent")).await;
+        let worktree_project =
+            add_project_path_for_server_test(state.clone(), &token, &worktree, None).await;
+
+        let taken_folder = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/renameWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "name": "busy",
+                        "projectId": worktree_project["projectId"]
+                    }
+                }),
+            ),
+            "request-rename-taken-folder".to_string(),
+        )
+        .await;
+        assert_eq!(taken_folder.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(taken_folder.response).await;
+        assert_eq!(
+            body["message"],
+            json!("A folder named \"rename-guard-parent-busy\" already exists next to the project.")
+        );
+        assert!(worktree.is_dir(), "the worktree never moved");
+
+        let taken_branch = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/renameWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "name": "feat/taken",
+                        "projectId": worktree_project["projectId"],
+                        "renameBranch": true
+                    }
+                }),
+            ),
+            "request-rename-taken-branch".to_string(),
+        )
+        .await;
+        assert_eq!(taken_branch.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(taken_branch.response).await;
+        assert_eq!(
+            body["message"],
+            json!("Branch \"feat/taken\" already exists.")
+        );
+        assert!(
+            worktree.is_dir(),
+            "a refused branch rename never moves the folder"
+        );
+        assert_eq!(
+            run_git_for_server_test(&worktree, &["branch", "--show-current"]).trim(),
+            "ghostex/0123abcd"
+        );
+
+        let nothing = route_http(
+            state.clone(),
+            rpc_request(
+                "/api/renameWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "name": "old",
+                        "projectId": worktree_project["projectId"]
+                    }
+                }),
+            ),
+            "request-rename-nothing".to_string(),
+        )
+        .await;
+        assert_eq!(nothing.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(nothing.response).await;
+        assert_eq!(body["message"], json!("Nothing to rename."));
+
+        /*
+        CDXC:WorktreeRename 2026-08-10:
+        Asking to rename the branch to the name it already carries, on a folder
+        that is already correct, changes nothing — and reporting success for it
+        tells the user something happened. The checkbox being ticked is not
+        enough to call it a rename.
+        */
+        run_git_for_server_test(&parent, &["branch", "-m", "ghostex/0123abcd", "old"]);
+        let no_op_branch = route_http(
+            state,
+            rpc_request(
+                "/api/renameWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "name": "old",
+                        "projectId": worktree_project["projectId"],
+                        "renameBranch": true
+                    }
+                }),
+            ),
+            "request-rename-noop-branch".to_string(),
+        )
+        .await;
+        assert_eq!(no_op_branch.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(no_op_branch.response).await;
+        assert_eq!(body["message"], json!("Nothing to rename."));
+    }
+
+    // Symlinks are the whole subject of this test, and `std::os::unix::fs` does
+    // not exist off unix — without the gate the module stops compiling there.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn renaming_explains_a_worktree_registered_through_a_different_path_form() {
+        /*
+        CDXC:WorktreeRename 2026-08-09-18:40:
+        Reproduces a real failure from manual testing on macOS: the project was
+        registered as `/tmp/rt` while its worktree resolved to
+        `/private/tmp/rt-old`, because `git worktree list` reports the symlink-
+        resolved path and the project kept the typed one. The typed operation
+        compares paths lexically by design, so it refused with a sentence about
+        `worktreePath` that meant nothing to the user. The rename must explain
+        which two things disagree instead of forwarding that.
+        */
+        if !git_available() {
+            return;
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let paths = get_gxserver_paths(Some(temp.path().to_path_buf()));
+        let state = test_app_state(paths.clone());
+        let token = state.auth_token.clone();
+        let real_root = paths.root_dir.join("symlink-family");
+        fs::create_dir_all(&real_root).expect("real root");
+        let parent = real_root.join("rt");
+        let worktree = real_root.join("rt-old");
+        create_git_repository_for_server_test(&parent);
+        run_git_for_server_test(&parent, &["branch", "feat/old"]);
+        run_git_for_server_test(
+            &parent,
+            &[
+                "worktree",
+                "add",
+                path_to_string(&worktree).as_str(),
+                "feat/old",
+            ],
+        );
+
+        // The parent is registered through a symlinked alias of the same folder,
+        // exactly as `/tmp/rt` aliases `/private/tmp/rt`.
+        let alias_root = paths.root_dir.join("symlink-alias");
+        std::os::unix::fs::symlink(&real_root, &alias_root).expect("symlink");
+        let aliased_parent = alias_root.join("rt");
+
+        add_project_path_for_server_test(state.clone(), &token, &aliased_parent, Some("Parent"))
+            .await;
+        let worktree_project =
+            add_project_path_for_server_test(state.clone(), &token, &worktree, None).await;
+
+        let response = route_http(
+            state,
+            rpc_request(
+                "/api/renameWorktreeProject",
+                &token,
+                json!({
+                    "params": {
+                        "name": "renamed",
+                        "projectId": worktree_project["projectId"]
+                    }
+                }),
+            ),
+            "request-rename-symlinked-family".to_string(),
+        )
+        .await;
+
+        assert_eq!(response.response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response.response).await;
+        let message = body["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("registered under different paths"),
+            "expected the mismatch explained, got: {message}"
+        );
+        assert!(
+            !message.contains("worktreePath"),
+            "the internal typed-operation sentence must not reach the user: {message}"
+        );
+        assert!(worktree.is_dir(), "nothing was touched");
+    }
+
+    #[tokio::test]
     async fn delete_worktree_project_route_force_removes_dirty_checkout_and_warns_for_remote() {
         if !git_available() {
             return;
@@ -14960,167 +15835,6 @@ mod tests {
         assert!(!worktree.exists());
     }
 
-    #[tokio::test]
-    async fn t3_runtime_endpoints_require_auth_and_stay_on_the_local_listener() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
-
-        for path in [
-            "/api/t3Runtime/status",
-            "/api/t3Runtime/start",
-            "/api/t3Runtime/stop",
-            "/api/t3Runtime/panes",
-        ] {
-            let endpoint = endpoint_for(path).expect("t3 runtime endpoint");
-            assert_eq!(endpoint.permission, ApiPermission::RemoteBlocked);
-            assert!(endpoint.requires_auth);
-            assert!(endpoint.requires_protocol_version);
-            assert_eq!(endpoint.transport, Transport::Http);
-            assert!(!is_remote_endpoint_allowed(
-                ListenerKind::Remote,
-                endpoint.permission
-            ));
-
-            let response = route_http(
-                state.clone(),
-                rpc_request(path, "wrong-token", json!({ "params": {} })),
-                "request-t3-runtime-auth".to_string(),
-            )
-            .await;
-            assert_eq!(response.response.status(), StatusCode::UNAUTHORIZED);
-        }
-    }
-
-    #[tokio::test]
-    async fn t3_runtime_status_route_returns_the_stopped_contract_shape() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
-        let token = state.auth_token.clone();
-
-        let response = route_http(
-            state,
-            rpc_request("/api/t3Runtime/status", &token, json!({ "params": {} })),
-            "request-t3-runtime-status".to_string(),
-        )
-        .await;
-
-        assert_eq!(response.response.status(), StatusCode::OK);
-        let body = response_json(response.response).await;
-        assert_eq!(
-            body["result"]["t3Runtime"],
-            json!({
-                "running": false,
-                "port": 3774,
-                "authReady": false,
-            })
-        );
-    }
-
-    #[tokio::test]
-    async fn t3_runtime_stop_route_is_a_clean_no_op_when_not_running() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
-        let token = state.auth_token.clone();
-
-        let response = route_http(
-            state,
-            rpc_request("/api/t3Runtime/stop", &token, json!({ "params": {} })),
-            "request-t3-runtime-stop".to_string(),
-        )
-        .await;
-
-        assert_eq!(response.response.status(), StatusCode::OK);
-        let body = response_json(response.response).await;
-        assert_eq!(body["result"]["t3Runtime"]["running"], json!(false));
-        assert!(body["result"]["t3Runtime"].get("pid").is_none());
-        assert!(body["result"]["t3Runtime"].get("ownership").is_none());
-    }
-
-    #[tokio::test]
-    async fn t3_runtime_start_route_rejects_invalid_params_before_launching() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
-        let token = state.auth_token.clone();
-
-        let missing_cwd = route_http(
-            state.clone(),
-            rpc_request("/api/t3Runtime/start", &token, json!({ "params": {} })),
-            "request-t3-runtime-start-missing-cwd".to_string(),
-        )
-        .await;
-        assert_eq!(missing_cwd.response.status(), StatusCode::BAD_REQUEST);
-        let body = response_json(missing_cwd.response).await;
-        assert_eq!(body["error"], json!("badRequest"));
-
-        let one_sided_plan = route_http(
-            state,
-            rpc_request(
-                "/api/t3Runtime/start",
-                &token,
-                json!({
-                    "params": {
-                        "cwd": path_to_string(temp.path()),
-                        "nodePath": "/usr/bin/env",
-                    }
-                }),
-            ),
-            "request-t3-runtime-start-one-sided-plan".to_string(),
-        )
-        .await;
-        assert_eq!(one_sided_plan.response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn t3_runtime_panes_route_validates_params_and_touches_the_heartbeat_file() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let state = test_app_state(get_gxserver_paths(Some(temp.path().to_path_buf())));
-        let token = state.auth_token.clone();
-        let heartbeat_file = state.t3_runtime.t3_paths().heartbeat_file.clone();
-
-        let missing_sessions = route_http(
-            state.clone(),
-            rpc_request(
-                "/api/t3Runtime/panes",
-                &token,
-                json!({ "params": { "clientId": "gpui" } }),
-            ),
-            "request-t3-runtime-panes-missing-sessions".to_string(),
-        )
-        .await;
-        assert_eq!(missing_sessions.response.status(), StatusCode::BAD_REQUEST);
-        assert!(!heartbeat_file.exists());
-
-        let live_panes = route_http(
-            state.clone(),
-            rpc_request(
-                "/api/t3Runtime/panes",
-                &token,
-                json!({ "params": { "clientId": "gpui", "sessionIds": ["G1", "G2"] } }),
-            ),
-            "request-t3-runtime-panes-live".to_string(),
-        )
-        .await;
-        assert_eq!(live_panes.response.status(), StatusCode::OK);
-        let body = response_json(live_panes.response).await;
-        assert_eq!(body["result"]["t3Runtime"]["running"], json!(false));
-        assert!(heartbeat_file.exists());
-        assert!(state.t3_runtime.heartbeat_task_is_running());
-
-        let empty_panes = route_http(
-            state.clone(),
-            rpc_request(
-                "/api/t3Runtime/panes",
-                &token,
-                json!({ "params": { "clientId": "gpui", "sessionIds": [] } }),
-            ),
-            "request-t3-runtime-panes-empty".to_string(),
-        )
-        .await;
-        assert_eq!(empty_panes.response.status(), StatusCode::OK);
-        assert!(!state.t3_runtime.heartbeat_task_is_running());
-    }
-
-    // -----------------------------------------------------------------------
     // Sidebar V2 worktree sessions
     // -----------------------------------------------------------------------
 
@@ -15804,7 +16518,6 @@ mod tests {
                 config.listeners.local.host, config.listeners.local.port
             ),
         );
-        let t3_runtime = crate::t3_runtime::test_t3_runtime_manager(&paths);
         Arc::new(AppState {
             auth_token: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             automation_runtime,
@@ -15822,7 +16535,6 @@ mod tests {
             session_chat_option_cache: Arc::new(Mutex::new(HashMap::new())),
             shutdown_tx,
             stale_activity_timers: Arc::new(Mutex::new(HashMap::new())),
-            t3_runtime,
             version: "0.0.0-test".to_string(),
             zmx_title_observers: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -15918,7 +16630,6 @@ mod tests {
             port: config.listeners.local.port,
             server_id: "S7k".to_string(),
             started_at: "2026-05-30T10:00:00.000Z".to_string(),
-            t3_runtime: None,
             tools: vec![],
         }
     }

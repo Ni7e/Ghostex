@@ -3,6 +3,7 @@ use anyhow::Result;
 use gpui::{Bounds, Pixels};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub fn prepare_application() {}
 
@@ -21,8 +22,6 @@ pub fn focus_native_view(_native_view: *mut std::ffi::c_void) {}
 pub fn focus_gpui_root_view(_native_view: *mut std::ffi::c_void) {}
 
 pub type BrowserPopupOpenHandler = Rc<dyn Fn(String)>;
-
-pub type T3WorkspaceBridgeEventHandler = Rc<dyn Fn(String)>;
 
 pub enum BrowserPageMetadataEvent {
     AddressChanged(String),
@@ -98,8 +97,6 @@ pub enum SidebarBridgeEvent {
     CreateProjectAgent(String),
     CreateProjectTerminal(String),
     WorkspaceTerminalFocus(String),
-    T3SessionFocus(String),
-    T3SessionCreate(String),
     WorkspaceTerminalRenameCommand(String),
     WorkspaceTerminalEnter(String),
     WorkspaceTerminalLifecycleResult(String),
@@ -110,7 +107,6 @@ pub enum SidebarBridgeEvent {
     TitlebarGitMenuState(String),
     OpenBrowserUrl(String),
     BrowserTabFocus(String),
-    T3BrowserAccessRequest(String),
     ProjectBoardConversationResponse(String),
 }
 
@@ -137,8 +133,22 @@ pub type AppModalHostBridgeEventHandler = Rc<dyn Fn(AppModalHostBridgeEvent)>;
 #[derive(Clone, Debug)]
 pub struct ManageDocsResourceScope;
 
+/// CDXC:DocsRootDirectory 2026-08-09: parity with the CEF scope, whose mounted
+/// Docs roots and their allowed relative roots are resolved together, lazily,
+/// off the main thread.
+type ManageDocsLocalRootResolver =
+    Arc<dyn Fn() -> Option<Vec<ManageDocsResourceRoot>> + Send + Sync>;
+
+/// CDXC:DocsRootAdditive 2026-08-09: parity with the CEF scope's mount record.
+#[derive(Clone)]
+pub struct ManageDocsResourceRoot {
+    pub allowed_relative_roots: Vec<String>,
+    pub mount_segment: String,
+    pub path: PathBuf,
+}
+
 impl ManageDocsResourceScope {
-    pub fn new(_project_root: PathBuf, _allowed_relative_roots: Vec<String>) -> Self {
+    pub fn new(_resolve_root: ManageDocsLocalRootResolver) -> Self {
         Self
     }
 }
@@ -181,7 +191,6 @@ impl CefBrowser {
         _manage_docs_resource_scope: Option<ManageDocsResourceScope>,
         _app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         _app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
-        _t3_workspace_bridge_event_handler: Option<T3WorkspaceBridgeEventHandler>,
     ) -> Self {
         Self
     }

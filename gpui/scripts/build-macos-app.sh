@@ -136,6 +136,8 @@ completion_sound_assets=(
 bundled_cli_skill_assets=(
 	ghostex-browser-use
 	ghostex-computer-use
+	ghostex-cli
+	ghostex-manage-automations
 	ghostex-agent-orchestration
 	ghostex-fable-5.6-orchestration
 	ghostex-find-prev-session
@@ -198,6 +200,17 @@ validate_portless_admin_runtime_resources() {
 			echo "Missing sealed GPUI on-demand component manifest: $WEB_SOURCE_DIR/on-demand-resources.json" >&2
 			missing=1
 		fi
+	elif [[ "${GHOSTEX_LOCAL_START:-0}" == "1" && ! -f "$WEB_SOURCE_DIR/code-server/out/node/entry.js" ]]; then
+		# CDXC:LocalStartSourceOptional 2026-08-09:
+		# prepare-macos-runtime.sh already treats a missing code-server checkout
+		# as an optional skip for local starts ("Skipping optional Source
+		# editor"), so failing here on the runtime it deliberately did not stage
+		# made a local dev build impossible without a full VS Code build. The
+		# Source tab is the only thing absent from such a build.
+		# Keyed on the entrypoint, not the directory: prepare stages the bundled
+		# Node runtime into code-server/lib/node even when no checkout exists,
+		# so the directory is always present and proves nothing.
+		echo "Local start without a staged Source runtime: skipping Source validation." >&2
 	else
 		# Development/bundled builds retain the complete self-contained Source
 		# runtime and validate its own lib/node beside the entrypoint.
@@ -217,12 +230,6 @@ validate_portless_admin_runtime_resources() {
 		echo "Missing GPUI Portless CLI payload: $WEB_SOURCE_DIR/portless/dist/cli.js" >&2
 		missing=1
 	fi
-	# CDXC:T3CodeDisabled ghostex-mzp9: Retain the validation for a future
-	# re-enable, but disabled builds intentionally have no staged T3 runtime.
-	# if [[ ! -f "$WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" ]]; then
-	# 	echo "Missing GPUI T3 Code server entrypoint: $WEB_SOURCE_DIR/t3code-server/dist/bin.mjs" >&2
-	# 	missing=1
-	# fi
 
 	if [[ "$missing" == "1" ]]; then
 		exit 1
@@ -269,6 +276,61 @@ validate_local_gxserver_runtime_resources() {
 	fi
 
 	if [[ "$missing" == "1" ]]; then
+		exit 1
+	fi
+}
+
+# CDXC:GPUILocalToolchainValidation 2026-08-10:
+# Local cargo builds invoke cef-dll-sys, whose CMake setup selects the Ninja
+# generator unconditionally but reports a generic "build program not found"
+# error that is easy to misread as a compiler or CEF issue. Fail up front with
+# an actionable message instead of letting the Cargo build stall and fail.
+validate_build_toolchain_dependencies() {
+	local missing=0
+
+	if ! command -v ninja >/dev/null 2>&1; then
+		echo "Required build tool 'ninja' was not found on PATH." >&2
+		echo "The cef-dll-sys crate drives CMake with the Ninja generator; without it the CEF build fails late." >&2
+		echo "Install it with: brew install ninja" >&2
+		missing=1
+	fi
+	if ! command -v cmake >/dev/null 2>&1; then
+		echo "Required build tool 'cmake' was not found on PATH." >&2
+		echo "The cef-dll-sys crate requires CMake to configure the bundled CEF sources." >&2
+		echo "Install it with: brew install cmake" >&2
+		missing=1
+	fi
+
+	if [[ "$missing" == "1" ]]; then
+		exit 1
+	fi
+
+	# The CEF build script compiles Metal shaders, so the Metal toolchain must
+	# be present even for host-only local builds.
+	if ! xcrun --sdk macosx --find metal >/dev/null 2>&1; then
+		echo "The macOS Metal toolchain is not installed; the CEF build cannot compile its shaders." >&2
+		echo "Install it with: xcodebuild -downloadComponent MetalToolchain" >&2
+		exit 1
+	fi
+}
+
+# CDXC:GPUIGhosttyKitLocalPrereq 2026-08-10:
+# gpui/build.rs links the repo-local GhosttyKit static archive by exact path
+# (gpui/build.rs links ghostty/macos/GhosttyKit.xcframework/.../ghostty-internal.a).
+# The dev path never builds it; the release pipeline does. Detecting the absence
+# up front avoids a long Rust compile that only fails at link time.
+validate_ghosttykit_archive() {
+	local ghostty_kit="$REPO_ROOT/ghostty/macos/GhosttyKit.xcframework/macos-arm64_x86_64"
+	if [[ ! -f "$ghostty_kit/ghostty-internal.a" || ! -f "$ghostty_kit/Headers/ghostty.h" ]]; then
+		echo "Missing repo-local GhosttyKit static archive: $ghostty_kit" >&2
+		echo "gpui/build.rs links this archive by exact path; the dev build does not build it." >&2
+		echo "Build it from the vendored Ghostty source with:" >&2
+		echo "  (cd \"$REPO_ROOT/ghostty\" && ZIG=\${ZIG:-\$(command -v zig)} && \\" >&2
+		echo "     env DEVELOPER_DIR=\"\$(xcode-select -p)\" \\" >&2
+		echo "       SDKROOT=\"\$(DEVELOPER_DIR=\"\$(xcode-select -p)\" xcrun --sdk macosx --show-sdk-path)\" \\" >&2
+		echo "       GHOSTTY_METAL_DEVELOPER_DIR=\"\$(xcode-select -p)\" \\" >&2
+		echo "       \"\$ZIG\" build -Demit-xcframework -Dxcframework-target=universal -Demit-macos-app=false)" >&2
+		echo "Requires Zig 0.15.2 (\`brew install zig@0.15\`) and the Metal toolchain." >&2
 		exit 1
 	fi
 }
@@ -909,6 +971,8 @@ validate_completion_sound_assets
 validate_cli_resources
 validate_portless_admin_runtime_resources
 validate_local_gxserver_runtime_resources
+validate_build_toolchain_dependencies
+validate_ghosttykit_archive
 
 (
 	cd "$REPO_ROOT"
@@ -996,7 +1060,7 @@ done
 # GPUI local starts seal the freshly built app-owned gxserver package and shared
 # Web/bin tools into Contents/Resources/Web, matching the native start command's
 # daemon ownership instead of launching against the main Ghostex.app bundle.
-rm -rf "$WEB_DIR/bin" "$WEB_DIR/code-server" "$WEB_DIR/gxserver" "$WEB_DIR/portless" "$WEB_DIR/t3code-server"
+rm -rf "$WEB_DIR/bin" "$WEB_DIR/code-server" "$WEB_DIR/gxserver" "$WEB_DIR/portless"
 mkdir -p "$WEB_DIR/portless"
 rsync -a --delete "$WEB_BIN_SOURCE_DIR/" "$WEB_DIR/bin/"
 rsync -a --delete "$GXSERVER_SOURCE_DIR/" "$WEB_DIR/gxserver/"
@@ -1006,9 +1070,6 @@ if [[ "$GHOSTEX_ON_DEMAND_ASSETS" != "1" ]]; then
 fi
 rsync -a --delete "$WEB_SOURCE_DIR/portless/" "$WEB_DIR/portless/"
 chmod 755 "$WEB_DIR/portless/dist/cli.js"
-# CDXC:T3CodeDisabled ghostex-mzp9: Keep the staging command ready for a future
-# re-enable; current bundles must not contain Web/t3code-server.
-# rsync -a --delete "$WEB_SOURCE_DIR/t3code-server/" "$WEB_DIR/t3code-server/"
 if [[ "$GHOSTEX_ON_DEMAND_ASSETS" == "1" ]]; then
 	stage_on_demand_remote_gxserver_manifest
 else
