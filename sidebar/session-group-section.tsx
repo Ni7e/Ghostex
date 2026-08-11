@@ -539,12 +539,14 @@ function clampContextMenuPosition(
 export function getGroupContextMenuItemCount({
   canCreateSessionGroup = false,
   canFullReloadGroup,
+  canHideGroup = false,
   hasProjectContext,
   isWorktreeProject,
   projectCollectionsEnabled = false,
 }: {
   canCreateSessionGroup?: boolean;
   canFullReloadGroup: boolean;
+  canHideGroup?: boolean;
   hasProjectContext: boolean;
   isWorktreeProject: boolean;
   projectCollectionsEnabled?: boolean;
@@ -552,11 +554,28 @@ export function getGroupContextMenuItemCount({
   /*
    * CDXC:ProjectGroups 2026-06-08-09:19:
    * Worktree project headings should expose Copy Path but omit the IDE Open action in their compact context menu. Keep the root context-menu item count explicit by project kind so viewport clamping stays aligned with the visible worktree and repository menu actions.
+   *
+   * CDXC:WorktreeRename 2026-08-10:
+   * Rename Worktree replaced the dead label-only Rename on worktree rows rather
+   * than joining it, so the count is unchanged. It drives viewport clamping, so
+   * it has to move with the menu or the last item opens off-screen.
+   *
+   * CDXC:SidebarContextMenu 2026-08-10:
+   * Hide/Unhide renders in both project menus whenever `onHideGroup` is supplied
+   * — which the sidebar always does — and was never counted, so every project
+   * menu was measured one row short and the last item could open off-screen. It
+   * is not part of the group menu, so only the project branches take it.
    */
   if (hasProjectContext) {
-    return isWorktreeProject
-      ? 5 + Number(projectCollectionsEnabled)
-      : 5 + Number(canFullReloadGroup) + Number(canCreateSessionGroup) + Number(projectCollectionsEnabled);
+    return (
+      Number(canHideGroup) +
+      (isWorktreeProject
+        ? 5 + Number(projectCollectionsEnabled)
+        : 5 +
+          Number(canFullReloadGroup) +
+          Number(canCreateSessionGroup) +
+          Number(projectCollectionsEnabled))
+    );
   }
 
   return 3 + Number(canFullReloadGroup);
@@ -1789,6 +1808,18 @@ export function SessionGroupSection({
     });
   };
 
+  const promptRenameWorktree = () => {
+    if (!projectContext?.worktree) {
+      return;
+    }
+
+    setContextMenuPosition(undefined);
+    vscode.postMessage({
+      groupId: group.groupId,
+      type: "promptRenameWorktreeForGroup",
+    });
+  };
+
   const handleTitleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -1890,6 +1921,7 @@ export function SessionGroupSection({
         getGroupContextMenuItemCount({
           canCreateSessionGroup: group.canCreateSessionGroup === true,
           canFullReloadGroup,
+          canHideGroup: Boolean(onHideGroup),
           hasProjectContext: Boolean(projectContext),
           isWorktreeProject: Boolean(projectContext?.worktree),
           projectCollectionsEnabled: Boolean(onCreateProjectCollection && onMoveProjectToCollection),
@@ -2962,21 +2994,29 @@ export function SessionGroupSection({
                       />
                       Open Folder
                     </button>
+                    {/*
+                     * CDXC:WorktreeRename 2026-08-10:
+                     * Worktree rows deliberately do NOT offer the label-only
+                     * Rename. It posts `renameWorkspaceProjectForGroup`, which
+                     * the GPUI runtime has no case for, so on the desktop app it
+                     * was a menu item that did nothing at all — and sat directly
+                     * above a Rename Worktree that does, which is worse than
+                     * absent. Renaming a worktree means moving the checkout, so
+                     * the action below is the whole story for these rows.
+                     * Ordinary project rows keep their label rename unchanged.
+                     */}
                     <button
                       className="session-context-menu-item"
-                      onClick={() => {
-                        setContextMenuPosition(undefined);
-                        setIsEditing(true);
-                      }}
+                      onClick={promptRenameWorktree}
                       role="menuitem"
                       type="button"
                     >
-                      <IconPencil
+                      <IconGitBranch
                         aria-hidden="true"
                         className="session-context-menu-icon"
                         size={14}
                       />
-                      Rename
+                      Rename Worktree…
                     </button>
                     {onCreateProjectCollection && onMoveProjectToCollection ? (
                       <button

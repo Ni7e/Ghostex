@@ -385,6 +385,42 @@ describe("getGroupContextMenuItemCount", () => {
     ).toBe(5);
   });
 
+  test("worktree rows offer Rename Worktree and not the dead label-only Rename", () => {
+    /*
+     * CDXC:WorktreeRename 2026-08-10:
+     * Two invariants in one place, because they are the same mistake.
+     *
+     * The label-only Rename posts `renameWorkspaceProjectForGroup`, which the
+     * GPUI runtime has no case for — on the desktop app it did nothing, sitting
+     * directly above a Rename Worktree that does. It must not come back for
+     * worktree rows, while ordinary project rows keep theirs.
+     *
+     * And getGroupContextMenuItemCount counts the items between these anchors,
+     * which drives viewport clamping. Anchoring on POSITION rather than mere
+     * presence is the point: a test that only checked the item exists would pass
+     * while the count drifted and the last menu item opened off-screen.
+     */
+    const menuStart = sessionGroupSectionSource.indexOf("CDXC:WorktreeDelete 2026-05-28-07:46");
+    // The slice has to reach the END of the worktree branch, not its first
+    // shared item: anchored on "Add to project group" it stopped short of Delete
+    // Worktree and Remove Worktree, so a reintroduced label-only Rename placed
+    // below that item would have passed the negative assertions untouched.
+    const menuEnd = sessionGroupSectionSource.indexOf("Remove Worktree", menuStart);
+    const collectionsAnchor = sessionGroupSectionSource.indexOf("Add to project group", menuStart);
+    expect(menuStart).toBeGreaterThanOrEqual(0);
+    expect(collectionsAnchor).toBeGreaterThan(menuStart);
+    expect(menuEnd).toBeGreaterThan(collectionsAnchor);
+    const worktreeMenuSource = sessionGroupSectionSource.slice(menuStart, menuEnd);
+
+    expect(worktreeMenuSource).toContain("Rename Worktree");
+    expect(worktreeMenuSource).toContain("promptRenameWorktree");
+    expect(worktreeMenuSource).not.toContain("IconPencil");
+    expect(worktreeMenuSource).not.toContain("setIsEditing(true)");
+    expect(sessionGroupSectionSource).toContain('type: "promptRenameWorktreeForGroup"');
+    // Ordinary project rows are untouched — they still rename their label.
+    expect(sessionGroupSectionSource.slice(menuEnd)).toContain("IconPencil");
+  });
+
   test("counts normal project and group actions separately", () => {
     expect(
       getGroupContextMenuItemCount({
@@ -400,6 +436,40 @@ describe("getGroupContextMenuItemCount", () => {
         isWorktreeProject: false,
       }),
     ).toBe(3);
+  });
+
+  test("counts the Hide item both project menus render", () => {
+    /*
+     * CDXC:SidebarContextMenu 2026-08-10:
+     * Hide/Unhide is rendered by the worktree AND the repository project menu
+     * whenever onHideGroup is supplied, and the sidebar always supplies it, so
+     * leaving it out measured every project menu one row short. The group menu
+     * has no Hide item, so it must not gain one here.
+     */
+    expect(
+      getGroupContextMenuItemCount({
+        canFullReloadGroup: false,
+        canHideGroup: true,
+        hasProjectContext: true,
+        isWorktreeProject: true,
+      }),
+    ).toBe(6);
+    expect(
+      getGroupContextMenuItemCount({
+        canFullReloadGroup: true,
+        canHideGroup: true,
+        hasProjectContext: true,
+        isWorktreeProject: false,
+      }),
+    ).toBe(7);
+    expect(
+      getGroupContextMenuItemCount({
+        canFullReloadGroup: true,
+        canHideGroup: true,
+        hasProjectContext: false,
+        isWorktreeProject: false,
+      }),
+    ).toBe(4);
   });
 });
 
