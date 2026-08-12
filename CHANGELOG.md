@@ -1,5 +1,16 @@
 # Changelog
 
+## 7.7.0 - 2026-08-13
+
+- Major
+  - Windows now guides first-time setup by checking WSL, helping you choose a distribution, and preparing the Ghostex runtime before opening the workspace.
+  - Remote machines reconnect more reliably after sleep, wake, tunnel interruptions, and temporary network failures, while remote session renames stay synchronized.
+  - Command panes restore their linked sessions and Action tabs more faithfully, including live working and completion status when you return to the app.
+- Minor
+  - On-demand component installs now show clearer checking, download progress, and size information instead of an indeterminate wait.
+  - Project Board uses the Beads installation from each local, Linux, or WSL environment and provides clearer installation or migration guidance when attention is needed.
+  - First-launch setup, recent-project recovery, Session Chat controls, titlebar customization, and Windows terminal startup are more dependable.
+
 ## 7.6.0 - 2026-08-12
 
 - Major
