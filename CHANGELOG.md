@@ -1,5 +1,16 @@
 # Changelog
 
+## 7.6.0 - 2026-08-12
+
+- Major
+  - Docs can mount an additional folder beside each project's own files, with clear copyable paths for everything in that collection, thanks to @banozz.
+  - Worktrees can rename both their folder and branch directly from the sidebar, thanks to @banozz.
+  - Project sessions are organized into collapsible Browser, Pinned, and Sessions sections so busy workspaces stay easier to scan.
+- Minor
+  - Session Chat presents tool activity and hidden work more clearly, keeps long output manageable, and adds a focused copy action to each final response.
+  - Browser panes can open their current page in the system browser, and titlebar customization is easier to reach from its context menu.
+  - Windows runtime setup, WSL terminal integration, session recovery, and on-demand component handling are more dependable.
+
 ## 7.5.0 - 2026-08-10
 
 - Major
