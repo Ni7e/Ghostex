@@ -3,6 +3,15 @@ export const PROJECT_DOCS_RESOURCE_ACTION = "readResource" as const;
 
 export type ProjectDocsFileEntry = {
   depth: number;
+  /**
+   * CDXC:DocsRootAdditive 2026-08-10:
+   * The same entry named the way the Docs tree names it, so anything that puts
+   * a path in front of a human — Copy Path, feedback pasted into a terminal —
+   * reads as `<mount name>/...` instead of the reserved routing segment. Only
+   * mounted entries carry it; the project's own files route by display name
+   * already. Absent for hosts that predate it — fall back to `path`.
+   */
+  displayPath?: string;
   kind: "directory" | "file";
   modifiedAt?: string;
   name: string;

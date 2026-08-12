@@ -97,7 +97,7 @@ describe("noise filter (§9.1)", () => {
     expect(isSessionChatNoiseMessage(textMsg("1", "user", "   "))).toBe(false);
   });
 
-  test("/compact stdout markers read 'Compaction completed'", () => {
+  test("special command markers use their meaningful result", () => {
     // Verbatim shape from a real transcript: dim-SGR-wrapped "Compacted".
     expect(
       sessionChatSuppressedTurnLabel(
@@ -114,12 +114,25 @@ describe("noise filter (§9.1)", () => {
         textMsg("2", "user", "<local-command-stdout>[2mCompaction complete.[22m</local-command-stdout>"),
       ),
     ).toBe("Compaction completed");
-    // Other command output keeps the generic marker.
     expect(
       sessionChatSuppressedTurnLabel(
-        textMsg("3", "user", "<local-command-stdout>Set model to Opus</local-command-stdout>"),
+        textMsg(
+          "model-command",
+          "user",
+          "<command-name>/model</command-name><command-message>model</command-message><command-args></command-args>",
+        ),
       ),
-    ).toBe("Local command output");
+    ).toBe("Set model");
+    // Model selection output names the model that was set.
+    expect(
+      sessionChatSuppressedTurnLabel(
+        textMsg(
+          "3",
+          "user",
+          "<local-command-stdout>Set model to [1mOpus 5 (1M context) [22m and saved as your default for new sessions</local-command-stdout>",
+        ),
+      ),
+    ).toBe("Opus 5 (1M context)");
     // Prose that merely mentions compaction is untouched.
     expect(
       sessionChatSuppressedTurnLabel(

@@ -35,7 +35,7 @@ type ToolBlock = SessionChatToolCallBlock | SessionChatToolResultBlock;
 
 export interface SessionChatToolRunProps {
   blocks: readonly ToolBlock[];
-  /** Global expand toggle; each row remains independently collapsible. */
+  /** Global expand toggle; expands the run and each row's detail. */
   expandSignal?: boolean;
 }
 
@@ -193,16 +193,61 @@ function ToolLine({
 
 export function SessionChatToolRun({ blocks, expandSignal = false }: SessionChatToolRunProps) {
   const pairs = pairSessionChatToolBlocks(blocks);
+  const [expanded, setExpanded] = useState(expandSignal);
+  useEffect(() => setExpanded(expandSignal), [expandSignal]);
+
+  const hiddenCount = Math.max(0, pairs.length - 1);
+  const toggle = (
+    <button
+      aria-expanded={expanded}
+      className="ghostex-chat-tool-run-toggle"
+      onClick={() => setExpanded((current) => !current)}
+      type="button"
+    >
+      <span className="ghostex-chat-work-icon">
+        <IconChevronRight
+          aria-hidden="true"
+          className={cn(expanded && "rotate-90")}
+          stroke={2}
+        />
+      </span>
+      <span>
+        {expanded
+          ? "Show fewer tool calls"
+          : `+${hiddenCount} previous tool ${hiddenCount === 1 ? "call" : "calls"}`}
+      </span>
+    </button>
+  );
+
+  const rows = (firstIndex: number) =>
+    pairs.slice(firstIndex).map((pair, index) => (
+      <ToolLine
+        call={pair.call}
+        expandSignal={expandSignal}
+        key={firstIndex + index}
+        result={pair.result}
+      />
+    ));
+
   return (
     <div className="ghostex-chat-tool-run">
-      {pairs.map((pair, index) => (
-        <ToolLine
-          call={pair.call}
-          expandSignal={expandSignal}
-          key={index}
-          result={pair.result}
-        />
-      ))}
+      {hiddenCount === 0 ? (
+        rows(0)
+      ) : expanded ? (
+        <SessionChatExpansion
+          bodyClassName="ghostex-chat-tool-run-expanded"
+          label="Show fewer tool calls"
+          onCollapse={() => setExpanded(false)}
+        >
+          {rows(0)}
+          {toggle}
+        </SessionChatExpansion>
+      ) : (
+        <>
+          {rows(hiddenCount)}
+          {toggle}
+        </>
+      )}
     </div>
   );
 }

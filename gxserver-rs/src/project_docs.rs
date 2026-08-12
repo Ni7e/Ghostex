@@ -753,13 +753,40 @@ fn append_extra_root_entries(entries: &mut Vec<Value>, mount: &DocsExtraMount) {
     let metadata = fs::metadata(root).ok();
     entries.push(json!({
         "depth": 0,
+        "displayPath": mount.name,
         "kind": "directory",
         "modifiedAt": metadata.as_ref().and_then(modified_at),
         "name": mount.name,
         "path": EXTRA_ROOT_MOUNT_SEGMENT,
         "size": Value::Null,
     }));
+    name_extra_root_tree_entries(&mut tree, &mount.name);
     entries.append(&mut tree);
+}
+
+/*
+CDXC:DocsRootAdditive 2026-08-10:
+Every mounted entry carries the name the tree shows it under beside the routing
+address it answers to, for the same reason a preview does: `path` starts with
+the reserved segment, which is an implementation detail no reader asked for, and
+it reaches humans through Copy Path and through text pasted into a terminal. The
+walk builds the routing paths, so the display names are derived from them here
+rather than threaded through every recursion.
+*/
+fn name_extra_root_tree_entries(tree: &mut [Value], mount_name: &str) {
+    for entry in tree {
+        let Some(relative_path) = entry
+            .get("path")
+            .and_then(Value::as_str)
+            .and_then(|path| path.strip_prefix(EXTRA_ROOT_MOUNT_SEGMENT))
+        else {
+            continue;
+        };
+        let display_path = format!("{mount_name}{relative_path}");
+        if let Some(entry) = entry.as_object_mut() {
+            entry.insert("displayPath".to_string(), Value::String(display_path));
+        }
+    }
 }
 
 /// The mount still shows when its folder does not, carrying the reason in the
@@ -769,6 +796,7 @@ fn unavailable_extra_root_entry(name: &str, error: &str) -> Value {
     json!({
         "depth": 0,
         "kind": "directory",
+        "displayPath": name,
         "modifiedAt": Value::Null,
         "name": format!("{name} — {error}"),
         "path": EXTRA_ROOT_MOUNT_SEGMENT,

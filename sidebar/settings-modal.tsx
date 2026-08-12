@@ -111,7 +111,6 @@ import {
   IconKeyboard,
   IconMinus,
   IconPalette,
-  IconPlug,
   // CDXC:AppIconPicker 2026-06-25-21:50: Placeholder glyph for the default-icon tile and missing thumbnails.
   IconPhoto,
   IconPencil,
@@ -2852,7 +2851,7 @@ export function SettingsModal({
       title: "General",
     },
     { icon: IconTools, id: "integrations", title: "Integrations" },
-    { icon: IconPlug, id: "plugins", title: "Customize" },
+    { icon: IconPalette, id: "plugins", title: "Customize" },
     { icon: IconCloud, id: "remote", title: "Remote" },
     { icon: IconFolderOpen, id: "projects", title: "Projects" },
     {

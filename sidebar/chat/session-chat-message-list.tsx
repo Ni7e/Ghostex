@@ -56,6 +56,7 @@ import { isSessionChatPendingMessageId } from "./session-chat-pending";
 import {
   dropSessionChatHiddenMessages,
   sessionChatSuppressedTurnLabel,
+  sessionChatSuppressedTurnPresentation,
 } from "./session-chat-noise";
 import { SESSION_CHAT_STREAMING_ID } from "./session-chat-streaming";
 import {
@@ -283,9 +284,11 @@ function normalizeUserMessageMarkdown(markdown: string): string {
 function MessageRow({
   expandToolRuns,
   message,
+  showAssistantCopy,
 }: {
   expandToolRuns: boolean;
   message: SessionChatMessage;
+  showAssistantCopy: boolean;
 }) {
   const { prose, tools } = splitSessionChatBlocks(message.blocks);
   const markdown = prose
@@ -299,15 +302,22 @@ function MessageRow({
     return null;
   }
 
-  const suppressedLabel = sessionChatSuppressedTurnLabel(message);
-  if (suppressedLabel !== null) {
-    return <SuppressedTurn label={suppressedLabel} text={markdown} />;
+  const suppressedTurn = sessionChatSuppressedTurnPresentation(message);
+  if (suppressedTurn !== null) {
+    return (
+      <SuppressedTurn
+        label={suppressedTurn.label}
+        text={suppressedTurn.text}
+      />
+    );
   }
 
   const isUser = message.role === "user";
   const isReasoning = message.role === "reasoning";
   const isSystem = message.role === "system";
-  const showControls = !isReasoning && !isSystem && markdown.length > 0;
+  const showCopy =
+    markdown.length > 0 &&
+    (isUser || (message.role === "assistant" && showAssistantCopy));
 
   if (isSystem) {
     return (
@@ -347,7 +357,7 @@ function MessageRow({
               </BubbleContent>
             </Bubble>
           ) : null}
-          {showControls ? <CopyFooter markdown={userMarkdown} /> : null}
+          {showCopy ? <CopyFooter markdown={userMarkdown} /> : null}
         </MessageContent>
       </Message>
     );
@@ -365,7 +375,7 @@ function MessageRow({
         {tools.length > 0 ? (
           <SessionChatToolRun blocks={tools} expandSignal={expandToolRuns} />
         ) : null}
-        {showControls ? <CopyFooter markdown={markdown} /> : null}
+        {showCopy ? <CopyFooter markdown={markdown} /> : null}
       </MessageContent>
     </Message>
   );
@@ -391,6 +401,38 @@ function hasAgentResponseContent(message: SessionChatMessage): boolean {
         (block.type === "text" && block.text.trim().length > 0),
     )
   );
+}
+
+/** One copy affordance per response: the last assistant text before the next user turn. */
+function finalAssistantMessageIds(
+  messages: readonly SessionChatMessage[],
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  let finalAssistantId: string | null = null;
+
+  const commitTurn = (): void => {
+    if (finalAssistantId !== null) {
+      ids.add(finalAssistantId);
+      finalAssistantId = null;
+    }
+  };
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      commitTurn();
+      continue;
+    }
+    if (
+      message.role === "assistant" &&
+      message.blocks.some(
+        (block) => block.type === "text" && block.text.trim().length > 0,
+      )
+    ) {
+      finalAssistantId = message.id;
+    }
+  }
+  commitTurn();
+  return ids;
 }
 
 /**
@@ -531,12 +573,17 @@ function CompletedWork({
                 expandToolRuns={expandSignal}
                 key={message.id}
                 message={message}
+                showAssistantCopy={false}
               />
             ))}
           </SessionChatExpansion>
         ) : null}
       </div>
-      <MessageRow expandToolRuns={expandSignal} message={turn.final} />
+      <MessageRow
+        expandToolRuns={expandSignal}
+        message={turn.final}
+        showAssistantCopy
+      />
     </div>
   );
 }
@@ -609,6 +656,10 @@ export function SessionChatMessageList({
     () => completedWorkRenderItems(rendered, isWorking),
     [isWorking, rendered],
   );
+  const copyableAssistantMessageIds = useMemo(
+    () => finalAssistantMessageIds(rendered),
+    [rendered],
+  );
 
   return (
     <MessageScrollerProvider
@@ -662,6 +713,9 @@ export function SessionChatMessageList({
                   <MessageRow
                     expandToolRuns={expandToolRuns}
                     message={item.message}
+                    showAssistantCopy={copyableAssistantMessageIds.has(
+                      item.message.id,
+                    )}
                   />
                 ) : (
                   <CompletedWork

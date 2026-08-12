@@ -48,6 +48,7 @@ import { AppTooltip } from "./app-tooltip";
 import { SidebarV2ProjectIcon } from "./v2/sidebar-v2-icons";
 import {
   getSidebarSessionLifecycleState,
+  type SidebarSessionItem,
   type SidebarTheme,
 } from "../shared/session-grid-contract";
 import type { SidebarProjectDiffStats } from "../shared/project-diff-stats";
@@ -517,6 +518,56 @@ export type SessionGroupSectionProps = {
   vscode: WebviewApi;
 };
 
+type ProjectSessionSection = "browser" | "pinned" | "sessions";
+
+const EXPANDED_PROJECT_SESSION_SECTIONS: Readonly<Record<ProjectSessionSection, boolean>> = {
+  browser: false,
+  pinned: false,
+  sessions: false,
+};
+
+function getProjectSessionSection(
+  session: SidebarSessionItem | undefined,
+): ProjectSessionSection {
+  if (session?.kind === "browser" || session?.sessionKind === "browser") {
+    return "browser";
+  }
+  return session?.isPinned === true ? "pinned" : "sessions";
+}
+
+function ProjectSessionSectionToggle({
+  isCollapsed,
+  label,
+  onToggle,
+}: {
+  isCollapsed: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      aria-expanded={!isCollapsed}
+      aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${label}`}
+      className="session-kind-toggle"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle();
+      }}
+      type="button"
+    >
+      <span>{label}</span>
+      <IconChevronRight
+        aria-hidden="true"
+        className="session-kind-toggle-chevron"
+        data-expanded={String(!isCollapsed)}
+        size={12}
+        stroke={2}
+      />
+    </button>
+  );
+}
+
 function clampContextMenuPosition(
   clientX: number,
   clientY: number,
@@ -744,6 +795,9 @@ export function SessionGroupSection({
   const [projectSessionListCollapsedState, setProjectSessionListCollapsedState] = useState(
     readProjectSessionListCollapsedState,
   );
+  const [collapsedProjectSessionSections, setCollapsedProjectSessionSections] = useState(
+    EXPANDED_PROJECT_SESSION_SECTIONS,
+  );
   const [projectSessionListCollapsedHeight, setProjectSessionListCollapsedHeight] =
     useState<number>();
   const { collapsibleStyle, contentRef, setContentElement } = useCollapsibleHeight<HTMLDivElement>();
@@ -952,19 +1006,40 @@ export function SessionGroupSection({
       ? orderedSessionIds
       : visibleSessionIds;
   const renderedBrowserSessionIds = renderedSessionIds.filter((sessionId) => {
-    const session = sessionsById[sessionId];
-    return session?.kind === "browser" || session?.sessionKind === "browser";
+    return getProjectSessionSection(sessionsById[sessionId]) === "browser";
+  });
+  const renderedPinnedSessionIds = renderedSessionIds.filter((sessionId) => {
+    return getProjectSessionSection(sessionsById[sessionId]) === "pinned";
+  });
+  const renderedUnpinnedSessionIds = renderedSessionIds.filter((sessionId) => {
+    return getProjectSessionSection(sessionsById[sessionId]) === "sessions";
   });
   const shouldRenderSessionKindLabels =
     renderedBrowserSessionIds.length > 0 &&
     renderedBrowserSessionIds.length < renderedSessionIds.length;
   const firstBrowserSessionId = renderedBrowserSessionIds[0];
+  const firstPinnedSessionId = renderedPinnedSessionIds[0];
+  const firstUnpinnedSessionId = renderedUnpinnedSessionIds[0];
   const firstTerminalSessionId = renderedSessionIds.find((sessionId) => {
     const session = sessionsById[sessionId];
     return session?.kind !== "browser" && session?.sessionKind !== "browser";
   });
+  const toggleProjectSessionSection = (section: ProjectSessionSection) => {
+    setCollapsedProjectSessionSections((previous) => ({
+      ...previous,
+      [section]: !previous[section],
+    }));
+  };
+  const expandedVisibleSessionIds = projectContext
+    ? visibleSessionIds.filter(
+        (sessionId) =>
+          !collapsedProjectSessionSections[getProjectSessionSection(sessionsById[sessionId])],
+      )
+    : visibleSessionIds;
   const projectSessionListLastVisibleSessionId =
-    visibleSessionIds.length > 0 ? visibleSessionIds[visibleSessionIds.length - 1] : undefined;
+    expandedVisibleSessionIds.length > 0
+      ? expandedVisibleSessionIds[expandedVisibleSessionIds.length - 1]
+      : undefined;
   const shouldClipProjectSessionList =
     shouldShowProjectSessionListToggle && isProjectSessionListCollapsed;
   const shouldScrollExpandedProjectSessionList =
@@ -976,7 +1051,7 @@ export function SessionGroupSection({
    * capped by the Show less count.
    */
   const projectSessionListRenderedSessionIdsKey = shouldClipProjectSessionList
-    ? visibleSessionIds.join("\u0000")
+    ? expandedVisibleSessionIds.join("\u0000")
     : "";
   const expandedProjectSessionListScrollHeight = shouldScrollExpandedProjectSessionList
     ? getExpandedProjectSessionListScrollHeight({
@@ -2542,6 +2617,11 @@ export function SessionGroupSection({
             {orderedSessionIds.length > 0 ? (
               <>
                 {renderedSessionIds.map((sessionId, sessionIndex) => {
+                  const session = sessionsById[sessionId];
+                  const projectSessionSection = getProjectSessionSection(session);
+                  const isProjectSessionSectionCollapsed =
+                    Boolean(projectContext) &&
+                    collapsedProjectSessionSections[projectSessionSection];
                   const isProjectSessionListOverflowRow =
                     shouldClipProjectSessionList && !visibleSessionIdSet.has(sessionId);
                   const sessionIdsBelowStartIndex = isProjectSessionListOverflowRow
@@ -2562,13 +2642,38 @@ export function SessionGroupSection({
 
                   return (
                     <Fragment key={sessionId}>
-                      {shouldRenderSessionKindLabels && sessionId === firstBrowserSessionId ? (
+                      {projectContext && sessionId === firstBrowserSessionId ? (
+                        <ProjectSessionSectionToggle
+                          isCollapsed={collapsedProjectSessionSections.browser}
+                          label="Browser"
+                          onToggle={() => toggleProjectSessionSection("browser")}
+                        />
+                      ) : null}
+                      {projectContext && sessionId === firstPinnedSessionId ? (
+                        <ProjectSessionSectionToggle
+                          isCollapsed={collapsedProjectSessionSections.pinned}
+                          label="Pinned"
+                          onToggle={() => toggleProjectSessionSection("pinned")}
+                        />
+                      ) : null}
+                      {projectContext && sessionId === firstUnpinnedSessionId ? (
+                        <ProjectSessionSectionToggle
+                          isCollapsed={collapsedProjectSessionSections.sessions}
+                          label="Sessions"
+                          onToggle={() => toggleProjectSessionSection("sessions")}
+                        />
+                      ) : null}
+                      {!projectContext &&
+                      shouldRenderSessionKindLabels &&
+                      sessionId === firstBrowserSessionId ? (
                         <div className="session-kind-label">Browser</div>
                       ) : null}
-                      {shouldRenderSessionKindLabels && sessionId === firstTerminalSessionId ? (
+                      {!projectContext &&
+                      shouldRenderSessionKindLabels &&
+                      sessionId === firstTerminalSessionId ? (
                         <div className="session-kind-label">Sessions</div>
                       ) : null}
-                      {shouldRenderPinnedSessionDropGaps ? (
+                      {!isProjectSessionSectionCollapsed && shouldRenderPinnedSessionDropGaps ? (
                         <div
                           aria-hidden
                           className="pinned-session-drop-gap"
@@ -2578,7 +2683,8 @@ export function SessionGroupSection({
                           data-edge={sessionIndex === 0 ? "start" : undefined}
                         />
                       ) : null}
-                      <SortableSessionCard
+                      {!isProjectSessionSectionCollapsed ? (
+                        <SortableSessionCard
                         completionFlashNonce={completionFlashNonceBySessionId?.[sessionId] ?? 0}
                         dragDisabled={
                           isProjectSessionListOverflowRow ||
@@ -2632,9 +2738,12 @@ export function SessionGroupSection({
                           !allowPinnedSessionReorder &&
                           !isProjectSessionListOverflowRow
                         }
-                        vscode={vscode}
-                      />
-                      {sessionsById[sessionId]?.isPinned === true &&
+                          vscode={vscode}
+                        />
+                      ) : null}
+                      {!projectContext &&
+                      !isProjectSessionSectionCollapsed &&
+                      sessionsById[sessionId]?.isPinned === true &&
                       orderedSessionIds[sessionIndex + 1] !== undefined &&
                       sessionsById[orderedSessionIds[sessionIndex + 1]]?.isPinned !== true ? (
                         <div aria-hidden className="pinned-sessions-divider" />

@@ -336,6 +336,38 @@ fn a_docs_directory_mounts_its_whole_tree_under_one_top_level_node() {
     }
 }
 
+/// Every mounted entry names itself by the mount, not by the routing segment,
+/// so Copy Path and pasted feedback never leak `.ghostex-docs-root`.
+#[test]
+fn mounted_entries_carry_the_mount_name_as_their_display_path() {
+    let repo = repo_fixture();
+    let vault = vault_fixture();
+    let root = with_docs_directory(repo.path(), vault.path());
+    let listed = list(&root, "");
+    let vault_name = vault
+        .path()
+        .file_name()
+        .expect("vault name")
+        .to_string_lossy()
+        .into_owned();
+
+    // The mount node itself, and a note nested three folders inside it.
+    assert_eq!(entry(&listed, MOUNT)["displayPath"], Value::String(vault_name.clone()));
+    assert_eq!(
+        entry(&listed, &mounted("notes/deep/deeper/note.md"))["displayPath"],
+        Value::String(format!("{vault_name}/notes/deep/deeper/note.md"))
+    );
+
+    // The project's own files route by the name they already show.
+    assert_eq!(entry(&listed, "README.md").get("displayPath"), None);
+
+    // The routing address is untouched: it is what a request must send back.
+    assert_eq!(
+        entry(&listed, &mounted("root.md"))["path"],
+        Value::String(mounted("root.md"))
+    );
+}
+
 /// Docs folders stays project-root-relative; it does not narrow the mount.
 #[test]
 fn docs_folders_narrow_the_project_root_only() {

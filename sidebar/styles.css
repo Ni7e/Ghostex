@@ -315,13 +315,19 @@ body {
 
 /*
  * CDXC:SessionChatRoundedChrome 2026-08-02:
- * The Session Chat surface keeps the rounded shadcn look (its root restores
- * --radius), so its controls fall back to their layered Tailwind radii
- * instead of the app-wide squared chrome above. The popup marker class covers
- * chat-owned dropdown menus, which portal outside the chat root.
+ * The Session Chat surface keeps rounded controls even though the shared
+ * Button primitive and app chrome are square by default. Apply the chat radius
+ * explicitly instead of reverting to the primitive's rounded-none layer. The
+ * popup marker class covers chat-owned dropdown menus portalled outside the
+ * chat root. Collapse rails and the terminal/agent floating strip keep their
+ * purpose-built geometry.
  */
-.ghostex-session-chat-scope :is(button, input, textarea, [role="button"], [data-slot="button"]),
+.ghostex-session-chat-scope :is(input, textarea),
 .ghostex-session-chat-popup,
+.ghostex-session-chat-scope
+  :is(button, [role="button"], [data-slot="button"]):not(
+    [data-slot="session-chat-host-action"]
+  ):not(.ghostex-chat-expansion-rail),
 .ghostex-session-chat-popup
   :is(
     button,
@@ -332,7 +338,23 @@ body {
     [data-slot="dropdown-menu-sub-trigger"],
     [data-slot="dropdown-menu-sub-content"]
   ) {
+  border-radius: calc(var(--radius, 0.625rem) - 2px);
+}
+
+.ghostex-session-chat-scope :is(input, textarea),
+.ghostex-session-chat-popup {
   border-radius: revert-layer;
+}
+
+/* Preserve controls intentionally designed as circles/pills. */
+.ghostex-session-chat-scope
+  :is(
+    .ghostex-chat-footer-control,
+    .ghostex-chat-scroll-bottom-button,
+    .ghostex-chat-send-button,
+    button.rounded-full
+  ) {
+  border-radius: 9999px;
 }
 
 .ghostex-settings-shadcn[data-slot="dialog-content"] {

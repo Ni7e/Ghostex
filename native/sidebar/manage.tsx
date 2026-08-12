@@ -1199,7 +1199,14 @@ function ManageApp() {
   const copyEntryPath = useCallback(async (entry: ManageFileEntry) => {
     setFileContextMenu(undefined);
     try {
-      await writeTextToClipboard(entry.path);
+      /*
+       * CDXC:DocsRootAdditive 2026-08-10:
+       * Copy the path the tree shows, not the routing address. For a file under
+       * a configured Docs directory those differ: the address leads with the
+       * reserved mount segment, which is meaningless anywhere it would be
+       * pasted.
+       */
+      await writeTextToClipboard(entry.displayPath ?? entry.path);
     } catch (copyError) {
       setError(copyError instanceof Error ? copyError.message : "Could not copy path.");
     }
@@ -3326,7 +3333,12 @@ function ManagePreview({
     if (!selectedPath) {
       return;
     }
-    const output = formatManageAnnotationsAsMarkdown(selectedPath, annotations);
+    /*
+     * CDXC:DocsRootAdditive 2026-08-10:
+     * This markdown is read by a human and by the agent it is pasted to, so it
+     * names the file the way the tree does rather than by routing address.
+     */
+    const output = formatManageAnnotationsAsMarkdown(preview?.displayPath ?? selectedPath, annotations);
     try {
       await writeTextToClipboard(output);
       setFeedbackCopyState("copied");
@@ -3334,7 +3346,7 @@ function ManagePreview({
     } catch {
       setFeedbackCopyState("error");
     }
-  }, [annotations, selectedPath]);
+  }, [annotations, preview?.displayPath, selectedPath]);
 
   const clearAllAnnotations = useCallback(() => {
     if (annotations.length === 0) {

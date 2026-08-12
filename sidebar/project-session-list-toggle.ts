@@ -102,10 +102,6 @@ export function getProjectSessionListBoundaryHeight({
     return undefined;
   }
 
-  if (!boundarySessionId) {
-    return 0;
-  }
-
   /**
    * CDXC:ProjectSessionLists 2026-06-12-23:53:
    * Show more and Show less should use the same measured max-height motion as project expand/collapse. Measure the bottom of the last user-visible session row so Show less can clip the still-mounted overflow rows smoothly instead of removing them before the collapse animation can run.
@@ -115,16 +111,14 @@ export function getProjectSessionListBoundaryHeight({
    * reveal row participates in the clipped edge. Expanded lists use fixed row
    * math instead so large projects avoid layout reads and ResizeObserver work.
    */
-  const sessionElement = Array.from(
-    sessionListElement.querySelectorAll<HTMLElement>("[data-sidebar-session-id]"),
-  ).find((element) => element.dataset.sidebarSessionId === boundarySessionId);
+  const sessionElement = boundarySessionId
+    ? Array.from(
+        sessionListElement.querySelectorAll<HTMLElement>("[data-sidebar-session-id]"),
+      ).find((element) => element.dataset.sidebarSessionId === boundarySessionId)
+    : undefined;
   const rowElement = sessionElement?.closest<HTMLElement>(".session-frame") ?? sessionElement;
-  if (!rowElement) {
-    return undefined;
-  }
-
   const listBounds = sessionListElement.getBoundingClientRect();
-  const rowBounds = rowElement.getBoundingClientRect();
+  const rowBounds = rowElement?.getBoundingClientRect();
   /**
    * CDXC:ProjectSessionLists 2026-06-13-19:49:
    * A collapsed project list now shows a regular session-card reveal row after
@@ -136,9 +130,12 @@ export function getProjectSessionListBoundaryHeight({
         "[data-project-session-list-more-toggle='true']",
       )
     : null;
+  if (!rowBounds && !moreToggleElement) {
+    return boundarySessionId ? undefined : 0;
+  }
   const clippedBottom = Math.max(
-    rowBounds.bottom,
-    moreToggleElement?.getBoundingClientRect().bottom ?? rowBounds.bottom,
+    rowBounds?.bottom ?? listBounds.top,
+    moreToggleElement?.getBoundingClientRect().bottom ?? rowBounds?.bottom ?? listBounds.top,
   );
   return Math.max(0, Math.ceil(clippedBottom - listBounds.top));
 }

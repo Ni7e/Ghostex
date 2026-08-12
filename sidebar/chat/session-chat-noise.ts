@@ -17,6 +17,7 @@
 // stay hidden.
 
 import type { SessionChatMessage } from "../../shared/session-chat";
+import { parseSessionChatCommandEnvelope } from "./session-chat-command-envelope";
 
 const LEADING_TAG_NAME = /^<([a-z][a-z0-9-]*)(?:[\s>]|$)/;
 const MARKUP_TAG = /<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?>/gi;
@@ -31,13 +32,25 @@ const MARKUP_TAG = /<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?>/gi;
 const ANSI_STYLE_SEQUENCE = /(?:\u001b|\u009b)?\[[0-9;]{1,8}m/g;
 const COMPACTION_OUTPUT =
   /^compact(?:ed|ing|ion)\b(?:\s+(?:is\s+)?(?:complete[d]?|done|finished|successful(?:ly)?))?\s*[.!…]*$/i;
+const MODEL_DEFAULT_OUTPUT =
+  /^set model to\s+(.+?)\s+and saved as your default for new sessions\s*[.!…]*$/i;
 
-function isCompactionCommandOutput(text: string): boolean {
-  const body = sessionChatSuppressedTurnBody(text)
+function normalizedSuppressedTurnBody(text: string): string {
+  return sessionChatSuppressedTurnBody(text)
     .replace(ANSI_STYLE_SEQUENCE, "")
     .replace(/\s+/g, " ")
     .trim();
-  return COMPACTION_OUTPUT.test(body);
+}
+
+function isCompactionCommandOutput(text: string): boolean {
+  return COMPACTION_OUTPUT.test(normalizedSuppressedTurnBody(text));
+}
+
+function modelSetByCommandOutput(text: string): string | null {
+  return (
+    MODEL_DEFAULT_OUTPUT.exec(normalizedSuppressedTurnBody(text))?.[1]?.trim() ??
+    null
+  );
 }
 
 /** Harness tags that render as a collapsed, expandable marker. */
@@ -166,6 +179,16 @@ export function classifySessionChatSuppressedTurn(
   if (label === "Local command output" && isCompactionCommandOutput(text)) {
     return { kind: "collapsed", label: "Compaction completed" };
   }
+  const command = parseSessionChatCommandEnvelope(text);
+  if (label === "Slash command" && command?.name.toLowerCase() === "/model") {
+    return { kind: "collapsed", label: "Set model" };
+  }
+  if (label === "Local command output") {
+    const model = modelSetByCommandOutput(text);
+    if (model) {
+      return { kind: "collapsed", label: model };
+    }
+  }
   return { kind: "collapsed", label };
 }
 
@@ -184,6 +207,31 @@ export function sessionChatSuppressedTurnLabel(
 ): string | null {
   const suppressed = classifySessionChatSuppressedTurn(message);
   return suppressed?.kind === "collapsed" ? suppressed.label : null;
+}
+
+export interface SessionChatSuppressedTurnPresentation {
+  label: string;
+  text: string;
+}
+
+/** Human-readable label and expandable text for a suppressed harness turn. */
+export function sessionChatSuppressedTurnPresentation(
+  message: SessionChatMessage,
+): SessionChatSuppressedTurnPresentation | null {
+  const suppressed = classifySessionChatSuppressedTurn(message);
+  if (suppressed?.kind !== "collapsed") {
+    return null;
+  }
+
+  const rawText = sessionChatMessageText(message);
+  const command = parseSessionChatCommandEnvelope(rawText);
+  let text = rawText;
+  if (command?.name.toLowerCase() === "/model") {
+    text = command.name;
+  } else if (modelSetByCommandOutput(rawText)) {
+    text = normalizedSuppressedTurnBody(rawText);
+  }
+  return { label: suppressed.label, text };
 }
 
 export function stripSessionChatNoiseMessages(
