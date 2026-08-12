@@ -8,6 +8,29 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>7.7.0</title>
+            <pubDate>Wed, 12 Aug 2026 23:48:44 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.7.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>70700</sparkle:version>
+            <sparkle:shortVersionString>7.7.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 7.7.0
+
+## 7.7.0 - 2026-08-13
+
+- Major
+  - Windows now guides first-time setup by checking WSL, helping you choose a distribution, and preparing the Ghostex runtime before opening the workspace.
+  - Remote machines reconnect more reliably after sleep, wake, tunnel interruptions, and temporary network failures, while remote session renames stay synchronized.
+  - Command panes restore their linked sessions and Action tabs more faithfully, including live working and completion status when you return to the app.
+- Minor
+  - On-demand component installs now show clearer checking, download progress, and size information instead of an indeterminate wait.
+  - Project Board uses the Beads installation from each local, Linux, or WSL environment and provides clearer installation or migration guidance when attention is needed.
+  - First-launch setup, recent-project recovery, Session Chat controls, titlebar customization, and Windows terminal startup are more dependable.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.7.0/ghostex-7.7.0-arm64.dmg" length="114651581" type="application/octet-stream" sparkle:edSignature="Ps6RpaNkj08UdBrr1bN9h9l5C+ixfBq2dxfyZJykomEdIabSG+oLv2hNxRp9Cd3+Q0CvAgCI9TWYxBI++0EkAg=="/>
+        </item>
+        <item>
             <title>7.6.0</title>
             <pubDate>Wed, 12 Aug 2026 04:23:44 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.6.0</sparkle:fullReleaseNotesLink>
@@ -127,28 +150,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.2.0/ghostex-7.2.0-arm64.dmg" length="114297438" type="application/octet-stream" sparkle:edSignature="CIolzSKZdfQK4FE+MKL+E+w5sdfCeqHWvI0YwfHYm9qRRZILbDrnfxRSM1VZ1DzqZl/uGhTjJnj+CCx0vo6NAA=="/>
         </item>
         <item>
-            <title>7.1.0</title>
-            <pubDate>Wed, 05 Aug 2026 05:06:04 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.1.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>70100</sparkle:version>
-            <sparkle:shortVersionString>7.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 7.1.0
-
-## 7.1.0 - 2026-08-05
-
-- Major
-  - Ghostex now keeps settings, app data, caches, logs, and runtime files in the standard locations for each operating system, automatically migrating existing installations while preserving compatibility with saved prompts, attachments, agent hooks, and bundled tools.
-- Minor
-  - Stashed prompts save and refresh more reliably, including prompts tied to a specific project or session.
-  - New sidebar opacity controls let you tune group and project surfaces independently on desktop and Android.
-  - Remote chat attachments and pasted images consistently use the connected machine's configured Ghostex storage location.
-  - Tooltips and compact controls are clearer and more consistent across the desktop workspace, Project Board, Settings, and the web app.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.1.0/ghostex-7.1.0-arm64.dmg" length="113162998" type="application/octet-stream" sparkle:edSignature="yFlmkM3WVYiNAtpIDZoyRUezG/Yh8q1tAjnjdb48mtRp+OCqfLdtqYdpzBmW3cT6pFaXuaz/2+nWstyvYie8Dg=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -160,6 +161,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: IdiPqK/Nldy/5ifhQY0BlfSunWSCqRftWuEE71q9T6QPcKIkypRQLqmm+9oLuRjhEDAefgN5QGZ9uH1iIF4ADQ==
-length: 13022
+edSignature: CmaVeRCH1M+dkzePDfz5jDoxFl+isXnbZ210n+fzxLOCr7WYlyf1FnY6r2vO1mHBoQTohJnAhiXe8a9LKNV6AQ==
+length: 13196
 -->
