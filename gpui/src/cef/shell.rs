@@ -30,8 +30,8 @@ use cef::{
     ImplPermissionPromptCallback as _, ImplProcessMessage as _, ImplRenderProcessHandler,
     ImplRequest as _, ImplRequestContext as _, ImplRequestHandler, ImplResourceHandler,
     ImplResourceRequestHandler, ImplResponse as _, ImplStreamReader as _, ImplTask,
-    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, LifeSpanHandler, LoadHandler,
-    MediaAccessCallback, MediaAccessPermissionTypes, MenuModel, PermissionHandler,
+    ImplV8Context as _, ImplV8Handler, ImplV8Value as _, KeyboardHandler, LifeSpanHandler,
+    LoadHandler, MediaAccessCallback, MediaAccessPermissionTypes, MenuModel, PermissionHandler,
     PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes, PopupFeatures,
     ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler, ResourceHandler,
     ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, State, StreamReader, Task,
@@ -48,8 +48,7 @@ use cef::{
 };
 #[cfg(target_os = "windows")]
 use cef::{
-    ImplKeyboardHandler, KeyEvent, KeyEventType, KeyboardHandler, WrapKeyboardHandler,
-    wrap_keyboard_handler,
+    ImplKeyboardHandler, KeyEvent, KeyEventType, WrapKeyboardHandler, wrap_keyboard_handler,
 };
 use gpui::{Bounds, Pixels};
 use percent_encoding::percent_decode_str;
