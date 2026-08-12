@@ -663,9 +663,14 @@ describe("reference sidebar group spacing styles", () => {
     const rowLoopStart = sessionGroupSectionSource.indexOf(
       "{renderedSessionIds.map((sessionId, sessionIndex) => {",
     );
-    const rowLoopSource = sessionGroupSectionSource.slice(rowLoopStart, rowLoopStart + 4200);
+    const rowLoopEnd = sessionGroupSectionSource.indexOf(
+      "{projectSessionListHiddenCount > 0 ? (",
+      rowLoopStart,
+    );
+    const rowLoopSource = sessionGroupSectionSource.slice(rowLoopStart, rowLoopEnd);
 
     expect(rowLoopStart).toBeGreaterThan(-1);
+    expect(rowLoopEnd).toBeGreaterThan(rowLoopStart);
     expect(rowLoopSource).toContain("sessionIdsBelowSource={visibleSessionIds}");
     expect(rowLoopSource).toContain("sessionIdsBelowStartIndex={sessionIdsBelowStartIndex}");
     expect(rowLoopSource).not.toContain("visibleSessionIds.indexOf(sessionId)");
