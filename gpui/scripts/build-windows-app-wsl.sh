@@ -214,7 +214,7 @@ report_build_phase "Building sidebar CSS and CEF web assets..."
 (
   cd "$REPO_ROOT"
   "$WINDOWS_BUN" run build:sidebar-css 2>&1 | cat
-  "$WINDOWS_BUN" x vite@8.0.10 build --config "$GPUI_DIR_WIN\\vite.config.ts" 2>&1 | cat
+  "$REPO_ROOT/node_modules/.bin/vite.exe" build --config "$GPUI_DIR_WIN\\vite.config.ts" 2>&1 | cat
 )
 
 VS_DEV_CMD_WIN="$(wslpath -a -w "$VS_DEV_CMD")"
@@ -445,6 +445,8 @@ if [[ "$ON_DEMAND_COMPONENTS" == "1" ]]; then
   CEF_STAGE="$(mktemp -d "$GPUI_DIR/build/cef-windows-component-XXXXXX")"
   CEF_ASSET="$COMPONENT_ASSET_DIR/cef-$CEF_COMPONENT_VERSION-windows-$RELEASE_ARCH.tar.gz"
   mkdir -p "$COMPONENT_ASSET_DIR"
+  mkdir -p "$(dirname "$COMPONENT_MANIFEST")"
+  printf '{"components":{}}\n' >"$COMPONENT_MANIFEST"
   for source_root in "$CEF_RELEASE" "$CEF_RESOURCES"; do
     find "$source_root" -maxdepth 1 -type f \
       \( -iname '*.dll' -o -iname '*.pak' -o -iname '*.dat' -o -iname '*.bin' \) \
@@ -526,6 +528,18 @@ stage_current_wsl_runtime_archive() {
     echo "The base WSL runtime archive does not contain bin/gxserver." >&2
     exit 1
   fi
+  if [[ -n "${GHOSTEX_WINDOWS_WSL_BEADS_BINARY:-}" ]]; then
+    if [[ ! -x "$GHOSTEX_WINDOWS_WSL_BEADS_BINARY" ]]; then
+      echo "Configured WSL Beads binary is not executable: $GHOSTEX_WINDOWS_WSL_BEADS_BINARY" >&2
+      exit 1
+    fi
+    cp "$GHOSTEX_WINDOWS_WSL_BEADS_BINARY" "$package_dir/bin/bd"
+    chmod 755 "$package_dir/bin/bd"
+  elif [[ ! -x "$package_dir/bin/bd" ]]; then
+    echo "The base WSL runtime archive does not contain executable bin/bd." >&2
+    exit 1
+  fi
+  node "$REPO_ROOT/scripts/smoke-test-packaged-beads.mjs" "$package_dir/bin/bd"
   cp "$WSL_GXSERVER_CURRENT_BIN" "$package_dir/bin/gxserver"
   cp "$WSL_ZMX_CURRENT_BIN" "$package_dir/bin/zmx"
   chmod 755 "$package_dir/bin/gxserver"
@@ -540,7 +554,7 @@ stage_current_wsl_runtime_archive() {
   current_fingerprint="sha256:$(
     {
       printf '%s\0' "$base_identity"
-      sha256sum "$package_dir/bin/gxserver" "$package_dir/bin/zmx"
+      sha256sum "$package_dir/bin/gxserver" "$package_dir/bin/zmx" "$package_dir/bin/bd"
     } | sha256sum | awk '{print $1}'
   )"
   source_revision="$(git -C "$REPO_ROOT" rev-parse HEAD)"

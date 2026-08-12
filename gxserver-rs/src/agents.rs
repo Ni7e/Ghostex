@@ -1872,6 +1872,32 @@ fn codex_metadata_title_identity(
     ))
 }
 
+pub(crate) fn codex_metadata_title_revision(home_dir: &Path, session: &Value) -> Option<String> {
+    let (_, index_paths) = codex_metadata_title_identity(home_dir, session)?;
+    let mut revisions = Vec::new();
+    for index_path in index_paths {
+        let Ok(metadata) = fs::metadata(&index_path) else {
+            continue;
+        };
+        let modified_ns = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| {
+                modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|duration| duration.as_nanos())
+            })
+            .unwrap_or_default();
+        revisions.push(format!(
+            "{}:{}:{modified_ns}",
+            index_path.to_string_lossy(),
+            metadata.len(),
+        ));
+    }
+    (!revisions.is_empty()).then(|| revisions.join("|"))
+}
+
 fn read_codex_session_index_title(
     index_paths: &[PathBuf],
     agent_session_id: &str,

@@ -94,6 +94,7 @@ pub enum SidebarBridgeEvent {
     SidebarCommandRunEnd(String),
     GhostexHotkeyAction(String),
     GxserverPresentationFocusState(String),
+    CreateProjectAgent(String),
     CreateProjectTerminal(String),
     WorkspaceTerminalFocus(String),
     WorkspaceTerminalRenameCommand(String),

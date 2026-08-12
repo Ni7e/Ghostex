@@ -24,6 +24,8 @@ import type {
   SidebarSessionItem,
 } from '../shared/session-grid-contract';
 import { getEnabledVisibleSidebarSessionTagSections } from '../shared/session-tags';
+import { ghostexHotkeyTextFromKeyboardEvent } from '../shared/ghostex-hotkeys';
+import { formatSidebarHotkeyLabel } from './hotkey-label';
 
 const PREVIOUS_SESSIONS_PAGE_SIZE = 80;
 const PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS = 200;
@@ -31,7 +33,7 @@ const PREVIOUS_SESSIONS_SCROLL_LOAD_MORE_THRESHOLD_PX = 96;
 const PREVIOUS_SESSIONS_TAG_FILTER_MENU_GAP_PX = 6;
 const PREVIOUS_SESSIONS_TAG_FILTER_MENU_MARGIN_PX = 12;
 const PREVIOUS_SESSIONS_VISIBLE_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
-const SESSIONS_SCOPE_TOGGLE_HOTKEY = '⌘⇧C';
+const SESSIONS_SCOPE_TOGGLE_HOTKEY = 'cmd+shift+c';
 
 type PreviousSessionsRequestMode = 'append' | 'replace';
 
@@ -472,13 +474,7 @@ export function PreviousSessionsModal({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.metaKey &&
-        event.shiftKey &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        event.key.toLocaleLowerCase() === 'c'
-      ) {
+      if (ghostexHotkeyTextFromKeyboardEvent(event) === SESSIONS_SCOPE_TOGGLE_HOTKEY) {
         event.preventDefault();
         event.stopPropagation();
         toggleClosedSessionsOnly();
@@ -805,7 +801,7 @@ export function PreviousSessionsModal({
               trailingControl={
                 <>
                   <button
-                    aria-label={`${showClosedSessionsOnly ? 'Show all sessions' : 'Show closed sessions'} (${SESSIONS_SCOPE_TOGGLE_HOTKEY})`}
+                    aria-label={`${showClosedSessionsOnly ? 'Show all sessions' : 'Show closed sessions'} (${formatSidebarHotkeyLabel(SESSIONS_SCOPE_TOGGLE_HOTKEY)})`}
                     aria-pressed={showClosedSessionsOnly}
                     className='quick-access-session-scope-toggle'
                     data-selected={String(showClosedSessionsOnly)}
@@ -819,7 +815,7 @@ export function PreviousSessionsModal({
                     type='button'
                   >
                     <span>{showClosedSessionsOnly ? 'Closed Sessions' : 'All Sessions'}</span>
-                    <kbd>{SESSIONS_SCOPE_TOGGLE_HOTKEY}</kbd>
+                    <kbd>{formatSidebarHotkeyLabel(SESSIONS_SCOPE_TOGGLE_HOTKEY)}</kbd>
                   </button>
                   {/*
                    * CDXC:PreviousSessions 2026-06-13-15:59:

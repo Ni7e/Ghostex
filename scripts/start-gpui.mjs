@@ -24,6 +24,7 @@ import {
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
+const appVersion = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 const gpuiDir = path.join(repoRoot, "gpui");
 const appName = "Ghostex";
 const bundleId = "com.madda.ghostex.gpui";
@@ -89,6 +90,14 @@ const windowsCodeServerIdentity = targetsWindows
 const windowsCodeServerNames = windowsCodeServerIdentity
   ? codeServerComponentNames(windowsCodeServerIdentity.componentVersion, `linux-${windowsArch}`)
   : undefined;
+/*
+CDXC:WindowsWslRuntimeCache 2026-08-09:
+The gxserver release asset keeps the same filename across Ghostex releases. A
+single architecture-only cache therefore reused an older CGO-disabled bd after
+the release pipeline began shipping the corrected embedded-Dolt build. Scope
+the cache to the immutable Ghostex release tag so a version can only consume
+the WSL runtime published with that version.
+*/
 const windowsWslArchive = targetsWindows
   ? explicitWindowsWslArchive
     ? path.resolve(explicitWindowsWslArchive)
@@ -96,6 +105,7 @@ const windowsWslArchive = targetsWindows
       repoRoot,
       "build",
       "runtime-artifacts",
+      `ghostex-${appVersion}`,
       windowsArch,
       `gxserver-linux-${windowsArch}.tar.gz`,
     )
@@ -404,13 +414,12 @@ function ensureWindowsWslRuntimeArchive() {
         `GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE does not exist: ${windowsWslArchive}`,
       );
     }
-    const version = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
     mkdirSync(path.dirname(windowsWslArchive), { recursive: true });
-    logStartStep(`Downloading the Ghostex ${version} WSL2 runtime...`);
+    logStartStep(`Downloading the Ghostex ${appVersion} WSL2 runtime...`);
     run("gh", [
       "release",
       "download",
-      `v${version}`,
+      `v${appVersion}`,
       "--repo",
       "maddada/Ghostex",
       "--pattern",

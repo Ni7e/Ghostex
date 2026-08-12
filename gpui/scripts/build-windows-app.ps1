@@ -54,7 +54,7 @@ Push-Location $RepoRoot
 try {
     bun run build:sidebar-css
     if ($LASTEXITCODE -ne 0) { throw "build:sidebar-css failed" }
-    bunx vite build --config (Join-Path $GpuiDir "vite.config.ts")
+    & (Join-Path $RepoRoot "node_modules/.bin/vite.exe") build --config (Join-Path $GpuiDir "vite.config.ts")
     if ($LASTEXITCODE -ne 0) { throw "vite build failed" }
 }
 finally {
@@ -154,6 +154,7 @@ if ($OnDemandComponents) {
     $CefComponentStage = Join-Path $ComponentRoot "cef-windows-$ReleaseArch-stage"
     $CefComponentAsset = Join-Path $ComponentAssetDir "cef-$CefComponentVersion-windows-$ReleaseArch.tar.gz"
     New-Item -ItemType Directory -Force -Path $ComponentAssetDir | Out-Null
+    '{"components":{}}' | Set-Content -Encoding UTF8 $ComponentManifest
     if (Test-Path $CefComponentStage) { Remove-Item -Recurse -Force $CefComponentStage }
     New-Item -ItemType Directory -Force -Path $CefComponentStage | Out-Null
     foreach ($sourceRoot in @($CefRelease.FullName, $CefResources) | Select-Object -Unique) {

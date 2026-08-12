@@ -942,18 +942,18 @@ fn download(url: &str, destination: &Path) -> Result<(), String> {
         .arg(url)
         .status();
     #[cfg(target_os = "windows")]
-    let status = Command::new("powershell.exe")
+    let status = Command::new("curl.exe")
         .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Invoke-WebRequest",
-            "-UseBasicParsing",
-            "-Uri",
+            "--fail",
+            "--location",
+            "--retry",
+            "2",
+            "--max-time",
+            "900",
+            "--output",
         ])
-        .arg(url)
-        .args(["-OutFile"])
         .arg(destination)
+        .arg(url)
         .status();
     match status {
         Ok(status) if status.success() => Ok(()),

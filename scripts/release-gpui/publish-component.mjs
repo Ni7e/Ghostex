@@ -139,16 +139,21 @@ function runGh(args, { allowFailure = false } = {}) {
   return result;
 }
 
-function reusePublishedAsset({ assetDir, component, componentVersion, platform, repo }) {
+function reusePublishedAsset({ assetDir, component, componentVersion, platform, repo, requireSha256Sidecar = false }) {
   const tag = `${component}-${componentVersion}`;
   const assetName = `${component}-${componentVersion}-${platform}.tar.gz`;
+  const sidecarName = `${assetName}.sha256`;
   const release = inspectRelease({ repo, tag });
   if (!release.exists) return false;
   const remote = release.assets.find((asset) => asset.name === assetName);
   if (!remote) return false;
+  const remoteSidecar = release.assets.find((asset) => asset.name === sidecarName);
+  if (requireSha256Sidecar && !remoteSidecar) {
+    throw new Error(`Component tag ${tag} is missing ${sidecarName}`);
+  }
 
   mkdirSync(assetDir, { recursive: true });
-  runGh([
+  const downloadArgs = [
     "release",
     "download",
     tag,
@@ -156,10 +161,14 @@ function reusePublishedAsset({ assetDir, component, componentVersion, platform, 
     repo,
     "--pattern",
     assetName,
+  ];
+  if (requireSha256Sidecar) downloadArgs.push("--pattern", sidecarName);
+  downloadArgs.push(
     "--dir",
     assetDir,
     "--clobber",
-  ]);
+  );
+  runGh(downloadArgs);
   const localPath = path.resolve(assetDir, assetName);
   const localSize = statSync(localPath).size;
   const localDigest = sha256File(localPath);
@@ -297,6 +306,7 @@ async function main() {
       componentVersion,
       platform,
       repo,
+      requireSha256Sidecar: options.requireSha256Sidecars,
     });
   }
   const assets = componentAssetsFromDirectory({ assetDir: options["asset-dir"], component, componentVersion });
