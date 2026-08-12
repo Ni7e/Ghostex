@@ -8,6 +8,29 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>7.6.0</title>
+            <pubDate>Wed, 12 Aug 2026 04:23:44 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.6.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>70600</sparkle:version>
+            <sparkle:shortVersionString>7.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 7.6.0
+
+## 7.6.0 - 2026-08-12
+
+- Major
+  - Docs can mount an additional folder beside each project's own files, with clear copyable paths for everything in that collection, thanks to @banozz.
+  - Worktrees can rename both their folder and branch directly from the sidebar, thanks to @banozz.
+  - Project sessions are organized into collapsible Browser, Pinned, and Sessions sections so busy workspaces stay easier to scan.
+- Minor
+  - Session Chat presents tool activity and hidden work more clearly, keeps long output manageable, and adds a focused copy action to each final response.
+  - Browser panes can open their current page in the system browser, and titlebar customization is easier to reach from its context menu.
+  - Windows runtime setup, WSL terminal integration, session recovery, and on-demand component handling are more dependable.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.6.0/ghostex-7.6.0-arm64.dmg" length="115040035" type="application/octet-stream" sparkle:edSignature="1n4eSXGCNPWpnOyqWhpvybQ8ZfTOnatbbMnDgabo3xyya1tbiQnnpMl1mZMfOmtWKSFkio2OYzDQEJcRwCIyDg=="/>
+        </item>
+        <item>
             <title>7.5.0</title>
             <pubDate>Sun, 09 Aug 2026 22:14:59 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.5.0</sparkle:fullReleaseNotesLink>
@@ -126,31 +149,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.1.0/ghostex-7.1.0-arm64.dmg" length="113162998" type="application/octet-stream" sparkle:edSignature="yFlmkM3WVYiNAtpIDZoyRUezG/Yh8q1tAjnjdb48mtRp+OCqfLdtqYdpzBmW3cT6pFaXuaz/2+nWstyvYie8Dg=="/>
         </item>
         <item>
-            <title>7.0.0</title>
-            <pubDate>Tue, 04 Aug 2026 06:58:33 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.0.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>70000</sparkle:version>
-            <sparkle:shortVersionString>7.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 7.0.0
-
-## 7.0.0 - 2026-08-04
-
-- Major
-  - Ghostex for Windows now uses installable x64 and ARM64 packages with built-in automatic updates from GitHub Releases; existing 6.x Windows users need to install 7.0.0 once to move onto the new updater.
-  - Session Automations can wait for agents to finish before sending a prompt, while missing project folders are detected and can be relocated without losing the project setup.
-  - Session Chat adds attach-anything uploads, larger image previews, broader agent transcript support, continuation tracking, and clearer live model and action state across desktop, web, and Android.
-  - Ghostex can download large app components only when needed and provides a dedicated Plugins window, reducing the size of the core desktop installation.
-- Minor
-  - Existing Codex and other agent integrations automatically repair Ghostex hook paths after the storage-folder migration, preventing PreToolUse and UserPromptSubmit hook failures.
-  - Global Actions can appear directly in the tab strip, and Global Defaults can configure common project settings once for every project, thanks to @banozz.
-  - Remote project collections, flexible GitHub clone inputs, terminal background images, multi-monitor popup placement, session reconciliation, and Windows startup reliability make everyday workspace management steadier, with Windows startup improvements from @yossifyahya16.
-  - The Android app adds Session Automations, chat attachment uploads, a simpler unified terminal menu, clearer quick actions, and the latest session-status improvements.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.0.0/ghostex-7.0.0-arm64.dmg" length="113450325" type="application/octet-stream" sparkle:edSignature="wWqZCDkDh7wpKGP7xI2rsp/5F3+6oBf1zfOvSbyUxIWCbFMAfIJ/HehnaH1Ocs429RpkLLkRZdKb3pqXPuSECw=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -162,6 +160,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: JS2vvojkB7eHXjXu6Qb0v6ZxoIudvTpA9JjV946Gj9vrboCCGwViynw5NhuO+e2HuG9zRAcbomwk/Hhl7moFAw==
-length: 13748
+edSignature: IdiPqK/Nldy/5ifhQY0BlfSunWSCqRftWuEE71q9T6QPcKIkypRQLqmm+9oLuRjhEDAefgN5QGZ9uH1iIF4ADQ==
+length: 13022
 -->
