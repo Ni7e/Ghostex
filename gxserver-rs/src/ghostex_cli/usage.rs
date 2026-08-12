@@ -229,7 +229,7 @@ pub fn usage() -> String {
         lines.extend(automation_help_commands());
         lines.push(format_help_command(
             "bd <args...>",
-            "Run Ghostex's bundled Beads CLI for the current project",
+            "Compatibility passthrough to the machine-installed Beads CLI",
         ));
         lines.join("\n")
     };
@@ -321,10 +321,6 @@ pub fn usage() -> String {
         format_help_command(
             "generate-title --help",
             "Show Ghostex Auto Rename Session skill setup",
-        ),
-        format_help_command(
-            "manage-beads --help",
-            "Show Ghostex Manage Beads skill setup",
         ),
         format_help_command(
             "move-codex-session --help",
@@ -464,7 +460,7 @@ What the skill teaches:
 
 Specialized workflows:
   Use $ghostex-manage-automations, $ghostex-agent-orchestration,
-  $ghostex-manage-beads, $ghostex-embedded-browser-use,
+  $ghostex-embedded-browser-use,
   $ghostex-browser-use, or $ghostex-computer-use when their domain applies.
 "
     .to_string()
@@ -793,31 +789,6 @@ What the skill does:
 
 Self-session command:
   ghostex rename-command --session-id \"${GHOSTEX_GLOBAL_SESSION_REF:-${GHOSTEX_SESSION_ID:-${ZMX_SESSION:-}}}\" --title \"<title>\"
-"
-    .to_string()
-}
-
-pub fn manage_beads_usage() -> String {
-    "Ghostex Manage Beads - install the agent skill for project board beads
-
-Usage:
-  gx manage-beads --help
-  gx manage-beads install-skill [--json]
-
-Agent skill:
-  Use $ghostex-manage-beads when a task needs project board bead management,
-  including creating review beads, moving beads through statuses, adding
-  comments, and associating a bead with the current Ghostex or Codex session.
-
-What the skill teaches:
-  Inspect existing beads with gx bd list/show/comments, create review beads with
-  external refs such as codex-thread:$CODEX_THREAD_ID, move work to review, and
-  add a session-association comment containing Ghostex and Codex ids when those
-  environment variables are available.
-
-Boundary:
-  The skill teaches agents to use gx bd, which forwards to Ghostex's bundled
-  Beads CLI. Ghostex does not invent a second project-board API.
 "
     .to_string()
 }

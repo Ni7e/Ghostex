@@ -28,7 +28,6 @@ command names or flags.
    ghostex quick-actions --help
    ghostex browser --help
    ghostex server --help
-   ghostex manage-beads --help
    ghostex agent-orchestration --help
    ```
 
@@ -48,7 +47,7 @@ command names or flags.
 
 - Use `$ghostex-manage-automations` for scheduled project automations.
 - Use `$ghostex-agent-orchestration` for coordinating panes or agent sessions.
-- Use `$ghostex-manage-beads` for Project Board bead workflows.
+- Use the latest machine-installed `bd` CLI directly for Project Board bead workflows.
 - Use `$ghostex-embedded-browser-use` for browser panes inside Ghostex.
 - Use `$ghostex-browser-use` for supported external browser page content.
 - Use `$ghostex-computer-use` for native desktop application control.

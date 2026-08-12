@@ -1,8 +1,8 @@
 ---
 name: ghostex-manage-beads
 description: >-
-  Use this skill when managing Ghostex project board beads with Ghostex's
-  bundled `gx bd` Beads CLI wrapper:
+  Use this skill when managing Ghostex project board beads with the normal
+  machine-installed `bd` CLI:
   creating, updating, commenting on, reviewing, closing, or associating beads
   with the current Ghostex or Codex session. It covers the project swimlane
   workflow, session-link comments, external refs, and safe examples for making
@@ -19,10 +19,10 @@ bead with the current Ghostex or Codex session.
 
 - Run bead commands from the repository root so Beads finds the project database
   and `.beads` JSONL export.
-- Use `gx bd`, not raw `bd`, so commands run through Ghostex's bundled Beads
-  binary instead of a shell-installed version.
-- Prefer `gx bd --help` and `gx bd <command> --help` as the source of truth for
-  the bundled Beads version.
+- Use the normal `bd` CLI installed in the environment running the project—
+  macOS, Linux, or the selected WSL distribution.
+- Prefer `bd --help` and `bd <command> --help` as the source of truth for the
+  installed Beads version.
 - Inspect nearby beads before creating a new one so title, labels, status, and
   external-ref style match the project.
 
@@ -31,24 +31,24 @@ bead with the current Ghostex or Codex session.
 1. Inspect current work:
 
    ```bash
-   gx bd list --json
-   gx bd show <id> --json
-   gx bd comments <id> --json
+   bd list --json
+   bd show <id> --json
+   bd comments <id> --json
    ```
 
 2. Move the bead through project swimlanes:
 
    ```bash
-   gx bd update <id> --status in_progress
-   gx bd update <id> --status test
-   gx bd update <id> --status review
-   gx bd close <id>
+   bd update <id> --status in_progress
+   bd update <id> --status test
+   bd update <id> --status review
+   bd close <id>
    ```
 
 3. After each meaningful turn, add a short human-readable comment:
 
    ```bash
-   gx bd comment <id> "<summary>"
+   bd comment <id> "<summary>"
    ```
 
 Keep comments focused on user-facing requirements delivered and high-level
@@ -88,14 +88,14 @@ gx board start-work <bead-id> [--agent <agentId>] [--project-id <id>] [--json]
 Use a review bead when the implementation is ready for another pass:
 
 ```bash
-gx bd create "Review <specific change>" \
+bd create "Review <specific change>" \
   --type task \
   --priority P2 \
   --labels review,<area> \
   --external-ref "codex-thread:$CODEX_THREAD_ID" \
   --description "<review focus, files or areas, verification, known blockers>" \
   --json
-gx bd update <id> --status review
+bd update <id> --status review
 ```
 
 If `CODEX_THREAD_ID` is missing, omit the external ref rather than inventing
@@ -107,7 +107,7 @@ Prefer a bead comment for full session association because `external-ref` holds
 one stable reference and comments can include both Ghostex and Codex ids:
 
 ```bash
-gx bd comment <id> "Associated session: Ghostex ${GHOSTEX_GLOBAL_SESSION_REF:-unknown} / ${GHOSTEX_NATIVE_SESSION_ID:-unknown}, Codex thread ${CODEX_THREAD_ID:-unknown}. <brief work summary and verification status>."
+bd comment <id> "Associated session: Ghostex ${GHOSTEX_GLOBAL_SESSION_REF:-unknown} / ${GHOSTEX_NATIVE_SESSION_ID:-unknown}, Codex thread ${CODEX_THREAD_ID:-unknown}. <brief work summary and verification status>."
 ```
 
 Useful environment variables when present:
@@ -126,15 +126,15 @@ in a comment.
 ## Example: Session-Associated Review Bead
 
 ```bash
-gx bd create "Review companion CEF flicker layout-key fix" \
+bd create "Review companion CEF flicker layout-key fix" \
   --type task \
   --priority P2 \
   --labels cef,native-sidebar,review \
   --external-ref "codex-thread:$CODEX_THREAD_ID" \
   --description "Review the geometry-only native layout-key extraction for companion terminal focus changes. Verify focused tests, typecheck, and any known unrelated blockers." \
   --json
-gx bd update <new-id> --status review
-gx bd comment <new-id> "Associated session: Ghostex ${GHOSTEX_GLOBAL_SESSION_REF:-unknown} / ${GHOSTEX_NATIVE_SESSION_ID:-unknown}, Codex thread ${CODEX_THREAD_ID:-unknown}. Implemented geometry-only native layout-key extraction so companion session clicks no longer classify active-tab focus changes as AppKit layout changes; focused tests and typecheck passed."
+bd update <new-id> --status review
+bd comment <new-id> "Associated session: Ghostex ${GHOSTEX_GLOBAL_SESSION_REF:-unknown} / ${GHOSTEX_NATIVE_SESSION_ID:-unknown}, Codex thread ${CODEX_THREAD_ID:-unknown}. Implemented geometry-only native layout-key extraction so companion session clicks no longer classify active-tab focus changes as AppKit layout changes; focused tests and typecheck passed."
 ```
 
 ## Safety

@@ -103,7 +103,7 @@ Native child windows are the accepted pattern for app modals, dropdowns, command
 
 ### Project board beads workflow
 
-When working from a Ghostex Project board ticket, move the bead through the project swimlanes with `bd` instead of leaving it in `open`/Todo:
+When working from a Ghostex Project board ticket, use the `bd` CLI installed in the environment running that project—macOS, Linux, or the selected WSL distribution—and move the bead through the project swimlanes instead of leaving it in `open`/Todo. Ghostex's Kanban runtime uses this same system binary, so do not depend on a separate `gx bd` wrapper or a bundled Ghostex copy. If `bd` is missing or a board command fails, ask the user to install or update to the latest Beads release in that same environment before continuing.
 
 - Park for later: `bd update <id> --status backlog`
 - Claim work: `bd update <id> --status in_progress`

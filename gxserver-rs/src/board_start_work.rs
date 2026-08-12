@@ -403,17 +403,17 @@ pub(crate) fn build_board_bead_work_prompt(
         description.to_string(),
         String::new(),
         "After each turn where you made progress on this bead, add a bead comment summarizing what you did:".to_string(),
-        format!("- `gx bd comment {bead_id} \"<summary>\"`"),
+        format!("- `bd comment {bead_id} \"<summary>\"`"),
         "- Focus on user-facing requirements delivered and high-level technical approach.".to_string(),
         "- Do not list specific files or line numbers.".to_string(),
         "- End the comment with `Agent: <agent name>` and `Session: <saved agent CLI session id>` lines so the ticket view can show the agent after the user name and the resumable agent session id at the bottom.".to_string(),
         String::new(),
         "Status workflow for this project board:".to_string(),
-        format!("- Park for later: `gx bd update {bead_id} --status backlog`"),
-        format!("- When you start: `gx bd update {bead_id} --status in_progress`"),
-        format!("- When implementation is ready for test: `gx bd update {bead_id} --status test`"),
-        format!("- When ready for review: `gx bd update {bead_id} --status review`"),
-        format!("- When done: `gx bd close {bead_id}`"),
+        format!("- Park for later: `bd update {bead_id} --status backlog`"),
+        format!("- When you start: `bd update {bead_id} --status in_progress`"),
+        format!("- When implementation is ready for test: `bd update {bead_id} --status test`"),
+        format!("- When ready for review: `bd update {bead_id} --status review`"),
+        format!("- When done: `bd close {bead_id}`"),
     ]
     .join("\n")
 }
@@ -944,7 +944,7 @@ mod tests {
         assert!(first_user_message
             .starts_with(&format!("Work on bead {TEST_BEAD_ID} ({TEST_BEAD_ID}): Fix the flux capacitor")));
         assert!(first_user_message.contains("Reverse the polarity."));
-        assert!(first_user_message.contains(&format!("`gx bd close {TEST_BEAD_ID}`")));
+        assert!(first_user_message.contains(&format!("`bd close {TEST_BEAD_ID}`")));
 
         let links = read_board_links(&board);
         assert_eq!(links.len(), 1);
@@ -1139,7 +1139,7 @@ mod tests {
         let prompt = build_board_bead_work_prompt("gx-12", "gx-12", "Do the thing", None);
         assert!(prompt.starts_with("Work on bead gx-12 (gx-12): Do the thing"));
         assert!(prompt.contains("No prompt provided."));
-        assert!(prompt.contains("- `gx bd comment gx-12 \"<summary>\"`"));
-        assert!(prompt.contains("- When done: `gx bd close gx-12`"));
+        assert!(prompt.contains("- `bd comment gx-12 \"<summary>\"`"));
+        assert!(prompt.contains("- When done: `bd close gx-12`"));
     }
 }

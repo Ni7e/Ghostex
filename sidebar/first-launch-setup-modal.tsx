@@ -66,6 +66,7 @@ export type FirstLaunchSetupPage =
   | "hooks"
   | "cli"
   | "skills"
+  | "ready"
   | "browserControl"
   | "desktopCua"
   | "agentsSessions"
@@ -220,6 +221,7 @@ const FIRST_LAUNCH_SETUP_PAGES: readonly FirstLaunchSetupPage[] = [
   "welcome",
   "hooks",
   "skills",
+  "ready",
 ];
 
 const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
@@ -837,6 +839,8 @@ export function FirstLaunchSetupModal({
               onInstallMoveCodexSessionSkill={onInstallMoveCodexSessionSkill}
               onUninstallBundledAgentSkill={onUninstallBundledAgentSkill}
             />
+          ) : activePage === "ready" ? (
+            <FirstLaunchReadyPage />
           ) : (
             <FirstLaunchGuidePageView
               ghostexCliStatus={ghostexCliStatus}
@@ -881,7 +885,7 @@ export function FirstLaunchSetupModal({
             ) : null}
             {isLastPage ? (
               <Button onClick={handleContinue} type="button">
-                Let's start!
+                Open Ghostex
               </Button>
             ) : (
               <Button onClick={handleContinue} type="button">
@@ -893,6 +897,26 @@ export function FirstLaunchSetupModal({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function FirstLaunchReadyPage() {
+  return (
+    <section
+      aria-labelledby="first-launch-ready-title"
+      className="flex min-h-0 flex-1 items-center justify-center"
+    >
+      <div className="flex max-w-xl flex-col items-center gap-4 text-center">
+        <IconCircleCheckFilled aria-hidden="true" className="size-16 text-emerald-500" />
+        <h2 className="first-launch-setup-title" id="first-launch-ready-title">
+          Ghostex is ready
+        </h2>
+        <p className="first-launch-setup-description">
+          Your terminal engine is connected, and you’ve reviewed agent hooks and bundled skills.
+          You can change any of these choices later in Settings.
+        </p>
+      </div>
+    </section>
   );
 }
 

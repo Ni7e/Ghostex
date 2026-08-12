@@ -399,8 +399,10 @@ export function SessionChatView({
       : chat.view.kind === "error"
         ? ("error" as const)
         : chat.view.kind;
-  const hideUnresolvedState = emptyKind === "loading" || emptyKind === "starting";
-  const showNewSessionWelcome = emptyKind === "empty";
+  const showNewSessionWelcome =
+    // A new agent reports `starting` until its first transcript file exists.
+    // Keep the designed welcome visible throughout that pre-transcript window.
+    emptyKind === "loading" || emptyKind === "starting" || emptyKind === "empty";
 
   return (
     <TooltipProvider>
@@ -445,7 +447,7 @@ export function SessionChatView({
             messages={chat.messages}
             onLoadEarlier={chat.loadEarlier}
           />
-        ) : hideUnresolvedState ? null : showNewSessionWelcome ? (
+        ) : showNewSessionWelcome ? (
           <NewSessionWelcome agentLabel={agentLabel} />
         ) : emptyKind ? (
           chat.view.kind === "error" ? (

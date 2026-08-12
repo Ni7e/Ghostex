@@ -12,8 +12,25 @@ const CEF_FRAMEWORK_EXECUTABLE_RELATIVE_PATH: &str =
 
 #[derive(Clone, Debug)]
 enum CefComponentWindowState {
-    Installing(component_store::ComponentStoreProgressPhase),
+    Installing(CefComponentProgress),
     Failed(String),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CefComponentProgress {
+    downloaded_bytes: u64,
+    phase: component_store::ComponentStoreProgressPhase,
+    size_bytes: u64,
+}
+
+impl CefComponentProgress {
+    fn checking() -> Self {
+        Self {
+            downloaded_bytes: 0,
+            phase: component_store::ComponentStoreProgressPhase::Checking,
+            size_bytes: 0,
+        }
+    }
 }
 
 pub(crate) struct GpuiCefComponentWindow {
@@ -51,28 +68,45 @@ impl GpuiCefComponentWindow {
 impl Render for GpuiCefComponentWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         let (title, detail, progress, failed) = match &self.state {
-            CefComponentWindowState::Installing(phase) => {
-                let (detail, progress) = match phase {
+            CefComponentWindowState::Installing(component_progress) => {
+                let (detail, progress) = match component_progress.phase {
                     component_store::ComponentStoreProgressPhase::Checking => {
-                        ("Checking the required runtime…", 0.10)
+                        ("Checking the required runtime…".to_string(), 0.10)
                     }
                     component_store::ComponentStoreProgressPhase::Downloading => {
-                        ("Downloading Chromium Embedded Framework…", 0.35)
+                        let download_ratio = if component_progress.size_bytes == 0 {
+                            0.0
+                        } else {
+                            component_progress.downloaded_bytes as f32
+                                / component_progress.size_bytes as f32
+                        }
+                        .clamp(0.0, 1.0);
+                        let detail = if component_progress.size_bytes == 0 {
+                            "Downloading the browser runtime…".to_string()
+                        } else {
+                            format!(
+                                "Downloading the browser runtime… {}% · {} of {}",
+                                (download_ratio * 100.0).round() as u32,
+                                cef_component_bytes_label(component_progress.downloaded_bytes),
+                                cef_component_bytes_label(component_progress.size_bytes),
+                            )
+                        };
+                        (detail, 0.10 + download_ratio * 0.50)
                     }
                     component_store::ComponentStoreProgressPhase::Verifying => {
-                        ("Verifying the signed download…", 0.65)
+                        ("Verifying the signed download…".to_string(), 0.65)
                     }
                     component_store::ComponentStoreProgressPhase::Installing => {
-                        ("Installing the verified runtime…", 0.82)
+                        ("Installing the verified runtime…".to_string(), 0.82)
                     }
                     component_store::ComponentStoreProgressPhase::Pruning => {
-                        ("Finishing installation…", 0.94)
+                        ("Finishing installation…".to_string(), 0.94)
                     }
                     component_store::ComponentStoreProgressPhase::Ready => {
-                        ("Starting Ghostex…", 1.0)
+                        ("Starting Ghostex…".to_string(), 1.0)
                     }
                 };
-                ("Preparing Ghostex", detail.to_string(), progress, false)
+                ("Preparing Ghostex", detail, progress, false)
             }
             CefComponentWindowState::Failed(message) => (
                 "Chromium runtime download failed",
@@ -179,15 +213,23 @@ impl Render for GpuiCefComponentWindow {
     }
 }
 
+fn cef_component_bytes_label(bytes: u64) -> String {
+    const MEBIBYTE: f64 = 1024.0 * 1024.0;
+    let mebibytes = bytes as f64 / MEBIBYTE;
+    if mebibytes >= 10.0 {
+        format!("{mebibytes:.0} MB")
+    } else {
+        format!("{mebibytes:.1} MB")
+    }
+}
+
 impl GhostexGpuiApp {
     pub(super) fn begin_cef_startup(&mut self, cx: &mut gpui::Context<Self>) {
         match verified_cef_runtime_readiness() {
             Ok(CefRuntimeReadiness::Ready) => self.initialize_cef(cx),
             Ok(CefRuntimeReadiness::InstallRequired { version }) => {
                 self.open_cef_component_window(
-                    CefComponentWindowState::Installing(
-                        component_store::ComponentStoreProgressPhase::Checking,
-                    ),
+                    CefComponentWindowState::Installing(CefComponentProgress::checking()),
                     version,
                     cx,
                 );
@@ -271,9 +313,7 @@ impl GhostexGpuiApp {
         let generation = self.cef_component_install_generation;
         let version = expected_cef_component_version();
         self.open_cef_component_window(
-            CefComponentWindowState::Installing(
-                component_store::ComponentStoreProgressPhase::Checking,
-            ),
+            CefComponentWindowState::Installing(CefComponentProgress::checking()),
             version,
             cx,
         );
@@ -406,7 +446,7 @@ fn verified_cef_runtime_readiness() -> Result<CefRuntimeReadiness, String> {
 }
 
 fn install_and_verify_cef_component(
-    progress_tx: mpsc::UnboundedSender<component_store::ComponentStoreProgressPhase>,
+    progress_tx: mpsc::UnboundedSender<CefComponentProgress>,
 ) -> Result<(), String> {
     let store = on_demand_component_store()?
         .ok_or_else(|| "The sealed CEF component manifest is unavailable.".to_string())?;
@@ -427,7 +467,11 @@ fn install_and_verify_cef_component(
     }
 
     let mut report_progress = |progress: component_store::ComponentStoreProgress| {
-        let _ = progress_tx.unbounded_send(progress.phase);
+        let _ = progress_tx.unbounded_send(CefComponentProgress {
+            downloaded_bytes: progress.downloaded_bytes,
+            phase: progress.phase,
+            size_bytes: progress.size_bytes,
+        });
     };
     let installed = store.install(CEF_COMPONENT, &mut report_progress)?;
     verify_cef_runtime_dir(&installed.path)

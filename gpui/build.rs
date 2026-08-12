@@ -515,6 +515,7 @@ fn main() {
     let gpui_app_icon = manifest_dir.join("native/macos/GpuiAppIcon.m");
     let gpui_accessibility_display_options =
         manifest_dir.join("native/macos/GpuiAccessibilityDisplayOptions.m");
+    let gpui_workspace_power_events = manifest_dir.join("native/macos/GpuiWorkspacePowerEvents.m");
     let gpui_lid_sleep_helper_client = manifest_dir.join("native/macos/GpuiLidSleepHelperClient.m");
     let gpui_menu_bar_status_item = manifest_dir.join("native/macos/GpuiMenuBarStatusItem.m");
     let gpui_sparkle_updater = manifest_dir.join("native/macos/GpuiSparkleUpdater.m");
@@ -539,6 +540,10 @@ fn main() {
     println!(
         "cargo:rerun-if-changed={}",
         gpui_accessibility_display_options.display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        gpui_workspace_power_events.display()
     );
     println!(
         "cargo:rerun-if-changed={}",
@@ -624,6 +629,15 @@ fn main() {
     gpui_macos_objc_build()
         .file(gpui_accessibility_display_options)
         .compile("ghostex_gpui_accessibility_display_options");
+
+    /*
+    CDXC:GPUIRemoteWakeReconnect 2026-08-12:
+    Compile the NSWorkspace wake observer separately from connection logic.
+    It forwards only the wake edge; Rust owns tunnel validation and status.
+    */
+    gpui_macos_objc_build()
+        .file(gpui_workspace_power_events)
+        .compile("ghostex_gpui_workspace_power_events");
 
     /*
     CDXC:GPUITitlebarKeepAwake 2026-06-26-00:09:

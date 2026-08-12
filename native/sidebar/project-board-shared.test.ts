@@ -383,16 +383,16 @@ describe("buildAgentWorkPrompt", () => {
 
     expect(prompt).toContain("Work on bead zmux-zkr (ZMU-41): Generating title...");
     expect(prompt).toContain("Document bead progress in comments after each agent turn.");
-    expect(prompt).toContain('gx bd comment zmux-zkr "<summary>"');
+    expect(prompt).toContain('bd comment zmux-zkr "<summary>"');
     expect(prompt).toContain("user-facing requirements");
     expect(prompt).toContain("Do not list specific files or line numbers.");
     expect(prompt).toContain("Agent: <agent name>");
     expect(prompt).toContain("Session: <saved agent CLI session id>");
-    expect(prompt).toContain("gx bd update zmux-zkr --status backlog");
-    expect(prompt).toContain("gx bd update zmux-zkr --status in_progress");
-    expect(prompt).toContain("gx bd update zmux-zkr --status test");
-    expect(prompt).toContain("gx bd update zmux-zkr --status review");
-    expect(prompt).toContain("gx bd close zmux-zkr");
+    expect(prompt).toContain("bd update zmux-zkr --status backlog");
+    expect(prompt).toContain("bd update zmux-zkr --status in_progress");
+    expect(prompt).toContain("bd update zmux-zkr --status test");
+    expect(prompt).toContain("bd update zmux-zkr --status review");
+    expect(prompt).toContain("bd close zmux-zkr");
   });
 });
 

@@ -4,8 +4,9 @@ use std::{
     fs::File,
     io::{self, Read},
     path::{Path, PathBuf},
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use flate2::read::GzDecoder;
@@ -13,6 +14,11 @@ use sha2::{Digest as _, Sha256};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt as _;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const MANIFEST_SCHEMA_VERSION: u64 = 2;
 const CODE_SERVER_COMPONENT_NAME: &str = "code-server";
@@ -94,6 +100,7 @@ impl ComponentStoreProgressPhase {
 pub struct ComponentStoreProgress {
     pub component: String,
     pub component_version: String,
+    pub downloaded_bytes: u64,
     pub platform: String,
     pub phase: ComponentStoreProgressPhase,
     pub size_bytes: u64,
@@ -104,6 +111,7 @@ impl ComponentStoreProgress {
         serde_json::json!({
             "component": self.component,
             "componentVersion": self.component_version,
+            "downloadedBytes": self.downloaded_bytes,
             "platform": self.platform,
             "phase": self.phase.as_str(),
             "sizeBytes": self.size_bytes,
@@ -579,7 +587,20 @@ impl ComponentStore {
             asset.size_bytes,
             ComponentStoreProgressPhase::Downloading,
         );
-        download(&url, &archive_path)?;
+        download(
+            &url,
+            &archive_path,
+            asset.size_bytes,
+            &mut |downloaded_bytes| {
+                emit_download_progress(
+                    progress,
+                    component,
+                    platform,
+                    asset.size_bytes,
+                    downloaded_bytes,
+                );
+            },
+        )?;
         emit(
             progress,
             component,
@@ -594,7 +615,7 @@ impl ComponentStore {
                 &component.download_tag,
                 sidecar_name,
             );
-            download(&sidecar_url, &sidecar_path)?;
+            download(&sidecar_url, &sidecar_path, 0, &mut |_| {})?;
             let sidecar = fs::read_to_string(&sidecar_path).map_err(|error| {
                 format!(
                     "Could not read downloaded component checksum sidecar {}: {error}",
@@ -747,7 +768,15 @@ impl ComponentStore {
             &compatibility_component.download_tag,
             &asset.name,
         );
-        download(&url, &temporary)?;
+        download(&url, &temporary, asset.bytes, &mut |downloaded_bytes| {
+            emit_download_progress(
+                progress,
+                &compatibility_component,
+                &platform,
+                asset.bytes,
+                downloaded_bytes,
+            );
+        })?;
         emit(
             progress,
             &compatibility_component,
@@ -842,8 +871,26 @@ fn emit(
     progress(ComponentStoreProgress {
         component: component.name.clone(),
         component_version: component.component_version.clone(),
+        downloaded_bytes: 0,
         platform: platform.to_string(),
         phase,
+        size_bytes,
+    });
+}
+
+fn emit_download_progress(
+    progress: &mut dyn FnMut(ComponentStoreProgress),
+    component: &ComponentDefinition,
+    platform: &str,
+    size_bytes: u64,
+    downloaded_bytes: u64,
+) {
+    progress(ComponentStoreProgress {
+        component: component.name.clone(),
+        component_version: component.component_version.clone(),
+        downloaded_bytes: downloaded_bytes.min(size_bytes),
+        platform: platform.to_string(),
+        phase: ComponentStoreProgressPhase::Downloading,
         size_bytes,
     });
 }
@@ -912,37 +959,20 @@ fn download_url(repo: &str, tag: &str, asset_name: &str) -> String {
     format!("{}/{tag}/{asset_name}", base.trim_end_matches('/'))
 }
 
-fn download(url: &str, destination: &Path) -> Result<(), String> {
+fn download(
+    url: &str,
+    destination: &Path,
+    expected_size: u64,
+    progress: &mut dyn FnMut(u64),
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    let status = Command::new("/usr/bin/curl")
-        .args([
-            "--fail",
-            "--location",
-            "--retry",
-            "2",
-            "--max-time",
-            "900",
-            "--output",
-        ])
-        .arg(destination)
-        .arg(url)
-        .status();
+    let mut command = Command::new("/usr/bin/curl");
     #[cfg(all(unix, not(target_os = "macos")))]
-    let status = Command::new("curl")
-        .args([
-            "--fail",
-            "--location",
-            "--retry",
-            "2",
-            "--max-time",
-            "900",
-            "--output",
-        ])
-        .arg(destination)
-        .arg(url)
-        .status();
+    let mut command = Command::new("curl");
     #[cfg(target_os = "windows")]
-    let status = Command::new("curl.exe")
+    let mut command = Command::new("curl.exe");
+
+    command
         .args([
             "--fail",
             "--location",
@@ -950,19 +980,54 @@ fn download(url: &str, destination: &Path) -> Result<(), String> {
             "2",
             "--max-time",
             "900",
+            "--silent",
+            "--show-error",
             "--output",
         ])
         .arg(destination)
         .arg(url)
-        .status();
-    match status {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(format!(
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Could not launch component downloader for {url}: {error}"))?;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if expected_size > 0 {
+                    let downloaded_bytes = fs::metadata(destination)
+                        .map(|metadata| metadata.len())
+                        .unwrap_or(0);
+                    progress(downloaded_bytes);
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "Could not monitor component downloader for {url}: {error}"
+                ));
+            }
+        }
+    };
+    if expected_size > 0 {
+        let downloaded_bytes = fs::metadata(destination)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        progress(downloaded_bytes);
+    }
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
             "Could not download component asset from {url}: downloader exited with {status}"
-        )),
-        Err(error) => Err(format!(
-            "Could not launch component downloader for {url}: {error}"
-        )),
+        ))
     }
 }
 

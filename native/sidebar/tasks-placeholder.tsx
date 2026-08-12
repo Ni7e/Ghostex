@@ -5138,7 +5138,143 @@ function AutomationRunDetail({
   );
 }
 
+type RemoteMigrateGateOption = {
+  commands: string[];
+  id: string;
+  risk: string;
+  when: string;
+};
+
+type RemoteMigrateGate = {
+  currentVersion?: number;
+  decision?: string;
+  docs?: string;
+  fallbackReason?: string;
+  latestVersion?: number;
+  options: RemoteMigrateGateOption[];
+  pending?: number;
+};
+
+function parseRemoteMigrateGate(message: string): RemoteMigrateGate | undefined {
+  try {
+    const payload = JSON.parse(message) as unknown;
+    if (typeof payload !== "object" || payload === null) {
+      return undefined;
+    }
+    const gateValue = (payload as Record<string, unknown>).remote_migrate_gate;
+    if (typeof gateValue !== "object" || gateValue === null) {
+      return undefined;
+    }
+    const gate = gateValue as Record<string, unknown>;
+    const options = Array.isArray(gate.options)
+      ? gate.options.flatMap((option): RemoteMigrateGateOption[] => {
+          if (typeof option !== "object" || option === null) {
+            return [];
+          }
+          const value = option as Record<string, unknown>;
+          const id = typeof value.id === "string" ? value.id : "";
+          const commands = Array.isArray(value.commands)
+            ? value.commands.filter((command): command is string => typeof command === "string")
+            : [];
+          if (!id || commands.length === 0) {
+            return [];
+          }
+          return [{
+            commands,
+            id,
+            risk: typeof value.risk === "string" ? value.risk : "",
+            when: typeof value.when === "string" ? value.when : "",
+          }];
+        })
+      : [];
+    if (options.length === 0) {
+      return undefined;
+    }
+    return {
+      currentVersion: typeof gate.current_version === "number" ? gate.current_version : undefined,
+      decision: typeof gate.decision === "string" ? gate.decision : undefined,
+      docs: typeof gate.docs === "string" ? gate.docs : undefined,
+      fallbackReason: typeof gate.fallback_reason === "string" ? gate.fallback_reason : undefined,
+      latestVersion: typeof gate.latest_version === "number" ? gate.latest_version : undefined,
+      options,
+      pending: typeof gate.pending === "number" ? gate.pending : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function currentBeadsMigrationDocsUrl(url: string | undefined): string | undefined {
+  return url?.replace("/website/docs/getting-started/upgrading.md", "/docs/getting-started/upgrading.md");
+}
+
+function RemoteMigrateGateNotice({ gate }: { gate: RemoteMigrateGate }) {
+  const docsUrl = currentBeadsMigrationDocsUrl(gate.docs);
+  const versionSummary =
+    gate.currentVersion !== undefined && gate.latestVersion !== undefined
+      ? `Schema v${gate.currentVersion} → v${gate.latestVersion}${gate.pending ? ` (${gate.pending} pending)` : ""}`
+      : "A schema migration is pending.";
+  const explanation = gate.decision === "adopt"
+    ? "The remote is already migrated. This clone must adopt that result; migrating it independently would fork the board schema."
+    : gate.decision === "fork-skew"
+      ? "This clone and its remote have already applied different migration content. Choose a canonical clone before replacing any local database."
+      : "Ghostex could not prove which clone should migrate. Exactly one clone may migrate and publish; every other clone must adopt that result.";
+  const fallback = gate.fallbackReason === "unreadable-remote-state"
+    ? "The cached remote schema state could not be read, so Ghostex cannot safely choose for you."
+    : gate.fallbackReason === "below-convergence-floor"
+      ? "This database predates Beads' merge-safe migration floor, so unattended migration is unsafe."
+      : "";
+  return (
+    <Card className="project-board-notice" data-kind="migration" role="alert" size="sm">
+      <CardContent>
+        <div className="project-board-notice-icon" aria-hidden="true">
+          <IconAlertTriangle />
+        </div>
+        <div className="project-board-notice-body">
+          <strong>Project board migration needs coordination</strong>
+          <p>{versionSummary}</p>
+          <p>First install or update to the latest Beads release on every clone, then follow one coordinated migration path below.</p>
+          <p>{explanation}</p>
+          {fallback ? <p>{fallback}</p> : null}
+          <div className="project-board-migration-options">
+            {gate.options.map((option) => {
+              const commands = option.commands;
+              const label = option.id === "migrate" ? "Migrate this clone" : option.id === "adopt" ? "Adopt the remote" : option.id;
+              return (
+                <div className="project-board-migration-option" key={option.id}>
+                  <strong>{label}</strong>
+                  {option.when ? <p>Use only when {option.when}.</p> : null}
+                  {option.risk ? <p className="project-board-migration-risk">Risk: {option.risk}.</p> : null}
+                  <div className="project-board-notice-command">
+                    <code>{commands.join(" && ")}</code>
+                    <Button
+                      aria-label={`Copy ${label.toLowerCase()} commands`}
+                      onClick={() => void navigator.clipboard.writeText(commands.join("\n"))}
+                      size="icon-sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <IconCopy />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {docsUrl ? (
+            <a href={docsUrl} rel="noreferrer" target="_blank">Read the Beads multi-clone migration guide</a>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ProjectBoardNotice({ message }: { message: string }) {
+  const remoteMigrateGate = parseRemoteMigrateGate(message);
+  if (remoteMigrateGate) {
+    return <RemoteMigrateGateNotice gate={remoteMigrateGate} />;
+  }
   /*
    * CDXC:ProjectBoardBeadsSchema 2026-08-08:
    * A database/schema failure proves that Beads found a workspace, so generic
@@ -5152,8 +5288,9 @@ function ProjectBoardNotice({ message }: { message: string }) {
     );
   const isMissingBeads =
     !isMissingProject &&
-    /bd was not found|bundled bd|beads cli|executable|command not found|not found: bd|bd: not found|env: bd: no such file|cannot find/i.test(message);
-  const command = isMissingProject ? "bd init" : "";
+    /bd was not found|beads cli|executable|command not found|not found: bd|bd: not found|env: bd: no such file|cannot find/i.test(message);
+  const latestBeadsInstallCommand = "curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash";
+  const command = isMissingProject ? "bd init" : latestBeadsInstallCommand;
   const title = isMissingBeads
     ? "Beads CLI unavailable"
     : isMissingProject
@@ -5161,14 +5298,14 @@ function ProjectBoardNotice({ message }: { message: string }) {
       : "Project board unavailable";
   const bodyLines = isMissingBeads
     ? [
-        "Packaged Ghostex includes the Beads CLI used to read and update Project tickets.",
-        "Update or rebuild Ghostex so the bundled bd is staged. Source checkouts must stage the bundled bd instead of using PATH bd.",
+        "Ghostex uses the Beads CLI installed in the environment running this project—macOS, Linux, or the selected WSL distribution.",
+        "Install the latest Beads release in that environment and ensure bd is available on its PATH, then refresh the board.",
       ]
     : isMissingProject
       ? [
           "This project does not have a Beads workspace yet. Run this once from the project root, then refresh the board.",
         ]
-      : [message];
+      : [message, "Update Beads to the latest release, then retry. If this is a remote-backed migration, follow the coordinated migration instructions instead of migrating multiple clones independently."];
   return (
     <Card
       className="project-board-notice"
@@ -5186,8 +5323,8 @@ function ProjectBoardNotice({ message }: { message: string }) {
           Missing-Beads setup should use the same polished notice shell but stay intentionally terse: one header and two lines below.
           Explain why Beads is required without adding a second control row.
 
-          CDXC:ProjectBoardBeads 2026-06-08-10:46:
-          Project/Kanban should work on first open in packaged Ghostex because the app now bundles the full upstream `bd` CLI. If bd is still unavailable, frame the notice as a stale/broken bundle or source-checkout setup issue instead of telling packaged users to install Homebrew Beads.
+          CDXC:ProjectBoardSystemBeads 2026-08-12:
+          Project/Kanban and shell agents intentionally use the same machine-installed `bd`. Missing and command-failure notices therefore direct the operator to install or update Beads instead of repairing Ghostex app resources.
         */}
         <div className="project-board-notice-icon" aria-hidden="true">
           <IconAlertTriangle />
@@ -5210,6 +5347,11 @@ function ProjectBoardNotice({ message }: { message: string }) {
                 <IconCopy />
               </Button>
             </div>
+          ) : null}
+          {isMissingBeads || !isMissingProject ? (
+            <a href="https://github.com/gastownhall/beads/blob/main/docs/INSTALLING.md" rel="noreferrer" target="_blank">
+              Beads install and update guide
+            </a>
           ) : null}
         </div>
       </CardContent>
@@ -7415,6 +7557,10 @@ styleElement.textContent = `
     border-color: rgba(94, 164, 255, 0.26);
   }
 
+  .project-board-notice[data-kind="migration"] {
+    border-color: rgba(231, 184, 91, 0.36);
+  }
+
   .project-board-notice[data-kind="install"] .project-board-notice-icon {
     background: rgba(94, 164, 255, 0.12);
     border-color: rgba(94, 164, 255, 0.2);
@@ -7467,6 +7613,60 @@ styleElement.textContent = `
     line-height: 1.45;
     margin: 0;
     max-width: 660px;
+  }
+
+  .project-board-notice-body > a {
+    align-self: flex-start;
+    color: #7ab7ff;
+    font-size: 12px;
+    margin-top: 2px;
+    text-decoration: none;
+  }
+
+  .project-board-notice-body > a:hover {
+    text-decoration: underline;
+  }
+
+  .project-board-migration-options {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 5px;
+    max-width: 760px;
+    width: 100%;
+  }
+
+  .project-board-migration-option {
+    background: rgba(0, 0, 0, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    padding: 10px;
+  }
+
+  .project-board-migration-option > strong {
+    font-size: 12px;
+  }
+
+  .project-board-migration-option .project-board-migration-risk {
+    color: rgba(231, 184, 91, 0.82);
+  }
+
+  .project-board-migration-option .project-board-notice-command {
+    max-width: 100%;
+  }
+
+  .project-board-migration-option .project-board-notice-command code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  @media (max-width: 760px) {
+    .project-board-migration-options {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
   .project-board-notice-command {

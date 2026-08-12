@@ -830,7 +830,8 @@ fn code_server_row(
     {
         installed = true;
         if version == "Unavailable" {
-            version = "Development".to_string();
+            version = source_code_server_checkout_version(&path)
+                .unwrap_or_else(|| "Source checkout".to_string());
         }
         size_bytes = component_store::path_size_bytes(&path).unwrap_or(0);
     }
@@ -881,6 +882,20 @@ fn code_server_row(
         status,
         version,
     }
+}
+
+fn source_code_server_checkout_version(repo_root: &Path) -> Option<String> {
+    /*
+    CDXC:GPUICodeServerVersion 2026-08-13:
+    The source checkout's top-level code-server package intentionally reports
+    0.0.0, so it is not useful runtime identity. Surface the version of the
+    VS Code payload that Code actually runs instead of the generic
+    "Development" label used before managed component metadata is available.
+    */
+    let package_json = fs::read_to_string(repo_root.join("lib/vscode/package.json")).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&package_json).ok()?;
+    let version = value.get("version")?.as_str()?.trim();
+    (!version.is_empty()).then(|| format!("VS Code {version}"))
 }
 
 pub(super) fn plugin_settings_status_message(app: &GhostexGpuiApp) -> serde_json::Value {

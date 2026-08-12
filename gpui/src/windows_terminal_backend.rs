@@ -24,6 +24,26 @@ pub(crate) enum ResolvedWindowsTerminalBackend {
 }
 
 #[cfg(target_os = "windows")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum WindowsWslReadiness {
+    Ready,
+    MissingWsl,
+    MissingDistribution,
+    ChooseDistribution(Vec<String>),
+    ConfiguredDistributionUnavailable(String),
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WindowsWslSetupPhase {
+    Checking,
+    Installing,
+    Starting,
+    Connecting,
+    Ready,
+}
+
+#[cfg(target_os = "windows")]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct WindowsWslGhostexCliStatus {
     pub(crate) agent_orchestration_skill_path: Option<String>,
@@ -54,7 +74,7 @@ pub(crate) fn current_preference() -> WindowsTerminalBackendPreference {
 mod platform {
     use super::{
         ResolvedWindowsTerminalBackend, WindowsTerminalBackendPreference,
-        WindowsWslGhostexCliStatus,
+        WindowsWslGhostexCliStatus, WindowsWslReadiness, WindowsWslSetupPhase,
     };
     use std::{
         env,
@@ -316,7 +336,9 @@ printf '%s\n' \
 
     pub(super) fn prepare_gxserver(
         preference: WindowsTerminalBackendPreference,
+        progress: &mut dyn FnMut(WindowsWslSetupPhase),
     ) -> Result<ResolvedWindowsTerminalBackend, String> {
+        progress(WindowsWslSetupPhase::Checking);
         let backend = resolve(preference)?;
         let ResolvedWindowsTerminalBackend::Wsl { distribution } = &backend else {
             return Ok(backend);
@@ -355,6 +377,7 @@ printf '%s\n' \
             .is_some_and(|actual| actual.trim() == expected)
         });
         if update_required || !installed || !installed_package_matches {
+            progress(WindowsWslSetupPhase::Installing);
             install_packaged_gxserver(distribution, &gxserver_install_root, &package)?;
         }
 
@@ -362,6 +385,7 @@ printf '%s\n' \
             state.package_update_required = false;
         }
 
+        progress(WindowsWslSetupPhase::Starting);
         let start_script = format!(
             "set -eu; gxserver={}; test -x \"$gxserver\"; \"$gxserver\" start --json >/dev/null",
             posix_single_quote(&gxserver_path),
@@ -369,6 +393,7 @@ printf '%s\n' \
         if !run_wsl_status(distribution, &start_script) {
             return Err("gxserver could not start inside the selected WSL2 distribution.".into());
         }
+        progress(WindowsWslSetupPhase::Connecting);
         let token_file = paths.state_path("gxserver/auth/token");
         let token = run_wsl_capture(
             distribution,
@@ -390,6 +415,7 @@ printf '%s\n' \
                 state.gxserver_owner = Some(gxserver_owner);
             }
         }
+        progress(WindowsWslSetupPhase::Ready);
         Ok(backend)
     }
 
@@ -853,6 +879,44 @@ exec "$node" "$repo_root/out/node/entry.js" \
             candidates.push(Wsl2Distribution { name, is_default });
         }
         candidates
+    }
+
+    pub(super) fn readiness() -> WindowsWslReadiness {
+        if !hidden_command("wsl.exe")
+            .args(["--list", "--quiet"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+        {
+            return WindowsWslReadiness::MissingWsl;
+        }
+        let requested_distribution = match configured_wsl_distribution() {
+            Ok(distribution) => distribution,
+            Err(_) => return WindowsWslReadiness::MissingDistribution,
+        };
+        let distributions = initialized_wsl2_distributions();
+        if let Some(requested) = requested_distribution {
+            return if distributions
+                .iter()
+                .any(|distribution| distribution.name.eq_ignore_ascii_case(&requested))
+            {
+                WindowsWslReadiness::Ready
+            } else {
+                WindowsWslReadiness::ConfiguredDistributionUnavailable(requested)
+            };
+        }
+        match distributions.as_slice() {
+            [] => WindowsWslReadiness::MissingDistribution,
+            [_] => WindowsWslReadiness::Ready,
+            _ => WindowsWslReadiness::ChooseDistribution(
+                distributions
+                    .into_iter()
+                    .map(|distribution| distribution.name)
+                    .collect(),
+            ),
+        }
     }
 
     fn detect_initialized_wsl2_distribution() -> Option<String> {
@@ -1476,7 +1540,19 @@ pub(crate) fn resolve_current() -> Result<ResolvedWindowsTerminalBackend, String
 #[cfg(target_os = "windows")]
 pub(crate) fn prepare_gxserver_for_current_settings()
 -> Result<ResolvedWindowsTerminalBackend, String> {
-    platform::prepare_gxserver(current_preference())
+    platform::prepare_gxserver(current_preference(), &mut |_| {})
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn prepare_gxserver_for_current_settings_with_progress(
+    progress: &mut dyn FnMut(WindowsWslSetupPhase),
+) -> Result<ResolvedWindowsTerminalBackend, String> {
+    platform::prepare_gxserver(current_preference(), progress)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn wsl_readiness() -> WindowsWslReadiness {
+    platform::readiness()
 }
 
 #[cfg(target_os = "windows")]

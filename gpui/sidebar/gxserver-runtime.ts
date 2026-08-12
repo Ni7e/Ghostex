@@ -575,7 +575,6 @@ const GPUI_PROJECT_COLLECTIONS_SERVER_SYNC_DELAY_MS = 400;
 const GPUI_PROJECT_COLLECTIONS_SERVER_SYNC_RETRY_DELAY_MS = 5000;
 const GPUI_ACTIVE_WORKSPACE_TAB_SESSION_TITLE_MAX_CHARS = 512;
 const GPUI_SIDEBAR_DEFAULT_CLIENT_ID = "ghostex-gpui-sidebar";
-const GPUI_REMOTE_GXSERVER_PRESENTATION_RECOVERY_DELAY_MS = 500;
 const GPUI_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const GPUI_GXSERVER_CHATS_GROUP_ID = "combined-chats";
 const GPUI_DEFAULT_VISIBLE_COUNT = 1;
@@ -1150,10 +1149,9 @@ class GpuiSidebarRuntime {
   private remotePresentations = new Map<string, GxserverPresentationSnapshot>();
   private remoteLastSeenPresentations = new Map<string, GxserverPresentationSnapshot>();
   private remoteLastSeenPersistTimeoutId: number | undefined;
-  private remotePresentationRecoveryTimeouts = new Map<string, number>();
-  private remoteStartupReconnectAttempts = new Map<string, number>();
-  private remoteStartupReconnectTimeouts = new Map<string, number>();
-  private startupRemoteMachineIds = new Set<string>();
+  private remoteReconnectAttempts = new Map<string, number>();
+  private remoteReconnectInFlight = new Set<string>();
+  private remoteReconnectTimeouts = new Map<string, number>();
   private remoteRecentProjectsByMachineId = new Map<string, GxserverRecentProjectDomainState[]>();
   private remoteGroupOrderByMachineId = new Map<string, string[]>();
   private revision = 0;
@@ -1219,10 +1217,9 @@ class GpuiSidebarRuntime {
     message-source listener so cached last-seen rows become live again and the
     header receives the normal connecting/connected status sequence. Reuse the
     explicit reconnect bridge; renderer code still sends only the saved id and
-    never receives SSH details or tokens. A retryable native failure arms one
-    per-machine retry after ten seconds, capped at three retries for this app
-    launch. Connecting successfully, exhausting the retry budget, or removing
-    the machine from Settings ends that launch's retry cycle.
+    never receives SSH details or tokens. Startup attempts enter the same
+    lifecycle reconnect manager used after sleep/wake, so retryable failures
+    back off without exhausting a launch-only budget.
     */
     if (
       this.didConnectSavedRemoteMachinesOnStartup ||
@@ -1233,23 +1230,27 @@ class GpuiSidebarRuntime {
     this.didConnectSavedRemoteMachinesOnStartup = true;
     const settings = createGpuiSidebarSettings(this.runtimeSettings);
     for (const machine of settings.remoteMachines) {
-      this.startupRemoteMachineIds.add(machine.id);
-      this.reconnectRemoteMachine(machine.id, false);
+      this.reconnectRemoteMachine(machine.id, false, true);
     }
   }
 
-  private reconcileStartupRemoteMachineRetryTargets(): void {
+  private reconcileRemoteMachineRetryTargets(): void {
     if (!this.didConnectSavedRemoteMachinesOnStartup) {
       return;
     }
     const savedRemoteMachineIds = new Set(
       createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.map((machine) => machine.id),
     );
-    for (const machineId of this.startupRemoteMachineIds) {
+    const retryMachineIds = new Set([
+      ...this.remoteReconnectAttempts.keys(),
+      ...this.remoteReconnectInFlight,
+      ...this.remoteReconnectTimeouts.keys(),
+    ]);
+    for (const machineId of retryMachineIds) {
       if (savedRemoteMachineIds.has(machineId)) {
         continue;
       }
-      this.finishRemoteStartupReconnects(machineId);
+      this.resetRemoteReconnect(machineId);
     }
   }
 
@@ -1586,7 +1587,7 @@ class GpuiSidebarRuntime {
       const didChange = !hasSameGpuiRuntimeSettings(this.runtimeSettings, runtimeSettings);
       this.runtimeSettings = runtimeSettings;
       this.connectSavedRemoteMachinesOnStartup();
-      this.reconcileStartupRemoteMachineRetryTargets();
+      this.reconcileRemoteMachineRetryTargets();
       if (!didChange) {
         return;
       }
@@ -3009,9 +3010,24 @@ class GpuiSidebarRuntime {
     if (!selection) {
       return;
     }
+    const remoteSession = parseGpuiRemotePresentationSessionId(selection.sessionId);
+    const remoteProject = parseGpuiRemotePresentationProjectId(selection.projectId);
+    if (remoteSession || remoteProject) {
+      if (
+        !remoteSession ||
+        !remoteProject ||
+        remoteSession.machineId !== remoteProject.machineId ||
+        remoteSession.projectId !== remoteProject.projectId
+      ) {
+        return;
+      }
+      this.setRemotePresentationSessionFocus(remoteSession);
+      this.publishRemotePresentationPatch();
+      return;
+    }
     /*
     CDXC:GPUIWorkspaceSessionFocus 2026-06-26-08:01:
-    A GPUI workspace tab click has already selected the native tab in Rust. Match macOS `paneTabSelected` by updating the sidebar's local presentation focus and publishing only the sidebar patch; do not post `workspaceTerminalFocus` back to Rust or call gxserver `/api/focusSession`.
+    A GPUI workspace tab click has already selected the native tab in Rust. Match macOS `paneTabSelected` by updating the sidebar's local or machine-scoped remote presentation focus and publishing only the corresponding sidebar patch; do not post `workspaceTerminalFocus` back to Rust or call gxserver `/api/focusSession`.
 
     CDXC:GPUIWorkspaceSessionFocus 2026-06-27-00:33:
     MacOS reconciles stale native sleeping pane tabs when gxserver presentation already reports the canonical P/G session running. Preserve the one-way tab-selection path for ordinary clicks, but if Rust marks the selected mapped tab as locally sleeping and the current presentation row is running, post one bounded WorkspaceTerminalFocus so Rust reuses and attaches that existing tab instead of leaving an inert sleeping placeholder.
@@ -3630,21 +3646,17 @@ class GpuiSidebarRuntime {
     if (remoteEvent.type === "remoteMachineStatus") {
       this.messageSource.postMessage(remoteEvent);
       if (remoteEvent.state === "connected") {
-        this.finishRemoteStartupReconnects(remoteEvent.machineId);
-      } else if (GPUI_REMOTE_MACHINE_STARTUP_RETRY_STATES.has(remoteEvent.state)) {
-        this.scheduleRemoteStartupReconnect(remoteEvent.machineId);
-      } else {
-        this.clearRemoteStartupReconnectTimeout(remoteEvent.machineId);
-      }
-      if (remoteEvent.state === "connected") {
-        this.clearRemotePresentationRecoveryTimeout(remoteEvent.machineId);
-      }
-      if (remoteEvent.state === "presentationStreamFailed") {
-        this.scheduleRemoteGxserverPresentationRecovery(remoteEvent.machineId);
-        return;
+        this.resetRemoteReconnect(remoteEvent.machineId);
+      } else if (GPUI_REMOTE_MACHINE_RECONNECT_PROGRESS_STATES.has(remoteEvent.state)) {
+        this.remoteReconnectInFlight.add(remoteEvent.machineId);
+        this.clearRemoteReconnectTimeout(remoteEvent.machineId);
+      } else if (GPUI_REMOTE_MACHINE_RETRY_STATES.has(remoteEvent.state)) {
+        this.remoteReconnectInFlight.delete(remoteEvent.machineId);
+        this.scheduleRemoteReconnect(remoteEvent.machineId);
+      } else if (GPUI_REMOTE_MACHINE_RECONNECT_STOP_STATES.has(remoteEvent.state)) {
+        this.resetRemoteReconnect(remoteEvent.machineId);
       }
       if (GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES.has(remoteEvent.state)) {
-        this.clearRemotePresentationRecoveryTimeout(remoteEvent.machineId);
         const previousPresentation = this.remotePresentations.get(remoteEvent.machineId);
         if (previousPresentation) {
           this.syncRemotePresentationAttentionTracking(
@@ -7291,8 +7303,9 @@ class GpuiSidebarRuntime {
       gxserver path. Splitting creation across CEF fetch and native attach can
       address different backend state during WSL bootstrap and leaves the
       project-header click with no materialized terminal. Send only the
-      bounded project and agent ids; Rust resolves the configured command,
-      starts the provider, obtains its attach plan, and opens the exact tab.
+      bounded project and agent ids plus the user's interface preference;
+      Rust resolves the configured command, starts the provider, obtains its
+      attach plan, and opens the exact tab.
       */
       const postCreate = window.ghostexGpui?.postCreateProjectAgent;
       const normalizedAgentId = agentId.trim();
@@ -7304,6 +7317,8 @@ class GpuiSidebarRuntime {
         const accepted = postCreate(
           JSON.stringify({
             agentId: normalizedAgentId,
+            preferredInterface: createGpuiSidebarSettings(this.runtimeSettings)
+              .preferredAgentInterface,
             projectId,
             type: "ghostex.gpui.sidebar.createProjectAgent",
             version: 1,
@@ -9199,10 +9214,22 @@ class GpuiSidebarRuntime {
       if (!message.title.trim()) {
         return;
       }
-      this.postRemoteGxserverSidebarRequest(remoteSession.machineId, "/api/updateSession", {
+      /*
+      CDXC:GPUIRemoteSessionRename 2026-08-12:
+      Remote agent sessions must use the same pending-metadata rename contract
+      as local sessions. The remote gxserver owns that session's zmx provider,
+      so ask it to submit the provider-specific slash command itself instead of
+      only updating sidebar metadata or trying to use GPUI's local Ghostty
+      surface bridge.
+      */
+      this.postRemoteGxserverSidebarRequest(remoteSession.machineId, "/api/requestSessionRename", {
+        ...(message.agentId ? { agentName: message.agentId } : {}),
         projectId: remoteSession.projectId,
+        reason: "gpui-sidebar",
         sessionId: remoteSession.sessionId,
+        submitAgentRenameCommand: true,
         title: message.title,
+        titleSource: "user",
       });
       return;
     }
@@ -13519,95 +13546,97 @@ class GpuiSidebarRuntime {
     }
   }
 
-  private reconnectRemoteMachine(remoteMachineId: string, installApproved: boolean): void {
-    this.clearRemoteStartupReconnectTimeout(remoteMachineId);
+  private reconnectRemoteMachine(
+    remoteMachineId: string,
+    installApproved: boolean,
+    automatic = false,
+  ): void {
+    const normalizedMachineId = normalizeNonEmptyString(remoteMachineId);
+    if (!normalizedMachineId) {
+      return;
+    }
+    if (!automatic) {
+      this.resetRemoteReconnect(normalizedMachineId);
+    } else if (this.remoteReconnectInFlight.has(normalizedMachineId)) {
+      return;
+    }
+    this.clearRemoteReconnectTimeout(normalizedMachineId);
+    this.remoteReconnectInFlight.add(normalizedMachineId);
     try {
       postAppModalHostMessage(
         {
+          automatic,
           installApproved,
-          remoteMachineId,
+          remoteMachineId: normalizedMachineId,
           type: "reconnectRemoteMachine",
         },
         "GPUISidebarRemoteMachines:reconnect",
       );
       this.messageSource.postMessage({
-        machineId: remoteMachineId,
+        machineId: normalizedMachineId,
         state: "connecting",
         type: "remoteMachineStatus",
       });
     } catch {
-      this.scheduleRemoteStartupReconnect(remoteMachineId);
-      this.postRemoteToast("warning", "Remote connect unavailable", {
-        description: "GPUI could not reach the native remote-machine bridge.",
-      });
+      this.remoteReconnectInFlight.delete(normalizedMachineId);
+      this.scheduleRemoteReconnect(normalizedMachineId);
+      if (!automatic) {
+        this.postRemoteToast("warning", "Remote connect unavailable", {
+          description: "GPUI could not reach the native remote-machine bridge.",
+        });
+      }
     }
   }
 
-  private scheduleRemoteStartupReconnect(remoteMachineId: string): void {
+  private scheduleRemoteReconnect(remoteMachineId: string): void {
     const normalizedMachineId = normalizeNonEmptyString(remoteMachineId);
     if (
       !normalizedMachineId ||
-      !this.startupRemoteMachineIds.has(normalizedMachineId) ||
-      this.remoteStartupReconnectTimeouts.has(normalizedMachineId)
+      this.remoteReconnectInFlight.has(normalizedMachineId) ||
+      this.remoteReconnectTimeouts.has(normalizedMachineId)
     ) {
       return;
     }
-    const retryAttempts = this.remoteStartupReconnectAttempts.get(normalizedMachineId) ?? 0;
-    if (retryAttempts >= GPUI_REMOTE_MACHINE_STARTUP_MAX_RETRIES) {
-      this.finishRemoteStartupReconnects(normalizedMachineId);
+    const isStillSaved = createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.some(
+      (machine) => machine.id === normalizedMachineId,
+    );
+    if (!isStillSaved) {
+      this.resetRemoteReconnect(normalizedMachineId);
       return;
     }
+    const retryAttempts = this.remoteReconnectAttempts.get(normalizedMachineId) ?? 0;
+    const delay =
+      GPUI_REMOTE_MACHINE_RECONNECT_DELAYS_MS[
+        Math.min(retryAttempts, GPUI_REMOTE_MACHINE_RECONNECT_DELAYS_MS.length - 1)
+      ];
     const timeout = window.setTimeout(() => {
-      this.remoteStartupReconnectTimeouts.delete(normalizedMachineId);
-      const isStillSaved = createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.some(
+      this.remoteReconnectTimeouts.delete(normalizedMachineId);
+      const remainsSaved = createGpuiSidebarSettings(this.runtimeSettings).remoteMachines.some(
         (machine) => machine.id === normalizedMachineId,
       );
-      if (!isStillSaved) {
-        this.finishRemoteStartupReconnects(normalizedMachineId);
+      if (!remainsSaved) {
+        this.resetRemoteReconnect(normalizedMachineId);
         return;
       }
-      this.remoteStartupReconnectAttempts.set(normalizedMachineId, retryAttempts + 1);
-      this.reconnectRemoteMachine(normalizedMachineId, false);
-    }, GPUI_REMOTE_MACHINE_STARTUP_RECONNECT_DELAY_MS);
-    this.remoteStartupReconnectTimeouts.set(normalizedMachineId, timeout);
+      this.remoteReconnectAttempts.set(normalizedMachineId, retryAttempts + 1);
+      this.reconnectRemoteMachine(normalizedMachineId, false, true);
+    }, delay);
+    this.remoteReconnectTimeouts.set(normalizedMachineId, timeout);
   }
 
-  private clearRemoteStartupReconnectTimeout(remoteMachineId: string): void {
-    const timeout = this.remoteStartupReconnectTimeouts.get(remoteMachineId);
+  private clearRemoteReconnectTimeout(remoteMachineId: string): void {
+    const timeout = this.remoteReconnectTimeouts.get(remoteMachineId);
     if (timeout === undefined) {
       return;
     }
     window.clearTimeout(timeout);
-    this.remoteStartupReconnectTimeouts.delete(remoteMachineId);
+    this.remoteReconnectTimeouts.delete(remoteMachineId);
   }
 
-  private finishRemoteStartupReconnects(remoteMachineId: string): void {
-    this.clearRemoteStartupReconnectTimeout(remoteMachineId);
-    this.remoteStartupReconnectAttempts.delete(remoteMachineId);
-    this.startupRemoteMachineIds.delete(remoteMachineId);
-  }
-
-  private scheduleRemoteGxserverPresentationRecovery(remoteMachineId: string): void {
-    const normalizedMachineId = normalizeNonEmptyString(remoteMachineId);
-    if (!normalizedMachineId || this.remotePresentationRecoveryTimeouts.has(normalizedMachineId)) {
-      return;
-    }
-    const timeout = window.setTimeout(() => {
-      this.remotePresentationRecoveryTimeouts.delete(normalizedMachineId);
-      void this.refreshRemotePresentationFromGxserver(normalizedMachineId).finally(() =>
-        this.startRemoteGxserverPresentationSubscription(normalizedMachineId),
-      );
-    }, GPUI_REMOTE_GXSERVER_PRESENTATION_RECOVERY_DELAY_MS);
-    this.remotePresentationRecoveryTimeouts.set(normalizedMachineId, timeout);
-  }
-
-  private clearRemotePresentationRecoveryTimeout(remoteMachineId: string): void {
-    const timeout = this.remotePresentationRecoveryTimeouts.get(remoteMachineId);
-    if (timeout === undefined) {
-      return;
-    }
-    window.clearTimeout(timeout);
-    this.remotePresentationRecoveryTimeouts.delete(remoteMachineId);
+  private resetRemoteReconnect(remoteMachineId: string): void {
+    this.clearRemoteReconnectTimeout(remoteMachineId);
+    this.remoteReconnectAttempts.delete(remoteMachineId);
+    this.remoteReconnectInFlight.delete(remoteMachineId);
   }
 
   private startRemoteGxserverPresentationSubscription(remoteMachineId: string): void {
@@ -20793,19 +20822,33 @@ function normalizeGpuiSidebarRemoteEvent(value: unknown): GpuiSidebarRemoteEvent
 }
 
 const GPUI_REMOTE_MACHINE_STATUS_MESSAGE_MAX_CHARS = 300;
-const GPUI_REMOTE_MACHINE_STARTUP_RECONNECT_DELAY_MS = 10_000;
-const GPUI_REMOTE_MACHINE_STARTUP_MAX_RETRIES = 3;
+const GPUI_REMOTE_MACHINE_RECONNECT_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000] as const;
 
-const GPUI_REMOTE_MACHINE_STARTUP_RETRY_STATES = new Set<
+const GPUI_REMOTE_MACHINE_RETRY_STATES = new Set<
   SidebarRemoteMachineStatusMessage["state"]
 >([
   "disconnected",
   "failed",
   "keychainFailed",
+  "presentationStreamFailed",
   "presentationSubscribeFailed",
   "sshFailed",
   "tokenUnavailable",
   "tunnelFailed",
+]);
+
+const GPUI_REMOTE_MACHINE_RECONNECT_PROGRESS_STATES = new Set<
+  SidebarRemoteMachineStatusMessage["state"]
+>(["connecting", "downloadingRemoteServerPackage", "installing"]);
+
+const GPUI_REMOTE_MACHINE_RECONNECT_STOP_STATES = new Set<
+  SidebarRemoteMachineStatusMessage["state"]
+>([
+  "installApprovalRequired",
+  "installFailed",
+  "invalid",
+  "unsupported",
+  "unsupportedRemotePlatform",
 ]);
 
 const GPUI_REMOTE_MACHINE_STATUS_STATES = new Set([
@@ -20835,6 +20878,7 @@ const GPUI_REMOTE_MACHINE_PRESENTATION_CLEAR_STATES = new Set([
   "installFailed",
   "invalid",
   "keychainFailed",
+  "presentationStreamFailed",
   "presentationSubscribeFailed",
   "sshFailed",
   "tokenUnavailable",

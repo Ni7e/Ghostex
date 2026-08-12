@@ -70,7 +70,6 @@ const HELP_GATE_EXCLUDED: &[&str] = &[
     "generate-title",
     "h",
     "history",
-    "manage-beads",
     "move-codex-session",
     "quick-actions",
     "server",
@@ -250,8 +249,6 @@ fn is_known_command(name: &str) -> bool {
         "install-find-prev-session-skill",
         "generate-title",
         "install-generate-title-skill",
-        "manage-beads",
-        "install-manage-beads-skill",
         "move-codex-session",
         "install-move-codex-session-skill",
         "toggle-sidebar",
@@ -521,8 +518,6 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "install-find-prev-session-skill" => skills::install_find_prev_session_skill_command(args),
         "generate-title" => skills::generate_title_command(args),
         "install-generate-title-skill" => skills::install_generate_title_skill_command(args),
-        "manage-beads" => skills::manage_beads_command(args),
-        "install-manage-beads-skill" => skills::install_manage_beads_skill_command(args),
         "move-codex-session" => skills::move_codex_session_command(args),
         "install-move-codex-session-skill" => {
             skills::install_move_codex_session_skill_command(args)

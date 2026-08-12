@@ -92,6 +92,7 @@ import {
   IconAlertTriangle,
   IconArrowBigUp,
   IconBolt,
+  IconCashEdit,
   IconChevronDown,
   IconChevronRight,
   IconCircleCheckFilled,
@@ -2851,7 +2852,7 @@ export function SettingsModal({
       title: "General",
     },
     { icon: IconTools, id: "integrations", title: "Integrations" },
-    { icon: IconPalette, id: "plugins", title: "Customize" },
+    { icon: IconCashEdit, id: "plugins", title: "Customize" },
     { icon: IconCloud, id: "remote", title: "Remote" },
     { icon: IconFolderOpen, id: "projects", title: "Projects" },
     {

@@ -964,11 +964,11 @@ pub fn resolve_zehn_launch_from_root(root: &Path) -> Option<Launch> {
 }
 
 // ---------------------------------------------------------------------------
-// Bundled Beads (`gx bd`)
+// Beads compatibility passthrough (`gx bd`)
 // ---------------------------------------------------------------------------
 
 pub fn beads_command(args: &[String]) -> CliResult<()> {
-    let launch = resolve_bundled_beads_launch()?;
+    let launch = resolve_system_beads_launch()?;
     let mut full_args = launch.args.clone();
     full_args.extend(args.to_vec());
     let cwd = std::env::current_dir().ok();
@@ -976,44 +976,14 @@ pub fn beads_command(args: &[String]) -> CliResult<()> {
     Ok(())
 }
 
-pub fn resolve_bundled_beads_launch() -> CliResult<Launch> {
-    /*
-    `gx bd` is the supported agent/user shell boundary for Beads operations.
-    Resolve only Ghostex-bundled or source-staged Beads binaries so
-    Project/Kanban, agent prompts, and manual commands cannot split state
-    across different shell-installed `bd` versions.
-    */
-    let cli_dir = cli_dir();
-    for root in default_launch_roots(&cli_dir) {
-        if let Some(launch) = resolve_bundled_beads_launch_from_root(&root) {
-            return Ok(launch);
-        }
-    }
-    Err(CliError::Other(
-        "Bundled bd was not found. Rebuild or reinstall Ghostex so Web/bin/bd is staged; shell-installed bd is intentionally ignored.".to_string(),
-    ))
-}
-
-pub fn resolve_bundled_beads_launch_from_root(root: &Path) -> Option<Launch> {
-    for candidate in [
-        root.join("bin").join("bd"),
-        root.join("native")
-            .join("macos")
-            .join("ghostexHost")
-            .join("Web")
-            .join("bin")
-            .join("bd"),
-    ] {
-        if file_exists_sync(&candidate) {
-            return Some(Launch {
-                command: candidate.to_string_lossy().to_string(),
-                args: Vec::new(),
-                cwd: None,
-                env: Vec::new(),
-            });
-        }
-    }
-    None
+pub fn resolve_system_beads_launch() -> CliResult<Launch> {
+    let bd = crate::toolchain::require_system_bd().map_err(CliError::Other)?;
+    Ok(Launch {
+        command: bd.executable_path,
+        args: Vec::new(),
+        cwd: None,
+        env: Vec::new(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1522,26 +1492,6 @@ mod tests {
             linux_ghostex_window_id("0x01  0 code.Code host Ghostex"),
             None
         );
-    }
-
-    #[test]
-    fn beads_launch_checks_bundled_and_source_staged_paths() {
-        let root = temp_root("beads");
-        assert!(resolve_bundled_beads_launch_from_root(&root).is_none());
-        let staged = root
-            .join("native")
-            .join("macos")
-            .join("ghostexHost")
-            .join("Web")
-            .join("bin")
-            .join("bd");
-        touch(&staged);
-        let launch = resolve_bundled_beads_launch_from_root(&root).expect("staged launch");
-        assert_eq!(launch.command, staged.to_string_lossy());
-        let bundled = root.join("bin").join("bd");
-        touch(&bundled);
-        let launch = resolve_bundled_beads_launch_from_root(&root).expect("bundled launch");
-        assert_eq!(launch.command, bundled.to_string_lossy());
     }
 
     #[test]

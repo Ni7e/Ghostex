@@ -25,7 +25,6 @@ const GHOSTEX_AGENT_ORCHESTRATION_SKILL_NAME: &str = "ghostex-agent-orchestratio
 const GHOSTEX_FABLE_56_ORCHESTRATION_SKILL_NAME: &str = "ghostex-fable-5.6-orchestration";
 const GHOSTEX_FIND_PREV_SESSION_SKILL_NAME: &str = "ghostex-find-prev-session";
 const GHOSTEX_AUTO_RENAME_SESSION_SKILL_NAME: &str = "ghostex-auto-rename-session";
-const GHOSTEX_MANAGE_BEADS_SKILL_NAME: &str = "ghostex-manage-beads";
 const GHOSTEX_MOVE_CODEX_SESSION_SKILL_NAME: &str = "ghostex-move-codex-session";
 
 /// JS stringFlag: trimmed non-empty string or nothing.
@@ -466,29 +465,6 @@ pub fn install_move_codex_session_skill_command(args: &[String]) -> CliResult<()
         "codex fork --yolo -C <target-folder> <SESSION_ID>",
         &["GHOSTEX_MOVE_CODEX_SESSION_SKILL_SOURCE"],
         GHOSTEX_MOVE_CODEX_SESSION_SKILL_NAME,
-    )
-}
-
-pub fn manage_beads_command(args: &[String]) -> CliResult<()> {
-    skill_surface_command(
-        args,
-        &usage::manage_beads_usage(),
-        "manage-beads",
-        &install_manage_beads_skill_command,
-    )
-}
-
-pub fn install_manage_beads_skill_command(args: &[String]) -> CliResult<()> {
-    /*
-    Agent-facing bead workflows must go through `gx bd` so installed agents use
-    Ghostex's pinned bundled Beads binary instead of whichever shell `bd`
-    happens to be first on PATH.
-    */
-    install_ghostex_agent_skill(
-        args,
-        "gx bd --help",
-        &["GHOSTEX_MANAGE_BEADS_SKILL_SOURCE"],
-        GHOSTEX_MANAGE_BEADS_SKILL_NAME,
     )
 }
 

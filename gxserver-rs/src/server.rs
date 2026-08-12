@@ -117,7 +117,7 @@ use crate::{
         open_gxserver_database_with_busy_timeout,
     },
     terminal_ws::{handle_terminal_socket, TerminalWsState},
-    toolchain::{get_gxserver_tool_statuses, require_bundled_bd, require_bundled_zmx},
+    toolchain::{get_gxserver_tool_statuses, require_bundled_zmx, require_system_bd},
     typed_operations::{
         create_pull_request_for_project, dispatch_typed_operation_endpoint,
         dispatch_worktree_path_operation, typed_operation_log_details, typed_operation_log_level,
@@ -3045,7 +3045,7 @@ async fn handle_board_start_work_http(
         Ok(params) => params,
         Err(error) => return domain_error_response(endpoint_path, request_id, error),
     };
-    let bd = match require_bundled_bd() {
+    let bd = match require_system_bd() {
         Ok(bd) => bd,
         Err(message) => {
             return domain_error_response(
@@ -3395,6 +3395,34 @@ async fn handle_agent_http(
             }
             if let Some(target) = fork_initial_rename {
                 schedule_fork_initial_rename(state.clone(), target);
+            }
+            if let Some((project_id, session_id, command)) =
+                requested_agent_title_command_submission(&endpoint_path, &params, &result)
+            {
+                /*
+                CDXC:GPUIRemoteSessionRename 2026-08-12:
+                A remote GPUI has no local Ghostty surface for this session.
+                When its bounded native bridge opts in, submit the rename from
+                the owning gxserver through zmx's separate text/Enter path.
+                Local GPUI renames omit the flag and retain their native-surface
+                Enter path.
+                */
+                let mut send_params = Map::new();
+                send_params.insert("projectId".to_string(), json!(project_id));
+                send_params.insert("sessionId".to_string(), json!(session_id));
+                send_params.insert(
+                    "diagnosticInputSource".to_string(),
+                    json!("remote-session-rename-command"),
+                );
+                send_params.insert("submit".to_string(), Value::Bool(true));
+                send_params.insert("text".to_string(), Value::String(command));
+                if let Err(error) = dispatch_zmx_session_interaction_endpoint(
+                    &repository,
+                    "/api/sendSessionMessage",
+                    &send_params,
+                ) {
+                    return zmx_error_response(endpoint_path, request_id, error);
+                }
             }
             if session_chat_state_changed {
                 if let Some(session) = result.get("session") {
@@ -4464,6 +4492,34 @@ fn agent_session_title_command(agent_name: Option<&str>, title: &str) -> String 
         Some("hermes-agent") => format!("/title {title}"),
         _ => format!("/rename {title}"),
     }
+}
+
+fn requested_agent_title_command_submission(
+    endpoint_path: &str,
+    params: &Map<String, Value>,
+    result: &Value,
+) -> Option<(String, String, String)> {
+    if endpoint_path != "/api/requestSessionRename"
+        || params
+            .get("submitAgentRenameCommand")
+            .and_then(Value::as_bool)
+            != Some(true)
+        || result
+            .get("shouldSendAgentRenameCommand")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return None;
+    }
+    let session = result.get("session")?;
+    let project_id = read_session_text(session, "projectId")?;
+    let session_id = read_session_text(session, "sessionId")?;
+    let title = params.get("title")?.as_str()?.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let command = agent_session_title_command(first_prompt_agent_name(session).as_deref(), title);
+    Some((project_id, session_id, command))
 }
 
 fn is_generic_agent_session_title(agent_name: Option<&str>, title: Option<&str>) -> bool {
@@ -14117,6 +14173,36 @@ mod tests {
         assert_eq!(
             agent_session_title_command(Some("codex"), "Investigate hooks"),
             "/rename Investigate hooks"
+        );
+    }
+
+    #[test]
+    fn requested_agent_title_command_submission_requires_opt_in_and_agent_rename() {
+        let mut params = Map::new();
+        params.insert("submitAgentRenameCommand".to_string(), Value::Bool(true));
+        params.insert("title".to_string(), json!("Investigate hooks"));
+        let result = json!({
+            "session": {
+                "agentId": "hermes-agent",
+                "projectId": "P1abc",
+                "sessionId": "G1abc"
+            },
+            "shouldSendAgentRenameCommand": true
+        });
+
+        assert_eq!(
+            requested_agent_title_command_submission("/api/requestSessionRename", &params, &result),
+            Some((
+                "P1abc".to_string(),
+                "G1abc".to_string(),
+                "/title Investigate hooks".to_string()
+            ))
+        );
+
+        params.remove("submitAgentRenameCommand");
+        assert_eq!(
+            requested_agent_title_command_submission("/api/requestSessionRename", &params, &result),
+            None
         );
     }
 

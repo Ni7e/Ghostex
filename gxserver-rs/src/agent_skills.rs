@@ -31,7 +31,6 @@ pub const GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-fable-5.6-orchestration",
     "ghostex-find-prev-session",
     "ghostex-auto-rename-session",
-    "ghostex-manage-beads",
     "ghostex-move-codex-session",
 ];
 
@@ -1233,7 +1232,6 @@ mod tests {
             skill_installed(skills, "ghostex-manage-automations"),
             Some(false)
         );
-        assert_eq!(skill_installed(skills, "ghostex-manage-beads"), Some(false));
         let roots = status
             .get("roots")
             .and_then(Value::as_array)

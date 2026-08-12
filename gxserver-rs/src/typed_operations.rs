@@ -15,7 +15,7 @@ use tokio::{
 };
 use url::Url;
 
-use crate::{platform::shell::command_shell, toolchain::require_bundled_bd};
+use crate::{platform::shell::command_shell, toolchain::require_system_bd};
 
 const TYPED_OPERATION_TIMEOUT_MS: u64 = 120_000;
 const TYPED_OPERATION_STDOUT_LIMIT_BYTES: usize = 4 * 1024 * 1024;
@@ -1237,7 +1237,7 @@ fn build_beads_command(
     params: &Map<String, Value>,
     context: &TypedOperationContext,
 ) -> Result<ProcessCommand, TypedOperationError> {
-    let bd = require_bundled_bd().map_err(TypedOperationError::dependency_unavailable)?;
+    let bd = require_system_bd().map_err(TypedOperationError::dependency_unavailable)?;
     build_beads_command_with_executable(action, params, context, &bd.executable_path)
 }
 
@@ -1473,7 +1473,7 @@ async fn ensure_beads_git_hooks(
 ) -> Result<Value, TypedOperationError> {
     /*
     CDXC:WorktreeBeads 2026-06-22-01:09:
-    The Rust port must install the same Ghostex-managed Beads hooks as the TypeScript server. Generated hooks live under the common Git directory, call the bundled bd by absolute path, pin BEADS_DIR to `bd where --json`, and are written before core.hooksPath is pointed at them.
+    The Rust port must install the same Ghostex-managed Beads hooks as the TypeScript server. Generated hooks live under the common Git directory, call the resolved machine-installed bd by absolute path, pin BEADS_DIR to `bd where --json`, and are written before core.hooksPath is pointed at them.
     */
     if !Path::new(&context.cwd).join(".beads").is_dir() {
         return Ok(json!({
@@ -1483,7 +1483,7 @@ async fn ensure_beads_git_hooks(
             "stdout": "skipped: no Beads workspace",
         }));
     }
-    let bd = require_bundled_bd().map_err(TypedOperationError::dependency_unavailable)?;
+    let bd = require_system_bd().map_err(TypedOperationError::dependency_unavailable)?;
     ensure_beads_git_hooks_with_executable(context, &bd.executable_path).await
 }
 
@@ -1591,7 +1591,7 @@ BD_BIN={}\n\
 BEADS_DIR_VALUE={}\n\
 HOOK_NAME={}\n\
 if [ ! -x \"$BD_BIN\" ]; then\n\
-  echo \"Warning: Ghostex bundled bd is missing; skipping Beads hook\" >&2\n\
+  echo \"Warning: the configured bd executable is missing; install or update Beads, then reinstall hooks\" >&2\n\
   exit 0\n\
 fi\n\
 export BEADS_DIR=\"$BEADS_DIR_VALUE\"\n\
