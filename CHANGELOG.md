@@ -1,5 +1,14 @@
 # Changelog
 
+## 7.7.1 - 2026-08-13
+
+- Major
+  - Ghostex releases are now planned around what actually changed, so updates are published faster and reach you sooner after a fix lands.
+- Minor
+  - Each release now includes a published record of how every download was produced, so a build can be traced back to its exact source.
+  - Release problems are detected before packaging begins, which reduces the chance of an incomplete or inconsistent update.
+  - The project README presents Ghostex more clearly for people evaluating it for the first time.
+
 ## 7.7.0 - 2026-08-13
 
 - Major
