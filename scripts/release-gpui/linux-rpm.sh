@@ -11,8 +11,18 @@ release_gpui_require_command rpmbuild
 release_gpui_require_command rpm
 release_gpui_prepare_output "$REPO_ROOT" "$OUTPUT"
 
-PACKAGE_ROOT="$REPO_ROOT/build/release-gpui/linux-rpm-package-root"
-"$SCRIPT_DIR/linux-stage.sh" "$VERSION" "$PACKAGE_ROOT"
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13: shared staged root, see linux-deb.sh.
+# The RPM tars the whole package root, so it must be built before linux-deb.sh
+# creates DEBIAN/ — otherwise Debian control metadata leaks into the RPM payload.
+PACKAGE_ROOT="${GHOSTEX_LINUX_PACKAGE_ROOT:-$REPO_ROOT/build/release-gpui/linux-rpm-package-root}"
+if [[ "${GHOSTEX_LINUX_PACKAGE_ROOT_READY:-0}" != "1" ]]; then
+  "$SCRIPT_DIR/linux-stage.sh" "$VERSION" "$PACKAGE_ROOT"
+fi
+[[ -d "$PACKAGE_ROOT/opt/ghostex" ]] || {
+  echo "Linux package root is not staged: $PACKAGE_ROOT" >&2
+  exit 1
+}
+rm -rf "$PACKAGE_ROOT/DEBIAN"
 RPM_ROOT="$REPO_ROOT/build/release-gpui/rpmbuild"
 rm -rf "$RPM_ROOT"
 mkdir -p "$RPM_ROOT"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}

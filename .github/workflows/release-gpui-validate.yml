@@ -1,0 +1,146 @@
+name: GPUI release - Windows compile validation
+
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+# Fail-fast gate for the two scarcest, slowest runners (§5.2).
+#
+# Release 7.7 discovered `cannot find type SharedString in this scope` about an
+# hour after dispatch, because Windows compilation could not start until the
+# gxserver jobs finished. Removing that edge is the primary fix; this job is the
+# cheap second line of defence: it type-checks the Windows-configured tree,
+# including cfg-gated code that `bun run typecheck` cannot see, before either
+# 25-27 minute packaging job starts.
+#
+# Deliberately NOT a source of build outputs (§Q7). `cargo check` emits .rmeta
+# that `cargo build` cannot link, so any "validation feeds packaging" scheme
+# would be a lie or a second full build. The only handoff is warm dependency
+# caches: ~/.cargo/registry, ~/.cargo/git, gpui/target, the CEF cache, and the
+# Zig global cache. Do not "optimize" this into an artifact handoff.
+#
+# Risk R6: the ARM64 leg cross-compiles from windows-2025. If the ARM64 CEF
+# distribution, `rc.exe` discovery, or the Zig aarch64-windows cross build ever
+# stops working on that image, set `arm64_target: false` in release-gpui.yml and
+# add a second call of this workflow on `windows-11-vs2026-arm`. Do not simply
+# drop the ARM64 check: it is the exact failure that motivated this job.
+
+on:
+  workflow_call:
+    inputs:
+      arm64_target:
+        description: Also cross-check the aarch64-pc-windows-msvc target
+        required: false
+        default: true
+        type: boolean
+      runner:
+        description: Runner label to validate on
+        required: false
+        default: windows-2025
+        type: string
+  workflow_dispatch:
+    inputs:
+      arm64_target:
+        description: Also cross-check the aarch64-pc-windows-msvc target
+        required: false
+        default: true
+        type: boolean
+      runner:
+        description: Runner label to validate on
+        required: false
+        default: windows-2025
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+    env:
+      CEF_PATH: ${{ github.workspace }}\gpui\build\cef-cache
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}\build\zig-global-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - name: Resolve dependency cache keys
+        id: cache_keys
+        shell: bash
+        run: |
+          {
+            printf 'cef=%s\n' "$(git rev-parse HEAD:.dependencies/cef-rs)"
+            printf 'zig=%s\n' "$(git rev-parse HEAD:ghostty)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Restore Cargo registry cache
+        uses: actions/cache@v6
+        id: cargo_cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-reg-windows-${{ hashFiles('gpui/Cargo.lock', 'gxserver-rs/Cargo.lock') }}
+          restore-keys: cargo-reg-windows-
+      - name: Restore CEF distribution cache
+        uses: actions/cache@v6
+        id: cef_cache
+        with:
+          path: gpui/build/cef-cache
+          key: cef-windows-${{ steps.cache_keys.outputs.cef }}
+      - name: Restore Zig package cache
+        uses: actions/cache@v6
+        id: zig_cache
+        with:
+          path: build/zig-global-cache
+          key: zig-windows-${{ steps.cache_keys.outputs.zig }}
+          restore-keys: zig-windows-
+      - name: Restore Cargo check target cache
+        uses: actions/cache@v6
+        id: target_cache
+        with:
+          path: gpui/target
+          key: cargo-check-windows-${{ hashFiles('gpui/Cargo.lock') }}-${{ steps.cache_keys.outputs.cef }}
+          restore-keys: cargo-check-windows-${{ hashFiles('gpui/Cargo.lock') }}-
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - name: Install pinned Zig
+        shell: pwsh
+        run: scripts/release-gpui/prepare-zig.ps1 -Arch x64
+      - name: Install the ARM64 Rust target
+        if: ${{ inputs.arm64_target }}
+        shell: bash
+        run: scripts/release-gpui/retry.sh 3 5 -- rustup target add aarch64-pc-windows-msvc
+      - name: Install JavaScript dependencies
+        shell: bash
+        run: scripts/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
+      - name: Prepare pinned reference checkouts
+        shell: bash
+        env:
+          GHOSTEX_RELEASE_SKIP_SUBMODULES: '1'
+        run: scripts/release-gpui/prepare-references.sh
+      # No fetch-zig-deps.sh here: ZIG_GLOBAL_CACHE_DIR must stay a native
+      # Windows path, which the bash prefetch helper cannot produce. The
+      # restored Zig package cache serves the same purpose on this runner.
+      - name: Type-check the Windows x64 desktop tree
+        shell: bash
+        run: cargo check --locked --all-targets --manifest-path gpui/Cargo.toml --target x86_64-pc-windows-msvc
+      - name: Type-check the Windows ARM64 desktop tree
+        if: ${{ inputs.arm64_target }}
+        shell: bash
+        run: cargo check --locked --all-targets --manifest-path gpui/Cargo.toml --target aarch64-pc-windows-msvc
+      - name: Type-check the Windows gxserver tree
+        shell: bash
+        run: cargo check --locked --all-targets --manifest-path gxserver-rs/Cargo.toml --target x86_64-pc-windows-msvc
+      - name: Record job observability
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "### Windows compile validation"
+            echo ""
+            echo "- Cargo registry cache: ${{ steps.cargo_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- CEF distribution cache: ${{ steps.cef_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- Zig package cache: ${{ steps.zig_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- cargo check target cache: ${{ steps.target_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- ARM64 target checked: ${{ inputs.arm64_target }}"
+          } >> "$GITHUB_STEP_SUMMARY"

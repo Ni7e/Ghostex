@@ -2,6 +2,8 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+import { resolvePublishRecoveryInputs } from "./release-gpui/publish-provenance.mjs";
+
 const repo = "maddada/Ghostex";
 
 function run(command, args, options = {}) {
@@ -38,6 +40,11 @@ Release options:
   --windows-signing <auto|required|off>  Default: auto
   --source-run-id <id>                   Required by publish
   --dry-run
+
+Planning options (scope flags express intent; the plan decides build/reuse/skip):
+  --force-all                            Rebuild every in-scope product, ignoring verified reuse
+  --force <a,b>                          Rebuild these products even when their inputs are unchanged
+  --reuse-from-run <id>                  Also reuse the successful products of this failed run
 `.trim();
 }
 
@@ -52,6 +59,9 @@ function parseArgs(argv) {
   const options = {
     android: true,
     dryRun: false,
+    forceAll: false,
+    forceProducts: "",
+    reuseFromRunId: "",
     gxserverLinuxArm64: true,
     gxserverLinuxX64: true,
     gxserverWslWindowsArm64: true,
@@ -99,7 +109,14 @@ function parseArgs(argv) {
     else if (arg === "--skip-sparkle") options.updateSparkle = false;
     else if (arg === "--prerelease") options.prerelease = true;
     else if (arg === "--dry-run") options.dryRun = true;
-    else if (arg === "--windows-signing") {
+    else if (arg === "--force-all") options.forceAll = true;
+    else if (arg === "--force") {
+      options.forceProducts = rest[index + 1] ?? "";
+      index += 1;
+    } else if (arg === "--reuse-from-run") {
+      options.reuseFromRunId = rest[index + 1] ?? "";
+      index += 1;
+    } else if (arg === "--windows-signing") {
       options.windowsSigning = rest[index + 1] ?? "";
       index += 1;
     } else if (arg === "--source-run-id") {
@@ -114,6 +131,12 @@ function parseArgs(argv) {
   }
   if (command === "publish" && !/^\d+$/u.test(options.sourceRunId)) {
     throw new Error("publish requires --source-run-id <GitHub Actions run id>");
+  }
+  if (options.forceAll && options.forceProducts) {
+    throw new Error("--force-all already rebuilds everything; drop --force");
+  }
+  if (options.reuseFromRunId && !/^\d+$/u.test(options.reuseFromRunId)) {
+    throw new Error("--reuse-from-run must be a GitHub Actions run id");
   }
   return { command, options, version };
 }
@@ -256,6 +279,56 @@ function validateRequiredSecrets(options, secrets) {
   }
 }
 
+/*
+ * CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+ * Show the operator what the release will actually do before anything is
+ * dispatched. This is the same planner the `prepare` job runs, with the same
+ * scope, so the preview equals reality unless origin/main moves — which is
+ * already a hard stop above.
+ */
+function previewPlan(version, options, windowsSigned, { required }) {
+  const scope = {
+    android: options.android,
+    gxserverLinuxArm64: options.gxserverLinuxArm64,
+    gxserverLinuxX64: options.gxserverLinuxX64,
+    gxserverWslWindowsArm64: options.gxserverWslWindowsArm64,
+    gxserverWslWindowsX64: options.gxserverWslWindowsX64,
+    linuxDeb: options.linuxDeb,
+    linuxRpm: options.linuxRpm,
+    macos: options.macos,
+    prerelease: options.prerelease,
+    signWindows: windowsSigned,
+    updateSparkle: options.updateSparkle,
+    windowsArm64: options.windowsArm64,
+    windowsX64: options.windowsX64,
+  };
+  const args = ["scripts/release-gpui/plan-cli.mjs", version, "--scope-json", JSON.stringify(scope)];
+  if (options.forceAll) args.push("--force-all");
+  else if (options.forceProducts) args.push("--force", options.forceProducts);
+  if (options.reuseFromRunId) args.push("--reuse-from-run", options.reuseFromRunId);
+  try {
+    run("node", args, { capture: false });
+  } catch (error) {
+    if (required) throw error;
+    console.warn(
+      `Could not compute the local plan preview (${error instanceof Error ? error.message : String(error)}). ` +
+        "The prepare job computes the authoritative plan on the runner.",
+    );
+  }
+}
+
+/* The publish path keys off the source run's recorded plan, never re-typed flags. */
+function recordedPlanFor(sourceRunId) {
+  const destination = `build/release-gpui/source-run-${sourceRunId}`;
+  run("gh", ["run", "download", sourceRunId, "--repo", repo, "--name", "release-plan", "--dir", destination]);
+  const planPath = new URL(`../${destination}/release-plan.json`, import.meta.url);
+  const plan = JSON.parse(readFileSync(planPath, "utf8"));
+  if (plan.schemaVersion !== 1 || !Array.isArray(plan.expectedPlatforms) || plan.expectedPlatforms.length === 0) {
+    throw new Error(`Source run ${sourceRunId} has an unreadable release plan; refusing publish-only recovery`);
+  }
+  return plan;
+}
+
 function dispatch(workflow, fields, dryRun) {
   const args = ["workflow", "run", workflow, "--repo", repo, "--ref", "main"];
   for (const [name, value] of Object.entries(fields)) args.push("-f", `${name}=${value}`);
@@ -283,10 +356,14 @@ console.log(`Platforms: ${platforms.join(", ")}`);
 console.log(`Windows signing: ${windowsSigned ? "enabled" : "disabled"}`);
 
 if (command === "start") {
+  previewPlan(version, options, windowsSigned, { required: options.dryRun });
   dispatch(
     "release-gpui.yml",
     {
       android: options.android,
+      force_all: options.forceAll,
+      force_products: options.forceProducts,
+      reuse_from_run_id: options.reuseFromRunId,
       gxserver_linux_arm64: options.gxserverLinuxArm64,
       gxserver_linux_x64: options.gxserverLinuxX64,
       gxserver_wsl_windows_arm64: options.gxserverWslWindowsArm64,
@@ -320,6 +397,25 @@ if (command === "start") {
     throw new Error(`Source run is not a dispatched Release Ghostex workflow: ${sourceRun.url}`);
   }
   run("git", ["merge-base", "--is-ancestor", sourceRun.headSha, head]);
+  /*
+   * Publish-only recovery reuses exactly what the source run resolved. Re-typing
+   * the scope flags could silently publish a different artifact set than the one
+   * that was built and verified, so the recorded plan is authoritative and an
+   * unreadable plan is a hard stop.
+   */
+  const recordedPlan = recordedPlanFor(options.sourceRunId);
+  if (recordedPlan.version !== version) {
+    throw new Error(`Source run ${options.sourceRunId} released ${recordedPlan.version}, not ${version}`);
+  }
+  const recordedPlatforms = recordedPlan.expectedPlatforms;
+  const scopeDrift = recordedPlatforms.filter((platform) => !platforms.includes(platform));
+  const flagDrift = platforms.filter((platform) => !recordedPlatforms.includes(platform));
+  if (scopeDrift.length > 0 || flagDrift.length > 0) {
+    console.warn(
+      `Scope flags describe ${platforms.join(", ")}, but the source run's plan resolved ` +
+        `${recordedPlatforms.join(", ")}. Publishing the recorded plan.`,
+    );
+  }
   const sourceArtifacts = JSON.parse(
     run("gh", [
       "api",
@@ -329,21 +425,49 @@ if (command === "start") {
   const availableArtifacts = new Set(
     sourceArtifacts.filter((artifact) => !artifact.expired).map((artifact) => artifact.name),
   );
-  const missingArtifacts = platforms
+  const missingArtifacts = recordedPlatforms
     .map((platform) => `release-${platform}`)
     .filter((name) => !availableArtifacts.has(name));
   if (missingArtifacts.length > 0) {
     throw new Error(`Source run is missing non-expired artifacts: ${missingArtifacts.join(", ")}`);
   }
+  console.log(`Recorded plan: ${recordedPlatforms.join(", ")}`);
+  /*
+   * Not only the platform list: prerelease, Sparkle, and Windows signing also
+   * come from the recorded plan. Re-typed flags describe what the operator
+   * remembers; the plan describes what was built, signed, and gated.
+   */
+  const recovery = resolvePublishRecoveryInputs({
+    flags: {
+      prerelease: options.prerelease,
+      updateSparkle: options.updateSparkle,
+      windowsSigned,
+    },
+    plan: recordedPlan,
+  });
+  for (const conflict of recovery.conflicts) {
+    console.warn(`Ignoring a re-typed flag that disagrees with the source run's plan — ${conflict}.`);
+  }
+  console.log(
+    `Recorded switches: prerelease=${recovery.prerelease}, sparkle=${recovery.updateSparkle}, ` +
+      `windows-signed=${recovery.windowsSigned}`,
+  );
+  /*
+   * The plan itself is deliberately not re-uploaded as a dispatch input: the
+   * publisher downloads the source run's own `release-plan` artifact along with
+   * every other artifact and reads it from there. One authoritative copy, no
+   * ~40 KB workflow input, and no way for a hand-edited plan to describe a
+   * different artifact set than the one being published.
+   */
   dispatch(
     "release-gpui-publish.yml",
     {
-      expected_platforms: platforms.join(","),
-      prerelease: options.prerelease,
+      expected_platforms: recordedPlatforms.join(","),
+      prerelease: recovery.prerelease,
       source_run_id: options.sourceRunId,
-      update_sparkle: options.updateSparkle,
+      update_sparkle: recovery.updateSparkle,
       version,
-      windows_signed: windowsSigned,
+      windows_signed: recovery.windowsSigned,
     },
     options.dryRun,
   );

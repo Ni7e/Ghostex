@@ -1,0 +1,84 @@
+name: GPUI release - reuse a verified product
+
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+# Materializes one plan-marked `reuse` product into exactly the same
+# `release-<platform>` artifact a build job produces, so the publisher, the
+# cross-payload checks, and the final verifier never branch on how the bytes
+# were obtained.
+#
+# Reuse means byte-identical re-publication into the new versioned release. It
+# never means omission and never means a cross-tag reference: shipped macOS apps
+# resolve on-demand assets from `v{manifest.version}` (component_store.rs:727),
+# so a product missing from a release breaks every user of that version.
+#
+# This job re-derives all four provenance checks from the downloaded bytes. The
+# plan is an invitation; the proof happens here. There is deliberately no
+# attestation step: these bytes were built by an earlier run and already carry
+# that run's attestation, which is what this job verifies.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      product:
+        required: true
+        type: string
+      plan:
+        description: Resolved release plan JSON from the prepare job
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+      product:
+        description: Release product id to materialize
+        required: true
+        type: string
+      plan:
+        description: Resolved release plan JSON
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  reuse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+      GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
+      OUTPUT_DIR: build/release-gpui/${{ inputs.version }}/${{ inputs.product }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - name: Materialize the verified reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          scripts/release-gpui/retry.sh 4 2 -- node scripts/release-gpui/materialize-reuse.mjs \
+            --product "${{ inputs.product }}" \
+            --dir "$OUTPUT_DIR" \
+            --source-sha "${{ github.sha }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ inputs.product }}
+          path: ${{ env.OUTPUT_DIR }}/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-provenance-${{ inputs.product }}
+          path: ${{ env.OUTPUT_DIR }}/provenance.json
+          if-no-files-found: error
+          retention-days: 14

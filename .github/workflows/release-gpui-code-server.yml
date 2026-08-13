@@ -1,0 +1,250 @@
+name: GPUI release - code-server component
+
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+# Immutable component, reuse before build (§8.1).
+#
+# code-server is content-addressed: its component version is
+# `<12-hex code-server HEAD>-p2-<payload fingerprint>`, so an unchanged upstream
+# payload has an unchanged tag. Release 7.7 still rebuilt it twice (10m39s +
+# 8m04s) and only discovered afterwards that publication was a no-op. This job
+# probes the component tag first and finishes in ~1 minute when the exact
+# immutable asset already exists.
+#
+# The reuse path is not weaker than the build path: the downloaded archive is
+# digest-checked against GitHub's own metadata by publish-component.mjs and then
+# structurally validated by verify-code-server-archive.mjs — the same check the
+# macOS job runs on a freshly built archive.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      arch:
+        required: true
+        type: string
+    outputs:
+      component_version:
+        value: ${{ jobs.component.outputs.component_version }}
+      archive_name:
+        value: ${{ jobs.component.outputs.archive_name }}
+      artifact_name:
+        value: ${{ jobs.component.outputs.artifact_name }}
+      download_tag:
+        value: ${{ jobs.component.outputs.download_tag }}
+      action:
+        value: ${{ jobs.component.outputs.action }}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+      arch:
+        description: Linux component architecture
+        required: true
+        default: x64
+        type: choice
+        options: [x64, arm64]
+
+permissions:
+  attestations: write
+  contents: write
+  id-token: write
+
+jobs:
+  component:
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    outputs:
+      action: ${{ steps.probe.outputs.action }}
+      archive_name: ${{ steps.code_server_identity.outputs.archive_name }}
+      artifact_name: ${{ steps.code_server_identity.outputs.artifact_name }}
+      component_version: ${{ steps.code_server_identity.outputs.component_version }}
+      download_tag: ${{ steps.code_server_identity.outputs.download_tag }}
+    env:
+      OUTPUT_DIR: build/release-gpui/${{ inputs.version }}/code-server-linux-${{ inputs.arch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - name: Restore the code-server identity input
+        run: git submodule update --init --depth=1 -- code-server
+      - name: Resolve immutable code-server component identity
+        id: code_server_identity
+        run: node scripts/release-gpui/code-server-component-identity.mjs --root code-server --platform "linux-${{ inputs.arch }}" --github-output >> "$GITHUB_OUTPUT"
+      - name: Probe the published component tag
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          ARCHIVE='${{ steps.code_server_identity.outputs.archive_name }}'
+          TAG='${{ steps.code_server_identity.outputs.download_tag }}'
+          # A missing tag and a transient API failure both make `gh release view`
+          # exit non-zero, and both used to mean "not published" — i.e. one blip
+          # bought a ~10-minute rebuild that publish-component.mjs would then
+          # no-op. Retry first; treating an unreachable API as "not published"
+          # stays the fallback because that direction is safe (worst case a
+          # rebuild, never a mutated immutable asset).
+          ERRLOG="$(mktemp)"
+          ASSETS=""
+          for attempt in 1 2 3; do
+            if ASSETS="$(gh release view "$TAG" --repo maddada/Ghostex --json assets 2>"$ERRLOG")"; then
+              break
+            fi
+            ASSETS=""
+            if grep -qiE 'release not found|not found \(HTTP 404\)' "$ERRLOG"; then
+              break
+            fi
+            echo "::warning::Component tag probe attempt ${attempt}/3 failed: $(tr '\n' ' ' <"$ERRLOG")"
+            if [[ $attempt -lt 3 ]]; then
+              sleep $(( attempt * 5 ))
+            fi
+          done
+          if [[ -z "$ASSETS" ]]; then
+            ASSETS='{"assets":[]}'
+          fi
+          rm -f "$ERRLOG"
+          PUBLISHED=0
+          if printf '%s' "$ASSETS" | node -e '
+            const text = require("node:fs").readFileSync(0, "utf8").trim() || "{}";
+            const assets = (JSON.parse(text).assets ?? []).map((asset) => asset.name);
+            const name = process.argv[1];
+            process.exit(assets.includes(name) && assets.includes(`${name}.sha256`) ? 0 : 1);
+          ' "$ARCHIVE"; then
+            PUBLISHED=1
+          fi
+          if [[ "$PUBLISHED" == "1" ]]; then
+            echo "action=reuse" >> "$GITHUB_OUTPUT"
+            echo "::notice::Reusing published component $TAG/$ARCHIVE"
+          else
+            echo "action=build" >> "$GITHUB_OUTPUT"
+            echo "::notice::Component $TAG has no $ARCHIVE yet; building it"
+          fi
+      - name: Reuse the published component asset
+        if: ${{ steps.probe.outputs.action == 'reuse' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/release-gpui/retry.sh 4 2 -- node scripts/release-gpui/publish-component.mjs \
+            --reuse-published \
+            --metadata-only \
+            --require-sha256-sidecars \
+            --component code-server \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform "linux-${{ inputs.arch }}" \
+            --asset-dir "$OUTPUT_DIR" \
+            --output build/on-demand-components/components.json
+          node scripts/release-gpui/verify-code-server-archive.mjs \
+            --archive "$OUTPUT_DIR/${{ steps.code_server_identity.outputs.archive_name }}" \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform "linux-${{ inputs.arch }}"
+      - name: Restore the code-server build tree
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        run: git -C code-server submodule update --init --depth=1 -- lib/vscode
+      - name: Install WSL Source build dependencies
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        run: |
+          scripts/release-gpui/retry.sh 3 5 -- sudo apt-get update
+          scripts/release-gpui/retry.sh 3 5 -- sudo apt-get install -y binutils build-essential jq libkrb5-dev libx11-dev libxkbfile-dev python3 rsync
+      - name: Apply Ghostex code-server build patches
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        run: |
+          PATCH="$PWD/scripts/release-gpui/patches/code-server-ripgrep-target-validation.patch"
+          git -C code-server apply --check "$PATCH"
+          git -C code-server apply "$PATCH"
+      - uses: actions/setup-node@v4
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        with:
+          node-version-file: code-server/.node-version
+          cache: npm
+          cache-dependency-path: |
+            code-server/package-lock.json
+            code-server/lib/vscode/package-lock.json
+      - name: Build the code-server runtime
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        run: |
+          scripts/release-gpui/retry.sh 3 5 -- npm --prefix code-server ci
+          (
+            cd code-server
+            npm run build
+            OS=linux \
+              ARCH="${{ inputs.arch == 'arm64' && 'arm64' || 'amd64' }}" \
+              VSCODE_TARGET="linux-${{ inputs.arch }}" \
+              VERSION="$(node -p 'require("./package.json").version')" \
+              npm run build:vscode
+            KEEP_MODULES=1 \
+              OS=linux \
+              ARCH="${{ inputs.arch == 'arm64' && 'arm64' || 'amd64' }}" \
+              VSCODE_TARGET="linux-${{ inputs.arch }}" \
+              npm run release
+          )
+          require_file() {
+            if [[ ! -f "$1" ]]; then
+              echo "::error file=$1::The WSL Source runtime is missing required file $1"
+              exit 1
+            fi
+          }
+          require_executable() {
+            if [[ ! -x "$1" ]]; then
+              echo "::error file=$1::The WSL Source runtime is missing required executable $1"
+              exit 1
+            fi
+          }
+          require_executable code-server/release/lib/node
+          require_file code-server/release/out/node/entry.js
+          require_file code-server/release/out/node/routes/health.js
+          require_file code-server/release/lib/vscode/out/server-main.js
+          require_file code-server/release/lib/vscode/extensions/git/node_modules/@vscode/fs-copyfile/package.json
+          require_executable code-server/release/lib/vscode/node_modules/@vscode/ripgrep/bin/rg
+          require_file code-server/release/lib/vscode/node_modules/node-pty/build/Release/pty.node
+          grep -F promptEditorIpcReady code-server/release/out/node/routes/health.js >/dev/null
+          code-server/release/lib/node code-server/release/out/node/entry.js --version >/dev/null
+      - name: Package and publish the immutable component
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCHIVE="$OUTPUT_DIR/${{ steps.code_server_identity.outputs.archive_name }}"
+          mkdir -p "$OUTPUT_DIR"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C code-server/release \
+            -czf "$ARCHIVE" .
+          archive_sha256="$(sha256sum "$ARCHIVE" | awk '{ print $1 }')"
+          printf '%s  %s\n' "$archive_sha256" "$(basename "$ARCHIVE")" >"$ARCHIVE.sha256"
+          node scripts/release-gpui/verify-code-server-archive.mjs \
+            --archive "$ARCHIVE" \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform "linux-${{ inputs.arch }}"
+          scripts/release-gpui/retry.sh 4 2 -- node scripts/release-gpui/publish-component.mjs \
+            --require-sha256-sidecars \
+            --component code-server \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --asset-dir "$OUTPUT_DIR" \
+            --output build/on-demand-components/components.json
+      - name: Attest build provenance
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: ${{ env.OUTPUT_DIR }}/${{ steps.code_server_identity.outputs.archive_name }}
+      - name: Record job observability
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### code-server linux-${{ inputs.arch }} — ${{ steps.probe.outputs.action }}"
+            echo ""
+            echo "- Component version \`${{ steps.code_server_identity.outputs.component_version }}\`"
+            echo "- Download tag \`${{ steps.code_server_identity.outputs.download_tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.code_server_identity.outputs.artifact_name }}
+          path: ${{ env.OUTPUT_DIR }}/
+          if-no-files-found: error
+          retention-days: 14

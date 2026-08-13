@@ -105,7 +105,7 @@ exit 1
       readFile(path.join(repoRoot, 'gpui', 'scripts', 'prepare-macos-runtime.sh'), 'utf8'),
       readFile(path.join(repoRoot, 'gxserver-rs', 'package-remote-linux.mjs'), 'utf8'),
       readFile(path.join(repoRoot, '.github', 'workflows', 'release-gpui-macos.yml'), 'utf8'),
-      readFile(path.join(repoRoot, '.github', 'workflows', 'release-gpui-runtime.yml'), 'utf8'),
+      readFile(path.join(repoRoot, '.github', 'workflows', 'release-gpui-gxserver.yml'), 'utf8'),
     ]);
     expect(beadsBuilder).toContain("CGO_ENABLED: '1'");
     expect(beadsBuilder).toContain("'gms_pure_go'");

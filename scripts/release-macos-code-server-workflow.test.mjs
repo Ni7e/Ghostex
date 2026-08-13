@@ -116,7 +116,10 @@ describe('phased macOS code-server prerequisite contract', () => {
 
   test('keeps every other active macOS release entry path fail-closed', () => {
     const reusableWorkflow = workflow('release-gpui-macos.yml');
-    const runtimeWorkflow = workflow('release-gpui-runtime.yml');
+    // CDXC:ReleaseChangeAwarePlanning 2026-08-13: release-gpui-runtime.yml was
+    // split into release-gpui-gxserver.yml (the package) and
+    // release-gpui-code-server.yml (the immutable component, reuse-first).
+    const codeServerWorkflow = workflow('release-gpui-code-server.yml');
     const windowsWorkflow = workflow('release-gpui-windows.yml');
     const orchestratorWorkflow = workflow('release-gpui.yml');
     const prerequisiteScript = repoFile('scripts/release-gpui/macos-prerequisite.sh');
@@ -133,30 +136,34 @@ describe('phased macOS code-server prerequisite contract', () => {
         `code-server-${arch}/code-server-$CODE_SERVER_COMPONENT_VERSION-linux-${arch}.tar.gz`
       );
     }
-    expect(runtimeWorkflow).toContain('--platform "linux-${{ inputs.arch }}" --github-output');
-    expect(runtimeWorkflow).toContain('name: ${{ steps.code_server_identity.outputs.artifact_name }}');
-    expect(runtimeWorkflow).toContain('ARCHIVE="$OUTPUT/${{ steps.code_server_identity.outputs.archive_name }}"');
+    expect(codeServerWorkflow).toContain('--platform "linux-${{ inputs.arch }}" --github-output');
+    expect(codeServerWorkflow).toContain('name: ${{ steps.code_server_identity.outputs.artifact_name }}');
+    expect(codeServerWorkflow).toContain(
+      'ARCHIVE="$OUTPUT_DIR/${{ steps.code_server_identity.outputs.archive_name }}"'
+    );
+    // Reuse before build must stay at least as strict as a fresh build: the
+    // downloaded archive is digest-checked by publish-component.mjs and then
+    // structurally validated by the same verifier the build path runs.
+    expect(codeServerWorkflow).toContain('--reuse-published');
+    expect(codeServerWorkflow).toContain('--require-sha256-sidecars');
+    expect(codeServerWorkflow).toContain('scripts/release-gpui/verify-code-server-archive.mjs');
     expect(reusableWorkflow).toContain('name: ${{ steps.code_server_identity.outputs.artifact_name }}');
     expect(reusableWorkflow).toContain(
       'name: release-code-server-${{ steps.code_server_identity.outputs.component_version }}-linux-arm64'
     );
-    expect(windowsWorkflow).toContain('name: ${{ inputs.code_server_artifact_name }}');
-    expect(windowsWorkflow).toContain(
-      '${{ inputs.code_server_archive_name || steps.code_server_identity.outputs.archive_name }}'
-    );
+    expect(windowsWorkflow).toContain('name: ${{ steps.code_server_identity.outputs.artifact_name }}');
+    expect(windowsWorkflow).toContain('${{ steps.code_server_identity.outputs.archive_name }}');
     expect(windowsBuildScript).toContain('code-server-$ComponentVersion-linux-$ReleaseArch.tar.gz');
     expect(windowsBuildScript).toContain('verify-code-server-archive.mjs');
     expect(windowsBuildScript).toContain('--platform "linux-$ReleaseArch"');
-    expect(orchestratorWorkflow).toContain('include_windows_source_runtime: ${{ inputs.windows_x64 || inputs.macos }}');
-    expect(orchestratorWorkflow).toContain(
-      'include_windows_source_runtime: ${{ inputs.windows_arm64 || inputs.macos }}'
-    );
-    expect(orchestratorWorkflow).toContain(
-      'code_server_artifact_name: ${{ needs.gxserver_linux_x64.outputs.code_server_artifact_name }}'
-    );
-    expect(orchestratorWorkflow).toContain(
-      'code_server_artifact_name: ${{ needs.gxserver_linux_arm64.outputs.code_server_artifact_name }}'
-    );
+    // The orchestrator gates the component jobs on the resolved plan and no
+    // longer threads component names through gxserver job outputs: every
+    // consumer resolves the identity itself from the pinned submodule, so
+    // codeServerComponentNames() stays the single source of the artifact name.
+    expect(orchestratorWorkflow).toContain('uses: ./.github/workflows/release-gpui-code-server.yml');
+    expect(orchestratorWorkflow).toContain("needs.prepare.outputs.job_code_server_x64 != 'skip'");
+    expect(orchestratorWorkflow).toContain("needs.prepare.outputs.job_code_server_arm64 != 'skip'");
+    expect(orchestratorWorkflow).not.toContain('code_server_artifact_name:');
     expect(prerequisiteScript).toContain('macOS runtime preparation requires Linux x64 code-server archive');
     expect(prerequisiteScript).toContain('macOS runtime preparation requires Linux arm64 code-server archive');
     expect(localReleaseScript).toContain('macOS release requires Linux x64 code-server archive');
@@ -202,7 +209,7 @@ describe('phased macOS code-server prerequisite contract', () => {
     );
   });
 
-  test.each(['release-build-gxserver-x64.yml', 'release-build-gxserver-arm64.yml', 'release-gpui-runtime.yml'])(
+  test.each(['release-build-gxserver-x64.yml', 'release-build-gxserver-arm64.yml', 'release-gpui-code-server.yml'])(
     'binds the producer checksum to the exact archive name in %s',
     (workflowName) => {
       const source = workflow(workflowName);

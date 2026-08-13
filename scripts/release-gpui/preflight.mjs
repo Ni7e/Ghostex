@@ -4,11 +4,24 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { validateOnDemandManifestV2 } from "./on-demand-manifest.mjs";
 import { inspectRelease, verifyPublishedComponent } from "./publish-component.mjs";
+import { validatePlan } from "./plan.mjs";
+import { PRODUCT_IDS, isProductRequested, productDefinition } from "./product-inputs.mjs";
 
-const [version] = process.argv.slice(2);
+/*
+ * CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+ * `--plan <file>` cross-checks the resolved plan against the scope the run was
+ * dispatched with. `--only-plan` runs that check alone, so the workflow can keep
+ * the expensive immutable-input validation first (it must fail within seconds)
+ * and still validate the plan once it exists.
+ */
+const argv = process.argv.slice(2);
+const version = argv.find((argument) => !argument.startsWith("--"));
+const planPath = argv.includes("--plan") ? argv[argv.indexOf("--plan") + 1] : null;
+const onlyPlan = argv.includes("--only-plan");
 if (!/^\d+\.\d+\.\d+$/u.test(version ?? "")) {
   throw new Error(`Version must be MAJOR.MINOR.PATCH, got ${version ?? "nothing"}`);
 }
+if (onlyPlan && !planPath) throw new Error("--only-plan requires --plan <file>");
 
 const enabled = (name) => process.env[name] === "true" || process.env[name] === "1";
 const requireValues = (label, names) => {
@@ -33,6 +46,62 @@ const platforms = {
 const prerelease = enabled("GHOSTEX_RELEASE_PRERELEASE");
 const signWindows = enabled("GHOSTEX_RELEASE_SIGN_WINDOWS");
 const updateSparkle = enabled("GHOSTEX_RELEASE_UPDATE_SPARKLE");
+
+/*
+ * The plan may reduce work through verified reuse, but it may never act on a
+ * product the operator did not request, never skip one they did, and never
+ * disagree with the run's version or source commit. Any of those would mean the
+ * plan and the dispatch describe different releases.
+ */
+function validatePlanAgainstScope(plan) {
+  validatePlan(plan);
+  if (plan.version !== version) {
+    throw new Error(`The resolved plan releases ${plan.version}, not ${version}`);
+  }
+  if (process.env.GITHUB_SHA && plan.sourceSha !== process.env.GITHUB_SHA) {
+    throw new Error(`The resolved plan was computed at ${plan.sourceSha}, not ${process.env.GITHUB_SHA}`);
+  }
+  const scope = {
+    android: platforms.android,
+    gxserverLinuxArm64: platforms.gxserverLinuxArm64,
+    gxserverLinuxX64: platforms.gxserverLinuxX64,
+    gxserverWslWindowsArm64: platforms.gxserverWslWindowsArm64,
+    gxserverWslWindowsX64: platforms.gxserverWslWindowsX64,
+    linuxDeb: platforms.linuxDeb,
+    linuxRpm: platforms.linuxRpm,
+    macos: platforms.macos,
+    windowsArm64: platforms.windowsArm64,
+    windowsX64: platforms.windowsX64,
+  };
+  const mismatches = [];
+  for (const productId of PRODUCT_IDS) {
+    const requested = isProductRequested(productId, scope);
+    const entry = plan.products[productId];
+    if (requested && entry.action === "skip") mismatches.push(`${productId} is requested but skipped by the plan`);
+    if (!requested && entry.action !== "skip") {
+      mismatches.push(`${productId} is not requested but planned as ${entry.action}`);
+    }
+    if (entry.action === "reuse" && productDefinition(productId).versionStamped) {
+      if (entry.reuse?.productVersion !== version) {
+        mismatches.push(`${productId} is version-stamped and cannot be reused from ${entry.reuse?.productVersion}`);
+      }
+    }
+  }
+  if (mismatches.length > 0) {
+    throw new Error(`The resolved plan disagrees with the requested scope:\n- ${mismatches.join("\n- ")}`);
+  }
+  const built = PRODUCT_IDS.filter((id) => plan.products[id].action === "build");
+  const reused = PRODUCT_IDS.filter((id) => plan.products[id].action === "reuse");
+  console.log(
+    `Plan validated for ${version}: ${built.length} built (${built.join(", ") || "none"}), ` +
+      `${reused.length} reused (${reused.join(", ") || "none"}).`,
+  );
+}
+
+if (onlyPlan) {
+  validatePlanAgainstScope(JSON.parse(readFileSync(planPath, "utf8")));
+  process.exit(0);
+}
 
 if (process.env.GITHUB_REF && process.env.GITHUB_REF !== "refs/heads/main") {
   throw new Error(`Public releases must be dispatched from main, got ${process.env.GITHUB_REF}`);
@@ -161,5 +230,7 @@ const remoteTag = execFileSync(
 if (remoteTag && !enabled("GHOSTEX_RELEASE_ALLOW_EXISTING_TAG")) {
   throw new Error(`v${version} already exists`);
 }
+
+if (planPath) validatePlanAgainstScope(JSON.parse(readFileSync(planPath, "utf8")));
 
 console.log(`Validated immutable release inputs for ${version} at ${remoteMain}.`);

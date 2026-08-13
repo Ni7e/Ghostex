@@ -1,5 +1,10 @@
 name: GPUI release - WSL gxserver
 
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+# The gxserver tarball is awaited just in time rather than through a `needs:`
+# edge, so this ~1 minute repackaging job no longer forces the parent graph to
+# serialize around the gxserver builds.
+
 on:
   workflow_call:
     inputs:
@@ -10,6 +15,11 @@ on:
         required: true
         type: string
       source_run_id:
+        required: false
+        default: ""
+        type: string
+      plan:
+        description: Resolved release plan JSON from the prepare job
         required: false
         default: ""
         type: string
@@ -30,15 +40,32 @@ on:
         required: true
         type: string
 
+permissions:
+  attestations: write
+  contents: read
+  id-token: write
+
 jobs:
   package:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
+    env:
+      GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+      GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: false
+      - name: Await the gxserver runtime artifact of this run
+        if: ${{ inputs.source_run_id == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-gpui/await-run-artifacts.mjs \
+            --names release-gxserver-linux-${{ inputs.arch }} \
+            --timeout-minutes 45
       - uses: actions/download-artifact@v8
         if: ${{ inputs.source_run_id == '' }}
         with:
@@ -57,9 +84,20 @@ jobs:
           "${{ inputs.version }}"
           "${{ inputs.arch }}"
           "build/runtime-artifacts/${{ inputs.arch }}/gxserver-linux-${{ inputs.arch }}.tar.gz"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: build/release-gpui/${{ inputs.version }}/gxserver-wsl-windows-${{ inputs.arch }}/gxserver-wsl-windows-${{ inputs.arch }}.zip
       - uses: actions/upload-artifact@v7
         with:
           name: release-gxserver-wsl-windows-${{ inputs.arch }}
           path: build/release-gpui/${{ inputs.version }}/gxserver-wsl-windows-${{ inputs.arch }}/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.plan != '' }}
+        with:
+          name: release-provenance-gxserver-wsl-windows-${{ inputs.arch }}
+          path: build/release-gpui/${{ inputs.version }}/gxserver-wsl-windows-${{ inputs.arch }}/provenance.json
           if-no-files-found: error
           retention-days: 14

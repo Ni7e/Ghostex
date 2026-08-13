@@ -1,11 +1,35 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { validateOnDemandManifestV2 } from "./on-demand-manifest.mjs";
 import { validateWindowsUpdateFeed } from "./windows-update-feed.mjs";
+import { releaseProvenanceAssetName } from "./provenance.mjs";
+import {
+  PRODUCT_PROVENANCE_FILE,
+  assertLiveProvenanceMatches,
+  assertPlanMatchesScope,
+  assertSingleBuildOrigin,
+  buildReleaseProvenanceRecord,
+  collectPublishProvenance,
+  isNonProductArtifactDirectory,
+  readPublishPlan,
+  renderBuildProvenanceNotes,
+  renderReleaseProvenanceReport,
+  resolveMacosFeedScope,
+  resolveWindowsFeedScope,
+} from "./publish-provenance.mjs";
 
 const [version, artifactsRoot] = process.argv.slice(2);
 if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) throw new Error("Version must be MAJOR.MINOR.PATCH");
@@ -18,6 +42,22 @@ const expected = new Set(
     .filter(Boolean),
 );
 if (expected.size === 0) throw new Error("GHOSTEX_RELEASE_EXPECTED_PLATFORMS is empty");
+
+/*
+ * CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+ * The resolved plan decides what this release contains. It arrives inline from
+ * the parent workflow and, for a publish-only recovery, also as the source run's
+ * `release-plan` artifact; when both are present they must agree exactly.
+ * Everything below validates plan <-> manifest <-> provenance three ways before
+ * a single byte is uploaded.
+ */
+const plan = readPublishPlan({
+  artifactsRoot,
+  env: process.env,
+  fileExists: existsSync,
+  readTextFile: (file) => readFileSync(file, "utf8"),
+});
+assertPlanMatchesScope({ expectedPlatforms: [...expected], plan, version });
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", stdio: options.capture ? "pipe" : "inherit" });
@@ -92,7 +132,36 @@ function validateArtifactContract(platform, names, contract) {
 }
 
 const sourceCommit = run("git", ["rev-parse", "HEAD"], { capture: true });
-const updateSparkle = process.env.GHOSTEX_RELEASE_UPDATE_SPARKLE !== "0";
+/*
+ * The artifacts were produced at the plan's source commit; this job tags the
+ * commit it checked out. For a normal run those are the same commit, and for a
+ * publish-only recovery the plan's commit must be an ancestor — otherwise the
+ * release would carry artifacts built from a commit this tag does not contain.
+ */
+if (spawnSync("git", ["merge-base", "--is-ancestor", plan.sourceSha, sourceCommit]).status !== 0) {
+  throw new Error(
+    `Refusing to publish: the plan's source ${plan.sourceSha} is not an ancestor of the publishing commit ${sourceCommit}`,
+  );
+}
+/*
+ * Scope-aware feeds, keyed on "macOS ships in this release" rather than on
+ * "macOS was rebuilt". macOS is version-stamped and therefore only reusable
+ * inside its own version — precisely the recovery case where the DMG exists but
+ * the appcast entry never got published, so Sparkle must still advance.
+ */
+const macosFeedScope = resolveMacosFeedScope({
+  plan,
+  updateSparkleRequested: process.env.GHOSTEX_RELEASE_UPDATE_SPARKLE !== "0",
+});
+const updateSparkle = macosFeedScope.sparkle;
+const windowsFeedScope = resolveWindowsFeedScope({ plan });
+console.log(
+  `Plan: ${plan.expectedPlatforms.join(", ")} (macOS ${macosFeedScope.macosAction}; sparkle=${
+    updateSparkle ? "advance" : "hold"
+  }; homebrew=${macosFeedScope.homebrew ? "eligible" : "hold"}; windows feeds regenerated=${
+    windowsFeedScope.regenerated.join(",") || "none"
+  }, carried forward=${windowsFeedScope.carriedForward.join(",") || "none"})`,
+);
 run("git", ["config", "user.name", "github-actions[bot]"]);
 run("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
 
@@ -101,7 +170,18 @@ for (const artifactDirectory of readdirSync(artifactsRoot, { withFileTypes: true
   if (!artifactDirectory.isDirectory()) continue;
   const directory = path.join(artifactsRoot, artifactDirectory.name);
   const manifestPath = path.join(directory, "manifest.json");
-  if (!existsSync(manifestPath)) continue;
+  if (!existsSync(manifestPath)) {
+    /*
+     * The run also uploads the plan, the per-product provenance records, and the
+     * immutable code-server component archives. None of them is a release
+     * product, so they carry no manifest; anything else without one is worth
+     * saying out loud without failing an otherwise complete release.
+     */
+    if (!isNonProductArtifactDirectory(artifactDirectory.name)) {
+      console.log(`::warning::Ignoring artifact directory without a manifest: ${artifactDirectory.name}`);
+    }
+    continue;
+  }
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8").replace(/^\uFEFF/, ""));
   if (manifest.schemaVersion !== 1 || manifest.version !== version || !expected.has(manifest.platform)) {
     throw new Error(`Unexpected manifest ${manifestPath}: ${JSON.stringify(manifest)}`);
@@ -136,6 +216,28 @@ for (const platform of expected) {
 if (received.size !== expected.size || manifests.length !== expected.size) {
   throw new Error("Received duplicate or unexpected platform manifests");
 }
+
+/*
+ * Plan <-> manifest <-> provenance. Every expected platform must carry exactly
+ * one provenance record whose product, action, fingerprint, algorithm revision,
+ * release version, source commit, and artifact digests agree with both the plan
+ * and the manifest that arrived beside it. A reused product additionally has to
+ * name the origin the plan authorized and carry all four verified checks.
+ */
+const productProvenance = collectPublishProvenance({
+  manifests,
+  plan,
+  readProvenance: (directory) => {
+    const file = path.join(directory, PRODUCT_PROVENANCE_FILE);
+    if (!existsSync(file)) return null;
+    return JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/u, ""));
+  },
+  version,
+});
+assertSingleBuildOrigin({
+  expectedRunId: process.env.GHOSTEX_RELEASE_SOURCE_RUN_ID || null,
+  records: productProvenance,
+});
 
 const byPlatform = new Map(manifests.map((manifest) => [manifest.platform, manifest]));
 for (const arch of ["x64", "arm64"]) {
@@ -245,6 +347,26 @@ for (const arch of ["x64", "arm64"]) {
 }
 
 const tag = `v${version}`;
+
+/*
+ * The durable reuse index. Every release carries one small asset recording, per
+ * product, the fingerprint, the digests, the origin, and the product version
+ * behind its bytes. That asset is what makes the *next* release able to reuse
+ * anything at all, and what lets the final verifier re-derive every reuse claim
+ * from public data alone. Actions artifact retention is irrelevant to it.
+ */
+const releaseProvenance = buildReleaseProvenanceRecord({
+  plan,
+  productRecords: productProvenance,
+  publishedAt: new Date().toISOString(),
+  sourceSha: sourceCommit,
+  version,
+  workflowRunId: Number(process.env.GITHUB_RUN_ID ?? 0),
+});
+const provenanceAssetName = releaseProvenanceAssetName(version);
+const provenanceAssetPath = path.join(artifactsRoot, provenanceAssetName);
+writeFileSync(provenanceAssetPath, `${JSON.stringify(releaseProvenance, null, 2)}\n`);
+
 const changelog = readFileSync("CHANGELOG.md", "utf8");
 const sectionStart = changelog.indexOf(`## ${version} -`);
 if (sectionStart < 0) throw new Error(`CHANGELOG.md has no ${version} section`);
@@ -266,14 +388,28 @@ for (const manifest of manifests.sort((a, b) => a.platform.localeCompare(b.platf
   }
   releaseNotes.push("");
 }
+const provenanceAssetSha = sha256(provenanceAssetPath);
+releaseNotes.push("### provenance", "");
+releaseNotes.push(`- \`${provenanceAssetName}\` — SHA256 \`${provenanceAssetSha}\``);
+releaseNotes.push("");
+uploadPaths.push(provenanceAssetPath);
+releaseNotes.push(renderBuildProvenanceNotes(releaseProvenance), "");
 const notesPath = path.join(artifactsRoot, `release-notes-${version}.md`);
 writeFileSync(notesPath, `${releaseNotes.join("\n").trim()}\n`);
-const expectedAssets = new Map(
-  manifests.flatMap((manifest) => manifest.artifacts).map((artifact) => [artifact.name, artifact.sha256]),
-);
+const expectedAssets = new Map([
+  ...manifests.flatMap((manifest) => manifest.artifacts).map((artifact) => [artifact.name, artifact.sha256]),
+  [provenanceAssetName, provenanceAssetSha],
+]);
 if (expectedAssets.size !== uploadPaths.length) throw new Error("Release artifact names are not globally unique");
 
-function validateLiveRelease(liveRelease) {
+/*
+ * `verifyProvenanceDigest` is false only when re-validating a release this run
+ * did not upload. The provenance record carries a `publishedAt` timestamp, so a
+ * second run produces different bytes for the same facts; the already-published
+ * path therefore compares the live record's *content* (below) instead of its
+ * digest. Everything else is still matched byte for byte.
+ */
+function validateLiveRelease(liveRelease, { verifyProvenanceDigest = true } = {}) {
   if (liveRelease.draft) throw new Error(`Live release ${tag} is still a draft`);
   const expectedPrerelease = process.env.GHOSTEX_RELEASE_PRERELEASE === "1";
   if (Boolean(liveRelease.prerelease) !== expectedPrerelease) {
@@ -283,6 +419,7 @@ function validateLiveRelease(liveRelease) {
     throw new Error(`Live release has ${liveRelease.assets?.length ?? 0} assets; expected ${expectedAssets.size}`);
   }
   for (const asset of liveRelease.assets) {
+    if (asset.name === provenanceAssetName && !verifyProvenanceDigest) continue;
     const expectedSha = expectedAssets.get(asset.name);
     const liveSha = typeof asset.digest === "string" && asset.digest.startsWith("sha256:")
       ? asset.digest.slice("sha256:".length)
@@ -320,7 +457,27 @@ if (existingReleaseResult.status === 0) {
   if (ancestor.status !== 0) {
     throw new Error(`Existing ${tag} commit ${tagCommit} is not an ancestor of source ${sourceCommit}`);
   }
-  validateLiveRelease(JSON.parse(existingReleaseResult.stdout));
+  const existingRelease = JSON.parse(existingReleaseResult.stdout);
+  validateLiveRelease(existingRelease, { verifyProvenanceDigest: false });
+  const publishedProvenanceAsset = (existingRelease.assets ?? []).find(
+    (asset) => asset.name === provenanceAssetName,
+  );
+  if (!publishedProvenanceAsset) throw new Error(`Existing ${tag} carries no ${provenanceAssetName}`);
+  assertLiveProvenanceMatches({
+    live: JSON.parse(
+      run(
+        "gh",
+        [
+          "api",
+          `repos/maddada/Ghostex/releases/assets/${publishedProvenanceAsset.id}`,
+          "-H",
+          "Accept: application/octet-stream",
+        ],
+        { capture: true },
+      ),
+    ),
+    record: releaseProvenance,
+  });
   if (macos && updateSparkle && !appcastReferencesRelease(readLiveAppcast(), buildNumber, version)) {
     const taggedAppcast = run("git", ["show", `${tag}:appcast.xml`], { capture: true });
     if (taggedAppcast.trim() !== generatedAppcastXml.trim()) {
@@ -337,6 +494,7 @@ if (existingReleaseResult.status === 0) {
     throw new Error(`Live appcast did not advance to ${version} (${buildNumber})`);
   }
   console.log(`Already published and live-verified ${tag} with ${uploadPaths.length} assets.`);
+  console.log(renderReleaseProvenanceReport(releaseProvenance, { plan }));
   process.exit(0);
 }
 if (run("git", ["tag", "-l", tag], { capture: true })) throw new Error(`Tag already exists without a public release: ${tag}`);
@@ -386,3 +544,12 @@ if (macos && updateSparkle) {
 }
 
 console.log(`Published and live-verified ${tag} with ${uploadPaths.length} assets.`);
+console.log(renderReleaseProvenanceReport(releaseProvenance, { plan }));
+if (process.env.GITHUB_STEP_SUMMARY) {
+  appendFileSync(
+    process.env.GITHUB_STEP_SUMMARY,
+    `${renderBuildProvenanceNotes(releaseProvenance)}\n\n\`\`\`\n${renderReleaseProvenanceReport(releaseProvenance, {
+      plan,
+    })}\n\`\`\`\n\n`,
+  );
+}

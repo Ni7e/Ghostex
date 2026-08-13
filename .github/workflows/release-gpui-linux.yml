@@ -1,4 +1,16 @@
-name: GPUI release - Linux package
+name: GPUI release - Linux packages
+
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+# One compile, two packages (§7).
+#
+# DEB and RPM used to run as two independent jobs that each executed
+# linux-stage.sh — a full `cargo build --release`, CEF download, and JS bundle —
+# to produce two packages from what is byte-for-byte the same staged tree. That
+# was ~13 minutes and one runner of pure duplication per release.
+#
+# Ordering matters: linux-rpm.sh tars the whole package root, so the RPM is
+# built BEFORE linux-deb.sh creates DEBIAN/. Keep that order, or DEBIAN/ leaks
+# into the RPM payload.
 
 on:
   workflow_call:
@@ -6,33 +18,49 @@ on:
       version:
         required: true
         type: string
-      package:
+      packages:
+        description: Comma-separated package formats to produce (deb, rpm, or both)
         required: true
         type: string
       runtime_artifacts_ready:
         required: false
         default: false
         type: boolean
+      plan:
+        description: Resolved release plan JSON from the prepare job
+        required: false
+        default: ""
+        type: string
   workflow_dispatch:
     inputs:
       version:
         description: Semver release version
         required: true
         type: string
-      package:
-        description: Linux package format
+      packages:
+        description: Linux package formats
         required: true
-        default: deb
+        default: deb,rpm
         type: choice
-        options: [deb, rpm]
+        options: [deb, rpm, "deb,rpm"]
 
 permissions:
+  attestations: write
   contents: write
+  id-token: write
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      CEF_PATH: ${{ github.workspace }}/gpui/build/cef-cache
+      GHOSTEX_LINUX_PACKAGE_ROOT: ${{ github.workspace }}/build/release-gpui/linux-package-root
+      GHOSTEX_LINUX_PACKAGE_ROOT_READY: '1'
+      GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+      GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/build/zig-global-cache
     steps:
       - uses: actions/checkout@v6
         with:
@@ -41,6 +69,84 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
+      - name: Validate the requested package formats
+        env:
+          REQUESTED_PACKAGES: ${{ inputs.packages }}
+        run: |
+          case "$REQUESTED_PACKAGES" in
+            deb | rpm | deb,rpm | rpm,deb) ;;
+            *) echo "packages must be deb, rpm, or deb,rpm; got $REQUESTED_PACKAGES" >&2; exit 2 ;;
+          esac
+      - name: Resolve dependency cache keys
+        id: cache_keys
+        run: |
+          {
+            printf 'cef=%s\n' "$(git rev-parse HEAD:.dependencies/cef-rs)"
+            printf 'zig=%s\n' "$(git rev-parse HEAD:ghostty)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Restore Cargo registry cache
+        uses: actions/cache@v6
+        id: cargo_cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-reg-linux-${{ hashFiles('gpui/Cargo.lock', 'gxserver-rs/Cargo.lock') }}
+          restore-keys: cargo-reg-linux-
+      - name: Restore CEF distribution cache
+        uses: actions/cache@v6
+        id: cef_cache
+        with:
+          path: gpui/build/cef-cache
+          key: cef-linux-x64-${{ steps.cache_keys.outputs.cef }}
+      - name: Restore Zig package cache
+        uses: actions/cache@v6
+        id: zig_cache
+        with:
+          path: |
+            build/zig-global-cache
+            ~/.cache/zig
+          key: zig-linux-x64-${{ steps.cache_keys.outputs.zig }}
+          restore-keys: zig-linux-x64-
+      - name: Install native packaging dependencies
+        run: |
+          scripts/release-gpui/retry.sh 3 5 -- sudo apt-get update
+          scripts/release-gpui/retry.sh 3 5 -- sudo apt-get install -y cmake ninja-build pkg-config rpm libasound2-dev libfontconfig1-dev libfreetype-dev libx11-dev libxcb1-dev libxkbcommon-x11-dev
+      - name: Install pinned Zig toolchains
+        run: |
+          scripts/release-gpui/retry.sh 3 5 -- bash -c 'curl -fsSL https://mise.run | sh'
+          scripts/release-gpui/retry.sh 3 5 -- "$HOME/.local/bin/mise" install zig@0.15.2 zig@0.16.0
+          ZIG_015="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig"
+          [[ "$($ZIG_015 version)" == "0.15.2" ]]
+          printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' "$ZIG_015" "$ZIG_015" >> "$GITHUB_ENV"
+      - name: Install JavaScript dependencies
+        run: scripts/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
+      - name: Pre-fetch Zig package dependencies
+        run: scripts/release-gpui/fetch-zig-deps.sh ghostty
+      # Known tradeoff, deliberately not restructured.
+      #
+      # Unlike macOS and Windows, this job awaits gxserver *before* its cargo
+      # build rather than after: `linux-stage.sh` refuses to start without the
+      # package (it would otherwise build gxserver from source itself, which is
+      # far worse), and `build-linux-app.sh` copies those bytes into the app dir
+      # at step 5, after the compile at line 72. Starting cargo first would mean
+      # splitting `build-linux-app.sh` into compile and bundle halves — a change
+      # to the shared script that macOS/Windows/local builds also run, for a few
+      # minutes of overlap on full rebuilds only.
+      #
+      # Cost when it bites: on a full rebuild the job reaches this step at
+      # t≈4 min and gxserver x64 finishes at t≈11 min, so a Linux compile error
+      # surfaces ~7 minutes later than it strictly could. It is still ~15 minutes
+      # earlier than the old `needs: gxserver_linux_x64` edge, and in the common
+      # reuse case gxserver is a ~1-minute reuse job, so the wait is ~0.
+      - name: Await the gxserver runtime artifact of this run
+        if: ${{ inputs.runtime_artifacts_ready }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-gpui/await-run-artifacts.mjs \
+            --names release-gxserver-linux-x64 \
+            --timeout-minutes 45
       - uses: actions/download-artifact@v8
         if: ${{ inputs.runtime_artifacts_ready }}
         with:
@@ -51,26 +157,74 @@ jobs:
         run: |
           mkdir -p build/remote-gxserver-linux/x64/package
           tar -xzf build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz -C build/remote-gxserver-linux/x64/package
-      - name: Install native packaging dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config rpm libasound2-dev libfontconfig1-dev libfreetype-dev libx11-dev libxcb1-dev libxkbcommon-x11-dev
-      - name: Install pinned Zig toolchains
-        run: |
-          curl https://mise.run | sh
-          "$HOME/.local/bin/mise" install zig@0.15.2 zig@0.16.0
-          ZIG_015="$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig"
-          [[ "$($ZIG_015 version)" == "0.15.2" ]]
-          printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' "$ZIG_015" "$ZIG_015" >> "$GITHUB_ENV"
-      - name: Install JavaScript dependencies
-        run: bun install --frozen-lockfile
-      - name: Build Linux package
+      - name: Stage the Linux desktop payload once
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/release-gpui/linux-${{ inputs.package }}.sh "${{ inputs.version }}"
-      - uses: actions/upload-artifact@v7
+        run: scripts/release-gpui/linux-stage.sh "${{ inputs.version }}" "$GHOSTEX_LINUX_PACKAGE_ROOT"
+      # RPM first: linux-rpm.sh tars the whole staged root, and linux-deb.sh
+      # creates DEBIAN/ inside it.
+      - name: Build the RPM package
+        if: ${{ contains(inputs.packages, 'rpm') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/release-gpui/linux-rpm.sh "${{ inputs.version }}"
+          # Risk R8: the shared package root is reused by the DEB step, so prove
+          # the RPM payload never contains Debian control metadata.
+          RPM_PATH="build/release-gpui/${{ inputs.version }}/linux-rpm-x64/ghostex-${{ inputs.version }}-1.x86_64.rpm"
+          if rpm -qpl "$RPM_PATH" | grep -q '^/DEBIAN'; then
+            echo "RPM payload leaked DEBIAN/ control metadata" >&2
+            exit 1
+          fi
+      - name: Build the DEB package
+        if: ${{ contains(inputs.packages, 'deb') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release-gpui/linux-deb.sh "${{ inputs.version }}"
+      - name: Attest the RPM package
+        if: ${{ contains(inputs.packages, 'rpm') }}
+        uses: actions/attest-build-provenance@v4
         with:
-          name: release-linux-${{ inputs.package }}-x64
-          path: build/release-gpui/${{ inputs.version }}/linux-${{ inputs.package }}-x64/
+          subject-path: build/release-gpui/${{ inputs.version }}/linux-rpm-x64/ghostex-${{ inputs.version }}-1.x86_64.rpm
+      - name: Attest the DEB package
+        if: ${{ contains(inputs.packages, 'deb') }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: build/release-gpui/${{ inputs.version }}/linux-deb-x64/ghostex_${{ inputs.version }}_amd64.deb
+      - name: Record job observability
+        if: ${{ always() }}
+        run: |
+          {
+            echo "- Packages produced: ${{ inputs.packages }} (single compile)"
+            echo "- Cargo registry cache: ${{ steps.cargo_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- CEF distribution cache: ${{ steps.cef_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- Zig package cache: ${{ steps.zig_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: ${{ contains(inputs.packages, 'rpm') }}
+        with:
+          name: release-linux-rpm-x64
+          path: build/release-gpui/${{ inputs.version }}/linux-rpm-x64/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ contains(inputs.packages, 'deb') }}
+        with:
+          name: release-linux-deb-x64
+          path: build/release-gpui/${{ inputs.version }}/linux-deb-x64/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.plan != '' && contains(inputs.packages, 'rpm') }}
+        with:
+          name: release-provenance-linux-rpm-x64
+          path: build/release-gpui/${{ inputs.version }}/linux-rpm-x64/provenance.json
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.plan != '' && contains(inputs.packages, 'deb') }}
+        with:
+          name: release-provenance-linux-deb-x64
+          path: build/release-gpui/${{ inputs.version }}/linux-deb-x64/provenance.json
           if-no-files-found: error
           retention-days: 14

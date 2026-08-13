@@ -66,6 +66,22 @@ release_gpui_assert_dmg_budget() {
   printf 'Release DMG size: %.1f MiB / 300.0 MiB budget\n' "$(awk -v bytes="$size_bytes" 'BEGIN { print bytes / 1048576 }')"
 }
 
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+# Every producing job also emits the per-product provenance record next to its
+# manifest, so the publisher can cross-check plan <-> manifest <-> provenance
+# instead of trusting a hand-written duplicate. It runs only when the job was
+# handed a resolved plan, and only for platforms the plan actually names, so
+# intermediate manifests (macos-arm64-signed) and local runs are unaffected.
+release_gpui_write_provenance() {
+  local output="$1"
+  if [[ -z "${GHOSTEX_RELEASE_PLAN:-}${GHOSTEX_RELEASE_PLAN_FILE:-}" ]]; then
+    return 0
+  fi
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  node "$script_dir/write-provenance.mjs" --dir "$output" --if-planned
+}
+
 release_gpui_write_manifest() {
   local output="$1"
   local platform="$2"
@@ -133,6 +149,7 @@ writeFileSync(join(output, "metadata.json"), `${JSON.stringify({
   workflow_sha: process.env.RELEASE_GPUI_MANIFEST_WORKFLOW_SHA || undefined,
 }, null, 2)}\n`);
 JS
+  release_gpui_write_provenance "$output"
 }
 
 release_gpui_require_command() {

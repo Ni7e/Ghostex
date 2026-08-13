@@ -18,6 +18,16 @@ import {
   validateWindowsUpdateFeed,
   windowsUpdateArtifactNames,
 } from "./release-gpui/windows-update-feed.mjs";
+import {
+  releaseProvenanceAssetName,
+  validateReleaseProvenance,
+} from "./release-gpui/provenance.mjs";
+import {
+  crossReleaseReuseOrigins,
+  productOriginLabel,
+  renderReleaseProvenanceReport,
+  verifyReleaseProvenanceAgainstAssets,
+} from "./release-gpui/publish-provenance.mjs";
 
 /*
  CDXC:ReleaseAutomation 2026-07-02-14:10:
@@ -269,6 +279,93 @@ async function main() {
   const dmgAsset = releaseAssets.find((asset) => asset.name === `ghostex-${version}-arm64.dmg`);
   const dmgDigest = parseAssetSha(dmgAsset);
 
+  /*
+   CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+   The release records, per product, whether its bytes were built here or reused
+   from an earlier verified origin. This check re-derives every one of those
+   claims from public data only: the live asset digests, and — for a
+   cross-release reuse — the origin release's own asset digests, which is what
+   "byte-identical re-publication" has to mean to a user.
+  */
+  let releaseProvenance = null;
+  await check("provenance", async () => {
+    const assetName = releaseProvenanceAssetName(version);
+    if (!releaseAssets.some((asset) => asset.name === assetName)) {
+      return {
+        warn: `Expected difference: ${version} carries no ${assetName} (released before change-aware planning).`,
+      };
+    }
+    const temporary = await mkdtemp(path.join(tmpdir(), `ghostex-provenance-verify-${version}-`));
+    await capture(
+      `env -u GH_TOKEN -u GITHUB_TOKEN gh release download ${shellQuote(`v${version}`)} ` +
+        `--repo ${shellQuote(githubRepo)} --pattern ${shellQuote(assetName)} --dir ${shellQuote(temporary)}`,
+    );
+    releaseProvenance = validateReleaseProvenance(
+      JSON.parse(await readFile(path.join(temporary, assetName), "utf8")),
+    );
+    if (releaseProvenance.version !== version || releaseProvenance.tag !== `v${version}`) {
+      throw new Error(`${assetName} records ${releaseProvenance.tag}, not v${version}.`);
+    }
+    const failures = verifyReleaseProvenanceAgainstAssets({
+      liveAssets: releaseAssets.map((asset) => ({
+        name: asset.name,
+        sha256: parseAssetSha(asset),
+        size: asset.size,
+      })),
+      releaseProvenance,
+      version,
+    });
+    if (failures.length > 0) throw new Error(failures.slice(0, 4).join(" | "));
+
+    /* A cross-release reuse must byte-match the release it names. */
+    const origins = crossReleaseReuseOrigins(releaseProvenance);
+    for (const origin of origins) {
+      if (origin.versionStamped) {
+        throw new Error(`${origin.product} is version-stamped but claims reuse from ${origin.tag}.`);
+      }
+      const originRelease = JSON.parse(
+        await capture(
+          `env -u GH_TOKEN -u GITHUB_TOKEN gh release view ${shellQuote(origin.tag)} ` +
+            `--repo ${shellQuote(githubRepo)} --json assets`,
+        ),
+      );
+      for (const artifact of origin.artifacts) {
+        const originAsset = (originRelease.assets ?? []).find((asset) => asset.name === artifact.name);
+        const originSha = parseAssetSha(originAsset);
+        if (!originAsset || originSha !== artifact.sha256) {
+          throw new Error(
+            `${origin.product} claims ${artifact.name} is unchanged since ${origin.tag}, but that release publishes ` +
+              `${originSha ?? "no such asset"}.`,
+          );
+        }
+      }
+    }
+    const counts = Object.values(releaseProvenance.products).reduce(
+      (totals, record) => ({
+        built: totals.built + (record.action === "built" ? 1 : 0),
+        reused: totals.reused + (record.action === "reused" ? 1 : 0),
+      }),
+      { built: 0, reused: 0 },
+    );
+    return (
+      `${counts.built} built, ${counts.reused} reused (${origins.length} cross-release origin(s) byte-matched), ` +
+      `${releaseAssets.length} assets recorded`
+    );
+  });
+
+  const provenanceFor = (product) => releaseProvenance?.products?.[product] ?? null;
+  const describeProduct = (product) => {
+    const record = provenanceFor(product);
+    if (!record) return "";
+    return ` [${record.action}, ${productOriginLabel(record)}]`;
+  };
+  const describeArtifact = (assetName) => {
+    const record = Object.values(releaseProvenance?.products ?? {}).find((candidate) =>
+      candidate.artifacts.some((artifact) => artifact.name === assetName),
+    );
+    return record ? describeProduct(record.product) : "";
+  };
+
   await check("windows-update-feeds", async () => {
     const arches = ["x64", "arm64"].filter((arch) => {
       const names = windowsUpdateArtifactNames(version, arch);
@@ -310,7 +407,9 @@ async function main() {
       if (!releaseBody.includes(channelAssets.find((asset) => asset.name === names.fullPackage).sha256)) {
         throw new Error(`Release notes do not contain the ${arch} full update package SHA256.`);
       }
-      validated.push(`${result.channel}${result.delta ? " with delta" : " full"}`);
+      validated.push(
+        `${result.channel}${result.delta ? " with delta" : " full"}${describeProduct(`windows-${arch}`)}`,
+      );
     }
     return validated.join(", ");
   });
@@ -337,7 +436,13 @@ async function main() {
         throw new Error(`GitHub reports no digest for ${asset.name}.`);
       }
     }
-    return onDemandReleaseAssets.map((asset) => `${asset.name}`).join(", ");
+    /*
+     Every shipped app of this version resolves these from `v<version>`, so a
+     reused product is not a reason to skip a check: it is a reason to say where
+     the bytes came from. The digests themselves were already matched against the
+     provenance record and against the origin release above.
+    */
+    return onDemandReleaseAssets.map((asset) => `${asset.name}${describeArtifact(asset.name)}`).join(", ");
   });
 
   let changelogNotes = null;
@@ -609,7 +714,13 @@ async function main() {
     if (!releaseBody.includes(apkSha)) {
       throw new Error("Release notes do not contain the Android APK SHA256.");
     }
-    return `APK digest ${apkSha.slice(0, 12)}... present in release notes`;
+    /*
+     A reused APK is byte-identical to the one the previous release published, so
+     its embedded versionName stays at the release in which mobile last changed.
+     `mobile/` has no self-update logic, so nothing notifies a user about it; the
+     release page and this line are where that fact is stated.
+    */
+    return `APK digest ${apkSha.slice(0, 12)}... present in release notes${describeProduct("android")}`;
   });
 
   await check("subrepos-clean", async () => {
@@ -649,6 +760,10 @@ async function main() {
     console.log(
       `${result.status.padEnd(4)}  ${result.name.padEnd(nameWidth)} ${formatDuration(result.durationMs).padStart(8)}  ${result.detail}`,
     );
+  }
+  if (releaseProvenance) {
+    console.log("");
+    console.log(renderReleaseProvenanceReport(releaseProvenance));
   }
   const failed = results.filter((result) => result.status === "FAIL");
   if (failed.length > 0) {

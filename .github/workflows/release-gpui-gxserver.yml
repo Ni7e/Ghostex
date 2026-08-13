@@ -1,0 +1,164 @@
+name: GPUI release - gxserver runtime
+
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+# Split out of release-gpui-runtime.yml. The immutable code-server component now
+# has its own workflow (release-gpui-code-server.yml) so the two stop being
+# serialized: code-server was ~10m of the ~21m gxserver job and sat directly on
+# the release critical path for no reason.
+#
+# Nothing downstream `needs:` this job any more. Consumers await
+# release-gxserver-linux-<arch> just in time (await-run-artifacts.mjs), which is
+# what lets Windows/macOS/Linux compilers start at t≈2 min.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      arch:
+        required: true
+        type: string
+      plan:
+        description: Resolved release plan JSON from the prepare job
+        required: false
+        default: ""
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+      arch:
+        description: Linux runtime architecture
+        required: true
+        default: x64
+        type: choice
+        options: [x64, arm64]
+
+permissions:
+  attestations: write
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    env:
+      GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+      GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/build/zig-global-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - uses: actions/checkout@v6
+        with:
+          repository: steveyegge/beads
+          ref: 672d942083a1fd0c8603fa1e77620c58ba9d47c8
+          fetch-depth: 1
+          path: build/pinned-beads-source
+      - name: Resolve dependency cache keys
+        id: cache_keys
+        run: |
+          {
+            printf 'zig=%s-%s\n' "$(git rev-parse HEAD:zmx)" "$(git rev-parse HEAD:zehn)"
+            printf 'cargo=%s\n' "$(git rev-parse HEAD:gxserver-rs)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Restore Cargo registry cache
+        uses: actions/cache@v6
+        id: cargo_cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-reg-gxserver-${{ runner.os }}-${{ inputs.arch }}-${{ steps.cache_keys.outputs.cargo }}
+          restore-keys: cargo-reg-gxserver-${{ runner.os }}-${{ inputs.arch }}-
+      - name: Restore Zig package cache
+        uses: actions/cache@v6
+        id: zig_cache
+        with:
+          path: |
+            build/zig-global-cache
+            ~/.cache/zig
+          key: zig-gxserver-${{ runner.os }}-${{ inputs.arch }}-${{ steps.cache_keys.outputs.zig }}
+          restore-keys: zig-gxserver-${{ runner.os }}-${{ inputs.arch }}-
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: build/pinned-beads-source/go.mod
+          cache-dependency-path: build/pinned-beads-source/go.sum
+      - name: Install native build dependencies
+        run: |
+          scripts/release-gpui/retry.sh 3 5 -- sudo apt-get update
+          scripts/release-gpui/retry.sh 3 5 -- sudo apt-get install -y build-essential cmake ninja-build pkg-config
+      - name: Install pinned Zig toolchains
+        run: |
+          scripts/release-gpui/retry.sh 3 5 -- bash -c 'curl -fsSL https://mise.run | sh'
+          scripts/release-gpui/retry.sh 3 5 -- "$HOME/.local/bin/mise" install zig@0.15.2 zig@0.16.0
+          printf 'ZIG=%s\nGHOSTEX_ZIG=%s\nZEHN_ZIG=%s\n' \
+            "$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" \
+            "$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" \
+            "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" >> "$GITHUB_ENV"
+      - name: Install Rust musl targets
+        run: scripts/release-gpui/retry.sh 3 5 -- rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+      - name: Install JavaScript dependencies
+        run: scripts/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
+      - name: Prepare source dependencies
+        run: GHOSTEX_RELEASE_SKIP_GPUI_REFERENCES=1 scripts/release-gpui/prepare-references.sh
+      - name: Pre-fetch Zig package dependencies
+        run: scripts/release-gpui/fetch-zig-deps.sh zmx zehn
+      - name: Build pinned embedded-Dolt Beads
+        run: |
+          node scripts/build-pinned-beads-release.mjs \
+            --source-root build/pinned-beads-source \
+            --platform linux \
+            --arch "${{ inputs.arch }}" \
+            --output "$RUNNER_TEMP/ghostex-pinned-beads/bd"
+      - name: Build remote runtime
+        env:
+          GHOSTEX_BEADS_PREBUILT_BINARY: ${{ runner.temp }}/ghostex-pinned-beads/bd
+          GHOSTEX_REQUIRE_BEADS_SMOKE: '1'
+        run: |
+          scripts/build-remote-gxserver-linux-release.sh --arch "${{ inputs.arch }}"
+          OUTPUT="build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}"
+          mkdir -p "$OUTPUT"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C "build/remote-gxserver-linux/${{ inputs.arch }}/package" \
+            -czf "$OUTPUT/gxserver-linux-${{ inputs.arch }}.tar.gz" .
+          source scripts/release-gpui/common.sh
+          release_gpui_write_manifest \
+            "$OUTPUT" \
+            "gxserver-linux-${{ inputs.arch }}" \
+            "${{ inputs.version }}" \
+            "$OUTPUT/gxserver-linux-${{ inputs.arch }}.tar.gz"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}/gxserver-linux-${{ inputs.arch }}.tar.gz
+      - name: Record job observability
+        if: ${{ always() }}
+        run: |
+          {
+            echo "- Cargo registry cache: ${{ steps.cargo_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- Zig package cache: ${{ steps.zig_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-gxserver-linux-${{ inputs.arch }}
+          path: build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.plan != '' }}
+        with:
+          name: release-provenance-gxserver-linux-${{ inputs.arch }}
+          path: build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}/provenance.json
+          if-no-files-found: error
+          retention-days: 14

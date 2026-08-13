@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  releaseProvenanceAssetName,
+  validateReleaseProvenance,
+} from "./release-gpui/provenance.mjs";
 
 const [version] = process.argv.slice(2);
 if (!/^\d+\.\d+\.\d+$/u.test(version ?? "")) {
@@ -43,6 +47,65 @@ const dmgSha = typeof dmg?.digest === "string" && dmg.digest.startsWith("sha256:
   : "";
 if (!/^[0-9a-f]{64}$/u.test(dmgSha)) {
   throw new Error(`${release.url} has no SHA256 digest for ${dmgName}`);
+}
+
+/*
+ * CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+ * The cask may only advance when macOS is actually part of this release. It does
+ * not matter whether the DMG was rebuilt or reused: macOS is version-stamped, so
+ * a reused DMG can only come from a same-version recovery whose cask update never
+ * happened. What matters is that these exact bytes are the ones the release
+ * recorded, so the published sha256 is cross-checked against the provenance
+ * record rather than against GitHub's metadata alone.
+ */
+function releaseProvenanceFor(releaseVersion) {
+  const assetName = releaseProvenanceAssetName(releaseVersion);
+  const scratch = mkdtempSync(path.join(os.tmpdir(), `ghostex-${releaseVersion}-provenance-`));
+  const result = spawnSync(
+    "gh",
+    [
+      "release",
+      "download",
+      `v${releaseVersion}`,
+      "--repo",
+      "maddada/Ghostex",
+      "--pattern",
+      assetName,
+      "--dir",
+      scratch,
+    ],
+    { encoding: "utf8" },
+  );
+  const file = path.join(scratch, assetName);
+  if (result.status !== 0 || !existsSync(file)) return null;
+  return validateReleaseProvenance(JSON.parse(readFileSync(file, "utf8")));
+}
+
+const provenance = releaseProvenanceFor(version);
+if (!provenance) {
+  console.log(
+    `v${version} carries no ${releaseProvenanceAssetName(version)} (released before change-aware planning); ` +
+      "updating the cask from the live DMG digest only.",
+  );
+} else {
+  const macos = provenance.products["macos-arm64"];
+  if (!macos) {
+    throw new Error(
+      `Refusing to update Homebrew: v${version} published no macOS product, so the cask must not advance`,
+    );
+  }
+  const recorded = macos.artifacts.find((artifact) => artifact.name === dmgName);
+  if (!recorded) throw new Error(`Refusing to update Homebrew: v${version} provenance records no ${dmgName}`);
+  if (recorded.sha256 !== dmgSha) {
+    throw new Error(
+      `Refusing to update Homebrew: live ${dmgName} digest ${dmgSha} does not match the recorded ${recorded.sha256}`,
+    );
+  }
+  console.log(
+    `macOS was ${macos.action} for ${version} (${
+      macos.action === "built" ? "this release" : `from ${macos.reusedFrom.tag ?? `run ${macos.reusedFrom.runId}`}`
+    }); cask update authorized.`,
+  );
 }
 
 const tapCheckout = mkdtempSync(path.join(os.tmpdir(), `ghostex-${version}-homebrew-tap-`));
