@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="1200" height="630" alt="og" src="https://github.com/user-attachments/assets/8b0417ff-a320-43a2-a7e2-1a6c24f86c5c" />
+  <img width="1200" alt="Ghostex workspace" src="media/readme/ghostex-hero.png" />
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 
 # Ghostex
 
-Cross-platform Ghostty-based desktop app (not using Electron or Tauri) for running agent CLIs with persistent terminals, GUI panes, browser panes, notifications, mobile access, and a lightweight code editor.
+Cross-platform Ghostty-based desktop app (not using Electron or Tauri) for running agent CLIs with persistent terminals, GUI panes, browser panes, notifications, mobile access, and a built-in IDE.
 
 Ghostex is built for developers who keep multiple agents and terminals alive at once. It combines low-RAM Ghostty terminals, a native Rust/GPUI interface, Chromium CEF browser panes, and Mobile (iOS/Android) session access in one workspace.
 
@@ -55,7 +55,7 @@ Please join and post in the iOS channel to get the app.
 
 ## Gallery
 
-### Embedded VS Code based editor
+### Built-in IDE
 
 Loads on demand for working with markdown, reviewing code, and checking PRs. <br/>
 Supports all extensions. Sleeps when not in use to same resources (configurable).
@@ -154,7 +154,7 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 | Ghostty terminals | Lower RAM use, better battery life, and stable agent CLI sessions. |
 | Native desktop shell | Rust/GPUI UI for performance-sensitive desktop behavior. |
 | Chromium CEF browser | Embedded browser panes with DevTools, profiles, and MCP access. |
-| Lightweight code editor | VS Code-based editor for Markdown, PR review, files, and git work. |
+| Built-in IDE | VS Code-based editor for Markdown, PR review, files, and git work. |
 | Mobile access | iOS & Android app for checking and controlling live sessions. |
 | TUI mode | Use `ghostex` or `gx` to attach from another machine. |
 
