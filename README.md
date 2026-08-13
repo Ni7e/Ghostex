@@ -48,6 +48,11 @@ Use the Android app to connect live to your Ghostex agent CLI sessions. APKs are
 
 [![Download Android APK](https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white)](https://github.com/maddada/Ghostex/releases/latest/download/ghostex-android.apk)
 
+### iOS
+
+The testflight for this app is running through our Discord: https://discord.gg/df7b3G92CS
+Please join and post in the iOS channel to get the app.
+
 ## Gallery
 
 ### Embedded VS Code based editor
