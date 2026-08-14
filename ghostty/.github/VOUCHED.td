@@ -23,8 +23,10 @@
 00jciv00
 04cb
 0xdvc
+12ya
 -4rh1t3ct0r7
 52dyd
+a-lang
 aalhendi
 aaron-ang
 abdurrahmanski
@@ -38,6 +40,7 @@ akimiojr
 alaasdk
 alanmoyano
 alaviss
+alex19ep
 alexbathome
 alexfeijoo44
 alexjuca
@@ -47,9 +50,12 @@ andrejdaskalov
 anhthang
 anmitalidev
 anthonyzhoon
+aprilnea
 arvin7liu
 athaapa
 atomk
+aurelleb
+aymanbagabas
 b0uks
 b1nar10
 balazs-szucs
@@ -63,9 +69,12 @@ bitigchi
 bkircher
 bleikurr
 bo2themax
+bousii
 brentschroeter
 brianc442
 c0x0o
+carldaws
+carlvillads
 cespare
 charliie-dev
 chernetskyi
@@ -82,6 +91,7 @@ damyanbogoev
 danneu
 danulqua
 dariogriffo
+dave92082
 davidsanchez222
 deblasis
 dervedro
@@ -89,7 +99,9 @@ devsunb
 diaaeddin
 dkinzler
 dmehala
+dmunozv04
 dobbylee
+dolzenko
 doprz
 douglance
 douglas
@@ -108,18 +120,23 @@ escalonc
 eunos-1128
 exlee
 -f1813483-netizen
+fallintoplace
 faukah
+figelwump
 filip7
 flou
 fornwall
 francescarpi
 fru1tworld
+gadgetman6
 gagbo
 ghokun
 gmile
 gordonbondon
+gotenksin
 gpanders
 guilhermetk
+-guysoft LLM communication (likely automated)
 h3nock
 hakonhagland
 halosatrio
@@ -135,7 +152,7 @@ illiakrauchanka
 j0hnm4r5
 jacobsandlund
 jake-stewart
-jamesarch
+-jamesarch Bad AI etiquette
 jamylak
 jarred-sumner
 jcollie
@@ -172,6 +189,7 @@ lepips
 liby
 linustalacko
 lonsagisawa
+lotheac
 louisunlimited
 luisnquin
 lynicis
@@ -235,11 +253,14 @@ pluiedev
 pouwerkerk
 poweruser64
 prakhar54-byte
+prihlop
 priyans-hu
+pssalman
 puzza007
 qappell
 quinnypig
 qwerasd205
+ragnoroct
 raphamorim
 reo101
 rewdy
@@ -250,17 +271,26 @@ rjwittams
 rmengelbrecht
 rmunn
 rockorager
+ronijacobson
 rpfaeffle
+ruoyouz
+ruseel
 sahilkmishra
 samasaur1
 sandydoo
+sanjj1
 -schickling-assistant NHITL
 secrus
 seruman
 seyoungjeong
+sghng
+shorsher
 silveirapf
+simonbcn
 slsrepo
+steven-tk
 sunshine-syz
+svmhdvn
 tasselx
 tbrundige
 tdgroot
@@ -275,10 +305,12 @@ turbolent
 tweedbeetle
 uhojin
 unphased
+unsaltedscholar
 uzaaft
 vancluever
 vaughanandrews
 -vectorpeak Stupid bot cosplaying as a maintainer
+vegerot
 viruslobster
 vlsi
 voidnv
@@ -289,6 +321,7 @@ yak3d
 yamshta
 ydah
 -zaviro
+zenangst
 zenyr
 zeshi09
 zubb

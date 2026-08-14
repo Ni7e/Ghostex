@@ -1,0 +1,123 @@
+--- a/src/input/mouse_encode.zig
++++ b/src/input/mouse_encode.zig
+@@ -36,8 +36,12 @@
+     /// If null, motion deduplication state is not tracked.
+     last_cell: ?*?point.Coordinate = null,
+ 
++    /// Last reported binding modifiers for motion deduplication.
++    /// If null, same-cell motion deduplication ignores modifier changes.
++    last_mods: ?*?key.Mods = null,
++
+     /// Initialize from terminal and renderer state. The caller may still
+-    /// set any_button_pressed and last_cell on the returned value.
++    /// set any_button_pressed, last_cell, and last_mods on the returned value.
+     pub fn fromTerminal(
+         t: *const Terminal,
+         size: renderer_size.Size,
+@@ -108,13 +112,20 @@
+     if (event.action == .motion and opts.format != .sgr_pixels) {
+         if (opts.last_cell) |last| {
+             if (last.*) |last_cell| {
+-                if (last_cell.eql(cell)) return;
++                const same_mods = if (opts.last_mods) |last_mods|
++                    if (last_mods.*) |mods| mods.equal(event.mods.binding()) else false
++                else
++                    true;
++                // CDXC:TerminalMouse 2026-05-23-00:59:
++                // gte shows path/link hover affordances when Cmd or Ctrl is held inside terminal mouse reporting. Same-cell motion dedupe must include modifiers so pressing Cmd over an existing path still reaches the TUI.
++                if (last_cell.eql(cell) and same_mods) return;
+             }
+         }
+     }
+ 
+     // Update the last reported cell if we are tracking it.
+     if (opts.last_cell) |last| last.* = cell;
++    if (opts.last_mods) |last| last.* = event.mods.binding();
+ 
+     const button_code = buttonCode(event, opts) orelse return;
+     switch (opts.format) {
+@@ -230,7 +241,9 @@
+     if (opts.event != .x10) {
+         if (event.mods.shift) acc += 4;
+         if (event.mods.alt) acc += 8;
+-        if (event.mods.ctrl) acc += 16;
++        // CDXC:TerminalMouse 2026-05-22-23:53:
++        // gte opens editor file paths and markdown links through modified mouse clicks. Terminal mouse protocols do not have a Super/Command bit, so encode Command-click as the Ctrl mouse modifier to preserve the macOS Cmd-click UX inside TUIs.
++        if (event.mods.ctrl or event.mods.super) acc += 16;
+     }
+ 
+     // Motion adds another bit.
+@@ -779,3 +792,73 @@
+         try testing.expect(writer.buffered().len > 0);
+     }
+ }
++
++test "sgr encodes super mouse modifier as ctrl for terminal apps" {
++    var data: [32]u8 = undefined;
++    var writer: std.Io.Writer = .fixed(&data);
++    var last: ?point.Coordinate = null;
++    try encode(&writer, .{
++        .button = .left,
++        .action = .press,
++        .mods = .{ .super = true },
++        .pos = .{ .x = 2, .y = 3 },
++    }, .{
++        .event = .any,
++        .format = .sgr,
++        .size = testSize(),
++        .last_cell = &last,
++    });
++
++    try testing.expectEqualStrings("\x1B[<16;3;4M", writer.buffered());
++}
++
++test "sgr motion emits same-cell modifier changes" {
++    var data: [64]u8 = undefined;
++    var writer: std.Io.Writer = .fixed(&data);
++    var last_cell: ?point.Coordinate = null;
++    var last_mods: ?key.Mods = null;
++
++    try encode(&writer, .{
++        .button = null,
++        .action = .motion,
++        .pos = .{ .x = 1, .y = 2 },
++    }, .{
++        .event = .any,
++        .format = .sgr,
++        .size = testSize(),
++        .last_cell = &last_cell,
++        .last_mods = &last_mods,
++    });
++
++    writer.end = 0;
++    try encode(&writer, .{
++        .button = null,
++        .action = .motion,
++        .mods = .{ .super = true },
++        .pos = .{ .x = 1, .y = 2 },
++    }, .{
++        .event = .any,
++        .format = .sgr,
++        .size = testSize(),
++        .last_cell = &last_cell,
++        .last_mods = &last_mods,
++    });
++
++    try testing.expectEqualStrings("\x1B[<51;2;3M", writer.buffered());
++
++    writer.end = 0;
++    try encode(&writer, .{
++        .button = null,
++        .action = .motion,
++        .mods = .{ .super = true },
++        .pos = .{ .x = 1, .y = 2 },
++    }, .{
++        .event = .any,
++        .format = .sgr,
++        .size = testSize(),
++        .last_cell = &last_cell,
++        .last_mods = &last_mods,
++    });
++
++    try testing.expectEqual(@as(usize, 0), writer.buffered().len);
++}

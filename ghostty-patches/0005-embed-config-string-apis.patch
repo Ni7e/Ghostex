@@ -1,0 +1,89 @@
+--- a/src/config/CApi.zig
++++ b/src/config/CApi.zig
+@@ -1,5 +1,6 @@
+ const builtin = @import("builtin");
+ const std = @import("std");
++const cli = @import("../cli.zig");
+ const inputpkg = @import("../input.zig");
+ const global = @import("../global.zig");
+ const String = @import("../main_c.zig").String;
+@@ -7,6 +8,7 @@
+ const Config = @import("Config.zig");
+ const c_get = @import("c_get.zig");
+ const edit = @import("edit.zig");
++const FileFormatter = @import("formatter_file.zig").FileFormatter;
+ const Key = @import("key.zig").Key;
+ 
+ const log = std.log.scoped(.config);
+@@ -75,6 +77,25 @@
+     };
+ }
+ 
++/// Load configuration from a string using Ghostty's normal config-file syntax.
++///
++/// CDXC:iOSNativeTerminals 2026-05-22-11:06:
++/// Native iOS terminal settings must update Ghostty surfaces through Ghostty
++/// configuration, not hterm preference JavaScript or UIKit-only colors.
++/// Expose string-backed config loading so the iOS host can apply its existing
++/// font, color, cursor, and scrollback settings to embedded GhosttyKit surfaces.
++export fn ghostty_config_load_string(
++    self: *Config,
++    str: [*]const u8,
++    len: usize,
++) void {
++    var reader: std.Io.Reader = .fixed(str[0..len]);
++    var iter: cli.args.LineIterator = .init(&reader);
++    self.loadIter(global.alloc(), &iter) catch |err| {
++        log.err("error loading config from string err={}", .{err});
++    };
++}
++
+ /// Load the configuration from the user-specified configuration
+ /// file locations in the previously loaded configuration. This will
+ /// recursively continue to load up to a built-in limit.
+@@ -90,6 +111,30 @@
+     };
+ }
+ 
++/// Return the finalized configuration in Ghostty's canonical file syntax.
++/// The caller owns the returned buffer and must free it with
++/// `ghostty_string_free`. This lets embedded hosts consume configuration
++/// types that are intentionally richer than the typed `ghostty_config_get`
++/// ABI (repeatable fonts, metric modifiers, terminal colors, etc.) without
++/// reparsing user files or losing theme/include resolution.
++export fn ghostty_config_to_string(self: *Config) String {
++    var buffer: std.Io.Writer.Allocating = .init(global.alloc());
++    defer buffer.deinit();
++    const formatter: FileFormatter = .{
++        .alloc = global.alloc(),
++        .config = self,
++    };
++    formatter.format(&buffer.writer) catch |err| {
++        log.err("error formatting config for embedded host err={}", .{err});
++        return .empty;
++    };
++    const owned = buffer.toOwnedSlice() catch |err| {
++        log.err("error allocating formatted config for embedded host err={}", .{err});
++        return .empty;
++    };
++    return .fromSlice(owned);
++}
++
+ export fn ghostty_config_get(
+     self: *Config,
+     ptr: *anyopaque,
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -1098,10 +1098,12 @@
+ GHOSTTY_API ghostty_config_t ghostty_config_clone(ghostty_config_t);
+ GHOSTTY_API void ghostty_config_load_cli_args(ghostty_config_t);
+ GHOSTTY_API void ghostty_config_load_file(ghostty_config_t, const char*);
++GHOSTTY_API void ghostty_config_load_string(ghostty_config_t, const char*, uintptr_t);
+ GHOSTTY_API void ghostty_config_load_default_files(ghostty_config_t);
+ GHOSTTY_API void ghostty_config_load_recursive_files(ghostty_config_t);
+ GHOSTTY_API void ghostty_config_finalize(ghostty_config_t);
+ GHOSTTY_API bool ghostty_config_get(ghostty_config_t, void*, const char*, uintptr_t);
++GHOSTTY_API ghostty_string_s ghostty_config_to_string(ghostty_config_t);
+ GHOSTTY_API ghostty_input_trigger_s ghostty_config_trigger(ghostty_config_t,
+                                                               const char*,
+                                                               uintptr_t);

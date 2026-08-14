@@ -19,7 +19,6 @@ WEB_SOURCE_DIR="$GPUI_DIR/runtime/macos/Web"
 WEB_BIN_SOURCE_DIR="$WEB_SOURCE_DIR/bin"
 GXSERVER_SOURCE_DIR="$WEB_SOURCE_DIR/gxserver"
 APP_ICON_SOURCE_SET="$GPUI_DIR/resources/AppIcon.appiconset"
-APP_ICON_BUILD_SET="$GPUI_DIR/build/macos/AppIcon.iconset"
 APP_ICON_DEST="$APP_PATH/Contents/Resources/AppIcon.icns"
 LID_SLEEP_HELPER_SOURCE_DIR="$GPUI_DIR/native/macos/lid-sleep-helper"
 LID_SLEEP_HELPER_BUILD_DIR="$GPUI_DIR/build/macos-lid-sleep-helper"
@@ -328,8 +327,8 @@ validate_ghosttykit_archive() {
 		echo "     env DEVELOPER_DIR=\"\$(xcode-select -p)\" \\" >&2
 		echo "       SDKROOT=\"\$(DEVELOPER_DIR=\"\$(xcode-select -p)\" xcrun --sdk macosx --show-sdk-path)\" \\" >&2
 		echo "       GHOSTTY_METAL_DEVELOPER_DIR=\"\$(xcode-select -p)\" \\" >&2
-		echo "       \"\$ZIG\" build -Demit-xcframework -Dxcframework-target=universal -Demit-macos-app=false)" >&2
-		echo "Requires Zig 0.15.2 (\`brew install zig@0.15\`) and the Metal toolchain." >&2
+		echo "       \"\$ZIG\" build -Demit-xcframework -Dxcframework-target=universal -Demit-macos-app=false -Doptimize=ReleaseSafe)" >&2
+		echo "Requires Zig 0.16.x (\`mise install zig@0.16.0\` or \`brew install zig\`) and the Metal toolchain." >&2
 		exit 1
 	fi
 }
@@ -758,6 +757,9 @@ stage_gpui_sparkle_framework_if_available() {
 
 stage_gpui_app_icon() {
 	local asset
+	local app_icon_build_root
+	local app_icon_build_set
+	local app_icon_build_dest
 	local required_assets=(
 		icon_16x16.png
 		icon_16x16@2x.png
@@ -780,17 +782,23 @@ stage_gpui_app_icon() {
 		exit 1
 	fi
 
-	rm -rf "$APP_ICON_BUILD_SET"
-	mkdir -p "$APP_ICON_BUILD_SET" "$(dirname "$APP_ICON_DEST")"
-	for asset in "${required_assets[@]}"; do
-		if [[ ! -f "$APP_ICON_SOURCE_SET/$asset" ]]; then
-			echo "Missing canonical Ghostex app icon asset: $APP_ICON_SOURCE_SET/$asset" >&2
-			exit 1
-		fi
-		install -m 0644 "$APP_ICON_SOURCE_SET/$asset" "$APP_ICON_BUILD_SET/$asset"
-	done
-	iconutil -c icns "$APP_ICON_BUILD_SET" -o "$APP_ICON_DEST"
-	rm -rf "$APP_ICON_BUILD_SET"
+	mkdir -p "$GPUI_DIR/build/macos" "$(dirname "$APP_ICON_DEST")"
+	app_icon_build_root="$(mktemp -d "$GPUI_DIR/build/macos/.app-icon.XXXXXX")"
+	app_icon_build_set="$app_icon_build_root/AppIcon.iconset"
+	app_icon_build_dest="$app_icon_build_root/AppIcon.icns"
+	(
+		trap 'rm -rf "$app_icon_build_root"' EXIT
+		mkdir -p "$app_icon_build_set"
+		for asset in "${required_assets[@]}"; do
+			if [[ ! -f "$APP_ICON_SOURCE_SET/$asset" ]]; then
+				echo "Missing canonical Ghostex app icon asset: $APP_ICON_SOURCE_SET/$asset" >&2
+				exit 1
+			fi
+			install -m 0644 "$APP_ICON_SOURCE_SET/$asset" "$app_icon_build_set/$asset"
+		done
+		iconutil -c icns "$app_icon_build_set" -o "$app_icon_build_dest"
+		mv -f "$app_icon_build_dest" "$APP_ICON_DEST"
+	)
 }
 
 sign_gpui_app_bundle() {

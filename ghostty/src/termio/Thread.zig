@@ -14,12 +14,12 @@ pub const Thread = @This();
 const std = @import("std");
 const ArenaAllocator = std.heap.ArenaAllocator;
 const builtin = @import("builtin");
-const xev = @import("../global.zig").xev;
+const global = @import("../global.zig");
+const xev = global.xev;
 const crash = @import("../crash/main.zig");
 const internal_os = @import("../os/main.zig");
 const termio = @import("../termio.zig");
 const renderer = @import("../renderer.zig");
-const build_config = @import("../build_config.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.io_thread);
@@ -148,8 +148,8 @@ pub fn threadMain(self: *Thread, io: *termio.Termio) void {
         // the error to the surface thread and let the apprt deal with it
         // in some way but this works for now. Without this, the user would
         // just see a blank terminal window.
-        io.renderer_state.mutex.lock();
-        defer io.renderer_state.mutex.unlock();
+        io.renderer_state.mutex.lockUncancelable(global.io());
+        defer io.renderer_state.mutex.unlock(global.io());
         const t = io.renderer_state.terminal;
 
         // Hide the cursor
@@ -298,7 +298,7 @@ fn drainMailbox(
 
     // If we're draining, we just drain the mailbox and return.
     if (self.flags.drain) {
-        while (mailbox.pop()) |_| {}
+        while (mailbox.pop(global.io())) |msg| msg.deinit();
         return;
     }
 
@@ -306,13 +306,18 @@ fn drainMailbox(
     // expectation is that all our message handlers will be non-blocking
     // ENOUGH to not mess up throughput on producers.
     var redraw: bool = false;
-    while (mailbox.pop()) |message| {
+    while (mailbox.pop(global.io())) |message| {
         // If we have a message we always redraw
         redraw = true;
 
         log.debug("mailbox message={s}", .{@tagName(message)});
         switch (message) {
             .color_scheme_report => |v| try io.colorSchemeReport(data, v.force),
+            .visibility_report => |v| try io.visibilityReport(
+                data,
+                v.visible,
+                v.force,
+            ),
             .crash => @panic("crash request, crashing intentionally"),
             .change_config => |config| {
                 defer config.alloc.destroy(config.ptr);
@@ -334,24 +339,19 @@ fn drainMailbox(
             .start_synchronized_output => self.startSynchronizedOutput(cb),
             .linefeed_mode => |v| self.flags.linefeed_mode = v,
             .focused => |v| try io.focusGained(data, v),
-            .write_small => |v| {
-                const bytes = v.data[0..v.len];
-                if (!writePtyDataToHost(io, bytes, self.flags.linefeed_mode)) try io.queueWrite(
-                    data,
-                    bytes,
-                    self.flags.linefeed_mode,
-                );
-            },
-            .write_stable => |v| {
-                if (!writePtyDataToHost(io, v, self.flags.linefeed_mode)) try io.queueWrite(
-                    data,
-                    v,
-                    self.flags.linefeed_mode,
-                );
-            },
+            .write_small => |v| try io.queueWrite(
+                data,
+                v.data[0..v.len],
+                self.flags.linefeed_mode,
+            ),
+            .write_stable => |v| try io.queueWrite(
+                data,
+                v,
+                self.flags.linefeed_mode,
+            ),
             .write_alloc => |v| {
                 defer v.alloc.free(v.data);
-                if (!writePtyDataToHost(io, v.data, self.flags.linefeed_mode)) try io.queueWrite(
+                try io.queueWrite(
                     data,
                     v.data,
                     self.flags.linefeed_mode,
@@ -365,11 +365,6 @@ fn drainMailbox(
     if (redraw) {
         try io.renderer_wakeup.notify();
     }
-}
-
-fn writePtyDataToHost(io: *termio.Termio, data: []const u8, linefeed: bool) bool {
-    if (comptime build_config.artifact != .lib) return false;
-    return io.surface_mailbox.surface.rt_surface.writePtyData(data, linefeed);
 }
 
 fn startSynchronizedOutput(self: *Thread, cb: *CallbackData) void {

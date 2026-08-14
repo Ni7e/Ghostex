@@ -59,14 +59,6 @@ pub mod ffi {
         pub b: u8,
     }
 
-    #[repr(C)]
-    #[derive(Clone, Copy, Debug)]
-    pub struct GhosttyTerminalOptions {
-        pub cols: u16,
-        pub rows: u16,
-        pub max_scrollback: usize,
-    }
-
     pub type GhosttyRenderStateDirty = c_int;
     pub const GHOSTTY_RENDER_STATE_DIRTY_FALSE: GhosttyRenderStateDirty = 0;
     pub const GHOSTTY_RENDER_STATE_DIRTY_PARTIAL: GhosttyRenderStateDirty = 1;
@@ -214,6 +206,14 @@ pub mod ffi {
     pub const GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND: GhosttyTerminalOption = 12;
     pub const GHOSTTY_TERMINAL_OPT_COLOR_CURSOR: GhosttyTerminalOption = 13;
     pub const GHOSTTY_TERMINAL_OPT_COLOR_PALETTE: GhosttyTerminalOption = 14;
+    pub const GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES: GhosttyTerminalOption = 27;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug)]
+    pub struct GhosttyTerminalModeConfig {
+        pub mode: GhosttyMode,
+        pub value: bool,
+    }
 
     pub type GhosttyTerminalData = c_int;
     pub const GHOSTTY_TERMINAL_DATA_CURSOR_X: GhosttyTerminalData = 3;
@@ -224,6 +224,7 @@ pub mod ffi {
     pub const GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING: GhosttyTerminalData = 11;
     pub const GHOSTTY_TERMINAL_DATA_TITLE: GhosttyTerminalData = 12;
     pub const GHOSTTY_TERMINAL_DATA_PWD: GhosttyTerminalData = 13;
+    pub const GHOSTTY_TERMINAL_DATA_MODE: GhosttyTerminalData = 37;
 
     pub type GhosttyTerminalScreen = c_int;
     pub const GHOSTTY_TERMINAL_SCREEN_PRIMARY: GhosttyTerminalScreen = 0;
@@ -624,7 +625,8 @@ pub mod ffi {
         pub fn ghostty_terminal_new(
             allocator: *const c_void,
             terminal: *mut GhosttyTerminal,
-            options: GhosttyTerminalOptions,
+            cols: u16,
+            rows: u16,
         ) -> GhosttyResult;
         pub fn ghostty_terminal_free(terminal: GhosttyTerminal);
         pub fn ghostty_terminal_reset(terminal: GhosttyTerminal);
@@ -713,11 +715,6 @@ pub mod ffi {
             terminal: GhosttyTerminal,
             data: GhosttyTerminalData,
             out: *mut c_void,
-        ) -> GhosttyResult;
-        pub fn ghostty_terminal_mode_get(
-            terminal: GhosttyTerminal,
-            mode: GhosttyMode,
-            out_value: *mut bool,
         ) -> GhosttyResult;
         pub fn ghostty_terminal_scroll_viewport(
             terminal: GhosttyTerminal,
@@ -928,17 +925,22 @@ unsafe impl Send for VtTerminal {}
 impl VtTerminal {
     pub fn new(cols: u16, rows: u16, max_scrollback: usize) -> Result<Self, VtError> {
         let mut raw: ffi::GhosttyTerminal = std::ptr::null_mut();
-        check(unsafe {
-            ffi::ghostty_terminal_new(
-                std::ptr::null(),
-                &mut raw,
-                ffi::GhosttyTerminalOptions {
-                    cols,
-                    rows,
-                    max_scrollback,
-                },
+        check(unsafe { ffi::ghostty_terminal_new(std::ptr::null(), &mut raw, cols, rows) })?;
+        // Upstream replaced the creation-time max_scrollback option with a
+        // runtime setter. Semantics are unchanged: the limit is in bytes and
+        // zero disables scrollback entirely (matches the old
+        // `no_scrollback = max_scrollback == 0` core behavior).
+        let scrollback_result = check(unsafe {
+            ffi::ghostty_terminal_set(
+                raw,
+                ffi::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
+                std::ptr::from_ref(&max_scrollback).cast(),
             )
-        })?;
+        });
+        if let Err(err) = scrollback_result {
+            unsafe { ffi::ghostty_terminal_free(raw) };
+            return Err(err);
+        }
         Ok(Self {
             raw,
             host_callbacks: std::ptr::null_mut(),
@@ -1097,9 +1099,15 @@ impl VtTerminal {
     /// Current value of a terminal mode (packed per modes.h; the exported
     /// `GHOSTTY_MODE_*` constants are DEC private modes and already packed).
     pub fn mode(&mut self, mode: ffi::GhosttyMode) -> Result<bool, VtError> {
-        let mut value = false;
-        check(unsafe { ffi::ghostty_terminal_mode_get(self.raw, mode, &mut value) })?;
-        Ok(value)
+        let mut config = ffi::GhosttyTerminalModeConfig { mode, value: false };
+        check(unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::GHOSTTY_TERMINAL_DATA_MODE,
+                std::ptr::from_mut(&mut config).cast(),
+            )
+        })?;
+        Ok(config.value)
     }
 
     /// Whether any mouse tracking mode (X10/normal/button/any-event) is on.
