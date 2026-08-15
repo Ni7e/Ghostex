@@ -24,6 +24,7 @@ import {
 } from "./release-gpui/provenance.mjs";
 import {
   customerDownloadEntries,
+  renderIosAvailabilityNotes,
 } from "./release-gpui/customer-downloads.mjs";
 import {
   crossReleaseReuseOrigins,
@@ -290,7 +291,11 @@ async function main() {
     if (missing.length > 0) {
       throw new Error(`Release notes are missing customer download links: ${missing.map((item) => item.label).join(", ")}`);
     }
-    return `${downloads.length} direct customer download links`;
+    const hasAndroidDownload = groups.some((group) => group.title === "Android");
+    if (hasAndroidDownload && !releaseBody.includes(renderIosAvailabilityNotes())) {
+      throw new Error("Release notes are missing the iOS TestFlight Discord instructions.");
+    }
+    return `${downloads.length} direct customer download links${hasAndroidDownload ? " plus iOS TestFlight instructions" : ""}`;
   });
 
   /*

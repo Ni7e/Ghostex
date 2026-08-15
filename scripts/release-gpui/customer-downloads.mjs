@@ -1,5 +1,15 @@
 const GITHUB_REPOSITORY = "maddada/Ghostex";
 
+export const IOS_DISCORD_URL = "https://discord.gg/df7b3G92CS";
+
+export function renderIosAvailabilityNotes() {
+  return [
+    "### iOS",
+    "",
+    `The iOS TestFlight is available through [Discord](${IOS_DISCORD_URL}). Join and post in the iOS channel to get the app.`,
+  ].join("\n");
+}
+
 function assertVersion(version) {
   if (!/^\d+\.\d+\.\d+$/u.test(version ?? "")) {
     throw new Error(`Version must be MAJOR.MINOR.PATCH, got ${version ?? "nothing"}`);
@@ -66,6 +76,9 @@ export function renderCustomerDownloadNotes(version, assetNames) {
       lines.push(`- [${download.label}](${download.url})`);
     }
     lines.push("");
+    if (group.title === "Android") {
+      lines.push(renderIosAvailabilityNotes(), "");
+    }
   }
   return lines.join("\n").trimEnd();
 }

@@ -11,7 +11,11 @@ import {
   packDependencies,
   resolveAmendIntent,
 } from "./amend-existing-lib.mjs";
-import { customerDownloadUrl } from "./customer-downloads.mjs";
+import {
+  customerDownloadUrl,
+  IOS_DISCORD_URL,
+  renderIosAvailabilityNotes,
+} from "./customer-downloads.mjs";
 import { releaseProvenanceAssetName } from "./provenance.mjs";
 
 const VERSION = "7.7.1";
@@ -203,6 +207,9 @@ describe("release notes merge", () => {
     });
     expect(merged).toContain(customerDownloadUrl(VERSION, dmg));
     expect(merged).toContain(customerDownloadUrl(VERSION, apk));
+    expect(merged).toContain(renderIosAvailabilityNotes());
+    expect(merged).toContain(`[Discord](${IOS_DISCORD_URL})`);
+    expect(merged.indexOf("### Android")).toBeLessThan(merged.indexOf("### iOS"));
     expect(merged).not.toContain("SHA256");
     expect(merged).not.toContain("Build provenance");
     expect(merged).not.toContain("release-provenance-7.7.1.json");
