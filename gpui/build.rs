@@ -141,16 +141,22 @@ fn build_libghostty_vt_with_zig(
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let prefix = out_dir.join("libghostty-vt");
     let is_windows = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
+    let cargo_target = env::var("TARGET").expect("TARGET");
     let (build_prefix, prefix_arg) = if is_windows {
-        let target = env::var("TARGET").expect("TARGET");
-        let relative = PathBuf::from("zig-out").join(format!("ghostex-gpui-vt-{target}"));
+        let relative = PathBuf::from("zig-out").join(format!("ghostex-gpui-vt-{cargo_target}"));
         (ghostty_dir.join(&relative), relative)
     } else {
         (prefix.clone(), prefix.clone())
     };
-    let status = Command::new(&zig)
-        .current_dir(&ghostty_dir)
-        .arg("build")
+    let mut command = Command::new(&zig);
+    command.current_dir(&ghostty_dir).arg("build");
+    if is_windows && cargo_target == "aarch64-pc-windows-msvc" {
+        // Zig 0.16's native Windows ARM64 compiler crashes with 0xc0000005
+        // while compiling libghostty-vt concurrently. Serial execution keeps
+        // the same ReleaseSafe output and avoids the unstable parallel path.
+        command.arg("-j1");
+    }
+    let status = command
         .arg(format!("-Dversion-string={version}"))
         .arg("-Demit-lib-vt=true")
         .arg("-Demit-xcframework=false")
