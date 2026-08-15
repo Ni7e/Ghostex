@@ -140,7 +140,7 @@ export type NativeGhosttyHostCommand =
       type: "createTerminal";
     }
   | {
-      browserFeedbackTool?: "react-grab" | "agentation";
+      browserFeedbackTool?: "agentation";
       browserHistory?: Array<{
         faviconDataUrl?: string;
         title: string;
@@ -258,7 +258,7 @@ export type NativeGhosttyHostCommand =
         title: string;
         url: string;
       }>;
-      browserFeedbackTool?: "react-grab" | "agentation";
+      browserFeedbackTool?: "agentation";
       /**
        * CDXC:BrowserHistory 2026-06-15-10:25:
        * Browser toolbar history is project-family state shared by the main project and its worktrees. The sidebar owns that family scope, then sends de-duplicated URL history snapshots to native so AppKit can render the address-bar menu without learning worktree relationships.

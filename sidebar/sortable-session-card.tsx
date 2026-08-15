@@ -41,7 +41,6 @@ import {
   getSidebarSessionLifecycleState,
   type SidebarSessionItem,
 } from "../shared/session-grid-contract";
-import type { BrowserFeedbackTool } from "../shared/ghostex-settings";
 import {
   getEnabledVisibleSidebarSessionTagSections,
   type SidebarSessionTagListItem,
@@ -162,7 +161,6 @@ export type SidebarSessionSelectionChangeRequest = {
 };
 
 export type SortableSessionCardSharedSettings = {
-  browserFeedbackTool: BrowserFeedbackTool;
   hideBrowserFaviconUntilHover: boolean;
   hideSessionAgentIconUntilHover: boolean;
   renameSessionOnDoubleClick: boolean;

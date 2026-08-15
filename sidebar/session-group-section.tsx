@@ -805,6 +805,7 @@ export function SessionGroupSection({
   const controlMenuRef = useRef<HTMLDivElement>(null);
   const projectAgentButtonRef = useRef<HTMLButtonElement>(null);
   const projectTitleButtonRef = useRef<HTMLButtonElement>(null);
+  const groupTitleInputRef = useRef<HTMLInputElement>(null);
   const groupSectionRef = useRef<HTMLElement | null>(null);
   const sessionsShellRef = useRef<HTMLDivElement | null>(null);
   const debugInstanceIdRef = useRef(createSessionGroupDebugInstanceId());
@@ -935,8 +936,6 @@ export function SessionGroupSection({
   const sessionCardSettings = useSidebarStore(
     useShallow(
       (state): SortableSessionCardSharedSettings => ({
-        browserFeedbackTool:
-          state.hud.settings?.browserFeedbackTool ?? DEFAULT_ghostex_SETTINGS.browserFeedbackTool,
         /*
          * CDXC:BrowserPanes 2026-05-28-07:38:
          * Browser favicons identify pages and need their own hover-only setting
@@ -1454,6 +1453,16 @@ export function SessionGroupSection({
 
     setDraftTitle(group.title);
   }, [group.title, isEditing]);
+
+  useLayoutEffect(() => {
+    if (!isEditing) {
+      return;
+    }
+
+    const input = groupTitleInputRef.current;
+    input?.focus({ preventScroll: true });
+    input?.select();
+  }, [isEditing]);
 
   useEffect(() => {
     if (!autoEdit) {
@@ -2093,12 +2102,12 @@ export function SessionGroupSection({
           <div className="group-title-wrap">
             {isEditing ? (
               <input
-                autoFocus
                 className="group-title-input"
                 onBlur={submitRename}
                 onChange={(event) => setDraftTitle(event.currentTarget.value)}
                 onClick={(event) => event.stopPropagation()}
                 onKeyDown={handleTitleKeyDown}
+                ref={groupTitleInputRef}
                 value={draftTitle}
               />
             ) : (
