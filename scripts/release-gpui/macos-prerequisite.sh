@@ -18,9 +18,9 @@ rm -f "$OUTPUT"
 case "$COMPONENT" in
   ghosttykit)
     GHOSTTY_ROOT="$REPO_ROOT/ghostty"
-    GHOSTTY_ZIG="${ZIG:-${GHOSTEX_ZIG:-}}"
-    [[ -x "$GHOSTTY_ZIG" ]] || { echo "Zig 0.15.2 is required to build GhosttyKit" >&2; exit 1; }
-    [[ "$("$GHOSTTY_ZIG" version)" == "0.15.2" ]] || { echo "GhosttyKit requires Zig 0.15.2" >&2; exit 1; }
+    GHOSTTY_ZIG="${GHOSTEX_ZIG:-${ZIG:-}}"
+    [[ -x "$GHOSTTY_ZIG" ]] || { echo "Zig 0.16.0 is required to build GhosttyKit" >&2; exit 1; }
+    [[ "$("$GHOSTTY_ZIG" version)" == "0.16.0" ]] || { echo "GhosttyKit requires Zig 0.16.0" >&2; exit 1; }
     DEVELOPER_DIR="$(xcode-select -p)"
     SDKROOT="$(DEVELOPER_DIR="$DEVELOPER_DIR" xcrun --sdk macosx --show-sdk-path)"
     (

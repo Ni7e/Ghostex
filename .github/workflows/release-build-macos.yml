@@ -39,9 +39,9 @@ jobs:
             cmake@4.4.0 \
             ninja@1.13.2 \
             xcodegen@2.46.0
-          "$HOME/.local/bin/mise" install zig@0.15.2
+          "$HOME/.local/bin/mise" install zig@0.16.0
           echo "$HOME/.local/share/mise/shims" >> "$GITHUB_PATH"
-          echo "ZIG=$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" >> "$GITHUB_ENV"
+          echo "ZIG=$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" >> "$GITHUB_ENV"
       - name: Build GhosttyKit prerequisite
         env:
           GHOSTEX_RELEASE_REPO_ROOT: ${{ github.workspace }}
@@ -151,7 +151,7 @@ jobs:
           echo "$HOME/.local/share/mise/shims" >> "$GITHUB_PATH"
           printf 'ZIG=%s\nGHOSTEX_ZIG=%s\nZEHN_ZIG=%s\n' \
             "$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" \
-            "$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" \
+            "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" \
             "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" >> "$GITHUB_ENV"
       - name: Seed pinned VS Code ripgrep cache
         env:
@@ -250,11 +250,11 @@ jobs:
           rustup toolchain install 1.95.0 --profile minimal
           curl -fsSL https://mise.run | MISE_VERSION=2026.7.7 sh
           "$HOME/.local/bin/mise" use -g cmake@4.4.0 ninja@1.13.2
-          "$HOME/.local/bin/mise" install zig@0.15.2
+          "$HOME/.local/bin/mise" install zig@0.16.0
           echo "$HOME/.local/share/mise/shims" >> "$GITHUB_PATH"
           printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' \
-            "$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" \
-            "$HOME/.local/share/mise/installs/zig/0.15.2/bin/zig" >> "$GITHUB_ENV"
+            "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" \
+            "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" >> "$GITHUB_ENV"
       - name: Build Rust prerequisite
         env:
           GITHUB_TOKEN: ${{ github.token }}

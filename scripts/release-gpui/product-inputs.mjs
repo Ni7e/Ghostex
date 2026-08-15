@@ -263,7 +263,7 @@ function windowsProduct(arch) {
       /* sign_windows changes the produced bytes and the release notes. */
       signingMode: (context) => (context.scope.signWindows ? "authenticode" : "unsigned"),
       vpk: TOOLCHAIN.vpk,
-      zigPin: TOOLCHAIN.zig015,
+      zigPin: TOOLCHAIN.zig016,
     },
     versionStamped: true,
   };

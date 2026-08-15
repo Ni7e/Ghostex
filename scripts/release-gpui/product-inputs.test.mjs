@@ -245,6 +245,8 @@ describe("pinned toolchain values track the workflows", () => {
     const android = workflow("release-gpui-android.yml");
     expect(macos).toContain(`bun-version: ${TOOLCHAIN.bun}`);
     expect(macos).toContain(`zig@${TOOLCHAIN.zig015} zig@${TOOLCHAIN.zig016}`);
+    expect(macos).toContain('"$ZIG_015" "$ZIG_016" "$ZIG_016" >> "$GITHUB_ENV"');
+    expect(workflow("release-gpui-linux.yml")).toContain('"$ZIG_015" "$ZIG_016" >> "$GITHUB_ENV"');
     expect(macos).toContain(`RIPGREP_VERSION: ${TOOLCHAIN.ripgrepVersion}`);
     expect(macos).toContain(`RIPGREP_PACKAGE_VERSION: ${TOOLCHAIN.ripgrepPackageVersion}`);
     expect(macos).toContain(`RIPGREP_SHA256: ${TOOLCHAIN.ripgrepSha256}`);
@@ -256,7 +258,7 @@ describe("pinned toolchain values track the workflows", () => {
     expect(android).toContain(`"platforms;${TOOLCHAIN.androidPlatform}"`);
     expect(android).toContain(`"build-tools;${TOOLCHAIN.androidBuildTools}"`);
     expect(android).toContain(`"ndk;${TOOLCHAIN.androidNdk}"`);
-    expect(readFileSync("scripts/release-gpui/prepare-zig.ps1", "utf8")).toContain(`$Version = "${TOOLCHAIN.zig015}"`);
+    expect(readFileSync("scripts/release-gpui/prepare-zig.ps1", "utf8")).toContain(`$Version = "${TOOLCHAIN.zig016}"`);
   });
 
   test("Beads and code-server identity pins match their source of truth", () => {

@@ -1,6 +1,6 @@
 param([ValidateSet("x64", "arm64")][string]$Arch = "x64")
 $ErrorActionPreference = "Stop"
-$Version = "0.15.2"
+$Version = "0.16.0"
 $ZigArch = if ($Arch -eq "arm64") { "aarch64" } else { "x86_64" }
 $Root = Join-Path $env:RUNNER_TEMP "zig-$Version-$Arch"
 $Archive = Join-Path $env:RUNNER_TEMP "zig-$Version-$Arch.zip"
