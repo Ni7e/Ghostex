@@ -164,9 +164,44 @@ pub(super) fn apply_platform_settings(settings: &mut cef::Settings) {
     settings.framework_dir_path = cef::CefString::from(framework.to_string_lossy().as_ref());
 }
 
-pub(super) fn append_platform_command_line_switches(_command_line: &mut cef::CommandLine) {
-    // macOS needs no OS-specific Chromium switches beyond the shared set in
-    // cef/shell.rs; Ozone platform selection is a Linux-only concern.
+pub(super) fn append_platform_command_line_switches(command_line: &mut cef::CommandLine) {
+    use cef::ImplCommandLine as _;
+
+    /*
+    Chromium's MacAppCodeSignClone is a Chrome-updater safeguard: every browser
+    launch APFS-clones the complete app bundle under /private/var/folders/.../X
+    and relies on an exit helper to remove it. Ghostex updates through Sparkle,
+    so the clone has no purpose here; crashes, forced development relaunches,
+    and updater exits can skip Chromium's cleanup and retain gigabytes per
+    launch until reboot. Disable creation at Chromium feature initialization
+    instead of trying to sweep another process's potentially-live clone later.
+
+    Preserve any disabled features already supplied by CEF or the caller.
+    */
+    const CODE_SIGN_CLONE_FEATURE: &str = "MacAppCodeSignClone";
+    let switch_name = cef::CefString::from("disable-features");
+    let existing = command_line.switch_value(Some(&switch_name));
+    let existing = cef::CefString::from(&existing).to_string();
+    if existing
+        .split(',')
+        .map(str::trim)
+        .any(|feature| feature == CODE_SIGN_CLONE_FEATURE)
+    {
+        return;
+    }
+    let disabled_features = if existing.trim().is_empty() {
+        CODE_SIGN_CLONE_FEATURE.to_string()
+    } else {
+        format!(
+            "{},{}",
+            existing.trim_end_matches(','),
+            CODE_SIGN_CLONE_FEATURE
+        )
+    };
+    command_line.append_switch_with_value(
+        Some(&switch_name),
+        Some(&cef::CefString::from(disabled_features.as_str())),
+    );
 }
 
 pub(super) fn child_window_info(
