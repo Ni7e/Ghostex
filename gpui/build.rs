@@ -150,11 +150,16 @@ fn build_libghostty_vt_with_zig(
     };
     let mut command = Command::new(&zig);
     command.current_dir(&ghostty_dir).arg("build");
-    if is_windows && cargo_target == "aarch64-pc-windows-msvc" {
-        // Zig 0.16's native Windows ARM64 compiler crashes with 0xc0000005
-        // while compiling libghostty-vt concurrently. Serial execution keeps
-        // the same ReleaseSafe output and avoids the unstable parallel path.
-        command.arg("-j1");
+    if is_windows {
+        // Release runners use Zig's stable x64 Windows host binary, including
+        // under Windows 11 ARM emulation. Keep the archive architecture tied
+        // explicitly to Cargo instead of allowing Zig to inherit its host.
+        let zig_target = match cargo_target.as_str() {
+            "aarch64-pc-windows-msvc" => "aarch64-windows-msvc",
+            "x86_64-pc-windows-msvc" => "x86_64-windows-msvc",
+            target => panic!("unsupported Windows libghostty-vt target: {target}"),
+        };
+        command.arg(format!("-Dtarget={zig_target}"));
     }
     let status = command
         .arg(format!("-Dversion-string={version}"))
