@@ -148,6 +148,15 @@ fn build_libghostty_vt_with_zig(
     } else {
         (prefix.clone(), prefix.clone())
     };
+    let optimize = if is_windows && cargo_target == "aarch64-pc-windows-msvc" {
+        // Zig 0.16's ReleaseSafe Windows ARM64 stack-trace implementation
+        // fails to compile in std.debug.SelfInfo.Windows due to an invalid
+        // pointer-alignment cast. Production ARM64 archives do not need that
+        // debug-only path.
+        "ReleaseFast"
+    } else {
+        "ReleaseSafe"
+    };
     let mut command = Command::new(&zig);
     command.current_dir(&ghostty_dir).arg("build");
     if is_windows {
@@ -165,7 +174,7 @@ fn build_libghostty_vt_with_zig(
         .arg(format!("-Dversion-string={version}"))
         .arg("-Demit-lib-vt=true")
         .arg("-Demit-xcframework=false")
-        .arg("-Doptimize=ReleaseSafe")
+        .arg(format!("-Doptimize={optimize}"))
         .arg("--prefix")
         .arg(&prefix_arg)
         .status()
