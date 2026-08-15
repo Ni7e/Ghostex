@@ -146,7 +146,7 @@ function NewSessionWelcome({ agentLabel }: { agentLabel?: string | null }) {
   const agentName = displayAgentName(agentLabel);
 
   return (
-    <div className="ghostex-chat-new-session">
+    <div className="ghostex-chat-new-session pointer-events-none absolute inset-0 justify-center">
       <div
         aria-label={agentName ?? "Agent"}
         className="ghostex-chat-new-session-agent"
@@ -275,7 +275,10 @@ export function SessionChatView({
       .then(() => {
         // A save can overlap more typing. Move only the exact saved snapshot;
         // never clear text the user added while gxserver was answering.
-        composerRef.current?.clearDraft(draft);
+        const currentComposer = composerRef.current;
+        if (currentComposer?.clearDraft(draft)) {
+          currentComposer.focus();
+        }
       })
       .catch(() => {
         // Keep the draft intact so a failed stash can be retried.
@@ -427,18 +430,8 @@ export function SessionChatView({
       {hostActions ? (
         <SessionChatHostActionsCluster hostActions={hostActions} surface="chat" />
       ) : null}
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col",
-          showNewSessionWelcome && "justify-center",
-        )}
-      >
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col",
-          showNewSessionWelcome && "flex-none",
-        )}
-      >
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
         {chat.view.kind === "ready" ? (
           <SessionChatMessageList
             hasMore={chat.hasMore}
@@ -486,6 +479,7 @@ export function SessionChatView({
             onPasteImage={pasteImage}
             onPickPaths={pickPaths}
             onSend={send}
+            {...(hostComposerBridge ? { onStash: stashComposerDraft } : {})}
             optionPills={
               <>
                 {chat.view.kind === "ready" ? (
@@ -501,7 +495,11 @@ export function SessionChatView({
                     await chat.sendKey?.(key, marker);
                   }}
                   {...(hostActions?.onSwitchToTerminal
-                    ? { onSwitchToTerminal: hostActions.onSwitchToTerminal }
+                    ? {
+                        onSwitchToTerminal:
+                          hostActions.onSwitchToTerminalForAgentPicker ??
+                          hostActions.onSwitchToTerminal,
+                      }
                     : {})}
                 />
               </>

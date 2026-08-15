@@ -15,6 +15,7 @@ import {
   IconPaperclip,
   IconPlayerStopFilled,
   IconRobot,
+  IconStackPush,
   IconX,
 } from "@tabler/icons-react";
 import {
@@ -99,6 +100,8 @@ export interface SessionChatComposerProps {
   slashHeading?: string;
   onSend: (text: string) => void | Promise<void>;
   onInterrupt: () => void;
+  /** Save the current draft for later and clear it after the save succeeds. */
+  onStash?: () => void;
   /**
    * Saves a pasted image onto the session's machine and resolves with the
    * absolute path there. When set, pasting an image inserts the terminal
@@ -281,6 +284,7 @@ export const SessionChatComposer = forwardRef<
     onPasteImage,
     onPickPaths,
     onSend,
+    onStash,
     optionPills,
     placeholder,
     sessionKey,
@@ -936,6 +940,22 @@ export const SessionChatComposer = forwardRef<
             {optionPills}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
+            {onStash ? (
+              <AppTooltip content="Stash prompt">
+                <span className="inline-flex">
+                  <Button
+                    aria-label="Stash prompt"
+                    className="ghostex-chat-footer-control rounded-full"
+                    disabled={disabled || draft.trim() === ""}
+                    onClick={onStash}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <IconStackPush aria-hidden="true" stroke={2} />
+                  </Button>
+                </span>
+              </AppTooltip>
+            ) : null}
             {onPasteImage || onAttachFile || onPickPaths ? (
               <>
                 {onPickPaths ? null : (
