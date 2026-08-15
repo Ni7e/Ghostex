@@ -1,4 +1,4 @@
-# Plan 007: Match macOS Browser profiles, cookies, import, project seeding, and history behavior
+# Plan 007: Match macOS Browser profiles, cookies, project seeding, and history behavior
 
 > **Executor instructions**: Follow this plan step by step. Stop on STOP conditions.
 >
@@ -15,7 +15,7 @@
 
 ## Why this matters
 
-The product decision is explicit: GPUI Browser must match macOS exactly, including durable CEF profiles/cookies/import. UI affordances that look like profiles or import cannot remain shell-only.
+The product decision is explicit: GPUI Browser must match macOS exactly, including durable CEF profiles and cookies. Profile UI cannot remain shell-only.
 
 ## Current state
 
@@ -29,7 +29,7 @@ The product decision is explicit: GPUI Browser must match macOS exactly, includi
 
 | Purpose | Command | Expected on success |
 |---------|---------|---------------------|
-| GPUI Browser Rust tests | `cargo test --manifest-path gpui/Cargo.toml browser profile import history -- --nocapture` | relevant tests pass |
+| GPUI Browser Rust tests | `cargo test --manifest-path gpui/Cargo.toml browser profile history -- --nocapture` | relevant tests pass |
 | GPUI sidebar tests | `bun run test -- gpui/sidebar/phase1-active-project-context gpui/sidebar/phase1-gxserver-runtime` | relevant tests pass |
 | Typecheck | `bun run typecheck` | exit 0 |
 
@@ -38,7 +38,6 @@ The product decision is explicit: GPUI Browser must match macOS exactly, includi
 **In scope**:
 - GPUI CEF profile request context persistence.
 - Browser profile naming/selection/last-used persistence matching macOS.
-- Browser import behavior matching macOS.
 - Browser first-open project URL behavior matching macOS.
 - Browser History menu semantics matching macOS.
 
@@ -60,19 +59,13 @@ Match macOS profile names, last-used profile, picker behavior, profile isolation
 
 **Verify**: tests cover create/select/rename/delete/default/last-used and restart model restore.
 
-### Step 3: Implement Browser import parity
-
-Port macOS import behavior for cookies/profile data into the selected GPUI CEF profile. Remove or replace the unsupported notification.
-
-**Verify**: add tests with importer fixtures; assert imported data lands in selected profile only and logs contain no cookies/paths.
-
-### Step 4: Match project Browser first-open behavior
+### Step 3: Match project Browser first-open behavior
 
 Do not guess from old docs. Inspect current macOS `native/sidebar/native-sidebar.tsx` and implement exactly the same contract. If macOS uses active project GitHub remote and remembered tabs, GPUI should do the same. Change the GPUI active-project/Browser identity contract as needed to match macOS, with explicit privacy-safe fields.
 
 **Verify**: project with GitHub origin opens repo on first Browser activation; non-GitHub/no-remote uses default; existing Browser tabs are reused.
 
-### Step 5: Match Browser History semantics
+### Step 4: Match Browser History semantics
 
 macOS right-side History opens selected history rows in a new Browser tab for project Browser. GPUI currently uses active-tab navigation history. Split these behaviors to match macOS.
 
@@ -82,11 +75,11 @@ macOS right-side History opens selected history rows in a new Browser tab for pr
 
 - Rust tests for request context settings and sanitized shell persistence.
 - TS tests for active-project Browser contract, first URL, profile UI, and History semantics.
-- Manual restart/profile/import verification only when operator permits.
+- Manual restart/profile verification only when operator permits.
 
 ## Done criteria
 
-- [ ] GPUI durable Browser profiles/cookies/import match macOS.
+- [ ] GPUI durable Browser profiles and cookies match macOS.
 - [ ] Browser project first-open behavior matches macOS exactly.
 - [ ] Browser History menu behavior matches macOS.
 - [ ] No Browser runtime private data leaks into shell state or support logs.
@@ -101,4 +94,3 @@ macOS right-side History opens selected history rows in a new Browser tab for pr
 ## Maintenance notes
 
 Any future Browser active-project contract change must be validated against macOS, not historical GPUI source-ledger docs.
-

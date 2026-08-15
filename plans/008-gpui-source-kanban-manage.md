@@ -9,7 +9,7 @@
 - **Priority**: P2
 - **Effort**: L
 - **Risk**: HIGH
-- **Depends on**: plans/005-gpui-sidebar-session-contracts.md, plans/007-gpui-browser-profiles-import-project.md
+- **Depends on**: plans/005-gpui-sidebar-session-contracts.md, plans/007-gpui-browser-profiles-project.md
 - **Category**: correctness
 - **Planned at**: commit `5d9960dff`, 2026-06-26
 
@@ -93,4 +93,3 @@ Do not claim parity from source comments. Once implementation tests pass and ope
 ## Maintenance notes
 
 Future workarea changes must distinguish source-ledger evidence from running-app parity.
-

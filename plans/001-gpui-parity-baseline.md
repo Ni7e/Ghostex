@@ -51,7 +51,7 @@ The remaining GPUI parity work is large and will be split across agents. Without
 Read `plans/README.md` and confirm it states:
 
 - GPUI must match current macOS behavior 100%.
-- Durable Browser profiles/import should match macOS.
+- Durable Browser profiles should match macOS.
 - Dropdown/menu behavior should use GPUI popovers where appropriate.
 - Browser active-project behavior should be copied from macOS.
 - First-run, generated titles, menu-bar, and floating status should match macOS.
@@ -82,4 +82,3 @@ No runtime tests are required for this planning baseline. Verification is file-c
 ## Maintenance notes
 
 When product decisions change, update `plans/README.md` first, then update any affected plan files before dispatching agents.
-

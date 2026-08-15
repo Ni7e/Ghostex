@@ -64,7 +64,7 @@ Prepare a manual/runtime checklist that starts the app only when explicitly allo
 - startup/relaunch/window restore/first-run
 - terminal create/restore/wake/provider attach/clipboard/drop/settings
 - sidebar session focus/focus mode/activity/title/first-prompt
-- Browser profiles/cookies/import/project URL/history
+- Browser profiles/cookies/project URL/history
 - Source/Kanban/Manage actions
 - modals/dropdowns/Resources/prompt editor/command palette
 - app menu/hotkeys/context menus/notifications/status
@@ -100,4 +100,3 @@ After runtime verification, inspect generated support logs for forbidden raw dat
 ## Maintenance notes
 
 Treat this plan as the release gate for claiming GPUI parity. Source-ledger tests alone are not enough.
-

@@ -23,7 +23,7 @@ These decisions apply to every plan:
 | 004 | Match macOS terminal launch, restore, provider attach, and terminalReady handoff | P1 | L | 001, 003 | TODO |
 | 005 | Match macOS sidebar session focus, gxserver launch plans, activity, and first-prompt flows | P1 | L | 004 | TODO |
 | 006 | Match macOS terminal input, clipboard, drag/drop, and Ghostty settings behavior | P1 | L | 004 | TODO |
-| 007 | Match macOS Browser profiles, cookies, import, project seeding, and history behavior | P1 | L | 001, 003 | TODO |
+| 007 | Match macOS Browser profiles, cookies, project seeding, and history behavior | P1 | L | 001, 003 | TODO |
 | 008 | Match macOS Source, Kanban, Manage workarea behavior | P2 | L | 005, 007 | TODO |
 | 009 | Match macOS settings effects, appearance, and configuration persistence | P2 | M | 002, 006 | TODO |
 | 010 | Match macOS command palette, modals, rename, prompt editor, Resources, and titlebar popovers | P2 | L | 005, 009 | TODO |
@@ -58,9 +58,8 @@ Do not run app start/restart commands for manual UI verification unless the oper
 
 ## Findings Considered And Rejected
 
-- "Keep GPUI Browser profiles memory-backed": rejected by product decision. GPUI must match macOS durable CEF profiles/cookies/import.
+- "Keep GPUI Browser profiles memory-backed": rejected by product decision. GPUI must match macOS durable CEF profiles and cookies.
 - "Use NativeMenu for titlebar dropdown parity": rejected by product decision. Use GPUI popovers where GPUI-native UI makes sense, but preserve macOS behavior.
 - "Keep Browser active-project identity separate because it is already documented that way": rejected as a product decision. The executor must inspect macOS behavior and make GPUI match it exactly, adjusting contracts as needed.
 - "Hide Generate Name for local command tabs": rejected. Implement generated titles like macOS.
 - "Skip menu-bar/floating status in GPUI": rejected. Implement GPUI behavior like the macOS app.
-

@@ -1320,7 +1320,7 @@ Install with Homebrew: `brew install --cask maddada/tap/ghostex`
 ## 1.4.3 - 2026-05-03
 
 - Added an opt-in Browser Panes mode that opens browser actions as first-class workspace panes instead of Chrome Canary windows.
-- Added native browser pane controls for address navigation, reload, DevTools, React Grab, profile selection, and browser-data import messaging.
+- Added native browser pane controls for address navigation, reload, DevTools, React Grab, and profile selection.
 - Persisted browser pane URLs, favicons, and browser-auto titles so sidebar cards and app restarts reflect the current page.
 
 ## 1.4.2 - 2026-05-02
