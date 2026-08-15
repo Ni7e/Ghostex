@@ -88,12 +88,10 @@ import { useSidebarCollapsiblePresence } from "./sidebar-collapse-animation";
 import type { WebviewApi } from "./webview-api";
 import { openAppModal } from "./app-modal-host-bridge";
 import {
-  PROJECT_SESSION_LIST_COLLAPSED_CHANGED_EVENT,
   getExpandedProjectSessionListScrollHeight,
   getProjectSessionListCollapsedHeight,
   getVisibleProjectSessionIds,
-  readProjectSessionListCollapsedState,
-  writeProjectSessionListCollapsedState,
+  type ProjectSessionListCollapsedState,
 } from "./project-session-list-toggle";
 import {
   DEFAULT_WORKSPACE_THEME_COLOR,
@@ -113,6 +111,7 @@ import {
 } from "./primary-agent-launcher";
 import { ProjectAgentLauncherIcon } from "./project-agent-launcher-icon";
 import { getSidebarReorderActivationConstraints } from "./sidebar-reorder-activation";
+import { SIDEBAR_ITEM_TOOLTIP_DELAY_MS } from "./tooltip-delay";
 
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 196;
@@ -498,6 +497,7 @@ export type SessionGroupSectionProps = {
   onFocusRequested?: (groupId: string, sessionId: string) => void;
   onCreateProjectCollection?: (projectId: string) => void;
   onMoveProjectToCollection?: (projectId: string, collectionId: string | undefined) => void;
+  onProjectSessionListCollapsedChange?: (projectId: string, collapsed: boolean) => void;
   onHideGroup?: () => void;
   onSessionSelectionChange?: (request: SidebarSessionSelectionChangeRequest) => void;
   orderedSessionIds?: readonly string[];
@@ -511,6 +511,7 @@ export type SessionGroupSectionProps = {
   projectHeaderActions?: "all" | "terminal-only";
   projectCollectionId?: string;
   projectCollectionOptions?: readonly { collectionId: string; color: string; title: string }[];
+  projectSessionListCollapsedState?: Readonly<ProjectSessionListCollapsedState>;
   sessionTagListItems?: readonly SidebarSessionTagListItem[];
   showHeaderActions?: boolean;
   showSessionDropPositionIndicators?: boolean;
@@ -709,6 +710,7 @@ export function SessionGroupSection({
   onFocusRequested,
   onCreateProjectCollection,
   onMoveProjectToCollection,
+  onProjectSessionListCollapsedChange,
   onHideGroup,
   onSessionSelectionChange,
   orderedSessionIds: orderedSessionIdsProp,
@@ -720,6 +722,7 @@ export function SessionGroupSection({
   projectHeaderActions = "all",
   projectCollectionId,
   projectCollectionOptions = [],
+  projectSessionListCollapsedState = {},
   sessionDropIndicator,
   sessionDraggingDisabled = false,
   sessionTagListItems,
@@ -792,9 +795,6 @@ export function SessionGroupSection({
   const [primaryProjectAgentLauncherId, setPrimaryProjectAgentLauncherId] = useState(
     readPrimaryAgentLauncherId,
   );
-  const [projectSessionListCollapsedState, setProjectSessionListCollapsedState] = useState(
-    readProjectSessionListCollapsedState,
-  );
   const [collapsedProjectSessionSections, setCollapsedProjectSessionSections] = useState(
     EXPANDED_PROJECT_SESSION_SECTIONS,
   );
@@ -843,20 +843,6 @@ export function SessionGroupSection({
   }, []);
 
   useEffect(() => {
-    const refreshCollapsedState = () => {
-      setProjectSessionListCollapsedState(readProjectSessionListCollapsedState());
-    };
-
-    window.addEventListener(PROJECT_SESSION_LIST_COLLAPSED_CHANGED_EVENT, refreshCollapsedState);
-    return () => {
-      window.removeEventListener(
-        PROJECT_SESSION_LIST_COLLAPSED_CHANGED_EVENT,
-        refreshCollapsedState,
-      );
-    };
-  }, []);
-
-  useEffect(() => {
     const refreshPrimaryAgentLauncher = (event: Event) => {
       const changedEvent = event as PrimaryAgentLauncherChangedEvent;
       setPrimaryProjectAgentLauncherId(
@@ -885,7 +871,11 @@ export function SessionGroupSection({
    */
   const isChatCollection = group?.isChatCollection === true;
   const projectContext = group?.projectContext;
-  const projectSessionListStorageId = projectContext?.editor.projectId ?? group?.groupId;
+  const rawProjectSessionListStorageId = projectContext?.editor.projectId ?? group?.groupId;
+  const projectSessionListStorageId =
+    rawProjectSessionListStorageId && group?.remoteMachineContext?.machineId
+      ? `remote:${group.remoteMachineContext.machineId}:${rawProjectSessionListStorageId}`
+      : rawProjectSessionListStorageId;
   const isProjectSessionListCollapsed =
     Boolean(projectContext) &&
     projectSessionListStorageId !== undefined &&
@@ -1582,27 +1572,10 @@ export function SessionGroupSection({
     if (!projectSessionListStorageId) {
       return;
     }
-
-    setProjectSessionListCollapsedState(() => {
-      const latestState = readProjectSessionListCollapsedState();
-      const nextState = { ...latestState };
-      const wasCollapsed = latestState[projectSessionListStorageId] === true;
-      if (wasCollapsed) {
-        delete nextState[projectSessionListStorageId];
-      } else {
-        nextState[projectSessionListStorageId] = true;
-      }
-      /*
-       * CDXC:ProjectSessionLists 2026-06-25-22:28:
-       * Show less is a local project-list state change and must not force the
-       * project header to the top of the outer sidebar scroll area. Expanded
-       * project lists now scroll internally, so toggling back to Show more can
-       * preserve the user's current sidebar viewport without programmatic
-       * outer-scroll alignment.
-       */
-      writeProjectSessionListCollapsedState(nextState);
-      return nextState;
-    });
+    onProjectSessionListCollapsedChange?.(
+      projectSessionListStorageId,
+      !isProjectSessionListCollapsed,
+    );
   };
 
   const requestCreateProjectTerminal = () => {
@@ -2192,6 +2165,7 @@ export function SessionGroupSection({
                     icon={projectContext.icon}
                     iconDataUrl={projectContext.iconDataUrl}
                     title={group.title}
+                    tooltipDelay={SIDEBAR_ITEM_TOOLTIP_DELAY_MS}
                   />
                 ) : null}
                 <div
@@ -2207,6 +2181,7 @@ export function SessionGroupSection({
                       }
                       content={projectTitleTooltip}
                       contentClassName="project-title-tooltip-content"
+                      delay={SIDEBAR_ITEM_TOOLTIP_DELAY_MS}
                     >
                       <button
                         aria-controls={
@@ -2230,7 +2205,10 @@ export function SessionGroupSection({
                       </button>
                     </AppTooltip>
                   ) : (
-                    <AppTooltip content={groupTitleActionLabel}>
+                    <AppTooltip
+                      content={groupTitleActionLabel}
+                      delay={projectContext ? SIDEBAR_ITEM_TOOLTIP_DELAY_MS : undefined}
+                    >
                       <button
                         aria-controls={canToggleCollapsed && !isCollapsed ? sessionsRegionId : undefined}
                         aria-disabled={!canToggleCollapsed && !isEmptyProjectGroup}

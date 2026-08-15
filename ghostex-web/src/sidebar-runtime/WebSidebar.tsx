@@ -11,6 +11,7 @@ export function WebSidebar({ runtime }: { runtime: WebSidebarRuntime }) {
           messageSource={runtime.messageSource}
           nativeHostEventSource={null}
           vscode={runtime.vscode}
+          windowScopeId="web-main"
         />
       </main>
     </div>

@@ -80,6 +80,7 @@ root.render(
         nativeHostEventSource={null}
         onStartGxserver={() => gpuiSidebarRuntime.startLocalGxserver()}
         vscode={gpuiSidebarRuntime.vscode}
+        windowScopeId="main"
       />
     </main>
   </div>,

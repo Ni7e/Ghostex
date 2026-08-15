@@ -2535,7 +2535,7 @@ export type SidebarToExtensionMessage =
       SidebarApp write-through-syncs its whole project-collection overlay after
       each local edit. The host debounces and pushes the wire state to
       gxserver's /api/updateSidebarProjectCollections; only bounded metadata
-      (ids, titles, colors, collapsed flags, ordering) crosses this message.
+      (ids, titles, colors, project membership, ordering) crosses this message.
       */
       state: GxserverSidebarProjectCollectionsState;
       remoteMachineId?: string;

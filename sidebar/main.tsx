@@ -152,7 +152,7 @@ const root = createRoot(rootElement);
 postSidebarBootstrapReproLog("reactRootCreated");
 
 try {
-  root.render(<SidebarApp vscode={vscode} />);
+  root.render(<SidebarApp vscode={vscode} windowScopeId="main" />);
   postSidebarBootstrapReproLog("reactRenderCalled");
 } catch (error) {
   postSidebarBootstrapReproLog("reactRenderFailed", {

@@ -598,7 +598,7 @@ describe("reference sidebar group spacing styles", () => {
     const toggleSource = sessionGroupSectionSource.slice(toggleStart, toggleStart + 1200);
 
     expect(toggleStart).toBeGreaterThan(-1);
-    expect(toggleSource).toContain("writeProjectSessionListCollapsedState(nextState);");
+    expect(toggleSource).toContain("onProjectSessionListCollapsedChange?.(");
     expect(toggleSource).not.toContain("scrollIntoView");
   });
 
