@@ -35,14 +35,28 @@ Bridge contract (mirrored by mobile/src/chat/session-chat-bridge.ts):
       params }))
 - RN → page: window.ghostexMobileChatDeliver({ id, ok, result?, error? })
 - RN config (injected before content loads):
-  window.__ghostexMobileChatConfig = { agentId? }
+  window.__ghostexMobileChatConfig = {
+    agentId?, theme?, fontFamily?, transcriptWidthPercent?
+  }
+- RN presentation updates (pushed when mobile settings change):
+  window.ghostexMobileChatSetPresentation({
+    theme?, fontFamily?, transcriptWidthPercent?
+  })
 - RN host state (pushed on every change, may arrive before or after mount):
   window.ghostexMobileChatSetHostState({ working?, canSend? })
 */
 
 interface MobileChatConfig {
   agentId?: string;
+  fontFamily?: string;
   theme?: SessionChatTheme;
+  transcriptWidthPercent?: number;
+}
+
+interface MobileChatPresentation {
+  fontFamily: string;
+  theme: SessionChatTheme;
+  transcriptWidthPercent: number;
 }
 
 interface BridgeResponse {
@@ -84,11 +98,16 @@ version skew, not a feature fallback: chat still works, at plain-poll latency,
 until the machine's Ghostex is updated.
 */
 const NO_FINGERPRINT_POLL_DELAY_MS = 3_000;
+const MIN_TRANSCRIPT_WIDTH_PERCENT = 50;
+const MAX_TRANSCRIPT_WIDTH_PERCENT = 100;
+const TRANSCRIPT_WIDTH_PERCENT_STEP = 5;
+const DEFAULT_TRANSCRIPT_WIDTH_PERCENT = 75;
 
 declare global {
   interface Window {
     ReactNativeWebView?: { postMessage(message: string): void };
     ghostexMobileChatDeliver?: (response: BridgeResponse) => void;
+    ghostexMobileChatSetPresentation?: (state: Partial<MobileChatPresentation>) => void;
     ghostexMobileChatSetHostState?: (state: Partial<MobileChatHostState>) => void;
     __ghostexMobileChatConfig?: MobileChatConfig;
   }
@@ -118,6 +137,81 @@ window.ghostexMobileChatSetHostState = (state) => {
   }
   hostState = next;
   for (const listener of hostStateListeners) {
+    listener();
+  }
+};
+
+function clampTranscriptWidthPercent(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_TRANSCRIPT_WIDTH_PERCENT;
+  const clamped = Math.min(
+    MAX_TRANSCRIPT_WIDTH_PERCENT,
+    Math.max(MIN_TRANSCRIPT_WIDTH_PERCENT, value),
+  );
+  return (
+    Math.round(clamped / TRANSCRIPT_WIDTH_PERCENT_STEP) * TRANSCRIPT_WIDTH_PERCENT_STEP
+  );
+}
+
+let presentationState: MobileChatPresentation = {
+  fontFamily: "",
+  theme: "dark",
+  transcriptWidthPercent: DEFAULT_TRANSCRIPT_WIDTH_PERCENT,
+};
+const presentationListeners = new Set<() => void>();
+
+function subscribePresentation(listener: () => void): () => void {
+  presentationListeners.add(listener);
+  return () => {
+    presentationListeners.delete(listener);
+  };
+}
+
+function readPresentation(): MobileChatPresentation {
+  return presentationState;
+}
+
+function applyDocumentPresentation(presentation: MobileChatPresentation): void {
+  const background = presentation.theme === "light" ? "#fdfdfd" : "#111111";
+  document.documentElement.style.colorScheme = presentation.theme;
+  document.documentElement.style.backgroundColor = background;
+  document.documentElement.style.setProperty(
+    "--ghostex-session-chat-font-family",
+    presentation.fontFamily ||
+      "var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif)",
+  );
+  document.documentElement.style.setProperty(
+    "--ghostex-session-chat-transcript-width-percent",
+    String(presentation.transcriptWidthPercent),
+  );
+  document.body.style.backgroundColor = background;
+  window.dispatchEvent(new Event("ghostex-session-chat-font-family-changed"));
+}
+
+window.ghostexMobileChatSetPresentation = (state) => {
+  const next: MobileChatPresentation = {
+    fontFamily:
+      typeof state?.fontFamily === "string"
+        ? state.fontFamily.trim()
+        : presentationState.fontFamily,
+    theme:
+      state?.theme === "dark" || state?.theme === "light"
+        ? state.theme
+        : presentationState.theme,
+    transcriptWidthPercent:
+      typeof state?.transcriptWidthPercent === "number"
+        ? clampTranscriptWidthPercent(state.transcriptWidthPercent)
+        : presentationState.transcriptWidthPercent,
+  };
+  if (
+    next.fontFamily === presentationState.fontFamily &&
+    next.theme === presentationState.theme &&
+    next.transcriptWidthPercent === presentationState.transcriptWidthPercent
+  ) {
+    return;
+  }
+  presentationState = next;
+  applyDocumentPresentation(next);
+  for (const listener of presentationListeners) {
     listener();
   }
 };
@@ -319,17 +413,20 @@ document.body.classList.add("vscode-dark", "native-sidebar-body");
 
 function MobileSessionChat({
   agentLabel,
-  theme,
   transport,
 }: {
   agentLabel: string | null;
-  theme: SessionChatTheme;
   transport: SessionChatTransport;
 }) {
   const { canSend, working } = useSyncExternalStore(
     subscribeHostState,
     readHostState,
     readHostState,
+  );
+  const { theme } = useSyncExternalStore(
+    subscribePresentation,
+    readPresentation,
+    readPresentation,
   );
   return (
     <div className="native-sidebar-shell gpui-session-chat">
@@ -349,14 +446,14 @@ const root = createRoot(rootElement);
 void waitForConfig().then((config) => {
   const agentId = config.agentId?.trim() ?? "";
   const agentLabel = agentId ? resolveSessionChatTranscriptAgent(agentId) ?? agentId : null;
-  const theme = normalizeSessionChatTheme(config.theme);
-  document.documentElement.style.colorScheme = theme;
-  document.documentElement.style.backgroundColor = theme === "light" ? "#fdfdfd" : "#111111";
-  document.body.style.backgroundColor = theme === "light" ? "#fdfdfd" : "#111111";
+  window.ghostexMobileChatSetPresentation?.({
+    fontFamily: config.fontFamily,
+    theme: normalizeSessionChatTheme(config.theme),
+    transcriptWidthPercent: config.transcriptWidthPercent,
+  });
   root.render(
     <MobileSessionChat
       agentLabel={agentLabel}
-      theme={theme}
       transport={createMobileSessionChatTransport()}
     />,
   );

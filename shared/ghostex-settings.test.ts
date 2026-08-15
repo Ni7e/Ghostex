@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import {
   AUTO_SLEEP_IDLE_MINUTE_OPTIONS,
   APP_SHOTS_HOTKEY_OPTIONS,
-  BROWSER_FEEDBACK_TOOL_OPTIONS,
   BROWSER_OPEN_MODE_OPTIONS,
   DEFAULT_ghostex_SETTINGS,
   DEFAULT_EDITOR_COMMAND_OPTIONS,
@@ -156,27 +155,17 @@ describe("normalizeghostexSettings", () => {
     }]);
   });
 
-  test("defaults browser feedback tools to Agentation and allows React Grab", () => {
-    /**
-     * CDXC:BrowserFeedbackTools 2026-05-22-09:18:
-     * The browser-pane feedback action defaults to Agentation for selector and
-     * annotation output from the CEF page, while Settings can switch the same
-     * action back to React Grab.
-     */
+  test("normalizes legacy browser feedback choices to Agentation", () => {
     expect(DEFAULT_ghostex_SETTINGS.browserFeedbackTool).toBe("agentation");
     expect(normalizeghostexSettings({})).toMatchObject({
       browserFeedbackTool: "agentation",
     });
     expect(normalizeghostexSettings({ browserFeedbackTool: "react-grab" })).toMatchObject({
-      browserFeedbackTool: "react-grab",
+      browserFeedbackTool: "agentation",
     });
     expect(normalizeghostexSettings({ browserFeedbackTool: "unknown" })).toMatchObject({
       browserFeedbackTool: "agentation",
     });
-    expect(BROWSER_FEEDBACK_TOOL_OPTIONS).toEqual([
-      { label: "React Grab", value: "react-grab" },
-      { label: "Agentation", value: "agentation" },
-    ]);
   });
 
   test("normalizes terminal dev-server discovery settings", () => {

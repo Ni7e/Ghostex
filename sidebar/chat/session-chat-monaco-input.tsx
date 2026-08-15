@@ -208,8 +208,7 @@ export function SessionChatMonacoInput({
           automaticLayout: true,
           contextmenu: false,
           folding: false,
-          fontFamily:
-            'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+          fontFamily: getComputedStyle(container).fontFamily,
           fontSize: 14,
           glyphMargin: false,
           // Plain text on purpose: the draft is a prompt, so markdown *emphasis*
@@ -344,6 +343,21 @@ export function SessionChatMonacoInput({
   useEffect(() => {
     editorRef.current?.updateOptions({ theme: CHAT_MONACO_THEMES[theme] });
   }, [theme]);
+
+  useEffect(() => {
+    const updateFontFamily = (): void => {
+      const container = containerRef.current;
+      if (container) {
+        editorRef.current?.updateOptions({
+          fontFamily: getComputedStyle(container).fontFamily,
+        });
+      }
+    };
+    window.addEventListener("ghostex-session-chat-font-family-changed", updateFontFamily);
+    return () => {
+      window.removeEventListener("ghostex-session-chat-font-family-changed", updateFontFamily);
+    };
+  }, []);
 
   /*
   CDXC:MonacoPasteCapture 2026-08-01:

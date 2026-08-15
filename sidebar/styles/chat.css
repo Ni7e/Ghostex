@@ -17,6 +17,25 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
+.ghostex-session-chat-scope,
+.ghostex-session-chat-popup {
+  font-family: var(
+    --ghostex-session-chat-font-family,
+    var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif)
+  );
+}
+
+.ghostex-session-chat-scope [data-slot="message-scroller-content"] {
+  width: calc(var(--ghostex-session-chat-transcript-width-percent, 75) * 1%);
+  max-width: calc(100% - 80px);
+}
+
+@media (max-width: 499px) {
+  .ghostex-session-chat-scope [data-slot="message-scroller-content"] {
+    max-width: calc(100% - 40px);
+  }
+}
+
 /* The chat palette is intentionally scoped to the conversation. The
    surrounding Ghostex shell remains dark even when chat content is light. */
 .ghostex-session-chat-scope[data-chat-theme="light"],

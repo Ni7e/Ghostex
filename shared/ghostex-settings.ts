@@ -51,7 +51,7 @@ export type TerminalCursorStyle = "bar" | "block" | "underline";
 export type TerminalBackgroundImageFit = "cover" | "contain" | "stretch" | "natural";
 export type WindowsTerminalBackend = "wsl";
 export type BrowserOpenMode = "browser-pane";
-export type BrowserFeedbackTool = "react-grab" | "agentation";
+export type BrowserFeedbackTool = "agentation";
 export type PortlessProtocol = "https" | "http";
 export type TerminalDevServerOpenTarget = "internal-browser" | "system-default-browser";
 export type DefaultEditorCommand =
@@ -72,6 +72,24 @@ export const MIN_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS = 0;
 export const MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS = 1000;
 export const SIDEBAR_COLLAPSE_ANIMATION_DURATION_STEP_MS = 100;
 export const DEFAULT_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS = 0;
+export const MIN_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT = 50;
+export const MAX_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT = 100;
+export const SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT_STEP = 5;
+export const DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT = 75;
+
+export function clampSessionChatTranscriptWidthPercent(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT;
+  }
+  const clamped = Math.min(
+    MAX_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
+    Math.max(MIN_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT, value),
+  );
+  return (
+    Math.round(clamped / SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT_STEP) *
+    SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT_STEP
+  );
+}
 
 export function clampSidebarCollapseAnimationDurationMs(value: number): number {
   const clamped = Math.min(
@@ -309,13 +327,6 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     logFiles: ["native-prompt-editor-debug.log"],
   },
   {
-    description: "Browser profile import, Chromium cookie/keychain/decrypt, and CEF handoff diagnostics.",
-    group: "macOS",
-    id: "native.browser.import",
-    label: "Browser import",
-    logFiles: ["native-browser-import-debug.log"],
-  },
-  {
     description: "Remote gxserver install approval, SSH setup phase, package selection, upload, token read, and tunnel diagnostics.",
     group: "macOS",
     id: "native.remote.gxserver.install",
@@ -335,6 +346,13 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     id: "gpui.sidebar.focus",
     label: "GPUI sidebar focus and bouncing",
     logFiles: ["gpui-sidebar-focus-debug.jsonl"],
+  },
+  {
+    description: "Shared-sidebar CEF renderer readiness, responsiveness transitions, and termination diagnostics.",
+    group: "GPUI",
+    id: "gpui.sidebar.renderer",
+    label: "GPUI sidebar renderer lifecycle",
+    logFiles: ["gpui-sidebar-renderer-debug.jsonl"],
   },
   {
     description: "GPUI app-modal host lifecycle, Settings hydration, renderer checkpoints, and modal errors.",
@@ -1123,6 +1141,10 @@ export type ghostexSettings = {
   sidebarTheme: SidebarThemeSetting;
   /** Theme for chat content only; the surrounding Ghostex chrome stays dark. */
   sessionChatTheme: SessionChatTheme;
+  /** CSS font-family used by chat messages and the prompt composer. */
+  sessionChatFontFamily: string;
+  /** Transcript width on a 64rem scale; 75% preserves the historical 48rem cap. */
+  sessionChatTranscriptWidthPercent: number;
   /**
    * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
    * Custom chrome colors are scoped to the sidebar and native titlebar only.
@@ -1429,14 +1451,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   sessionTitleGenerationAgent: "codex",
   customSessionTitleGenerationCommand: "",
   /**
-   * CDXC:BrowserFeedbackTools 2026-05-22-09:18:
-   * Browser panes can inject either React Grab or Agentation for visual
-   * feedback.
-   *
-   * CDXC:BrowserFeedbackTools 2026-05-22-09:18:
-   * Agentation is the default browser feedback tool so browser panes open the
-   * structured annotation workflow unless a user explicitly switches back to
-   * React Grab in Settings.
+   * Browser feedback always uses Agentation. Keep the normalized field for
+   * compatibility with older host payloads, but do not expose it in Settings.
    */
   browserFeedbackTool: "agentation",
   /**
@@ -1845,6 +1861,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   sidebarTheme: "dark-2",
   sessionChatTheme: "dark",
+  sessionChatFontFamily: "",
+  sessionChatTranscriptWidthPercent: DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
   /**
    * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
    * Custom sidebar/titlebar colors are scoped to the sidebar and titlebar.
@@ -2046,14 +2064,6 @@ export const BROWSER_OPEN_MODE_OPTIONS: ReadonlyArray<{
   label: string;
   value: BrowserOpenMode;
 }> = [{ label: "Browser Panes", value: "browser-pane" }];
-
-export const BROWSER_FEEDBACK_TOOL_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: BrowserFeedbackTool;
-}> = [
-  { label: "React Grab", value: "react-grab" },
-  { label: "Agentation", value: "agentation" },
-];
 
 export const APP_SHOTS_HOTKEY_OPTIONS: ReadonlyArray<{
   label: string;
@@ -2452,17 +2462,12 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         DEFAULT_ghostex_SETTINGS.customSessionTitleGenerationCommand,
       ),
     ),
-    /**
-     * CDXC:BrowserFeedbackTools 2026-05-22-09:18:
-     * Normalize the browser feedback injector choice so missing or invalid
-     * settings use Agentation, while explicit React Grab selections continue
-     * to launch the legacy injector.
-     */
     openTerminalLinksInApp: readBoolean(
       source,
       "openTerminalLinksInApp",
       DEFAULT_ghostex_SETTINGS.openTerminalLinksInApp,
     ),
+    /** Normalize legacy feedback-tool settings to the sole supported tool. */
     browserFeedbackTool: normalizeBrowserFeedbackTool(
       readString(source, "browserFeedbackTool", DEFAULT_ghostex_SETTINGS.browserFeedbackTool),
     ),
@@ -3064,6 +3069,18 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       readString(source, "sidebarTheme", DEFAULT_ghostex_SETTINGS.sidebarTheme),
     ),
     sessionChatTheme: normalizeSessionChatTheme(source.sessionChatTheme),
+    sessionChatFontFamily: readString(
+      source,
+      "sessionChatFontFamily",
+      DEFAULT_ghostex_SETTINGS.sessionChatFontFamily,
+    ).trim(),
+    sessionChatTranscriptWidthPercent: clampSessionChatTranscriptWidthPercent(
+      readNumber(
+        source,
+        "sessionChatTranscriptWidthPercent",
+        DEFAULT_ghostex_SETTINGS.sessionChatTranscriptWidthPercent,
+      ),
+    ),
     customSidebarTitlebarColorsEnabled: true,
     customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
       customSidebarTitlebarBackgroundColor,
@@ -3532,8 +3549,8 @@ function normalizeBrowserOpenMode(value: string | undefined): BrowserOpenMode {
   return "browser-pane";
 }
 
-function normalizeBrowserFeedbackTool(value: string | undefined): BrowserFeedbackTool {
-  return value === "react-grab" ? "react-grab" : DEFAULT_ghostex_SETTINGS.browserFeedbackTool;
+function normalizeBrowserFeedbackTool(_value: string | undefined): BrowserFeedbackTool {
+  return "agentation";
 }
 
 function normalizeAppShotsHotkey(value: string | undefined): AppShotsHotkey {

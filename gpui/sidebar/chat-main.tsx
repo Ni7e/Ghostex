@@ -13,6 +13,10 @@ import {
 } from "../../shared/session-chat";
 import { GXSERVER_PROTOCOL_VERSION } from "../../shared/gxserver-protocol";
 import {
+  clampSessionChatTranscriptWidthPercent,
+  DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
+} from "../../shared/ghostex-settings";
+import {
   SessionChatView,
   type SessionChatHostActions,
   type SessionChatHostComposerBridge,
@@ -43,7 +47,9 @@ interface ChatGxserverBootstrap {
 
 declare global {
   interface Window {
+    ghostexSetSessionChatFontFamily?: (fontFamily: unknown) => void;
     ghostexSetSessionChatTheme?: (theme: unknown) => void;
+    ghostexSetSessionChatTranscriptWidthPercent?: (widthPercent: unknown) => void;
   }
 }
 
@@ -506,6 +512,8 @@ const GPUI_SESSION_CHAT_HOST_LINKS: SessionChatHostLinks = {
 
 const GPUI_SESSION_CHAT_HOST_ACTIONS: SessionChatHostActions = {
   onSwitchToTerminal: () => postSessionChatHostAction("terminalView"),
+  onSwitchToTerminalForAgentPicker: () =>
+    postSessionChatHostAction("agentPickerTerminalView"),
   actions: [
     { id: "rename", label: "Rename" },
     { id: "sleep", label: "Sleep" },
@@ -549,6 +557,11 @@ const sessionId = searchParams.get("sessionId")?.trim() ?? "";
 const agentId = searchParams.get("agentId")?.trim() ?? "";
 const remote = searchParams.get("remote") === "true";
 let chatTheme = normalizeSessionChatTheme(searchParams.get("theme"));
+let chatFontFamily = searchParams.get("fontFamily")?.trim() ?? "";
+let chatTranscriptWidthPercent = clampSessionChatTranscriptWidthPercent(
+  Number(searchParams.get("transcriptWidthPercent")) ||
+    DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
+);
 let renderReadyChat: ((theme: SessionChatTheme) => void) | null = null;
 
 function applyDocumentChatTheme(theme: SessionChatTheme): void {
@@ -557,13 +570,39 @@ function applyDocumentChatTheme(theme: SessionChatTheme): void {
   document.body.style.backgroundColor = theme === "light" ? "#fdfdfd" : "#111111";
 }
 
+function applyDocumentChatFontFamily(fontFamily: string): void {
+  const normalized = fontFamily.trim();
+  document.documentElement.style.setProperty(
+    "--ghostex-session-chat-font-family",
+    normalized || "var(--vscode-font-family, ui-sans-serif, system-ui, sans-serif)",
+  );
+  window.dispatchEvent(new Event("ghostex-session-chat-font-family-changed"));
+}
+
+function applyDocumentChatTranscriptWidthPercent(widthPercent: number): void {
+  document.documentElement.style.setProperty(
+    "--ghostex-session-chat-transcript-width-percent",
+    String(clampSessionChatTranscriptWidthPercent(widthPercent)),
+  );
+}
+
 document.body.dataset.sidebarTheme = "plain-dark";
 document.body.classList.add("vscode-dark", "native-sidebar-body");
 applyDocumentChatTheme(chatTheme);
+applyDocumentChatFontFamily(chatFontFamily);
+applyDocumentChatTranscriptWidthPercent(chatTranscriptWidthPercent);
 window.ghostexSetSessionChatTheme = (value) => {
   chatTheme = normalizeSessionChatTheme(value);
   applyDocumentChatTheme(chatTheme);
   renderReadyChat?.(chatTheme);
+};
+window.ghostexSetSessionChatFontFamily = (value) => {
+  chatFontFamily = typeof value === "string" ? value : "";
+  applyDocumentChatFontFamily(chatFontFamily);
+};
+window.ghostexSetSessionChatTranscriptWidthPercent = (value) => {
+  chatTranscriptWidthPercent = clampSessionChatTranscriptWidthPercent(Number(value));
+  applyDocumentChatTranscriptWidthPercent(chatTranscriptWidthPercent);
 };
 
 if (!projectId || !sessionId) {
