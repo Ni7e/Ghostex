@@ -395,6 +395,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/removeSession"
         | "/api/readSessionText"
         | "/api/readSessionChat"
+        | "/api/readSessionChatSkills"
         | "/api/sendSessionChatMessage"
         | "/api/saveSessionChatImage"
         | "/api/saveSessionChatAttachment"

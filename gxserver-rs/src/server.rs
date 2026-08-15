@@ -100,6 +100,7 @@ use crate::{
         create_source_build_identity, is_build_identity_reusable, remove_runtime_metadata,
         write_runtime_metadata,
     },
+    session_chat_skills::read_session_chat_skills,
     session_git_status, session_lifecycle,
     session_status::agent_activity_presentation_refresh_delay_ms,
     sidebar_hud::{
@@ -2766,6 +2767,10 @@ async fn route_http(
         }
         "/api/readSessionChat" => {
             handle_read_session_chat_http(&state, endpoint.path, request_id, &body_json).await
+        }
+        "/api/readSessionChatSkills" => {
+            handle_read_session_chat_skills_http(&state, endpoint.path, request_id, &body_json)
+                .await
         }
         "/api/sendSessionChatMessage" => {
             handle_send_session_chat_message_http(&state, endpoint.path, request_id, &body_json)
@@ -11057,6 +11062,93 @@ struct SessionChatReadResolution {
     fingerprint: String,
 }
 
+async fn handle_read_session_chat_skills_http(
+    state: &AppState,
+    endpoint_path: String,
+    request_id: String,
+    body: &Value,
+) -> RoutedResponse {
+    let params = match read_domain_rpc_params(body) {
+        Ok(params) => params,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let project_id = params
+        .get("projectId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if project_id.is_empty() || session_id.is_empty() {
+        return domain_error_response(
+            endpoint_path,
+            request_id,
+            DomainStateError {
+                code: "invalidParams",
+                message: "readSessionChatSkills requires projectId and sessionId.".to_string(),
+            },
+        );
+    }
+
+    let resolved = (|| {
+        let db = open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+            code: "internalError",
+            message: format!("SQLite gxserver state error: {error}"),
+        })?;
+        let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
+        let session = repository
+            .get_session(project_id, session_id)?
+            .ok_or_else(|| DomainStateError {
+                code: "notFound",
+                message: "The session no longer exists.".to_string(),
+            })?;
+        let project = repository
+            .get_project(project_id)?
+            .ok_or_else(|| DomainStateError {
+                code: "notFound",
+                message: "The project no longer exists.".to_string(),
+            })?;
+        let agent_id = session_chat_agent_for_session(&session).unwrap_or_default();
+        let project_path = project
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        Ok::<_, DomainStateError>((agent_id, project_path))
+    })();
+    let (agent_id, project_path) = match resolved {
+        Ok(resolved) => resolved,
+        Err(error) => return domain_error_response(endpoint_path, request_id, error),
+    };
+    let paths = state.paths.clone();
+    let result = match tokio::task::spawn_blocking(move || {
+        read_session_chat_skills(&paths, &agent_id, project_path.as_deref())
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: "Session chat skills could not be read.".to_string(),
+                },
+            )
+        }
+    };
+    routed_json(
+        Some(endpoint_path),
+        StatusCode::OK,
+        rpc_success(request_id, result),
+    )
+}
+
 fn resolve_session_chat_read_state(
     state: &AppState,
     project_id: &str,
@@ -11506,9 +11598,10 @@ async fn handle_send_session_chat_message_http(
         .to_string();
     /*
     Raw-key mode: `key` carries a keystroke that has no text form (Claude
-    Code's Shift+Tab permission-mode cycle). It is mutually exclusive with a
-    message body — the key writes one verbatim burst with none of the message
-    pacing (no clear, no paste framing, no delayed Enter).
+    Code's Shift+Tab permission-mode cycle or Codex's shifted effort arrows).
+    It is mutually exclusive with a message body — the key writes one verbatim
+    burst with none of the message pacing (no clear, no paste framing, no
+    delayed Enter).
     */
     if let Some(key) = params.get("key").and_then(Value::as_str) {
         if !text.trim().is_empty() || params.get("imagePaths").is_some() {
@@ -11582,13 +11675,23 @@ async fn handle_send_session_chat_message_http(
             },
         );
     }
+    let agent = session_chat_agent_for_session(&target.session);
     let mut steps = crate::session_chat_send::build_session_chat_message_steps(&text, &image_paths);
-    steps.insert(
-        0,
-        crate::session_chat_send::SessionChatSendStep::PreserveTerminalDraft {
-            state_dir: state.paths.app_state_dir.clone(),
-        },
-    );
+    /*
+    Grok Build fullscreen maps Ctrl+G to its Tasks pane rather than its
+    external editor. Its terminal-to-chat transition therefore leaves any
+    draft in the CLI and warns the user to copy it manually; chat sends must
+    skip the same impossible preservation handshake before taking ownership
+    of the terminal input line.
+    */
+    if agent.as_deref() != Some("grok") {
+        steps.insert(
+            0,
+            crate::session_chat_send::SessionChatSendStep::PreserveTerminalDraft {
+                state_dir: state.paths.app_state_dir.clone(),
+            },
+        );
+    }
     if let Err(message) = crate::session_chat_send::execute_session_chat_send(
         &target.project_id,
         &target.session_id,
@@ -11608,7 +11711,6 @@ async fn handle_send_session_chat_message_http(
         );
     }
     // An option command changes what the statusline reports: read it back.
-    let agent = session_chat_agent_for_session(&target.session);
     if crate::session_chat_options::is_session_chat_option_command_text(agent.as_deref(), &text) {
         schedule_session_chat_option_redetect(
             state,

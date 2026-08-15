@@ -51,6 +51,8 @@ auto → manual → accept edits → plan → bypass on every write. Same kitty-
 reasoning as SESSION_CHAT_INTERRUPT above.
 */
 pub const SESSION_CHAT_SHIFT_TAB: &str = "\u{1b}[9;2u";
+pub const SESSION_CHAT_SHIFT_UP: &str = "\u{1b}[1;2A";
+pub const SESSION_CHAT_SHIFT_DOWN: &str = "\u{1b}[1;2B";
 pub const AGENT_TUI_CLEAR_INPUT_LINE: &str = "\u{15}"; // Ctrl+U — clear toward start
 pub const AGENT_TUI_CLEAR_INPUT_FORWARD: &str = "\u{b}"; // Ctrl+K — clear toward end
 pub const AGENT_TUI_CLEAR_LINE_SLACK: usize = 8;
@@ -400,6 +402,8 @@ of writing something arbitrary.
 pub fn build_session_chat_key_steps(key: &str) -> Option<Vec<SessionChatSendStep>> {
     let payload = match key {
         "shift-tab" => SESSION_CHAT_SHIFT_TAB,
+        "shift-up" => SESSION_CHAT_SHIFT_UP,
+        "shift-down" => SESSION_CHAT_SHIFT_DOWN,
         _ => return None,
     };
     Some(vec![SessionChatSendStep::Write(payload.to_string())])
@@ -974,6 +978,14 @@ mod tests {
         );
         // No bracketed paste framing, no trailing Enter, no clear burst.
         assert_eq!(build_session_chat_key_steps("shift-tab").unwrap().len(), 1);
+        assert_eq!(
+            build_session_chat_key_steps("shift-up"),
+            Some(vec![SessionChatSendStep::Write("\u{1b}[1;2A".to_string())])
+        );
+        assert_eq!(
+            build_session_chat_key_steps("shift-down"),
+            Some(vec![SessionChatSendStep::Write("\u{1b}[1;2B".to_string())])
+        );
         assert_eq!(build_session_chat_key_steps("tab"), None);
         assert_eq!(build_session_chat_key_steps(""), None);
     }
