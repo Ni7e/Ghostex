@@ -23,57 +23,27 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
   - Ghostex now uses the latest upstream Ghostty terminal engine to improve terminal performance while lowering RAM and CPU use.
   - Session Chat can search the full conversation and jump between matching results on desktop, web, and Android.
   - Session Chat can mention installed agent skills by typing `$` and choosing from the session's available skills.
-  - Session Chat can change the active Claude model without switching back to the terminal.
-  - Session Chat can open the Codex model picker without leaving the chat workflow.
-  - Session Chat can change Claude reasoning effort without switching back to the terminal.
-  - Session Chat can change Codex reasoning effort without switching back to the terminal.
-  - Session Chat can toggle Claude Fast Mode without switching back to the terminal.
-  - Session Chat can cycle Claude permission modes without switching back to the terminal.
-  - Session Chat can switch Codex into Plan mode without switching back to the terminal.
-  - Automations can run once after a countdown timer.
-  - Automations can run once at a chosen date and time.
+  - Session Chat now puts Claude and Codex model, reasoning effort, Fast Mode, permission mode, and Plan mode controls directly in the chat workflow.
+  - Automations can run once after a countdown timer or at a chosen date and time.
   - Recent Projects can open a real project-scoped terminal on a connected remote machine.
-  - Project Board can initialize Beads in the connected environment.
-  - Project Board can update Beads in the connected environment.
-  - Project Board can migrate Beads data in the connected environment.
+  - Project Board can initialize, update, and migrate Beads in the connected environment.
 - Minor
   - The Ghostty update fixes a terminal crash that could occur when hyperlinks reflowed.
   - Windows ARM64 now uses an optimized native Ghostty terminal build.
-  - Session Chat groups thinking and its tool calls into a clearer expandable activity view.
-  - Session Chat shows compact command summaries before tool details are expanded.
-  - Session Chat shows compact file summaries before tool details are expanded.
-  - Session Chat adds a Verbose Mode setting that expands thinking-owned tool activity by default.
-  - Session Chat theme controls now live in a dedicated Chat settings section.
-  - Session Chat can use a custom installed font family.
-  - Session Chat can adjust transcript width without narrowing the prompt composer.
-  - Android now includes the same Session Chat theme control as desktop.
-  - Android now includes the same Session Chat font control as desktop.
-  - Android now includes the same Session Chat transcript-width control as desktop.
-  - Android now includes the same Session Chat Verbose Mode control as desktop.
+  - Session Chat makes agent activity easier to scan with grouped thinking, compact tool summaries, and optional Verbose Mode.
+  - Session Chat appearance settings now cover theme, custom font, and transcript width on desktop and Android.
   - Session Chat drafts can be stashed directly from the composer.
-  - Failed Session Chat sends restore the unsent message.
-  - Failed Session Chat sends now show a clear error.
-  - Accepted Session Chat sends clear the composer immediately so the next draft can be typed without waiting.
-  - Session Chat shows the working state immediately after a message is accepted.
-  - Session Chat only offers final-response copying after the agent has actually finished its turn.
-  - Session Chat keeps keyboard focus inside the composer on the desktop app.
-  - Select All stays inside the Session Chat composer on the desktop app.
-  - Empty Session Chat conversations keep the welcome state centered without shifting the composer.
-  - Grok Build chat sends no longer attempt an unsupported terminal-draft preservation step.
-  - Project collection expansion stays local to each window and device.
-  - Session group expansion stays local to each window and device.
+  - Failed Session Chat sends restore the unsent message and show a clear error.
+  - Accepted Session Chat sends clear the composer and show the working state immediately.
+  - Session Chat keeps keyboard focus and Select All inside the composer on the desktop app.
+  - Expansion for sidebar collections and session groups stays local to each window and device.
   - Sidebar item tooltips wait longer before appearing so they do not interrupt normal navigation.
-  - Toggle Chat View now defaults to the remappable `Alt+G` shortcut.
-  - Every customized hotkey can now be reset individually to its default binding.
-  - Codex sessions recover their conversation identity when the title arrives before process detection.
+  - Toggle Chat View now defaults to `Alt+G`, and customized hotkeys can be reset individually.
+  - Manually launched Codex sessions reconnect to the correct conversation when process detection is delayed.
   - macOS no longer lets Chromium clone the app bundle on every launch and leave gigabytes of temporary data behind.
   - On-demand component cleanup now removes obsolete versions and abandoned installation artifacts.
   - Source mode is disabled for remote projects where it cannot operate correctly.
-  - Renaming a project now focuses and selects the existing title without stealing sidebar scroll.
-  - One-shot automation timers keep their original absolute deadline across app and server restarts.
-  - One-shot automations disable themselves after their due run is queued.
-  - Automation schedule saves now use the exact timer value visible when Save was pressed.
-  - Automation schedule saves now use the exact date value visible when Save was pressed.
+  - One-shot automations preserve their deadline across restarts and disable themselves after the due run is queued.
 ]]></description>
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.8.0/ghostex-7.8.0-arm64.dmg" length="114778165" type="application/octet-stream" sparkle:edSignature="1H7Ut5fK8FrEoaJ/kJJwTJkCC8eLrg8VPVQZ0B4ceseqHj04jkSp19WHC1t90T5u4JI34ugX/VBq5ZQX+iSIAA=="/>
         </item>
