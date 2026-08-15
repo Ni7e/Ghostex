@@ -19895,16 +19895,33 @@ function createGpuiRemotePresentationSidebarGroups({
           machineName: machine.name,
           ...(project ? { projectId: project.projectId } : {}),
         },
-        sessions: group.sessions.map((session) => ({
-          ...session,
-          canPopOutPane:
-            session.sessionKind === "terminal" &&
-            Boolean(session.agentIcon) &&
-            session.isSleeping !== true &&
-            session.lifecycleState !== "sleeping",
-          canScheduleDelayedSend: session.sessionKind === "terminal",
-          canToggleCloseAfterDone: session.sessionKind === "terminal",
-        })),
+        sessions: group.sessions.map((session) => {
+          const remoteSession = parseGpuiRemotePresentationSessionId(session.sessionId);
+          return {
+            ...session,
+            canPopOutPane:
+              session.sessionKind === "terminal" &&
+              Boolean(session.agentIcon) &&
+              session.isSleeping !== true &&
+              session.lifecycleState !== "sleeping",
+            canScheduleDelayedSend: session.sessionKind === "terminal",
+            canToggleCloseAfterDone: session.sessionKind === "terminal",
+            /*
+            CDXC:GPUIRemoteVisibleFallback 2026-08-15:
+            Mirror the local-group override in createSidebarGroups: the shared
+            projection's first-row visible fallback must not survive into
+            remote groups. Whenever a remote project became active, it marked
+            the projection's index-0 session visible (fill highlight) on top of
+            the actually focused session. Remote visibility is owned by the
+            native workspace callback's visibleSessionIds, exactly like local
+            terminals.
+            */
+            isVisible:
+              group.isActive === true &&
+              remoteSession !== undefined &&
+              visibleRawSessionIds.has(remoteSession.sessionId),
+          };
+        }),
       };
     });
   });
