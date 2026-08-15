@@ -1,5 +1,16 @@
 # Changelog
 
+## 7.8.0 - 2026-08-15
+
+- Major
+  - Session Chat now offers conversation search, agent skill mentions, clearer thinking and tool activity, safer instant sending, and native model and effort controls across desktop, web, and Android.
+  - Remote projects can open terminals directly from Recent Projects, while Project Board commands use the connected environment's Beads workflow more naturally.
+  - Automations can run once at a chosen time or date, making lightweight scheduled follow-ups easier to create.
+- Minor
+  - Chat appearance, font, message width, verbose-mode, draft recovery, empty-session layout, and mobile presentation controls are more consistent across every active app.
+  - Sidebar expansion stays local to each window and device, session and project tooltips wait longer before appearing, and chat or session shortcuts are easier to customize.
+  - Codex session recovery, macOS startup and signing compatibility, remote terminal focus, and on-demand component cleanup are more dependable.
+
 ## 7.7.1 - 2026-08-13
 
 - Major
