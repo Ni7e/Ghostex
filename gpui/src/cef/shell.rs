@@ -15,6 +15,7 @@ use super::sidebar_bridge_manifest::{
     project_workarea_bridge_function_spec_for_process_message,
     sidebar_bridge_function_spec_for_js_function, sidebar_bridge_function_spec_for_process_message,
 };
+use crate::support_logs::{self, GpuiSupportLog};
 use anyhow::{Context as _, Result};
 use cef::rc::Rc as _;
 use cef::wrapper::resource_manager::{get_mime_type, get_url_without_query_or_fragment};
@@ -35,16 +36,17 @@ use cef::{
     PermissionPromptCallback, PermissionRequestResult, PermissionRequestTypes, PopupFeatures,
     ProcessId, ProcessMessage, RenderProcessHandler, Request, RequestHandler, ResourceHandler,
     ResourceReadCallback, ResourceRequestHandler, Response, ReturnValue, State, StreamReader, Task,
-    ThreadId, V8Handler, V8Propertyattribute, V8Value, ValueType, WindowInfo,
-    WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler, WrapClient, WrapContextMenuHandler,
-    WrapDisplayHandler, WrapFindHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
-    WrapPermissionHandler, WrapRenderProcessHandler, WrapRequestHandler, WrapResourceHandler,
-    WrapResourceRequestHandler, WrapTask, WrapV8Handler, ZoomCommand, post_task,
-    stream_reader_create_for_file, string_multimap_alloc, string_multimap_append, wrap_app,
-    wrap_browser_process_handler, wrap_client, wrap_context_menu_handler, wrap_display_handler,
-    wrap_find_handler, wrap_focus_handler, wrap_life_span_handler, wrap_load_handler,
-    wrap_permission_handler, wrap_render_process_handler, wrap_request_handler,
-    wrap_resource_handler, wrap_resource_request_handler, wrap_task, wrap_v8_handler,
+    TerminationStatus, ThreadId, UnresponsiveProcessCallback, V8Handler, V8Propertyattribute,
+    V8Value, ValueType, WindowInfo, WindowOpenDisposition, WrapApp, WrapBrowserProcessHandler,
+    WrapClient, WrapContextMenuHandler, WrapDisplayHandler, WrapFindHandler, WrapFocusHandler,
+    WrapLifeSpanHandler, WrapLoadHandler, WrapPermissionHandler, WrapRenderProcessHandler,
+    WrapRequestHandler, WrapResourceHandler, WrapResourceRequestHandler, WrapTask, WrapV8Handler,
+    ZoomCommand, post_task, stream_reader_create_for_file, string_multimap_alloc,
+    string_multimap_append, wrap_app, wrap_browser_process_handler, wrap_client,
+    wrap_context_menu_handler, wrap_display_handler, wrap_find_handler, wrap_focus_handler,
+    wrap_life_span_handler, wrap_load_handler, wrap_permission_handler,
+    wrap_render_process_handler, wrap_request_handler, wrap_resource_handler,
+    wrap_resource_request_handler, wrap_task, wrap_v8_handler,
 };
 #[cfg(target_os = "windows")]
 use cef::{
@@ -90,6 +92,7 @@ struct CefRuntimeState {
 
 static CEF_RUNTIME: OnceLock<Mutex<Option<CefRuntimeState>>> = OnceLock::new();
 static CEF_CONTEXT_INITIALIZED: AtomicBool = AtomicBool::new(false);
+static CEF_SHUTDOWN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 const SIDEBAR_PROJECT_CONTEXT_INSTALL_MESSAGE_NAME: &str =
     "ghostex.gpui.sidebar.installActiveProjectContextBridge";
 const SIDEBAR_RUNTIME_SETTINGS_UPDATE_MESSAGE_NAME: &str =
@@ -663,6 +666,7 @@ pub fn initialize(cx: &gpui::App) -> Result<()> {
     if state.is_some() {
         return Ok(());
     }
+    CEF_SHUTDOWN_IN_PROGRESS.store(false, Ordering::Release);
 
     let args = cef::args::Args::new();
     let platform_runtime = platform::load_cef_runtime()?;
@@ -922,11 +926,11 @@ wrap_focus_handler! {
 CDXC:GPUICefPaneZoomShortcutsWindows 2026-08-12:
 Windowed CEF owns keyboard focus in its Chromium child HWND on Windows, so
 GPUI's Ctrl+=, Ctrl+-, and Ctrl+0 bindings cannot observe those keystrokes.
-Install this handler only on Browser and main project-workarea clients (the
-same surfaces registered for macOS keyboard zoom) and consume the Windows
-primary-modifier chord through Chromium's browser-host zoom API. Sidebar,
-modal, titlebar, companion, and DevTools clients deliberately receive no
-handler. The macOS AppKit responder path remains unchanged.
+Install this handler only on Browser, main project-workarea, and Session Chat
+clients (the same surfaces registered for macOS keyboard zoom) and consume the
+Windows primary-modifier chord through Chromium's browser-host zoom API.
+Sidebar, modal, titlebar, companion, and DevTools clients deliberately receive
+no handler. The macOS AppKit responder path remains unchanged.
 */
 #[cfg(target_os = "windows")]
 wrap_keyboard_handler! {
@@ -1363,6 +1367,96 @@ wrap_resource_request_handler! {
             ))
         }
     }
+}
+
+wrap_request_handler! {
+    struct GhostexGpuiSidebarRendererRequestHandler;
+
+    impl RequestHandler {
+        fn on_render_view_ready(&self, browser: Option<&mut cef::Browser>) {
+            append_sidebar_renderer_lifecycle(
+                "gpui.sidebar.rendererReady",
+                browser,
+                serde_json::json!({}),
+            );
+        }
+
+        fn on_render_process_unresponsive(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            _callback: Option<&mut UnresponsiveProcessCallback>,
+        ) -> c_int {
+            append_sidebar_renderer_lifecycle(
+                "gpui.sidebar.rendererUnresponsive",
+                browser,
+                serde_json::json!({}),
+            );
+            0
+        }
+
+        fn on_render_process_responsive(&self, browser: Option<&mut cef::Browser>) {
+            append_sidebar_renderer_lifecycle(
+                "gpui.sidebar.rendererResponsive",
+                browser,
+                serde_json::json!({}),
+            );
+        }
+
+        fn on_render_process_terminated(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            status: TerminationStatus,
+            error_code: c_int,
+            error_string: Option<&CefString>,
+        ) {
+            append_sidebar_renderer_lifecycle(
+                "gpui.sidebar.rendererTerminated",
+                browser,
+                serde_json::json!({
+                    "cefCode": error_code,
+                    "cefText": error_string.map(CefString::to_string),
+                    "terminationKind": cef_termination_kind(status),
+                    "terminationRaw": status.get_raw(),
+                }),
+            );
+        }
+    }
+}
+
+fn cef_termination_kind(status: TerminationStatus) -> &'static str {
+    match status {
+        TerminationStatus::ABNORMAL_TERMINATION => "abnormalTermination",
+        TerminationStatus::PROCESS_WAS_KILLED => "processWasKilled",
+        TerminationStatus::PROCESS_CRASHED => "processCrashed",
+        TerminationStatus::PROCESS_OOM => "processOutOfMemory",
+        TerminationStatus::LAUNCH_FAILED => "launchFailed",
+        TerminationStatus::INTEGRITY_FAILURE => "integrityFailure",
+        _ => "unknown",
+    }
+}
+
+fn append_sidebar_renderer_lifecycle(
+    event: &str,
+    browser: Option<&mut cef::Browser>,
+    mut details: serde_json::Value,
+) {
+    if let Some(details) = details.as_object_mut() {
+        details.insert(
+            "browserId".to_string(),
+            browser
+                .map(|browser| serde_json::Value::from(browser.identifier()))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        details.insert(
+            "cefContextInitialized".to_string(),
+            serde_json::Value::Bool(CEF_CONTEXT_INITIALIZED.load(Ordering::Acquire)),
+        );
+        details.insert(
+            "runtimeShutdownStarted".to_string(),
+            serde_json::Value::Bool(CEF_SHUTDOWN_IN_PROGRESS.load(Ordering::Acquire)),
+        );
+    }
+    support_logs::append(GpuiSupportLog::SidebarRenderer, event, details);
 }
 
 wrap_request_handler! {
@@ -3229,7 +3323,7 @@ wrap_life_span_handler! {
             Browser-mode target=_blank and window.open requests must stay inside the GPUI Browser workspace. Intercept CEF popup creation through cef-rs LifeSpanHandler, forward only the requested target URL to the shell tab model, and return handled so Chromium does not create a separate native CEF window.
 
             CDXC:GPUIBrowserPopups 2026-06-23-11:43:
-            Match native macOS CEF popup policy: empty target URLs are handled here without dispatching a shell popup callback because there is no transferable URL/content and no fallback transfer/import path. Non-empty targets remain shell-owned Browser tab requests.
+            Match native macOS CEF popup policy: empty target URLs are handled here without dispatching a shell popup callback because there is no transferable URL/content and no fallback transfer path. Non-empty targets remain shell-owned Browser tab requests.
             */
             if let Some(no_javascript_access) = no_javascript_access {
                 *no_javascript_access = 1;
@@ -3487,9 +3581,11 @@ pub fn shutdown() {
     let mut state = state
         .lock()
         .expect("CEF runtime mutex should not be poisoned");
-    if state.take().is_none() {
+    if state.is_none() {
         return;
     }
+    CEF_SHUTDOWN_IN_PROGRESS.store(true, Ordering::Release);
+    state.take();
     CEF_REQUEST_CONTEXTS_BY_PROFILE.with(|contexts| {
         contexts.borrow_mut().clear();
     });
@@ -3606,8 +3702,9 @@ impl CefBrowser {
         app_modal_host_bridge_surface: Option<AppModalHostBridgeSurface>,
         app_modal_host_bridge_event_handler: Option<AppModalHostBridgeEventHandler>,
     ) -> Result<Self, String> {
-        let keyboard_zoom_enabled =
-            page_metadata_handler.is_some() || project_workarea_bridge_event_handler.is_some();
+        let keyboard_zoom_enabled = page_metadata_handler.is_some()
+            || project_workarea_bridge_event_handler.is_some()
+            || app_modal_host_bridge_surface == Some(AppModalHostBridgeSurface::SessionChat);
         /*
         CDXC:GPUICefBrowserCreateFallible 2026-07-11:
         CreateBrowserSync returns null when the per-profile request context's
@@ -3690,11 +3787,14 @@ impl CefBrowser {
         let manage_docs_resource_base_url = manage_docs_resource_scope
             .as_ref()
             .map(|scope| scope.base_url().to_string());
-        let request_handler = manage_docs_resource_scope
-            .as_ref()
-            .map(ManageDocsResourceScope::request_handler);
         let is_shared_sidebar_surface =
             sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some());
+        let request_handler = manage_docs_resource_scope
+            .as_ref()
+            .map(ManageDocsResourceScope::request_handler)
+            .or_else(|| {
+                is_shared_sidebar_surface.then(GhostexGpuiSidebarRendererRequestHandler::new)
+            });
         let load_handler =
             if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
                 Some(GhostexGpuiSidebarProjectContextLoadHandler::new(
@@ -4398,10 +4498,11 @@ impl CefEditCommand {
 /*
 CDXC:GPUICefPaneZoomShortcuts 2026-07-14:
 The AppKit CEF responder subclass forwards only the standard page-zoom
-commands for Browser and main project-workarea native views. The raw values
-are the narrow ABI contract with GpuiCefAppKitHooks.m. Sidebar, modal,
-titlebar, and companion CEF views are deliberately absent from the keyboard
-zoom registry even though they share the browser registry used by editing.
+commands for Browser, main project-workarea, and Session Chat native views.
+The raw values are the narrow ABI contract with GpuiCefAppKitHooks.m. Sidebar,
+modal, titlebar, and companion CEF views are deliberately absent from the
+keyboard zoom registry even though they share the browser registry used by
+editing.
 */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CefZoomCommand {

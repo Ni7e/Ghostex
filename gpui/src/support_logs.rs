@@ -32,6 +32,7 @@ const MAX_CRASH_MESSAGE_CHARS: usize = 1_000;
 pub enum GpuiSupportLog {
     HostLifecycle,
     RemoteGxserverInstall,
+    SidebarRenderer,
     SidebarRefresh,
     TerminalFocus,
     ProjectBoard,
@@ -45,6 +46,7 @@ impl GpuiSupportLog {
         match self {
             Self::HostLifecycle => "gpui-host-lifecycle.log",
             Self::RemoteGxserverInstall => "gpui-remote-gxserver-install-debug.log",
+            Self::SidebarRenderer => "gpui-sidebar-renderer-debug.jsonl",
             Self::SidebarRefresh => "gpui-sidebar-refresh-debug.log",
             Self::TerminalFocus => "gpui-terminal-focus-debug.log",
             Self::ProjectBoard => "gpui-project-board-debug.log",
@@ -60,6 +62,7 @@ impl GpuiSupportLog {
         match self {
             Self::HostLifecycle => Some(GpuiDiagnosticScenario::HostLifecycle),
             Self::RemoteGxserverInstall => Some(GpuiDiagnosticScenario::RemoteGxserverInstall),
+            Self::SidebarRenderer => Some(GpuiDiagnosticScenario::SidebarRenderer),
             Self::SidebarRefresh => Some(GpuiDiagnosticScenario::SidebarRefresh),
             Self::TerminalFocus => Some(GpuiDiagnosticScenario::TerminalFocus),
             Self::ProjectBoard => Some(GpuiDiagnosticScenario::ProjectBoard),
@@ -75,6 +78,7 @@ impl GpuiSupportLog {
 pub enum GpuiDiagnosticScenario {
     HostLifecycle,
     RemoteGxserverInstall,
+    SidebarRenderer,
     SidebarRefresh,
     TerminalFocus,
     ProjectBoard,
@@ -86,6 +90,7 @@ impl GpuiDiagnosticScenario {
         match self {
             Self::HostLifecycle => "native.host.lifecycle",
             Self::RemoteGxserverInstall => "native.remote.gxserver.install",
+            Self::SidebarRenderer => "gpui.sidebar.renderer",
             Self::SidebarRefresh => "native.sidebar.refresh",
             Self::TerminalFocus => "native.terminal.focus",
             Self::ProjectBoard => "native.project.board",
@@ -332,6 +337,7 @@ pub fn prune_gpui_support_logs() {
     for log in [
         GpuiSupportLog::HostLifecycle,
         GpuiSupportLog::RemoteGxserverInstall,
+        GpuiSupportLog::SidebarRenderer,
         GpuiSupportLog::SidebarRefresh,
         GpuiSupportLog::TerminalFocus,
         GpuiSupportLog::ProjectBoard,

@@ -48,6 +48,7 @@ int GhostexGpuiKeyboardRouteNativeEvent(
   const char* charactersIgnoringModifiers,
   const char* characters);
 int GhostexGpuiKeyboardOwnerUsesRendererEditHotkeys(void* gpuiRootView);
+int GhostexGpuiKeyboardOwnerIsSessionChat(void* gpuiRootView);
 int GhostexGpuiKeyboardOwnerUsesDocsEditorHotkeys(void* gpuiRootView);
 bool GhostexGpuiNativeViewContainsResponder(void* rootNativeView, void* responder);
 
@@ -250,6 +251,15 @@ static BOOL GhostexGpuiCEFRendererEditHotkeysOwnKeyboardInWindow(NSWindow* windo
     GhostexGpuiKeyboardOwnerUsesRendererEditHotkeys((__bridge void*)gpuiRootView) != 0;
 }
 
+static BOOL GhostexGpuiCEFSessionChatOwnsKeyboardInWindow(NSWindow* window) {
+  GhostexGpuiFirstResponderObserver* observer =
+    objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey);
+  NSView* gpuiRootView = observer.gpuiRootView;
+  return gpuiRootView &&
+    gpuiRootView.window == window &&
+    GhostexGpuiKeyboardOwnerIsSessionChat((__bridge void*)gpuiRootView) != 0;
+}
+
 static BOOL GhostexGpuiCEFDocsEditorHotkeysOwnKeyboardInWindow(NSWindow* window) {
   GhostexGpuiFirstResponderObserver* observer =
     objc_getAssociatedObject(window, GhostexGpuiFirstResponderObserverKey);
@@ -367,6 +377,31 @@ static BOOL GhostexGpuiCEFDocsEditorHotkeysOwnKeyboardInWindow(NSWindow* window)
           (uint64_t)event.modifierFlags,
           charactersIgnoringModifiers.UTF8String,
           characters.UTF8String) != 0) {
+      return;
+    }
+  }
+
+  /*
+   CDXC:GPUISessionChatEditHotkeys 2026-08-13:
+   The chat composer is a Monaco renderer editor, so its command chords must
+   reach Chromium as the original trusted key event. AppKit's Edit-menu key
+   equivalents and generic CEF select-all mirror are intentionally disabled
+   for renderer editors; deliver Cmd+A to the exact chat first responder
+   before key-equivalent traversal so it selects the composer model instead
+   of falling through to a stale GPUI terminal focus handle.
+   */
+  NSWindow* sessionChatShortcutWindow = event.window ?: NSApp.keyWindow;
+  if (event.type == NSEventTypeKeyDown &&
+      GhostexGpuiCEFSessionChatOwnsKeyboardInWindow(sessionChatShortcutWindow)) {
+    id responder = sessionChatShortcutWindow.firstResponder;
+    GhostexGpuiCEFZoomCommand zoomCommand = GhostexGpuiCEFZoomCommandForEvent(event);
+    if (zoomCommand != GhostexGpuiCEFZoomCommandNone &&
+        GhostexGpuiCEFHandleZoomCommandForResponder(responder, zoomCommand)) {
+      return;
+    }
+    if (GhostexGpuiCEFEventIsCommandA(event) &&
+        responder && [responder respondsToSelector:@selector(keyDown:)]) {
+      [responder keyDown:event];
       return;
     }
   }

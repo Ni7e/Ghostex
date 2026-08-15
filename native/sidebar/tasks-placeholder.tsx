@@ -231,6 +231,7 @@ type ProjectBoardIdleWindow = Window & {
 const BRIDGE_REQUEST_PREFIX = "__GHOSTEX_PROJECT_BEADS_REQUEST__";
 const BRIDGE_RESPONSE_EVENT = "ghostex-project-beads-response";
 const PROJECT_BOARD_RESPONSE_EVENT = "ghostex-project-board-response";
+const PROJECT_BOARD_COMMAND_COMPLETED_EVENT = "ghostex-project-board-command-completed";
 const PROJECT_BOARD_IMAGE_RESPONSE_EVENT = "ghostex-project-board-image-response";
 const PROJECT_BOARD_AUTO_REFRESH_INTERVAL_MS = 8_000;
 const PROJECT_BOARD_GENERATED_TITLE_DELAY_MS = 2_000;
@@ -321,6 +322,29 @@ type BoardRefreshOptions = {
   mode?: BoardRefreshMode;
 };
 
+type ProjectBoardCommandCompletedEventDetail = {
+  action?: string;
+  exitCode?: number;
+};
+
+type ProjectBoardRunnableCommandAction =
+  | "initializeBeads"
+  | "installOrUpdateBeads"
+  | "runBeadsMigration";
+
+type RunnableBeadsMigrationOption =
+  | "migrate"
+  | "adopt"
+  | "adopt-fast-forward"
+  | "reconcile-fork";
+
+function projectBoardCommandRunKey(
+  action: ProjectBoardRunnableCommandAction,
+  migrationOption?: RunnableBeadsMigrationOption,
+): string {
+  return migrationOption ? `${action}:${migrationOption}` : action;
+}
+
 type ProjectSurfaceTab = "triage" | "automations" | "runs" | "board";
 
 type TicketContextMenuState = {
@@ -346,6 +370,8 @@ const AUTOMATION_SCHEDULE_PRESETS = [
 ] as const;
 
 type AutomationSchedulePreset = (typeof AUTOMATION_SCHEDULE_PRESETS)[number]["value"];
+type AutomationScheduleMode = "repeat" | "timer" | "date";
+type AutomationTimerUnit = "minutes" | "hours" | "days";
 
 const AUTOMATION_INTERVAL_MS_BY_PRESET: Partial<Record<AutomationSchedulePreset, number>> = {
   "5m": 5 * 60 * 1000,
@@ -366,6 +392,12 @@ const AUTOMATION_WEEKDAY_OPTIONS = [
   "Saturday",
 ] as const;
 
+const AUTOMATION_TIMER_UNIT_OPTIONS: Array<{ label: string; value: AutomationTimerUnit }> = [
+  { label: "Minutes", value: "minutes" },
+  { label: "Hours", value: "hours" },
+  { label: "Days", value: "days" },
+];
+
 type AutomationDraft = {
   agentId: string;
   cronExpression: string;
@@ -376,9 +408,13 @@ type AutomationDraft = {
   name: string;
   prompt: string;
   projectId: string;
+  runAt: string;
+  scheduleMode: AutomationScheduleMode;
   schedulePreset: AutomationSchedulePreset;
   scheduleTime: string;
   setupCommand: string;
+  timerAmount: string;
+  timerUnit: AutomationTimerUnit;
   threadSessionId: string;
   weeklyDay: string;
 };
@@ -592,6 +628,7 @@ function ProjectBoardApp() {
   const pickedAgentIdByBeadIdRef = useRef(new Map<string, string>());
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [hasCompletedInitialBoardLoad, setHasCompletedInitialBoardLoad] = useState(false);
+  const [runningProjectBoardCommand, setRunningProjectBoardCommand] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -1173,6 +1210,65 @@ function ProjectBoardApp() {
       }
     }
   }, [displayKey, issuePrefix, runBeads]);
+
+  const runProjectBoardCommand = useCallback(async (
+    action: ProjectBoardRunnableCommandAction,
+    migrationOption?: RunnableBeadsMigrationOption,
+  ) => {
+    if (runningProjectBoardCommand) {
+      return;
+    }
+    const runKey = projectBoardCommandRunKey(action, migrationOption);
+    setRunningProjectBoardCommand(runKey);
+    try {
+      const response = await sendProjectBoardRequest({
+        action,
+        ...(migrationOption ? { migrationOption } : {}),
+        projectId,
+      });
+      if (!response.ok) {
+        throw new Error(response.error || "Could not start the Beads command.");
+      }
+    } catch (error) {
+      setRunningProjectBoardCommand("");
+      showProjectBoardToast(
+        "error",
+        "Could not run Beads command",
+        error instanceof Error ? error.message : "Could not start the Beads command.",
+      );
+    }
+  }, [projectId, runningProjectBoardCommand, showProjectBoardToast]);
+
+  const initializeBeads = useCallback(() => {
+    void runProjectBoardCommand("initializeBeads");
+  }, [runProjectBoardCommand]);
+
+  const installOrUpdateBeads = useCallback(() => {
+    void runProjectBoardCommand("installOrUpdateBeads");
+  }, [runProjectBoardCommand]);
+
+  const runBeadsMigration = useCallback((migrationOption: RunnableBeadsMigrationOption) => {
+    void runProjectBoardCommand("runBeadsMigration", migrationOption);
+  }, [runProjectBoardCommand]);
+
+  useEffect(() => {
+    const handleCommandCompleted = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectBoardCommandCompletedEventDetail>).detail;
+      if (
+        detail?.action !== "initializeBeads" &&
+        detail?.action !== "installOrUpdateBeads" &&
+        detail?.action !== "runBeadsMigration"
+      ) {
+        return;
+      }
+      setRunningProjectBoardCommand("");
+      void loadTickets({ mode: "manual" });
+    };
+    window.addEventListener(PROJECT_BOARD_COMMAND_COMPLETED_EVENT, handleCommandCompleted);
+    return () => {
+      window.removeEventListener(PROJECT_BOARD_COMMAND_COMPLETED_EVENT, handleCommandCompleted);
+    };
+  }, [loadTickets]);
 
   useEffect(() => {
     if (activeSurfaceTab === "board" || (experimentalFeaturesEnabled && !isAutomationGlobalScope)) {
@@ -2389,6 +2485,10 @@ function ProjectBoardApp() {
       })),
     [],
   );
+  const automationTimerUnitSelectItems = useMemo(
+    () => AUTOMATION_TIMER_UNIT_OPTIONS,
+    [],
+  );
   const automationSessionSelectItems = useMemo(
     () =>
       automationConversationState.sessions.map((session) => ({
@@ -2764,7 +2864,16 @@ function ProjectBoardApp() {
 
       {activeSurfaceTab === "board" ? (
         <>
-          {errorMessage ? <ProjectBoardNotice message={errorMessage} /> : null}
+          {errorMessage ? (
+            <ProjectBoardNotice
+              canRunBeadsCommands={!remoteMachineId}
+              message={errorMessage}
+              onInstallOrUpdateBeads={installOrUpdateBeads}
+              onInitializeBeads={initializeBeads}
+              onRunBeadsMigration={runBeadsMigration}
+              runningCommand={runningProjectBoardCommand}
+            />
+          ) : null}
           <div className="project-board-board-region">
             <DragDropProvider onDragEnd={handleDragEnd}>
               {/*
@@ -2849,7 +2958,14 @@ function ProjectBoardApp() {
           ) : null}
         </>
       ) : errorMessage ? (
-        <ProjectBoardNotice message={errorMessage} />
+        <ProjectBoardNotice
+          canRunBeadsCommands={!remoteMachineId}
+          message={errorMessage}
+          onInstallOrUpdateBeads={installOrUpdateBeads}
+          onInitializeBeads={initializeBeads}
+          onRunBeadsMigration={runBeadsMigration}
+          runningCommand={runningProjectBoardCommand}
+        />
       ) : null}
         </>
       )}
@@ -2860,7 +2976,7 @@ function ProjectBoardApp() {
           <DialogHeader>
             <DialogTitle>{automationDraft.id ? "Edit automation" : "Create automation"}</DialogTitle>
             <DialogDescription>
-              {isAutomationGlobalScope ? "Schedule recurring agent work for a selected project." : `Schedule recurring agent work for ${projectName}.`}
+              {isAutomationGlobalScope ? "Schedule agent work once or repeatedly for a selected project." : `Schedule agent work once or repeatedly for ${projectName}.`}
             </DialogDescription>
           </DialogHeader>
           <div className="project-ticket-dialog-body project-automation-form vertical-scroll-fade-mask">
@@ -2937,89 +3053,174 @@ function ProjectBoardApp() {
                   </SelectContent>
                 </Select>
               </label>
-              <label>
-                <span>Schedule</span>
-                <Select
-                  items={automationScheduleSelectItems}
-                  onValueChange={(value) =>
-                    setAutomationDraft((current) => ({
-                      ...current,
-                      schedulePreset: value as AutomationDraft["schedulePreset"],
-                    }))
-                  }
-                  value={automationDraft.schedulePreset}
-                >
-                  <SelectTrigger className="project-automation-select">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AUTOMATION_SCHEDULE_PRESETS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              {automationDraft.schedulePreset === "weekly" ? (
-                <label>
-                  <span>Day</span>
-                  <Select
-                    items={automationWeekdaySelectItems}
-                    onValueChange={(value) =>
-                      setAutomationDraft((current) => ({ ...current, weeklyDay: value }))
-                    }
-                    value={automationDraft.weeklyDay}
-                  >
-                    <SelectTrigger className="project-automation-select">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {AUTOMATION_WEEKDAY_OPTIONS.map((day, index) => (
-                        <SelectItem key={day} value={String(index)}>
-                          {day}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-              ) : null}
-              {automationDraft.schedulePreset === "daily" ||
-              automationDraft.schedulePreset === "weekly" ||
-              automationDraft.schedulePreset === "weekdays" ? (
-                <label>
-                  <span>Time</span>
-                  <Input
-                    className="project-automation-select"
-                    onChange={(event) => {
-                      const scheduleTime = event.currentTarget.value;
+            </div>
+            <div className="project-automation-form-section">
+              <div className="project-automation-form-section-title">Timing</div>
+              <div className="project-automation-segmented" role="group" aria-label="Schedule type">
+                {[
+                  ["repeat", "Repeat"],
+                  ["timer", "Timer"],
+                  ["date", "Date"],
+                ].map(([value, label]) => (
+                  <button
+                    data-active={automationDraft.scheduleMode === value}
+                    key={value}
+                    onClick={() =>
                       setAutomationDraft((current) => ({
                         ...current,
-                        scheduleTime,
+                        scheduleMode: value as AutomationScheduleMode,
+                      }))
+                    }
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {automationDraft.scheduleMode === "repeat" ? (
+                <div className="project-automation-form-grid">
+                  <label>
+                    <span>Repeat</span>
+                    <Select
+                      items={automationScheduleSelectItems}
+                      onValueChange={(value) =>
+                        setAutomationDraft((current) => ({
+                          ...current,
+                          schedulePreset: value as AutomationDraft["schedulePreset"],
+                        }))
+                      }
+                      value={automationDraft.schedulePreset}
+                    >
+                      <SelectTrigger className="project-automation-select">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {AUTOMATION_SCHEDULE_PRESETS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  {automationDraft.schedulePreset === "weekly" ? (
+                    <label>
+                      <span>Day</span>
+                      <Select
+                        items={automationWeekdaySelectItems}
+                        onValueChange={(value) =>
+                          setAutomationDraft((current) => ({ ...current, weeklyDay: value }))
+                        }
+                        value={automationDraft.weeklyDay}
+                      >
+                        <SelectTrigger className="project-automation-select">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {AUTOMATION_WEEKDAY_OPTIONS.map((day, index) => (
+                            <SelectItem key={day} value={String(index)}>
+                              {day}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </label>
+                  ) : null}
+                  {automationDraft.schedulePreset === "daily" ||
+                  automationDraft.schedulePreset === "weekly" ||
+                  automationDraft.schedulePreset === "weekdays" ? (
+                    <label>
+                      <span>Time</span>
+                      <Input
+                        className="project-automation-select"
+                        onChange={(event) => {
+                          const scheduleTime = event.currentTarget.value;
+                          setAutomationDraft((current) => ({
+                            ...current,
+                            scheduleTime,
+                          }));
+                        }}
+                        type="time"
+                        value={automationDraft.scheduleTime}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              ) : automationDraft.scheduleMode === "timer" ? (
+                <div className="project-automation-form-grid">
+                  <label>
+                    <span>Run in</span>
+                    <Input
+                      className="project-automation-select"
+                      min="1"
+                      onChange={(event) =>
+                        setAutomationDraft((current) => ({
+                          ...current,
+                          timerAmount: event.currentTarget.value,
+                        }))
+                      }
+                      step="1"
+                      type="number"
+                      value={automationDraft.timerAmount}
+                    />
+                  </label>
+                  <label>
+                    <span>Unit</span>
+                    <Select
+                      items={automationTimerUnitSelectItems}
+                      onValueChange={(value) =>
+                        setAutomationDraft((current) => ({
+                          ...current,
+                          timerUnit: value as AutomationTimerUnit,
+                        }))
+                      }
+                      value={automationDraft.timerUnit}
+                    >
+                      <SelectTrigger className="project-automation-select">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {AUTOMATION_TIMER_UNIT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                </div>
+              ) : (
+                <label className="project-automation-field-full">
+                  <span>Run on</span>
+                  <Input
+                    onChange={(event) =>
+                      setAutomationDraft((current) => ({
+                        ...current,
+                        runAt: event.currentTarget.value,
+                      }))
+                    }
+                    type="datetime-local"
+                    value={automationDraft.runAt}
+                  />
+                </label>
+              )}
+              {automationDraft.scheduleMode === "repeat" && automationDraft.schedulePreset === "cron" ? (
+                <label className="project-automation-field-full">
+                  <span>Cron</span>
+                  <Input
+                    onChange={(event) => {
+                      const cronExpression = event.currentTarget.value;
+                      setAutomationDraft((current) => ({
+                        ...current,
+                        cronExpression,
                       }));
                     }}
-                    type="time"
-                    value={automationDraft.scheduleTime}
+                    placeholder="*/15 * * * *"
+                    value={automationDraft.cronExpression}
                   />
                 </label>
               ) : null}
             </div>
-            {automationDraft.schedulePreset === "cron" ? (
-              <label className="project-automation-field-full">
-                <span>Cron</span>
-                <Input
-                  onChange={(event) => {
-                    const cronExpression = event.currentTarget.value;
-                    setAutomationDraft((current) => ({
-                      ...current,
-                      cronExpression,
-                    }));
-                  }}
-                  placeholder="*/15 * * * *"
-                  value={automationDraft.cronExpression}
-                />
-              </label>
-            ) : null}
             <div className="project-automation-form-section">
               <div className="project-automation-form-section-title">Execution</div>
             <div className="project-automation-segmented" role="group" aria-label="Execution mode">
@@ -4569,7 +4770,7 @@ function AutomationDefinitionList({
     return (
       <AutomationEmptyState
         action={{ label: "Create automation", onClick: onCreate }}
-        description="Schedule agents to run recurring checks, reviews, or maintenance for this project."
+        description="Schedule agents with a timer, a specific date, or a repeating cadence."
         icon={IconCalendarTime}
         title="No automations yet"
       />
@@ -5208,13 +5409,48 @@ function currentBeadsMigrationDocsUrl(url: string | undefined): string | undefin
   return url?.replace("/website/docs/getting-started/upgrading.md", "/docs/getting-started/upgrading.md");
 }
 
-function RemoteMigrateGateNotice({ gate }: { gate: RemoteMigrateGate }) {
+function runnableBeadsMigrationOption(id: string): RunnableBeadsMigrationOption | undefined {
+  return id === "migrate" ||
+    id === "adopt" ||
+    id === "adopt-fast-forward" ||
+    id === "reconcile-fork"
+    ? id
+    : undefined;
+}
+
+function beadsMigrationOptionLabel(id: string): string {
+  switch (id) {
+    case "migrate":
+      return "Migrate this clone";
+    case "adopt":
+      return "Adopt the remote";
+    case "adopt-fast-forward":
+      return "Adopt the remote (lossless)";
+    case "reconcile-fork":
+      return "Back up and adopt the canonical remote";
+    default:
+      return id;
+  }
+}
+
+function RemoteMigrateGateNotice({
+  canRunBeadsCommands,
+  gate,
+  onRunBeadsMigration,
+  runningCommand,
+}: {
+  canRunBeadsCommands: boolean;
+  gate: RemoteMigrateGate;
+  onRunBeadsMigration: (option: RunnableBeadsMigrationOption) => void;
+  runningCommand: string;
+}) {
+  const [confirmingOption, setConfirmingOption] = useState<RemoteMigrateGateOption>();
   const docsUrl = currentBeadsMigrationDocsUrl(gate.docs);
   const versionSummary =
     gate.currentVersion !== undefined && gate.latestVersion !== undefined
       ? `Schema v${gate.currentVersion} → v${gate.latestVersion}${gate.pending ? ` (${gate.pending} pending)` : ""}`
       : "A schema migration is pending.";
-  const explanation = gate.decision === "adopt"
+  const explanation = gate.decision === "adopt" || gate.decision === "adopt-ff"
     ? "The remote is already migrated. This clone must adopt that result; migrating it independently would fork the board schema."
     : gate.decision === "fork-skew"
       ? "This clone and its remote have already applied different migration content. Choose a canonical clone before replacing any local database."
@@ -5224,13 +5460,24 @@ function RemoteMigrateGateNotice({ gate }: { gate: RemoteMigrateGate }) {
     : gate.fallbackReason === "below-convergence-floor"
       ? "This database predates Beads' merge-safe migration floor, so unattended migration is unsafe."
       : "";
+  const confirmingOptionId = confirmingOption
+    ? runnableBeadsMigrationOption(confirmingOption.id)
+    : undefined;
+  const confirmationText = confirmingOptionId === "migrate"
+    ? "Confirm that this is the one designated clone allowed to migrate and publish. Running this on another clone can fork the shared board schema unrecoverably."
+    : confirmingOptionId === "adopt-fast-forward"
+      ? "Beads reports that this clone can adopt the migrated remote without losing local work. Confirm before replacing the local database."
+      : confirmingOptionId === "reconcile-fork"
+        ? "This first exports a backup, then replaces this clone's database from the canonical remote. Confirm that the canonical clone has already been chosen."
+        : "Adopting re-clones and replaces this local database. Confirm that needed local work has been pushed or exported first.";
   return (
-    <Card className="project-board-notice" data-kind="migration" role="alert" size="sm">
-      <CardContent>
-        <div className="project-board-notice-icon" aria-hidden="true">
-          <IconAlertTriangle />
-        </div>
-        <div className="project-board-notice-body">
+    <>
+      <Card className="project-board-notice" data-kind="migration" role="alert" size="sm">
+        <CardContent>
+          <div className="project-board-notice-icon" aria-hidden="true">
+            <IconAlertTriangle />
+          </div>
+          <div className="project-board-notice-body">
           <strong>Project board migration needs coordination</strong>
           <p>{versionSummary}</p>
           <p>First install or update to the latest Beads release on every clone, then follow one coordinated migration path below.</p>
@@ -5239,7 +5486,12 @@ function RemoteMigrateGateNotice({ gate }: { gate: RemoteMigrateGate }) {
           <div className="project-board-migration-options">
             {gate.options.map((option) => {
               const commands = option.commands;
-              const label = option.id === "migrate" ? "Migrate this clone" : option.id === "adopt" ? "Adopt the remote" : option.id;
+              const label = beadsMigrationOptionLabel(option.id);
+              const runnableOption = runnableBeadsMigrationOption(option.id);
+              const runKey = runnableOption
+                ? projectBoardCommandRunKey("runBeadsMigration", runnableOption)
+                : "";
+              const isRunning = runKey === runningCommand;
               return (
                 <div className="project-board-migration-option" key={option.id}>
                   <strong>{label}</strong>
@@ -5256,6 +5508,23 @@ function RemoteMigrateGateNotice({ gate }: { gate: RemoteMigrateGate }) {
                     >
                       <IconCopy />
                     </Button>
+                    {canRunBeadsCommands && runnableOption ? (
+                      <Button
+                        className="project-board-notice-run-button"
+                        disabled={Boolean(runningCommand)}
+                        onClick={() => setConfirmingOption(option)}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        {isRunning ? (
+                          <IconLoader2 className="animate-spin" />
+                        ) : (
+                          <IconPlayerPlay />
+                        )}
+                        Run in Terminal
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -5264,16 +5533,77 @@ function RemoteMigrateGateNotice({ gate }: { gate: RemoteMigrateGate }) {
           {docsUrl ? (
             <a href={docsUrl} rel="noreferrer" target="_blank">Read the Beads multi-clone migration guide</a>
           ) : null}
-        </div>
-      </CardContent>
-    </Card>
+          </div>
+        </CardContent>
+      </Card>
+      <Dialog
+        open={Boolean(confirmingOptionId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmingOption(undefined);
+          }
+        }}
+      >
+        <DialogContent className="project-ticket-dialog">
+          <DialogHeader>
+            <DialogTitle>Confirm {confirmingOption ? beadsMigrationOptionLabel(confirmingOption.id) : "Beads command"}</DialogTitle>
+            <DialogDescription>{confirmationText}</DialogDescription>
+          </DialogHeader>
+          {confirmingOption ? (
+            <div className="project-board-notice-command project-board-confirm-command">
+              <code>{confirmingOption.commands.join(" && ")}</code>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button onClick={() => setConfirmingOption(undefined)} type="button" variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={!confirmingOptionId || Boolean(runningCommand)}
+              onClick={() => {
+                if (!confirmingOptionId) {
+                  return;
+                }
+                onRunBeadsMigration(confirmingOptionId);
+                setConfirmingOption(undefined);
+              }}
+              type="button"
+            >
+              <IconPlayerPlay />
+              Confirm and Run in Terminal
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-function ProjectBoardNotice({ message }: { message: string }) {
+function ProjectBoardNotice({
+  canRunBeadsCommands,
+  message,
+  onInstallOrUpdateBeads,
+  onInitializeBeads,
+  onRunBeadsMigration,
+  runningCommand,
+}: {
+  canRunBeadsCommands: boolean;
+  message: string;
+  onInstallOrUpdateBeads: () => void;
+  onInitializeBeads: () => void;
+  onRunBeadsMigration: (option: RunnableBeadsMigrationOption) => void;
+  runningCommand: string;
+}) {
   const remoteMigrateGate = parseRemoteMigrateGate(message);
   if (remoteMigrateGate) {
-    return <RemoteMigrateGateNotice gate={remoteMigrateGate} />;
+    return (
+      <RemoteMigrateGateNotice
+        canRunBeadsCommands={canRunBeadsCommands}
+        gate={remoteMigrateGate}
+        onRunBeadsMigration={onRunBeadsMigration}
+        runningCommand={runningCommand}
+      />
+    );
   }
   /*
    * CDXC:ProjectBoardBeadsSchema 2026-08-08:
@@ -5303,7 +5633,7 @@ function ProjectBoardNotice({ message }: { message: string }) {
       ]
     : isMissingProject
       ? [
-          "This project does not have a Beads workspace yet. Run this once from the project root, then refresh the board.",
+          "This project does not have a Beads workspace yet. Run this once from the project root; Ghostex will refresh the board when it finishes.",
         ]
       : [message, "Update Beads to the latest release, then retry. If this is a remote-backed migration, follow the coordinated migration instructions instead of migrating multiple clones independently."];
   return (
@@ -5317,14 +5647,17 @@ function ProjectBoardNotice({ message }: { message: string }) {
         {/*
           CDXC:ProjectBoard 2026-05-28-15:27:
           Initialization is a normal first-run state for Beads-backed projects, not an app failure.
-          Present bd init as an explanatory setup callout with a copyable command so users understand what needs to happen before the board can load tickets.
+          Present bd init as an explanatory setup callout with a direct Run action so users can initialize the project in a visible command pane before the board reloads.
 
           CDXC:ProjectBoard 2026-05-29-15:49:
           Missing-Beads setup should use the same polished notice shell but stay intentionally terse: one header and two lines below.
-          Explain why Beads is required without adding a second control row.
+          Explain why Beads is required and keep copy/run controls in the single command row.
 
           CDXC:ProjectBoardSystemBeads 2026-08-12:
           Project/Kanban and shell agents intentionally use the same machine-installed `bd`. Missing and command-failure notices therefore direct the operator to install or update Beads instead of repairing Ghostex app resources.
+
+          CDXC:ProjectBoardBeadsCommands 2026-08-14:
+          Local setup and update commands run visibly in the active project's command pane. The renderer sends only a fixed action selector; Rust owns the command literal and completion refresh.
         */}
         <div className="project-board-notice-icon" aria-hidden="true">
           <IconAlertTriangle />
@@ -5337,15 +5670,52 @@ function ProjectBoardNotice({ message }: { message: string }) {
           {command ? (
             <div className="project-board-notice-command">
               <code>{command}</code>
-              <Button
-                aria-label={`Copy ${command}`}
-                onClick={() => void navigator.clipboard.writeText(command)}
-                size="icon-sm"
-                type="button"
-                variant="ghost"
-              >
-                <IconCopy />
-              </Button>
+              {isMissingProject && canRunBeadsCommands ? (
+                <Button
+                  className="project-board-notice-run-button"
+                  disabled={Boolean(runningCommand)}
+                  onClick={onInitializeBeads}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  {runningCommand === "initializeBeads" ? (
+                    <IconLoader2 className="animate-spin" />
+                  ) : (
+                    <IconPlayerPlay />
+                  )}
+                  Run in Terminal
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    aria-label={`Copy ${command}`}
+                    onClick={() => void navigator.clipboard.writeText(command)}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <IconCopy />
+                  </Button>
+                  {!isMissingProject && canRunBeadsCommands ? (
+                    <Button
+                      className="project-board-notice-run-button"
+                      disabled={Boolean(runningCommand)}
+                      onClick={onInstallOrUpdateBeads}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {runningCommand === "installOrUpdateBeads" ? (
+                        <IconLoader2 className="animate-spin" />
+                      ) : (
+                        <IconPlayerPlay />
+                      )}
+                      Run in Terminal
+                    </Button>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : null}
           {isMissingBeads || !isMissingProject ? (
@@ -5377,9 +5747,13 @@ function createAutomationDraft(input: Partial<AutomationDraft> = {}): Automation
     name: input.name ?? "",
     prompt: input.prompt ?? "",
     projectId: input.projectId ?? "",
+    runAt: input.runAt ?? "",
+    scheduleMode: input.scheduleMode ?? "repeat",
     schedulePreset: input.schedulePreset ?? "15m",
     scheduleTime: input.scheduleTime ?? "09:00",
     setupCommand: input.setupCommand ?? "",
+    timerAmount: input.timerAmount ?? "30",
+    timerUnit: input.timerUnit ?? "minutes",
     threadSessionId: input.threadSessionId ?? "",
     weeklyDay: input.weeklyDay ?? "1",
   };
@@ -5426,6 +5800,12 @@ function createAutomationDraftFromDefinition(
 ): AutomationDraft {
   const schedulePreset = resolveAutomationSchedulePreset(definition.schedule);
   const schedule = definition.schedule;
+  if (schedule.kind === "once") {
+    return createAutomationDraftFromDefinitionSchedule(definition, schedulePreset, projectId, {
+      runAt: toDatetimeLocalValue(schedule.runAt),
+      scheduleMode: "date",
+    });
+  }
   if (schedule.kind === "weekly") {
     return createAutomationDraftFromDefinitionSchedule(definition, schedulePreset, projectId, {
       scheduleTime: schedule.time,
@@ -5446,6 +5826,9 @@ function createAutomationDraftFromDefinition(
 }
 
 function resolveAutomationSchedulePreset(schedule: AutomationSchedule): AutomationSchedulePreset {
+  if (schedule.kind === "once") {
+    return "15m";
+  }
   if (schedule.kind === "interval") {
     const matchedPreset = Object.entries(AUTOMATION_INTERVAL_MS_BY_PRESET).find(
       ([, everyMs]) => everyMs === schedule.everyMs,
@@ -5541,6 +5924,33 @@ function createAutomationDefinitionFromDraft(
 }
 
 function createAutomationScheduleFromDraft(draft: AutomationDraft): AutomationSchedule | undefined {
+  if (draft.scheduleMode === "timer") {
+    const amount = Number(draft.timerAmount);
+    const unitMs =
+      draft.timerUnit === "days"
+        ? 24 * 60 * 60 * 1000
+        : draft.timerUnit === "hours"
+          ? 60 * 60 * 1000
+          : 60 * 1000;
+    const delayMs = amount * unitMs;
+    if (
+      !Number.isFinite(delayMs) ||
+      delayMs < 60 * 1000 ||
+      delayMs > 365 * 24 * 60 * 60 * 1000
+    ) {
+      return undefined;
+    }
+    return normalizeAutomationSchedule({
+      kind: "once",
+      runAt: new Date(Date.now() + delayMs).toISOString(),
+    });
+  }
+  if (draft.scheduleMode === "date") {
+    return normalizeAutomationSchedule({
+      kind: "once",
+      runAt: datetimeLocalToIso(draft.runAt),
+    });
+  }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
   const intervalMs = AUTOMATION_INTERVAL_MS_BY_PRESET[draft.schedulePreset];
   const schedule =
@@ -5576,6 +5986,8 @@ function createAutomationScheduleFromDraft(draft: AutomationDraft): AutomationSc
 
 function describeAutomationSchedule(schedule: AutomationSchedule): string {
   switch (schedule.kind) {
+    case "once":
+      return `Once on ${new Date(schedule.runAt).toLocaleString()}`;
     case "interval": {
       const preset = Object.entries(AUTOMATION_INTERVAL_MS_BY_PRESET).find(
         ([, everyMs]) => everyMs === schedule.everyMs,
@@ -7696,6 +8108,26 @@ styleElement.textContent = `
 
   .project-board-notice-command button:hover {
     color: rgba(250, 250, 250, 0.92);
+  }
+
+  .project-board-notice-command .project-board-notice-run-button {
+    gap: 5px;
+    padding-inline: 7px;
+    width: auto;
+  }
+
+  .project-board-notice-command .project-board-notice-run-button svg {
+    height: 14px;
+    width: 14px;
+  }
+
+  .project-board-confirm-command {
+    max-width: 100%;
+  }
+
+  .project-board-confirm-command code {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .project-ticket-dialog {
