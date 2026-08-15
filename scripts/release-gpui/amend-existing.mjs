@@ -30,7 +30,6 @@ import {
   collectPublishProvenance,
   isNonProductArtifactDirectory,
   readPublishPlan,
-  renderBuildProvenanceNotes,
   renderReleaseProvenanceReport,
 } from "./publish-provenance.mjs";
 import {
@@ -328,12 +327,14 @@ const provenanceSha = sha256(provenanceAssetPath);
 
 const mutatedManifests = manifests.filter((manifest) => mutate.includes(manifest.platform));
 const notesPath = path.join(artifactsRoot, `amend-notes-${version}.md`);
+const releaseAssetNames = new Set((liveRelease.assets ?? []).map((asset) => asset.name));
+for (const manifest of mutatedManifests) {
+  for (const artifact of manifest.artifacts) releaseAssetNames.add(artifact.name);
+}
 const updatedBody = mergeReleaseNotes({
+  assetNames: [...releaseAssetNames],
   liveBody: liveRelease.body,
-  mutatedManifests,
-  provenanceAssetName: provenanceName,
-  provenanceNotes: renderBuildProvenanceNotes(mergedProvenance),
-  provenanceSha,
+  version,
 });
 writeFileSync(notesPath, updatedBody);
 

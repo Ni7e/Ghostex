@@ -4,7 +4,6 @@ import {
   artifactNamesForProduct,
   assertLiveDependencyAlignment,
   assertUnrelatedAssetsUnchanged,
-  checksumLine,
   companionProducts,
   mergeAmendProvenance,
   mergeReleaseNotes,
@@ -12,6 +11,7 @@ import {
   packDependencies,
   resolveAmendIntent,
 } from "./amend-existing-lib.mjs";
+import { customerDownloadUrl } from "./customer-downloads.mjs";
 import { releaseProvenanceAssetName } from "./provenance.mjs";
 
 const VERSION = "7.7.1";
@@ -162,27 +162,23 @@ describe("live gxserver alignment", () => {
 });
 
 describe("release notes merge", () => {
-  test("appends a Downloads section onto custom notes that never had one", () => {
+  test("appends customer download links without checksums or provenance", () => {
+    const installer = "ghostex-7.7.1-windows-x64.exe";
     const merged = mergeReleaseNotes({
+      assetNames: [installer],
       liveBody: "## 7.7.1 - 2026-08-13\n\n- Fixed chat view\n",
-      mutatedManifests: [
-        {
-          artifacts: [{ name: "ghostex-7.7.1-windows-x64.exe", sha256: "a".repeat(64) }],
-          platform: "windows-x64",
-        },
-      ],
-      provenanceAssetName: "release-provenance-7.7.1.json",
-      provenanceNotes: "## Build provenance\n\n| Product | Status |\n",
-      provenanceSha: "b".repeat(64),
+      version: VERSION,
     });
     expect(merged).toContain("## 7.7.1 - 2026-08-13");
-    expect(merged).toContain("## Downloads");
-    expect(merged).toContain(checksumLine("ghostex-7.7.1-windows-x64.exe", "a".repeat(64)));
-    expect(merged).toContain(checksumLine("release-provenance-7.7.1.json", "b".repeat(64)));
-    expect(merged).toContain("## Build provenance");
+    expect(merged).toContain("## Download Ghostex 7.7.1");
+    expect(merged).toContain(customerDownloadUrl(VERSION, installer));
+    expect(merged).not.toContain("SHA256");
+    expect(merged).not.toContain("Build provenance");
   });
 
-  test("replaces an existing platform checksum block without touching other platforms", () => {
+  test("replaces legacy checksum and provenance sections with customer links", () => {
+    const dmg = "ghostex-7.7.1-arm64.dmg";
+    const apk = "ghostex-android.apk";
     const liveBody = [
       "## 7.7.1",
       "",
@@ -190,28 +186,26 @@ describe("release notes merge", () => {
       "",
       "### macos-arm64",
       "",
-      checksumLine("ghostex-7.7.1-arm64.dmg", "c".repeat(64)),
+      `- \`${dmg}\` — SHA256 \`${"c".repeat(64)}\``,
       "",
       "### provenance",
       "",
-      checksumLine("release-provenance-7.7.1.json", "d".repeat(64)),
+      `- \`release-provenance-7.7.1.json\` — SHA256 \`${"d".repeat(64)}\``,
       "",
+      "## Build provenance",
+      "",
+      "| Product | Status |",
     ].join("\n");
     const merged = mergeReleaseNotes({
+      assetNames: [dmg, apk, "release-provenance-7.7.1.json"],
       liveBody,
-      mutatedManifests: [
-        {
-          artifacts: [{ name: "ghostex-android.apk", sha256: "e".repeat(64) }],
-          platform: "android",
-        },
-      ],
-      provenanceAssetName: "release-provenance-7.7.1.json",
-      provenanceSha: "f".repeat(64),
+      version: VERSION,
     });
-    expect(merged).toContain(checksumLine("ghostex-7.7.1-arm64.dmg", "c".repeat(64)));
-    expect(merged).toContain(checksumLine("ghostex-android.apk", "e".repeat(64)));
-    expect(merged).toContain(checksumLine("release-provenance-7.7.1.json", "f".repeat(64)));
-    expect(merged).not.toContain("d".repeat(64));
+    expect(merged).toContain(customerDownloadUrl(VERSION, dmg));
+    expect(merged).toContain(customerDownloadUrl(VERSION, apk));
+    expect(merged).not.toContain("SHA256");
+    expect(merged).not.toContain("Build provenance");
+    expect(merged).not.toContain("release-provenance-7.7.1.json");
   });
 });
 

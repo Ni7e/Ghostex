@@ -4,6 +4,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  customerDownloadUrl,
+  mergeCustomerDownloadNotes,
+} from "./customer-downloads.mjs";
 
 const [version, artifactDirectory] = process.argv.slice(2);
 if (!/^\d+\.\d+\.\d+$/u.test(version ?? "")) {
@@ -81,14 +85,10 @@ const nonAndroidDigests = new Map(
     .map((asset) => [asset.name, asset.digest]),
 );
 
-const checksumLine = /- `ghostex-android\.apk` — SHA256 `[0-9a-f]{64}`/gu;
-const checksumMatches = release.body.match(checksumLine) ?? [];
-if (checksumMatches.length !== 1) {
-  throw new Error(`Release notes contain ${checksumMatches.length} Android checksum lines; expected exactly one`);
-}
-const updatedBody = release.body.replace(
-  checksumLine,
-  `- \`${apkName}\` — SHA256 \`${actualSha}\``,
+const updatedBody = mergeCustomerDownloadNotes(
+  release.body,
+  version,
+  release.assets.map((asset) => asset.name),
 );
 
 const currentSha =
@@ -130,8 +130,8 @@ const verifiedApk = verified.assets.find((asset) => asset.name === apkName);
 if (verifiedApk?.digest !== `sha256:${actualSha}`) {
   throw new Error(`Live Android digest is ${verifiedApk?.digest ?? "missing"}; expected sha256:${actualSha}`);
 }
-if (!verified.body.includes(`- \`${apkName}\` — SHA256 \`${actualSha}\``)) {
-  throw new Error("Live release notes do not contain the replacement Android digest");
+if (!verified.body.includes(customerDownloadUrl(version, apkName))) {
+  throw new Error("Live release notes do not contain the Android download link");
 }
 for (const [name, digest] of nonAndroidDigests) {
   const asset = verified.assets.find((candidate) => candidate.name === name);

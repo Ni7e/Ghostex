@@ -15,8 +15,8 @@ import { PRODUCT_IDS, productDefinition } from "./product-inputs.mjs";
 import {
   buildReleaseProvenanceRecord,
   compactPlanForRecord,
-  renderBuildProvenanceNotes,
 } from "./publish-provenance.mjs";
+import { mergeCustomerDownloadNotes } from "./customer-downloads.mjs";
 import { releaseProvenanceAssetName, validateReleaseProvenance } from "./provenance.mjs";
 
 export const AMEND_EXISTING_WORKFLOW_FILE = "release-amend-existing.yml";
@@ -186,87 +186,12 @@ export function assertLiveDependencyAlignment({ liveAssets, mutate, packedShaByN
   }
 }
 
-function replaceOrAppendSection(body, headingPattern, headingLine, contentLines) {
-  const block = [headingLine, "", ...contentLines, ""].join("\n");
-  if (headingPattern.test(body)) {
-    return body.replace(headingPattern, block.trimEnd());
-  }
-  return `${body.trimEnd()}\n\n${block}`;
-}
-
-function platformSectionPattern(platform) {
-  const escaped = platform.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return new RegExp(`### ${escaped}\\n\\n(?:- \`[^\`]+ \` — SHA256 \`[0-9a-f]{64}\`\\n)+`, "u");
-}
-
-export function checksumLine(name, sha256) {
-  return `- \`${name}\` — SHA256 \`${sha256}\``;
-}
-
 export function mergeReleaseNotes({
+  assetNames,
   liveBody,
-  mutatedManifests,
-  provenanceAssetName,
-  provenanceNotes,
-  provenanceSha,
+  version,
 }) {
-  let body = String(liveBody ?? "").replaceAll("\r\n", "\n").trimEnd();
-  if (!body) throw new Error("Existing release notes are empty");
-
-  const platformBlocks = [...mutatedManifests]
-    .sort((left, right) => left.platform.localeCompare(right.platform))
-    .map((manifest) => {
-      const lines = (manifest.artifacts ?? []).map((artifact) => checksumLine(artifact.name, artifact.sha256));
-      return { lines, platform: manifest.platform };
-    });
-
-  if (!/^## Downloads\s*$/mu.test(body)) {
-    const downloadLines = ["## Downloads", ""];
-    for (const block of platformBlocks) {
-      downloadLines.push(`### ${block.platform}`, "", ...block.lines, "");
-    }
-    downloadLines.push("### provenance", "", checksumLine(provenanceAssetName, provenanceSha), "");
-    body = `${body}\n\n${downloadLines.join("\n")}`;
-  } else {
-    for (const block of platformBlocks) {
-      const section = [`### ${block.platform}`, "", ...block.lines, ""].join("\n");
-      const pattern = platformSectionPattern(block.platform);
-      if (pattern.test(body)) body = body.replace(pattern, section);
-      else {
-        body = body.replace(
-          /(### provenance\n)/u,
-          `${section}\n$1`,
-        );
-        if (!body.includes(`### ${block.platform}\n`)) {
-          body = `${body.trimEnd()}\n\n${section}`;
-        }
-      }
-    }
-    const provenanceLine = checksumLine(provenanceAssetName, provenanceSha);
-    const provenancePattern = new RegExp(
-      `- \`${provenanceAssetName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\` — SHA256 \`[0-9a-f]{64}\``,
-      "u",
-    );
-    if (provenancePattern.test(body)) body = body.replace(provenancePattern, provenanceLine);
-    else {
-      body = replaceOrAppendSection(
-        body,
-        /### provenance\n\n(?:- `[^`]+` — SHA256 `[0-9a-f]{64}`\n)+/u,
-        "### provenance",
-        [provenanceLine],
-      );
-    }
-  }
-
-  if (provenanceNotes) {
-    body = replaceOrAppendSection(
-      body,
-      /## Build provenance\n[\s\S]*$/u,
-      "## Build provenance",
-      provenanceNotes.replace(/^## Build provenance\n\n/u, "").trimEnd().split("\n"),
-    );
-  }
-  return `${body.trimEnd()}\n`;
+  return mergeCustomerDownloadNotes(liveBody, version, assetNames);
 }
 
 export function mergeAmendProvenance({
@@ -345,4 +270,4 @@ export function githubOutputsForIntent(intent, { updateSparkle, version }) {
   };
 }
 
-export { SCOPE_FLAG_TO_PRODUCT, renderBuildProvenanceNotes, releaseProvenanceAssetName };
+export { SCOPE_FLAG_TO_PRODUCT, releaseProvenanceAssetName };
