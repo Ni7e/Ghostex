@@ -384,15 +384,14 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
      * CDXC:SessionChatView 2026-07-31:
      * Session Chat swaps the focused agent terminal's pane body with the shared
      * chat surface for supported transcript agents (claude/openclaude/codex/grok).
-     * Ctrl+Shift+J mirrors the other ctrl+shift terminal-session chords, and the
-     * same action id must always be able to toggle a chat-mode session back to
-     * its terminal.
+     * Alt+G keeps the chat toggle compact, and the same action id must always
+     * be able to toggle a chat-mode session back to its terminal.
      */
-    defaultKey: "ctrl+shift+j",
+    defaultKey: "alt+g",
     description: "Toggle between the terminal and chat view for the focused agent session.",
     id: "toggleChatView",
+    retiredDefaultKeys: ["ctrl+shift+j", "cmd+alt+j", "ctrl+shift+g", "cmd+alt+g"],
     title: "Toggle Chat View",
-    windowsLinuxDefaultKey: "cmd+alt+j",
   },
   {
     action: {

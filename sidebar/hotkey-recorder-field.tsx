@@ -15,6 +15,7 @@ export type HotkeyRecorderFieldProps = {
   hotkey: string;
   id?: string;
   onChange: (hotkey: string) => void;
+  originalHotkey: string;
 };
 
 export function HotkeyRecorderField({
@@ -23,9 +24,13 @@ export function HotkeyRecorderField({
   hotkey,
   id,
   onChange,
+  originalHotkey,
 }: HotkeyRecorderFieldProps) {
   const [isRecording, setIsRecording] = useState(false);
   const normalizedHotkey = normalizeHotkeyText(hotkey);
+  const normalizedOriginalHotkey = normalizeHotkeyText(originalHotkey);
+  const originalHotkeyLabel = formatSidebarHotkeyLabel(normalizedOriginalHotkey) || "Unassigned";
+  const isModified = normalizedHotkey !== normalizedOriginalHotkey;
   const label = isRecording
     ? "Press Shortcut"
     : formatSidebarHotkeyLabel(normalizedHotkey);
@@ -78,7 +83,10 @@ export function HotkeyRecorderField({
     >
       <Button
         aria-invalid={ariaInvalid}
-        className={cn("h-10 w-full justify-start px-3 pr-9 font-mono text-sm", className)}
+        className={cn(
+          "h-10 w-full justify-start overflow-hidden px-3 pr-9 font-mono text-sm",
+          className,
+        )}
         id={id}
         onClick={() => {
           setIsRecording((recording) => !recording);
@@ -86,30 +94,52 @@ export function HotkeyRecorderField({
         type="button"
         variant="outline"
       >
-        {label || "Unassigned"}
+        <span className="truncate">{label || "Unassigned"}</span>
       </Button>
-      {normalizedHotkey ? (
-        <AppTooltip content="Remove hotkey">
-          <Button
-            aria-label="Remove hotkey"
-            className="pointer-events-none absolute top-1/2 right-1.5 z-10 size-7 -translate-y-1/2 rounded-none border border-border bg-background/95 p-0 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-muted hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/hotkey-recorder:pointer-events-auto group-hover/hotkey-recorder:opacity-100"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setIsRecording(false);
-              onChange("");
-            }}
-            size="icon-xs"
-            type="button"
-            variant="outline"
-          >
-            {/* CDXC:Hotkeys 2026-05-11-09:06
-                The remove affordance is a real button inside the hotkey field,
-                revealed only when that field is hovered or focused so hotkey rows
-                stay quiet until the user targets a specific binding. */}
-            <IconX aria-hidden="true" className="size-4" />
-          </Button>
-        </AppTooltip>
+      {isModified || normalizedHotkey ? (
+        <div className="pointer-events-none absolute top-1/2 right-1.5 z-10 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-focus-within/hotkey-recorder:pointer-events-auto group-focus-within/hotkey-recorder:opacity-100 group-hover/hotkey-recorder:pointer-events-auto group-hover/hotkey-recorder:opacity-100">
+          {isModified ? (
+            <AppTooltip content={`Reset to ${originalHotkeyLabel}`}>
+              <Button
+                aria-label={`Reset hotkey to ${originalHotkeyLabel}`}
+                className="h-7 rounded-none border border-border bg-background/95 px-2 font-mono text-xs text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setIsRecording(false);
+                  onChange(normalizedOriginalHotkey);
+                }}
+                type="button"
+                variant="outline"
+              >
+                {originalHotkeyLabel}
+              </Button>
+            </AppTooltip>
+          ) : null}
+          {normalizedHotkey ? (
+            <AppTooltip content="Remove hotkey">
+              <Button
+                aria-label="Remove hotkey"
+                className="size-7 rounded-none border border-border bg-background/95 p-0 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setIsRecording(false);
+                  onChange("");
+                }}
+                size="icon-xs"
+                type="button"
+                variant="outline"
+              >
+                {/* CDXC:Hotkeys 2026-05-11-09:06
+                    The remove affordance is a real button inside the hotkey field,
+                    revealed only when that field is hovered or focused so hotkey rows
+                    stay quiet until the user targets a specific binding. */}
+                <IconX aria-hidden="true" className="size-4" />
+              </Button>
+            </AppTooltip>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
