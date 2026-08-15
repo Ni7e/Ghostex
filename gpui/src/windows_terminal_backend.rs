@@ -249,9 +249,8 @@ printf '%s\n' \
         let mut skill_paths = Vec::with_capacity(skill_names.len());
         for skill_name in skill_names {
             let installed = parse_status_flag(lines.next())?;
-            skill_paths.push(installed.then(|| {
-                format!("{home}/.agents/skills/{skill_name}/SKILL.md")
-            }));
+            skill_paths
+                .push(installed.then(|| format!("{home}/.agents/skills/{skill_name}/SKILL.md")));
         }
         if lines.next().is_some() {
             return Err("WSL returned an invalid Ghostex CLI status response.".to_string());
