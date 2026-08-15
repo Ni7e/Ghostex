@@ -2,6 +2,7 @@ import { CronExpressionParser } from "cron-parser";
 import type { SidebarAgentIcon } from "./sidebar-agents";
 
 export type AutomationSchedule =
+  | { kind: "once"; runAt: string }
   | { kind: "interval"; everyMs: number }
   | { kind: "daily"; time: string; timezone: string }
   | { kind: "weekly"; days: number[]; time: string; timezone: string }
@@ -171,6 +172,10 @@ export function normalizeAutomationSchedule(candidate: unknown): AutomationSched
     return undefined;
   }
   switch (candidate.kind) {
+    case "once": {
+      const runAt = normalizeDateString(candidate.runAt);
+      return runAt ? { kind: "once", runAt } : undefined;
+    }
     case "interval": {
       const everyMs = normalizeIntervalMs(candidate.everyMs);
       return everyMs ? { kind: "interval", everyMs } : undefined;
@@ -306,6 +311,12 @@ export function computeNextRunAt(
     return undefined;
   }
   switch (schedule.kind) {
+    case "once": {
+      const runAtMs = Date.parse(schedule.runAt);
+      return Number.isFinite(runAtMs) && runAtMs > afterMs
+        ? new Date(runAtMs).toISOString()
+        : undefined;
+    }
     case "interval":
       return new Date(afterMs + schedule.everyMs).toISOString();
     case "daily":
