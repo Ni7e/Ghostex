@@ -16,6 +16,13 @@ const repoFile = (relativePath) => readFileSync(new URL(`../${relativePath}`, im
 const workflow = (name) => repoFile(`.github/workflows/${name}`);
 const temporaryRoots = [];
 
+function runGit(root, ...args) {
+  const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || `git ${args.join(' ')} failed`);
+  }
+}
+
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
 });
@@ -35,6 +42,11 @@ async function createCodeServerIdentityFixture() {
   const readinessSource = path.join(root, 'src/node/routes/health.ts');
   await mkdir(path.dirname(readinessSource), { recursive: true });
   await writeFile(readinessSource, 'export const promptEditorIpcReady = false;\n');
+  runGit(root, 'init', '--quiet');
+  runGit(root, 'config', 'user.email', 'release-test@ghostex.local');
+  runGit(root, 'config', 'user.name', 'Ghostex Release Test');
+  runGit(root, 'add', '.');
+  runGit(root, 'commit', '--quiet', '-m', 'fixture');
   return { readinessSource, root };
 }
 
@@ -44,6 +56,8 @@ describe('immutable code-server component identity', () => {
     const sourceRevision = '6b4cfff155c0';
     const before = await codeServerComponentIdentity({ codeServerRoot: fixture.root, sourceRevision });
     await writeFile(fixture.readinessSource, 'export const promptEditorIpcReady = true;\n');
+    runGit(fixture.root, 'add', '.');
+    runGit(fixture.root, 'commit', '--quiet', '-m', 'update readiness');
     const after = await codeServerComponentIdentity({ codeServerRoot: fixture.root, sourceRevision });
 
     expect(before.componentVersion).toMatch(/^6b4cfff155c0-p2-[0-9a-f]{64}$/);
