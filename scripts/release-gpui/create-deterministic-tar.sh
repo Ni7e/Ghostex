@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The release plan is orchestration metadata and is not needed while packaging.
+# On Git for Windows it can be large enough that `find -exec` cannot create a
+# child process after inheriting the environment (Windows error 206).
+unset GHOSTEX_RELEASE_PLAN
+
 SOURCE="${1:-}"
 OUTPUT="${2:-}"
 PLATFORM_MODE="${3:-}"
