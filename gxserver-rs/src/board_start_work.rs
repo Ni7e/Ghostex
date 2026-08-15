@@ -794,12 +794,16 @@ mod tests {
         project_id: String,
     }
 
+    #[cfg(unix)]
     fn make_executable(path: &std::path::Path) {
         use std::os::unix::fs::PermissionsExt;
         let mut permissions = fs::metadata(path).expect("bd metadata").permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions).expect("bd permissions");
     }
+
+    #[cfg(not(unix))]
+    fn make_executable(_path: &std::path::Path) {}
 
     /// A board fixture: gxserver storage in a tempdir (explicit home, no HOME
     /// override), one project whose beadsDirectory holds a fake `.beads`

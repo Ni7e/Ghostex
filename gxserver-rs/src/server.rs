@@ -1410,6 +1410,7 @@ fn web_bootstrap_origin_matches(headers: &HeaderMap, base_url: &str) -> bool {
     }
 }
 
+#[cfg(unix)]
 fn local_machine_label() -> std::result::Result<String, String> {
     let mut buffer = [0_u8; 256];
     let status = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
@@ -1426,6 +1427,23 @@ fn local_machine_label() -> std::result::Result<String, String> {
         return Err("The local machine hostname is empty.".to_string());
     }
     Ok(hostname.to_string())
+}
+
+#[cfg(windows)]
+fn local_machine_label() -> std::result::Result<String, String> {
+    use windows_sys::Win32::System::WindowsProgramming::GetComputerNameW;
+
+    let mut buffer = [0_u16; 256];
+    let mut length = buffer.len() as u32;
+    if unsafe { GetComputerNameW(buffer.as_mut_ptr(), &mut length) } == 0 {
+        return Err("Failed to read the local machine hostname.".to_string());
+    }
+    let hostname = String::from_utf16(&buffer[..length as usize])
+        .map_err(|_| "The local machine hostname is not valid UTF-16.".to_string())?;
+    if hostname.is_empty() {
+        return Err("The local machine hostname is empty.".to_string());
+    }
+    Ok(hostname)
 }
 
 async fn serve_web_static(config: &GxserverConfig, request_path: &str) -> RoutedResponse {

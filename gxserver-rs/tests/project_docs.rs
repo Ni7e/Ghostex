@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::{fs, os::unix::fs::symlink, path::Path};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
