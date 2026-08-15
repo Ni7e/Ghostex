@@ -421,10 +421,14 @@ export function sessionChatCommandMarkersAsMessages(
 ): SessionChatMessage[] {
   return markers.flatMap((marker) => {
     const commandName = marker.command.trim().toLowerCase().split(/\s+/, 1)[0];
-    if (commandName === "/model" || commandName === "/effort") {
-      // Claude records authoritative command/output turns for both settings.
+    if (
+      commandName === "/model" ||
+      commandName === "/effort" ||
+      commandName === "/compact"
+    ) {
+      // Claude records authoritative command/output turns for these actions.
       // Rendering an optimistic marker too produces the duplicate "Ran /…"
-      // rows that the model-setting status presentation consolidates.
+      // rows that the completed-action status presentation consolidates.
       return [];
     }
     return [

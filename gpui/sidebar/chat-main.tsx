@@ -6,6 +6,7 @@ import {
   resolveSessionChatTranscriptAgent,
   type GxserverReadSessionChatImageResult,
   type GxserverReadSessionChatResult,
+  type GxserverReadSessionChatSkillsResult,
   type GxserverSaveSessionChatAttachmentResult,
   type GxserverSaveSessionChatImageResult,
   type GxserverSessionChatEvent,
@@ -50,6 +51,7 @@ declare global {
     ghostexSetSessionChatFontFamily?: (fontFamily: unknown) => void;
     ghostexSetSessionChatTheme?: (theme: unknown) => void;
     ghostexSetSessionChatTranscriptWidthPercent?: (widthPercent: unknown) => void;
+    ghostexSetSessionChatVerboseMode?: (verboseMode: unknown) => void;
   }
 }
 
@@ -184,6 +186,13 @@ function createGpuiSessionChatTransport(
         ...(params.limit !== undefined ? { limit: params.limit } : {}),
         ...(params.beforeOffset !== undefined ? { beforeOffset: params.beforeOffset } : {}),
       });
+    },
+    readSkills() {
+      return rpc<GxserverReadSessionChatSkillsResult>(
+        bootstrap,
+        "/api/readSessionChatSkills",
+        { projectId, sessionId },
+      );
     },
     async send(text, imagePaths) {
       await rpc(bootstrap, "/api/sendSessionChatMessage", {
@@ -562,6 +571,7 @@ let chatTranscriptWidthPercent = clampSessionChatTranscriptWidthPercent(
   Number(searchParams.get("transcriptWidthPercent")) ||
     DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
 );
+let chatVerboseMode = searchParams.get("verboseMode") === "true";
 let renderReadyChat: ((theme: SessionChatTheme) => void) | null = null;
 
 function applyDocumentChatTheme(theme: SessionChatTheme): void {
@@ -604,6 +614,10 @@ window.ghostexSetSessionChatTranscriptWidthPercent = (value) => {
   chatTranscriptWidthPercent = clampSessionChatTranscriptWidthPercent(Number(value));
   applyDocumentChatTranscriptWidthPercent(chatTranscriptWidthPercent);
 };
+window.ghostexSetSessionChatVerboseMode = (value) => {
+  chatVerboseMode = value === true;
+  renderReadyChat?.(chatTheme);
+};
 
 if (!projectId || !sessionId) {
   renderFailure(root, "This chat surface was opened without a session identity.", chatTheme);
@@ -638,6 +652,7 @@ if (!projectId || !sessionId) {
               sessionKey={`${projectId}:${sessionId}`}
               theme={theme}
               transport={transport}
+              verboseMode={chatVerboseMode}
             />
           </div>,
         );

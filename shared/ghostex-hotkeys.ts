@@ -358,7 +358,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
       kind: "terminalToolbarAction",
       terminalToolbarAction: "stashedPrompts",
     },
-    defaultKey: "",
+    defaultKey: "alt+shift+s",
     description: "Open stashed prompts for the focused agent session.",
     id: "stashedPrompts",
     title: "Stashed Prompts",
@@ -437,13 +437,10 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
       id: "sleepFocusedSession",
       kind: "focusedPaneAction",
     },
-    /**
-     * CDXC:FocusedSessionActions 2026-06-19-15:43:
-     * Option+Shift+S is the default Sleep Focused Session shortcut. Store it in the shared model so Settings, command-palette display, sidebar DOM dispatch, and terminal-focused AppKit dispatch all resolve the same focused session action.
-     */
-    defaultKey: "alt+shift+s",
+    defaultKey: "",
     description: "Sleep the focused terminal session.",
     id: "sleepFocusedSession",
+    retiredDefaultKeys: ["alt+shift+s"],
     title: "Sleep Focused Session",
   },
   {

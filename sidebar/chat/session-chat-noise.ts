@@ -31,7 +31,7 @@ const MARKUP_TAG = /<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?>/gi;
  */
 const ANSI_STYLE_SEQUENCE = /(?:\u001b|\u009b)?\[[0-9;]{1,8}m/g;
 const COMPACTION_OUTPUT =
-  /^compact(?:ed|ing|ion)\b(?:\s+(?:is\s+)?(?:complete[d]?|done|finished|successful(?:ly)?))?\s*[.!…]*$/i;
+  /^compact(?:ed|ing|ion)\b(?:\s+(?:is\s+)?(?:complete[d]?|done|finished|successful(?:ly)?))?(?:\s*\([^)]*\))?\s*[.!…]*$/i;
 const MODEL_DEFAULT_OUTPUT =
   /^set model to\s+(.+?)\s+and saved as your default for new sessions\s*[.!…]*$/i;
 const EFFORT_DEFAULT_OUTPUT = /^set effort level to\s+\S+/i;
@@ -171,6 +171,10 @@ export function classifySessionChatSuppressedTurn(
     return null;
   }
   const text = sessionChatMessageText(message);
+  if (text.trim().toLowerCase() === "/compact") {
+    // The authoritative completion row below is the one visible record.
+    return { kind: "hidden" };
+  }
   const label = harnessInjectedTurnLabel(text);
   if (label === null) {
     return null;
@@ -180,13 +184,14 @@ export function classifySessionChatSuppressedTurn(
     return { kind: "hidden" };
   }
   if (label === "Local command output" && isCompactionCommandOutput(text)) {
-    return { kind: "collapsed", label: "Compaction completed" };
+    return { kind: "status", label: "Compaction completed" };
   }
   const command = parseSessionChatCommandEnvelope(text);
   if (
     label === "Slash command" &&
     (command?.name.toLowerCase() === "/model" ||
-      command?.name.toLowerCase() === "/effort")
+      command?.name.toLowerCase() === "/effort" ||
+      command?.name.toLowerCase() === "/compact")
   ) {
     // The local-command output owns the one user-facing result row.
     return { kind: "hidden" };

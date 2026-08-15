@@ -99,6 +99,20 @@ describe("noise filter (§9.1)", () => {
   });
 
   test("special command markers use their meaningful result", () => {
+    expect(
+      sessionChatSuppressedTurnPresentation(
+        textMsg("compact-input", "user", "/compact"),
+      ),
+    ).toBeNull();
+    expect(
+      sessionChatSuppressedTurnPresentation(
+        textMsg(
+          "compact-command",
+          "user",
+          "<command-name>/compact</command-name><command-message>compact</command-message><command-args></command-args>",
+        ),
+      ),
+    ).toBeNull();
     // Verbatim shape from a real transcript: dim-SGR-wrapped "Compacted".
     expect(
       sessionChatSuppressedTurnLabel(
@@ -111,10 +125,19 @@ describe("noise filter (§9.1)", () => {
     ).toBe("Compaction completed");
     // Lenient: ESC bytes lost in encoding, different wording, trailing period.
     expect(
-      sessionChatSuppressedTurnLabel(
+      sessionChatSuppressedTurnPresentation(
         textMsg("2", "user", "<local-command-stdout>[2mCompaction complete.[22m</local-command-stdout>"),
       ),
-    ).toBe("Compaction completed");
+    ).toMatchObject({ kind: "status", label: "Compaction completed" });
+    expect(
+      sessionChatSuppressedTurnPresentation(
+        textMsg(
+          "compact-output-with-hint",
+          "user",
+          "<local-command-stdout>[2mCompacted (ctrl+o to see full summary) [22m</local-command-stdout>",
+        ),
+      ),
+    ).toMatchObject({ kind: "status", label: "Compaction completed" });
     const modelCommand = textMsg(
       "model-command",
       "user",

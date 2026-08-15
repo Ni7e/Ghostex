@@ -152,8 +152,9 @@ describe("/clear boundary (§10.3)", () => {
         { command: "/model sonnet", id: "model", sentAt: 100 },
         { command: "/effort xhigh", id: "effort", sentAt: 200 },
         { command: "/compact", id: "compact", sentAt: 300 },
+        { command: "/clear", id: "clear", sentAt: 400 },
       ]).map((message) => message.blocks),
-    ).toEqual([[{ text: "Ran /compact", type: "text" }]]);
+    ).toEqual([[{ text: "Ran /clear", type: "text" }]]);
   });
 
   test("only /clear (first token) counts as a clear command", () => {

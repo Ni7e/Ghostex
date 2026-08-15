@@ -212,15 +212,35 @@ export interface GxserverReadSessionChatResult {
   error?: string;
 }
 
+export type SessionChatSkillSourceKind = "global" | "pluginCache" | "repository";
+
+export interface SessionChatSkill {
+  /** Display/mention name, matching the skill folder shown by Agents Hub. */
+  name: string;
+  /** Absolute skill folder path on the machine that owns this session. */
+  directoryPath: string;
+  /** Absolute SKILL.md path on the machine that owns this session. */
+  skillFilePath: string;
+  sourceKind: SessionChatSkillSourceKind;
+}
+
+export interface GxserverReadSessionChatSkillsResult {
+  /** gxserver-resolved agent identity; clients do not choose the provider. */
+  agentId: string;
+  generatedAt: string;
+  skills: SessionChatSkill[];
+}
+
 // ---------------------------------------------------------------------------
 // /api/sendSessionChatMessage · /api/answerSessionChatPrompt · /api/interruptSessionChat
 // ---------------------------------------------------------------------------
 
 /**
  * Raw keystrokes the chat surface can inject into the agent TUI that are not
- * expressible as text. `shift-tab` is Claude Code's permission-mode cycle.
+ * expressible as text. `shift-tab` is Claude Code's permission-mode cycle;
+ * shifted arrows adjust Codex reasoning effort.
  */
-export type SessionChatSendKey = "shift-tab";
+export type SessionChatSendKey = "shift-tab" | "shift-up" | "shift-down";
 
 export interface GxserverSendSessionChatMessageParams {
   projectId: string;

@@ -39,6 +39,12 @@ export type SessionChatOptionDispatch =
   | { kind: "toggle-command"; command: string }
   /** Types a command that opens the agent's own picker, then shows the terminal. */
   | { kind: "agent-picker"; command: string }
+  /** Steps through a bounded TUI setting using shifted arrow keys. */
+  | {
+      kind: "bounded-key-steps";
+      decreaseKey: SessionChatSendKey;
+      increaseKey: SessionChatSendKey;
+    }
   /** Writes a raw keystroke sequence (no text, no Enter). */
   | { kind: "key"; key: SessionChatSendKey; marker: string };
 
@@ -142,8 +148,6 @@ const CODEX_EFFORTS: readonly SessionChatOptionChoice[] = [
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
   { value: "xhigh", label: "Extra high" },
-  { value: "max", label: "Max" },
-  { value: "auto", label: "Auto" },
 ];
 
 export function codexEffortChoices(
@@ -152,24 +156,25 @@ export function codexEffortChoices(
   return CODEX_EFFORTS;
 }
 
-/*
-Codex accepts model and reasoning-effort values as slash-command arguments.
-Send those commands through the normal chat transport so choosing an option
-does not leave the chat view.
-*/
+/* Codex owns model selection in its interactive terminal picker. */
 const CODEX_MODEL: SessionChatOptionDescriptor = {
   id: "model",
   label: "Model",
   category: "model",
   choices: CODEX_MODELS,
-  dispatch: { kind: "command", build: (value) => `/model ${value}` },
+  actionLabel: "Open the CLI's model picker",
+  dispatch: { kind: "agent-picker", command: "/model" },
 };
 
 const CODEX_EFFORT: SessionChatOptionDescriptor = {
   id: "effort",
   label: "Reasoning effort",
   category: "thought_level",
-  dispatch: { kind: "command", build: (value) => `/effort ${value}` },
+  dispatch: {
+    kind: "bounded-key-steps",
+    decreaseKey: "shift-down",
+    increaseKey: "shift-up",
+  },
 };
 
 const CODEX_MODE: SessionChatOptionDescriptor = {
@@ -320,10 +325,49 @@ export function sessionChatOptionTracksValue(
   descriptor: SessionChatOptionDescriptor,
 ): boolean {
   return (
-    descriptor.dispatch.kind === "command" &&
+    (descriptor.dispatch.kind === "command" ||
+      descriptor.dispatch.kind === "bounded-key-steps") &&
     descriptor.choices !== undefined &&
     descriptor.choices.length > 0
   );
+}
+
+/**
+ * Exact key sequence for a bounded ordered setting. With a known current
+ * value, send only the delta. Without one, first saturate at the nearer edge
+ * and then step inward, so the requested value is deterministic.
+ */
+export function sessionChatBoundedKeySteps(
+  choices: readonly SessionChatOptionChoice[],
+  currentValue: string | undefined,
+  targetValue: string,
+  decreaseKey: SessionChatSendKey,
+  increaseKey: SessionChatSendKey,
+): SessionChatSendKey[] {
+  const targetIndex = choices.findIndex((choice) => choice.value === targetValue);
+  if (targetIndex < 0 || choices.length < 2) {
+    return [];
+  }
+  const currentIndex = choices.findIndex((choice) => choice.value === currentValue);
+  if (currentIndex >= 0) {
+    const delta = targetIndex - currentIndex;
+    return Array.from(
+      { length: Math.abs(delta) },
+      () => (delta > 0 ? increaseKey : decreaseKey),
+    );
+  }
+  const lastIndex = choices.length - 1;
+  const fromLowerEdge = lastIndex + targetIndex;
+  const fromUpperEdge = lastIndex + (lastIndex - targetIndex);
+  return fromLowerEdge <= fromUpperEdge
+    ? [
+        ...Array.from({ length: lastIndex }, () => decreaseKey),
+        ...Array.from({ length: targetIndex }, () => increaseKey),
+      ]
+    : [
+        ...Array.from({ length: lastIndex }, () => increaseKey),
+        ...Array.from({ length: lastIndex - targetIndex }, () => decreaseKey),
+      ];
 }
 
 export function seedSessionChatOptionState(

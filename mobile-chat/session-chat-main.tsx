@@ -6,6 +6,7 @@ import {
   resolveSessionChatTranscriptAgent,
   type GxserverReadSessionChatImageResult,
   type GxserverReadSessionChatResult,
+  type GxserverReadSessionChatSkillsResult,
   type GxserverSaveSessionChatAttachmentResult,
   type GxserverSaveSessionChatImageResult,
   type GxserverSessionChatSnapshotEvent,
@@ -30,17 +31,18 @@ all chat behavior lives in shared code.
 
 Bridge contract (mirrored by mobile/src/chat/session-chat-bridge.ts):
 - page → RN: window.ReactNativeWebView.postMessage(JSON.stringify(
-    { id, op: "read" | "send" | "answerPrompt" | "interrupt" | "saveImage"
-        | "saveAttachment" | "loadImage",
+    { id, op: "read" | "readSkills" | "send" | "sendKey"
+        | "switchToTerminalForAgentPicker" | "answerPrompt" | "interrupt"
+        | "saveImage" | "saveAttachment" | "loadImage",
       params }))
 - RN → page: window.ghostexMobileChatDeliver({ id, ok, result?, error? })
 - RN config (injected before content loads):
   window.__ghostexMobileChatConfig = {
-    agentId?, theme?, fontFamily?, transcriptWidthPercent?
+    agentId?, sessionKey?, theme?, fontFamily?, transcriptWidthPercent?, verboseMode?
   }
 - RN presentation updates (pushed when mobile settings change):
   window.ghostexMobileChatSetPresentation({
-    theme?, fontFamily?, transcriptWidthPercent?
+    theme?, fontFamily?, transcriptWidthPercent?, verboseMode?
   })
 - RN host state (pushed on every change, may arrive before or after mount):
   window.ghostexMobileChatSetHostState({ working?, canSend? })
@@ -49,14 +51,17 @@ Bridge contract (mirrored by mobile/src/chat/session-chat-bridge.ts):
 interface MobileChatConfig {
   agentId?: string;
   fontFamily?: string;
+  sessionKey?: string;
   theme?: SessionChatTheme;
   transcriptWidthPercent?: number;
+  verboseMode?: boolean;
 }
 
 interface MobileChatPresentation {
   fontFamily: string;
   theme: SessionChatTheme;
   transcriptWidthPercent: number;
+  verboseMode: boolean;
 }
 
 interface BridgeResponse {
@@ -79,7 +84,10 @@ interface MobileChatHostState {
 
 type BridgeOp =
   | "read"
+  | "readSkills"
   | "send"
+  | "sendKey"
+  | "switchToTerminalForAgentPicker"
   | "answerPrompt"
   | "interrupt"
   | "saveImage"
@@ -156,6 +164,7 @@ let presentationState: MobileChatPresentation = {
   fontFamily: "",
   theme: "dark",
   transcriptWidthPercent: DEFAULT_TRANSCRIPT_WIDTH_PERCENT,
+  verboseMode: false,
 };
 const presentationListeners = new Set<() => void>();
 
@@ -201,11 +210,16 @@ window.ghostexMobileChatSetPresentation = (state) => {
       typeof state?.transcriptWidthPercent === "number"
         ? clampTranscriptWidthPercent(state.transcriptWidthPercent)
         : presentationState.transcriptWidthPercent,
+    verboseMode:
+      typeof state?.verboseMode === "boolean"
+        ? state.verboseMode
+        : presentationState.verboseMode,
   };
   if (
     next.fontFamily === presentationState.fontFamily &&
     next.theme === presentationState.theme &&
-    next.transcriptWidthPercent === presentationState.transcriptWidthPercent
+    next.transcriptWidthPercent === presentationState.transcriptWidthPercent &&
+    next.verboseMode === presentationState.verboseMode
   ) {
     return;
   }
@@ -306,6 +320,9 @@ function createMobileSessionChatTransport(): SessionChatTransport {
         ...(params.beforeOffset !== undefined ? { beforeOffset: params.beforeOffset } : {}),
       });
     },
+    readSkills() {
+      return bridgeCall<GxserverReadSessionChatSkillsResult>("readSkills");
+    },
     /*
     Composer image paste. gxserver's saveSessionChatImage endpoint has no CLI
     verb (base64 bytes would blow past ARG_MAX on the SSH command line), so RN
@@ -340,6 +357,9 @@ function createMobileSessionChatTransport(): SessionChatTransport {
         text,
         ...(imagePaths && imagePaths.length > 0 ? { imagePaths } : {}),
       });
+    },
+    async sendKey(key) {
+      await bridgeCall("sendKey", { key });
     },
     subscribe({ currentLimit, onEvent }) {
       let stopped = false;
@@ -413,9 +433,11 @@ document.body.classList.add("vscode-dark", "native-sidebar-body");
 
 function MobileSessionChat({
   agentLabel,
+  sessionKey,
   transport,
 }: {
   agentLabel: string | null;
+  sessionKey: string | undefined;
   transport: SessionChatTransport;
 }) {
   const { canSend, working } = useSyncExternalStore(
@@ -423,7 +445,7 @@ function MobileSessionChat({
     readHostState,
     readHostState,
   );
-  const { theme } = useSyncExternalStore(
+  const { theme, verboseMode } = useSyncExternalStore(
     subscribePresentation,
     readPresentation,
     readPresentation,
@@ -434,8 +456,14 @@ function MobileSessionChat({
         agentLabel={agentLabel}
         canSend={canSend}
         className="gpui-session-chat-view"
+        onSwitchToTerminalForAgentPicker={() => {
+          void bridgeCall("switchToTerminalForAgentPicker");
+        }}
+        sessionKey={sessionKey}
+        showSearchButton
         theme={theme}
         transport={transport}
+        verboseMode={verboseMode}
         working={working}
       />
     </div>
@@ -446,14 +474,17 @@ const root = createRoot(rootElement);
 void waitForConfig().then((config) => {
   const agentId = config.agentId?.trim() ?? "";
   const agentLabel = agentId ? resolveSessionChatTranscriptAgent(agentId) ?? agentId : null;
+  const sessionKey = config.sessionKey?.trim() || undefined;
   window.ghostexMobileChatSetPresentation?.({
     fontFamily: config.fontFamily,
     theme: normalizeSessionChatTheme(config.theme),
     transcriptWidthPercent: config.transcriptWidthPercent,
+    verboseMode: config.verboseMode,
   });
   root.render(
     <MobileSessionChat
       agentLabel={agentLabel}
+      sessionKey={sessionKey}
       transport={createMobileSessionChatTransport()}
     />,
   );

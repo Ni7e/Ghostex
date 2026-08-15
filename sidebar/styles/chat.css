@@ -27,12 +27,113 @@
 
 .ghostex-session-chat-scope [data-slot="message-scroller-content"] {
   width: calc(var(--ghostex-session-chat-transcript-width-percent, 75) * 1%);
-  max-width: calc(100% - 80px);
+  max-width: calc(100% - 60px);
 }
 
-@media (max-width: 499px) {
+::highlight(ghostex-chat-search-match) {
+  background-color: color-mix(in srgb, var(--ring) 40%, transparent);
+  color: inherit;
+}
+
+::highlight(ghostex-chat-search-active) {
+  background-color: color-mix(in srgb, var(--primary) 70%, transparent);
+  color: var(--primary-foreground);
+}
+
+/* Mirror gpui's native terminal find chrome exactly. The chat transcript is a
+   CEF document, so it cannot instantiate the Rust GPUI element directly; this
+   row keeps the same normal-layout dimensions, colors, type, and controls. */
+.ghostex-chat-terminal-search-row {
+  align-items: center;
+  background: #000;
+  border-bottom: 1px solid #202020;
+  display: flex;
+  flex: 0 0 35px;
+  height: 35px;
+  justify-content: flex-end;
+  padding-left: 8px;
+  width: 100%;
+}
+
+.ghostex-chat-terminal-search-bar {
+  align-items: center;
+  background: #000;
+  border-left: 1px solid #252525;
+  display: flex;
+  flex: 0 1 300px;
+  gap: 4px;
+  height: 100%;
+  max-width: 100%;
+  padding-left: 9px;
+  width: 300px;
+}
+
+.ghostex-chat-terminal-search-input {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: rgba(255, 255, 255, 0.937);
+  flex: 1 1 auto;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  height: 100%;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+}
+
+.ghostex-chat-terminal-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.56);
+  opacity: 1;
+}
+
+.ghostex-chat-terminal-search-count {
+  color: rgba(255, 255, 255, 0.72);
+  flex: 0 0 auto;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ghostex-chat-terminal-search-actions {
+  align-items: stretch;
+  display: flex;
+  flex: 0 0 auto;
+  height: 100%;
+}
+
+.ghostex-chat-terminal-search-button {
+  align-items: center;
+  appearance: none;
+  background: #000;
+  border: 0;
+  border-left: 1px solid #252525;
+  color: #cfcfcf;
+  cursor: default;
+  display: flex;
+  flex: 0 0 42px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  height: 100%;
+  justify-content: center;
+  line-height: 20px;
+  padding: 0;
+  width: 42px;
+}
+
+.ghostex-chat-terminal-search-button:last-child {
+  flex-basis: 41px;
+  width: 41px;
+}
+
+.ghostex-chat-terminal-search-button:hover {
+  background: #343434;
+}
+
+@media (max-width: 700px) {
   .ghostex-session-chat-scope [data-slot="message-scroller-content"] {
-    max-width: calc(100% - 40px);
+    max-width: calc(100% - 20px);
   }
 }
 
@@ -129,16 +230,20 @@ body[data-session-chat-theme="dark"] .ghostex-session-chat-popup {
   line-height: inherit;
 }
 
+.ghostex-chat-thinking-line::before {
+  font-size: 1.25em;
+}
+
 .ghostex-chat-thinking-row {
   color: var(--muted-foreground);
   font-size: 0.8125rem;
-  font-style: italic;
+  font-style: normal;
   display: flex;
   flex-direction: column;
   gap: calc(0.375rem + 7px);
   line-height: 1.5;
   min-width: 0;
-  padding: 0 0 0.375rem;
+  padding: 0 0 calc(0.375rem + 7px);
   white-space: pre-wrap;
   word-break: break-word;
   width: 100%;
@@ -150,6 +255,56 @@ body[data-session-chat-theme="dark"] .ghostex-session-chat-popup {
   display: grid;
   grid-template-columns: 0.375rem minmax(0, 1fr);
   min-width: 0;
+}
+
+.ghostex-chat-thinking-row.is-disclosure {
+  gap: 0.375rem;
+}
+
+.ghostex-chat-thinking-trigger {
+  align-items: start;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: grid;
+  font: inherit;
+  font-style: inherit;
+  column-gap: 0.625rem;
+  grid-template-columns: 0.375rem minmax(0, 1fr);
+  line-height: inherit;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.ghostex-chat-thinking-trigger:hover {
+  color: var(--foreground);
+}
+
+.ghostex-chat-thinking-icon {
+  align-items: center;
+  display: inline-flex;
+  height: 1.21875rem;
+  justify-content: center;
+  overflow: visible;
+  width: 0.375rem;
+}
+
+.ghostex-chat-thinking-icon svg {
+  height: 1.09375rem;
+  transition: transform 150ms ease;
+  width: 1.09375rem;
+}
+
+.ghostex-chat-thinking-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ghostex-chat-thinking-detail {
+  margin-inline-start: 0.03125rem;
 }
 
 .ghostex-chat-completed-turn,
@@ -210,7 +365,7 @@ body[data-session-chat-theme="dark"] .ghostex-session-chat-popup {
 }
 
 /* The button itself is the full five-pixel hit target. Its centered pseudo
-   element is the visible three-pixel rail, so no invisible overlap reaches into
+   element is the visible two-pixel rail, so no invisible overlap reaches into
    the expanded content beside it. */
 .ghostex-chat-expansion-rail {
   align-self: stretch;
@@ -224,7 +379,7 @@ body[data-session-chat-theme="dark"] .ghostex-session-chat-popup {
 }
 
 .ghostex-chat-expansion-rail::before {
-  background: #111111;
+  background: color-mix(in srgb, var(--muted-foreground) 42%, transparent);
   bottom: 0;
   content: "";
   left: 50%;
@@ -232,7 +387,7 @@ body[data-session-chat-theme="dark"] .ghostex-session-chat-popup {
   top: 0;
   transform: translateX(-50%);
   transition: background-color 150ms ease;
-  width: 3px;
+  width: 2px;
 }
 
 .ghostex-chat-expansion-rail:not(:disabled) {
@@ -241,7 +396,7 @@ body[data-session-chat-theme="dark"] .ghostex-session-chat-popup {
 
 .ghostex-chat-expansion-rail:hover::before,
 .ghostex-chat-expansion-rail:focus-visible::before {
-  background: #ffffff;
+  background: var(--foreground);
 }
 
 .ghostex-chat-tool-run {
@@ -343,7 +498,7 @@ body[data-session-chat-theme="dark"] .ghostex-session-chat-popup {
 }
 
 .ghostex-chat-work-detail {
-  margin-inline-start: 1.75rem;
+  margin-inline-start: 0.46875rem;
   margin-top: 0.25rem;
   padding-top: 0.125rem;
 }

@@ -4,6 +4,7 @@ import {
   codexEffortChoices,
   reconcileSessionChatOptionsFromCommand,
   seedSessionChatOptionState,
+  sessionChatBoundedKeySteps,
   sessionChatOptionCommandNames,
   sessionChatOptionsPillLabel,
   sessionChatOptionTracksValue,
@@ -109,40 +110,67 @@ describe("session chat session-option catalogs", () => {
     expect(mode && sessionChatOptionTracksValue(mode)).toBe(false);
   });
 
-  it("delivers codex model and effort as slash commands", () => {
+  it("opens codex's model picker and adjusts effort with shifted arrows", () => {
     const catalog = catalogFor("codex");
-    if (catalog.model.dispatch.kind !== "command") {
-      throw new Error("codex model must dispatch a command");
-    }
-    expect(catalog.model.dispatch.build("gpt-5.6-sol")).toBe("/model gpt-5.6-sol");
+    expect(catalog.model.actionLabel).toBe("Open the CLI's model picker");
+    expect(catalog.model.description).toBeUndefined();
+    expect(catalog.model.dispatch).toEqual({ kind: "agent-picker", command: "/model" });
     const effort = catalog
       .optionsForModel("gpt-5.6-sol")
       .find((descriptor) => descriptor.id === "effort");
-    if (effort?.dispatch.kind !== "command") {
-      throw new Error("codex effort must dispatch a command");
-    }
-    expect(effort.dispatch.build("auto")).toBe("/effort auto");
+    expect(effort?.dispatch).toEqual({
+      kind: "bounded-key-steps",
+      decreaseKey: "shift-down",
+      increaseKey: "shift-up",
+    });
     expect(seedSessionChatOptionState(catalog)).toEqual({});
     expect(sessionChatOptionValueLabel(catalog.model, {})).toBeNull();
   });
 
-  it("offers the slash-command effort values for every codex model", () => {
+  it("offers the shifted-arrow effort values for every codex model", () => {
     expect(codexEffortChoices("gpt-5.6-sol").map((choice) => choice.value)).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
-      "max",
-      "auto",
     ]);
     expect(codexEffortChoices("gpt-5.6-luna").map((choice) => choice.value)).toEqual([
       "low",
       "medium",
       "high",
       "xhigh",
-      "max",
-      "auto",
     ]);
+  });
+
+  it("uses the effort delta when known and a deterministic boundary when unknown", () => {
+    const choices = codexEffortChoices("gpt-5.6-sol");
+    expect(
+      sessionChatBoundedKeySteps(
+        choices,
+        "medium",
+        "xhigh",
+        "shift-down",
+        "shift-up",
+      ),
+    ).toEqual(["shift-up", "shift-up"]);
+    expect(
+      sessionChatBoundedKeySteps(
+        choices,
+        undefined,
+        "low",
+        "shift-down",
+        "shift-up",
+      ),
+    ).toEqual(["shift-down", "shift-down", "shift-down"]);
+    expect(
+      sessionChatBoundedKeySteps(
+        choices,
+        undefined,
+        "high",
+        "shift-down",
+        "shift-up",
+      ),
+    ).toEqual(["shift-up", "shift-up", "shift-up", "shift-down"]);
   });
 
   it("gives codex a plan-mode entry that types /plan", () => {
@@ -175,7 +203,10 @@ describe("session chat session-option catalogs", () => {
         for (const descriptor of catalog.optionsForModel(choice.value)) {
           if (descriptor.dispatch.kind === "command") {
             commands.push(descriptor.dispatch.build(descriptor.choices?.[0]?.value ?? ""));
-          } else if (descriptor.dispatch.kind !== "key") {
+          } else if (
+            descriptor.dispatch.kind === "toggle-command" ||
+            descriptor.dispatch.kind === "agent-picker"
+          ) {
             commands.push(descriptor.dispatch.command);
           }
         }

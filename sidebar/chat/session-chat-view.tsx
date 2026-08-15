@@ -7,7 +7,7 @@ import { IconRobot } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { cn } from "../../lib/utils";
-import type { SessionChatTheme } from "../../shared/session-chat";
+import type { SessionChatSkill, SessionChatTheme } from "../../shared/session-chat";
 import { getDefaultSidebarAgentById } from "../../shared/sidebar-agents";
 import { getBrandAgentLogoStyle } from "../agent-logos";
 import { TooltipProvider } from "../app-tooltip";
@@ -28,6 +28,7 @@ import {
 } from "./session-chat-links";
 import { SessionChatInteractiveCard } from "./session-chat-interactive-card";
 import { SessionChatMessageList } from "./session-chat-message-list";
+import { SessionChatSearch } from "./session-chat-search";
 import {
   SessionChatSessionOptionPills,
   useSessionChatSessionOptions,
@@ -94,6 +95,8 @@ export interface SessionChatViewProps {
   sessionKey?: string;
   /** Top-right Terminal View / Agent Actions cluster (see the type doc). */
   hostActions?: SessionChatHostActions;
+  /** Host-only terminal switch for an agent-owned model picker. */
+  onSwitchToTerminalForAgentPicker?: () => void;
   /** Native-host requests that must act on this chat composer's draft. */
   hostComposerBridge?: SessionChatHostComposerBridge;
   /**
@@ -110,6 +113,10 @@ export interface SessionChatViewProps {
   monacoVsBaseUrl?: string;
   /** Chat-only palette. It does not change the host application's chrome. */
   theme?: SessionChatTheme;
+  /** Reveal thinking-owned tool calls without requiring a click. */
+  verboseMode?: boolean;
+  /** Show the touch-friendly search affordance used by the mobile host. */
+  showSearchButton?: boolean;
   className?: string;
 }
 
@@ -212,10 +219,13 @@ export function SessionChatView({
   hostComposerBridge,
   hostLinks,
   monacoVsBaseUrl,
+  onSwitchToTerminalForAgentPicker,
   previewText,
   sessionKey,
+  showSearchButton = false,
   theme = "dark",
   transport,
+  verboseMode = false,
   working,
 }: SessionChatViewProps) {
   useEffect(() => {
@@ -243,6 +253,29 @@ export function SessionChatView({
     transport,
     working,
   });
+  const [skills, setSkills] = useState<readonly SessionChatSkill[]>([]);
+  useEffect(() => {
+    const readSkills = transport.readSkills?.bind(transport);
+    if (!readSkills) {
+      setSkills([]);
+      return;
+    }
+    let active = true;
+    void readSkills()
+      .then((result) => {
+        if (active) {
+          setSkills(result.skills);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSkills([]);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [transport]);
   const sessionOptions = useSessionChatSessionOptions({
     agent: agentLabel ?? null,
     ...(sessionKey !== undefined ? { sessionKey } : {}),
@@ -343,6 +376,7 @@ export function SessionChatView({
       : undefined;
   }, [transport]);
   const [questionActive, setQuestionActive] = useState(false);
+  const chatRootRef = useRef<HTMLDivElement | null>(null);
 
   const interrupt = useCallback((): void => {
     void chat.interrupt();
@@ -421,16 +455,23 @@ export function SessionChatView({
       )}
         data-chat-theme={theme}
         onKeyDownCapture={handleKeyDownCapture}
+        ref={chatRootRef}
         tabIndex={-1}
       >
       <SessionChatImageViewerProvider
         {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
       >
       <SessionChatHostLinksProvider {...(hostLinks ? { links: hostLinks } : {})}>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <SessionChatSearch
+        rootRef={chatRootRef}
+        searchRevision={chat.messages}
+        showButton={showSearchButton}
+      />
+      <div className="relative flex min-h-0 flex-1 flex-col">
       {hostActions ? (
         <SessionChatHostActionsCluster hostActions={hostActions} surface="chat" />
       ) : null}
-      <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col">
         {chat.view.kind === "ready" ? (
           <SessionChatMessageList
@@ -439,6 +480,7 @@ export function SessionChatView({
             loadingEarlier={chat.loadingEarlier}
             messages={chat.messages}
             onLoadEarlier={chat.loadEarlier}
+            verboseMode={verboseMode}
           />
         ) : showNewSessionWelcome ? (
           <NewSessionWelcome agentLabel={agentLabel} />
@@ -494,11 +536,12 @@ export function SessionChatView({
                   onDispatchKey={async (key, marker) => {
                     await chat.sendKey?.(key, marker);
                   }}
-                  {...(hostActions?.onSwitchToTerminal
+                  {...(onSwitchToTerminalForAgentPicker || hostActions?.onSwitchToTerminal
                     ? {
-                        onSwitchToTerminal:
-                          hostActions.onSwitchToTerminalForAgentPicker ??
-                          hostActions.onSwitchToTerminal,
+                      onSwitchToTerminal:
+                          onSwitchToTerminalForAgentPicker ??
+                          hostActions?.onSwitchToTerminalForAgentPicker ??
+                          hostActions?.onSwitchToTerminal,
                       }
                     : {})}
                 />
@@ -508,8 +551,11 @@ export function SessionChatView({
             ref={composerRef}
             slashCommands={slashCommands}
             slashHeading={sessionChatSlashHeadingForAgent(agentLabel ?? null)}
+            skills={skills}
+            skillHeading={`${displayAgentName(agentLabel) ?? "Agent"} skills`}
           />
         )}
+      </div>
       </div>
       </div>
       </SessionChatHostLinksProvider>

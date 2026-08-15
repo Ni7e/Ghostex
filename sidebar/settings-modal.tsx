@@ -646,6 +646,7 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "sessionChatTheme",
     "sessionChatFontFamily",
     "sessionChatTranscriptWidthPercent",
+    "sessionChatVerboseMode",
   ],
   sidebar: [
     "preferredAgentInterface",
@@ -2158,6 +2159,11 @@ export function SettingsModal({
         key: "sessionChatTranscriptWidthPercent",
         subtitle: "Set the width of the message transcript without changing the prompt composer.",
         title: "Chat message width",
+      },
+      {
+        key: "sessionChatVerboseMode",
+        subtitle: "Expand thinking blocks to show their tool calls by default.",
+        title: "Verbose mode",
       },
     ]),
     sidebarTags: getSettingsSectionSearch(settingsSearchQuery, "Sidebar Tags", [
@@ -4007,6 +4013,15 @@ export function SettingsModal({
                     }
                     step={SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT_STEP}
                     value={draft.sessionChatTranscriptWidthPercent}
+                  />
+                ) : null}
+                {mainSettingVisible(settingsSearch.chat, "sessionChatVerboseMode") ? (
+                  <ToggleField
+                    checked={draft.sessionChatVerboseMode}
+                    description="Expand thinking blocks to show their tool calls by default. Individual command and output details remain collapsible."
+                    label="Verbose Mode"
+                    {...getSettingModificationProps("sessionChatVerboseMode")}
+                    onChange={(checked) => updateDraft("sessionChatVerboseMode", checked)}
                   />
                 ) : null}
               </SettingsSection>

@@ -1145,6 +1145,8 @@ export type ghostexSettings = {
   sessionChatFontFamily: string;
   /** Transcript width on a 64rem scale; 75% preserves the historical 48rem cap. */
   sessionChatTranscriptWidthPercent: number;
+  /** Reveal thinking-owned tool calls by default in Session Chat. */
+  sessionChatVerboseMode: boolean;
   /**
    * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
    * Custom chrome colors are scoped to the sidebar and native titlebar only.
@@ -1863,6 +1865,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   sessionChatTheme: "dark",
   sessionChatFontFamily: "",
   sessionChatTranscriptWidthPercent: DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
+  sessionChatVerboseMode: false,
   /**
    * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
    * Custom sidebar/titlebar colors are scoped to the sidebar and titlebar.
@@ -3080,6 +3083,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
         "sessionChatTranscriptWidthPercent",
         DEFAULT_ghostex_SETTINGS.sessionChatTranscriptWidthPercent,
       ),
+    ),
+    sessionChatVerboseMode: readBoolean(
+      source,
+      "sessionChatVerboseMode",
+      DEFAULT_ghostex_SETTINGS.sessionChatVerboseMode,
     ),
     customSidebarTitlebarColorsEnabled: true,
     customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
