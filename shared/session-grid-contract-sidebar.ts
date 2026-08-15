@@ -2096,6 +2096,7 @@ export type SidebarToExtensionMessage =
       type:
         | "copyRecentProjectPath"
         | "openRecentProjectInFinder"
+        | "openRecentProjectTerminal"
         | "removeRecentProject";
       projectId: string;
     }
@@ -2380,10 +2381,10 @@ export type SidebarToExtensionMessage =
        * CDXC:BrowserPanes 2026-05-02-06:35
        * Browser session cards expose pane-specific controls copied from the
        * native browser workflow: DevTools, the Settings-selected feedback tool,
-       * profile selection, and browser-data import. The native host owns the
-       * macOS UI and WebKit/CEF work.
+       * and profile selection. The native host owns the macOS UI and WebKit/CEF
+       * work.
        */
-      action: "devtools" | "feedback-tool" | "profile-picker" | "import-settings";
+      action: "devtools" | "feedback-tool" | "profile-picker";
       sessionId: string;
       type: "runBrowserPaneAction";
     }

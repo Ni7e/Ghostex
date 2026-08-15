@@ -1,4 +1,4 @@
-import { IconCopy, IconFolder, IconFolderOpen, IconRotateClockwise, IconTrash } from '@tabler/icons-react';
+import { IconCopy, IconFolder, IconFolderOpen, IconRotateClockwise, IconTerminal2, IconTrash } from '@tabler/icons-react';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { ExtensionToSidebarMessage, SidebarRecentProject } from '../shared/session-grid-contract';
@@ -463,15 +463,22 @@ export function RecentProjectsModal({
                 onClick={() => {
                   vscode.postMessage({
                     projectId: contextMenuPosition.projectId,
-                    type: 'openRecentProjectInFinder',
+                    type: machineId ? 'openRecentProjectTerminal' : 'openRecentProjectInFinder',
                   });
                   setContextMenuPosition(undefined);
+                  if (machineId) {
+                    onClose();
+                  }
                 }}
                 role='menuitem'
                 type='button'
               >
-                <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
-                Open in Finder
+                {machineId ? (
+                  <IconTerminal2 aria-hidden='true' className='session-context-menu-icon' size={14} />
+                ) : (
+                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
+                )}
+                {machineId ? 'Open remote terminal here' : 'Open in Finder'}
               </button>
               <div className='session-context-menu-divider' role='separator' />
               <button

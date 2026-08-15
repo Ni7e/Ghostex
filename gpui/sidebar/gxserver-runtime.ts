@@ -754,7 +754,7 @@ type GpuiSidebarNativeProjectPathAction =
   | "openExistingPullRequestInBrowser"
   | "openSidebarGitChangedFileInIde"
   | "copyRemoteProjectPath"
-  | "copyRemoteProjectOpenFolderCommand"
+  | "openRemoteProjectTerminal"
   | "openRemoteWorkspaceProjectInIde"
   | "openRemoteWorkspaceProjectInVscode"
   | "openRemoteWorkspaceProjectInZed"
@@ -954,11 +954,8 @@ Remote GPUI Git/GitHub/worktree actions must route through the Rust-owned saved-
 CDXC:GPUIRemoteAttach 2026-06-24-19:06:
 Remote terminal focus and copy-attach commands may leave React only as fixed native action names plus machine-scoped remote presentation session ids. Rust owns saved-machine SSH details, gxserver attach/resume metadata, GPUI terminal launch payloads, and clipboard command construction so renderer state never carries tokens, hostnames, paths, or command text.
 
-CDXC:GPUIRemoteNativeActions 2026-06-24-19:25:
-Remote project copy-path, existing-PR browser open, Recent Projects Open Folder command-copy, and changed-file open intents may leave React only as fixed native action names plus machine-scoped project ids and review-approved relative file candidates. Rust must revalidate through the saved-machine gxserver tunnel before clipboard/browser/editor side effects; local Finder must never dereference remote paths, so Recent Projects Open Folder copies a saved-machine SSH command instead of opening Finder.
-
-CDXC:GPUIRecentProjects 2026-06-25-19:30:
-Remote Recent Projects Open Folder must follow the macOS sidebar source of truth by crossing the native bridge as `copyRemoteProjectOpenFolderCommand`, not by showing an unsupported GPUI toast or attempting local Finder. React may send only the machine-scoped project id; Rust owns path lookup, SSH command construction, clipboard write, and sanitized user feedback.
+CDXC:GPUIRemoteNativeActions 2026-08-14:
+Remote Recent Projects opens a real project-scoped terminal through the fixed `openRemoteProjectTerminal` selector. React sends only the machine-scoped project id; Rust restores the parked project, creates the remote gxserver terminal, and owns all SSH attach metadata and terminal launch payloads.
 
 CDXC:GPUIRemoteNativeActions 2026-06-24-20:26:
 Remote IDE project and changed-file opens are allowed only through Rust-owned fixed editor openers. React may request a fixed action for a machine-scoped project id, but it must never send remote paths, URI strings, SSH host/user/port/identity details, Settings custom commands, or editor command text.
@@ -6132,7 +6129,7 @@ class GpuiSidebarRuntime {
         await this.createSession(message.groupId);
         return;
       case "createProjectTerminal":
-        await this.createProjectTerminal(message.groupId);
+        await this.createProjectTerminal(message);
         return;
       case "createChat":
         await this.createQuickTerminal();
@@ -6434,15 +6431,19 @@ class GpuiSidebarRuntime {
         {
           const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
           if (remoteProject) {
-            this.postRemoteProjectNativeAction(
-              "copyRemoteProjectOpenFolderCommand",
-              remoteProject,
-              message,
-            );
+            this.postRemoteProjectNativeAction("openRemoteProjectTerminal", remoteProject, message);
             return;
           }
         }
         this.postNativeProjectPathAction("openRecentProjectInFinder", message.projectId, message);
+        return;
+      case "openRecentProjectTerminal":
+        {
+          const remoteProject = parseGpuiRemotePresentationProjectId(message.projectId);
+          if (remoteProject) {
+            this.postRemoteProjectNativeAction("openRemoteProjectTerminal", remoteProject, message);
+          }
+        }
         return;
       case "closeWorkspaceProjectForGroup":
         await this.closeProjectForGroup(message.groupId);
@@ -7092,18 +7093,29 @@ class GpuiSidebarRuntime {
     }
   }
 
-  private async createProjectTerminal(groupId: string): Promise<void> {
+  private async createProjectTerminal(
+    message: Extract<SidebarToExtensionMessage, { type: "createProjectTerminal" }>,
+  ): Promise<void> {
     /*
     CDXC:GPUIWindowsProjectTerminal 2026-07-26:
     The project-heading terminal button is an explicit project-scoped create
     request. On Windows, keep the WSL gxserver create and attach sequence in
     the Rust host by posting only the clicked local project id. The native host
-    then reuses the same atomic path as GPUI New Terminal. macOS, Linux, remote
-    projects, and generic subgroup creation keep their existing flows.
+    then reuses the same atomic path as GPUI New Terminal. Remote project
+    headings also stay host-owned: posting the bounded project reference lets
+    Rust use one create/start/attach operation instead of making CEF create a
+    row and then serially wake it before the native tab can appear. Local
+    macOS/Linux projects and generic subgroup creation keep their existing
+    flows.
     */
+    const groupId = message.groupId;
     const remoteGroup = parseGpuiRemotePresentationGroupId(groupId);
     if (remoteGroup) {
-      await this.createSession(groupId);
+      if (!this.postRemoteProjectNativeAction("openRemoteProjectTerminal", remoteGroup, message)) {
+        this.postRemoteToast("warning", "Remote session failed", {
+          description: "Ghostex could not create that remote terminal.",
+        });
+      }
       return;
     }
     const projectId = parseGxserverPresentationProjectGroupId(groupId);
@@ -14899,7 +14911,7 @@ class GpuiSidebarRuntime {
     action: Extract<
       GpuiSidebarNativeProjectPathAction,
       | "copyRemoteProjectPath"
-      | "copyRemoteProjectOpenFolderCommand"
+      | "openRemoteProjectTerminal"
       | "openRemoteWorkspaceProjectInIde"
       | "openRemoteWorkspaceProjectInVscode"
       | "openRemoteWorkspaceProjectInZed"

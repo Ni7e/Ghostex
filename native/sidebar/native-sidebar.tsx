@@ -959,7 +959,6 @@ type NativeHostCommand =
   | { sessionId: string; type: "injectBrowserReactGrab" }
   | { sessionId: string; type: "injectBrowserAgentation" }
   | { sessionId: string; type: "showBrowserProfilePicker" }
-  | { sessionId: string; type: "showBrowserImportSettings" }
   | { side: SidebarSide; type: "setSidebarSide" }
   | { type: "toggleSidebarCollapsed" }
   | {
@@ -46947,9 +46946,6 @@ function handleSidebarMessage(message: SidebarToExtensionMessage): void {
           return;
         case "profile-picker":
           postNative({ sessionId: nativeSessionId, type: "showBrowserProfilePicker" });
-          return;
-        case "import-settings":
-          postNative({ sessionId: nativeSessionId, type: "showBrowserImportSettings" });
           return;
       }
     }
