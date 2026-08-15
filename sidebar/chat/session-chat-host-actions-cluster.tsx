@@ -50,6 +50,8 @@ export interface SessionChatHostAction {
  */
 export interface SessionChatHostActions {
   onSwitchToTerminal: () => void;
+  /** Optional plain switch reserved for opening an agent-owned model picker. */
+  onSwitchToTerminalForAgentPicker?: () => void;
   /** Expanded Agent Actions row; omit to hide the Agent Actions button. */
   actions?: readonly SessionChatHostAction[];
   onAction?: (id: string, value?: string) => void;

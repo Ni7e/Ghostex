@@ -71,9 +71,9 @@ export interface SessionChatSessionOptionCatalog {
 
 const CLAUDE_MODELS: readonly SessionChatOptionChoice[] = [
   { value: "fable", label: "Fable 5" },
-  { value: "opus", label: "Opus 4.8" },
+  { value: "opus", label: "Opus 5" },
   { value: "sonnet", label: "Sonnet 5" },
-  { value: "haiku", label: "Haiku" },
+  { value: "haiku", label: "Haiku 4.5" },
 ];
 
 const CLAUDE_EFFORTS: readonly SessionChatOptionChoice[] = [
@@ -82,6 +82,7 @@ const CLAUDE_EFFORTS: readonly SessionChatOptionChoice[] = [
   { value: "high", label: "High" },
   { value: "xhigh", label: "Extra high" },
   { value: "max", label: "Max" },
+  { value: "auto", label: "Auto" },
 ];
 
 const CLAUDE_MODEL: SessionChatOptionDescriptor = {
@@ -137,45 +138,38 @@ const CODEX_MODELS: readonly SessionChatOptionChoice[] = [
 ];
 
 const CODEX_EFFORTS: readonly SessionChatOptionChoice[] = [
-  { value: "minimal", label: "Minimal" },
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
   { value: "xhigh", label: "Extra high" },
+  { value: "max", label: "Max" },
+  { value: "auto", label: "Auto" },
 ];
 
-/** Luna has no extra-high tier. */
 export function codexEffortChoices(
-  modelValue: string,
+  _modelValue: string,
 ): readonly SessionChatOptionChoice[] {
-  return modelValue === "gpt-5.6-luna"
-    ? CODEX_EFFORTS.filter((choice) => choice.value !== "xhigh")
-    : CODEX_EFFORTS;
+  return CODEX_EFFORTS;
 }
 
 /*
-Codex sets model AND reasoning effort in one interactive `/model` overlay that
-cannot be driven blind (the row order changes with the model). So both are
-agent-picker options: we type `/model`, then flip the pane to the terminal so
-the user finishes in the TUI. Nothing is claimed about the resulting value.
+Codex accepts model and reasoning-effort values as slash-command arguments.
+Send those commands through the normal chat transport so choosing an option
+does not leave the chat view.
 */
 const CODEX_MODEL: SessionChatOptionDescriptor = {
   id: "model",
   label: "Model",
   category: "model",
   choices: CODEX_MODELS,
-  actionLabel: "Choose in agent picker…",
-  description: "Codex picks the model in its own overlay.",
-  dispatch: { kind: "agent-picker", command: "/model" },
+  dispatch: { kind: "command", build: (value) => `/model ${value}` },
 };
 
 const CODEX_EFFORT: SessionChatOptionDescriptor = {
   id: "effort",
   label: "Reasoning effort",
   category: "thought_level",
-  actionLabel: "Choose in agent picker…",
-  description: "Set together with the model in Codex's /model overlay.",
-  dispatch: { kind: "agent-picker", command: "/model" },
+  dispatch: { kind: "command", build: (value) => `/effort ${value}` },
 };
 
 const CODEX_MODE: SessionChatOptionDescriptor = {

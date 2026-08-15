@@ -13,7 +13,12 @@
 // flipped to RTL (content back to LTR) so the scrollbar renders on the left
 // edge of the conversation.
 
-import { IconChevronRight, IconCopy, IconPhoto } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconChevronRight,
+  IconCopy,
+  IconPhoto,
+} from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionChatMessage } from "../../shared/session-chat";
 import { cn } from "../../lib/utils";
@@ -218,6 +223,19 @@ function SuppressedTurn({ label, text }: { label: string; text: string }) {
   );
 }
 
+function ModelConfigurationStatus({ label }: { label: string }) {
+  return (
+    <div className="flex w-full min-w-0 pb-3">
+      <div className="inline-flex min-w-0 items-center gap-2 rounded-full border border-border/60 bg-muted/35 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+          <IconCheck aria-hidden="true" className="size-3" stroke={2.4} />
+        </span>
+        <span className="truncate">{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function ReasoningRow({ markdown }: { markdown: string }) {
   const text = markdown
     .replace(/```(?:[^\n]*)\n?([\s\S]*?)```/g, "$1")
@@ -304,6 +322,9 @@ function MessageRow({
 
   const suppressedTurn = sessionChatSuppressedTurnPresentation(message);
   if (suppressedTurn !== null) {
+    if (suppressedTurn.kind === "status") {
+      return <ModelConfigurationStatus label={suppressedTurn.label} />;
+    }
     return (
       <SuppressedTurn
         label={suppressedTurn.label}

@@ -37,6 +37,15 @@ describe("session chat session-option catalogs", () => {
     );
   });
 
+  it("shows the current claude model lineup", () => {
+    expect(catalogFor("claude").model.choices).toEqual([
+      { value: "fable", label: "Fable 5" },
+      { value: "opus", label: "Opus 5" },
+      { value: "sonnet", label: "Sonnet 5" },
+      { value: "haiku", label: "Haiku 4.5" },
+    ]);
+  });
+
   it("does not claim a claude model or effort before agent-owned evidence", () => {
     const catalog = catalogFor("claude");
     const state = seedSessionChatOptionState(catalog);
@@ -72,6 +81,14 @@ describe("session chat session-option catalogs", () => {
       throw new Error("claude effort must dispatch a command");
     }
     expect(effort.dispatch.build("xhigh")).toBe("/effort xhigh");
+    expect(effort.choices?.map((choice) => choice.value)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "auto",
+    ]);
     const fast = catalog
       .optionsForModel("opus")
       .find((descriptor) => descriptor.id === "fastMode");
@@ -92,27 +109,39 @@ describe("session chat session-option catalogs", () => {
     expect(mode && sessionChatOptionTracksValue(mode)).toBe(false);
   });
 
-  it("routes codex model and effort through the agent picker", () => {
+  it("delivers codex model and effort as slash commands", () => {
     const catalog = catalogFor("codex");
-    expect(catalog.model.dispatch).toEqual({ kind: "agent-picker", command: "/model" });
+    if (catalog.model.dispatch.kind !== "command") {
+      throw new Error("codex model must dispatch a command");
+    }
+    expect(catalog.model.dispatch.build("gpt-5.6-sol")).toBe("/model gpt-5.6-sol");
     const effort = catalog
       .optionsForModel("gpt-5.6-sol")
       .find((descriptor) => descriptor.id === "effort");
-    expect(effort?.dispatch).toEqual({ kind: "agent-picker", command: "/model" });
-    // Agent-picker values are never claimed locally.
+    if (effort?.dispatch.kind !== "command") {
+      throw new Error("codex effort must dispatch a command");
+    }
+    expect(effort.dispatch.build("auto")).toBe("/effort auto");
     expect(seedSessionChatOptionState(catalog)).toEqual({});
     expect(sessionChatOptionValueLabel(catalog.model, {})).toBeNull();
   });
 
-  it("drops extra-high reasoning effort on codex luna only", () => {
-    expect(codexEffortChoices("gpt-5.6-sol").map((choice) => choice.value)).toContain(
-      "xhigh",
-    );
-    expect(codexEffortChoices("gpt-5.6-luna").map((choice) => choice.value)).toEqual([
-      "minimal",
+  it("offers the slash-command effort values for every codex model", () => {
+    expect(codexEffortChoices("gpt-5.6-sol").map((choice) => choice.value)).toEqual([
       "low",
       "medium",
       "high",
+      "xhigh",
+      "max",
+      "auto",
+    ]);
+    expect(codexEffortChoices("gpt-5.6-luna").map((choice) => choice.value)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "auto",
     ]);
   });
 

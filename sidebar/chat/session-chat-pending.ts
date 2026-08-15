@@ -419,15 +419,26 @@ export function appendSessionChatCommandMarker(
 export function sessionChatCommandMarkersAsMessages(
   markers: readonly SessionChatCommandMarker[],
 ): SessionChatMessage[] {
-  return markers.map((marker) => ({
-    // Text deliberately avoids harness noise prefixes so the noise filter
-    // keeps it.
-    blocks: [{ text: marker.label ?? `Ran ${marker.command}`, type: "text" as const }],
-    id: `command:${marker.id}`,
-    role: "system" as const,
-    source: "client" as const,
-    timestamp: marker.sentAt,
-  }));
+  return markers.flatMap((marker) => {
+    const commandName = marker.command.trim().toLowerCase().split(/\s+/, 1)[0];
+    if (commandName === "/model" || commandName === "/effort") {
+      // Claude records authoritative command/output turns for both settings.
+      // Rendering an optimistic marker too produces the duplicate "Ran /…"
+      // rows that the model-setting status presentation consolidates.
+      return [];
+    }
+    return [
+      {
+        // Text deliberately avoids harness noise prefixes so the noise filter
+        // keeps it.
+        blocks: [{ text: marker.label ?? `Ran ${marker.command}`, type: "text" as const }],
+        id: `command:${marker.id}`,
+        role: "system" as const,
+        source: "client" as const,
+        timestamp: marker.sentAt,
+      },
+    ];
+  });
 }
 
 export function isSessionChatClearCommand(command: string): boolean {

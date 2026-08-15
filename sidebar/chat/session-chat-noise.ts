@@ -34,6 +34,7 @@ const COMPACTION_OUTPUT =
   /^compact(?:ed|ing|ion)\b(?:\s+(?:is\s+)?(?:complete[d]?|done|finished|successful(?:ly)?))?\s*[.!…]*$/i;
 const MODEL_DEFAULT_OUTPUT =
   /^set model to\s+(.+?)\s+and saved as your default for new sessions\s*[.!…]*$/i;
+const EFFORT_DEFAULT_OUTPUT = /^set effort level to\s+\S+/i;
 
 function normalizedSuppressedTurnBody(text: string): string {
   return sessionChatSuppressedTurnBody(text)
@@ -152,7 +153,9 @@ export type SessionChatSuppressedTurn =
   /** Never surfaced: the agent's own TUI does not print it either. */
   | { kind: "hidden" }
   /** One-line marker that expands to the full text on click. */
-  | { kind: "collapsed"; label: string };
+  | { kind: "collapsed"; label: string }
+  /** A polished, non-expandable status row for a completed UI action. */
+  | { kind: "status"; label: string };
 
 export function classifySessionChatSuppressedTurn(
   message: SessionChatMessage,
@@ -180,13 +183,23 @@ export function classifySessionChatSuppressedTurn(
     return { kind: "collapsed", label: "Compaction completed" };
   }
   const command = parseSessionChatCommandEnvelope(text);
-  if (label === "Slash command" && command?.name.toLowerCase() === "/model") {
-    return { kind: "collapsed", label: "Set model" };
+  if (
+    label === "Slash command" &&
+    (command?.name.toLowerCase() === "/model" ||
+      command?.name.toLowerCase() === "/effort")
+  ) {
+    // The local-command output owns the one user-facing result row.
+    return { kind: "hidden" };
   }
   if (label === "Local command output") {
     const model = modelSetByCommandOutput(text);
     if (model) {
-      return { kind: "collapsed", label: model };
+      return { kind: "status", label: `Set model to ${model}` };
+    }
+    if (EFFORT_DEFAULT_OUTPUT.test(normalizedSuppressedTurnBody(text))) {
+      // Effort is part of the model configuration action. The model result
+      // above is the single durable row for the two picker selections.
+      return { kind: "hidden" };
     }
   }
   return { kind: "collapsed", label };
@@ -206,10 +219,13 @@ export function sessionChatSuppressedTurnLabel(
   message: SessionChatMessage,
 ): string | null {
   const suppressed = classifySessionChatSuppressedTurn(message);
-  return suppressed?.kind === "collapsed" ? suppressed.label : null;
+  return suppressed?.kind === "collapsed" || suppressed?.kind === "status"
+    ? suppressed.label
+    : null;
 }
 
 export interface SessionChatSuppressedTurnPresentation {
+  kind: "collapsed" | "status";
   label: string;
   text: string;
 }
@@ -219,7 +235,7 @@ export function sessionChatSuppressedTurnPresentation(
   message: SessionChatMessage,
 ): SessionChatSuppressedTurnPresentation | null {
   const suppressed = classifySessionChatSuppressedTurn(message);
-  if (suppressed?.kind !== "collapsed") {
+  if (suppressed?.kind !== "collapsed" && suppressed?.kind !== "status") {
     return null;
   }
 
@@ -231,7 +247,7 @@ export function sessionChatSuppressedTurnPresentation(
   } else if (modelSetByCommandOutput(rawText)) {
     text = normalizedSuppressedTurnBody(rawText);
   }
-  return { label: suppressed.label, text };
+  return { kind: suppressed.kind, label: suppressed.label, text };
 }
 
 export function stripSessionChatNoiseMessages(
