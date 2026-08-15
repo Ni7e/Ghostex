@@ -3153,12 +3153,13 @@ function ProjectBoardApp() {
                     <Input
                       className="project-automation-select"
                       min="1"
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const timerAmount = event.currentTarget.value;
                         setAutomationDraft((current) => ({
                           ...current,
-                          timerAmount: event.currentTarget.value,
-                        }))
-                      }
+                          timerAmount,
+                        }));
+                      }}
                       step="1"
                       type="number"
                       value={automationDraft.timerAmount}
@@ -3193,12 +3194,13 @@ function ProjectBoardApp() {
                 <label className="project-automation-field-full">
                   <span>Run on</span>
                   <Input
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const runAt = event.currentTarget.value;
                       setAutomationDraft((current) => ({
                         ...current,
-                        runAt: event.currentTarget.value,
-                      }))
-                    }
+                        runAt,
+                      }));
+                    }}
                     type="datetime-local"
                     value={automationDraft.runAt}
                   />
