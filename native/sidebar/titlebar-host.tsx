@@ -106,6 +106,7 @@ import {
   type WorkspaceOpenTargetAvailability,
   type WorkspaceOpenTargetDefinition,
 } from "../../shared/workspace-open-targets";
+import { parseRemoteProjectId } from "../../shared/remote-terminal-selection";
 import { EditorBrandIcon, getEditorBrandIconId } from "../../sidebar/brand-icons";
 import { formatSidebarHotkeyLabel } from "../../sidebar/hotkey-label";
 import { SidebarCommandIconGlyph } from "../../sidebar/sidebar-command-icon";
@@ -4232,7 +4233,15 @@ function App() {
     });
   };
 
+  const codeModeDisabledReason =
+    projectState.projectId && parseRemoteProjectId(projectState.projectId)
+      ? "Code is currently disabled for remote projects"
+      : undefined;
+
   const openCodeMode = () => {
+    if (codeModeDisabledReason) {
+      return;
+    }
     closeAppModalFromTitlebarNavigation("SettingsDismissal:titlebarSourceMode");
     appendTitlebarModeSwitchDebugLog(
       projectState.diagnosticLogging,
@@ -4418,6 +4427,8 @@ function App() {
       value: "agents" as const,
     },
     {
+      disabled: codeModeDisabledReason !== undefined,
+      disabledReason: codeModeDisabledReason,
       label: "Source",
       onSelect: openCodeMode,
       value: "code" as const,
