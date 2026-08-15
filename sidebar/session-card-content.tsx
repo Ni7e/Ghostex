@@ -45,7 +45,6 @@ import { formatRelativeTime } from "./relative-time";
 import { TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import { useRelativeTimeTick } from "./use-relative-time-tick";
 
-const SESSION_HOVER_TOOLTIP_DELAY_MS = TOOLTIP_DELAY_MS;
 const SESSION_TOOLTIP_VIEWPORT_MARGIN_PX = 8;
 const SESSION_TOOLTIP_TRIGGER_OFFSET_PX = 8;
 const CLOSE_AFTER_DONE_ARMED_REMAINING_LABEL = "03:00";
@@ -1376,6 +1375,7 @@ type OverflowTooltipTextProps = {
     onMouseEnter?: MouseEventHandler<HTMLElement>;
     onMouseLeave?: MouseEventHandler<HTMLElement>;
   }>;
+  delayMs?: number;
   textRef?: RefObject<HTMLDivElement | null>;
   text: string;
   tooltip?: string;
@@ -1390,6 +1390,7 @@ type SessionTooltipPosition = {
 
 export function OverflowTooltipText({
   children,
+  delayMs = TOOLTIP_DELAY_MS,
   text,
   textRef,
   tooltip,
@@ -1460,7 +1461,7 @@ export function OverflowTooltipText({
       activeOverflowTooltipClose = closeTooltip;
       setIsOpen(true);
       openTimeoutIdRef.current = undefined;
-    }, SESSION_HOVER_TOOLTIP_DELAY_MS);
+    }, delayMs);
   };
 
   useEffect(() => {

@@ -132,6 +132,7 @@ export type SidebarV2ProjectIconProps = {
   icon?: WorkspaceProjectIcon;
   iconDataUrl?: string;
   title: string;
+  tooltipDelay?: number;
 };
 
 export function SidebarV2ProjectIcon({
@@ -140,11 +141,12 @@ export function SidebarV2ProjectIcon({
   icon,
   iconDataUrl,
   title,
+  tooltipDelay,
 }: SidebarV2ProjectIconProps) {
   const imageDataUrl = resolveWorkspaceProjectIconDataUrl({ icon, iconDataUrl });
   if (imageDataUrl) {
     return (
-      <AppTooltip content={title}>
+      <AppTooltip content={title} delay={tooltipDelay}>
         <img
           alt=""
           aria-hidden="true"
@@ -165,7 +167,7 @@ export function SidebarV2ProjectIcon({
   const discovered = normalizeDiscoveredProjectIconDataUrl(discoveredIconDataUrl);
   if (discovered) {
     return (
-      <AppTooltip content={title}>
+      <AppTooltip content={title} delay={tooltipDelay}>
         <img
           alt=""
           aria-hidden="true"
@@ -184,7 +186,7 @@ export function SidebarV2ProjectIcon({
      * state hook, without teaching a V1 component about V2's markup.
     */
     return (
-      <AppTooltip content={title}>
+      <AppTooltip content={title} delay={tooltipDelay}>
         <span
           aria-hidden="true"
           className="sidebar-v2-project-icon"

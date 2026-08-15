@@ -63,6 +63,7 @@ import { closeAppModal, openAppModal } from "./app-modal-host-bridge";
 import { SidebarContextMenuPortal } from "./sidebar-context-menu-portal";
 import { postSidebarRefreshDebugLog } from "./sidebar-refresh-debug-log";
 import { getSidebarReorderActivationConstraints } from "./sidebar-reorder-activation";
+import { SIDEBAR_ITEM_TOOLTIP_DELAY_MS } from "./tooltip-delay";
 import { useSidebarStore, type SidebarGroupRecord } from "./sidebar-store";
 import {
   getEffectiveSessionTag,
@@ -2374,6 +2375,7 @@ export function SortableSessionCard({
   return (
     <>
       <OverflowTooltipText
+        delayMs={SIDEBAR_ITEM_TOOLTIP_DELAY_MS}
         text={sessionTitleTooltip.headingText}
         textRef={aliasHeadingRef}
         tooltip={sessionTitleTooltip.tooltip}
