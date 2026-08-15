@@ -122,7 +122,7 @@ design. Zig cross-compiles natively and the vendored ghostty build already
 emits the static lib under both names (`lib/ghostty-vt-static.lib` on
 Windows, avoiding the DLL import-lib collision; `lib/libghostty-vt.a`
 elsewhere — see ghostty/build.zig), so this hook invokes zig directly
-instead of the macOS bash script (which exists only to pick a Zig 0.15.x
+instead of the macOS bash script (which exists only to pick a Zig 0.16.x
 binary and redirect the Xcode SDK, both meaningless off macOS).
 Zig resolution: GHOSTEX_ZIG override, else `zig` on PATH; ghostty's
 requireZig rejects mismatched versions with a clear message.
