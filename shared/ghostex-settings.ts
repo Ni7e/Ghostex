@@ -1145,7 +1145,11 @@ export type ghostexSettings = {
   sessionChatFontFamily: string;
   /** Transcript width on a 64rem scale; 75% preserves the historical 48rem cap. */
   sessionChatTranscriptWidthPercent: number;
-  /** Reveal thinking-owned tool calls by default in Session Chat. */
+  /**
+   * Reveal thinking-owned tool calls by default in Session Chat. Chats that
+   * use the composer's Verbose pill store their own value and stop following
+   * this (sidebar/chat/session-chat-verbose-override.ts).
+   */
   sessionChatVerboseMode: boolean;
   /**
    * CDXC:SidebarTitlebarColors 2026-06-15-11:24:
