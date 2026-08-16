@@ -65,7 +65,6 @@ jobs:
     runs-on: ${{ inputs.arch == 'arm64' && 'windows-11-vs2026-arm' || 'windows-2025' }}
     timeout-minutes: 120
     env:
-      GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
       GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
       GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
       OUTPUT_DIR: build/release-gpui/${{ inputs.version }}/windows-${{ inputs.arch }}
@@ -167,6 +166,8 @@ jobs:
       - name: Write release provenance
         if: ${{ inputs.plan != '' }}
         shell: bash
+        env:
+          GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
         run: node scripts/release-gpui/write-provenance.mjs --dir "$OUTPUT_DIR"
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4

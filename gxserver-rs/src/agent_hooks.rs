@@ -3,7 +3,6 @@ use std::{
     env, fs,
     io::{Read, Write},
     net::TcpStream,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -974,7 +973,7 @@ fn write_hook_store(
             "surfaceId": surface_id,
             "cwd": cwd,
             "transcriptPath": transcript_path,
-            "pid": unsafe { libc::getppid() },
+            "pid": parent_process_id(),
             "isRestorable": true,
             "updatedAt": UtcTimestamp::now_seconds(),
         }),
@@ -2253,12 +2252,62 @@ exit 0
 fn write_executable_notify_hook(path: &Path, contents: &str) -> Result<(), DomainStateError> {
     let temp_path = temp_path_for(path);
     fs::write(&temp_path, contents).map_err(io_error)?;
-    fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o755)).map_err(io_error)?;
+    set_executable_permissions(&temp_path).map_err(io_error)?;
     remove_macos_notify_hook_execution_attributes(&temp_path);
     fs::rename(&temp_path, path).map_err(io_error)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).map_err(io_error)?;
+    set_executable_permissions(path).map_err(io_error)?;
     remove_macos_notify_hook_execution_attributes(path);
     Ok(())
+}
+
+#[cfg(unix)]
+fn set_executable_permissions(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+}
+
+#[cfg(not(unix))]
+fn set_executable_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn parent_process_id() -> u32 {
+    unsafe { libc::getppid() as u32 }
+}
+
+#[cfg(windows)]
+fn parent_process_id() -> u32 {
+    use std::mem::{size_of, zeroed};
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        },
+    };
+
+    let current_pid = std::process::id();
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return 0;
+        }
+        let mut entry: PROCESSENTRY32W = zeroed();
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = Process32FirstW(snapshot, &mut entry) != 0;
+        let mut parent_pid = 0;
+        while found {
+            if entry.th32ProcessID == current_pid {
+                parent_pid = entry.th32ParentProcessID;
+                break;
+            }
+            found = Process32NextW(snapshot, &mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+        parent_pid
+    }
 }
 
 fn remove_macos_notify_hook_execution_attributes(path: &Path) {
@@ -3609,9 +3658,18 @@ fn unique_path_entries(entries: Vec<String>) -> Vec<String> {
 }
 
 fn is_executable(path: &Path) -> bool {
-    fs::metadata(path)
-        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        return fs::metadata(path)
+            .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false);
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
 }
 
 fn read_file_text(path: &Path) -> String {
@@ -3657,7 +3715,6 @@ fn io_error(error: std::io::Error) -> DomainStateError {
 mod tests {
     use super::*;
     use crate::paths::get_gxserver_paths;
-    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn hook_status_uses_home_scoped_paths() {
@@ -4343,7 +4400,6 @@ mod tests {
 
     fn write_test_executable(path: &Path) {
         write_test_file(path, "#!/bin/sh\nexit 0\n");
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-            .expect("chmod test executable");
+        set_executable_permissions(path).expect("chmod test executable");
     }
 }

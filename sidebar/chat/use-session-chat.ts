@@ -138,9 +138,9 @@ export interface UseSessionChatResult {
   loadEarlier: () => void;
   send: (text: string, imagePaths?: string[]) => Promise<void>;
   /**
-   * Raw keystroke injection (Claude's Shift+Tab mode cycle). Undefined when
-   * the host transport cannot deliver keys, so callers hide the control
-   * instead of pretending it works.
+   * Raw keystroke injection for agent-owned TUI controls. Undefined when the
+   * host transport cannot deliver keys, so callers hide the control instead
+   * of pretending it works.
    */
   sendKey?: (key: SessionChatSendKey, marker: string) => Promise<void>;
   answerPrompt: (
@@ -533,8 +533,12 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   // the server's activity-transition state frames, and the host's own hook
   // signal. Settling is owned by an idle transition, a terminal turn
   // lifecycle, or a local interrupt.
+  const optimisticWorking = pending.length > 0;
   const workingSignal =
-    serverWorking || serverStatus === "working" || externalWorking === true;
+    optimisticWorking ||
+    serverWorking ||
+    serverStatus === "working" ||
+    externalWorking === true;
   if (workingSignal) {
     workingStartedAtRef.current ??= Date.now();
   } else {
@@ -548,7 +552,11 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     // settle the new turn instantly — the dead-indicator bug.
     workingStartedAt: workingStartedAtRef.current,
   });
-  const working = workingOverride === "working" && !interrupted;
+  // A locally accepted send owns the working presentation immediately. It
+  // remains pending until the authoritative transcript advances past that
+  // user turn, bridging the gap before host/server activity arrives.
+  const working =
+    (optimisticWorking || workingOverride === "working") && !interrupted;
   workingRef.current = working;
 
   // Clear the Stop suppression once the live signal settles (§10.5).
@@ -688,8 +696,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   );
 
   /**
-   * Keystroke dispatch: the marker is recorded only after the write is
-   * accepted, so a failed injection leaves no "Sent Shift+Tab" ghost.
+   * Keystroke dispatch: a non-empty marker is recorded only after the write
+   * is accepted. Multi-key setting adjustments pass an empty marker so their
+   * implementation keystrokes do not become chat rows.
    */
   const transportSendKey = transport.sendKey;
   const sendKey = useCallback(
@@ -698,9 +707,11 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         return;
       }
       await transportSendKey.call(transport, key);
-      setMarkers((current) =>
-        appendSessionChatCommandMarker(current, key, Date.now(), marker),
-      );
+      if (marker.trim() !== "") {
+        setMarkers((current) =>
+          appendSessionChatCommandMarker(current, key, Date.now(), marker),
+        );
+      }
     },
     [transport, transportSendKey],
   );

@@ -4,6 +4,7 @@ import {
   codexEffortChoices,
   reconcileSessionChatOptionsFromCommand,
   seedSessionChatOptionState,
+  sessionChatBoundedKeySteps,
   sessionChatOptionCommandNames,
   sessionChatOptionsPillLabel,
   sessionChatOptionTracksValue,
@@ -35,6 +36,15 @@ describe("session chat session-option catalogs", () => {
     expect(sessionChatSessionOptionCatalog("openclaude")).toBe(
       sessionChatSessionOptionCatalog("claude"),
     );
+  });
+
+  it("shows the current claude model lineup", () => {
+    expect(catalogFor("claude").model.choices).toEqual([
+      { value: "fable", label: "Fable 5" },
+      { value: "opus", label: "Opus 5" },
+      { value: "sonnet", label: "Sonnet 5" },
+      { value: "haiku", label: "Haiku 4.5" },
+    ]);
   });
 
   it("does not claim a claude model or effort before agent-owned evidence", () => {
@@ -72,6 +82,14 @@ describe("session chat session-option catalogs", () => {
       throw new Error("claude effort must dispatch a command");
     }
     expect(effort.dispatch.build("xhigh")).toBe("/effort xhigh");
+    expect(effort.choices?.map((choice) => choice.value)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "auto",
+    ]);
     const fast = catalog
       .optionsForModel("opus")
       .find((descriptor) => descriptor.id === "fastMode");
@@ -92,28 +110,67 @@ describe("session chat session-option catalogs", () => {
     expect(mode && sessionChatOptionTracksValue(mode)).toBe(false);
   });
 
-  it("routes codex model and effort through the agent picker", () => {
+  it("opens codex's model picker and adjusts effort with shifted arrows", () => {
     const catalog = catalogFor("codex");
+    expect(catalog.model.actionLabel).toBe("Open the CLI's model picker");
+    expect(catalog.model.description).toBeUndefined();
     expect(catalog.model.dispatch).toEqual({ kind: "agent-picker", command: "/model" });
     const effort = catalog
       .optionsForModel("gpt-5.6-sol")
       .find((descriptor) => descriptor.id === "effort");
-    expect(effort?.dispatch).toEqual({ kind: "agent-picker", command: "/model" });
-    // Agent-picker values are never claimed locally.
+    expect(effort?.dispatch).toEqual({
+      kind: "bounded-key-steps",
+      decreaseKey: "shift-down",
+      increaseKey: "shift-up",
+    });
     expect(seedSessionChatOptionState(catalog)).toEqual({});
     expect(sessionChatOptionValueLabel(catalog.model, {})).toBeNull();
   });
 
-  it("drops extra-high reasoning effort on codex luna only", () => {
-    expect(codexEffortChoices("gpt-5.6-sol").map((choice) => choice.value)).toContain(
-      "xhigh",
-    );
-    expect(codexEffortChoices("gpt-5.6-luna").map((choice) => choice.value)).toEqual([
-      "minimal",
+  it("offers the shifted-arrow effort values for every codex model", () => {
+    expect(codexEffortChoices("gpt-5.6-sol").map((choice) => choice.value)).toEqual([
       "low",
       "medium",
       "high",
+      "xhigh",
     ]);
+    expect(codexEffortChoices("gpt-5.6-luna").map((choice) => choice.value)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+  });
+
+  it("uses the effort delta when known and a deterministic boundary when unknown", () => {
+    const choices = codexEffortChoices("gpt-5.6-sol");
+    expect(
+      sessionChatBoundedKeySteps(
+        choices,
+        "medium",
+        "xhigh",
+        "shift-down",
+        "shift-up",
+      ),
+    ).toEqual(["shift-up", "shift-up"]);
+    expect(
+      sessionChatBoundedKeySteps(
+        choices,
+        undefined,
+        "low",
+        "shift-down",
+        "shift-up",
+      ),
+    ).toEqual(["shift-down", "shift-down", "shift-down"]);
+    expect(
+      sessionChatBoundedKeySteps(
+        choices,
+        undefined,
+        "high",
+        "shift-down",
+        "shift-up",
+      ),
+    ).toEqual(["shift-up", "shift-up", "shift-up", "shift-down"]);
   });
 
   it("gives codex a plan-mode entry that types /plan", () => {
@@ -146,7 +203,10 @@ describe("session chat session-option catalogs", () => {
         for (const descriptor of catalog.optionsForModel(choice.value)) {
           if (descriptor.dispatch.kind === "command") {
             commands.push(descriptor.dispatch.build(descriptor.choices?.[0]?.value ?? ""));
-          } else if (descriptor.dispatch.kind !== "key") {
+          } else if (
+            descriptor.dispatch.kind === "toggle-command" ||
+            descriptor.dispatch.kind === "agent-picker"
+          ) {
             commands.push(descriptor.dispatch.command);
           }
         }

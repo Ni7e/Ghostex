@@ -19,7 +19,9 @@ export function isToolOnlySessionChatMessage(message: SessionChatMessage): boole
 }
 
 /**
- * Fold consecutive tool-only messages INTO their preceding assistant turn.
+ * Fold consecutive tool-only messages INTO their preceding assistant or
+ * reasoning turn. A reasoning summary therefore owns the tool activity that
+ * immediately follows it, independent of which agent emitted the transcript.
  *
  * `isTransparent` marks rows that render as their own thing (collapsed
  * harness markers) but must not break a fold run: a system reminder injected
@@ -39,7 +41,10 @@ export function foldSessionChatToolMessages(
       continue;
     }
     const anchor = anchorIndex >= 0 ? output[anchorIndex] : undefined;
-    if (isToolOnlySessionChatMessage(message) && anchor?.role === "assistant") {
+    if (
+      isToolOnlySessionChatMessage(message) &&
+      (anchor?.role === "assistant" || anchor?.role === "reasoning")
+    ) {
       if (!anchorCloned) {
         output[anchorIndex] = { ...anchor, blocks: [...anchor.blocks] };
         anchorCloned = true;

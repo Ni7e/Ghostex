@@ -5,6 +5,7 @@ import { useCallback, type MouseEvent as ReactMouseEvent, type ReactNode } from 
 import { createGroupDropData } from "../sidebar-dnd";
 import { groupSensors } from "../session-group-section";
 import { AppTooltip } from "../app-tooltip";
+import { SIDEBAR_ITEM_TOOLTIP_DELAY_MS } from "../tooltip-delay";
 import { SidebarV2ProjectIcon } from "./sidebar-v2-icons";
 import { useSidebarCollapsiblePresence } from "../sidebar-collapse-animation";
 import type { SidebarV2GroupModel } from "./sidebar-v2-view-model";
@@ -201,6 +202,7 @@ export function SidebarV2ProjectGroupSection({
                 icon={group.icon}
                 iconDataUrl={group.iconDataUrl}
                 title={group.title}
+                tooltipDelay={SIDEBAR_ITEM_TOOLTIP_DELAY_MS}
               />
             ) : null}
             {projectPathState !== undefined && projectPathState !== "available" ? (

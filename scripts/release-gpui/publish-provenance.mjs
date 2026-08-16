@@ -2,7 +2,7 @@
  * CDXC:ReleaseChangeAwarePlanning 2026-08-13:
  * The publisher side of the change-aware release: plan <-> manifest <->
  * provenance cross-checks, the `release-provenance-<version>.json` asset, the
- * "Build provenance" release-notes section, and the scope of the update feeds.
+ * internal build-provenance operator summary, and the scope of the update feeds.
  *
  * `assemble.mjs` is a linear script with real side effects (it tags, uploads,
  * and pushes), so every decision it has to *refuse* on lives here as a pure

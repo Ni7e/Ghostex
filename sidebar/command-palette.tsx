@@ -342,7 +342,7 @@ const SIDEBAR_MESSAGE_PALETTE_COMMANDS = [
     hotkey: '',
     kind: 'sidebarMessage',
     message: { type: 'openAutomationsPage' },
-    searchText: 'Automations schedules recurring agents',
+    searchText: 'Automations schedules agents timers dates recurring',
     title: 'Automations',
   },
   {

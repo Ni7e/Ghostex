@@ -23,6 +23,7 @@ export function HotkeysModal({ hotkeys, isOpen, onChange, onClose }: HotkeysModa
     normalizeghostexHotkeySettings(hotkeys),
   );
   const duplicateIds = useMemo(() => getDuplicateHotkeyIds(draft), [draft]);
+  const defaultHotkeys = normalizeghostexHotkeySettings(DEFAULT_ghostex_HOTKEYS);
 
   useEffect(() => {
     if (!isOpen) {
@@ -41,7 +42,7 @@ export function HotkeysModal({ hotkeys, isOpen, onChange, onClose }: HotkeysModa
   };
 
   const resetHotkeys = () => {
-    const nextHotkeys = normalizeghostexHotkeySettings(DEFAULT_ghostex_HOTKEYS);
+    const nextHotkeys = defaultHotkeys;
     setDraft(nextHotkeys);
     onChange(nextHotkeys);
   };
@@ -83,6 +84,7 @@ export function HotkeysModal({ hotkeys, isOpen, onChange, onClose }: HotkeysModa
                     className="hotkeys-modal-input"
                     hotkey={value}
                     onChange={(nextHotkey) => updateHotkey(definition.id, nextHotkey)}
+                    originalHotkey={defaultHotkeys[definition.id] ?? ""}
                   />
                 </label>
               );

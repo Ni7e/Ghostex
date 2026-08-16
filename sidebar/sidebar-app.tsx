@@ -140,6 +140,7 @@ import {
   createSidebarProjectCollection,
   moveProjectsToSidebarCollection,
   parseSidebarProjectCollectionsFromGxserver,
+  readLegacyCollapsedSidebarProjectCollectionIds,
   readSidebarProjectCollections,
   removeSidebarProjectCollection,
   reorderSidebarProjectCollectionDefinitions,
@@ -233,7 +234,7 @@ import {
 } from "./primary-agent-launcher";
 import {
   readProjectSessionListCollapsedState,
-  writeProjectSessionListCollapsedState,
+  type ProjectSessionListCollapsedState,
 } from "./project-session-list-toggle";
 import { ProjectAgentLauncherIcon } from "./project-agent-launcher-icon";
 import { hasKnownSidebarProjectInventory } from "./sidebar-project-empty-state";
@@ -246,6 +247,7 @@ export type SidebarAppProps = {
   nativeHostEventSource?: SidebarEventSource | null;
   onStartGxserver?: () => void;
   vscode: WebviewApi;
+  windowScopeId?: string;
 };
 
 type SessionIdsByGroup = Record<string, string[]>;
@@ -695,9 +697,16 @@ type SidebarSessionPointerDragState = {
 
 type SidebarUiCollapseState = {
   collapsedGroupsById: Record<string, true>;
+  collapsedProjectCollectionsByKey: Record<string, true>;
+  collapsedProjectSessionListsById: ProjectSessionListCollapsedState;
   collapsedRemoteMachineSectionsById: Record<string, true>;
   isReferenceChatsCollapsed: boolean;
   isReferenceProjectsCollapsed: boolean;
+};
+
+type SidebarUiCollapseStorage = {
+  state: SidebarUiCollapseState;
+  version: 2;
 };
 
 type SidebarUiCollapseStateReadResult = {
@@ -767,6 +776,12 @@ const SIDEBAR_STARTUP_REPRO_WINDOW_MS = 15_000;
 const SIDEBAR_GXSERVER_UNAVAILABLE_GROUP_ID = "gxserver-unavailable";
 const SIDEBAR_GXSERVER_UNAVAILABLE_EMPTY_STATE_DELAY_MS = 20_000;
 const SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY = "ghostex-sidebar-ui-collapse-state";
+/*
+ * Collapse preferences belong to one app window. The current GPUI host uses
+ * "main"; future windows must pass their own stable scope id so their sidebars
+ * persist independently without sending presentation state through gxserver.
+ */
+const DEFAULT_SIDEBAR_WINDOW_SCOPE_ID = "main";
 const MIN_SESSION_SEARCH_QUERY_LENGTH = 4;
 const COMPLETION_FLASH_DURATION_MS = 3_000;
 const DEBUG_BUILD_STAMP_STYLE: CSSProperties = {
@@ -788,13 +803,53 @@ const DEBUG_BUILD_STAMP_STYLE: CSSProperties = {
 function createDefaultSidebarUiCollapseState(): SidebarUiCollapseState {
   return {
     collapsedGroupsById: {},
+    collapsedProjectCollectionsByKey: {},
+    collapsedProjectSessionListsById: {},
     collapsedRemoteMachineSectionsById: {},
     isReferenceChatsCollapsed: false,
     isReferenceProjectsCollapsed: false,
   };
 }
 
-function readSidebarUiCollapseState(): SidebarUiCollapseStateReadResult {
+function normalizeSidebarWindowScopeId(value: string): string {
+  const normalized = value.trim().slice(0, 120);
+  return normalized || DEFAULT_SIDEBAR_WINDOW_SCOPE_ID;
+}
+
+function getSidebarUiCollapseStateStorageKey(windowScopeId: string): string {
+  return `${SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY}:window:${encodeURIComponent(windowScopeId)}`;
+}
+
+function createLocalProjectCollectionCollapseKey(collectionId: string): string {
+  return `local:${collectionId}`;
+}
+
+function createRemoteProjectCollectionCollapseKey(machineId: string, collectionId: string): string {
+  return `remote:${machineId}:${collectionId}`;
+}
+
+function normalizeSidebarUiCollapseState(candidate: unknown): SidebarUiCollapseState {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return createDefaultSidebarUiCollapseState();
+  }
+  const state = candidate as Partial<SidebarUiCollapseState>;
+  return {
+    collapsedGroupsById: normalizeStoredCollapsedGroupsById(state.collapsedGroupsById),
+    collapsedProjectCollectionsByKey: normalizeStoredCollapsedGroupsById(
+      state.collapsedProjectCollectionsByKey,
+    ),
+    collapsedProjectSessionListsById: normalizeStoredCollapsedGroupsById(
+      state.collapsedProjectSessionListsById,
+    ),
+    collapsedRemoteMachineSectionsById: normalizeStoredCollapsedGroupsById(
+      state.collapsedRemoteMachineSectionsById,
+    ),
+    isReferenceChatsCollapsed: state.isReferenceChatsCollapsed === true,
+    isReferenceProjectsCollapsed: state.isReferenceProjectsCollapsed === true,
+  };
+}
+
+function readSidebarUiCollapseState(windowScopeId: string): SidebarUiCollapseStateReadResult {
   if (typeof window === "undefined") {
     return {
       reason: "storage-unavailable",
@@ -803,38 +858,51 @@ function readSidebarUiCollapseState(): SidebarUiCollapseStateReadResult {
   }
 
   try {
-    const storedValue = window.localStorage.getItem(SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY);
-    if (storedValue === null) {
+    const scopedStoredValue = window.localStorage.getItem(
+      getSidebarUiCollapseStateStorageKey(windowScopeId),
+    );
+    if (scopedStoredValue !== null) {
+      const scopedCandidate = JSON.parse(scopedStoredValue) as Partial<SidebarUiCollapseStorage>;
+      if (
+        !scopedCandidate ||
+        typeof scopedCandidate !== "object" ||
+        scopedCandidate.version !== 2
+      ) {
+        return {
+          reason: "invalid-shape",
+          state: createDefaultSidebarUiCollapseState(),
+          storedByteLength: scopedStoredValue.length,
+        };
+      }
       return {
-        reason: "missing",
-        state: createDefaultSidebarUiCollapseState(),
+        state: normalizeSidebarUiCollapseState(scopedCandidate.state),
+        storedByteLength: scopedStoredValue.length,
       };
     }
 
-    const candidate = JSON.parse(storedValue);
+    const legacyStoredValue = window.localStorage.getItem(SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY);
+    const candidate = JSON.parse(legacyStoredValue ?? "null");
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-      return {
-        reason: "invalid-shape",
-        state: createDefaultSidebarUiCollapseState(),
-        storedByteLength: storedValue.length,
-      };
+      const state = createDefaultSidebarUiCollapseState();
+      state.collapsedProjectCollectionsByKey = Object.fromEntries(
+        Object.keys(readLegacyCollapsedSidebarProjectCollectionIds()).map((collectionId) => [
+          createLocalProjectCollectionCollapseKey(collectionId),
+          true,
+        ]),
+      );
+      state.collapsedProjectSessionListsById = readProjectSessionListCollapsedState();
+      return { reason: "missing", state };
     }
 
-    return {
-      state: {
-        collapsedGroupsById: normalizeStoredCollapsedGroupsById(
-          (candidate as Partial<SidebarUiCollapseState>).collapsedGroupsById,
-        ),
-        collapsedRemoteMachineSectionsById: normalizeStoredCollapsedGroupsById(
-          (candidate as Partial<SidebarUiCollapseState>).collapsedRemoteMachineSectionsById,
-        ),
-        isReferenceChatsCollapsed:
-          (candidate as Partial<SidebarUiCollapseState>).isReferenceChatsCollapsed === true,
-        isReferenceProjectsCollapsed:
-          (candidate as Partial<SidebarUiCollapseState>).isReferenceProjectsCollapsed === true,
-      },
-      storedByteLength: storedValue.length,
-    };
+    const migrated = normalizeSidebarUiCollapseState(candidate);
+    migrated.collapsedProjectCollectionsByKey = Object.fromEntries(
+      Object.keys(readLegacyCollapsedSidebarProjectCollectionIds()).map((collectionId) => [
+        createLocalProjectCollectionCollapseKey(collectionId),
+        true,
+      ]),
+    );
+    migrated.collapsedProjectSessionListsById = readProjectSessionListCollapsedState();
+    return { state: migrated, storedByteLength: legacyStoredValue?.length ?? 0 };
   } catch {
     return {
       reason: "parse-error",
@@ -860,6 +928,8 @@ function normalizeStoredCollapsedGroupsById(candidate: unknown): Record<string, 
 function summarizeSidebarUiCollapseState(state: SidebarUiCollapseState): Record<string, unknown> {
   return {
     collapsedGroupCount: Object.keys(state.collapsedGroupsById).length,
+    collapsedProjectCollectionCount: Object.keys(state.collapsedProjectCollectionsByKey).length,
+    collapsedProjectSessionListCount: Object.keys(state.collapsedProjectSessionListsById).length,
     collapsedRemoteMachineSectionCount: Object.keys(state.collapsedRemoteMachineSectionsById)
       .length,
     isReferenceChatsCollapsed: state.isReferenceChatsCollapsed,
@@ -878,6 +948,7 @@ function summarizeSidebarUiCollapseRead(
 }
 
 function writeSidebarUiCollapseState(
+  windowScopeId: string,
   state: SidebarUiCollapseState,
 ): SidebarUiCollapseStateWriteResult {
   if (typeof window === "undefined") {
@@ -885,8 +956,11 @@ function writeSidebarUiCollapseState(
   }
 
   try {
-    const serialized = JSON.stringify(state);
-    window.localStorage.setItem(SIDEBAR_UI_COLLAPSE_STATE_STORAGE_KEY, serialized);
+    const serialized = JSON.stringify({
+      state,
+      version: 2,
+    } satisfies SidebarUiCollapseStorage);
+    window.localStorage.setItem(getSidebarUiCollapseStateStorageKey(windowScopeId), serialized);
     return { ok: true, storedByteLength: serialized.length };
   } catch {
     // Ignore storage failures; the in-memory collapse state should still update.
@@ -927,9 +1001,11 @@ export function SidebarApp({
   nativeHostEventSource = window,
   onStartGxserver,
   vscode,
+  windowScopeId: rawWindowScopeId = DEFAULT_SIDEBAR_WINDOW_SCOPE_ID,
 }: SidebarAppProps) {
   useDismissSidebarTooltipsOnScroll();
-  const [ initialUiCollapseStateRead ] = useState(readSidebarUiCollapseState);
+  const [ windowScopeId ] = useState(() => normalizeSidebarWindowScopeId(rawWindowScopeId));
+  const [ initialUiCollapseStateRead ] = useState(() => readSidebarUiCollapseState(windowScopeId));
   const initialUiCollapseState = initialUiCollapseStateRead.state;
   const [ isStartupInteractionBlocked, setIsStartupInteractionBlocked ] = useState(true);
   const [ autoEditingGroupId, setAutoEditingGroupId ] = useState<string>();
@@ -959,6 +1035,13 @@ export function SidebarApp({
   const [ collapsedGroupsById, setCollapsedGroupsById ] = useState<Record<string, true>>(
     initialUiCollapseState.collapsedGroupsById,
   );
+  const [ collapsedProjectCollectionsByKey, setCollapsedProjectCollectionsByKey ] = useState<
+    Record<string, true>
+  >(initialUiCollapseState.collapsedProjectCollectionsByKey);
+  const [ collapsedProjectSessionListsById, setCollapsedProjectSessionListsById ] =
+    useState<ProjectSessionListCollapsedState>(
+      initialUiCollapseState.collapsedProjectSessionListsById,
+    );
   const [ projectCollections, setProjectCollections ] = useState<SidebarProjectCollectionsState>(
     enableProjectCollections ? readSidebarProjectCollections : { collections: [], nextCollectionNumber: 1 },
   );
@@ -1610,6 +1693,34 @@ export function SidebarApp({
         }
       }
       return next ?? previous;
+    });
+  };
+
+  const setProjectCollectionCollapsed = (collectionKey: string, collapsed: boolean) => {
+    setCollapsedProjectCollectionsByKey((previous) => {
+      if (collapsed) {
+        return previous[ collectionKey ] ? previous : { ...previous, [ collectionKey ]: true };
+      }
+      if (!previous[ collectionKey ]) {
+        return previous;
+      }
+      const next = { ...previous };
+      delete next[ collectionKey ];
+      return next;
+    });
+  };
+
+  const setProjectSessionListCollapsed = (projectId: string, collapsed: boolean) => {
+    setCollapsedProjectSessionListsById((previous) => {
+      if (collapsed) {
+        return previous[ projectId ] ? previous : { ...previous, [ projectId ]: true };
+      }
+      if (!previous[ projectId ]) {
+        return previous;
+      }
+      const next = { ...previous };
+      delete next[ projectId ];
+      return next;
     });
   };
 
@@ -3005,10 +3116,7 @@ export function SidebarApp({
     if (wasProjectCollapsed) {
       setGroupCollapsed(detail.groupId, false);
       if (detail.showLessAfterExpand) {
-        writeProjectSessionListCollapsedState({
-          ...readProjectSessionListCollapsedState(),
-          [ detail.projectId ]: true,
-        });
+        setProjectSessionListCollapsed(detail.projectId, true);
       }
     }
     requestFocusedSessionReveal();
@@ -3362,11 +3470,13 @@ export function SidebarApp({
      */
     const nextCollapseState = {
       collapsedGroupsById,
+      collapsedProjectCollectionsByKey,
+      collapsedProjectSessionListsById,
       collapsedRemoteMachineSectionsById,
       isReferenceChatsCollapsed,
       isReferenceProjectsCollapsed,
     };
-    const writeResult = writeSidebarUiCollapseState(nextCollapseState);
+    const writeResult = writeSidebarUiCollapseState(windowScopeId, nextCollapseState);
     postSidebarCollapseStateLog("write", {
       ...summarizeSidebarUiCollapseState(nextCollapseState),
       groupCount: groupOrder.length,
@@ -3376,9 +3486,12 @@ export function SidebarApp({
     });
   }, [
     collapsedGroupsById,
+    collapsedProjectCollectionsByKey,
+    collapsedProjectSessionListsById,
     collapsedRemoteMachineSectionsById,
     isReferenceChatsCollapsed,
     isReferenceProjectsCollapsed,
+    windowScopeId,
   ]);
 
   const shouldShowSessionSearchEmptyState =
@@ -5272,12 +5385,14 @@ export function SidebarApp({
         onCreateProjectCollection={enableProjectCollections ? createProjectCollectionForProject : undefined}
         onFocusRequested={focusSidebarSessionFromNavigation}
         onMoveProjectToCollection={enableProjectCollections ? moveProjectToCollection : undefined}
+        onProjectSessionListCollapsedChange={setProjectSessionListCollapsed}
         onHideGroup={() => setHiddenGroupIds((current) => current.includes(groupId) ? current.filter((id) => id !== groupId) : [...current, groupId])}
         onSessionSelectionChange={handleSidebarSessionSelectionChange}
         orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
         pinnedSessionDropIndicator={pinnedSessionDropIndicator}
         projectCollectionId={projectId ? projectCollectionIdByProjectId.get(projectId) : undefined}
         projectCollectionOptions={enableProjectCollections ? projectCollections.collections : undefined}
+        projectSessionListCollapsedState={collapsedProjectSessionListsById}
         selectedSearchSessionId={
           isSessionSearchSelectionVisible && selectedSessionSearchResult?.kind === "session"
             ? selectedSessionSearchResult.sessionId
@@ -5648,11 +5763,15 @@ export function SidebarApp({
                                   ? "Collapse All"
                                   : "Expand Previous"
                               }
-                              collection={
-                                isSessionSearchFiltering
-                                  ? { ...item.collection, collapsed: false }
-                                  : item.collection
+                              collapsed={
+                                !isSessionSearchFiltering &&
+                                collapsedProjectCollectionsByKey[
+                                  createLocalProjectCollectionCollapseKey(
+                                    item.collection.collectionId,
+                                  )
+                                ] === true
                               }
+                              collection={item.collection}
                               containsActiveSession={item.groupIds.some((groupId) =>
                                 groupIdsContainingActiveSession.has(groupId),
                               )}
@@ -5705,13 +5824,20 @@ export function SidebarApp({
                                     updated.collectionId,
                                     (existing) => ({
                                       ...existing,
-                                      collapsed: updated.collapsed,
                                       color: updated.color,
                                       title: updated.title,
                                     }),
                                   ),
                                 );
                               }}
+                              onCollapsedChange={(collapsed) =>
+                                setProjectCollectionCollapsed(
+                                  createLocalProjectCollectionCollapseKey(
+                                    item.collection.collectionId,
+                                  ),
+                                  collapsed,
+                                )
+                              }
                               onDelete={() => {
                                 setProjectCollections((previous) =>
                                   removeSidebarProjectCollection(
@@ -5832,6 +5958,7 @@ export function SidebarApp({
                                     )
                                 : undefined
                             }
+                            onProjectSessionListCollapsedChange={setProjectSessionListCollapsed}
                             onHideGroup={() =>
                               setHiddenGroupIds((current) =>
                                 current.includes(groupId)
@@ -5843,6 +5970,7 @@ export function SidebarApp({
                             orderedSessionIds={displayedWorkspaceSessionIdsByGroup[ groupId ] ?? []}
                             enableProjectSessionListToggle={!isSessionSearchFiltering}
                             projectHeaderActions="all"
+                            projectSessionListCollapsedState={collapsedProjectSessionListsById}
                             projectCollectionId={
                               groupsById[groupId]?.remoteMachineContext?.projectId
                                 ? machineCollectionIdByProjectId.get(
@@ -5967,11 +6095,16 @@ export function SidebarApp({
                                   ? "Collapse All"
                                   : "Expand Previous"
                               }
-                              collection={
-                                isSessionSearchFiltering
-                                  ? { ...item.collection, collapsed: false }
-                                  : item.collection
+                              collapsed={
+                                !isSessionSearchFiltering &&
+                                collapsedProjectCollectionsByKey[
+                                  createRemoteProjectCollectionCollapseKey(
+                                    machine.id,
+                                    item.collection.collectionId,
+                                  )
+                                ] === true
                               }
+                              collection={item.collection}
                               containsActiveSession={item.groupIds.some((groupId) =>
                                 groupIdsContainingActiveSession.has(groupId),
                               )}
@@ -6015,13 +6148,21 @@ export function SidebarApp({
                                     updated.collectionId,
                                     (existing) => ({
                                       ...existing,
-                                      collapsed: updated.collapsed,
                                       color: updated.color,
                                       title: updated.title,
                                     }),
                                   ),
                                 );
                               }}
+                              onCollapsedChange={(collapsed) =>
+                                setProjectCollectionCollapsed(
+                                  createRemoteProjectCollectionCollapseKey(
+                                    machine.id,
+                                    item.collection.collectionId,
+                                  ),
+                                  collapsed,
+                                )
+                              }
                               onDelete={() => {
                                 updateRemoteProjectCollections(machine.id, (previous) =>
                                   removeSidebarProjectCollection(

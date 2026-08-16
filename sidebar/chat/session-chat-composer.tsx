@@ -15,6 +15,7 @@ import {
   IconPaperclip,
   IconPlayerStopFilled,
   IconRobot,
+  IconStackPush,
   IconX,
 } from "@tabler/icons-react";
 import {
@@ -30,6 +31,7 @@ import {
 } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
+import { Field, FieldError } from "../../components/ui/field";
 import { AppTooltip } from "../app-tooltip";
 import {
   EMPTY_SESSION_CHAT_COMPOSER_HISTORY,
@@ -48,7 +50,7 @@ import {
   sessionChatImageTargetForHref,
   useSessionChatImageViewer,
 } from "./session-chat-image-viewer";
-import type { SessionChatTheme } from "../../shared/session-chat";
+import type { SessionChatSkill, SessionChatTheme } from "../../shared/session-chat";
 
 export interface SessionChatComposerHandle {
   /** Clear the draft only when it still matches the supplied snapshot. */
@@ -97,8 +99,14 @@ export interface SessionChatComposerProps {
   slashCommands?: readonly SessionChatSlashCommand[];
   /** Section heading shown above the picker rows (usually the agent name). */
   slashHeading?: string;
+  /** Skills available to this session's agent, resolved on its machine. */
+  skills?: readonly SessionChatSkill[];
+  /** Section heading shown above the skill mention rows. */
+  skillHeading?: string;
   onSend: (text: string) => void | Promise<void>;
   onInterrupt: () => void;
+  /** Save the current draft for later and clear it after the save succeeds. */
+  onStash?: () => void;
   /**
    * Saves a pasted image onto the session's machine and resolves with the
    * absolute path there. When set, pasting an image inserts the terminal
@@ -152,6 +160,40 @@ interface PastedImagePreview {
   dataUrl: string;
   id: string;
   path: string;
+}
+
+interface SessionChatSkillMentionQuery {
+  query: string;
+  start: number;
+}
+
+/** A whitespace-delimited trailing `$name` token opens the skill picker. */
+function sessionChatSkillMentionQuery(text: string): SessionChatSkillMentionQuery | null {
+  const match = /(?:^|\s)\$([\p{L}\p{N}._:-]*)$/u.exec(text);
+  if (!match) {
+    return null;
+  }
+  const tokenOffset = match[0].lastIndexOf("$");
+  return {
+    query: match[1] ?? "",
+    start: match.index + tokenOffset,
+  };
+}
+
+function filterSessionChatSkills(
+  skills: readonly SessionChatSkill[],
+  query: string,
+): SessionChatSkill[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  return skills.filter((skill) =>
+    normalized === "" || skill.name.toLocaleLowerCase().includes(normalized),
+  );
+}
+
+function linkedSessionChatSkillMention(skill: SessionChatSkill): string {
+  const label = skill.name.replace(/[\\\[\]]/g, "\\$&");
+  const path = skill.directoryPath.replace(/[\\()]/g, "\\$&");
+  return `[$${label}](${path})`;
 }
 
 /** Rich Prompt Editor numbering: max existing [Image #N]( in the draft, +1. */
@@ -281,11 +323,14 @@ export const SessionChatComposer = forwardRef<
     onPasteImage,
     onPickPaths,
     onSend,
+    onStash,
     optionPills,
     placeholder,
     sessionKey,
     slashCommands,
     slashHeading,
+    skills,
+    skillHeading,
     theme = "dark",
   },
   ref,
@@ -294,13 +339,17 @@ export const SessionChatComposer = forwardRef<
   const [history, setHistory] = useState(EMPTY_SESSION_CHAT_COMPOSER_HISTORY);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [skillDismissed, setSkillDismissed] = useState(false);
+  const [skillIndex, setSkillIndex] = useState(0);
   const [pastedImages, setPastedImages] = useState<readonly PastedImagePreview[]>([]);
   const [pendingImagePastes, setPendingImagePastes] = useState(0);
   const [monacoFailed, setMonacoFailed] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const imageViewer = useSessionChatImageViewer();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const slashListRef = useRef<HTMLDivElement | null>(null);
+  const skillListRef = useRef<HTMLDivElement | null>(null);
   const pasteSequenceRef = useRef(0);
   const previewLoadsRef = useRef(new Set<string>());
   const draftRef = useRef(draft);
@@ -330,6 +379,20 @@ export const SessionChatComposer = forwardRef<
   );
   const slashOpen = slashMatches.length > 0 && !disabled;
   const highlightedIndex = Math.min(slashIndex, Math.max(slashMatches.length - 1, 0));
+  const skillMention = sessionChatSkillMentionQuery(draft);
+  const skillQuery = skillMention?.query ?? null;
+  const skillMatches = useMemo(
+    () =>
+      skillQuery !== null && !skillDismissed
+        ? filterSessionChatSkills(skills ?? [], skillQuery)
+        : [],
+    [skillDismissed, skillQuery, skills],
+  );
+  const skillOpen = skillMatches.length > 0 && !disabled && !slashOpen;
+  const highlightedSkillIndex = Math.min(
+    skillIndex,
+    Math.max(skillMatches.length - 1, 0),
+  );
 
   useEffect(() => {
     if (!slashOpen) {
@@ -340,14 +403,28 @@ export const SessionChatComposer = forwardRef<
       ?.scrollIntoView({ block: "nearest" });
   }, [highlightedIndex, slashOpen]);
 
+  useEffect(() => {
+    if (!skillOpen) {
+      return;
+    }
+    skillListRef.current
+      ?.querySelector('[data-highlighted="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [highlightedSkillIndex, skillOpen]);
+
   const updateDraft = (next: string): void => {
     writeStoredSessionChatDraft(sessionKey, next);
     setDraft(next);
+    setSendError(null);
     setHistory((current) => resetSessionChatComposerHistoryIndex(current));
     if (sessionChatSlashQuery(next) === null) {
       setSlashDismissed(false);
     }
+    if (sessionChatSkillMentionQuery(next) === null) {
+      setSkillDismissed(false);
+    }
     setSlashIndex(0);
+    setSkillIndex(0);
   };
 
   const textareaApi: SessionChatComposerInputApi = {
@@ -420,6 +497,9 @@ export const SessionChatComposer = forwardRef<
       getInputApi()?.applyValue("", 0);
       setSlashDismissed(false);
       setSlashIndex(0);
+      setSkillDismissed(false);
+      setSkillIndex(0);
+      setSendError(null);
       return true;
     },
     focus: () => {
@@ -452,26 +532,45 @@ export const SessionChatComposer = forwardRef<
       return;
     }
     sendInFlightRef.current = true;
-    void Promise.resolve()
-      .then(() => onSend(text))
+    setSendError(null);
+
+    // The optimistic transcript echo is created synchronously by onSend.
+    // Vacate the composer first so the submit gesture feels immediate and
+    // any typing that follows belongs to the next draft.
+    writeStoredSessionChatDraft(sessionKey, "");
+    draftRef.current = "";
+    setDraft("");
+    setHistory((value) => resetSessionChatComposerHistoryIndex(value));
+    getInputApi()?.applyValue("", 0);
+    setSlashDismissed(false);
+    setSlashIndex(0);
+    setSkillDismissed(false);
+    setSkillIndex(0);
+
+    const sendRequest = (() => {
+      try {
+        return Promise.resolve(onSend(text));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    })();
+    void sendRequest
       .then(() => {
-        // Preservation and terminal submission are asynchronous. Clear only
-        // the exact snapshot that succeeded; text added while the request was
-        // in flight remains the next draft.
-        const current = getInputApi()?.getValue() ?? draftRef.current;
-        if (current === text) {
-          writeStoredSessionChatDraft(sessionKey, "");
-          draftRef.current = "";
-          setDraft("");
-          getInputApi()?.applyValue("", 0);
-        }
         setHistory((value) => pushSessionChatComposerHistory(value, text));
-        setSlashDismissed(false);
-        setSlashIndex(0);
       })
       .catch(() => {
-        // The transport rejected the send before submission. Keep the exact
-        // chat draft so preserving terminal input can be retried safely.
+        // Do not overwrite a next draft typed while the send was in flight.
+        // Put the failed message first so retrying still preserves send order.
+        const current = getInputApi()?.getValue() ?? draftRef.current;
+        const restored =
+          current === "" || current === text ? text : `${text}\n${current}`;
+        writeStoredSessionChatDraft(sessionKey, restored);
+        draftRef.current = restored;
+        setDraft(restored);
+        setHistory((value) => resetSessionChatComposerHistoryIndex(value));
+        getInputApi()?.applyValue(restored, restored.length);
+        getInputApi()?.focus();
+        setSendError("Message could not be sent. Your draft was restored.");
       })
       .finally(() => {
         sendInFlightRef.current = false;
@@ -696,9 +795,10 @@ export const SessionChatComposer = forwardRef<
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
       const delta = event.key === "ArrowUp" ? -1 : 1;
-      setSlashIndex(
-        (highlightedIndex + delta + slashMatches.length) % slashMatches.length,
-      );
+      setSlashIndex((current) => {
+        const currentIndex = Math.min(current, slashMatches.length - 1);
+        return (currentIndex + delta + slashMatches.length) % slashMatches.length;
+      });
       return true;
     }
     if (event.key === "Tab") {
@@ -720,6 +820,46 @@ export const SessionChatComposer = forwardRef<
     return false;
   };
 
+  const completeSkillMention = (skill: SessionChatSkill): void => {
+    const mention = sessionChatSkillMentionQuery(draft);
+    if (!mention) {
+      return;
+    }
+    const linkedMention = `${linkedSessionChatSkillMention(skill)} `;
+    const next = `${draft.slice(0, mention.start)}${linkedMention}`;
+    updateDraft(next);
+    const api = getInputApi();
+    api?.focus();
+    api?.applyValue(next, next.length);
+  };
+
+  const handleSkillKeyDown = (event: SessionChatComposerKeyEvent): boolean => {
+    if (!skillOpen) {
+      return false;
+    }
+    const highlighted = skillMatches[highlightedSkillIndex];
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setSkillDismissed(true);
+      return true;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const delta = event.key === "ArrowUp" ? -1 : 1;
+      setSkillIndex((current) => {
+        const currentIndex = Math.min(current, skillMatches.length - 1);
+        return (currentIndex + delta + skillMatches.length) % skillMatches.length;
+      });
+      return true;
+    }
+    if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+      event.preventDefault();
+      completeSkillMention(highlighted);
+      return true;
+    }
+    return false;
+  };
+
   const handleKeyDown = (event: SessionChatComposerKeyEvent): void => {
     // IME guard: composition Enter confirms the composition; letting it fall
     // through would submit a partial draft. (The textarea wrapper additionally
@@ -727,7 +867,7 @@ export const SessionChatComposer = forwardRef<
     if (event.isComposing) {
       return;
     }
-    if (handleSlashKeyDown(event)) {
+    if (handleSkillKeyDown(event) || handleSlashKeyDown(event)) {
       return;
     }
     if (event.key === "Escape") {
@@ -767,7 +907,10 @@ export const SessionChatComposer = forwardRef<
     // min-w-0 all the way down to the input: this sits in a grid/flex column,
     // whose items are min-width:auto by default, so an unbreakable pasted run
     // would otherwise widen the composer past the pane and scroll the page.
-    <div className="relative min-w-0">
+    <Field
+      className="relative min-w-0 gap-2"
+      data-invalid={sendError !== null ? true : undefined}
+    >
       {slashOpen ? (
         <div className="absolute inset-x-0 bottom-full z-10 mb-2 overflow-hidden rounded-2xl border border-input bg-popover shadow-xl">
           <div
@@ -817,6 +960,57 @@ export const SessionChatComposer = forwardRef<
           </div>
         </div>
       ) : null}
+      {skillOpen ? (
+        <div className="absolute inset-x-0 bottom-full z-10 mb-2 overflow-hidden rounded-2xl border border-input bg-popover shadow-xl">
+          <div
+            aria-label="Available skills"
+            className="max-h-72 overflow-y-auto p-1.5"
+            ref={skillListRef}
+            role="listbox"
+          >
+            <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              {skillHeading ?? "Skills"}
+            </div>
+            {skillMatches.map((skill, index) => (
+              <button
+                aria-selected={index === highlightedSkillIndex}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm",
+                  index === highlightedSkillIndex
+                    ? "bg-accent text-accent-foreground"
+                    : "text-foreground",
+                )}
+                data-highlighted={
+                  index === highlightedSkillIndex ? "true" : undefined
+                }
+                key={`${skill.name}:${skill.directoryPath}`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  completeSkillMention(skill);
+                }}
+                onMouseMove={() => {
+                  if (index !== highlightedSkillIndex) {
+                    setSkillIndex(index);
+                  }
+                }}
+                role="option"
+                type="button"
+              >
+                <IconRobot
+                  aria-hidden="true"
+                  className="size-4 shrink-0 text-muted-foreground"
+                  stroke={1.6}
+                />
+                <span className="shrink-0 font-semibold">${skill.name}</span>
+                <span className="truncate text-muted-foreground">
+                  {skill.directoryPath}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {sendError ? <FieldError className="px-2">{sendError}</FieldError> : null}
       <div
         className={cn(
           "ghostex-chat-composer min-w-0 rounded-3xl border border-input bg-card px-4 py-2.5 transition-colors focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20",
@@ -906,6 +1100,7 @@ export const SessionChatComposer = forwardRef<
           <textarea
             className="ghostex-chat-composer-input max-h-40 min-h-6 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-sm leading-6 text-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground"
             disabled={disabled}
+            aria-invalid={sendError !== null}
             onChange={(event) => {
               updateDraft(event.target.value);
             }}
@@ -936,6 +1131,22 @@ export const SessionChatComposer = forwardRef<
             {optionPills}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
+            {onStash ? (
+              <AppTooltip content="Stash prompt">
+                <span className="inline-flex">
+                  <Button
+                    aria-label="Stash prompt"
+                    className="ghostex-chat-footer-control rounded-full"
+                    disabled={disabled || draft.trim() === ""}
+                    onClick={onStash}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    <IconStackPush aria-hidden="true" stroke={2} />
+                  </Button>
+                </span>
+              </AppTooltip>
+            ) : null}
             {onPasteImage || onAttachFile || onPickPaths ? (
               <>
                 {onPickPaths ? null : (
@@ -1018,6 +1229,6 @@ export const SessionChatComposer = forwardRef<
           </div>
         </div>
       </div>
-    </div>
+    </Field>
   );
 });

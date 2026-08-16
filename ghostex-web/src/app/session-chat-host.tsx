@@ -145,10 +145,10 @@ export function SessionChatHost({
   onSwitchToTerminal?: () => void;
   session: WorkspaceSession;
 }) {
-  const [theme, setTheme] = useState(() => readWebSettings().sessionChatTheme);
+  const [chatSettings, setChatSettings] = useState(readWebSettings);
   useEffect(() => {
     const handleSettingsChanged = (event: Event) => {
-      setTheme((event as CustomEvent<ReturnType<typeof readWebSettings>>).detail.sessionChatTheme);
+      setChatSettings((event as CustomEvent<ReturnType<typeof readWebSettings>>).detail);
     };
     window.addEventListener(WEB_SETTINGS_CHANGED_EVENT, handleSettingsChanged);
     return () => window.removeEventListener(WEB_SETTINGS_CHANGED_EVENT, handleSettingsChanged);
@@ -177,8 +177,9 @@ export function SessionChatHost({
       // config's monaco plugin.
       monacoVsBaseUrl="/monaco/vs"
       sessionKey={`${session.machineId}:${session.projectId}:${session.sessionId}`}
-      theme={theme}
+      theme={chatSettings.sessionChatTheme}
       transport={transport}
+      verboseMode={chatSettings.sessionChatVerboseMode}
       working={session.activity === "working"}
     />
   );

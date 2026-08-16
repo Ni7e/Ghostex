@@ -7,6 +7,7 @@ import {
 import {
   isSessionChatNoiseMessage,
   sessionChatSuppressedTurnLabel,
+  sessionChatSuppressedTurnPresentation,
   stripSessionChatNoiseMessages,
 } from "./session-chat-noise";
 
@@ -98,6 +99,20 @@ describe("noise filter (§9.1)", () => {
   });
 
   test("special command markers use their meaningful result", () => {
+    expect(
+      sessionChatSuppressedTurnPresentation(
+        textMsg("compact-input", "user", "/compact"),
+      ),
+    ).toBeNull();
+    expect(
+      sessionChatSuppressedTurnPresentation(
+        textMsg(
+          "compact-command",
+          "user",
+          "<command-name>/compact</command-name><command-message>compact</command-message><command-args></command-args>",
+        ),
+      ),
+    ).toBeNull();
     // Verbatim shape from a real transcript: dim-SGR-wrapped "Compacted".
     expect(
       sessionChatSuppressedTurnLabel(
@@ -110,29 +125,47 @@ describe("noise filter (§9.1)", () => {
     ).toBe("Compaction completed");
     // Lenient: ESC bytes lost in encoding, different wording, trailing period.
     expect(
-      sessionChatSuppressedTurnLabel(
+      sessionChatSuppressedTurnPresentation(
         textMsg("2", "user", "<local-command-stdout>[2mCompaction complete.[22m</local-command-stdout>"),
       ),
-    ).toBe("Compaction completed");
+    ).toMatchObject({ kind: "status", label: "Compaction completed" });
     expect(
-      sessionChatSuppressedTurnLabel(
+      sessionChatSuppressedTurnPresentation(
         textMsg(
-          "model-command",
+          "compact-output-with-hint",
           "user",
-          "<command-name>/model</command-name><command-message>model</command-message><command-args></command-args>",
+          "<local-command-stdout>[2mCompacted (ctrl+o to see full summary) [22m</local-command-stdout>",
         ),
       ),
-    ).toBe("Set model");
-    // Model selection output names the model that was set.
-    expect(
-      sessionChatSuppressedTurnLabel(
-        textMsg(
-          "3",
-          "user",
-          "<local-command-stdout>Set model to [1mOpus 5 (1M context) [22m and saved as your default for new sessions</local-command-stdout>",
-        ),
-      ),
-    ).toBe("Opus 5 (1M context)");
+    ).toMatchObject({ kind: "status", label: "Compaction completed" });
+    const modelCommand = textMsg(
+      "model-command",
+      "user",
+      "<command-name>/model</command-name><command-message>model</command-message><command-args>opus</command-args>",
+    );
+    expect(sessionChatSuppressedTurnLabel(modelCommand)).toBeNull();
+    const modelOutput = textMsg(
+      "3",
+      "user",
+      "<local-command-stdout>Set model to [1mOpus 5 (1M context) [22m and saved as your default for new sessions</local-command-stdout>",
+    );
+    expect(sessionChatSuppressedTurnPresentation(modelOutput)).toEqual({
+      kind: "status",
+      label: "Set model to Opus 5 (1M context)",
+      text: "Set model to Opus 5 (1M context) and saved as your default for new sessions",
+    });
+    const effortCommand = textMsg(
+      "effort-command",
+      "user",
+      "<command-name>/effort</command-name><command-message>effort</command-message><command-args>xhigh</command-args>",
+    );
+    const effortOutput = textMsg(
+      "effort-output",
+      "user",
+      "<local-command-stdout>Set effort level to xhigh (saved as your default for new sessions): Deeper reasoning than high</local-command-stdout>",
+    );
+    expect(sessionChatSuppressedTurnLabel(effortCommand)).toBeNull();
+    expect(sessionChatSuppressedTurnLabel(effortOutput)).toBeNull();
     // Prose that merely mentions compaction is untouched.
     expect(
       sessionChatSuppressedTurnLabel(

@@ -62,7 +62,7 @@ finally {
 }
 
 # 2) Rust binaries (bootstrap, main app, and CEF helper). Requires MSVC toolchain, cmake,
-# and ninja (cef-dll-sys builds libcef_dll_wrapper), plus a Zig 0.15.x for
+# and ninja (cef-dll-sys builds libcef_dll_wrapper), plus Zig 0.16.x for
 # libghostty-vt (GHOSTEX_ZIG override honored by gpui/build.rs).
 Push-Location $GpuiDir
 try {

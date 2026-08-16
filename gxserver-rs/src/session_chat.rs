@@ -1,8 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
-    io::{BufRead, BufReader, Read},
-    os::unix::fs::{FileExt, MetadataExt},
+    io::{self, BufRead, BufReader, Read},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicI64, Ordering},
@@ -10,6 +9,11 @@ use std::{
     },
     time::Duration,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::{FileExt, MetadataExt};
+#[cfg(windows)]
+use std::os::windows::fs::{FileExt, MetadataExt};
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -33,6 +37,25 @@ live stream position without touching the presentation revision sequencer.
 
 pub const SESSION_CHAT_INITIAL_LIMIT: usize = 300;
 pub const SESSION_CHAT_MAX_LIMIT: usize = 10_000;
+
+#[cfg(unix)]
+fn read_exact_at(file: &File, buffer: &mut [u8], offset: u64) -> io::Result<()> {
+    file.read_exact_at(buffer, offset)
+}
+
+#[cfg(windows)]
+fn read_exact_at(file: &File, buffer: &mut [u8], offset: u64) -> io::Result<()> {
+    let mut read = 0;
+    while read < buffer.len() {
+        let count = file.seek_read(&mut buffer[read..], offset + read as u64)?;
+        if count == 0 {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+        }
+        read += count;
+    }
+    Ok(())
+}
+
 const MAX_SESSION_CHAT_TRANSCRIPT_RECORD_BYTES: usize = 2 * 1024 * 1024;
 const TAIL_CHUNK_BYTES: usize = 64 * 1024;
 const APPEND_BATCH_MESSAGE_LIMIT: usize = 40;
@@ -1588,7 +1611,7 @@ fn find_last_complete_line_end(file: &File, end: u64) -> std::io::Result<u64> {
         return Ok(0);
     }
     let mut last = [0u8; 1];
-    file.read_exact_at(&mut last, end - 1)?;
+    read_exact_at(file, &mut last, end - 1)?;
     if last[0] == b'\n' {
         return Ok(end);
     }
@@ -1597,7 +1620,7 @@ fn find_last_complete_line_end(file: &File, end: u64) -> std::io::Result<u64> {
     while cursor > 0 {
         let start = cursor.saturating_sub(TAIL_CHUNK_BYTES as u64);
         let length = (cursor - start) as usize;
-        file.read_exact_at(&mut buffer[..length], start)?;
+        read_exact_at(file, &mut buffer[..length], start)?;
         for index in (0..length).rev() {
             if buffer[index] == b'\n' {
                 return Ok(start + index as u64 + 1);
@@ -1632,7 +1655,7 @@ pub fn read_session_chat_transcript_tail_file(
     }
 
     let mut trailing = [0u8; 1];
-    file.read_exact_at(&mut trailing, consumed_to - 1)?;
+    read_exact_at(&file, &mut trailing, consumed_to - 1)?;
     // A window that does not end on a newline means the first-decoded (newest)
     // record is a partial write — tolerate one malformed record silently.
     let mut ignore_next_malformed_record = trailing[0] != b'\n';
@@ -1678,7 +1701,7 @@ pub fn read_session_chat_transcript_tail_file(
     while cursor > 0 && newest_first.len() <= limit {
         let start = cursor.saturating_sub(TAIL_CHUNK_BYTES as u64);
         let length = (cursor - start) as usize;
-        file.read_exact_at(&mut buffer[..length], start)?;
+        read_exact_at(&file, &mut buffer[..length], start)?;
         let mut segment_end = length;
         let mut index = length;
         while index > 0 && newest_first.len() <= limit {
@@ -2037,7 +2060,7 @@ pub fn read_incremental_transcript_messages(
     let mut buffer = vec![0u8; TAIL_CHUNK_BYTES];
     while absolute_offset < end {
         let take = ((end - absolute_offset).min(TAIL_CHUNK_BYTES as u64)) as usize;
-        file.read_exact_at(&mut buffer[..take], absolute_offset)?;
+        read_exact_at(&file, &mut buffer[..take], absolute_offset)?;
         let mut segment_start = 0usize;
         for index in 0..take {
             if buffer[index] != b'\n' {
@@ -2092,13 +2115,57 @@ pub struct TranscriptFileVersion {
 pub fn read_transcript_file_version(file_path: &Path) -> std::io::Result<TranscriptFileVersion> {
     let metadata = fs::metadata(file_path)?;
     Ok(TranscriptFileVersion {
-        identity: format!("{}:{}", metadata.dev(), metadata.ino()),
+        identity: transcript_file_identity(file_path, &metadata)?,
         size: metadata.len(),
-        mtime_ms: i128::from(metadata.mtime()) * 1_000
-            + i128::from(metadata.mtime_nsec()) / 1_000_000,
-        ctime_ms: i128::from(metadata.ctime()) * 1_000
-            + i128::from(metadata.ctime_nsec()) / 1_000_000,
+        mtime_ms: transcript_mtime_ms(&metadata),
+        ctime_ms: transcript_ctime_ms(&metadata),
     })
+}
+
+#[cfg(unix)]
+fn transcript_file_identity(_file_path: &Path, metadata: &fs::Metadata) -> io::Result<String> {
+    Ok(format!("{}:{}", metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn transcript_file_identity(file_path: &Path, _metadata: &fs::Metadata) -> io::Result<String> {
+    use std::{mem::zeroed, os::windows::io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+
+    let file = File::open(file_path)?;
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+    Ok(format!("{}:{index}", info.dwVolumeSerialNumber))
+}
+
+#[cfg(unix)]
+fn transcript_mtime_ms(metadata: &fs::Metadata) -> i128 {
+    i128::from(metadata.mtime()) * 1_000 + i128::from(metadata.mtime_nsec()) / 1_000_000
+}
+
+#[cfg(windows)]
+fn transcript_mtime_ms(metadata: &fs::Metadata) -> i128 {
+    windows_filetime_to_unix_ms(metadata.last_write_time())
+}
+
+#[cfg(unix)]
+fn transcript_ctime_ms(metadata: &fs::Metadata) -> i128 {
+    i128::from(metadata.ctime()) * 1_000 + i128::from(metadata.ctime_nsec()) / 1_000_000
+}
+
+#[cfg(windows)]
+fn transcript_ctime_ms(metadata: &fs::Metadata) -> i128 {
+    windows_filetime_to_unix_ms(metadata.creation_time())
+}
+
+#[cfg(windows)]
+fn windows_filetime_to_unix_ms(filetime: u64) -> i128 {
+    i128::from(filetime) / 10_000 - 11_644_473_600_000
 }
 
 /// Last ≤64 bytes before the read cursor, base64 — detects in-place rewrites
@@ -2111,7 +2178,7 @@ pub fn boundary_fingerprint(file_path: &Path, offset: u64) -> std::io::Result<St
     let start = offset.saturating_sub(BOUNDARY_FINGERPRINT_BYTES);
     let length = (offset - start) as usize;
     let mut buffer = vec![0u8; length];
-    file.read_exact_at(&mut buffer, start)?;
+    read_exact_at(&file, &mut buffer, start)?;
     Ok(BASE64_STANDARD.encode(&buffer))
 }
 
@@ -2315,7 +2382,7 @@ fn read_transcript_head_complete_lines(path: &Path, head_limit_bytes: u64) -> Op
         return None;
     }
     let mut buffer = vec![0u8; head_length];
-    file.read_exact_at(&mut buffer, 0).ok()?;
+    read_exact_at(&file, &mut buffer, 0).ok()?;
     let head = String::from_utf8_lossy(&buffer);
     // The last line of a truncated head is very likely partial: never parse it.
     match head.rfind('\n') {
@@ -2463,7 +2530,7 @@ pub fn last_substantive_transcript_timestamp_ms(file_path: &Path) -> Option<i64>
         return None;
     }
     let mut trailing = [0u8; 1];
-    file.read_exact_at(&mut trailing, consumed_to - 1).ok()?;
+    read_exact_at(&file, &mut trailing, consumed_to - 1).ok()?;
     let mut cursor = consumed_to - u64::from(trailing[0] == b'\n');
     let floor = consumed_to.saturating_sub(SUBSTANTIVE_TAIL_SCAN_BYTES);
     let mut accumulator = TailLineAccumulator::new();
@@ -2472,7 +2539,7 @@ pub fn last_substantive_transcript_timestamp_ms(file_path: &Path) -> Option<i64>
     while cursor > floor {
         let start = cursor.saturating_sub(TAIL_CHUNK_BYTES as u64).max(floor);
         let length = (cursor - start) as usize;
-        file.read_exact_at(&mut buffer[..length], start).ok()?;
+        read_exact_at(&file, &mut buffer[..length], start).ok()?;
         let mut segment_end = length;
         let mut index = length;
         while index > 0 {
@@ -2654,7 +2721,14 @@ fn is_uuid_transcript_stem(stem: &str) -> bool {
 }
 
 fn file_modified_ms(metadata: &fs::Metadata) -> i64 {
-    metadata.mtime() * 1_000 + metadata.mtime_nsec() / 1_000_000
+    #[cfg(unix)]
+    {
+        metadata.mtime() * 1_000 + metadata.mtime_nsec() / 1_000_000
+    }
+    #[cfg(windows)]
+    {
+        windows_filetime_to_unix_ms(metadata.last_write_time()) as i64
+    }
 }
 
 fn collect_successor_candidates(

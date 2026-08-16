@@ -1,0 +1,366 @@
+--- a/src/Surface.zig
++++ b/src/Surface.zig
+@@ -234,6 +234,9 @@
+     /// The last x/y sent for mouse reports.
+     event_point: ?terminal.point.Coordinate = null,
+ 
++    /// The last binding modifiers sent for mouse reports.
++    event_mods: ?input.Mods = null,
++
+     /// The pressure stage for the mouse. This should always be none if
+     /// the mouse is not pressed.
+     pressure_stage: input.MousePressureStage = .none,
+@@ -1440,6 +1443,25 @@
+     };
+ }
+ 
++/// Push a message to the surface/app mailbox from the search thread with a
++/// bounded wait.
++///
++/// Ghostex patch (2026-07-11): the app mailbox is drained only by the app
++/// thread, and Surface.deinit joins the search thread FIRST — before anything
++/// else — with no way to interrupt a condvar wait. A `.forever` push from the
++/// search thread therefore deadlocks the whole process whenever the app
++/// thread enters ghostty_surface_free while the app mailbox is full (same
++/// cycle as the fixed surfaceMessageWriter bug). Search counts/selection are
++/// re-derivable UI state; dropping them under a wedged app thread is safe.
++fn searchSurfaceMailboxPush(self: *Surface, msg: apprt.surface.Message) void {
++    if (self.surfaceMailbox().push(msg, .{ .ns = std.time.ns_per_s }) == 0) {
++        log.warn(
++            "surface mailbox full for over 1s; dropping search message to avoid deadlock",
++            .{},
++        );
++    }
++}
++
+ fn searchCallback_(
+     self: *Surface,
+     event: terminal.search.Thread.Event,
+@@ -1484,10 +1506,7 @@
+                 );
+ 
+                 // Send the selected index to the surface mailbox
+-                _ = self.surfaceMailbox().push(
+-                    .{ .search_selected = sel.idx },
+-                    .forever,
+-                );
++                self.searchSurfaceMailboxPush(.{ .search_selected = sel.idx });
+             } else {
+                 // Reset our selected match
+                 _ = self.renderer_thread.mailbox.push(
+@@ -1497,20 +1516,14 @@
+                 );
+ 
+                 // Reset the selected index
+-                _ = self.surfaceMailbox().push(
+-                    .{ .search_selected = null },
+-                    .forever,
+-                );
++                self.searchSurfaceMailboxPush(.{ .search_selected = null });
+             }
+ 
+             try self.renderer_thread.wakeup.notify();
+         },
+ 
+         .total_matches => |total| {
+-            _ = self.surfaceMailbox().push(
+-                .{ .search_total = total },
+-                .forever,
+-            );
++            self.searchSurfaceMailboxPush(.{ .search_total = total });
+         },
+ 
+         // When we quit, tell our renderer to reset any search state.
+@@ -1531,14 +1544,8 @@
+             try self.renderer_thread.wakeup.notify();
+ 
+             // Reset search totals in the surface
+-            _ = self.surfaceMailbox().push(
+-                .{ .search_total = null },
+-                .forever,
+-            );
+-            _ = self.surfaceMailbox().push(
+-                .{ .search_selected = null },
+-                .forever,
+-            );
++            self.searchSurfaceMailboxPush(.{ .search_total = null });
++            self.searchSurfaceMailboxPush(.{ .search_selected = null });
+         },
+ 
+         // Unhandled, so far.
+@@ -3723,6 +3730,7 @@
+         // Keep track of our last reported viewport cell for event
+         // deduplication.
+         opts.last_cell = &self.mouse.event_point;
++        opts.last_mods = &self.mouse.event_mods;
+ 
+         break :opts opts;
+     };
+--- a/src/renderer/generic.zig
++++ b/src/renderer/generic.zig
+@@ -1743,20 +1743,36 @@
+             self: *Self,
+             health: Health,
+         ) void {
++            // Always release our semaphore FIRST (Ghostex patch 2026-07-11):
++            // this callback runs on a GPU/libdispatch completion thread, and
++            // the mailbox push below can block. If the semaphore is not
++            // released before any wait, a blocked push wedges the renderer
++            // thread in nextFrame()/frame_sema.wait() and the app thread in
++            // SwapChain.deinit — both unbounded joins reachable from
++            // ghostty_surface_free.
++            self.swap_chain.releaseFrame();
++
+             // If our health value hasn't changed, then we do nothing. We don't
+             // do a cmpxchg here because strict atomicity isn't important.
+             if (self.health.load(.seq_cst) != health) {
+                 self.health.store(health, .seq_cst);
+ 
+                 // Our health value changed, so we notify the surface so that it
+-                // can do something about it.
+-                _ = self.surface_mailbox.push(.{
++                // can do something about it. Bounded push (Ghostex patch
++                // 2026-07-11): the surface/app mailbox is drained only by the
++                // app thread; a forever push from this completion thread can
++                // deadlock the process if the app thread is blocked in surface
++                // teardown. Health is re-derivable state — dropping the
++                // notification under a wedged app thread is safe.
++                if (self.surface_mailbox.push(.{
+                     .renderer_health = health,
+-                }, .{ .forever = {} });
++                }, .{ .ns = std.time.ns_per_s }) == 0) {
++                    log.warn(
++                        "surface mailbox full for over 1s; dropping renderer_health to avoid deadlock",
++                        .{},
++                    );
++                }
+             }
+-
+-            // Always release our semaphore
+-            self.swap_chain.releaseFrame();
+         }
+ 
+         /// Call this any time the background image path changes.
+@@ -2741,8 +2757,13 @@
+ 
+                     // Advance our index until we reach or pass
+                     // our current x position in the shaper cells.
++                    // Ghostex patch (2026-07-11): bound the scan — the last
++                    // shaped run can end before x, and walking past the end
++                    // of shaper_cells is UB/panic in safe builds.
+                     const shaper_cells_unwrapped = shaper_cells.?;
+-                    while (run.offset + shaper_cells_unwrapped[shaper_cells_i].x < x) {
++                    while (shaper_cells_i < shaper_cells_unwrapped.len and
++                        run.offset + shaper_cells_unwrapped[shaper_cells_i].x < x)
++                    {
+                         shaper_cells_i += 1;
+                     }
+                 }
+--- a/src/termio/Exec.zig
++++ b/src/termio/Exec.zig
+@@ -285,12 +285,27 @@
+ 
+     // We always notify the surface immediately that the child has
+     // exited and some metadata about the exit.
+-    _ = td.surface_mailbox.push(.{
++    //
++    // Ghostex patch (2026-07-11): bounded push. The surface/app mailbox is
++    // drained only by the app thread, and this callback runs on the io
++    // thread exactly when a surface is being torn down (the child exits
++    // because we are killing it). If the app thread is already blocked in
++    // Surface.deinit joining this io thread, a forever push here closes the
++    // same deadlock cycle as the fixed surfaceMessageWriter bug. Dropping
++    // the notification after 1s is safe: the only wedge scenario is an app
++    // thread that is not draining, and the surface being freed no longer
++    // needs the exit notification.
++    if (td.surface_mailbox.push(.{
+         .child_exited = .{
+             .exit_code = exit_code,
+             .runtime_ms = runtime_ms,
+         },
+-    }, .{ .forever = {} });
++    }, .{ .ns = std.time.ns_per_s }) == 0) {
++        log.warn(
++            "surface mailbox full for over 1s; dropping child_exited to avoid deadlock",
++            .{},
++        );
++    }
+ }
+ 
+ fn processExit(
+@@ -378,11 +393,24 @@
+         }
+ 
+         // We have to notify the surface that we're in password input.
+-        // We must block on this because the balanced true/false state
+-        // of this is critical to apprt behavior.
+-        _ = td.surface_mailbox.push(.{
++        // We should block on this because the balanced true/false state
++        // of this is critical to apprt behavior — but the wait must be
++        // bounded (Ghostex patch 2026-07-11): this timer callback runs on
++        // the io thread and the surface/app mailbox is drained only by the
++        // app thread. If the app thread is blocked in Surface.deinit
++        // joining this io thread, a forever push deadlocks the process
++        // (same cycle as the fixed surfaceMessageWriter bug). A 1s expiry
++        // only happens when the app thread is wedged, in which case the
++        // password styling imbalance is the least of the app's problems
++        // and self-corrects on the next termios change.
++        if (td.surface_mailbox.push(.{
+             .password_input = password_input,
+-        }, .{ .forever = {} });
++        }, .{ .ns = std.time.ns_per_s }) == 0) {
++            log.warn(
++                "surface mailbox full for over 1s; dropping password_input to avoid deadlock",
++                .{},
++            );
++        }
+     }
+ 
+     // Repeat the timer
+@@ -1181,10 +1209,24 @@
+         // to calling execve. In this case, the direct child dies
+         // but grandchildren survive. To work around this, we loop
+         // and repeatedly kill the process group until all
+-        // descendents are well and truly dead. We will not rest
+-        // until the entire family tree is obliterated.
+-        while (true) {
+-            switch (posix.errno(c.killpg(pgid, c.SIGHUP))) {
++        // descendents are well and truly dead.
++        //
++        // Ghostex patch (2026-07-11): the loop must be BOUNDED. It runs on
++        // the io thread during surface teardown while the app thread is
++        // blocked in Surface.deinit joining us, so an unkillable child
++        // (SIGHUP-ignoring process, or one wedged in kernel exit flushing a
++        // full pty — the 2026-07-10 freeze) previously deadlocked the whole
++        // app. Escalate to SIGKILL after ~2s of SIGHUP, and give up entirely
++        // after ~5s: nothing else reaps this pid, so giving up leaves a
++        // zombie pid-table entry until the app exits — strictly better than
++        // a permanent process-wide freeze, and the pty is closed later in
++        // Subprocess.deinit so an abandoned child loses its terminal anyway.
++        const sigkill_after: usize = 200; // ~2s of SIGHUP attempts (10ms steps)
++        const give_up_after: usize = 500; // ~5s total
++        var attempt: usize = 0;
++        while (true) : (attempt += 1) {
++            const sig: c_int = if (attempt < sigkill_after) c.SIGHUP else c.SIGKILL;
++            switch (posix.errno(c.killpg(pgid, sig))) {
+                 .SUCCESS => log.debug("process group killed pgid={}", .{pgid}),
+                 else => |err| killpg: {
+                     if ((comptime builtin.target.os.tag.isDarwin()) and
+@@ -1210,6 +1252,13 @@
+             };
+             log.debug("waitpid result={}", .{res_pid});
+             if (res_pid != 0) break;
++            if (attempt >= give_up_after) {
++                log.warn(
++                    "child did not exit after SIGHUP+SIGKILL; abandoning unreaped pid={} to avoid deadlock",
++                    .{pid},
++                );
++                return;
++            }
+             try std.Io.sleep(global.io(), .fromMilliseconds(10), .awake);
+         }
+     }
+@@ -1226,9 +1275,21 @@
+         // FIRST thing the child process does and as far as I can tell,
+         // setsid cannot fail. I'm sure that's not true, but I'd rather
+         // have a bug reported than defensively program against it now.
+-        while (true) {
++        // Ghostex patch (2026-07-11): bounded retries. This runs on the io
++        // thread while the app thread is blocked joining it in
++        // Surface.deinit; a child stopped between fork and setsid (SIGSTOP,
++        // scheduler starvation) previously spun this loop forever and froze
++        // the app. If setsid hasn't happened within ~1s, give up on the
++        // group kill (the pty close in Subprocess.deinit still tears the
++        // child down).
++        var attempt: usize = 0;
++        while (true) : (attempt += 1) {
+             const pgid = c.getpgid(pid);
+             if (pgid == my_pgid) {
++                if (attempt >= 100) {
++                    log.warn("pgid still our own after ~1s; skipping group kill for pid={}", .{pid});
++                    return null;
++                }
+                 log.warn("pgid is our own, retrying", .{});
+                 std.Io.sleep(global.io(), .fromMilliseconds(10), .awake) catch {};
+                 continue;
+--- a/src/termio/Termio.zig
++++ b/src/termio/Termio.zig
+@@ -500,8 +500,19 @@
+         }
+     }
+ 
+-    // Mail the renderer so that it can update the GPU and re-render
+-    _ = self.renderer_mailbox.push(global.io(), .{ .resize = size }, .{ .forever = {} });
++    // Mail the renderer so that it can update the GPU and re-render.
++    // Bounded push (Ghostex patch 2026-07-11): this runs on the io thread,
++    // and the renderer mailbox is drained only by the renderer thread — which
++    // Surface.deinit stops and joins BEFORE the io thread, without draining
++    // the mailbox on exit. A backlogged resize processed in that window would
++    // block forever and deadlock the io-thread join. A dropped resize is
++    // recovered by the next resize or render pass.
++    if (self.renderer_mailbox.push(global.io(), .{ .resize = size }, .{ .ns = std.time.ns_per_s }) == 0) {
++        log.warn(
++            "renderer mailbox full for over 1s; dropping resize to avoid deadlock",
++            .{},
++        );
++    }
+     self.renderer_wakeup.notify() catch {};
+ }
+ 
+--- a/src/termio/mailbox.zig
++++ b/src/termio/mailbox.zig
+@@ -92,7 +92,26 @@
+                 // here.
+                 if (mutex) |m| m.unlock(global.io());
+                 defer if (mutex) |m| m.lockUncancelable(global.io());
+-                if (mb.queue.push(global.io(), msg, .{ .forever = {} }) == 0) msg.deinit();
++                // Ghostex patch (2026-07-11): bounded, not `.forever`. This
++                // queue is drained only by the io thread's loop wakeup. Once
++                // the io thread enters threadExit (surface teardown) nothing
++                // pops it again, and producers include the pty ReadThread
++                // (VT reports) and the app thread itself (ghostty_surface_*
++                // key/paste/resize). A forever push then wedges those threads
++                // permanently: the ReadThread stops draining the pty, the
++                // dying child blocks flushing it, killPid never reaps, and
++                // the io-thread join in Surface.deinit deadlocks the app
++                // (2026-07-10 freeze, twin of the surfaceMessageWriter fix).
++                // A healthy io thread frees a slot within milliseconds, so a
++                // one-second wait only expires when it is gone or wedged —
++                // dropping the message then is what keeps the process alive.
++                if (mb.queue.push(global.io(), msg, .{ .ns = std.time.ns_per_s }) == 0) {
++                    log.warn(
++                        "termio mailbox full for over 1s; dropping message to avoid deadlock",
++                        .{},
++                    );
++                    msg.deinit();
++                }
+             },
+         }
+     }
+--- a/src/termio/stream_handler.zig
++++ b/src/termio/stream_handler.zig
+@@ -121,7 +121,23 @@
+         if (self.surface_mailbox.push(msg, .{ .instant = {} }) == 0) {
+             self.renderer_state.mutex.unlock(global.io());
+             defer self.renderer_state.mutex.lockUncancelable(global.io());
+-            _ = self.surface_mailbox.push(msg, .{ .forever = {} });
++            // Ghostex patch (2026-07-10): the retry must be bounded, not
++            // `.forever`. The surface mailbox is drained only by the app
++            // thread, and in embedded mode the app thread can block inside
++            // ghostty_surface_free (Surface.deinit joins the io thread,
++            // whose exit path waits for the child to die, whose exit waits
++            // for the pty to drain, which needs THIS read thread to keep
++            // reading). A forever push from here then deadlocks the whole
++            // process. Any healthy app thread frees a mailbox slot within
++            // milliseconds, so a one-second wait only expires when the app
++            // thread is wedged — dropping the message then is what lets the
++            // pty drain and the deadlock cycle break.
++            if (self.surface_mailbox.push(msg, .{ .ns = 1 * std.time.ns_per_s }) == 0) {
++                log.warn(
++                    "surface mailbox full for over 1s; dropping message to avoid deadlock",
++                    .{},
++                );
++            }
+         }
+     }
+ 

@@ -2479,7 +2479,7 @@ fn run_zsh_script_blocking(
             timed_out = timed_out || started.elapsed() >= timeout;
             if terminate_started.is_none() {
                 terminate_started = Some(Instant::now());
-                send_sigterm(&child);
+                send_sigterm(&mut child);
             } else if terminate_started
                 .map(|instant| instant.elapsed() >= Duration::from_millis(1_000))
                 .unwrap_or(false)
@@ -2520,7 +2520,7 @@ fn read_capped<R: Read>(
     (output, truncated)
 }
 
-fn send_sigterm(child: &std::process::Child) {
+fn send_sigterm(child: &mut std::process::Child) {
     #[cfg(unix)]
     unsafe {
         libc::kill(child.id() as i32, libc::SIGTERM);

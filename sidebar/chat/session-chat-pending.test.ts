@@ -6,6 +6,7 @@ import {
   countLeadingPendingTextsGluedToUserText,
   isSessionChatClearCommand,
   pruneSessionChatPendingSends,
+  sessionChatCommandMarkersAsMessages,
   sessionChatPendingContentKey,
   visibleSessionChatPendingSends,
   type SessionChatPendingSend,
@@ -145,6 +146,17 @@ describe("content keys", () => {
 });
 
 describe("/clear boundary (§10.3)", () => {
+  test("model configuration commands rely on one authoritative transcript status", () => {
+    expect(
+      sessionChatCommandMarkersAsMessages([
+        { command: "/model sonnet", id: "model", sentAt: 100 },
+        { command: "/effort xhigh", id: "effort", sentAt: 200 },
+        { command: "/compact", id: "compact", sentAt: 300 },
+        { command: "/clear", id: "clear", sentAt: 400 },
+      ]).map((message) => message.blocks),
+    ).toEqual([[{ text: "Ran /clear", type: "text" }]]);
+  });
+
   test("only /clear (first token) counts as a clear command", () => {
     expect(isSessionChatClearCommand("/clear")).toBe(true);
     expect(isSessionChatClearCommand("  /CLEAR now ")).toBe(true);

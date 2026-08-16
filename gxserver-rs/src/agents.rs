@@ -2116,9 +2116,28 @@ pub(crate) fn apply_live_process_session_identity(
     project_id: &str,
     session_id: &str,
     agent_id: Option<String>,
-    agent_session_id: Option<String>,
+    mut agent_session_id: Option<String>,
     agent_session_path: Option<String>,
 ) -> Result<bool, DomainStateError> {
+    // A manually launched Codex can publish its UUID title before the process
+    // scan identifies the terminal as Codex. Consume that already-observed
+    // identity now so either event ordering reaches the same agent session.
+    if agent_session_id.is_none()
+        && normalize_agent_id(agent_id.as_deref()).as_deref() == Some("codex")
+    {
+        let current = repository.get_session(project_id, session_id)?;
+        let runtime_settings = current
+            .as_ref()
+            .map(|session| object_field(session, "runtimeSettings"))
+            .unwrap_or_default();
+        if read_text_from_map(&runtime_settings, "agentSessionId").is_none() {
+            agent_session_id = runtime_settings
+                .get("agentActivity")
+                .and_then(Value::as_object)
+                .and_then(|activity| read_text_from_map(activity, "lastTitle"))
+                .and_then(|title| get_codex_session_id_from_title(&title));
+        }
+    }
     let lifecycle = LifecycleParams {
         project_id: project_id.to_string(),
         session_id: session_id.to_string(),
@@ -7183,6 +7202,78 @@ mod tests {
         assert_eq!(
             runtime_settings.get("agentSessionId"),
             Some(&json!("019EB8D0-D27B-7F30-B6D7-7A04AB8FAE78"))
+        );
+    }
+
+    #[test]
+    fn live_process_identity_claims_codex_id_observed_before_process_promotion() {
+        let (temp, db) = open_test_database();
+        let repository = DomainRepository::new(&db, "test-server");
+        let project = repository
+            .create_project(
+                json!({
+                    "name": "Ghostex",
+                    "path": temp.path().to_string_lossy()
+                })
+                .as_object()
+                .expect("project params"),
+            )
+            .expect("create project");
+        let project_id = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .expect("project id")
+            .to_string();
+        let session = repository
+            .create_session(
+                json!({
+                    "kind": "terminal",
+                    "lifecycleState": "running",
+                    "projectId": project_id,
+                    "runtimeSettings": {
+                        "agentActivity": {
+                            "lastTitle": "019ff871-8b5c-7ce2-bcf7-5409263e2e0e"
+                        },
+                        "sessionPersistenceProvider": "zmx",
+                        "titleSource": "placeholder"
+                    },
+                    "surface": "workspace",
+                    "title": "Terminal Session"
+                })
+                .as_object()
+                .expect("session params"),
+                false,
+            )
+            .expect("create session");
+        let session_id = session
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .expect("session id")
+            .to_string();
+
+        let changed = apply_live_process_session_identity(
+            &repository,
+            &project_id,
+            &session_id,
+            Some("codex".to_string()),
+            None,
+            None,
+        )
+        .expect("apply live process identity");
+
+        assert!(changed);
+        let updated = repository
+            .get_session(&project_id, &session_id)
+            .expect("get updated session")
+            .expect("updated session");
+        assert_eq!(updated.get("kind"), Some(&json!("agent")));
+        assert_eq!(updated.get("agentId"), Some(&json!("codex")));
+        assert_eq!(
+            updated
+                .get("runtimeSettings")
+                .and_then(Value::as_object)
+                .and_then(|settings| settings.get("agentSessionId")),
+            Some(&json!("019ff871-8b5c-7ce2-bcf7-5409263e2e0e"))
         );
     }
 

@@ -26,6 +26,7 @@ import {
 import { pairSessionChatToolBlocks } from "./session-chat-tool-fold";
 import {
   formatSessionChatToolInput,
+  summarizeSessionChatCommandInput,
   summarizeSessionChatToolInput,
 } from "./session-chat-tool-summary";
 
@@ -37,6 +38,8 @@ export interface SessionChatToolRunProps {
   blocks: readonly ToolBlock[];
   /** Global expand toggle; expands the run and each row's detail. */
   expandSignal?: boolean;
+  /** The parent disclosure already owns collapsing, so render every row. */
+  showAllRows?: boolean;
 }
 
 function clipBody(text: string): string {
@@ -121,8 +124,9 @@ function ToolLine({
   const name = call?.name ?? "Result";
   const commandTool = isCommandTool(name);
   const inputPreview = call ? summarizeSessionChatToolInput(call.input) : "";
+  const commandPreview = call ? summarizeSessionChatCommandInput(call.input) : "";
   const resultPreview = result?.output.split("\n")[0]?.trim().slice(0, 120) ?? "";
-  const preview = commandTool ? "" : inputPreview || resultPreview;
+  const preview = commandTool ? commandPreview : inputPreview || resultPreview;
   const callDiff = call ? diffFromSessionChatToolCall(call.name, call.input) : null;
   const resultDiff = result ? diffFromSessionChatText(result.output) : null;
   const diff = callDiff ?? resultDiff;
@@ -191,10 +195,14 @@ function ToolLine({
   );
 }
 
-export function SessionChatToolRun({ blocks, expandSignal = false }: SessionChatToolRunProps) {
+export function SessionChatToolRun({
+  blocks,
+  expandSignal = false,
+  showAllRows = false,
+}: SessionChatToolRunProps) {
   const pairs = pairSessionChatToolBlocks(blocks);
-  const [expanded, setExpanded] = useState(expandSignal);
-  useEffect(() => setExpanded(expandSignal), [expandSignal]);
+  const [expanded, setExpanded] = useState(showAllRows || expandSignal);
+  useEffect(() => setExpanded(showAllRows || expandSignal), [expandSignal, showAllRows]);
 
   const hiddenCount = Math.max(0, pairs.length - 1);
   const toggle = (
@@ -231,7 +239,7 @@ export function SessionChatToolRun({ blocks, expandSignal = false }: SessionChat
 
   return (
     <div className="ghostex-chat-tool-run">
-      {hiddenCount === 0 ? (
+      {hiddenCount === 0 || showAllRows ? (
         rows(0)
       ) : expanded ? (
         <SessionChatExpansion

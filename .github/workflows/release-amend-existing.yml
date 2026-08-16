@@ -1,0 +1,450 @@
+name: Amend existing Ghostex release
+
+# Same-version add-or-replace for an already public tag. Product flags are
+# opt-in and default false. Pack dependencies (gxserver) are pulled into the
+# build scope automatically; they are only published when missing from the live
+# release or when the operator selected them.
+#
+# The job graph matches release-gpui.yml so Windows/macOS still await gxserver
+# and code-server just in time. Do not fold this into release-gpui.yml: that
+# file is a fingerprint input of every product, and editing it would force a
+# gxserver rebuild of a tag we are trying to leave byte-identical.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing stable release version to add or replace products on
+        required: true
+        type: string
+      macos:
+        description: Add or replace the macOS arm64 DMG
+        required: true
+        default: false
+        type: boolean
+      update_sparkle:
+        description: Advance Sparkle when macOS is part of this amend
+        required: true
+        default: true
+        type: boolean
+      linux_deb:
+        description: Add or replace the Debian/Ubuntu x64 DEB
+        required: true
+        default: false
+        type: boolean
+      linux_rpm:
+        description: Add or replace the Fedora/RHEL x64 RPM
+        required: true
+        default: false
+        type: boolean
+      windows_x64:
+        description: Add or replace Windows x64 installer and portable package
+        required: true
+        default: false
+        type: boolean
+      windows_arm64:
+        description: Add or replace Windows ARM64 installer and portable package
+        required: true
+        default: false
+        type: boolean
+      sign_windows:
+        description: Authenticode-sign Windows packages
+        required: true
+        default: false
+        type: boolean
+      android:
+        description: Add or replace the signed React Native Android APK
+        required: true
+        default: false
+        type: boolean
+      gxserver_linux_x64:
+        description: Add or replace the static Linux x64 gxserver runtime
+        required: true
+        default: false
+        type: boolean
+      gxserver_linux_arm64:
+        description: Add or replace the static Linux ARM64 gxserver runtime
+        required: true
+        default: false
+        type: boolean
+      gxserver_wsl_windows_x64:
+        description: Add or replace the Windows x64 WSL gxserver bootstrap
+        required: true
+        default: false
+        type: boolean
+      gxserver_wsl_windows_arm64:
+        description: Add or replace the Windows ARM64 WSL gxserver bootstrap
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ghostex-gpui-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: macos-15
+    outputs:
+      amend_products: ${{ steps.scope.outputs.amend_products }}
+      expected_platforms: ${{ steps.plan.outputs.expected_platforms }}
+      feeds_sparkle: ${{ steps.plan.outputs.feeds_sparkle }}
+      job_android: ${{ steps.plan.outputs.job_android }}
+      job_code_server_arm64: ${{ steps.plan.outputs.job_code_server_arm64 }}
+      job_code_server_x64: ${{ steps.plan.outputs.job_code_server_x64 }}
+      job_gxserver_arm64: ${{ steps.plan.outputs.job_gxserver_arm64 }}
+      job_gxserver_x64: ${{ steps.plan.outputs.job_gxserver_x64 }}
+      job_linux_x64: ${{ steps.plan.outputs.job_linux_x64 }}
+      job_macos: ${{ steps.plan.outputs.job_macos }}
+      job_validate_windows: ${{ steps.plan.outputs.job_validate_windows }}
+      job_windows_arm64: ${{ steps.plan.outputs.job_windows_arm64 }}
+      job_windows_x64: ${{ steps.plan.outputs.job_windows_x64 }}
+      job_wsl_arm64: ${{ steps.plan.outputs.job_wsl_arm64 }}
+      job_wsl_x64: ${{ steps.plan.outputs.job_wsl_x64 }}
+      linux_packages: ${{ steps.plan.outputs.linux_packages }}
+      plan: ${{ steps.plan.outputs.plan }}
+      reuse_count: ${{ steps.plan.outputs.reuse_count }}
+      reuse_matrix: ${{ steps.plan.outputs.reuse_matrix }}
+      update_sparkle: ${{ steps.scope.outputs.update_sparkle }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - name: Resolve amend scope against the live release
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/release-gpui/resolve-amend-scope.mjs
+          --version "${{ inputs.version }}"
+          --macos "${{ inputs.macos }}"
+          --linux-deb "${{ inputs.linux_deb }}"
+          --linux-rpm "${{ inputs.linux_rpm }}"
+          --windows-x64 "${{ inputs.windows_x64 }}"
+          --windows-arm64 "${{ inputs.windows_arm64 }}"
+          --android "${{ inputs.android }}"
+          --gxserver-linux-x64 "${{ inputs.gxserver_linux_x64 }}"
+          --gxserver-linux-arm64 "${{ inputs.gxserver_linux_arm64 }}"
+          --gxserver-wsl-windows-x64 "${{ inputs.gxserver_wsl_windows_x64 }}"
+          --gxserver-wsl-windows-arm64 "${{ inputs.gxserver_wsl_windows_arm64 }}"
+          --update-sparkle "${{ inputs.update_sparkle }}"
+      - name: Validate immutable release inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOSTEX_RELEASE_ALLOW_EXISTING_TAG: "1"
+          GHOSTEX_RELEASE_MACOS: ${{ steps.scope.outputs.GHOSTEX_RELEASE_MACOS }}
+          GHOSTEX_RELEASE_LINUX_DEB: ${{ steps.scope.outputs.GHOSTEX_RELEASE_LINUX_DEB }}
+          GHOSTEX_RELEASE_LINUX_RPM: ${{ steps.scope.outputs.GHOSTEX_RELEASE_LINUX_RPM }}
+          GHOSTEX_RELEASE_WINDOWS_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_WINDOWS_X64 }}
+          GHOSTEX_RELEASE_WINDOWS_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_WINDOWS_ARM64 }}
+          GHOSTEX_RELEASE_SIGN_WINDOWS: ${{ inputs.sign_windows }}
+          GHOSTEX_RELEASE_ANDROID: ${{ steps.scope.outputs.GHOSTEX_RELEASE_ANDROID }}
+          GHOSTEX_RELEASE_GXSERVER_LINUX_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_LINUX_X64 }}
+          GHOSTEX_RELEASE_GXSERVER_LINUX_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_LINUX_ARM64 }}
+          GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_X64 }}
+          GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64 }}
+          GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ steps.scope.outputs.update_sparkle }}
+          GHOSTEX_RELEASE_PRERELEASE: "false"
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          GHOSTEX_MOBILE_DEPLOY_KEY: ${{ secrets.GHOSTEX_MOBILE_DEPLOY_KEY }}
+          WINDOWS_CODE_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
+          WINDOWS_CODE_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
+        run: node scripts/release-gpui/preflight.mjs "${{ inputs.version }}"
+      - name: Verify clean GPUI release reference contract
+        if: ${{ steps.scope.outputs.GHOSTEX_RELEASE_MACOS == 'true' || steps.scope.outputs.GHOSTEX_RELEASE_LINUX_DEB == 'true' || steps.scope.outputs.GHOSTEX_RELEASE_LINUX_RPM == 'true' || steps.scope.outputs.GHOSTEX_RELEASE_WINDOWS_X64 == 'true' || steps.scope.outputs.GHOSTEX_RELEASE_WINDOWS_ARM64 == 'true' }}
+        run: node scripts/release-gpui/verify-reference-contract.mjs --clean
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - name: Restore release-test prerequisites
+        run: git submodule update --init --depth 1 code-server
+      - name: Install and typecheck
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run release:test
+      - name: Resolve the change-aware release plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOSTEX_RELEASE_MACOS: ${{ steps.scope.outputs.GHOSTEX_RELEASE_MACOS }}
+          GHOSTEX_RELEASE_LINUX_DEB: ${{ steps.scope.outputs.GHOSTEX_RELEASE_LINUX_DEB }}
+          GHOSTEX_RELEASE_LINUX_RPM: ${{ steps.scope.outputs.GHOSTEX_RELEASE_LINUX_RPM }}
+          GHOSTEX_RELEASE_WINDOWS_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_WINDOWS_X64 }}
+          GHOSTEX_RELEASE_WINDOWS_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_WINDOWS_ARM64 }}
+          GHOSTEX_RELEASE_SIGN_WINDOWS: ${{ inputs.sign_windows }}
+          GHOSTEX_RELEASE_ANDROID: ${{ steps.scope.outputs.GHOSTEX_RELEASE_ANDROID }}
+          GHOSTEX_RELEASE_GXSERVER_LINUX_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_LINUX_X64 }}
+          GHOSTEX_RELEASE_GXSERVER_LINUX_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_LINUX_ARM64 }}
+          GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_X64 }}
+          GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64 }}
+          GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ steps.scope.outputs.update_sparkle }}
+          GHOSTEX_RELEASE_PRERELEASE: "false"
+          RELEASE_FORCE_PRODUCTS: ${{ steps.scope.outputs.force_products }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p build/release-gpui
+          ARGS=()
+          if [[ -n "$RELEASE_FORCE_PRODUCTS" ]]; then
+            ARGS+=(--force "$RELEASE_FORCE_PRODUCTS")
+          fi
+          node scripts/release-gpui/plan-cli.mjs "$RELEASE_VERSION" \
+            --source-sha "${{ github.sha }}" \
+            --output build/release-gpui/release-plan.json \
+            --emit-github-output \
+            --emit-step-summary \
+            "${ARGS[@]}"
+      - name: Validate the plan against the requested scope
+        env:
+          GHOSTEX_RELEASE_MACOS: ${{ steps.scope.outputs.GHOSTEX_RELEASE_MACOS }}
+          GHOSTEX_RELEASE_LINUX_DEB: ${{ steps.scope.outputs.GHOSTEX_RELEASE_LINUX_DEB }}
+          GHOSTEX_RELEASE_LINUX_RPM: ${{ steps.scope.outputs.GHOSTEX_RELEASE_LINUX_RPM }}
+          GHOSTEX_RELEASE_WINDOWS_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_WINDOWS_X64 }}
+          GHOSTEX_RELEASE_WINDOWS_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_WINDOWS_ARM64 }}
+          GHOSTEX_RELEASE_ANDROID: ${{ steps.scope.outputs.GHOSTEX_RELEASE_ANDROID }}
+          GHOSTEX_RELEASE_GXSERVER_LINUX_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_LINUX_X64 }}
+          GHOSTEX_RELEASE_GXSERVER_LINUX_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_LINUX_ARM64 }}
+          GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_X64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_X64 }}
+          GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64: ${{ steps.scope.outputs.GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64 }}
+          GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ steps.scope.outputs.update_sparkle }}
+          GHOSTEX_RELEASE_PRERELEASE: "false"
+        run: node scripts/release-gpui/preflight.mjs "${{ inputs.version }}" --only-plan --plan build/release-gpui/release-plan.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-plan
+          path: build/release-gpui/release-plan.json
+          if-no-files-found: error
+          retention-days: 14
+
+  validate_windows:
+    if: ${{ needs.prepare.outputs.job_validate_windows == 'true' }}
+    needs: prepare
+    uses: ./.github/workflows/release-gpui-validate.yml
+    with:
+      arm64_target: ${{ needs.prepare.outputs.job_windows_arm64 == 'build' }}
+
+  gxserver_x64:
+    if: ${{ needs.prepare.outputs.job_gxserver_x64 == 'build' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release-gpui-gxserver.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: x64
+      plan: ${{ needs.prepare.outputs.plan }}
+
+  gxserver_arm64:
+    if: ${{ needs.prepare.outputs.job_gxserver_arm64 == 'build' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release-gpui-gxserver.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: arm64
+      plan: ${{ needs.prepare.outputs.plan }}
+
+  code_server_x64:
+    if: ${{ needs.prepare.outputs.job_code_server_x64 != 'skip' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-code-server.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: x64
+
+  code_server_arm64:
+    if: ${{ needs.prepare.outputs.job_code_server_arm64 != 'skip' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-code-server.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: arm64
+
+  reuse:
+    if: ${{ needs.prepare.outputs.reuse_count != '0' }}
+    needs: prepare
+    strategy:
+      fail-fast: true
+      matrix:
+        product: ${{ fromJSON(needs.prepare.outputs.reuse_matrix) }}
+    uses: ./.github/workflows/release-gpui-reuse.yml
+    with:
+      version: ${{ inputs.version }}
+      product: ${{ matrix.product }}
+      plan: ${{ needs.prepare.outputs.plan }}
+
+  macos:
+    if: ${{ needs.prepare.outputs.job_macos == 'build' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-macos.yml
+    with:
+      version: ${{ inputs.version }}
+      runtime_artifacts_ready: true
+      update_sparkle: ${{ needs.prepare.outputs.update_sparkle == 'true' }}
+      plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
+
+  linux_x64:
+    if: ${{ needs.prepare.outputs.job_linux_x64 == 'build' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-linux.yml
+    with:
+      version: ${{ inputs.version }}
+      packages: ${{ needs.prepare.outputs.linux_packages }}
+      runtime_artifacts_ready: true
+      plan: ${{ needs.prepare.outputs.plan }}
+
+  gxserver_wsl_windows_x64:
+    if: ${{ needs.prepare.outputs.job_wsl_x64 == 'build' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release-gpui-wsl-runtime.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: x64
+      plan: ${{ needs.prepare.outputs.plan }}
+
+  gxserver_wsl_windows_arm64:
+    if: ${{ needs.prepare.outputs.job_wsl_arm64 == 'build' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release-gpui-wsl-runtime.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: arm64
+      plan: ${{ needs.prepare.outputs.plan }}
+
+  windows_x64:
+    if: ${{ needs.prepare.outputs.job_windows_x64 == 'build' }}
+    needs: [prepare, validate_windows]
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-windows.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: x64
+      sign: ${{ inputs.sign_windows }}
+      runtime_artifacts_ready: true
+      plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
+
+  windows_arm64:
+    if: ${{ needs.prepare.outputs.job_windows_arm64 == 'build' }}
+    needs: [prepare, validate_windows]
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-windows.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: arm64
+      sign: ${{ inputs.sign_windows }}
+      runtime_artifacts_ready: true
+      plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
+
+  android:
+    if: ${{ needs.prepare.outputs.job_android == 'build' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release-gpui-android.yml
+    with:
+      version: ${{ inputs.version }}
+      plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
+
+  publish:
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        ((needs.prepare.outputs.job_validate_windows == 'true' && needs.validate_windows.result == 'success') || (needs.prepare.outputs.job_validate_windows != 'true' && needs.validate_windows.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_gxserver_x64 == 'build' && needs.gxserver_x64.result == 'success') || (needs.prepare.outputs.job_gxserver_x64 != 'build' && needs.gxserver_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_gxserver_arm64 == 'build' && needs.gxserver_arm64.result == 'success') || (needs.prepare.outputs.job_gxserver_arm64 != 'build' && needs.gxserver_arm64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_code_server_x64 != 'skip' && needs.code_server_x64.result == 'success') || (needs.prepare.outputs.job_code_server_x64 == 'skip' && needs.code_server_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_code_server_arm64 != 'skip' && needs.code_server_arm64.result == 'success') || (needs.prepare.outputs.job_code_server_arm64 == 'skip' && needs.code_server_arm64.result == 'skipped')) &&
+        ((needs.prepare.outputs.reuse_count != '0' && needs.reuse.result == 'success') || (needs.prepare.outputs.reuse_count == '0' && needs.reuse.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_macos == 'build' && needs.macos.result == 'success') || (needs.prepare.outputs.job_macos != 'build' && needs.macos.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_linux_x64 == 'build' && needs.linux_x64.result == 'success') || (needs.prepare.outputs.job_linux_x64 != 'build' && needs.linux_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_windows_x64 == 'build' && needs.windows_x64.result == 'success') || (needs.prepare.outputs.job_windows_x64 != 'build' && needs.windows_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_windows_arm64 == 'build' && needs.windows_arm64.result == 'success') || (needs.prepare.outputs.job_windows_arm64 != 'build' && needs.windows_arm64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_android == 'build' && needs.android.result == 'success') || (needs.prepare.outputs.job_android != 'build' && needs.android.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_wsl_x64 == 'build' && needs.gxserver_wsl_windows_x64.result == 'success') || (needs.prepare.outputs.job_wsl_x64 != 'build' && needs.gxserver_wsl_windows_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_wsl_arm64 == 'build' && needs.gxserver_wsl_windows_arm64.result == 'success') || (needs.prepare.outputs.job_wsl_arm64 != 'build' && needs.gxserver_wsl_windows_arm64.result == 'skipped'))
+      }}
+    needs:
+      - prepare
+      - validate_windows
+      - gxserver_x64
+      - gxserver_arm64
+      - code_server_x64
+      - code_server_arm64
+      - reuse
+      - macos
+      - linux_x64
+      - windows_x64
+      - windows_arm64
+      - android
+      - gxserver_wsl_windows_x64
+      - gxserver_wsl_windows_arm64
+    uses: ./.github/workflows/release-gpui-publish.yml
+    with:
+      version: ${{ inputs.version }}
+      expected_platforms: ${{ needs.prepare.outputs.expected_platforms }}
+      prerelease: false
+      update_sparkle: ${{ needs.prepare.outputs.update_sparkle == 'true' }}
+      windows_signed: ${{ inputs.sign_windows }}
+      plan: ${{ needs.prepare.outputs.plan }}
+      amend: true
+      amend_products: ${{ needs.prepare.outputs.amend_products }}
+    secrets: inherit

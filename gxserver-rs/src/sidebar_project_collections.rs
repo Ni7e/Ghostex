@@ -12,9 +12,8 @@ Native Android could neither render nor edit the same grouped project list. gxse
 now owns a durable normalized copy of that overlay in the metadata table.
 Every editor (GPUI and React Native Android) write-through-syncs the whole normalized
 state here so all clients read one contract. Keep this metadata-only:
-collection ids, titles, colors, collapsed flags, project ids, and an explicit
-ordering array — never paths, prompts, command text, tokens, or terminal
-output.
+collection ids, titles, colors, project ids, and an explicit ordering array.
+Expansion is client-local UI state and never enters gxserver.
 */
 
 const SIDEBAR_PROJECT_COLLECTIONS_METADATA_KEY: &str = "sidebarProjectCollections";
@@ -177,7 +176,6 @@ pub fn assign_project_to_sidebar_collection(
             collections.insert(
                 collection_id.clone(),
                 json!({
-                    "collapsed": false,
                     "collectionId": collection_id,
                     "color": SIDEBAR_PROJECT_COLLECTION_COLORS[color_index],
                     "projectIds": [],
@@ -281,14 +279,9 @@ pub fn normalize_sidebar_project_collections_state(state: &Value) -> Value {
         let title = trimmed_bounded_text(collection_state.get("title"), MAX_TITLE_CHARS)
             .unwrap_or_else(|| collection_id.clone());
         let color = normalized_collection_color(collection_state.get("color"), collections.len());
-        let collapsed = collection_state
-            .get("collapsed")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
         collections.insert(
             collection_id.clone(),
             json!({
-                "collapsed": collapsed,
                 "collectionId": collection_id,
                 "color": color,
                 "projectIds": project_ids,
@@ -351,14 +344,12 @@ mod tests {
         let state = json!({
             "collections": {
                 "c1": {
-                    "collapsed": true,
                     "collectionId": "c1",
                     "color": "#7c6df2",
                     "projectIds": ["P1", "P2"],
                     "title": "Group 1",
                 },
                 "c2": {
-                    "collapsed": false,
                     "collectionId": "c2",
                     "color": "#4f5663",
                     "projectIds": ["P3"],
@@ -423,14 +414,12 @@ mod tests {
             json!({
                 "collections": {
                     "c1": {
-                        "collapsed": false,
                         "collectionId": "c1",
                         "color": "#4f5663",
                         "projectIds": ["P1", "P2"],
                         "title": "Keep",
                     },
                     "c3": {
-                        "collapsed": false,
                         "collectionId": "c3",
                         "color": "#808080",
                         "projectIds": ["P3"],
@@ -483,7 +472,6 @@ mod tests {
             json!({
                 "collections": {
                     "c1": {
-                        "collapsed": false,
                         "collectionId": "c1",
                         "color": "#3aa675",
                         "projectIds": ["P1"],

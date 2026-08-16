@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readdir } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -46,7 +46,16 @@ export async function codeServerNodePayloadFingerprint(codeServerRoot) {
   const root = path.resolve(codeServerRoot);
   const digest = createHash('sha256');
   for (const relativePath of await payloadFiles(root)) {
-    const contents = await readFile(path.join(root, relativePath));
+    const result = spawnSync('git', ['-C', root, 'show', `HEAD:${relativePath}`], {
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    if (result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
+      const detail = Buffer.isBuffer(result.stderr) ? result.stderr.toString('utf8').trim() : '';
+      throw new Error(
+        `Could not read canonical code-server payload input ${relativePath} from HEAD${detail ? `: ${detail}` : ''}`
+      );
+    }
+    const contents = result.stdout;
     digest.update(`file\0${relativePath}\0${contents.byteLength}\0`);
     digest.update(contents);
     digest.update('\0');

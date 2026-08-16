@@ -140,7 +140,7 @@ CDXC:GPUISettingsService 2026-06-24-10:50:
 GPUI must read and persist the shared sidebar settings JSON through the central XDG/GHOSTEX_HOME path resolver. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` and `sidebarSide` without introducing a second settings store.
 
 CDXC:GPUISettingsService 2026-06-24-10:50:
-Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, browserFeedbackTool, sidebarDefaultWidthPx, sidebarSide, project-editor auto-sleep fields, legacy external-IDE command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
+Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, sidebarDefaultWidthPx, sidebarSide, project-editor auto-sleep fields, legacy external-IDE command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
 
 CDXC:GPUISettingsService 2026-06-24-10:50:
 GPUI `updateSettings` handling needs a production write path: accept only JSON object payloads, create the shared state directory, write through an adjacent temp file then rename, skip byte-identical writes, and maintain a monotonic in-memory revision/hash/snapshot signal without logging paths, project names, URLs, commands, environment values, tokens, stdout/stderr, or user-owned content.
@@ -609,10 +609,6 @@ impl SharedSidebarSettingsSnapshot {
             )
             .unwrap_or(DEFAULT_KEEP_AWAKE_WHILE_WORKING_SESSIONS),
         }
-    }
-
-    pub fn browser_feedback_tool(&self) -> Option<&str> {
-        self.object.get("browserFeedbackTool")?.as_str()
     }
 
     pub fn gxserver_agent_settings(&self) -> SharedGxserverAgentSettings {

@@ -36,6 +36,7 @@ import {
   readStoredSessionChatOptions,
   reconcileSessionChatOptionsFromCommand,
   seedSessionChatOptionState,
+  sessionChatBoundedKeySteps,
   sessionChatOptionsPillLabel,
   sessionChatOptionTracksValue,
   sessionChatOptionValueLabel,
@@ -152,7 +153,7 @@ export interface SessionChatSessionOptionPillsProps {
   isWorking: boolean;
   /** False when input is held elsewhere. */
   canSend: boolean;
-  /** True when the transport can inject raw keystrokes (Claude's mode cycle). */
+  /** True when the transport can inject raw keystrokes for agent TUI controls. */
   canSendKey: boolean;
   onDispatchCommand: (command: string) => Promise<void>;
   onDispatchKey: (key: SessionChatSendKey, marker: string) => Promise<void>;
@@ -215,7 +216,10 @@ export function SessionChatSessionOptionPills({
   const visibleOptions = useMemo(
     () =>
       optionDescriptors.filter(
-        (descriptor) => descriptor.dispatch.kind !== "key" || canSendKey,
+        (descriptor) =>
+          (descriptor.dispatch.kind !== "key" &&
+            descriptor.dispatch.kind !== "bounded-key-steps") ||
+          canSendKey,
       ),
     [canSendKey, optionDescriptors],
   );
@@ -238,8 +242,24 @@ export function SessionChatSessionOptionPills({
           return;
         }
         if (delivery.kind === "agent-picker") {
-          onSwitchToTerminal?.();
           await onDispatchCommand(delivery.command);
+          onSwitchToTerminal?.();
+          return;
+        }
+        if (delivery.kind === "bounded-key-steps") {
+          const keys = sessionChatBoundedKeySteps(
+            descriptor.choices ?? [],
+            state[descriptor.id]?.value,
+            value ?? "",
+            delivery.decreaseKey,
+            delivery.increaseKey,
+          );
+          for (const key of keys) {
+            await onDispatchKey(key, "");
+          }
+          if (value !== undefined) {
+            recordDispatched(descriptor.id, value);
+          }
           return;
         }
         await onDispatchKey(delivery.key, delivery.marker);
@@ -256,7 +276,7 @@ export function SessionChatSessionOptionPills({
           }
         });
     },
-    [onDispatchCommand, onDispatchKey, onSwitchToTerminal, recordDispatched],
+    [onDispatchCommand, onDispatchKey, onSwitchToTerminal, recordDispatched, state],
   );
 
   if (!catalog) {
@@ -297,16 +317,12 @@ export function SessionChatSessionOptionPills({
       );
     }
     return (
-      <>
-        <DropdownMenuItem className="rounded-md" onClick={() => dispatch(descriptor)}>
-          {descriptor.actionLabel ?? descriptor.label}
-        </DropdownMenuItem>
-        {descriptor.dispatch.kind === "agent-picker" && descriptor.choices?.length ? (
-          <DropdownMenuLabel className="whitespace-normal">
-            {descriptor.choices.map((choice) => choice.label).join(" · ")}
-          </DropdownMenuLabel>
-        ) : null}
-      </>
+      <DropdownMenuItem
+        className="rounded-md whitespace-nowrap"
+        onClick={() => dispatch(descriptor)}
+      >
+        {descriptor.actionLabel ?? descriptor.label}
+      </DropdownMenuItem>
     );
   };
 

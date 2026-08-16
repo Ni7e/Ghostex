@@ -3,14 +3,15 @@
 // the composer while showing. Hosts inject a SessionChatTransport; everything
 // else is derived by useSessionChat.
 
-import { IconRobot } from "@tabler/icons-react";
+import { IconEyeFilled, IconEyeOff, IconRobot } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
+import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
-import type { SessionChatTheme } from "../../shared/session-chat";
+import type { SessionChatSkill, SessionChatTheme } from "../../shared/session-chat";
 import { getDefaultSidebarAgentById } from "../../shared/sidebar-agents";
 import { getBrandAgentLogoStyle } from "../agent-logos";
-import { TooltipProvider } from "../app-tooltip";
+import { AppTooltip, TooltipProvider } from "../app-tooltip";
 import {
   SessionChatComposer,
   type SessionChatComposerHandle,
@@ -28,11 +29,16 @@ import {
 } from "./session-chat-links";
 import { SessionChatInteractiveCard } from "./session-chat-interactive-card";
 import { SessionChatMessageList } from "./session-chat-message-list";
+import { SessionChatSearch } from "./session-chat-search";
 import {
   SessionChatSessionOptionPills,
   useSessionChatSessionOptions,
 } from "./session-chat-option-pills";
 import { sessionChatOptionCommandNames } from "./session-chat-session-options";
+import {
+  readStoredSessionChatVerbose,
+  writeStoredSessionChatVerbose,
+} from "./session-chat-verbose-override";
 import {
   sessionChatSlashCommandsForAgent,
   sessionChatSlashHeadingForAgent,
@@ -94,6 +100,8 @@ export interface SessionChatViewProps {
   sessionKey?: string;
   /** Top-right Terminal View / Agent Actions cluster (see the type doc). */
   hostActions?: SessionChatHostActions;
+  /** Host-only terminal switch for an agent-owned model picker. */
+  onSwitchToTerminalForAgentPicker?: () => void;
   /** Native-host requests that must act on this chat composer's draft. */
   hostComposerBridge?: SessionChatHostComposerBridge;
   /**
@@ -110,6 +118,10 @@ export interface SessionChatViewProps {
   monacoVsBaseUrl?: string;
   /** Chat-only palette. It does not change the host application's chrome. */
   theme?: SessionChatTheme;
+  /** Reveal thinking-owned tool calls without requiring a click. */
+  verboseMode?: boolean;
+  /** Show the touch-friendly search affordance used by the mobile host. */
+  showSearchButton?: boolean;
   className?: string;
 }
 
@@ -146,7 +158,7 @@ function NewSessionWelcome({ agentLabel }: { agentLabel?: string | null }) {
   const agentName = displayAgentName(agentLabel);
 
   return (
-    <div className="ghostex-chat-new-session">
+    <div className="ghostex-chat-new-session pointer-events-none absolute inset-0 justify-center">
       <div
         aria-label={agentName ?? "Agent"}
         className="ghostex-chat-new-session-agent"
@@ -203,6 +215,47 @@ function SessionAgentIdentity({ agentLabel }: { agentLabel?: string | null }) {
   );
 }
 
+/*
+Verbose pill: a per-session override of the sessionChatVerboseMode setting.
+The setting stays the default for chats that never touch the pill; a session
+that does keeps its own value (session-chat-verbose-override.ts).
+*/
+function SessionVerbosePill({
+  onToggle,
+  verbose,
+}: {
+  onToggle: () => void;
+  verbose: boolean;
+}) {
+  const Icon = verbose ? IconEyeFilled : IconEyeOff;
+  return (
+    <AppTooltip
+      content={
+        verbose
+          ? "Verbose on for this chat: thinking blocks start expanded"
+          : "Verbose off for this chat: thinking blocks start collapsed"
+      }
+    >
+      <span className="inline-flex">
+        <Button
+          aria-label="Verbose mode"
+          aria-pressed={verbose}
+          className={cn(
+            "ghostex-chat-footer-control rounded-full",
+            verbose ? "text-foreground" : "text-muted-foreground",
+          )}
+          onClick={onToggle}
+          size="xs"
+          variant={verbose ? "secondary" : "ghost"}
+        >
+          <Icon aria-hidden="true" className="size-3 shrink-0" stroke={2} />
+          <span className="truncate">Verbose</span>
+        </Button>
+      </span>
+    </AppTooltip>
+  );
+}
+
 export function SessionChatView({
   agentLabel,
   canSend = true,
@@ -212,10 +265,13 @@ export function SessionChatView({
   hostComposerBridge,
   hostLinks,
   monacoVsBaseUrl,
+  onSwitchToTerminalForAgentPicker,
   previewText,
   sessionKey,
+  showSearchButton = false,
   theme = "dark",
   transport,
+  verboseMode = false,
   working,
 }: SessionChatViewProps) {
   useEffect(() => {
@@ -243,10 +299,46 @@ export function SessionChatView({
     transport,
     working,
   });
+  const [skills, setSkills] = useState<readonly SessionChatSkill[]>([]);
+  useEffect(() => {
+    const readSkills = transport.readSkills?.bind(transport);
+    if (!readSkills) {
+      setSkills([]);
+      return;
+    }
+    let active = true;
+    void readSkills()
+      .then((result) => {
+        if (active) {
+          setSkills(result.skills);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSkills([]);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [transport]);
   const sessionOptions = useSessionChatSessionOptions({
     agent: agentLabel ?? null,
     ...(sessionKey !== undefined ? { sessionKey } : {}),
   });
+  // null = this chat has never been toggled, so it follows the global setting.
+  const [verboseOverride, setVerboseOverride] = useState<boolean | null>(() =>
+    readStoredSessionChatVerbose(sessionKey),
+  );
+  useEffect(() => {
+    setVerboseOverride(readStoredSessionChatVerbose(sessionKey));
+  }, [sessionKey]);
+  const verbose = verboseOverride ?? verboseMode;
+  const toggleVerbose = useCallback(() => {
+    const next = !verbose;
+    writeStoredSessionChatVerbose(sessionKey, next);
+    setVerboseOverride(next);
+  }, [sessionKey, verbose]);
   /*
   What the agent is actually running, confirmed by gxserver from structured
   transcript metadata and the terminal statusline. Keyed on detectedAt so a
@@ -275,7 +367,10 @@ export function SessionChatView({
       .then(() => {
         // A save can overlap more typing. Move only the exact saved snapshot;
         // never clear text the user added while gxserver was answering.
-        composerRef.current?.clearDraft(draft);
+        const currentComposer = composerRef.current;
+        if (currentComposer?.clearDraft(draft)) {
+          currentComposer.focus();
+        }
       })
       .catch(() => {
         // Keep the draft intact so a failed stash can be retried.
@@ -340,6 +435,7 @@ export function SessionChatView({
       : undefined;
   }, [transport]);
   const [questionActive, setQuestionActive] = useState(false);
+  const chatRootRef = useRef<HTMLDivElement | null>(null);
 
   const interrupt = useCallback((): void => {
     void chat.interrupt();
@@ -418,27 +514,24 @@ export function SessionChatView({
       )}
         data-chat-theme={theme}
         onKeyDownCapture={handleKeyDownCapture}
+        ref={chatRootRef}
         tabIndex={-1}
       >
       <SessionChatImageViewerProvider
         {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
       >
       <SessionChatHostLinksProvider {...(hostLinks ? { links: hostLinks } : {})}>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <SessionChatSearch
+        rootRef={chatRootRef}
+        searchRevision={chat.messages}
+        showButton={showSearchButton}
+      />
+      <div className="relative flex min-h-0 flex-1 flex-col">
       {hostActions ? (
         <SessionChatHostActionsCluster hostActions={hostActions} surface="chat" />
       ) : null}
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col",
-          showNewSessionWelcome && "justify-center",
-        )}
-      >
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col",
-          showNewSessionWelcome && "flex-none",
-        )}
-      >
+      <div className="flex min-h-0 flex-1 flex-col">
         {chat.view.kind === "ready" ? (
           <SessionChatMessageList
             hasMore={chat.hasMore}
@@ -446,6 +539,7 @@ export function SessionChatView({
             loadingEarlier={chat.loadingEarlier}
             messages={chat.messages}
             onLoadEarlier={chat.loadEarlier}
+            verboseMode={verbose}
           />
         ) : showNewSessionWelcome ? (
           <NewSessionWelcome agentLabel={agentLabel} />
@@ -486,6 +580,7 @@ export function SessionChatView({
             onPasteImage={pasteImage}
             onPickPaths={pickPaths}
             onSend={send}
+            {...(hostComposerBridge ? { onStash: stashComposerDraft } : {})}
             optionPills={
               <>
                 {chat.view.kind === "ready" ? (
@@ -500,18 +595,27 @@ export function SessionChatView({
                   onDispatchKey={async (key, marker) => {
                     await chat.sendKey?.(key, marker);
                   }}
-                  {...(hostActions?.onSwitchToTerminal
-                    ? { onSwitchToTerminal: hostActions.onSwitchToTerminal }
+                  {...(onSwitchToTerminalForAgentPicker || hostActions?.onSwitchToTerminal
+                    ? {
+                      onSwitchToTerminal:
+                          onSwitchToTerminalForAgentPicker ??
+                          hostActions?.onSwitchToTerminalForAgentPicker ??
+                          hostActions?.onSwitchToTerminal,
+                      }
                     : {})}
                 />
+                <SessionVerbosePill onToggle={toggleVerbose} verbose={verbose} />
               </>
             }
             placeholder={canSend ? undefined : "Input is held by another device."}
             ref={composerRef}
             slashCommands={slashCommands}
             slashHeading={sessionChatSlashHeadingForAgent(agentLabel ?? null)}
+            skills={skills}
+            skillHeading={`${displayAgentName(agentLabel) ?? "Agent"} skills`}
           />
         )}
+      </div>
       </div>
       </div>
       </SessionChatHostLinksProvider>

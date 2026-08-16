@@ -216,6 +216,7 @@ fn is_known_command(name: &str) -> bool {
         "read-messages",
         "read-thread",
         "read-session-chat",
+        "read-session-chat-skills",
         "send-session-chat-message",
         "answer-session-chat-prompt",
         "interrupt-session-chat",
@@ -466,6 +467,12 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "read-session-chat" => {
             run_bridge_action("readSessionChat", Parser::SessionChatRead, plain, args)
         }
+        "read-session-chat-skills" => run_bridge_action(
+            "readSessionChatSkills",
+            Parser::SessionSelector,
+            plain,
+            args,
+        ),
         "send-session-chat-message" => run_bridge_action(
             "sendSessionChatMessage",
             Parser::SendText,

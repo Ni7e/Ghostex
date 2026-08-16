@@ -34,6 +34,7 @@ interface MonacoSelectionLike {
 
 interface MonacoKeyboardEventLike {
   browserEvent: KeyboardEvent;
+  keyCode: number;
   preventDefault(): void;
   stopPropagation(): void;
 }
@@ -86,6 +87,28 @@ const CHAT_MONACO_THEMES: Record<SessionChatTheme, string> = {
 };
 const MIN_INPUT_HEIGHT_PX = 24;
 const MAX_INPUT_HEIGHT_PX = 160;
+
+// Monaco has already normalized the browser event into its cross-platform
+// KeyCode enum. GPUI's CEF input path can expose navigation keys with a raw
+// `KeyboardEvent.key` value that differs from the DOM spelling expected by
+// the composer, so use Monaco's canonical value for the keys the composer
+// owns and leave text/editing keys on the original browser value.
+function composerKeyForMonacoEvent(event: MonacoKeyboardEventLike): string {
+  switch (event.keyCode) {
+    case 2: // monaco.KeyCode.Tab
+      return "Tab";
+    case 3: // monaco.KeyCode.Enter
+      return "Enter";
+    case 9: // monaco.KeyCode.Escape
+      return "Escape";
+    case 16: // monaco.KeyCode.UpArrow
+      return "ArrowUp";
+    case 18: // monaco.KeyCode.DownArrow
+      return "ArrowDown";
+    default:
+      return event.browserEvent.key;
+  }
+}
 
 let monacoPromise: Promise<MonacoNamespaceLike> | undefined;
 
@@ -208,8 +231,7 @@ export function SessionChatMonacoInput({
           automaticLayout: true,
           contextmenu: false,
           folding: false,
-          fontFamily:
-            'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+          fontFamily: getComputedStyle(container).fontFamily,
           fontSize: 14,
           glyphMargin: false,
           // Plain text on purpose: the draft is a prompt, so markdown *emphasis*
@@ -264,7 +286,7 @@ export function SessionChatMonacoInput({
               altKey: event.browserEvent.altKey,
               ctrlKey: event.browserEvent.ctrlKey,
               isComposing: event.browserEvent.isComposing,
-              key: event.browserEvent.key,
+              key: composerKeyForMonacoEvent(event),
               metaKey: event.browserEvent.metaKey,
               preventDefault: () => {
                 event.preventDefault();
@@ -344,6 +366,21 @@ export function SessionChatMonacoInput({
   useEffect(() => {
     editorRef.current?.updateOptions({ theme: CHAT_MONACO_THEMES[theme] });
   }, [theme]);
+
+  useEffect(() => {
+    const updateFontFamily = (): void => {
+      const container = containerRef.current;
+      if (container) {
+        editorRef.current?.updateOptions({
+          fontFamily: getComputedStyle(container).fontFamily,
+        });
+      }
+    };
+    window.addEventListener("ghostex-session-chat-font-family-changed", updateFontFamily);
+    return () => {
+      window.removeEventListener("ghostex-session-chat-font-family-changed", updateFontFamily);
+    };
+  }, []);
 
   /*
   CDXC:MonacoPasteCapture 2026-08-01:

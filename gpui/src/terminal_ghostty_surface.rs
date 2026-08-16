@@ -935,10 +935,17 @@ fn parse_ghostty_terminal_engine_config(
             cursor,
             palette,
         }),
-        scrollback_limit_bytes: value("scrollback-limit")
+        // Ghostty 1.4 renamed `scrollback-limit` to `scrollback-limit-bytes`;
+        // the canonical formatter emits only the new key, either as a byte
+        // count or as the `unlimited` sentinel (integer max upstream).
+        scrollback_limit_bytes: match value("scrollback-limit-bytes")
             .ok_or(GhosttySurfaceRuntimeError::ConfigOptionInvalid)?
-            .parse::<u64>()
-            .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)?,
+        {
+            "unlimited" => u64::MAX,
+            value => value
+                .parse::<u64>()
+                .map_err(|_| GhosttySurfaceRuntimeError::ConfigOptionInvalid)?,
+        },
         option_as_alt,
         confirm_close_surface,
     })
@@ -1318,7 +1325,6 @@ impl GhosttySurfaceConfigRequest {
             macos: ffi::ghostty_platform_macos_s { nsview },
         };
         config.userdata = nsview;
-        config.write_pty_cb = None;
         config.scale_factor = self.scale_factor.get();
         config.font_size = self.terminal_config.font_size();
         config.working_directory = ptr::null();
@@ -1453,7 +1459,6 @@ fn empty_ffi_surface_config() -> ffi::ghostty_surface_config_s {
             },
         },
         userdata: ptr::null_mut(),
-        write_pty_cb: None,
         scale_factor: 1.0,
         font_size: 0.0,
         working_directory: ptr::null(),

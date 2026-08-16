@@ -1,5 +1,33 @@
 # Changelog
 
+## 7.8.0 - 2026-08-15
+
+- Major
+  - Ghostex now uses the latest upstream Ghostty terminal engine to improve terminal performance while lowering RAM and CPU use.
+  - Session Chat can search the full conversation and jump between matching results on desktop, web, and Android.
+  - Session Chat can mention installed agent skills by typing `$` and choosing from the session's available skills.
+  - Session Chat now puts Claude and Codex model, reasoning effort, Fast Mode, permission mode, and Plan mode controls directly in the chat workflow.
+  - Automations can run once after a countdown timer or at a chosen date and time.
+  - Recent Projects can open a real project-scoped terminal on a connected remote machine.
+  - Project Board can initialize, update, and migrate Beads in the connected environment.
+- Minor
+  - The Ghostty update fixes a terminal crash that could occur when hyperlinks reflowed.
+  - Windows ARM64 now uses an optimized native Ghostty terminal build.
+  - Session Chat makes agent activity easier to scan with grouped thinking, compact tool summaries, and optional Verbose Mode.
+  - Session Chat appearance settings now cover theme, custom font, and transcript width on desktop and Android.
+  - Session Chat drafts can be stashed directly from the composer.
+  - Failed Session Chat sends restore the unsent message and show a clear error.
+  - Accepted Session Chat sends clear the composer and show the working state immediately.
+  - Session Chat keeps keyboard focus and Select All inside the composer on the desktop app.
+  - Expansion for sidebar collections and session groups stays local to each window and device.
+  - Sidebar item tooltips wait longer before appearing so they do not interrupt normal navigation.
+  - Toggle Chat View now defaults to `Alt+G`, and customized hotkeys can be reset individually.
+  - Manually launched Codex sessions reconnect to the correct conversation when process detection is delayed.
+  - macOS no longer lets Chromium clone the app bundle on every launch and leave gigabytes of temporary data behind.
+  - On-demand component cleanup now removes obsolete versions and abandoned installation artifacts.
+  - Source mode is disabled for remote projects where it cannot operate correctly.
+  - One-shot automations preserve their deadline across restarts and disable themselves after the due run is queued.
+
 ## 7.7.1 - 2026-08-13
 
 - Major
@@ -1320,7 +1348,7 @@ Install with Homebrew: `brew install --cask maddada/tap/ghostex`
 ## 1.4.3 - 2026-05-03
 
 - Added an opt-in Browser Panes mode that opens browser actions as first-class workspace panes instead of Chrome Canary windows.
-- Added native browser pane controls for address navigation, reload, DevTools, React Grab, profile selection, and browser-data import messaging.
+- Added native browser pane controls for address navigation, reload, DevTools, React Grab, and profile selection.
 - Persisted browser pane URLs, favicons, and browser-auto titles so sidebar cards and app restarts reflect the current page.
 
 ## 1.4.2 - 2026-05-02

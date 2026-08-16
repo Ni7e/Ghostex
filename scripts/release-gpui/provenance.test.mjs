@@ -348,6 +348,13 @@ describe("reuse verification", () => {
     }
   });
 
+  test("accepts an amend-existing workflow run as a trusted origin", () => {
+    const result = accept({
+      candidate: runCandidate(androidRecord(), { workflowName: "Amend existing Ghostex release" }),
+    });
+    expect(result.ok).toBe(true);
+  });
+
   test("rejects an incompatible algorithm revision", () => {
     const stale = { ...androidRecord(), algorithmRevision: "fp0" };
     expect(accept({ candidate: releaseCandidate(stale) }).failures.join(" ")).toMatch(

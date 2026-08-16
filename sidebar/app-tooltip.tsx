@@ -92,6 +92,7 @@ type AppTooltipProps = ComponentProps<typeof Tooltip> & {
   collisionPadding?: ComponentProps<typeof TooltipContent>["collisionPadding"];
   content: ReactNode;
   contentClassName?: string;
+  delay?: ComponentProps<typeof TooltipTrigger>["delay"];
   side?: ComponentProps<typeof TooltipContent>["side"];
   contentStyle?: ComponentProps<typeof TooltipContent>["style"];
   sideOffset?: number;
@@ -112,6 +113,7 @@ export function AppTooltip({
   collisionPadding,
   content,
   contentClassName,
+  delay,
   side,
   contentStyle,
   sideOffset = 8,
@@ -183,7 +185,7 @@ export function AppTooltip({
    */
   return (
     <Tooltip {...tooltipRootProps} onOpenChange={setOpen} open={open}>
-      <TooltipTrigger render={children} />
+      <TooltipTrigger delay={delay} render={children} />
       <TooltipContent
         align={align}
         alignOffset={alignOffset}

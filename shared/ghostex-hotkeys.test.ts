@@ -58,13 +58,8 @@ describe("normalizeghostexHotkeySettings", () => {
     expect(DEFAULT_ghostex_HOTKEYS.rotatePanesClockwise).toBe("ctrl+shift+l");
     expect(DEFAULT_ghostex_HOTKEYS.mergeAllTabs).toBe("ctrl+shift+m");
     expect(DEFAULT_ghostex_HOTKEYS.delayedSend).toBe("ctrl+shift+s");
-    /**
-     * CDXC:FocusedSessionActions 2026-06-19-15:43:
-     * Sleep Focused Session should be the only newly added focused-session
-     * action with a default shortcut. Close and Close After Done are bindable
-     * and command-palette runnable, but start unassigned.
-     */
-    expect(DEFAULT_ghostex_HOTKEYS.sleepFocusedSession).toBe("alt+shift+s");
+    expect(DEFAULT_ghostex_HOTKEYS.stashedPrompts).toBe("alt+shift+s");
+    expect(DEFAULT_ghostex_HOTKEYS.sleepFocusedSession).toBe("");
     expect(DEFAULT_ghostex_HOTKEYS.wakeFocusedSession).toBe("");
     expect(DEFAULT_ghostex_HOTKEYS.closeAfterDone).toBe("");
     expect(DEFAULT_ghostex_HOTKEYS.closeFocusedSession).toBe("");
@@ -126,7 +121,7 @@ describe("normalizeghostexHotkeySettings", () => {
     );
   });
 
-  test("matches focused pane action hotkeys", () => {
+  test("matches pane and prompt action hotkeys", () => {
     expect(getghostexHotkeyActionIdForKey(DEFAULT_ghostex_HOTKEYS, "cmd+n")).toBe(
       "openBrowserPane",
     );
@@ -134,10 +129,10 @@ describe("normalizeghostexHotkeySettings", () => {
       "popOutPane",
     );
     expect(getghostexHotkeyActionIdForKey(DEFAULT_ghostex_HOTKEYS, "option+shift+s")).toBe(
-      "sleepFocusedSession",
+      "stashedPrompts",
     );
     expect(getghostexHotkeyActionIdForKey(DEFAULT_ghostex_HOTKEYS, "alt+shift+s")).toBe(
-      "sleepFocusedSession",
+      "stashedPrompts",
     );
   });
 

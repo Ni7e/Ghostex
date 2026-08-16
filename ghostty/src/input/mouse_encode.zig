@@ -495,25 +495,6 @@ test "sgr release keeps button identity" {
     try testing.expectEqualStrings("\x1B[<2;5;6m", writer.buffered());
 }
 
-test "sgr encodes super mouse modifier as ctrl for terminal apps" {
-    var data: [32]u8 = undefined;
-    var writer: std.Io.Writer = .fixed(&data);
-    var last: ?point.Coordinate = null;
-    try encode(&writer, .{
-        .button = .left,
-        .action = .press,
-        .mods = .{ .super = true },
-        .pos = .{ .x = 2, .y = 3 },
-    }, .{
-        .event = .any,
-        .format = .sgr,
-        .size = testSize(),
-        .last_cell = &last,
-    });
-
-    try testing.expectEqualStrings("\x1B[<16;3;4M", writer.buffered());
-}
-
 test "sgr motion with no button" {
     var data: [32]u8 = undefined;
     var writer: std.Io.Writer = .fixed(&data);
@@ -530,57 +511,6 @@ test "sgr motion with no button" {
     });
 
     try testing.expectEqualStrings("\x1B[<35;2;3M", writer.buffered());
-}
-
-test "sgr motion emits same-cell modifier changes" {
-    var data: [64]u8 = undefined;
-    var writer: std.Io.Writer = .fixed(&data);
-    var last_cell: ?point.Coordinate = null;
-    var last_mods: ?key.Mods = null;
-
-    try encode(&writer, .{
-        .button = null,
-        .action = .motion,
-        .pos = .{ .x = 1, .y = 2 },
-    }, .{
-        .event = .any,
-        .format = .sgr,
-        .size = testSize(),
-        .last_cell = &last_cell,
-        .last_mods = &last_mods,
-    });
-
-    writer.end = 0;
-    try encode(&writer, .{
-        .button = null,
-        .action = .motion,
-        .mods = .{ .super = true },
-        .pos = .{ .x = 1, .y = 2 },
-    }, .{
-        .event = .any,
-        .format = .sgr,
-        .size = testSize(),
-        .last_cell = &last_cell,
-        .last_mods = &last_mods,
-    });
-
-    try testing.expectEqualStrings("\x1B[<51;2;3M", writer.buffered());
-
-    writer.end = 0;
-    try encode(&writer, .{
-        .button = null,
-        .action = .motion,
-        .mods = .{ .super = true },
-        .pos = .{ .x = 1, .y = 2 },
-    }, .{
-        .event = .any,
-        .format = .sgr,
-        .size = testSize(),
-        .last_cell = &last_cell,
-        .last_mods = &last_mods,
-    });
-
-    try testing.expectEqual(@as(usize, 0), writer.buffered().len);
 }
 
 test "urxvt with modifiers" {
@@ -861,4 +791,74 @@ test "motion is deduped by last cell except sgr pixels" {
         });
         try testing.expect(writer.buffered().len > 0);
     }
+}
+
+test "sgr encodes super mouse modifier as ctrl for terminal apps" {
+    var data: [32]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&data);
+    var last: ?point.Coordinate = null;
+    try encode(&writer, .{
+        .button = .left,
+        .action = .press,
+        .mods = .{ .super = true },
+        .pos = .{ .x = 2, .y = 3 },
+    }, .{
+        .event = .any,
+        .format = .sgr,
+        .size = testSize(),
+        .last_cell = &last,
+    });
+
+    try testing.expectEqualStrings("\x1B[<16;3;4M", writer.buffered());
+}
+
+test "sgr motion emits same-cell modifier changes" {
+    var data: [64]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&data);
+    var last_cell: ?point.Coordinate = null;
+    var last_mods: ?key.Mods = null;
+
+    try encode(&writer, .{
+        .button = null,
+        .action = .motion,
+        .pos = .{ .x = 1, .y = 2 },
+    }, .{
+        .event = .any,
+        .format = .sgr,
+        .size = testSize(),
+        .last_cell = &last_cell,
+        .last_mods = &last_mods,
+    });
+
+    writer.end = 0;
+    try encode(&writer, .{
+        .button = null,
+        .action = .motion,
+        .mods = .{ .super = true },
+        .pos = .{ .x = 1, .y = 2 },
+    }, .{
+        .event = .any,
+        .format = .sgr,
+        .size = testSize(),
+        .last_cell = &last_cell,
+        .last_mods = &last_mods,
+    });
+
+    try testing.expectEqualStrings("\x1B[<51;2;3M", writer.buffered());
+
+    writer.end = 0;
+    try encode(&writer, .{
+        .button = null,
+        .action = .motion,
+        .mods = .{ .super = true },
+        .pos = .{ .x = 1, .y = 2 },
+    }, .{
+        .event = .any,
+        .format = .sgr,
+        .size = testSize(),
+        .last_cell = &last_cell,
+        .last_mods = &last_mods,
+    });
+
+    try testing.expectEqual(@as(usize, 0), writer.buffered().len);
 }

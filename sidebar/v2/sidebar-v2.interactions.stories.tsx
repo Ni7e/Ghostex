@@ -1263,12 +1263,14 @@ export const CollapsesGroupedProjectsThroughTheSharedState: Story = {
      */
     await step("persist it through the sidebar's shared collapse state", async () => {
       await waitFor(() => {
-        const stored = window.localStorage.getItem("ghostex-sidebar-ui-collapse-state");
+        const stored = window.localStorage.getItem(
+          "ghostex-sidebar-ui-collapse-state:window:main",
+        );
         expect(stored).toBeTruthy();
         const parsed = JSON.parse(stored!) as {
-          collapsedGroupsById?: Record<string, boolean>;
+          state?: { collapsedGroupsById?: Record<string, boolean> };
         };
-        return expect(parsed.collapsedGroupsById?.["v2-project-zmx"]).toBe(true);
+        return expect(parsed.state?.collapsedGroupsById?.["v2-project-zmx"]).toBe(true);
       });
     });
 

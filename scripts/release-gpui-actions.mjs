@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 import { resolvePublishRecoveryInputs } from "./release-gpui/publish-provenance.mjs";
+import { isAllowedReleaseWorkflowName } from "./release-gpui/provenance.mjs";
 
 const repo = "maddada/Ghostex";
 
@@ -24,8 +25,9 @@ function usage() {
 Usage:
   node scripts/release-gpui-actions.mjs start <version> [options]
   node scripts/release-gpui-actions.mjs publish <version> --source-run-id <id> [options]
+  node scripts/release-gpui-actions.mjs amend <version> [product flags] [options]
 
-Scope options (all are enabled by default):
+Scope options for start/publish (all are enabled by default):
   --only-macos
   --skip-macos
   --skip-linux | --skip-linux-deb | --skip-linux-rpm
@@ -33,6 +35,14 @@ Scope options (all are enabled by default):
   --skip-android
   --skip-gxserver-linux-x64 | --skip-gxserver-linux-arm64
   --skip-gxserver-wsl | --skip-gxserver-wsl-x64 | --skip-gxserver-wsl-arm64
+
+Product flags for amend (all are disabled by default; opt-in):
+  --macos
+  --linux | --linux-deb | --linux-rpm
+  --windows | --windows-x64 | --windows-arm64
+  --android
+  --gxserver | --gxserver-linux-x64 | --gxserver-linux-arm64
+  --wsl | --gxserver-wsl | --gxserver-wsl-x64 | --gxserver-wsl-arm64
 
 Release options:
   --skip-sparkle
@@ -54,31 +64,38 @@ function parseArgs(argv) {
     process.exit(0);
   }
   const [command = "start", version, ...rest] = argv;
-  if (!["start", "publish"].includes(command)) throw new Error(`Unknown command: ${command}`);
+  if (!["start", "publish", "amend"].includes(command)) throw new Error(`Unknown command: ${command}`);
   if (!/^\d+\.\d+\.\d+$/u.test(version ?? "")) throw new Error("Pass a MAJOR.MINOR.PATCH version");
+  const amendDefaults = command === "amend";
   const options = {
-    android: true,
+    android: !amendDefaults,
     dryRun: false,
     forceAll: false,
     forceProducts: "",
     reuseFromRunId: "",
-    gxserverLinuxArm64: true,
-    gxserverLinuxX64: true,
-    gxserverWslWindowsArm64: true,
-    gxserverWslWindowsX64: true,
-    linuxDeb: true,
-    linuxRpm: true,
-    macos: true,
+    gxserverLinuxArm64: !amendDefaults,
+    gxserverLinuxX64: !amendDefaults,
+    gxserverWslWindowsArm64: !amendDefaults,
+    gxserverWslWindowsX64: !amendDefaults,
+    linuxDeb: !amendDefaults,
+    linuxRpm: !amendDefaults,
+    macos: !amendDefaults,
     prerelease: false,
     sourceRunId: "",
     updateSparkle: true,
-    windowsArm64: true,
+    windowsArm64: !amendDefaults,
     windowsSigning: "auto",
-    windowsX64: true,
+    windowsX64: !amendDefaults,
+  };
+  const rejectSkipOnAmend = (flag) => {
+    if (command === "amend") {
+      throw new Error(`amend is opt-in; use the matching --windows/--macos/--gxserver flag instead of ${flag}`);
+    }
   };
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === "--only-macos") {
+      rejectSkipOnAmend(arg);
       Object.assign(options, {
         android: false,
         gxserverLinuxArm64: true,
@@ -91,22 +108,62 @@ function parseArgs(argv) {
         windowsArm64: false,
         windowsX64: false,
       });
-    } else if (arg === "--skip-macos") options.macos = false;
-    else if (arg === "--skip-linux") options.linuxDeb = options.linuxRpm = false;
-    else if (arg === "--skip-linux-deb") options.linuxDeb = false;
-    else if (arg === "--skip-linux-rpm") options.linuxRpm = false;
-    else if (arg === "--skip-windows") options.windowsX64 = options.windowsArm64 = false;
-    else if (arg === "--skip-windows-x64") options.windowsX64 = false;
-    else if (arg === "--skip-windows-arm64") options.windowsArm64 = false;
-    else if (arg === "--skip-android") options.android = false;
-    else if (arg === "--skip-gxserver-linux-x64") options.gxserverLinuxX64 = false;
-    else if (arg === "--skip-gxserver-linux-arm64") options.gxserverLinuxArm64 = false;
-    else if (arg === "--skip-gxserver-wsl") {
+    } else if (arg === "--skip-macos") {
+      rejectSkipOnAmend(arg);
+      options.macos = false;
+    } else if (arg === "--macos") options.macos = true;
+    else if (arg === "--linux") options.linuxDeb = options.linuxRpm = true;
+    else if (arg === "--linux-deb") options.linuxDeb = true;
+    else if (arg === "--linux-rpm") options.linuxRpm = true;
+    else if (arg === "--windows") options.windowsX64 = options.windowsArm64 = true;
+    else if (arg === "--windows-x64") options.windowsX64 = true;
+    else if (arg === "--windows-arm64") options.windowsArm64 = true;
+    else if (arg === "--android") options.android = true;
+    else if (arg === "--gxserver") options.gxserverLinuxX64 = options.gxserverLinuxArm64 = true;
+    else if (arg === "--gxserver-linux-x64") options.gxserverLinuxX64 = true;
+    else if (arg === "--gxserver-linux-arm64") options.gxserverLinuxArm64 = true;
+    else if (arg === "--wsl" || arg === "--gxserver-wsl") {
+      options.gxserverWslWindowsX64 = options.gxserverWslWindowsArm64 = true;
+    } else if (arg === "--gxserver-wsl-x64") options.gxserverWslWindowsX64 = true;
+    else if (arg === "--gxserver-wsl-arm64") options.gxserverWslWindowsArm64 = true;
+    else if (arg === "--skip-linux") {
+      rejectSkipOnAmend(arg);
+      options.linuxDeb = options.linuxRpm = false;
+    } else if (arg === "--skip-linux-deb") {
+      rejectSkipOnAmend(arg);
+      options.linuxDeb = false;
+    } else if (arg === "--skip-linux-rpm") {
+      rejectSkipOnAmend(arg);
+      options.linuxRpm = false;
+    } else if (arg === "--skip-windows") {
+      rejectSkipOnAmend(arg);
+      options.windowsX64 = options.windowsArm64 = false;
+    } else if (arg === "--skip-windows-x64") {
+      rejectSkipOnAmend(arg);
+      options.windowsX64 = false;
+    } else if (arg === "--skip-windows-arm64") {
+      rejectSkipOnAmend(arg);
+      options.windowsArm64 = false;
+    } else if (arg === "--skip-android") {
+      rejectSkipOnAmend(arg);
+      options.android = false;
+    } else if (arg === "--skip-gxserver-linux-x64") {
+      rejectSkipOnAmend(arg);
+      options.gxserverLinuxX64 = false;
+    } else if (arg === "--skip-gxserver-linux-arm64") {
+      rejectSkipOnAmend(arg);
+      options.gxserverLinuxArm64 = false;
+    } else if (arg === "--skip-gxserver-wsl") {
+      rejectSkipOnAmend(arg);
       options.gxserverWslWindowsX64 = false;
       options.gxserverWslWindowsArm64 = false;
-    } else if (arg === "--skip-gxserver-wsl-x64") options.gxserverWslWindowsX64 = false;
-    else if (arg === "--skip-gxserver-wsl-arm64") options.gxserverWslWindowsArm64 = false;
-    else if (arg === "--skip-sparkle") options.updateSparkle = false;
+    } else if (arg === "--skip-gxserver-wsl-x64") {
+      rejectSkipOnAmend(arg);
+      options.gxserverWslWindowsX64 = false;
+    } else if (arg === "--skip-gxserver-wsl-arm64") {
+      rejectSkipOnAmend(arg);
+      options.gxserverWslWindowsArm64 = false;
+    } else if (arg === "--skip-sparkle") options.updateSparkle = false;
     else if (arg === "--prerelease") options.prerelease = true;
     else if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--force-all") options.forceAll = true;
@@ -141,7 +198,7 @@ function parseArgs(argv) {
   return { command, options, version };
 }
 
-function validateScope(options) {
+function validateScope(options, command) {
   const enabled = [
     options.macos,
     options.linuxDeb,
@@ -155,10 +212,14 @@ function validateScope(options) {
     options.gxserverWslWindowsArm64,
   ];
   if (!enabled.some(Boolean)) throw new Error("At least one platform must be enabled");
-  if (options.updateSparkle && !options.macos) throw new Error("--skip-macos requires --skip-sparkle");
   if (options.prerelease && options.updateSparkle) {
     throw new Error("A prerelease requires --skip-sparkle");
   }
+  if (command === "amend") {
+    if (options.prerelease) throw new Error("amend requires an existing public stable release");
+    return;
+  }
+  if (options.updateSparkle && !options.macos) throw new Error("--skip-macos requires --skip-sparkle");
   if (options.macos && (!options.gxserverLinuxX64 || !options.gxserverLinuxArm64)) {
     throw new Error("macOS requires both gxserver Linux runtimes");
   }
@@ -204,7 +265,7 @@ function expectedPlatforms(options) {
   ].filter(Boolean);
 }
 
-function validateLocalSource(version, { allowExistingTag }) {
+function validateLocalSource(version, { allowExistingTag, requireExistingTag = false }) {
   run("gh", ["auth", "status"], { capture: false });
   const branch = run("git", ["branch", "--show-current"]);
   if (branch !== "main") throw new Error(`Release source must be main, got ${branch}`);
@@ -220,6 +281,7 @@ function validateLocalSource(version, { allowExistingTag }) {
   if (!changelog.includes(`## ${version} -`)) throw new Error(`CHANGELOG.md has no ${version} section`);
   const tag = run("git", ["ls-remote", "--tags", "origin", `refs/tags/v${version}`]);
   if (tag && !allowExistingTag) throw new Error(`v${version} already exists`);
+  if (requireExistingTag && !tag) throw new Error(`v${version} does not exist; amend requires a public tag`);
   return head;
 }
 
@@ -342,9 +404,12 @@ function dispatch(workflow, fields, dryRun) {
 }
 
 const { command, options, version } = parseArgs(process.argv.slice(2));
-validateScope(options);
-const head = validateLocalSource(version, { allowExistingTag: command === "publish" });
-if (command === "start" && requiresGpuiReferenceContract(options)) {
+validateScope(options, command);
+const head = validateLocalSource(version, {
+  allowExistingTag: command === "publish" || command === "amend",
+  requireExistingTag: command === "amend",
+});
+if ((command === "start" || command === "amend") && requiresGpuiReferenceContract(options)) {
   run("node", ["scripts/release-gpui/verify-reference-contract.mjs"], { capture: false });
 }
 const secrets = configuredSecrets();
@@ -380,6 +445,27 @@ if (command === "start") {
     },
     options.dryRun,
   );
+} else if (command === "amend") {
+  console.log("Amend is opt-in; the runner expands pack/companion dependencies against the live provenance.");
+  dispatch(
+    "release-amend-existing.yml",
+    {
+      android: options.android,
+      gxserver_linux_arm64: options.gxserverLinuxArm64,
+      gxserver_linux_x64: options.gxserverLinuxX64,
+      gxserver_wsl_windows_arm64: options.gxserverWslWindowsArm64,
+      gxserver_wsl_windows_x64: options.gxserverWslWindowsX64,
+      linux_deb: options.linuxDeb,
+      linux_rpm: options.linuxRpm,
+      macos: options.macos,
+      sign_windows: windowsSigned,
+      update_sparkle: options.updateSparkle,
+      version,
+      windows_arm64: options.windowsArm64,
+      windows_x64: options.windowsX64,
+    },
+    options.dryRun,
+  );
 } else {
   const sourceRun = JSON.parse(
     run("gh", [
@@ -393,8 +479,8 @@ if (command === "start") {
     ]),
   );
   if (sourceRun.status !== "completed") throw new Error(`Source run is ${sourceRun.status}: ${sourceRun.url}`);
-  if (sourceRun.workflowName !== "Release Ghostex" || sourceRun.event !== "workflow_dispatch") {
-    throw new Error(`Source run is not a dispatched Release Ghostex workflow: ${sourceRun.url}`);
+  if (!isAllowedReleaseWorkflowName(sourceRun.workflowName) || sourceRun.event !== "workflow_dispatch") {
+    throw new Error(`Source run is not a dispatched Ghostex release workflow: ${sourceRun.url}`);
   }
   run("git", ["merge-base", "--is-ancestor", sourceRun.headSha, head]);
   /*

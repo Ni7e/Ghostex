@@ -15,6 +15,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { validateOnDemandManifestV2 } from "./on-demand-manifest.mjs";
 import { validateWindowsUpdateFeed } from "./windows-update-feed.mjs";
+import { renderCustomerDownloadNotes } from "./customer-downloads.mjs";
 import { releaseProvenanceAssetName } from "./provenance.mjs";
 import {
   PRODUCT_PROVENANCE_FILE,
@@ -378,22 +379,19 @@ if (process.env.GHOSTEX_RELEASE_PRERELEASE === "1") {
 if (process.env.GHOSTEX_RELEASE_WINDOWS_SIGNED === "0") {
   releaseNotes.push("> Windows beta packages are not Authenticode-signed and may show a SmartScreen warning.", "");
 }
-releaseNotes.push("## Downloads", "");
 const uploadPaths = [];
 for (const manifest of manifests.sort((a, b) => a.platform.localeCompare(b.platform))) {
-  releaseNotes.push(`### ${manifest.platform}`, "");
   for (const artifact of manifest.artifacts) {
-    releaseNotes.push(`- \`${artifact.name}\` — SHA256 \`${artifact.sha256}\``);
     uploadPaths.push(artifact.path);
   }
-  releaseNotes.push("");
 }
 const provenanceAssetSha = sha256(provenanceAssetPath);
-releaseNotes.push("### provenance", "");
-releaseNotes.push(`- \`${provenanceAssetName}\` — SHA256 \`${provenanceAssetSha}\``);
-releaseNotes.push("");
 uploadPaths.push(provenanceAssetPath);
-releaseNotes.push(renderBuildProvenanceNotes(releaseProvenance), "");
+const customerDownloads = renderCustomerDownloadNotes(
+  version,
+  manifests.flatMap((manifest) => manifest.artifacts.map((artifact) => artifact.name)),
+);
+if (customerDownloads) releaseNotes.push(customerDownloads, "");
 const notesPath = path.join(artifactsRoot, `release-notes-${version}.md`);
 writeFileSync(notesPath, `${releaseNotes.join("\n").trim()}\n`);
 const expectedAssets = new Map([

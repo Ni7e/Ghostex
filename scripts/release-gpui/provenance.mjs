@@ -18,6 +18,15 @@ export const PROVENANCE_SCHEMA_VERSION = 1;
 export const RELEASE_PROVENANCE_SCHEMA_VERSION = 1;
 export const REUSE_CHECKS = Object.freeze(["fingerprint", "digest", "origin", "attestation"]);
 export const RELEASE_WORKFLOW_NAME = "Release Ghostex";
+export const AMEND_EXISTING_WORKFLOW_NAME = "Amend existing Ghostex release";
+export const ALLOWED_RELEASE_WORKFLOW_NAMES = Object.freeze([
+  RELEASE_WORKFLOW_NAME,
+  AMEND_EXISTING_WORKFLOW_NAME,
+]);
+
+export function isAllowedReleaseWorkflowName(name) {
+  return ALLOWED_RELEASE_WORKFLOW_NAMES.includes(name);
+}
 
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const commitPattern = /^[0-9a-f]{40}$/u;
@@ -321,8 +330,10 @@ function checkOrigin(candidate, evidence) {
       failures.push(`origin tag ${candidate.tag ?? "(missing)"} is not a published release tag`);
     }
   } else if (candidate.tier === "run") {
-    if (candidate.workflowName !== RELEASE_WORKFLOW_NAME) {
-      failures.push(`origin run workflow ${candidate.workflowName ?? "(unknown)"} is not ${RELEASE_WORKFLOW_NAME}`);
+    if (!isAllowedReleaseWorkflowName(candidate.workflowName)) {
+      failures.push(
+        `origin run workflow ${candidate.workflowName ?? "(unknown)"} is not a Ghostex release workflow`,
+      );
     }
     if (candidate.event !== "workflow_dispatch") {
       failures.push(`origin run event ${candidate.event ?? "(unknown)"} is not workflow_dispatch`);

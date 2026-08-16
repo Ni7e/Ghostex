@@ -122,7 +122,7 @@ design. Zig cross-compiles natively and the vendored ghostty build already
 emits the static lib under both names (`lib/ghostty-vt-static.lib` on
 Windows, avoiding the DLL import-lib collision; `lib/libghostty-vt.a`
 elsewhere — see ghostty/build.zig), so this hook invokes zig directly
-instead of the macOS bash script (which exists only to pick a Zig 0.15.x
+instead of the macOS bash script (which exists only to pick a Zig 0.16.x
 binary and redirect the Xcode SDK, both meaningless off macOS).
 Zig resolution: GHOSTEX_ZIG override, else `zig` on PATH; ghostty's
 requireZig rejects mismatched versions with a clear message.
@@ -141,20 +141,40 @@ fn build_libghostty_vt_with_zig(
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let prefix = out_dir.join("libghostty-vt");
     let is_windows = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
+    let cargo_target = env::var("TARGET").expect("TARGET");
     let (build_prefix, prefix_arg) = if is_windows {
-        let target = env::var("TARGET").expect("TARGET");
-        let relative = PathBuf::from("zig-out").join(format!("ghostex-gpui-vt-{target}"));
+        let relative = PathBuf::from("zig-out").join(format!("ghostex-gpui-vt-{cargo_target}"));
         (ghostty_dir.join(&relative), relative)
     } else {
         (prefix.clone(), prefix.clone())
     };
-    let status = Command::new(&zig)
-        .current_dir(&ghostty_dir)
-        .arg("build")
+    let optimize = if is_windows && cargo_target == "aarch64-pc-windows-msvc" {
+        // Zig 0.16's ReleaseSafe Windows ARM64 stack-trace implementation
+        // fails to compile in std.debug.SelfInfo.Windows due to an invalid
+        // pointer-alignment cast. Production ARM64 archives do not need that
+        // debug-only path.
+        "ReleaseFast"
+    } else {
+        "ReleaseSafe"
+    };
+    let mut command = Command::new(&zig);
+    command.current_dir(&ghostty_dir).arg("build");
+    if is_windows {
+        // Release runners use Zig's stable x64 Windows host binary, including
+        // under Windows 11 ARM emulation. Keep the archive architecture tied
+        // explicitly to Cargo instead of allowing Zig to inherit its host.
+        let zig_target = match cargo_target.as_str() {
+            "aarch64-pc-windows-msvc" => "aarch64-windows-msvc",
+            "x86_64-pc-windows-msvc" => "x86_64-windows-msvc",
+            target => panic!("unsupported Windows libghostty-vt target: {target}"),
+        };
+        command.arg(format!("-Dtarget={zig_target}"));
+    }
+    let status = command
         .arg(format!("-Dversion-string={version}"))
         .arg("-Demit-lib-vt=true")
         .arg("-Demit-xcframework=false")
-        .arg("-Doptimize=ReleaseSafe")
+        .arg(format!("-Doptimize={optimize}"))
         .arg("--prefix")
         .arg(&prefix_arg)
         .status()

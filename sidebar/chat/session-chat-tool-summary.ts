@@ -7,6 +7,7 @@ export const SESSION_CHAT_MAX_PREVIEW_STRING_INPUT = 160;
 export const SESSION_CHAT_MAX_PREVIEW_COLLECTION_ITEMS = 8;
 export const SESSION_CHAT_MAX_PREVIEW_DEPTH = 2;
 export const SESSION_CHAT_MAX_TOOL_RUN_SUMMARY_PARTS = 3;
+export const SESSION_CHAT_MAX_COMMAND_PREVIEW_LINES = 3;
 
 function boundedPreviewValue(
   value: unknown,
@@ -71,6 +72,50 @@ export function summarizeSessionChatToolInput(input: unknown): string {
   return collapsed.length <= SESSION_CHAT_MAX_PREVIEW_LENGTH
     ? collapsed
     : `${collapsed.slice(0, SESSION_CHAT_MAX_PREVIEW_LENGTH - 1)}…`;
+}
+
+function sessionChatCommandText(input: unknown): string {
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return sessionChatCommandText(JSON.parse(trimmed));
+      } catch {
+        // Freeform Codex exec input is JavaScript, not necessarily JSON.
+      }
+    }
+    const embeddedCommand =
+      /(?:\bcmd|["']cmd["']|\bcommand|["']command["'])\s*:\s*("(?:\\.|[^"\\])*")/su.exec(
+        input,
+      )?.[1];
+    if (embeddedCommand) {
+      try {
+        const parsed = JSON.parse(embeddedCommand);
+        if (typeof parsed === "string") {
+          return parsed;
+        }
+      } catch {
+        // Keep the freeform source as the honest preview when it is not JSON.
+      }
+    }
+    return input;
+  }
+  if (typeof input !== "object" || input === null) {
+    return input === undefined || input === null ? "" : String(input);
+  }
+  const record = input as Record<string, unknown>;
+  const command = record.command ?? record.cmd ?? record.script;
+  return typeof command === "string" ? command : toRawPreview(input);
+}
+
+/** First three non-empty command lines, flattened into the compact tool row. */
+export function summarizeSessionChatCommandInput(input: unknown): string {
+  return sessionChatCommandText(input)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, SESSION_CHAT_MAX_COMMAND_PREVIEW_LINES)
+    .join(" ");
 }
 
 /** Full detail for the expanded view. */

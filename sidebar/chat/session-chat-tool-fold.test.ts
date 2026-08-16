@@ -93,6 +93,21 @@ describe("tool fold (§6.6b)", () => {
     expect(foldSessionChatToolMessages([toolRow, user])).toHaveLength(2);
   });
 
+  test("tool-only messages fold into the preceding reasoning summary", () => {
+    const reasoning = message("r1", "reasoning", [
+      { text: "Inspecting the renderer", type: "text" },
+    ]);
+    const callRow = message("a1", "assistant", [call("exec")]);
+    const resultRow = message("t1", "tool", [result("done")]);
+    const folded = foldSessionChatToolMessages([reasoning, callRow, resultRow]);
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.blocks.map((block) => block.type)).toEqual([
+      "text",
+      "tool-call",
+      "tool-result",
+    ]);
+  });
+
   test("a user turn breaks the fold chain", () => {
     const assistant = message("a1", "assistant", [{ text: "x", type: "text" }]);
     const user = message("u1", "user", [{ text: "hi", type: "text" }]);

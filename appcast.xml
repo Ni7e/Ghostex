@@ -8,6 +8,46 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>7.8.0</title>
+            <pubDate>Sat, 15 Aug 2026 14:04:39 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.8.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>70800</sparkle:version>
+            <sparkle:shortVersionString>7.8.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 7.8.0
+
+## 7.8.0 - 2026-08-15
+
+- Major
+  - Ghostex now uses the latest upstream Ghostty terminal engine to improve terminal performance while lowering RAM and CPU use.
+  - Session Chat can search the full conversation and jump between matching results on desktop, web, and Android.
+  - Session Chat can mention installed agent skills by typing `$` and choosing from the session's available skills.
+  - Session Chat now puts Claude and Codex model, reasoning effort, Fast Mode, permission mode, and Plan mode controls directly in the chat workflow.
+  - Automations can run once after a countdown timer or at a chosen date and time.
+  - Recent Projects can open a real project-scoped terminal on a connected remote machine.
+  - Project Board can initialize, update, and migrate Beads in the connected environment.
+- Minor
+  - The Ghostty update fixes a terminal crash that could occur when hyperlinks reflowed.
+  - Windows ARM64 now uses an optimized native Ghostty terminal build.
+  - Session Chat makes agent activity easier to scan with grouped thinking, compact tool summaries, and optional Verbose Mode.
+  - Session Chat appearance settings now cover theme, custom font, and transcript width on desktop and Android.
+  - Session Chat drafts can be stashed directly from the composer.
+  - Failed Session Chat sends restore the unsent message and show a clear error.
+  - Accepted Session Chat sends clear the composer and show the working state immediately.
+  - Session Chat keeps keyboard focus and Select All inside the composer on the desktop app.
+  - Expansion for sidebar collections and session groups stays local to each window and device.
+  - Sidebar item tooltips wait longer before appearing so they do not interrupt normal navigation.
+  - Toggle Chat View now defaults to `Alt+G`, and customized hotkeys can be reset individually.
+  - Manually launched Codex sessions reconnect to the correct conversation when process detection is delayed.
+  - macOS no longer lets Chromium clone the app bundle on every launch and leave gigabytes of temporary data behind.
+  - On-demand component cleanup now removes obsolete versions and abandoned installation artifacts.
+  - Source mode is disabled for remote projects where it cannot operate correctly.
+  - One-shot automations preserve their deadline across restarts and disable themselves after the due run is queued.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.8.0/ghostex-7.8.0-arm64.dmg" length="114778165" type="application/octet-stream" sparkle:edSignature="1H7Ut5fK8FrEoaJ/kJJwTJkCC8eLrg8VPVQZ0B4ceseqHj04jkSp19WHC1t90T5u4JI34ugX/VBq5ZQX+iSIAA=="/>
+        </item>
+        <item>
             <title>7.7.1</title>
             <pubDate>Thu, 13 Aug 2026 04:15:10 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.7.1</sparkle:fullReleaseNotesLink>
@@ -123,30 +163,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.4.0/ghostex-7.4.0-arm64.dmg" length="114564255" type="application/octet-stream" sparkle:edSignature="9qxEUeXKYRNimj8GOb8K2tzltSsSdfCTIIbrT0/flDrSzZJSWjzNxQ33DhrMx+SySVaSPm3oBGPs3sm1LjjRBg=="/>
         </item>
         <item>
-            <title>7.3.0</title>
-            <pubDate>Fri, 07 Aug 2026 09:40:15 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v7.3.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>70300</sparkle:version>
-            <sparkle:shortVersionString>7.3.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 7.3.0
-
-## 7.3.0 - 2026-08-07
-
-- Major
-  - Quick Access now brings the Command Pane, Recent Projects, and Recent Sessions into one fast, tabbed workflow with consistent search and keyboard shortcuts.
-  - Remote projects can open Source and Prompt Editor through their connected machine, while Docs can browse and manage files on that remote workspace.
-- Minor
-  - Remote machines can be reordered directly in the sidebar, sidebar sections collapse more smoothly, and active sessions stay clearly visible through collapsed groups.
-  - Previous-session search preserves exact word and phrase matches, and choosing an already-running conversation focuses its existing terminal instead of opening a duplicate agent.
-  - Windows browser keyboard input and popup focus are more reliable, while menus, tooltips, and scrollbars have cleaner sizing and placement across the desktop app.
-  - Terminal selection, agent waits, prompt delivery, support logs, and live session tracking are more dependable during longer-running work.
-  - The Android app shows useful working, attention, and awake counts when machine and project sections are collapsed.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v7.3.0/ghostex-7.3.0-arm64.dmg" length="114312453" type="application/octet-stream" sparkle:edSignature="ThbyH7p9OqHvZq4w7BnzO9bHbzIk9gBXnHz7fK1TskDs5L24dPAoTHEEQ6lxz40jB7DuvUJIY7HoaQBUMsIEBw=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -158,6 +174,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: p+rKSXiy3MFRHwtTfo7WIwI7inQLNydra7lTjx4SdShNAnQM/VU9EreKLA3RARzvx4r8+l6RoIg6fZ98wW/iAA==
-length: 12572
+edSignature: n+E9AdOvPGJQV/yaLsIwcw7D5FBgaB3RNjUZQ7PCtcihtOsyIsSOO4EB8qyigsk2OFDkkSaBdol2uW9NIgdOCw==
+length: 12448
 -->

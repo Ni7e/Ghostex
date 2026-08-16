@@ -13,7 +13,13 @@
 // flipped to RTL (content back to LTR) so the scrollbar renders on the left
 // edge of the conversation.
 
-import { IconChevronRight, IconCopy, IconPhoto } from "@tabler/icons-react";
+import {
+  IconCaretRightFilled,
+  IconCheck,
+  IconChevronRight,
+  IconCopy,
+  IconPhoto,
+} from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionChatMessage } from "../../shared/session-chat";
 import { cn } from "../../lib/utils";
@@ -77,8 +83,8 @@ export interface SessionChatMessageListProps {
   hasMore: boolean;
   loadingEarlier: boolean;
   onLoadEarlier: () => void;
-  /** Global tool-run expansion signal; runs start collapsed by default. */
-  expandToolRuns?: boolean;
+  /** Reveal reasoning-owned tool activity by default. */
+  verboseMode?: boolean;
 }
 
 function isPastedImagePath(path: string | undefined): boolean {
@@ -218,7 +224,31 @@ function SuppressedTurn({ label, text }: { label: string; text: string }) {
   );
 }
 
-function ReasoningRow({ markdown }: { markdown: string }) {
+function ModelConfigurationStatus({ label }: { label: string }) {
+  return (
+    <div className="flex w-full min-w-0 pb-3">
+      <div className="inline-flex min-w-0 items-center gap-2 rounded-full border border-border/60 bg-muted/35 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+          <IconCheck aria-hidden="true" className="size-3" stroke={2.4} />
+        </span>
+        <span className="truncate">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function ReasoningRow({
+  markdown,
+  tools,
+  verboseMode,
+}: {
+  markdown: string;
+  tools: ReturnType<typeof splitSessionChatBlocks>["tools"];
+  verboseMode: boolean;
+}) {
+  const [open, setOpen] = useState(verboseMode);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => setOpen(verboseMode), [verboseMode]);
   const text = markdown
     .replace(/```(?:[^\n]*)\n?([\s\S]*?)```/g, "$1")
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
@@ -234,11 +264,53 @@ function ReasoningRow({ markdown }: { markdown: string }) {
     .map((line) => line.trim())
     .filter(Boolean);
 
+  if (tools.length > 0) {
+    return (
+      <div className="ghostex-chat-thinking-row is-disclosure">
+        <button
+          aria-expanded={open}
+          className="ghostex-chat-thinking-trigger"
+          onClick={() => {
+            if (!open) {
+              centerSessionChatExpansion(triggerRef.current);
+            }
+            setOpen((value) => !value);
+          }}
+          ref={triggerRef}
+          type="button"
+        >
+          <span className="ghostex-chat-thinking-icon">
+            <IconCaretRightFilled
+              aria-hidden="true"
+              className={cn(open && "rotate-90")}
+            />
+          </span>
+          <span className="ghostex-chat-thinking-text">
+            {lines.map((line, index) => (
+              <span data-ghostex-thinking-text key={index}>
+                {line}
+              </span>
+            ))}
+          </span>
+        </button>
+        {open ? (
+          <SessionChatExpansion
+            className="ghostex-chat-thinking-detail"
+            label="Collapse thinking tools"
+            onCollapse={() => setOpen(false)}
+          >
+            <SessionChatToolRun blocks={tools} showAllRows />
+          </SessionChatExpansion>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="ghostex-chat-thinking-row">
       {lines.map((line, index) => (
         <div className="ghostex-chat-thinking-line" key={index}>
-          {line}
+          <span data-ghostex-thinking-text>{line}</span>
         </div>
       ))}
     </div>
@@ -282,13 +354,13 @@ function normalizeUserMessageMarkdown(markdown: string): string {
 }
 
 function MessageRow({
-  expandToolRuns,
   message,
   showAssistantCopy,
+  verboseMode,
 }: {
-  expandToolRuns: boolean;
   message: SessionChatMessage;
   showAssistantCopy: boolean;
+  verboseMode: boolean;
 }) {
   const { prose, tools } = splitSessionChatBlocks(message.blocks);
   const markdown = prose
@@ -304,6 +376,9 @@ function MessageRow({
 
   const suppressedTurn = sessionChatSuppressedTurnPresentation(message);
   if (suppressedTurn !== null) {
+    if (suppressedTurn.kind === "status") {
+      return <ModelConfigurationStatus label={suppressedTurn.label} />;
+    }
     return (
       <SuppressedTurn
         label={suppressedTurn.label}
@@ -315,6 +390,7 @@ function MessageRow({
   const isUser = message.role === "user";
   const isReasoning = message.role === "reasoning";
   const isSystem = message.role === "system";
+  const hasToolCall = tools.some((block) => block.type === "tool-call");
   const showCopy =
     markdown.length > 0 &&
     (isUser || (message.role === "assistant" && showAssistantCopy));
@@ -327,13 +403,19 @@ function MessageRow({
     );
   }
 
+  /*
+   * Claude can place thinking + text + tool_use in one assistant record, while
+   * Codex commonly emits reasoning and calls as adjacent records. Treat both
+   * normalized shapes as the same provider-neutral work disclosure.
+   */
   if (
-    isReasoning &&
+    (isReasoning || hasToolCall) &&
     markdown.length > 0 &&
-    images.length === 0 &&
-    tools.length === 0
+    images.length === 0
   ) {
-    return <ReasoningRow markdown={markdown} />;
+    return (
+      <ReasoningRow markdown={markdown} tools={tools} verboseMode={verboseMode} />
+    );
   }
 
   if (isUser) {
@@ -373,7 +455,7 @@ function MessageRow({
           </div>
         ) : null}
         {tools.length > 0 ? (
-          <SessionChatToolRun blocks={tools} expandSignal={expandToolRuns} />
+          <SessionChatToolRun blocks={tools} />
         ) : null}
         {showCopy ? <CopyFooter markdown={markdown} /> : null}
       </MessageContent>
@@ -406,6 +488,7 @@ function hasAgentResponseContent(message: SessionChatMessage): boolean {
 /** One copy affordance per response: the last assistant text before the next user turn. */
 function finalAssistantMessageIds(
   messages: readonly SessionChatMessage[],
+  isWorking: boolean,
 ): ReadonlySet<string> {
   const ids = new Set<string>();
   let finalAssistantId: string | null = null;
@@ -431,7 +514,12 @@ function finalAssistantMessageIds(
       finalAssistantId = message.id;
     }
   }
-  commitTurn();
+  // The newest assistant text is only a final reply once the turn has
+  // finished. While the agent is still working it is commentary, even when it
+  // happens to be the most recent text block for a moment.
+  if (!isWorking) {
+    commitTurn();
+  }
   return ids;
 }
 
@@ -520,15 +608,15 @@ function workedDurationLabel(
 }
 
 function CompletedWork({
-  expandSignal,
   turn,
+  verboseMode,
 }: {
-  expandSignal: boolean;
   turn: CompletedWorkTurn;
+  verboseMode: boolean;
 }) {
-  const [open, setOpen] = useState(expandSignal);
+  const [open, setOpen] = useState(verboseMode);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => setOpen(expandSignal), [expandSignal]);
+  useEffect(() => setOpen(verboseMode), [verboseMode]);
   const hasWork = turn.work.length > 0;
 
   return (
@@ -570,31 +658,31 @@ function CompletedWork({
           >
             {turn.work.map((message) => (
               <MessageRow
-                expandToolRuns={expandSignal}
                 key={message.id}
                 message={message}
                 showAssistantCopy={false}
+                verboseMode={verboseMode}
               />
             ))}
           </SessionChatExpansion>
         ) : null}
       </div>
       <MessageRow
-        expandToolRuns={expandSignal}
         message={turn.final}
         showAssistantCopy
+        verboseMode={verboseMode}
       />
     </div>
   );
 }
 
 export function SessionChatMessageList({
-  expandToolRuns = false,
   hasMore,
   isWorking,
   loadingEarlier,
   messages,
   onLoadEarlier,
+  verboseMode = false,
 }: SessionChatMessageListProps) {
   const loadingEarlierRef = useRef(loadingEarlier);
   loadingEarlierRef.current = loadingEarlier;
@@ -657,8 +745,8 @@ export function SessionChatMessageList({
     [isWorking, rendered],
   );
   const copyableAssistantMessageIds = useMemo(
-    () => finalAssistantMessageIds(rendered),
-    [rendered],
+    () => finalAssistantMessageIds(rendered, isWorking),
+    [isWorking, rendered],
   );
 
   return (
@@ -711,16 +799,16 @@ export function SessionChatMessageList({
               >
                 {item.kind === "message" ? (
                   <MessageRow
-                    expandToolRuns={expandToolRuns}
                     message={item.message}
                     showAssistantCopy={copyableAssistantMessageIds.has(
                       item.message.id,
                     )}
+                    verboseMode={verboseMode}
                   />
                 ) : (
                   <CompletedWork
-                    expandSignal={expandToolRuns}
                     turn={item.turn}
+                    verboseMode={verboseMode}
                   />
                 )}
               </MessageScrollerItem>

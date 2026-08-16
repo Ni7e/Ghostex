@@ -23,6 +23,10 @@ import {
   validateReleaseProvenance,
 } from "./release-gpui/provenance.mjs";
 import {
+  customerDownloadEntries,
+  renderIosAvailabilityNotes,
+} from "./release-gpui/customer-downloads.mjs";
+import {
   crossReleaseReuseOrigins,
   productOriginLabel,
   renderReleaseProvenanceReport,
@@ -279,6 +283,21 @@ async function main() {
   const dmgAsset = releaseAssets.find((asset) => asset.name === `ghostex-${version}-arm64.dmg`);
   const dmgDigest = parseAssetSha(dmgAsset);
 
+  await check("customer-downloads", async () => {
+    const groups = customerDownloadEntries(version, releaseAssets.map((asset) => asset.name));
+    const downloads = groups.flatMap((group) => group.downloads);
+    if (downloads.length === 0) throw new Error("Release has no customer-facing download assets.");
+    const missing = downloads.filter((download) => !releaseBody.includes(download.url));
+    if (missing.length > 0) {
+      throw new Error(`Release notes are missing customer download links: ${missing.map((item) => item.label).join(", ")}`);
+    }
+    const hasAndroidDownload = groups.some((group) => group.title === "Android");
+    if (hasAndroidDownload && !releaseBody.includes(renderIosAvailabilityNotes())) {
+      throw new Error("Release notes are missing the iOS TestFlight Discord instructions.");
+    }
+    return `${downloads.length} direct customer download links${hasAndroidDownload ? " plus iOS TestFlight instructions" : ""}`;
+  });
+
   /*
    CDXC:ReleaseChangeAwarePlanning 2026-08-13:
    The release records, per product, whether its bytes were built here or reused
@@ -404,9 +423,6 @@ async function main() {
         feedText: await readFile(path.join(temporary, names.feed), "utf8"),
         version,
       });
-      if (!releaseBody.includes(channelAssets.find((asset) => asset.name === names.fullPackage).sha256)) {
-        throw new Error(`Release notes do not contain the ${arch} full update package SHA256.`);
-      }
       validated.push(
         `${result.channel}${result.delta ? " with delta" : " full"}${describeProduct(`windows-${arch}`)}`,
       );
@@ -711,16 +727,8 @@ async function main() {
     if (!apkSha) {
       return { warn: "GitHub reported no digest for ghostex-android.apk; checksum not cross-checked." };
     }
-    if (!releaseBody.includes(apkSha)) {
-      throw new Error("Release notes do not contain the Android APK SHA256.");
-    }
-    /*
-     A reused APK is byte-identical to the one the previous release published, so
-     its embedded versionName stays at the release in which mobile last changed.
-     `mobile/` has no self-update logic, so nothing notifies a user about it; the
-     release page and this line are where that fact is stated.
-    */
-    return `APK digest ${apkSha.slice(0, 12)}... present in release notes${describeProduct("android")}`;
+    /* A reused APK is still checked through live asset metadata and provenance. */
+    return `APK digest ${apkSha.slice(0, 12)}... verified from the live asset${describeProduct("android")}`;
   });
 
   await check("subrepos-clean", async () => {

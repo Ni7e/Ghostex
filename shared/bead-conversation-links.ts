@@ -117,10 +117,13 @@ export type ProjectBoardBridgeAction =
   | "automationSave"
   | "automationSetEnabled"
   | "getState"
+  | "initializeBeads"
+  | "installOrUpdateBeads"
   | "jumpToConversation"
   | "projectEditorFocusOwnerChanged"
   | "showToast"
   | "startWork"
+  | "runBeadsMigration"
   | "unlinkConversation";
 
 export type ProjectBoardBridgeRequest = {
@@ -134,6 +137,7 @@ export type ProjectBoardBridgeRequest = {
   prompt?: string;
   projectId?: string;
   projectPath?: string;
+  migrationOption?: string;
   remoteMachineId?: string;
   payloadJson?: string;
   requestId: string;

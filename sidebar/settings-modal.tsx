@@ -149,9 +149,9 @@ import {
 import {
   AUTO_SLEEP_IDLE_MINUTE_OPTIONS,
   APP_SHOTS_HOTKEY_OPTIONS,
-  BROWSER_FEEDBACK_TOOL_OPTIONS,
   DEFAULT_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_TINT_COLOR,
   DEFAULT_ghostex_SETTINGS,
+  MAX_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
   MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MAX_TERMINAL_PANE_PADDING_PX,
   MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
@@ -165,6 +165,7 @@ import {
   MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MIN_TERMINAL_PANE_PADDING_PX,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
+  MIN_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   WINDOWS_TERMINAL_BACKEND_OPTIONS,
   type PromptEditorBackend,
@@ -188,6 +189,7 @@ import {
   MIN_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
   MIN_SIDEBAR_DEFAULT_WIDTH_PX,
   SIDEBAR_COLLAPSE_ANIMATION_DURATION_STEP_MS,
+  SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT_STEP,
   normalizeTerminalDevServerIgnoredPortRuleInput,
   normalizeTerminalDevServerIgnoredPortRules,
   normalizeSettingsModalNavigationState,
@@ -196,7 +198,6 @@ import {
   parseSidebarAutoSettleAfterDaysSelectValue,
   setDiagnosticLoggingScenario,
   sidebarAutoSettleAfterDaysSelectValue,
-  type BrowserFeedbackTool,
   type AppShotsHotkey,
   type AutoSleepIdleMinutes,
   type DiagnosticLoggingScenarioId,
@@ -563,6 +564,7 @@ type SettingModificationProps = {
 type MainSettingsSectionId =
   | "agents"
   | "appearance"
+  | "chat"
   | "sidebar"
   | "terminal"
   | "tools"
@@ -635,11 +637,16 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
    */
   appearance: [
     "sidebarTheme",
-    "sessionChatTheme",
     "customSidebarTitlebarBackgroundDarknessPercent",
     "customSidebarTitlebarBackgroundTintColor",
     "workspaceActivePaneBorderColor",
     "appIconSourceId",
+  ],
+  chat: [
+    "sessionChatTheme",
+    "sessionChatFontFamily",
+    "sessionChatTranscriptWidthPercent",
+    "sessionChatVerboseMode",
   ],
   sidebar: [
     "preferredAgentInterface",
@@ -735,12 +742,6 @@ const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<
     "terminalScrollToBottomWhenTyping",
   ],
   tools: [
-    /*
-     * CDXC:BrowserSettings 2026-05-22-09:18:
-     * Browser-related controls belong in one Browser section on the main
-     * Settings tab: URL open target and browser-pane feedback tool selection.
-     */
-    "browserFeedbackTool",
     "openTerminalLinksInApp",
     "codeServerLinkVscodeUserConfig",
     "codeServerUseVscodeInsidersUserConfig",
@@ -801,7 +802,6 @@ const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
   ...MAIN_SETTINGS_SECTION_SETTING_KEYS,
   theming: [
     "sidebarTheme",
-    "sessionChatTheme",
     "customSidebarTitlebarBackgroundDarknessPercent",
     "customSidebarTitlebarBackgroundTintColor",
   ],
@@ -842,7 +842,7 @@ const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
     "automateViewTabHidden",
     "docsViewTabHidden",
   ],
-  browser: ["browserFeedbackTool", "openTerminalLinksInApp"],
+  browser: ["openTerminalLinksInApp"],
   editor: [
     "codeServerLinkVscodeUserConfig",
     "codeServerUseVscodeInsidersUserConfig",
@@ -958,7 +958,6 @@ const DIAGNOSTIC_LOGGING_GROUPS: readonly ["macOS", "GPUI", "gxserver"] = [
  *
  */
 const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
-  "browserFeedbackTool",
   "sidebarDefaultWidthPx",
   "projectSessionListCollapsedCount",
   "createSessionOnSidebarDoubleClick",
@@ -1417,6 +1416,7 @@ export function SettingsModal({
   const agentsOnboardingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarSectionRef = useRef<HTMLDivElement>(null);
   const themingSectionRef = useRef<HTMLDivElement>(null);
+  const chatSectionRef = useRef<HTMLDivElement>(null);
   // CDXC:AppIconPicker 2026-06-25-21:50: Anchor ref so the App Icon section participates in Settings nav scrolling.
   const appIconSectionRef = useRef<HTMLDivElement>(null);
   const sidebarTagsSectionRef = useRef<HTMLDivElement>(null);
@@ -1758,12 +1758,6 @@ export function SettingsModal({
       ],
     ),
     browser: getSettingsSectionSearch(settingsSearchQuery, "Browser", [
-      {
-        key: "browserFeedbackTool",
-        options: BROWSER_FEEDBACK_TOOL_OPTIONS,
-        subtitle: "Choose the feedback tool launched from browser pane menus.",
-        title: "Feedback Tool",
-      },
       {
         key: "openTerminalLinksInApp",
         subtitle:
@@ -2134,12 +2128,6 @@ export function SettingsModal({
         title: "Theme",
       },
       {
-        key: "sessionChatTheme",
-        options: SESSION_CHAT_THEME_OPTIONS,
-        subtitle: "Choose the palette used by chat messages, thinking, tools, edits, and Markdown.",
-        title: "Chat appearance",
-      },
-      {
         key: "customSidebarTitlebarBackgroundDarknessPercent",
         subtitle: "Contrast level for the sidebar and titlebar background.",
         title: "Background Contrast",
@@ -2153,6 +2141,30 @@ export function SettingsModal({
         key: "workspaceActivePaneBorderColor",
         subtitle: "CSS color for the focused pane border.",
         title: "Active Pane Border",
+      },
+    ]),
+    chat: getSettingsSectionSearch(settingsSearchQuery, "Chat", [
+      {
+        key: "sessionChatTheme",
+        options: SESSION_CHAT_THEME_OPTIONS,
+        subtitle: "Choose the palette used by chat messages, thinking, tools, edits, and Markdown.",
+        title: "Chat appearance",
+      },
+      {
+        key: "sessionChatFontFamily",
+        subtitle: "Use any installed font in chat messages and the prompt composer.",
+        title: "Chat font family",
+      },
+      {
+        key: "sessionChatTranscriptWidthPercent",
+        subtitle: "Set the width of the message transcript without changing the prompt composer.",
+        title: "Chat message width",
+      },
+      {
+        key: "sessionChatVerboseMode",
+        subtitle:
+          "Expand thinking blocks to show their tool calls by default. Each chat can override it from its composer.",
+        title: "Verbose mode",
       },
     ]),
     sidebarTags: getSettingsSectionSearch(settingsSearchQuery, "Sidebar Tags", [
@@ -2506,6 +2518,7 @@ export function SettingsModal({
       settingsSearch.theming,
       settingsSearch.appIcon,
     ]),
+    chat: settingsSearch.chat,
     sidebar: getGroupedSettingsSectionSearch(settingsSearchQuery, "Sidebar", [
       settingsSearch.sidebar,
       settingsSearch.sessionCards,
@@ -2552,6 +2565,7 @@ export function SettingsModal({
       searchResult: mainSettingsGroupSearch.appearance,
       title: "Appearance",
     },
+    { id: "chat", searchResult: mainSettingsGroupSearch.chat, title: "Chat" },
     ...(PET_CONTROLS_VISIBLE
       ? [
           {
@@ -2699,6 +2713,7 @@ export function SettingsModal({
     beta: betaSectionRef,
     builtInFeatures: browserSectionRef,
     browser: browserSectionRef,
+    chat: chatSectionRef,
     debugging: debuggingSectionRef,
     editor: editorSectionRef,
     notifications: soundsSectionRef,
@@ -2899,6 +2914,7 @@ export function SettingsModal({
       autoSleep: autoSleepSectionRef,
       builtInFeatures: browserSectionRef,
       browser: browserSectionRef,
+      chat: chatSectionRef,
       editor: editorSectionRef,
       notifications: soundsSectionRef,
       power: powerSectionRef,
@@ -3920,15 +3936,6 @@ export function SettingsModal({
                     value="Light theme coming soon"
                   />
                 ) : null}
-                {mainSettingVisible(settingsSearch.theming, "sessionChatTheme") ? (
-                  <SessionChatThemeField
-                    description="Changes chat content only; the surrounding Ghostex app remains dark."
-                    label="Chat Appearance"
-                    {...getSettingModificationProps("sessionChatTheme")}
-                    onChange={(value) => updateDraft("sessionChatTheme", value)}
-                    value={draft.sessionChatTheme}
-                  />
-                ) : null}
                 {mainSettingVisible(
                   settingsSearch.theming,
                   "customSidebarTitlebarBackgroundDarknessPercent",
@@ -3973,6 +3980,54 @@ export function SettingsModal({
               </SettingsSection>
             ) : null}
 
+            {mainSectionVisible("chat", settingsSearch.chat) ? (
+              <SettingsSection sectionRef={chatSectionRef} title="Chat">
+                {mainSettingVisible(settingsSearch.chat, "sessionChatTheme") ? (
+                  <SessionChatThemeField
+                    description="Changes chat content only; the surrounding Ghostex app remains dark."
+                    label="Appearance"
+                    {...getSettingModificationProps("sessionChatTheme")}
+                    onChange={(value) => updateDraft("sessionChatTheme", value)}
+                    value={draft.sessionChatTheme}
+                  />
+                ) : null}
+                {mainSettingVisible(settingsSearch.chat, "sessionChatFontFamily") ? (
+                  <TextField
+                    description="Type an installed font family name. Leave blank to use the app font."
+                    label="Font Family"
+                    {...getSettingModificationProps("sessionChatFontFamily")}
+                    onChange={(value) => updateDraft("sessionChatFontFamily", value)}
+                    placeholder="App default"
+                    value={draft.sessionChatFontFamily}
+                  />
+                ) : null}
+                {mainSettingVisible(settingsSearch.chat, "sessionChatTranscriptWidthPercent") ? (
+                  <SliderNumberField
+                    description="Adjust message width only. The prompt composer at the bottom keeps its current width."
+                    label="Message Width (%)"
+                    {...getSettingModificationProps("sessionChatTranscriptWidthPercent")}
+                    max={MAX_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT}
+                    min={MIN_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT}
+                    onCommit={(value) => updateDraft("sessionChatTranscriptWidthPercent", value)}
+                    onChange={(value) =>
+                      updateDraftDebounced("sessionChatTranscriptWidthPercent", value)
+                    }
+                    step={SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT_STEP}
+                    value={draft.sessionChatTranscriptWidthPercent}
+                  />
+                ) : null}
+                {mainSettingVisible(settingsSearch.chat, "sessionChatVerboseMode") ? (
+                  <ToggleField
+                    checked={draft.sessionChatVerboseMode}
+                    description="Expand thinking blocks to show their tool calls by default. Individual command and output details remain collapsible. This is the default for new chats; the Verbose pill in a chat's composer overrides it for that chat only."
+                    label="Verbose Mode"
+                    {...getSettingModificationProps("sessionChatVerboseMode")}
+                    onChange={(checked) => updateDraft("sessionChatVerboseMode", checked)}
+                  />
+                ) : null}
+              </SettingsSection>
+            ) : null}
+
             {PET_CONTROLS_VISIBLE && mainSectionVisible("statusIndicators", settingsSearch.statusIndicators) ? (
             <SettingsSection sectionRef={statusIndicatorsSectionRef} title="Status Indicators">
               {mainSettingVisible(settingsSearch.statusIndicators, "petOverlayEnabled") ? (
@@ -3997,20 +4052,6 @@ export function SettingsModal({
             {mainSubsectionVisible("browser", settingsSearch.browser) ? (
             <SettingsSection sectionRef={browserSectionRef} title="Browser">
               {/* CDXC:BrowserPanes 2026-05-27-07:24: Settings no longer exposes Chrome Canary attachment. Browser actions always open in workspace browser panes, leaving this section focused on pane behavior controls. */}
-              {/* CDXC:BrowserFeedbackTools 2026-05-22-09:18:
-                  Browser-pane context menus should expose one feedback action whose injected tool is user-selectable: Agentation by default for structured visual annotations, or React Grab when explicitly selected. */}
-              {mainSettingVisible(settingsSearch.browser, "browserFeedbackTool") ? (
-              <SelectField
-                description="Choose the feedback tool launched from browser pane menus."
-                label="Feedback Tool"
-                {...getSettingModificationProps("browserFeedbackTool")}
-                onChange={(value) =>
-                  updateDraft("browserFeedbackTool", value as BrowserFeedbackTool)
-                }
-                options={BROWSER_FEEDBACK_TOOL_OPTIONS}
-                value={draft.browserFeedbackTool}
-              />
-              ) : null}
               {mainSettingVisible(settingsSearch.browser, "openTerminalLinksInApp") ? (
               /*
                * CDXC:TerminalLinkInAppBrowser 2026-07-02-13:05:
@@ -10528,6 +10569,7 @@ function HotkeysSettingsTab({
   visibleSections: readonly HotkeySettingsSectionDefinition[];
 }) {
   const normalizedHotkeys = normalizeghostexHotkeySettings(hotkeys);
+  const defaultHotkeys = normalizeghostexHotkeySettings(DEFAULT_ghostex_HOTKEYS);
   const duplicateIds = useMemo(
     () => getDuplicateHotkeyIds(normalizedHotkeys),
     [normalizedHotkeys],
@@ -10569,7 +10611,7 @@ function HotkeysSettingsTab({
   };
 
   const resetHotkeys = () => {
-    onChange(normalizeghostexHotkeySettings(DEFAULT_ghostex_HOTKEYS));
+    onChange(defaultHotkeys);
   };
 
   const scheduleHotkeySectionMeasurement = (viewport: HTMLElement) => {
@@ -10692,6 +10734,7 @@ function HotkeysSettingsTab({
                       id={`hotkey-${definition.id}`}
                       hotkey={value}
                       onChange={(nextHotkey) => updateHotkey(definition.id, nextHotkey)}
+                      originalHotkey={defaultHotkeys[definition.id] ?? ""}
                     />
                   </Field>,
                 ];

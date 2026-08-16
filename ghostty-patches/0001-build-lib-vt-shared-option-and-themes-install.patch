@@ -1,0 +1,159 @@
+--- a/build.zig
++++ b/build.zig
+@@ -80,6 +80,11 @@
+ 
+     // Ghostty resources like terminfo, shell integration, themes, etc.
+     const resources = try buildpkg.GhosttyResources.init(b, &config, &deps);
++    // Ghostex embeds the upstream theme files into its GPUI terminal renderer.
++    // A libghostty-vt-only build otherwise installs no resources at all, so
++    // expose just the audited themes to the Cargo build without pulling in the
++    // full Ghostty application resource set.
++    if (config.emit_lib_vt) resources.installThemes();
+     const i18n = if (config.i18n) try buildpkg.GhosttyI18n.init(b, &config) else null;
+ 
+     // Ghostty executable, the actual runnable Ghostty program.
+@@ -117,20 +122,25 @@
+     }
+ 
+     // libghostty-vt
+-    const libghostty_vt_shared = shared: {
+-        if (config.target.result.cpu.arch.isWasm()) {
+-            break :shared try buildpkg.GhosttyLibVt.initWasm(
++    // Ghostex patch (2026-07-11): the shared dylib is skippable via
++    // -Demit-lib-vt-shared=false for static-archive-only consumers; see the
++    // option definition in src/build/Config.zig for why.
++    if (config.emit_lib_vt_shared) {
++        const libghostty_vt_shared = shared: {
++            if (config.target.result.cpu.arch.isWasm()) {
++                break :shared try buildpkg.GhosttyLibVt.initWasm(
++                    b,
++                    &mod,
++                );
++            }
++
++            break :shared try buildpkg.GhosttyLibVt.initShared(
+                 b,
+                 &mod,
+             );
+-        }
+-
+-        break :shared try buildpkg.GhosttyLibVt.initShared(
+-            b,
+-            &mod,
+-        );
+-    };
+-    libghostty_vt_shared.install(b.getInstallStep());
++        };
++        libghostty_vt_shared.install(b.getInstallStep());
++    }
+ 
+     // libghostty-vt static lib
+     const libghostty_vt_static = try buildpkg.GhosttyLibVt.initStatic(
+--- a/src/build/Config.zig
++++ b/src/build/Config.zig
+@@ -53,6 +53,7 @@
+ emit_exe: bool = false,
+ emit_helpgen: bool = false,
+ emit_lib_vt: bool = false,
++emit_lib_vt_shared: bool = true,
+ emit_macos_app: bool = false,
+ emit_terminfo: bool = false,
+ emit_termcap: bool = false,
+@@ -138,10 +139,14 @@
+     // one exists so this is hardcoded.
+     const wasm_target: WasmTarget = .browser;
+ 
+-    // Determine whether GTK supports X11 and Wayland. This is always safe
+-    // to run even on non-Linux platforms because any failures result in
+-    // defaults.
+-    const gtk_targets = gtk.targets(b);
++    // Windows lib-vt consumers do not build the GTK runtime. Avoid spawning
++    // pkg-config there: Zig's Windows PATH traversal fails hard when PATH
++    // contains an unavailable drive, even though GTK probe failures would
++    // otherwise be ignored. macOS/Linux behavior remains unchanged.
++    const gtk_targets = if (target.result.os.tag == .windows)
++        gtk.Targets{}
++    else
++        gtk.targets(b);
+ 
+     // Grab the environment from build state
+     const env = &b.graph.environ_map;
+@@ -402,6 +407,18 @@
+ 
+     config.emit_lib_vt = emit_lib_vt;
+ 
++    // Ghostex patch (2026-07-11): consumers that only link the static
++    // libghostty-vt archive (the GPUI cargo build) can skip the shared
++    // dylib. Zig 0.15 cannot link macOS dylibs against Xcode 26+ SDKs whose
++    // libSystem TBD stub is arm64e-only, so on machines without an older
++    // Command Line Tools SDK the unconditional dylib emit failed the whole
++    // build even though the static archive it actually needs built fine.
++    config.emit_lib_vt_shared = b.option(
++        bool,
++        "emit-lib-vt-shared",
++        "Build and install the shared libghostty-vt library (default true).",
++    ) orelse true;
++
+     config.emit_exe = b.option(
+         bool,
+         "emit-exe",
+@@ -669,6 +686,11 @@
+             .ghostty => self.version,
+             .lib => self.lib_version,
+         },
++        // Note (Ghostex 2026-08-14): this stays on upstream semantics (Debug
++        // => true) because Zig tests share these modules and comptime-assert
++        // that the slow checks are enabled. To get a fast development
++        // GhosttyKit without the page-integrity scans, build the xcframework
++        // with -Doptimize=ReleaseSafe instead of Debug.
+         .slow_runtime_safety = switch (optimize) {
+             .Debug => true,
+             .ReleaseSafe,
+--- a/src/build/GhosttyResources.zig
++++ b/src/build/GhosttyResources.zig
+@@ -7,9 +7,11 @@
+ const SharedDeps = @import("SharedDeps.zig");
+ 
+ steps: []*std.Build.Step,
++themes_step: ?*std.Build.Step,
+ 
+ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !GhosttyResources {
+     var steps: std.ArrayList(*std.Build.Step) = .empty;
++    var themes_step: ?*std.Build.Step = null;
+     errdefer steps.deinit(b.allocator);
+ 
+     // This is the exe used to generate some build data.
+@@ -134,6 +136,7 @@
+                 .install_subdir = b.pathJoin(&.{ "ghostty", "themes" }),
+                 .exclude_extensions = &.{".md"},
+             });
++            themes_step = &install_step.step;
+             try steps.append(b.allocator, &install_step.step);
+         }
+     }
+@@ -250,7 +253,10 @@
+         &steps,
+     );
+ 
+-    return .{ .steps = steps.items };
++    return .{
++        .steps = steps.items,
++        .themes_step = themes_step,
++    };
+ }
+ 
+ /// Add the resource files needed to make Ghostty a proper
+@@ -434,6 +440,13 @@
+     self.addStepDependencies(b.getInstallStep());
+ }
+ 
++/// Install only the bundled themes for embedders that use libghostty-vt
++/// without shipping Ghostty's full application resource tree.
++pub fn installThemes(self: *const GhosttyResources) void {
++    const step = self.themes_step orelse return;
++    step.owner.getInstallStep().dependOn(step);
++}
++
+ pub fn addStepDependencies(
+     self: *const GhosttyResources,
+     other_step: *std.Build.Step,

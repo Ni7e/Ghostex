@@ -8,6 +8,7 @@ import type {
   GxserverAnswerSessionChatPromptParams,
   GxserverReadSessionChatImageResult,
   GxserverReadSessionChatResult,
+  GxserverReadSessionChatSkillsResult,
   GxserverSaveSessionChatAttachmentResult,
   GxserverSaveSessionChatImageResult,
   GxserverSessionChatEvent,
@@ -19,6 +20,8 @@ export interface SessionChatTransport {
     limit?: number;
     beforeOffset?: number;
   }): Promise<GxserverReadSessionChatResult>;
+  /** Lists skills gxserver resolved for this session's stored agent identity. */
+  readSkills?(): Promise<GxserverReadSessionChatSkillsResult>;
   /** Returns an unsubscribe function. Events must already be filtered to this session. */
   subscribe(handlers: {
     onEvent: (e: GxserverSessionChatEvent) => void;
@@ -32,9 +35,9 @@ export interface SessionChatTransport {
   }): () => void;
   send(text: string, imagePaths?: string[]): Promise<void>;
   /**
-   * Injects a raw keystroke sequence (no text, no Enter) — Claude Code's
-   * permission-mode cycle is Shift+Tab only. Hosts without a path for it omit
-   * this, which hides the Mode control instead of faking it.
+   * Injects a raw keystroke sequence (no text, no Enter) for controls owned by
+   * the agent TUI. Hosts without a path for it omit this, which hides those
+   * controls instead of pretending they work.
    */
   sendKey?(key: SessionChatSendKey): Promise<void>;
   /**

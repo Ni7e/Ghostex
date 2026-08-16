@@ -141,6 +141,7 @@ impl AutomationRuntime {
                     Some("Skipped because another run for this automation is still active."),
                 );
                 upsert_run(&db, &run)?;
+                update_automation_next_run_at(&db, &automation.project_id, &automation.id)?;
                 continue;
             }
             let _ = queue_automation_run(self, &repository, &db, &automation);
@@ -859,11 +860,21 @@ fn normalize_definition_payload(
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let created_at = read_value_text(object, "createdAt").unwrap_or_else(|| now.clone());
-    let next_run_at = read_value_text(object, "nextRunAt").or_else(|| {
-        enabled
-            .then(|| compute_next_run_at(&schedule, None))
-            .flatten()
-    });
+    let next_run_at = if enabled {
+        let next_run_at = if is_one_shot_schedule(&schedule) {
+            compute_next_run_at(&schedule, None)
+        } else {
+            read_value_text(object, "nextRunAt")
+                .or_else(|| compute_next_run_at(&schedule, None))
+        };
+        Some(next_run_at.ok_or_else(|| {
+            DomainStateError::bad_request(
+                "Automation schedule must have a future run before it can be enabled.",
+            )
+        })?)
+    } else {
+        None
+    };
     Ok(AutomationDefinitionRecord {
         agent_id,
         created_at,
@@ -886,6 +897,22 @@ fn normalize_schedule(value: Option<&Value>) -> Result<Value, DomainStateError> 
     let kind = read_value_text(schedule, "kind")
         .ok_or_else(|| DomainStateError::bad_request("Automation schedule kind is required."))?;
     match kind.as_str() {
+        "once" => {
+            let run_at = normalize_run_at(read_value_text(schedule, "runAt"))?;
+            Ok(json!({ "kind": "once", "runAt": run_at }))
+        }
+        "timer" => {
+            let delay_ms = schedule
+                .get("delayMs")
+                .and_then(Value::as_i64)
+                .filter(|value| *value >= 1_000 && *value <= 365 * 24 * 60 * 60 * 1000)
+                .ok_or_else(|| {
+                    DomainStateError::bad_request("Timer schedule delayMs is invalid.")
+                })?;
+            let run_at = (Utc::now() + chrono::Duration::milliseconds(delay_ms))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            Ok(json!({ "kind": "once", "runAt": run_at }))
+        }
         "interval" => {
             let every_ms = schedule
                 .get("everyMs")
@@ -1030,9 +1057,17 @@ fn set_automation_enabled(
     enabled: bool,
 ) -> Result<(), DomainStateError> {
     let automation = read_automation(db, project, automation_id)?;
-    let next_run_at = enabled
-        .then(|| compute_next_run_at(&automation.schedule, None))
-        .flatten();
+    let next_run_at = if enabled {
+        Some(
+            compute_next_run_at(&automation.schedule, None).ok_or_else(|| {
+                DomainStateError::bad_request(
+                "This one-time automation is in the past. Choose a new date before enabling it.",
+            )
+            })?,
+        )
+    } else {
+        None
+    };
     db.execute(
         r#"
         UPDATE automations
@@ -1063,9 +1098,10 @@ fn update_automation_next_run_at(
     };
     let automation = read_automation(db, &project, automation_id)?;
     let next_run_at = compute_next_run_at(&automation.schedule, None);
+    let enabled = !is_one_shot_schedule(&automation.schedule) || next_run_at.is_some();
     db.execute(
-        "UPDATE automations SET nextRunAt = ?3, updatedAt = ?4 WHERE projectId = ?1 AND automationId = ?2",
-        params![project_id, automation_id, next_run_at, now_iso()],
+        "UPDATE automations SET enabled = ?3, nextRunAt = ?4, updatedAt = ?5 WHERE projectId = ?1 AND automationId = ?2",
+        params![project_id, automation_id, bool_to_int(enabled), next_run_at, now_iso()],
     )
     .map_err(sql_error)?;
     Ok(())
@@ -1660,6 +1696,14 @@ fn build_automation_prompt(prompt: &str) -> String {
 fn compute_next_run_at(schedule: &Value, after: Option<chrono::DateTime<Utc>>) -> Option<String> {
     let now = after.unwrap_or_else(Utc::now);
     match schedule.get("kind").and_then(Value::as_str)? {
+        "once" => {
+            let run_at = chrono::DateTime::parse_from_rfc3339(
+                schedule.get("runAt").and_then(Value::as_str)?,
+            )
+            .ok()?
+            .with_timezone(&Utc);
+            (run_at > now).then(|| run_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        }
         "interval" => {
             let every_ms = schedule.get("everyMs").and_then(Value::as_i64)?;
             Some(
@@ -1684,6 +1728,10 @@ fn compute_next_run_at(schedule: &Value, after: Option<chrono::DateTime<Utc>>) -
         "cron" => next_basic_cron(now, schedule.get("expression").and_then(Value::as_str)?),
         _ => None,
     }
+}
+
+fn is_one_shot_schedule(schedule: &Value) -> bool {
+    schedule.get("kind").and_then(Value::as_str) == Some("once")
 }
 
 fn next_daily(now: chrono::DateTime<Utc>, hour: u32, minute: u32) -> Option<String> {
@@ -1769,6 +1817,20 @@ fn normalize_time(value: Option<String>) -> Result<String, DomainStateError> {
     parse_time(&value)
         .map(|_| value)
         .ok_or_else(|| DomainStateError::bad_request("Schedule time must be HH:mm."))
+}
+
+fn normalize_run_at(value: Option<String>) -> Result<String, DomainStateError> {
+    let value = value
+        .ok_or_else(|| DomainStateError::bad_request("One-time schedule runAt is required."))?;
+    chrono::DateTime::parse_from_rfc3339(&value)
+        .map(|run_at| {
+            run_at
+                .with_timezone(&Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        })
+        .map_err(|_| {
+            DomainStateError::bad_request("One-time schedule runAt must be an ISO 8601 date.")
+        })
 }
 
 fn is_active_status(status: &str) -> bool {
@@ -1881,6 +1943,45 @@ fn sql_error(error: rusqlite::Error) -> DomainStateError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timer_input_is_anchored_as_a_one_time_schedule() {
+        let before = Utc::now();
+        let normalized = normalize_schedule(Some(&json!({
+            "kind": "timer",
+            "delayMs": 60_000,
+        })))
+        .expect("timer should normalize");
+        let run_at = chrono::DateTime::parse_from_rfc3339(
+            normalized
+                .get("runAt")
+                .and_then(Value::as_str)
+                .expect("timer has runAt"),
+        )
+        .expect("runAt is ISO 8601")
+        .with_timezone(&Utc);
+        assert_eq!(normalized.get("kind").and_then(Value::as_str), Some("once"));
+        assert!(run_at >= before + chrono::Duration::seconds(59));
+        assert!(run_at <= Utc::now() + chrono::Duration::seconds(61));
+    }
+
+    #[test]
+    fn one_time_schedule_has_no_next_run_after_its_deadline() {
+        let schedule = json!({
+            "kind": "once",
+            "runAt": "2026-08-14T09:30:00.000Z",
+        });
+        let before = Utc.with_ymd_and_hms(2026, 8, 14, 9, 0, 0).single().unwrap();
+        let after = Utc
+            .with_ymd_and_hms(2026, 8, 14, 10, 0, 0)
+            .single()
+            .unwrap();
+        assert_eq!(
+            compute_next_run_at(&schedule, Some(before)).as_deref(),
+            Some("2026-08-14T09:30:00.000Z")
+        );
+        assert_eq!(compute_next_run_at(&schedule, Some(after)), None);
+    }
 
     #[test]
     fn prompt_instructions_never_parse_as_a_result() {

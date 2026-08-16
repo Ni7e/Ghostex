@@ -143,8 +143,8 @@ WINDOWS_NINJA="$(first_existing_file \
   || true)"
 WINDOWS_ZIG="$(first_existing_file \
   "${GHOSTEX_WINDOWS_ZIG:-}" \
-  "$WINDOWS_TOOLS_ROOT/zig/zig-x86_64-windows-0.15.2/zig.exe" \
-  "/mnt/c/tools/zig-x86_64-windows-0.15.2/zig.exe" \
+  "$WINDOWS_TOOLS_ROOT/zig/zig-x86_64-windows-0.16.0/zig.exe" \
+  "/mnt/c/tools/zig-x86_64-windows-0.16.0/zig.exe" \
   || true)"
 
 for required_name in VS_DEV_CMD WINDOWS_CARGO WINDOWS_RUSTUP WINDOWS_BUN WINDOWS_CMAKE WINDOWS_NINJA WINDOWS_ZIG; do
@@ -155,8 +155,8 @@ for required_name in VS_DEV_CMD WINDOWS_CARGO WINDOWS_RUSTUP WINDOWS_BUN WINDOWS
   fi
 done
 
-if [[ "$($WINDOWS_ZIG version | tr -d '\r')" != "0.15.2" ]]; then
-  echo "Ghostex requires Windows Zig 0.15.2 at $WINDOWS_ZIG." >&2
+if [[ "$($WINDOWS_ZIG version | tr -d '\r')" != "0.16.0" ]]; then
+  echo "Ghostex requires Windows Zig 0.16.0 at $WINDOWS_ZIG." >&2
   exit 1
 fi
 

@@ -1603,14 +1603,9 @@ fn to_mobile_sidebar_project_collections(collections_state: Option<&Value>) -> O
                 Some(Value::String(text)) if !text.is_empty() => text.clone(),
                 _ => "transparent".to_string(),
             };
-            let collapsed = collection
-                .get("collapsed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
             collections.insert(
                 collection_id.clone(),
                 json!({
-                    "collapsed": collapsed,
                     "collectionId": collection_id,
                     "color": color,
                     "projectIds": project_ids,
@@ -2144,14 +2139,12 @@ mod tests {
             Some(json!({
                 "collections": {
                     "c1": {
-                        "collapsed": true,
                         "collectionId": "c1",
                         "color": "#7c6df2",
                         "projectIds": ["P1"],
                         "title": "Group 1",
                     },
                     "c2": {
-                        "collapsed": false,
                         "collectionId": "c2",
                         "color": "transparent",
                         "projectIds": ["P2"],

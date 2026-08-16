@@ -39,6 +39,12 @@ export type SessionChatOptionDispatch =
   | { kind: "toggle-command"; command: string }
   /** Types a command that opens the agent's own picker, then shows the terminal. */
   | { kind: "agent-picker"; command: string }
+  /** Steps through a bounded TUI setting using shifted arrow keys. */
+  | {
+      kind: "bounded-key-steps";
+      decreaseKey: SessionChatSendKey;
+      increaseKey: SessionChatSendKey;
+    }
   /** Writes a raw keystroke sequence (no text, no Enter). */
   | { kind: "key"; key: SessionChatSendKey; marker: string };
 
@@ -71,9 +77,9 @@ export interface SessionChatSessionOptionCatalog {
 
 const CLAUDE_MODELS: readonly SessionChatOptionChoice[] = [
   { value: "fable", label: "Fable 5" },
-  { value: "opus", label: "Opus 4.8" },
+  { value: "opus", label: "Opus 5" },
   { value: "sonnet", label: "Sonnet 5" },
-  { value: "haiku", label: "Haiku" },
+  { value: "haiku", label: "Haiku 4.5" },
 ];
 
 const CLAUDE_EFFORTS: readonly SessionChatOptionChoice[] = [
@@ -82,6 +88,7 @@ const CLAUDE_EFFORTS: readonly SessionChatOptionChoice[] = [
   { value: "high", label: "High" },
   { value: "xhigh", label: "Extra high" },
   { value: "max", label: "Max" },
+  { value: "auto", label: "Auto" },
 ];
 
 const CLAUDE_MODEL: SessionChatOptionDescriptor = {
@@ -137,35 +144,25 @@ const CODEX_MODELS: readonly SessionChatOptionChoice[] = [
 ];
 
 const CODEX_EFFORTS: readonly SessionChatOptionChoice[] = [
-  { value: "minimal", label: "Minimal" },
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
   { value: "xhigh", label: "Extra high" },
 ];
 
-/** Luna has no extra-high tier. */
 export function codexEffortChoices(
-  modelValue: string,
+  _modelValue: string,
 ): readonly SessionChatOptionChoice[] {
-  return modelValue === "gpt-5.6-luna"
-    ? CODEX_EFFORTS.filter((choice) => choice.value !== "xhigh")
-    : CODEX_EFFORTS;
+  return CODEX_EFFORTS;
 }
 
-/*
-Codex sets model AND reasoning effort in one interactive `/model` overlay that
-cannot be driven blind (the row order changes with the model). So both are
-agent-picker options: we type `/model`, then flip the pane to the terminal so
-the user finishes in the TUI. Nothing is claimed about the resulting value.
-*/
+/* Codex owns model selection in its interactive terminal picker. */
 const CODEX_MODEL: SessionChatOptionDescriptor = {
   id: "model",
   label: "Model",
   category: "model",
   choices: CODEX_MODELS,
-  actionLabel: "Choose in agent picker…",
-  description: "Codex picks the model in its own overlay.",
+  actionLabel: "Open the CLI's model picker",
   dispatch: { kind: "agent-picker", command: "/model" },
 };
 
@@ -173,9 +170,11 @@ const CODEX_EFFORT: SessionChatOptionDescriptor = {
   id: "effort",
   label: "Reasoning effort",
   category: "thought_level",
-  actionLabel: "Choose in agent picker…",
-  description: "Set together with the model in Codex's /model overlay.",
-  dispatch: { kind: "agent-picker", command: "/model" },
+  dispatch: {
+    kind: "bounded-key-steps",
+    decreaseKey: "shift-down",
+    increaseKey: "shift-up",
+  },
 };
 
 const CODEX_MODE: SessionChatOptionDescriptor = {
@@ -326,10 +325,49 @@ export function sessionChatOptionTracksValue(
   descriptor: SessionChatOptionDescriptor,
 ): boolean {
   return (
-    descriptor.dispatch.kind === "command" &&
+    (descriptor.dispatch.kind === "command" ||
+      descriptor.dispatch.kind === "bounded-key-steps") &&
     descriptor.choices !== undefined &&
     descriptor.choices.length > 0
   );
+}
+
+/**
+ * Exact key sequence for a bounded ordered setting. With a known current
+ * value, send only the delta. Without one, first saturate at the nearer edge
+ * and then step inward, so the requested value is deterministic.
+ */
+export function sessionChatBoundedKeySteps(
+  choices: readonly SessionChatOptionChoice[],
+  currentValue: string | undefined,
+  targetValue: string,
+  decreaseKey: SessionChatSendKey,
+  increaseKey: SessionChatSendKey,
+): SessionChatSendKey[] {
+  const targetIndex = choices.findIndex((choice) => choice.value === targetValue);
+  if (targetIndex < 0 || choices.length < 2) {
+    return [];
+  }
+  const currentIndex = choices.findIndex((choice) => choice.value === currentValue);
+  if (currentIndex >= 0) {
+    const delta = targetIndex - currentIndex;
+    return Array.from(
+      { length: Math.abs(delta) },
+      () => (delta > 0 ? increaseKey : decreaseKey),
+    );
+  }
+  const lastIndex = choices.length - 1;
+  const fromLowerEdge = lastIndex + targetIndex;
+  const fromUpperEdge = lastIndex + (lastIndex - targetIndex);
+  return fromLowerEdge <= fromUpperEdge
+    ? [
+        ...Array.from({ length: lastIndex }, () => decreaseKey),
+        ...Array.from({ length: targetIndex }, () => increaseKey),
+      ]
+    : [
+        ...Array.from({ length: lastIndex }, () => increaseKey),
+        ...Array.from({ length: lastIndex - targetIndex }, () => decreaseKey),
+      ];
 }
 
 export function seedSessionChatOptionState(

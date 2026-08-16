@@ -1506,7 +1506,7 @@ html:has(body.app-modal-host-native-window-body) {
   border-radius: 0;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) minmax(132px, 180px);
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
   padding: 10px 12px;
 }
 

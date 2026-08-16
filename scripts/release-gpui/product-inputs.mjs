@@ -74,6 +74,10 @@ export const IGNORED_FOR_RELEASE = Object.freeze([
   { path: "favicon.png", why: "Web asset for local tooling; not packaged by any release job." },
   { path: "ghostex-cli", why: "Port planning notes only (no build inputs)." },
   { path: "ghostex-history", why: "Local history CLI; not packaged by any release job." },
+  {
+    path: "ghostty-patches",
+    why: "Source-sync overlay only; release jobs compile the already-patched tracked ghostty tree.",
+  },
   { path: "ghostex-web", why: "Web app; released separately, never part of a GPUI release artifact." },
   { path: "mobile-chat", why: "Mobile chat bundle source; consumed by the mobile submodule build, not by release jobs." },
   { path: "plans", why: "Planning documents; metadata only." },
@@ -259,7 +263,7 @@ function windowsProduct(arch) {
       /* sign_windows changes the produced bytes and the release notes. */
       signingMode: (context) => (context.scope.signWindows ? "authenticode" : "unsigned"),
       vpk: TOOLCHAIN.vpk,
-      zigPin: TOOLCHAIN.zig015,
+      zigPin: TOOLCHAIN.zig016,
     },
     versionStamped: true,
   };

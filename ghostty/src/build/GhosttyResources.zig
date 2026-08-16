@@ -11,8 +11,8 @@ themes_step: ?*std.Build.Step,
 
 pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !GhosttyResources {
     var steps: std.ArrayList(*std.Build.Step) = .empty;
-    errdefer steps.deinit(b.allocator);
     var themes_step: ?*std.Build.Step = null;
+    errdefer steps.deinit(b.allocator);
 
     // This is the exe used to generate some build data.
     const build_data_exe = b.addExecutable(.{
@@ -23,9 +23,9 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
             .strip = false,
             .omit_frame_pointer = false,
             .unwind_tables = .sync,
+            .link_libc = true,
         }),
     });
-    build_data_exe.linkLibC();
 
     deps.help_strings.addImport(build_data_exe);
 
@@ -41,7 +41,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         const run = b.addRunArtifact(build_data_exe);
         run.addArg("+terminfo");
         const wf = b.addWriteFiles();
-        const source = wf.addCopyFile(run.captureStdOut(), "ghostty.terminfo");
+        const source = wf.addCopyFile(run.captureStdOut(.{}), "ghostty.terminfo");
 
         if (cfg.emit_terminfo) {
             const source_install = b.addInstallFile(
@@ -65,8 +65,8 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
             const run_step = RunStep.create(b, "infotocap");
             run_step.addArg("infotocap");
             run_step.addFileArg(source);
-            const out_source = run_step.captureStdOut();
-            _ = run_step.captureStdErr(); // so we don't see stderr
+            const out_source = run_step.captureStdOut(.{});
+            _ = run_step.captureStdErr(.{}); // so we don't see stderr
 
             const cap_install = b.addInstallFile(
                 out_source,
@@ -86,7 +86,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
             const path = run_step.addOutputFileArg(terminfo_share_dir);
 
             run_step.addFileArg(source);
-            _ = run_step.captureStdErr(); // so we don't see stderr
+            _ = run_step.captureStdErr(.{}); // so we don't see stderr
 
             // Ensure that `share/terminfo` is a directory, otherwise the `cp
             // -R` will create a file named `share/terminfo`
@@ -146,7 +146,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         const run = b.addRunArtifact(build_data_exe);
         run.addArg("+fish");
         const wf = b.addWriteFiles();
-        _ = wf.addCopyFile(run.captureStdOut(), "ghostty.fish");
+        _ = wf.addCopyFile(run.captureStdOut(.{}), "ghostty.fish");
 
         const install_step = b.addInstallDirectory(.{
             .source_dir = wf.getDirectory(),
@@ -161,7 +161,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         const run = b.addRunArtifact(build_data_exe);
         run.addArg("+zsh");
         const wf = b.addWriteFiles();
-        _ = wf.addCopyFile(run.captureStdOut(), "_ghostty");
+        _ = wf.addCopyFile(run.captureStdOut(.{}), "_ghostty");
 
         const install_step = b.addInstallDirectory(.{
             .source_dir = wf.getDirectory(),
@@ -176,7 +176,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         const run = b.addRunArtifact(build_data_exe);
         run.addArg("+bash");
         const wf = b.addWriteFiles();
-        _ = wf.addCopyFile(run.captureStdOut(), "ghostty.bash");
+        _ = wf.addCopyFile(run.captureStdOut(.{}), "ghostty.bash");
 
         const install_step = b.addInstallDirectory(.{
             .source_dir = wf.getDirectory(),
@@ -193,22 +193,22 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         {
             const run = b.addRunArtifact(build_data_exe);
             run.addArg("+vim-syntax");
-            _ = wf.addCopyFile(run.captureStdOut(), "syntax/ghostty.vim");
+            _ = wf.addCopyFile(run.captureStdOut(.{}), "syntax/ghostty.vim");
         }
         {
             const run = b.addRunArtifact(build_data_exe);
             run.addArg("+vim-ftdetect");
-            _ = wf.addCopyFile(run.captureStdOut(), "ftdetect/ghostty.vim");
+            _ = wf.addCopyFile(run.captureStdOut(.{}), "ftdetect/ghostty.vim");
         }
         {
             const run = b.addRunArtifact(build_data_exe);
             run.addArg("+vim-ftplugin");
-            _ = wf.addCopyFile(run.captureStdOut(), "ftplugin/ghostty.vim");
+            _ = wf.addCopyFile(run.captureStdOut(.{}), "ftplugin/ghostty.vim");
         }
         {
             const run = b.addRunArtifact(build_data_exe);
             run.addArg("+vim-compiler");
-            _ = wf.addCopyFile(run.captureStdOut(), "compiler/ghostty.vim");
+            _ = wf.addCopyFile(run.captureStdOut(.{}), "compiler/ghostty.vim");
         }
 
         const vim_step = b.addInstallDirectory(.{
@@ -236,7 +236,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         const run = b.addRunArtifact(build_data_exe);
         run.addArg("+sublime");
         const wf = b.addWriteFiles();
-        _ = wf.addCopyFile(run.captureStdOut(), "ghostty.sublime-syntax");
+        _ = wf.addCopyFile(run.captureStdOut(.{}), "ghostty.sublime-syntax");
 
         const install_step = b.addInstallDirectory(.{
             .source_dir = wf.getDirectory(),
@@ -364,10 +364,10 @@ fn addLinuxAppResources(
         // Template output has a single header line we want to remove.
         // We use `tail` to do it since its part of the POSIX standard.
         const tail = b.addSystemCommand(&.{ "tail", "-n", "+2" });
-        tail.setStdIn(.{ .lazy_path = tpl.getOutput() });
+        tail.setStdIn(.{ .lazy_path = tpl.getOutputFile() });
 
         const copy = b.addInstallFile(
-            tail.captureStdOut(),
+            tail.captureStdOut(.{}),
             template[1],
         );
 

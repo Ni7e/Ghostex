@@ -1,7 +1,6 @@
 import type { GxserverSidebarProjectCollectionsState } from "../shared/gxserver-protocol";
 
 export type SidebarProjectCollection = {
-  collapsed: boolean;
   color: string;
   collectionId: string;
   projectIds: string[];
@@ -14,6 +13,35 @@ export type SidebarProjectCollectionsState = {
 };
 
 const STORAGE_KEY = "ghostex.sidebar.projectCollections.v1";
+
+export function readLegacyCollapsedSidebarProjectCollectionIds(): Record<string, true> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null") as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const collections = (parsed as Record<string, unknown>).collections;
+    if (!Array.isArray(collections)) {
+      return {};
+    }
+    const collapsedById: Record<string, true> = {};
+    for (const collection of collections) {
+      if (!collection || typeof collection !== "object" || Array.isArray(collection)) {
+        continue;
+      }
+      const candidate = collection as Record<string, unknown>;
+      if (typeof candidate.collectionId === "string" && candidate.collapsed === true) {
+        collapsedById[candidate.collectionId] = true;
+      }
+    }
+    return collapsedById;
+  } catch {
+    return {};
+  }
+}
 
 export const SIDEBAR_PROJECT_COLLECTION_COLORS = [
   "#4f5663",
@@ -116,7 +144,6 @@ function sanitizeSidebarProjectCollections(
       continue;
     }
     collections.push({
-      collapsed: candidate.collapsed === true,
       color,
       collectionId,
       projectIds,
@@ -161,7 +188,6 @@ export function serializeSidebarProjectCollectionsForGxserver(
       state.collections.map((collection) => [
         collection.collectionId,
         {
-          collapsed: collection.collapsed,
           collectionId: collection.collectionId,
           color: collection.color,
           projectIds: [...collection.projectIds],
@@ -224,7 +250,6 @@ export function areSidebarProjectCollectionsStatesEqual(
   return left.collections.every((collection, index) => {
     const other = right.collections[index];
     return (
-      collection.collapsed === other.collapsed &&
       collection.collectionId === other.collectionId &&
       collection.color === other.color &&
       collection.title === other.title &&
@@ -247,7 +272,6 @@ export function createSidebarProjectCollection(
       collections: [
         ...withoutProject.collections,
         {
-          collapsed: false,
           color:
             SIDEBAR_PROJECT_COLLECTION_COLORS[
               (nextCollectionNumber - 1) % SIDEBAR_PROJECT_COLLECTION_COLORS.length

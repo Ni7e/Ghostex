@@ -48,6 +48,7 @@ import {
 type ProjectCollectionSectionProps = {
   autoEdit: boolean;
   children: ReactNode;
+  collapsed: boolean;
   collection: SidebarProjectCollection;
   draggingDisabled: boolean;
   /*
@@ -69,6 +70,7 @@ type ProjectCollectionSectionProps = {
   onAutoEditHandled: () => void;
   onBulkProjectToggle: () => void;
   onChange: (collection: SidebarProjectCollection) => void;
+  onCollapsedChange: (collapsed: boolean) => void;
   onDelete: () => void;
   onHide: () => void;
   onSelectSessions: (sessionIds: string[]) => void;
@@ -112,6 +114,7 @@ const projectCollectionSensors = [
 export function ProjectCollectionSection({
   autoEdit,
   children,
+  collapsed,
   collection,
   containsActiveSession = false,
   draggingDisabled,
@@ -122,6 +125,7 @@ export function ProjectCollectionSection({
   onAutoEditHandled,
   onBulkProjectToggle,
   onChange,
+  onCollapsedChange,
   onDelete,
   onHide,
   onSelectSessions,
@@ -161,7 +165,7 @@ export function ProjectCollectionSection({
   const awakeCount = getAwakeTerminalAndBrowserCount(collectionSessions);
   const hasActionStatus = sessionSummary.workingCount > 0 || sessionSummary.attentionCount > 0;
   const shouldShowCollapsedStatus =
-    collection.collapsed && (hasActionStatus || awakeCount > 0);
+    collapsed && (hasActionStatus || awakeCount > 0);
   const sleepableSessionIds = uniqueSessionIds.filter((sessionId) =>
     canSleepSidebarSession(sessionsById[sessionId]),
   );
@@ -194,7 +198,7 @@ export function ProjectCollectionSection({
     isPresent: shouldRenderProjects,
     isVisuallyCollapsed: areProjectsVisuallyCollapsed,
     setCollapsibleElement: setProjectsElement,
-  } = useSidebarCollapsiblePresence(collection.collapsed);
+  } = useSidebarCollapsiblePresence(collapsed);
 
   useEffect(() => {
     if (!autoEdit) {
@@ -216,7 +220,7 @@ export function ProjectCollectionSection({
   };
 
   const toggleCollapsed = () => {
-    onChange({ ...collection, collapsed: !collection.collapsed });
+    onCollapsedChange(!collapsed);
   };
 
   const dismissMenu = () => {
@@ -269,7 +273,7 @@ export function ProjectCollectionSection({
   return (
     <section
       className="project-collection"
-      data-collapsed={String(collection.collapsed)}
+      data-collapsed={String(collapsed)}
       data-collection-drop-position={dropIndicatorPosition}
       data-contains-active-session={String(containsActiveSession)}
       data-dragging={String(Boolean(sortable.isDragging || isDragPreviewSource))}
@@ -298,8 +302,8 @@ export function ProjectCollectionSection({
         ref={sortable.handleRef}
       >
         <button
-          aria-expanded={!collection.collapsed}
-          aria-label={`${collection.collapsed ? "Expand" : "Collapse"} ${collection.title}`}
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? "Expand" : "Collapse"} ${collection.title}`}
           className="project-collection-collapse"
           onClick={(event) => {
             event.preventDefault();
@@ -380,7 +384,7 @@ export function ProjectCollectionSection({
             ) : null}
           </div>
         ) : null}
-        {!collection.collapsed ? (
+        {!collapsed ? (
           <SidebarFixedTooltipButton
             aria-label={bulkProjectActionLabel}
             className="project-collection-bulk-project-action"

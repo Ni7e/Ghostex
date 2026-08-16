@@ -242,6 +242,7 @@ pub fn usage() -> String {
         format_help_command("send-message <agentId> <text>", "Unsupported in gxserver cutover until renderer-created visible sessions land"),
         format_help_command("read-text <selector> [--lines n] [--visible] [--json]", "Read terminal text by id or quoted title"),
         format_help_command("read-session-chat <selector> [--limit n] [--before-offset n] [--wait-ms n --fingerprint f] --json", "Read a session's chat transcript; --wait-ms long-polls until the chat changes"),
+        format_help_command("read-session-chat-skills <selector> --json", "List skills available to the session's agent"),
         format_help_command("send-session-chat-message <selector> <text>", "Send a chat message into an agent session"),
         format_help_command("answer-session-chat-prompt <selector> --answer-json '<json>'", "Answer a pending question/approval prompt"),
         format_help_command("interrupt-session-chat <selector>", "Interrupt the session's running agent turn"),
@@ -487,14 +488,24 @@ Recommended workflow:
   4. Re-read automation-state after every mutation.
   5. After run-now, follow the newest matching run until it leaves queued or running.
 
-Minimal definition JSON:
+Repeating definition JSON:
   {{"name":"Daily review","agentId":"codex","prompt":"Review the project and report actionable findings.","enabled":false,"schedule":{{"kind":"daily","time":"09:00","timezone":"local"}},"executionMode":{{"kind":"local"}}}}
 
+Timer definition JSON:
+  {{"name":"Follow up","agentId":"codex","prompt":"Check whether the task finished.","enabled":true,"schedule":{{"kind":"timer","delayMs":1800000}},"executionMode":{{"kind":"local"}}}}
+
 Schedule shapes:
+  timer     {{"kind":"timer","delayMs":1800000}} (one-time convenience input; 1,000 ms through 365 days)
+  once      {{"kind":"once","runAt":"2026-08-14T09:30:00.000Z"}} (one-time ISO 8601 date)
   interval  {{"kind":"interval","everyMs":3600000}} (60,000 ms through 365 days)
   daily     {{"kind":"daily","time":"09:00","timezone":"local"}}
   weekly    {{"kind":"weekly","days":[1,3,5],"time":"09:00","timezone":"local"}} (days 0-6)
   cron      {{"kind":"cron","expression":"0 9 * * 1-5","timezone":"local"}}
+
+One-time schedules:
+  timer is converted to once when saved, anchoring the deadline so server restarts do not reset it.
+  timer and once definitions must be enabled to run automatically. After their due run is queued,
+  gxserver disables them. A past once date cannot be enabled; save it with a new future runAt.
 
 Execution modes:
   local     {{"kind":"local"}}
@@ -987,7 +998,9 @@ mod tests {
         let text = automations_usage();
         assert!(text.contains("gx automations install-skill [--json]"));
         assert!(text.contains("automation-save --path path --definition-json json"));
-        assert!(text.contains("Minimal definition JSON:"));
+        assert!(text.contains("Repeating definition JSON:"));
+        assert!(text.contains(r#"{"kind":"timer","delayMs":1800000}"#));
+        assert!(text.contains(r#"{"kind":"once","runAt":"2026-08-14T09:30:00.000Z"}"#));
         assert!(text.contains("AUTOMATION_RESULT"));
         assert!(text.contains("delayed-send"));
     }

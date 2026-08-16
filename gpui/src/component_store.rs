@@ -425,10 +425,9 @@ impl OnDemandManifest {
 
 impl ComponentStore {
     pub fn from_manifest(manifest: OnDemandManifest) -> Result<Self, String> {
-        Ok(Self {
-            manifest,
-            root: component_store_root()?,
-        })
+        let root = component_store_root()?;
+        prune_other_versions(&legacy_asset_cache_root()?, &manifest.version)?;
+        Ok(Self { manifest, root })
     }
 
     pub fn with_root(manifest: OnDemandManifest, root: PathBuf) -> Self {
@@ -545,6 +544,7 @@ impl ComponentStore {
             self.query_for_platform(&component.name, &component.component_version, platform)?;
         if current.installed {
             prune_temporary_install_artifacts(&version_root);
+            prune_other_versions(&component_root, &component.component_version)?;
             emit(
                 progress,
                 component,
@@ -561,6 +561,7 @@ impl ComponentStore {
                 version_root.display()
             )
         })?;
+        prune_temporary_install_artifacts(&version_root);
         let unique = unique_suffix();
         let archive_path = version_root.join(format!(".download-{}-{unique}", std::process::id()));
         let sidecar_path =
@@ -720,6 +721,7 @@ impl ComponentStore {
                 cache_dir.display()
             )
         })?;
+        prune_temporary_install_artifacts(&cache_dir);
         let destination = cache_dir.join(&asset.name);
         let compatibility_component = ComponentDefinition {
             name: asset_key.to_string(),
@@ -2110,7 +2112,12 @@ fn prune_temporary_install_artifacts(version_root: &Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if !name.starts_with(".download-") && !name.starts_with(".install-") {
+        if !name.starts_with(".download-")
+            && !name.starts_with(".install-")
+            && !name.starts_with(".previous-")
+            && !name.starts_with(".bd-download-")
+            && !name.starts_with(".bd-extract-")
+        {
             continue;
         }
         let path = entry.path();
@@ -2127,12 +2134,17 @@ fn prune_temporary_install_artifacts(version_root: &Path) {
 }
 
 fn prune_other_versions(component_root: &Path, retained_version: &str) -> Result<(), String> {
-    for entry in fs::read_dir(component_root).map_err(|error| {
-        format!(
-            "Could not prune component versions under {}: {error}",
-            component_root.display()
-        )
-    })? {
+    let entries = match fs::read_dir(component_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "Could not prune component versions under {}: {error}",
+                component_root.display()
+            ));
+        }
+    };
+    for entry in entries {
         let entry =
             entry.map_err(|error| format!("Could not inspect component version: {error}"))?;
         let name = entry.file_name();

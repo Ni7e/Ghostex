@@ -103,16 +103,16 @@ pub mod ffi {
     // the pinned GhosttyKit.xcframework's ghostty.h. Re-verify these indices
     // whenever the vendored Ghostty header changes.
     pub const GHOSTTY_TARGET_SURFACE: ghostty_target_tag_e = 1;
-    pub const GHOSTTY_ACTION_DESKTOP_NOTIFICATION: ghostty_action_tag_e = 31;
-    pub const GHOSTTY_ACTION_SET_TITLE: ghostty_action_tag_e = 32;
-    pub const GHOSTTY_ACTION_PWD: ghostty_action_tag_e = 35;
-    pub const GHOSTTY_ACTION_MOUSE_OVER_LINK: ghostty_action_tag_e = 38;
-    pub const GHOSTTY_ACTION_RING_BELL: ghostty_action_tag_e = 50;
-    pub const GHOSTTY_ACTION_OPEN_URL: ghostty_action_tag_e = 55;
-    pub const GHOSTTY_ACTION_START_SEARCH: ghostty_action_tag_e = 60;
-    pub const GHOSTTY_ACTION_END_SEARCH: ghostty_action_tag_e = 61;
-    pub const GHOSTTY_ACTION_SEARCH_TOTAL: ghostty_action_tag_e = 62;
-    pub const GHOSTTY_ACTION_SEARCH_SELECTED: ghostty_action_tag_e = 63;
+    pub const GHOSTTY_ACTION_DESKTOP_NOTIFICATION: ghostty_action_tag_e = 32;
+    pub const GHOSTTY_ACTION_SET_TITLE: ghostty_action_tag_e = 33;
+    pub const GHOSTTY_ACTION_PWD: ghostty_action_tag_e = 37;
+    pub const GHOSTTY_ACTION_MOUSE_OVER_LINK: ghostty_action_tag_e = 40;
+    pub const GHOSTTY_ACTION_RING_BELL: ghostty_action_tag_e = 52;
+    pub const GHOSTTY_ACTION_OPEN_URL: ghostty_action_tag_e = 57;
+    pub const GHOSTTY_ACTION_START_SEARCH: ghostty_action_tag_e = 62;
+    pub const GHOSTTY_ACTION_END_SEARCH: ghostty_action_tag_e = 63;
+    pub const GHOSTTY_ACTION_SEARCH_TOTAL: ghostty_action_tag_e = 64;
+    pub const GHOSTTY_ACTION_SEARCH_SELECTED: ghostty_action_tag_e = 65;
 
     #[repr(C)]
     #[derive(Clone, Copy, Debug)]
@@ -443,16 +443,12 @@ pub mod ffi {
         pub action: ghostty_action_u,
     }
 
-    pub type ghostty_surface_write_pty_cb =
-        Option<unsafe extern "C" fn(*mut c_void, *const c_char, usize)>;
-
     #[repr(C)]
     #[derive(Clone, Copy)]
     pub struct ghostty_surface_config_s {
         pub platform_tag: ghostty_platform_e,
         pub platform: ghostty_platform_u,
         pub userdata: *mut c_void,
-        pub write_pty_cb: ghostty_surface_write_pty_cb,
         pub scale_factor: f64,
         pub font_size: f32,
         pub working_directory: *const c_char,

@@ -137,6 +137,16 @@ describe("automation normalization", () => {
 });
 
 describe("computeNextRunAt", () => {
+  test("returns a future one-shot date only once", () => {
+    const schedule = { kind: "once", runAt: "2026-05-01T10:30:00.000Z" } as const;
+    expect(
+      computeNextRunAt(schedule, { after: new Date("2026-05-01T10:00:00.000Z") }),
+    ).toBe("2026-05-01T10:30:00.000Z");
+    expect(
+      computeNextRunAt(schedule, { after: new Date("2026-05-01T10:30:00.000Z") }),
+    ).toBeUndefined();
+  });
+
   test("computes interval schedules from the supplied after date", () => {
     expect(
       computeNextRunAt(

@@ -138,7 +138,7 @@ jobs:
           [[ "$($ZIG_015 version)" == "0.15.2" ]]
           [[ "$($ZIG_016 version)" == "0.16.0" ]]
           printf 'ZIG=%s\nGHOSTEX_ZIG=%s\nZEHN_ZIG=%s\n' \
-            "$ZIG_015" "$ZIG_015" "$ZIG_016" >> "$GITHUB_ENV"
+            "$ZIG_015" "$ZIG_016" "$ZIG_016" >> "$GITHUB_ENV"
       - name: Seed pinned VS Code ripgrep cache
         env:
           RIPGREP_PACKAGE_VERSION: 1.17.1
