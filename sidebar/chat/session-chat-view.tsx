@@ -3,7 +3,7 @@
 // the composer while showing. Hosts inject a SessionChatTransport; everything
 // else is derived by useSessionChat.
 
-import { IconEye, IconEyeOff, IconRobot } from "@tabler/icons-react";
+import { IconEyeFilled, IconEyeOff, IconRobot } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { Button } from "../../components/ui/button";
@@ -227,7 +227,7 @@ function SessionVerbosePill({
   onToggle: () => void;
   verbose: boolean;
 }) {
-  const Icon = verbose ? IconEye : IconEyeOff;
+  const Icon = verbose ? IconEyeFilled : IconEyeOff;
   return (
     <AppTooltip
       content={

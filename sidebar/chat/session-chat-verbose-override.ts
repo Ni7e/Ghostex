@@ -22,7 +22,12 @@ export function readStoredSessionChatVerbose(
   if (!sessionKey) {
     return null;
   }
-  const raw = storage()?.getItem(`${STORAGE_PREFIX}${sessionKey}`);
+  let raw: string | null;
+  try {
+    raw = storage()?.getItem(`${STORAGE_PREFIX}${sessionKey}`) ?? null;
+  } catch {
+    return null;
+  }
   if (raw === "1") {
     return true;
   }
