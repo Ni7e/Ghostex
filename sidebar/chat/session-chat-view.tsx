@@ -3,14 +3,15 @@
 // the composer while showing. Hosts inject a SessionChatTransport; everything
 // else is derived by useSessionChat.
 
-import { IconRobot } from "@tabler/icons-react";
+import { IconEyeFilled, IconEyeOff, IconRobot } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
+import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import type { SessionChatSkill, SessionChatTheme } from "../../shared/session-chat";
 import { getDefaultSidebarAgentById } from "../../shared/sidebar-agents";
 import { getBrandAgentLogoStyle } from "../agent-logos";
-import { TooltipProvider } from "../app-tooltip";
+import { AppTooltip, TooltipProvider } from "../app-tooltip";
 import {
   SessionChatComposer,
   type SessionChatComposerHandle,
@@ -34,6 +35,10 @@ import {
   useSessionChatSessionOptions,
 } from "./session-chat-option-pills";
 import { sessionChatOptionCommandNames } from "./session-chat-session-options";
+import {
+  readStoredSessionChatVerbose,
+  writeStoredSessionChatVerbose,
+} from "./session-chat-verbose-override";
 import {
   sessionChatSlashCommandsForAgent,
   sessionChatSlashHeadingForAgent,
@@ -210,6 +215,47 @@ function SessionAgentIdentity({ agentLabel }: { agentLabel?: string | null }) {
   );
 }
 
+/*
+Verbose pill: a per-session override of the sessionChatVerboseMode setting.
+The setting stays the default for chats that never touch the pill; a session
+that does keeps its own value (session-chat-verbose-override.ts).
+*/
+function SessionVerbosePill({
+  onToggle,
+  verbose,
+}: {
+  onToggle: () => void;
+  verbose: boolean;
+}) {
+  const Icon = verbose ? IconEyeFilled : IconEyeOff;
+  return (
+    <AppTooltip
+      content={
+        verbose
+          ? "Verbose on for this chat: thinking blocks start expanded"
+          : "Verbose off for this chat: thinking blocks start collapsed"
+      }
+    >
+      <span className="inline-flex">
+        <Button
+          aria-label="Verbose mode"
+          aria-pressed={verbose}
+          className={cn(
+            "ghostex-chat-footer-control rounded-full",
+            verbose ? "text-foreground" : "text-muted-foreground",
+          )}
+          onClick={onToggle}
+          size="xs"
+          variant={verbose ? "secondary" : "ghost"}
+        >
+          <Icon aria-hidden="true" className="size-3 shrink-0" stroke={2} />
+          <span className="truncate">Verbose</span>
+        </Button>
+      </span>
+    </AppTooltip>
+  );
+}
+
 export function SessionChatView({
   agentLabel,
   canSend = true,
@@ -280,6 +326,19 @@ export function SessionChatView({
     agent: agentLabel ?? null,
     ...(sessionKey !== undefined ? { sessionKey } : {}),
   });
+  // null = this chat has never been toggled, so it follows the global setting.
+  const [verboseOverride, setVerboseOverride] = useState<boolean | null>(() =>
+    readStoredSessionChatVerbose(sessionKey),
+  );
+  useEffect(() => {
+    setVerboseOverride(readStoredSessionChatVerbose(sessionKey));
+  }, [sessionKey]);
+  const verbose = verboseOverride ?? verboseMode;
+  const toggleVerbose = useCallback(() => {
+    const next = !verbose;
+    writeStoredSessionChatVerbose(sessionKey, next);
+    setVerboseOverride(next);
+  }, [sessionKey, verbose]);
   /*
   What the agent is actually running, confirmed by gxserver from structured
   transcript metadata and the terminal statusline. Keyed on detectedAt so a
@@ -480,7 +539,7 @@ export function SessionChatView({
             loadingEarlier={chat.loadingEarlier}
             messages={chat.messages}
             onLoadEarlier={chat.loadEarlier}
-            verboseMode={verboseMode}
+            verboseMode={verbose}
           />
         ) : showNewSessionWelcome ? (
           <NewSessionWelcome agentLabel={agentLabel} />
@@ -545,6 +604,7 @@ export function SessionChatView({
                       }
                     : {})}
                 />
+                <SessionVerbosePill onToggle={toggleVerbose} verbose={verbose} />
               </>
             }
             placeholder={canSend ? undefined : "Input is held by another device."}

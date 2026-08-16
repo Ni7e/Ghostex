@@ -2162,7 +2162,8 @@ export function SettingsModal({
       },
       {
         key: "sessionChatVerboseMode",
-        subtitle: "Expand thinking blocks to show their tool calls by default.",
+        subtitle:
+          "Expand thinking blocks to show their tool calls by default. Each chat can override it from its composer.",
         title: "Verbose mode",
       },
     ]),
@@ -4018,7 +4019,7 @@ export function SettingsModal({
                 {mainSettingVisible(settingsSearch.chat, "sessionChatVerboseMode") ? (
                   <ToggleField
                     checked={draft.sessionChatVerboseMode}
-                    description="Expand thinking blocks to show their tool calls by default. Individual command and output details remain collapsible."
+                    description="Expand thinking blocks to show their tool calls by default. Individual command and output details remain collapsible. This is the default for new chats; the Verbose pill in a chat's composer overrides it for that chat only."
                     label="Verbose Mode"
                     {...getSettingModificationProps("sessionChatVerboseMode")}
                     onChange={(checked) => updateDraft("sessionChatVerboseMode", checked)}
