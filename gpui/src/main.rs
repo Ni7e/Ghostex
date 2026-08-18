@@ -24915,6 +24915,15 @@ pub struct GhostexGpuiApp {
     remote round trips for the same tab.
     */
     remote_workspace_attach_pending: HashSet<GpuiRemoteAttachSessionKey>,
+    /*
+    CDXC:GPUIRemoteWorkspaceRestore 2026-08-16:
+    Machine ids whose awake background remote tabs have already run the
+    one-shot launch prearm pass this app run. The key is consumed by the
+    first pass while the machine is connected, so a later reconnect can never
+    re-arm remote tabs the user closed on purpose; only bounded machine ids
+    live here.
+    */
+    remote_workspace_prearm_consumed_machines: HashSet<String>,
     // CDXC:GPUIProjectViewMemory 2026-08-07: last workarea + companion
     // arrangement per canonical workspace project key. See GpuiProjectViewState.
     project_view_states_by_project: HashMap<String, GpuiProjectViewState>,
@@ -25637,6 +25646,7 @@ impl GhostexGpuiApp {
                 pending_docs_file_open: None,
                 startup_restore_wake_pending,
                 remote_workspace_attach_pending: HashSet::new(),
+                remote_workspace_prearm_consumed_machines: HashSet::new(),
                 project_view_states_by_project: shell_layout_state.project_view_states_by_project,
                 remote_attach_sessions: shell_layout_state.remote_attach_sessions,
                 #[cfg(target_os = "macos")]
@@ -38315,6 +38325,7 @@ impl GhostexGpuiApp {
             .insert(remote_machine_id.to_string(), state.to_string());
         if state == GpuiRemoteGxserverConnectState::Connected.wire_status_state() {
             self.attach_surfaced_remote_workspace_terminals(remote_machine_id, cx);
+            self.prearm_background_remote_workspace_terminals(remote_machine_id, cx);
         }
         let mut payload = serde_json::json!({
             "machineId": remote_machine_id,
@@ -44601,6 +44612,7 @@ impl GhostexGpuiApp {
             .map(|remote_project| remote_project.remote_machine_id)
         {
             self.attach_surfaced_remote_workspace_terminals(&remote_machine_id, cx);
+            self.prearm_background_remote_workspace_terminals(&remote_machine_id, cx);
         }
         self.resume_restored_workspace_surfaced_terminals(cx);
         let Some(tab_sessions) = focus_state.active_project_tab_sessions.as_deref() else {
@@ -44994,6 +45006,250 @@ impl GhostexGpuiApp {
             serde_json::json!({
                 "machineId": key.remote_machine_id,
                 "mode": "surfacedRestore",
+                "sessionId": key.session_id,
+            }),
+        );
+        self.persist_shell_layout_state();
+        cx.notify();
+    }
+
+    fn prearm_background_remote_workspace_terminals(
+        &mut self,
+        remote_machine_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        CDXC:GPUIRemoteWorkspaceRestore 2026-08-16:
+        The surfaced pass re-arms only each rendered pane's active remote tab,
+        so every awake background remote tab of the active remote project
+        stayed Running-but-dead until clicked. Prearm those background tabs
+        once per app run per machine — on the first pass after the machine
+        reports connected — with the same plan/payload shape the surfaced pass
+        uses, plus a body-less engine-terminal spawn so the SSH attach runs at
+        launch instead of on the first tab click. Selecting a prearmed tab
+        later mounts the existing engine record through the ordinary
+        selection path. Sleeping rows never enter the candidate set, and the
+        consumed machine key keeps a mid-run reconnect from re-arming tabs
+        the user closed on purpose.
+        */
+        let Some(active_project_id) = self.agents_workspace_project_id.clone() else {
+            return;
+        };
+        let Some(remote_project) =
+            gpui_remote_project_reference_from_project_id(&active_project_id)
+        else {
+            return;
+        };
+        if remote_project.remote_machine_id != remote_machine_id {
+            return;
+        }
+        if self
+            .remote_machine_connect_states
+            .get(remote_machine_id)
+            .map(String::as_str)
+            != Some(GpuiRemoteGxserverConnectState::Connected.wire_status_state())
+        {
+            return;
+        }
+        let Some(target) = self.gpui_remote_gxserver_request_target(remote_machine_id) else {
+            return;
+        };
+        let settings_snapshot = shared_settings::shared_sidebar_settings_snapshot();
+        let Some(config) =
+            gpui_remote_machine_config_from_settings(settings_snapshot.object(), remote_machine_id)
+        else {
+            return;
+        };
+        if !self
+            .remote_workspace_prearm_consumed_machines
+            .insert(remote_machine_id.to_string())
+        {
+            return;
+        }
+        let surfaced_slots = self
+            .agents_workspace
+            .rendered_terminal_body_mount_slots()
+            .into_iter()
+            .map(|slot_id| (slot_id.pane_id, slot_id.session_id))
+            .collect::<HashSet<_>>();
+        let candidates = self
+            .remote_attach_sessions
+            .iter()
+            .filter(|(key, _)| {
+                key.remote_machine_id == remote_machine_id
+                    && key.project_id == remote_project.project_id
+            })
+            .filter_map(|(key, session_id)| {
+                let pane_id = self.agents_workspace.pane_id_for_session(*session_id)?;
+                (!surfaced_slots.contains(&(pane_id, *session_id))
+                    && self.agents_tab_selected_local_runtime_missing(pane_id, *session_id))
+                    .then(|| (pane_id, *session_id, key.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        for (pane_id, session_id, key) in candidates {
+            if !self.remote_workspace_attach_pending.insert(key.clone()) {
+                continue;
+            }
+            let reference = GpuiRemoteAttachSessionReference {
+                remote_machine_id: key.remote_machine_id.clone(),
+                project_id: key.project_id.clone(),
+                session_id: key.session_id.clone(),
+            };
+            let prepare_config = config.clone();
+            let prepare_target = target.clone();
+            let background = cx.background_executor().clone();
+            cx.spawn(async move |this, cx| {
+                let prepare_reference = reference.clone();
+                let result = background
+                    .spawn(async move {
+                        /*
+                        Wake matches the surfaced pass: the Running-only
+                        candidate filter is the never-wake-sleepers gate, and
+                        a provider that died while the app was closed must be
+                        resumed before there is anything to attach to.
+                        */
+                        gpui_prepare_remote_attach_terminal_plan(
+                            &prepare_config,
+                            &prepare_target,
+                            &prepare_reference,
+                            true,
+                        )
+                    })
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.remote_workspace_attach_pending.remove(&key);
+                    let Ok(plan) = result else {
+                        support_logs::append(
+                            support_logs::GpuiSupportLog::TerminalFocus,
+                            "gpui.remoteAttach.prearmBackgroundPlanFailed",
+                            serde_json::json!({ "machineId": key.remote_machine_id }),
+                        );
+                        return;
+                    };
+                    this.arm_prearmed_background_remote_workspace_terminal(
+                        &key, pane_id, session_id, plan, cx,
+                    );
+                });
+            })
+            .detach();
+        }
+    }
+
+    fn arm_prearmed_background_remote_workspace_terminal(
+        &mut self,
+        key: &GpuiRemoteAttachSessionKey,
+        pane_id: WorkspacePaneId,
+        session_id: TerminalSessionId,
+        plan: GpuiRemoteAttachTerminalPlan,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        /*
+        The SSH round trip runs in the background, so the layout may have
+        moved on: the mapping, the pane placement, and the dead-tab condition
+        must all still hold before this payload belongs to the slot. Unlike
+        the surfaced arm, the tab does not need to stay the pane's active tab
+        — it only needs to still live in the same pane.
+        */
+        if self.remote_attach_sessions.get(key).copied() != Some(session_id)
+            || self.agents_workspace.pane_id_for_session(session_id) != Some(pane_id)
+            || !self.agents_tab_selected_local_runtime_missing(pane_id, session_id)
+        {
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        let env_vars = plan
+            .askpass
+            .as_ref()
+            .map(|askpass| {
+                vec![
+                    (
+                        "DISPLAY".to_string(),
+                        env::var("DISPLAY").unwrap_or_else(|_| "localhost:0".to_string()),
+                    ),
+                    (
+                        "SSH_ASKPASS".to_string(),
+                        gpui_path_string(askpass.script.as_path()),
+                    ),
+                    ("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string()),
+                ]
+            })
+            .unwrap_or_default();
+        #[cfg(not(target_os = "macos"))]
+        let env_vars = Vec::new();
+        let payload = AgentsTerminalExplicitLaunchPayload {
+            working_directory: None,
+            command: Some(plan.terminal_command),
+            env_vars,
+            initial_input: None,
+            wait_after_command: false,
+        };
+        if payload.to_ghostty_launch_payload().is_err() {
+            return;
+        }
+        let runtime_session_id = self
+            .agents_terminal_runtime_sessions
+            .ensure_runtime_session_id(session_id);
+        let engine_payload = payload.clone();
+        self.agents_terminal_launch_payload_source
+            .insert_explicit_payload_for_mount_slot(
+                runtime_session_id,
+                AgentsTerminalBodyMountSlotId {
+                    pane_id,
+                    session_id,
+                },
+                payload,
+            );
+        #[cfg(target_os = "macos")]
+        if let Some(askpass) = plan.askpass {
+            self.remote_attach_askpass_scripts
+                .insert(key.clone(), askpass);
+        }
+        /*
+        Spawn the composited engine terminal now, without a rendered body:
+        engine records survive independently of rendering, resize on first
+        mount, and let the ordinary selection path mount the existing view
+        instead of re-arming a duplicate attach. The inserted payload stays
+        as the same-slot launch data for the ordinary mount path if this
+        spawn fails.
+        */
+        let engine_settings = shared_settings::shared_sidebar_settings_snapshot()
+            .gpui_terminal_engine_settings();
+        if engine_settings.enabled
+            && !self.agents_gpui_engine_terminals.contains_key(&session_id)
+        {
+            match self.spawn_gpui_engine_terminal_record(
+                GpuiEngineTerminalEventTarget::Agents(session_id),
+                runtime_session_id,
+                engine_payload.working_directory,
+                engine_payload.command,
+                engine_payload.env_vars,
+                engine_payload.initial_input,
+                engine_payload.wait_after_command,
+                &engine_settings,
+                cx,
+            ) {
+                Some(record) => {
+                    self.agents_gpui_engine_terminals.insert(session_id, record);
+                }
+                None => {
+                    support_logs::append(
+                        support_logs::GpuiSupportLog::TerminalFocus,
+                        "gpui.remoteAttach.prearmBackgroundEngineSpawnFailed",
+                        serde_json::json!({
+                            "machineId": key.remote_machine_id,
+                            "sessionId": key.session_id,
+                        }),
+                    );
+                }
+            }
+        }
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.remoteAttach.terminalOpened",
+            serde_json::json!({
+                "machineId": key.remote_machine_id,
+                "mode": "prearmBackground",
                 "sessionId": key.session_id,
             }),
         );
