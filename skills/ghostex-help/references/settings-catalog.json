@@ -5657,6 +5657,30 @@
       "agentWritable": true
     },
     {
+      "key": "windowsTerminalBackend",
+      "title": "Windows Environment",
+      "subtitle": "Windows only. Native Windows projects and agents in PowerShell, or Linux projects in WSL. Restart Ghostex to apply.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "wsl",
+      "options": [
+        {
+          "label": "PowerShell (native Windows)",
+          "value": "powershell"
+        },
+        {
+          "label": "WSL (Linux)",
+          "value": "wsl"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
       "key": "windowsWslDistribution",
       "title": "WSL distribution",
       "subtitle": "Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.",
@@ -7198,18 +7222,6 @@
         "scrollTopByTab": {},
         "version": 1
       },
-      "agentWritable": false
-    },
-    {
-      "key": "windowsTerminalBackend",
-      "title": "windowsTerminalBackend",
-      "subtitle": "App-managed state saved with the settings; not a user preference.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "section": "internalState",
-      "sectionTitle": "Internal state (not user settings)",
-      "type": "string",
-      "default": "wsl",
       "agentWritable": false
     },
     {

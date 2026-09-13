@@ -127,6 +127,7 @@ How to use this file:
 - **Show session id in terminal panes** `showSessionIdInTerminalPanes` (boolean, default false) [advanced]: Show the provider session id in the top-right corner of terminal panes.
 - **Show notification on terminal bell** `showNotificationOnTerminalBell` (boolean, default false): Treat terminal bell events as session attention.
 - **Ctrl+G prompt editor** `promptEditorBackend` (one of monaco | inherit; default monaco) [advanced]: Choose which editor Ctrl+G uses when a terminal prompt asks for $EDITOR. Option labels: monaco = Ghostex editor, inherit = Use default from this machine.
+- **Windows Environment** `windowsTerminalBackend` (one of powershell | wsl; default wsl): Windows only. Native Windows projects and agents in PowerShell, or Linux projects in WSL. Restart Ghostex to apply. Option labels: powershell = PowerShell (native Windows), wsl = WSL (Linux).
 - **WSL distribution** `windowsWslDistribution` (text, default (empty)): Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.
 #### Terminal Behavior
 
@@ -198,7 +199,6 @@ How to use this file:
 - **gpuiTitlebarActionCommandByProject** `gpuiTitlebarActionCommandByProject` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **gpuiTitlebarOpenTargetByProject** `gpuiTitlebarOpenTargetByProject` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **settingsModalNavigation** `settingsModalNavigation` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
-- **windowsTerminalBackend** `windowsTerminalBackend` (text, default wsl) [not agent-writable]: App-managed state saved with the settings; not a user preference.
 - **hotkeys** `hotkeys` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **customViewTemplates** `customViewTemplates` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **customWorkspaceOpenTargets** `customWorkspaceOpenTargets` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
