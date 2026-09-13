@@ -51,15 +51,20 @@ pub(crate) fn run(launch: Launch) -> Result<()> {
     let pair = native_pty_system().openpty(size)?;
     let mut command = CommandBuilder::new(&launch.shell);
     command.arg("-NoLogo");
-    if let Some(startup) = launch.startup.filter(|text| !text.trim().is_empty()) {
-        let encoded = STANDARD.encode(
-            startup
-                .encode_utf16()
-                .flat_map(u16::to_le_bytes)
-                .collect::<Vec<_>>(),
-        );
-        command.args(["-NoExit", "-EncodedCommand", &encoded]);
-    }
+    // CDXC:PromptEditor 2026-09-14 WHY:
+    // Chat transfers need Ghostex's one-shot editor handshake. Install it after the PowerShell profile runs: this machine's profile assigns EDITOR/VISUAL to VS Code, which otherwise opens and blocks every view transfer.
+    // Preserve that editor for deliberate external-editor requests.
+    let startup = format!(
+        "$env:GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL=$env:VISUAL; $env:GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR=$env:EDITOR; $env:VISUAL='ghostex prompt-editor'; $env:EDITOR=$env:VISUAL; $env:GHOSTEX_PROMPT_EDITING_ENABLED='1'; {}",
+        launch.startup.unwrap_or_default()
+    );
+    let encoded = STANDARD.encode(
+        startup
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>(),
+    );
+    command.args(["-NoExit", "-EncodedCommand", &encoded]);
     command.cwd(&launch.cwd);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
