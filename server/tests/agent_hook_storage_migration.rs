@@ -229,7 +229,7 @@ fn repairs_installed_agent_hooks_after_storage_directory_migration() {
     assert!(repaired.contains(&current_notify_text));
     assert!(fs::read_to_string(&current_notify)
         .expect("notify hook")
-        .contains("ghostex-gxserver-agent-notify-hook-marker v7"));
+        .contains("ghostex-gxserver-agent-notify-hook-marker v9"));
     assert_ne!(
         fs::metadata(&current_notify)
             .expect("notify hook metadata")
@@ -297,7 +297,11 @@ fn repairs_installed_agent_hooks_after_storage_directory_migration() {
         .as_array()
         .and_then(|agents| agents.first())
         .expect("Codex hook status");
-    assert_eq!(codex_status["status"], json!("installed"));
+    // Repair is path-only: trusting Codex hooks is the explicit Update Hooks
+    // consent act, so a repaired-but-never-consented install stays updateRequired
+    // until the user consents (consent-time behavior is covered by install tests).
+    assert_eq!(codex_status["status"], json!("updateRequired"));
+    assert_eq!(codex_status["hookInstalled"], json!(false));
     assert_eq!(
         fs::read_to_string(&user_only_codex_profile)
             .expect("user-only Codex profile after status refresh"),
@@ -315,10 +319,23 @@ fn repairs_installed_agent_hooks_after_storage_directory_migration() {
     assert!(!rovodev_text.contains(&legacy_notify_text));
     assert!(rovodev_text.contains("user_before: true"));
     assert!(rovodev_text.contains("user_after: true"));
-    let legacy_pi_text = fs::read_to_string(&legacy_pi_plugin).expect("legacy Pi plugin");
-    assert!(legacy_pi_text.contains("ghostex-pi-session-extension-marker v3"));
-    assert!(legacy_pi_text.contains(&current_notify_text));
-    assert!(!legacy_pi_text.contains(&legacy_notify_text));
+    // Pi moved to an agent-dir `ghostex-session.ts` extension (2026-08-24): the
+    // old directory-layout plugin never loads, so repair migrates it away.
+    let migrated_pi_text = fs::read_to_string(
+        &home
+            .join(".pi")
+            .join("agent")
+            .join("extensions")
+            .join("ghostex-session.ts"),
+    )
+    .expect("migrated Pi extension");
+    assert!(migrated_pi_text.contains("ghostex-pi-session-extension-marker v4"));
+    assert!(migrated_pi_text.contains(&current_notify_text));
+    assert!(!migrated_pi_text.contains(&legacy_notify_text));
+    assert!(
+        !legacy_pi_plugin.exists(),
+        "legacy Pi plugin must be migrated away"
+    );
     assert_eq!(
         fs::read_to_string(&user_only_pi_plugin).expect("user-only Pi plugin after repair"),
         user_only_pi_plugin_before
