@@ -1,6 +1,11 @@
 import type { SessionChatDraftVersion, SessionChatRecoveryDraft } from '@/packages/shared/session-chat-queue';
 import { reportDraftStorageFailure } from './session-chat-draft-outbox';
 import { SessionChatStorageIndex } from './session-chat-storage-index';
+import {
+  compactDraftRecoveryDismissals,
+  draftRecoveryDismissalMarker,
+  isDraftRecoveryDismissed,
+} from './session-chat-draft-dismissals';
 
 const PREFIX = 'ghostex.sessionChat.recovery.';
 export type LocalRecoveryDraft = {
@@ -14,7 +19,7 @@ const recoveryIndex = new SessionChatStorageIndex<LocalRecoveryDraft>(
   PREFIX,
   (raw) => {
     const entry = JSON.parse(raw) as LocalRecoveryDraft;
-    return typeof entry.text === 'string' && !entry.dismissed ? entry : null;
+    return entry && typeof entry.text === 'string' && !entry.dismissed ? entry : null;
   },
   (entry) => entry.sessionKey
 );
@@ -25,7 +30,9 @@ export function preserveDraftRevision(entry: LocalRecoveryDraft): void {
   if (entry.text === '') return;
   try {
     const name = PREFIX + identity(entry);
-    if (localStorage.getItem(name) === null) recoveryIndex.set(name, entry);
+    if (localStorage.getItem(name) === null && !isDraftRecoveryDismissed(entry.sessionKey, entry.version)) {
+      recoveryIndex.set(name, entry);
+    }
   } catch {
     reportDraftStorageFailure(entry.sessionKey);
   }
@@ -45,6 +52,7 @@ export function retireDraftRecovery(sessionKey: string, receipts: readonly Sessi
   }
 }
 export function recoveryDraftEntries(sessionKey?: string): [string, LocalRecoveryDraft][] {
+  prepareDraftRecoveryStorage(sessionKey);
   try {
     return recoveryIndex.entries(sessionKey).map(([name, entry]) => [name.slice(PREFIX.length), entry]);
   } catch {
@@ -53,10 +61,25 @@ export function recoveryDraftEntries(sessionKey?: string): [string, LocalRecover
   return [];
 }
 export function dismissDraftRecovery(id: string): void {
+  prepareDraftRecoveryStorage();
   const raw = localStorage.getItem(PREFIX + id);
-  if (raw) recoveryIndex.set(PREFIX + id, { ...JSON.parse(raw), text: '', dismissed: true });
+  if (!raw) return;
+  const entry = JSON.parse(raw) as LocalRecoveryDraft | null;
+  if (!entry || typeof entry.text !== 'string') return;
+  localStorage.setItem(PREFIX + id, draftRecoveryDismissalMarker(entry.sessionKey, entry.version));
+  // Refresh this page's index too: storage events only notify other pages.
+  recoveryIndex.refresh(PREFIX + id);
+  void compactDraftRecoveryDismissals((name) => recoveryIndex.remove(name), PREFIX + id).catch(() =>
+    reportDraftStorageFailure(entry.sessionKey)
+  );
+}
+export function prepareDraftRecoveryStorage(sessionKey?: string): void {
+  void compactDraftRecoveryDismissals((name) => recoveryIndex.remove(name)).catch(() => {
+    if (sessionKey) reportDraftStorageFailure(sessionKey);
+  });
 }
 export function importDraftRecovery(drafts: readonly SessionChatRecoveryDraft[] = [], prefix = ''): void {
+  prepareDraftRecoveryStorage();
   for (const draft of drafts)
     preserveDraftRevision({
       sessionKey: `${prefix}${draft.projectId}:${draft.sessionId}`,

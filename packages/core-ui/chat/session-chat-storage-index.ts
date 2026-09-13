@@ -86,6 +86,10 @@ export class SessionChatStorageIndex<T> {
     this.update(key, raw);
   }
 
+  refresh(key: string): void {
+    this.update(key, window.localStorage.getItem(key));
+  }
+
   remove(key: string): void {
     window.localStorage.removeItem(key);
     this.update(key, null);

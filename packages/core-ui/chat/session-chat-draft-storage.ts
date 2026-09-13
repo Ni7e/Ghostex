@@ -14,6 +14,7 @@ import {
   recoveryDraftEntries,
   dismissDraftRecovery,
   retireDraftRecovery,
+  prepareDraftRecoveryStorage,
 } from './session-chat-draft-recovery';
 import { recordDeliveredSessionChatDrafts } from './session-chat-sent-history';
 import { SessionChatStorageIndex } from './session-chat-storage-index';
@@ -107,6 +108,7 @@ export function readStoredSessionChatDraftEntry(sessionKey: string | undefined):
   if (!sessionKey) {
     return null;
   }
+  prepareDraftRecoveryStorage(sessionKey);
   const raw = draftStorage()?.getItem(draftStorageKey(sessionKey));
   return raw === null || raw === undefined ? null : decodeStoredDraft(raw);
 }

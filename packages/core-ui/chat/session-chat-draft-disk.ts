@@ -20,6 +20,26 @@ function open(): Promise<IDBDatabase> {
 function identity(draft: PendingDraft): string {
   return `${draft.sessionKey}:${draft.version.draftId}:${draft.version.revision}`;
 }
+
+/** Serialize synchronous recovery maintenance across pages using the existing origin-wide draft database. */
+export async function withDraftStorageLock(action: () => void): Promise<void> {
+  const db = await open();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction('drafts', 'readwrite');
+    transaction.objectStore('drafts').count().onsuccess = () => {
+      try {
+        action();
+      } catch (error) {
+        transaction.abort();
+        reject(error);
+      }
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error('Draft storage maintenance was interrupted.'));
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
 export async function saveDraftToDisk(draft: PendingDraft): Promise<void> {
   const db = await open();
   await new Promise<void>((resolve, reject) => {
