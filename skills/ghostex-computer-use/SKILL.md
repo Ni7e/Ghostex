@@ -5,6 +5,9 @@ description: >-
   or native macOS app automation. It wraps the CLI-first Trycua workflow so
   agents can drive the computer and desktop apps without the user needing to
   remember `$cua-driver`.
+# CDXC:AgentSkills 2026-09-13 DECISION:
+# User: Ghostex Help and all other Ghostex skills must not be agent-invokable, matching the Shepherd skill's explicit-invocation policy.
+disable-model-invocation: true
 ---
 
 # ghostex-computer-use
