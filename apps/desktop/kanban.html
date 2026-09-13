@@ -10,7 +10,23 @@
         background: #0e0e0e;
         margin: 0;
       }
+
+      html[data-workarea-theme='light'],
+      html[data-workarea-theme='light'] body {
+        background: #ffffff;
+        transition: none;
+      }
     </style>
+    <script>
+      // CDXC:Theming 2026-09-13 WHY:
+      // Kanban and Automate share this document, which CEF can paint before kanban-main installs the app theme.
+      // Keep the first paint aligned with the native appTheme parameter and views/workarea-theme.ts, as in manage.html.
+      (() => {
+        const theme = new URLSearchParams(location.search).get('appTheme') === 'light' ? 'light' : 'dark';
+        document.documentElement.dataset.workareaTheme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

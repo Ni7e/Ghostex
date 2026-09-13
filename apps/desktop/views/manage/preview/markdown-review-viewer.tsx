@@ -1,3 +1,4 @@
+import { useWorkareaTheme } from '../../workarea-theme';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorView } from '@codemirror/view';
 import { type Extension } from '@codemirror/state';
@@ -51,6 +52,8 @@ export function ManageMarkdownReviewViewer({
   selection?: ManageCapturedSelection;
   selectionToolbarMode: ManageSelectionToolbarMode;
 }) {
+  const workareaTheme = useWorkareaTheme();
+  useEffect(() => { applyManageMeoTheme(); }, [workareaTheme]);
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<ManageMeoEditor | null>(null);
   const latestContentRef = useRef(content);

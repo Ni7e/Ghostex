@@ -18,18 +18,18 @@ export const MANAGE_STYLES = `
     --sidebar-context-menu-backdrop-z-index: 749;
     --sidebar-context-menu-z-index: 750;
     --sidebar-context-menu-submenu-z-index: 751;
-    --manage-bg: #0e0e0e;
-    --manage-panel: #0e0e0e;
-    --manage-panel-strong: #161616;
-    --manage-panel-raised: #1d1d1d;
-    --manage-border: color-mix(in srgb, #ffffff 11%, transparent);
-    --manage-border-strong: rgba(255, 255, 255, 0.12);
-    --manage-text: #e5e5e5;
-    --manage-muted: #a3a3a3;
-    --manage-subtle: #808080;
-    --manage-accent: #9bbce0;
-    --manage-accent-muted: rgba(255, 255, 255, 0.055);
-    --manage-row-surface: #202020;
+    --manage-bg: light-dark(#f7f7f8, #0e0e0e);
+    --manage-panel: light-dark(#f7f7f8, #0e0e0e);
+    --manage-panel-strong: light-dark(#ffffff, #161616);
+    --manage-panel-raised: light-dark(#f2f2f3, #1d1d1d);
+    --manage-border: light-dark(rgba(0, 0, 0, 0.11), rgba(255, 255, 255, 0.11));
+    --manage-border-strong: light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
+    --manage-text: light-dark(#27272a, #e5e5e5);
+    --manage-muted: light-dark(#626269, #a3a3a3);
+    --manage-subtle: light-dark(#71717a, #808080);
+    --manage-accent: light-dark(#315d88, #9bbce0);
+    --manage-accent-muted: light-dark(rgba(0, 0, 0, 0.055), rgba(255, 255, 255, 0.055));
+    --manage-row-surface: light-dark(#e9e9eb, #202020);
     /*
      * CDXC:Docs 2026-08-23:
      * One control height for every free-standing in-row control (inputs,
@@ -37,9 +37,9 @@ export const MANAGE_STYLES = `
      * 32px convention. Header bars keep their own 35px full-height segments.
      */
     --manage-control-height: 32px;
-    --manage-green: #9db6aa;
-    --manage-red: #fda4af;
-    --manage-yellow: #c6ad80;
+    --manage-green: light-dark(#376c51, #9db6aa);
+    --manage-red: light-dark(#be123c, #fda4af);
+    --manage-yellow: light-dark(#85632f, #c6ad80);
     background: var(--manage-bg);
   }
 
@@ -188,7 +188,7 @@ export const MANAGE_STYLES = `
    * User: Docs files sidebar, search row, and header rows (including header button resting fills when set) use #0b0b0b.
    */
   .manage-sidebar {
-    background: #0b0b0b;
+    background: light-dark(#ffffff, #0b0b0b);
     color: var(--app-foreground);
     box-sizing: border-box;
     display: flex;
@@ -243,7 +243,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-sidebar-resizer::before {
-    background: #212121;
+    background: light-dark(#e5e5e7, #212121);
     content: "";
     bottom: 0;
     position: absolute;
@@ -351,7 +351,7 @@ export const MANAGE_STYLES = `
     border-radius: 0;
     box-shadow: none;
     box-sizing: border-box;
-    color: rgba(255, 255, 255, 0.84);
+    color: light-dark(rgba(0, 0, 0, 0.84), rgba(255, 255, 255, 0.84));
     height: 35px;
     max-height: 35px;
     min-height: 35px;
@@ -360,7 +360,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-sidebar-header .manage-icon-button {
-    border-left: 1px solid #252525;
+    border-left: 1px solid light-dark(#d4d4d8, #252525);
     width: 42px;
   }
 
@@ -369,7 +369,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-sidebar-restore-button {
-    border-right: 1px solid #252525;
+    border-right: 1px solid light-dark(#d4d4d8, #252525);
     width: 40px;
   }
 
@@ -380,7 +380,7 @@ export const MANAGE_STYLES = `
 
   .manage-shell[data-sidebar-side="left"] .manage-sidebar-header .manage-sidebar-edge-button {
     border-left: 0;
-    border-right: 1px solid #252525;
+    border-right: 1px solid light-dark(#d4d4d8, #252525);
     margin-right: auto;
   }
 
@@ -389,14 +389,14 @@ export const MANAGE_STYLES = `
   .manage-sidebar-header .manage-icon-button[aria-expanded="true"],
   .manage-sidebar-restore-button:not(:disabled):hover,
   .manage-sidebar-restore-button:not(:disabled):focus-visible {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.96);
+    background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+    color: light-dark(rgba(0, 0, 0, 0.96), rgba(255, 255, 255, 0.96));
     outline: none;
   }
 
   .manage-sidebar-header .manage-icon-button:disabled {
     background: transparent;
-    color: rgba(255, 255, 255, 0.34);
+    color: light-dark(rgba(0, 0, 0, 0.34), rgba(255, 255, 255, 0.34));
     cursor: default;
   }
 
@@ -426,7 +426,7 @@ export const MANAGE_STYLES = `
     box-shadow:
       0 18px 42px rgba(0, 0, 0, 0.38),
       0 4px 12px rgba(0, 0, 0, 0.28),
-      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      inset 0 1px 0 light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
     display: grid;
     gap: 3px;
     min-width: 190px;
@@ -446,7 +446,7 @@ export const MANAGE_STYLES = `
     background: transparent;
     border: 0;
     border-radius: 6px;
-    color: rgba(244, 244, 245, 0.88);
+    color: light-dark(rgba(24, 24, 27, 0.88), rgba(244, 244, 245, 0.88));
     display: flex;
     font-size: 12.5px;
     font-weight: 400;
@@ -462,7 +462,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-sidebar-menu-item svg {
-    color: rgba(244, 244, 245, 0.72);
+    color: light-dark(rgba(24, 24, 27, 0.72), rgba(244, 244, 245, 0.72));
     flex: 0 0 auto;
     height: 15px;
     width: 15px;
@@ -470,15 +470,15 @@ export const MANAGE_STYLES = `
 
   .manage-sidebar-menu-item:hover,
   .manage-sidebar-menu-item:focus-visible {
-    background: rgba(255, 255, 255, 0.105);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.045);
-    color: rgba(250, 250, 250, 0.98);
+    background: light-dark(rgba(0, 0, 0, 0.105), rgba(255, 255, 255, 0.105));
+    box-shadow: inset 0 0 0 1px light-dark(rgba(0, 0, 0, 0.045), rgba(255, 255, 255, 0.045));
+    color: light-dark(rgba(24, 24, 27, 0.98), rgba(250, 250, 250, 0.98));
     outline: none;
   }
 
   .manage-sidebar-menu-item:hover svg,
   .manage-sidebar-menu-item:focus-visible svg {
-    color: rgba(250, 250, 250, 0.92);
+    color: light-dark(rgba(24, 24, 27, 0.92), rgba(250, 250, 250, 0.92));
   }
 
   .manage-sidebar-menu-item:disabled {
@@ -503,7 +503,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar-restore-button {
-    border-left: 1px solid #252525;
+    border-left: 1px solid light-dark(#d4d4d8, #252525);
     border-right: 0;
     left: auto;
     right: 0;
@@ -553,7 +553,7 @@ export const MANAGE_STYLES = `
   .manage-search {
     /* CDXC:Docs 2026-09-06 DECISION: User: make the Docs file search bar 3px taller. */
     align-items: center;
-    background: #0b0b0b;
+    background: light-dark(#ffffff, #0b0b0b);
     border: 0;
     border-bottom: 1px solid #292929;
     box-sizing: border-box;
@@ -636,7 +636,7 @@ export const MANAGE_STYLES = `
 
   .manage-file-list:hover,
   .manage-file-list:focus-within {
-    scrollbar-color: rgba(255, 255, 255, 0.38) transparent;
+    scrollbar-color: light-dark(rgba(0, 0, 0, 0.38), rgba(255, 255, 255, 0.38)) transparent;
   }
 
   .manage-file-list::-webkit-scrollbar {
@@ -654,15 +654,15 @@ export const MANAGE_STYLES = `
 
   .manage-file-list:hover::-webkit-scrollbar-thumb,
   .manage-file-list:focus-within::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.38);
+    background: light-dark(rgba(0, 0, 0, 0.38), rgba(255, 255, 255, 0.38));
   }
 
   .manage-file-list::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.54);
+    background: light-dark(rgba(0, 0, 0, 0.54), rgba(255, 255, 255, 0.54));
   }
 
   .manage-file-list::before {
-    background: #c8cdd5;
+    background: light-dark(#52525b, #c8cdd5);
     box-shadow:
       0 0 0 1px rgba(200, 205, 213, 0.22),
       0 0 14px rgba(200, 205, 213, 0.24);
@@ -692,7 +692,7 @@ export const MANAGE_STYLES = `
     background: transparent;
     border: 0;
     box-sizing: border-box;
-    color: #b4b8c0;
+    color: light-dark(#52525b, #b4b8c0);
     display: grid;
     gap: 9px;
     grid-template-columns: 14px 16px minmax(0, 1fr) auto;
@@ -706,7 +706,7 @@ export const MANAGE_STYLES = `
   .manage-file-row:hover,
   .manage-file-row:focus-visible {
     background: var(--app-context-menu-hover-background);
-    color: #d8d8d8;
+    color: light-dark(#3f3f46, #d8d8d8);
     outline: none;
   }
 
@@ -716,12 +716,12 @@ export const MANAGE_STYLES = `
   }
 
   .manage-file-row[data-kind="directory"][data-active-descendant="true"] {
-    color: #ffffff;
+    color: light-dark(#18181b, #ffffff);
   }
 
   .manage-file-row[data-selected="true"] {
     background: var(--manage-row-surface);
-    color: #d8d8d8;
+    color: light-dark(#3f3f46, #d8d8d8);
   }
 
   .manage-file-row[data-context-menu-open="true"] {
@@ -914,7 +914,7 @@ export const MANAGE_STYLES = `
   .manage-preview-header {
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     align-items: center;
-    background: #0b0b0b;
+    background: light-dark(#ffffff, #0b0b0b);
     border-bottom: 1px solid var(--manage-border);
     box-sizing: border-box;
     display: flex;
@@ -962,7 +962,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-title:hover {
-    color: #ffffff;
+    color: light-dark(#18181b, #ffffff);
   }
 
   .manage-preview-title:focus-visible {
@@ -1019,7 +1019,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-path {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+    border-bottom: 1px solid light-dark(rgba(0, 0, 0, 0.055), rgba(255, 255, 255, 0.055));
     color: var(--manage-subtle);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 11px;
@@ -1032,7 +1032,7 @@ export const MANAGE_STYLES = `
   .manage-text-editor {
     background: var(--manage-bg);
     border: 0;
-    color: rgba(248, 250, 252, 0.88);
+    color: light-dark(rgba(24, 24, 27, 0.88), rgba(248, 250, 252, 0.88));
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 12px;
     height: 100%;
@@ -1102,7 +1102,7 @@ export const MANAGE_STYLES = `
 
   .manage-preview-header-actions button,
   .manage-comment-popover-actions button {
-    background: rgba(255, 255, 255, 0.04);
+    background: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
     border: 1px solid var(--manage-border);
     color: var(--manage-muted);
     height: var(--manage-control-height);
@@ -1112,11 +1112,11 @@ export const MANAGE_STYLES = `
   .manage-preview-header-actions button {
     background: transparent;
     border: 0;
-    border-left: 1px solid #252525;
+    border-left: 1px solid light-dark(#d4d4d8, #252525);
     border-radius: 0;
     box-shadow: none;
     box-sizing: border-box;
-    color: rgba(255, 255, 255, 0.84);
+    color: light-dark(rgba(0, 0, 0, 0.84), rgba(255, 255, 255, 0.84));
     font-size: 10.5px;
     font-weight: 500;
     height: 35px;
@@ -1141,9 +1141,9 @@ export const MANAGE_STYLES = `
   .manage-preview-header-actions button:not(:disabled):focus-visible,
   .manage-preview-header-actions button[aria-expanded="true"],
   .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: #252525;
-    color: rgba(255, 255, 255, 0.96);
+    background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+    border-color: light-dark(#d4d4d8, #252525);
+    color: light-dark(rgba(0, 0, 0, 0.96), rgba(255, 255, 255, 0.96));
     outline: none;
   }
 
@@ -1154,30 +1154,30 @@ export const MANAGE_STYLES = `
 
   .manage-preview-header-actions button:disabled {
     background: transparent;
-    color: rgba(255, 255, 255, 0.34);
+    color: light-dark(rgba(0, 0, 0, 0.34), rgba(255, 255, 255, 0.34));
     cursor: default;
   }
 
   .manage-preview-header-actions button:disabled:hover {
     background: transparent;
-    color: rgba(255, 255, 255, 0.34);
+    color: light-dark(rgba(0, 0, 0, 0.34), rgba(255, 255, 255, 0.34));
   }
 
   .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
-    border-left-color: #252525;
+    border-left-color: light-dark(#d4d4d8, #252525);
   }
 
   .manage-preview-header-actions .manage-clear-annotations-button[data-confirming="true"] {
     background: rgba(244, 63, 94, 0.13);
     border-color: rgba(244, 63, 94, 0.34);
-    color: #fda4af;
+    color: light-dark(#be123c, #fda4af);
   }
 
   .manage-preview-header-actions .manage-clear-annotations-button[data-confirming="true"]:not(:disabled):hover,
   .manage-preview-header-actions .manage-clear-annotations-button[data-confirming="true"]:not(:disabled):focus-visible {
     background: rgba(244, 63, 94, 0.18);
     border-color: rgba(244, 63, 94, 0.46);
-    color: #fecdd3;
+    color: light-dark(#9f1239, #fecdd3);
   }
 
   .manage-preview-header-actions .manage-annotation-dropdown-trigger {
@@ -1218,7 +1218,7 @@ export const MANAGE_STYLES = `
 
   .manage-file-change-indicator {
     background: #fbbf24;
-    border: 1px solid #0e0e0e;
+    border: 1px solid light-dark(#f7f7f8, #0e0e0e);
     border-radius: 999px;
     box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.18);
     height: 7px;
@@ -1232,7 +1232,7 @@ export const MANAGE_STYLES = `
   .manage-meo-markdown-editor {
     background: var(--manage-bg);
     box-sizing: border-box;
-    color: rgba(248, 250, 252, 0.9);
+    color: light-dark(rgba(24, 24, 27, 0.9), rgba(248, 250, 252, 0.9));
     inline-size: 100%;
     max-inline-size: 100%;
     min-height: 0;
@@ -1246,7 +1246,7 @@ export const MANAGE_STYLES = `
    * Keep Meo's single-row toolbar layout, measure before hiding the three secondary right-side utility buttons, and use one Live/Source toggle button instead of a two-option segmented control.
    */
   .manage-meo-markdown-editor .mode-toolbar {
-    background: #0b0b0b;
+    background: light-dark(#ffffff, #0b0b0b);
     box-shadow: inset 0 -1px 0 var(--manage-border);
     box-sizing: border-box;
     display: flex;
@@ -1283,8 +1283,8 @@ export const MANAGE_STYLES = `
   }
 
   .manage-meo-markdown-editor .mode-group {
-    background: rgba(255, 255, 255, 0.025);
-    border-color: rgba(255, 255, 255, 0.16);
+    background: light-dark(rgba(0, 0, 0, 0.025), rgba(255, 255, 255, 0.025));
+    border-color: light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.16));
     border-radius: 9px;
     gap: 2px;
   }
@@ -1300,14 +1300,14 @@ export const MANAGE_STYLES = `
 
   .manage-meo-markdown-editor .mode-button[aria-selected="true"],
   .manage-meo-markdown-editor .mode-button.is-active {
-    background: #242424;
+    background: light-dark(#e9e9eb, #242424);
     box-shadow: inset 0 0 0 1px var(--manage-border-strong);
     color: var(--manage-text);
   }
 
   .manage-meo-markdown-editor .mode-button[aria-selected="false"]:hover,
   .manage-meo-markdown-editor .mode-button:not(.is-active):hover {
-    background: rgba(255, 255, 255, 0.07);
+    background: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.07));
     color: var(--manage-text);
   }
 
@@ -1317,19 +1317,19 @@ export const MANAGE_STYLES = `
   }
 
   .manage-selection-inline-mode-button {
-    color: ${MANAGE_MEO_HEADING_COLOR};
+    color: light-dark(#1f2937, ${MANAGE_MEO_HEADING_COLOR});
   }
 
   .manage-meo-markdown-editor .cm-line:not(.meo-md-code-block):not(.meo-src-code-block):not(.meo-mermaid-block) .meo-md-inline-code,
   .manage-meo-markdown-editor .cm-line:not(.meo-md-code-block):not(.meo-src-code-block):not(.meo-mermaid-block) .meo-md-inline-code * {
-    background: ${MANAGE_MEO_CODE_BLOCK_BACKGROUND} !important;
-    color: ${MANAGE_MEO_CODE_COLOR} !important;
-    -webkit-text-fill-color: ${MANAGE_MEO_CODE_COLOR} !important;
+    background: light-dark(#f3f4f6, ${MANAGE_MEO_CODE_BLOCK_BACKGROUND}) !important;
+    color: light-dark(#374151, ${MANAGE_MEO_CODE_COLOR}) !important;
+    -webkit-text-fill-color: light-dark(#374151, ${MANAGE_MEO_CODE_COLOR}) !important;
   }
 
   .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block),
   .manage-meo-markdown-editor .cm-line.meo-md-alert:is(.meo-md-code-block, .meo-src-code-block) {
-    background: ${MANAGE_MEO_CODE_BLOCK_BACKGROUND} !important;
+    background: light-dark(#f3f4f6, ${MANAGE_MEO_CODE_BLOCK_BACKGROUND}) !important;
   }
 
   .manage-meo-markdown-editor .cm-line:is(.meo-md-code-block, .meo-src-code-block) {
@@ -1384,7 +1384,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-meo-markdown-editor .cm-scroller {
-    scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+    scrollbar-color: light-dark(rgba(0, 0, 0, 0.28), rgba(255, 255, 255, 0.28)) transparent;
   }
 
   .manage-meo-markdown-editor .cm-gutters {
@@ -1417,7 +1417,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-markdown-document {
-    color: rgba(248, 250, 252, 0.9);
+    color: light-dark(rgba(24, 24, 27, 0.9), rgba(248, 250, 252, 0.9));
     font-size: 15px;
     line-height: 1.625;
     min-height: 0;
@@ -1435,7 +1435,7 @@ export const MANAGE_STYLES = `
   .manage-markdown-document h4,
   .manage-markdown-document h5,
   .manage-markdown-document h6 {
-    color: ${MANAGE_MEO_HEADING_COLOR};
+    color: light-dark(#1f2937, ${MANAGE_MEO_HEADING_COLOR});
     letter-spacing: 0;
     line-height: 1.22;
   }
@@ -1499,10 +1499,10 @@ export const MANAGE_STYLES = `
   }
 
   .manage-md-inline-code {
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.07));
+    border: 1px solid light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
     border-radius: 4px;
-    color: rgba(248, 250, 252, 0.92);
+    color: light-dark(rgba(24, 24, 27, 0.92), rgba(248, 250, 252, 0.92));
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 0.9em;
     padding: 1px 4px;
@@ -1537,7 +1537,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-md-list-text {
-    color: rgba(248, 250, 252, 0.9);
+    color: light-dark(rgba(24, 24, 27, 0.9), rgba(248, 250, 252, 0.9));
     min-width: 0;
   }
 
@@ -1553,7 +1553,7 @@ export const MANAGE_STYLES = `
 
   .manage-md-code-block button {
     align-items: center;
-    background: rgba(255, 255, 255, 0.08);
+    background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
     border: 1px solid var(--manage-border);
     color: var(--manage-muted);
     display: inline-flex;
@@ -1574,10 +1574,10 @@ export const MANAGE_STYLES = `
   }
 
   .manage-md-code-block pre {
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: light-dark(rgba(0, 0, 0, 0.045), rgba(255, 255, 255, 0.045));
+    border: 1px solid light-dark(rgba(0, 0, 0, 0.09), rgba(255, 255, 255, 0.09));
     border-radius: 8px;
-    color: rgba(248, 250, 252, 0.88);
+    color: light-dark(rgba(24, 24, 27, 0.88), rgba(248, 250, 252, 0.88));
     font-size: 13px;
     line-height: 1.6;
     margin: 0;
@@ -1609,13 +1609,13 @@ export const MANAGE_STYLES = `
   }
 
   .manage-md-table-wrap th {
-    background: rgba(255, 255, 255, 0.045);
-    color: rgba(248, 250, 252, 0.9);
+    background: light-dark(rgba(0, 0, 0, 0.045), rgba(255, 255, 255, 0.045));
+    color: light-dark(rgba(24, 24, 27, 0.9), rgba(248, 250, 252, 0.9));
     font-weight: 700;
   }
 
   .manage-md-table-wrap td {
-    color: rgba(248, 250, 252, 0.8);
+    color: light-dark(rgba(24, 24, 27, 0.8), rgba(248, 250, 252, 0.8));
   }
 
   .manage-md-alert,
@@ -1641,7 +1641,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-md-html-block {
-    color: rgba(248, 250, 252, 0.9);
+    color: light-dark(rgba(24, 24, 27, 0.9), rgba(248, 250, 252, 0.9));
     font-size: 15px;
     line-height: 1.625;
     margin: 16px 0;
@@ -1730,7 +1730,7 @@ export const MANAGE_STYLES = `
 
   .manage-attachment-chip {
     align-items: center;
-    background: rgba(255, 255, 255, 0.04);
+    background: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
     border: 1px solid var(--manage-border);
     border-radius: 6px;
     display: grid;
@@ -1743,7 +1743,7 @@ export const MANAGE_STYLES = `
 
   .manage-attachment-chip img,
   .manage-annotation-attachments img {
-    background: rgba(255, 255, 255, 0.06);
+    background: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
     border-radius: 4px;
     height: 34px;
     object-fit: cover;
@@ -1848,7 +1848,7 @@ export const MANAGE_STYLES = `
 
   .manage-annotation-card blockquote {
     border-left: 2px solid color-mix(in srgb, var(--manage-annotation-color) 62%, transparent);
-    color: rgba(248, 250, 252, 0.86);
+    color: light-dark(rgba(24, 24, 27, 0.86), rgba(248, 250, 252, 0.86));
     font-size: 12px;
     line-height: 1.45;
     margin: 0;
@@ -2045,7 +2045,7 @@ export const MANAGE_STYLES = `
 
   .manage-comment-popover-close:hover,
   .manage-comment-popover-close:focus-visible {
-    background: rgba(255, 255, 255, 0.075);
+    background: light-dark(rgba(0, 0, 0, 0.075), rgba(255, 255, 255, 0.075));
     color: var(--manage-text);
     outline: none;
   }
@@ -2082,27 +2082,27 @@ export const MANAGE_STYLES = `
   }
 
   .manage-comment-popover-actions .manage-comment-popover-image-button {
-    background: rgba(255, 255, 255, 0.055);
+    background: light-dark(rgba(0, 0, 0, 0.055), rgba(255, 255, 255, 0.055));
     border-color: var(--manage-border-strong);
   }
 
   .manage-comment-popover-actions .manage-comment-popover-submit {
     background: rgba(34, 197, 94, 0.18);
     border-color: rgba(74, 222, 128, 0.48);
-    color: #bbf7d0;
+    color: light-dark(#166534, #bbf7d0);
   }
 
   .manage-comment-popover-actions .manage-comment-popover-submit:not(:disabled):hover,
   .manage-comment-popover-actions .manage-comment-popover-submit:not(:disabled):focus-visible {
     background: rgba(34, 197, 94, 0.26);
     border-color: rgba(74, 222, 128, 0.66);
-    color: #dcfce7;
+    color: light-dark(#14532d, #dcfce7);
   }
 
   .manage-comment-popover-actions .manage-comment-popover-submit:disabled {
     background: rgba(34, 197, 94, 0.08);
     border-color: rgba(74, 222, 128, 0.2);
-    color: rgba(187, 247, 208, 0.42);
+    color: light-dark(rgba(22, 101, 52, 0.5), rgba(187, 247, 208, 0.42));
   }
 
   .manage-hidden-file-input {
@@ -2110,7 +2110,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-drawing-editor {
-    background: #101112;
+    background: light-dark(#fafafa, #101112);
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     min-height: 0;

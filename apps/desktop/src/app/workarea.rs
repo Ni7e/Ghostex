@@ -905,7 +905,22 @@ impl GhostexGpuiApp {
                 }
             }
         }
-        let url = runtime_url.clone().into_cef_url();
+        let themed_page = matches!(
+            slot_key,
+            ProjectWorkareaCefSurfaceSlotKey::Kanban
+                | ProjectWorkareaCefSurfaceSlotKey::Automate
+                | ProjectWorkareaCefSurfaceSlotKey::Manage
+        );
+        let mut url = runtime_url.clone().into_cef_url();
+        if themed_page {
+            let separator = if url.contains('?') { '&' } else { '?' };
+            let theme = if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+                "light"
+            } else {
+                "dark"
+            };
+            url.push_str(&format!("{separator}appTheme={theme}"));
+        }
         // The Source slot hosts the app-owned code-server runtime; its origin
         // is the one trusted clipboard origin (macOS trustedClipboardOrigin).
         let trusted_clipboard_origin =
@@ -913,11 +928,14 @@ impl GhostexGpuiApp {
         let project_workarea_bridge_event_handler =
             (!matches!(slot_key, ProjectWorkareaCefSurfaceSlotKey::Extension(_)))
                 .then(|| self.project_workarea_bridge_event_handler(slot_key, cx));
-        let surface_background = if slot_key == ProjectWorkareaCefSurfaceSlotKey::Source {
-            source_view_background_color()
-        } else {
-            workspace_background_color()
-        };
+        let surface_background =
+            if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+                rgb(0xffffff).into()
+            } else if slot_key == ProjectWorkareaCefSurfaceSlotKey::Source || themed_page {
+                source_view_background_color()
+            } else {
+                workspace_background_color()
+            };
         let manage_docs_resource_scope = if slot_key == ProjectWorkareaCefSurfaceSlotKey::Manage {
             let snapshot = self.latest_sidebar_project_snapshot.as_ref()?;
             let active_project_id = snapshot.active_project_id.as_ref()?.0.as_str();
@@ -1023,7 +1041,7 @@ impl GhostexGpuiApp {
                         parent_ns_view,
                         url,
                         profile,
-                        CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                        pane_prepaint_background_color(),
                         true,
                         surface_background,
                         None,
@@ -1055,7 +1073,7 @@ impl GhostexGpuiApp {
                         parent_ns_view,
                         url,
                         profile,
-                        CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                        pane_prepaint_background_color(),
                         false,
                         surface_background,
                         true,
@@ -1070,7 +1088,7 @@ impl GhostexGpuiApp {
                 parent_ns_view,
                 url,
                 profile,
-                CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+                pane_prepaint_background_color(),
                 false,
                 surface_background,
                 trusted_clipboard_origin,

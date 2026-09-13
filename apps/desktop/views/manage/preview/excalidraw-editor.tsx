@@ -1,8 +1,9 @@
+import { useWorkareaTheme } from '../../workarea-theme';
 import { Excalidraw } from '@excalidraw/excalidraw';
 import { type ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { MANAGE_EXCALIDRAW_CANVAS_BACKGROUND, MANAGE_EXCALIDRAW_CANVAS_THEME } from '../constants';
+import { MANAGE_EXCALIDRAW_CANVAS_BACKGROUND } from '../constants';
 import { ManagePreviewMessage, isEditableEventTarget } from './preview-shared';
 import { createExcalidrawSceneSignature, parseExcalidrawFile, serializeExcalidrawFile } from '../excalidraw-io';
 import '@excalidraw/excalidraw/index.css';
@@ -16,6 +17,7 @@ export function ManageExcalidrawEditor({
   fileName: string;
   onChange: (content: string) => void;
 }) {
+  const theme = useWorkareaTheme();
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const hasAcceptedInitialSceneRef = useRef(false);
   const previousSceneSignatureRef = useRef('');
@@ -68,7 +70,7 @@ export function ManageExcalidrawEditor({
             collaborators: new Map(),
             viewBackgroundColor: MANAGE_EXCALIDRAW_CANVAS_BACKGROUND,
             ...data.appState,
-            theme: MANAGE_EXCALIDRAW_CANVAS_THEME,
+            theme,
           },
           elements: drawingElements,
           files: data.files ?? {},
@@ -102,7 +104,7 @@ export function ManageExcalidrawEditor({
           setParseError(undefined);
           onChange(nextContent);
         }}
-        theme={MANAGE_EXCALIDRAW_CANVAS_THEME}
+        theme={theme}
       />
     </div>
   );

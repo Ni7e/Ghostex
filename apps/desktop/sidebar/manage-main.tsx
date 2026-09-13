@@ -1,4 +1,5 @@
 import { installManageCefBridge } from './project-workarea-cef-bridge';
+import { installWorkareaTheme } from '../views/workarea-theme';
 import '@/packages/core-ui/styles/shadcn.generated.css';
 import '@/packages/core-ui/styles/theme.css';
 /*
@@ -11,6 +12,7 @@ import '@/packages/core-ui/styles/theme.css';
 import '@/packages/core-ui/styles/modals.css';
 
 installManageCefBridge();
+installWorkareaTheme();
 
 void import('../views/manage').catch((error) => {
   const root = document.getElementById('root');

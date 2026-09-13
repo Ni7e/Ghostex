@@ -1,3 +1,4 @@
+import { useWorkareaTheme } from '../workarea-theme';
 import {
   IconAdjustmentsHorizontal,
   IconFilter,
@@ -173,6 +174,7 @@ export type TicketDetailSaveDraft = Omit<DetailDraft, 'isDeleting' | 'isSaving' 
 export const PROJECT_BOARD_FOCUS_OWNER_MIN_INTERVAL_MS = 250;
 
 export function ProjectBoardApp() {
+  const workareaTheme = useWorkareaTheme();
   const urlSearchParams = new URLSearchParams(window.location.search);
   const projectName = urlSearchParams.get('projectName') || 'Project';
   const projectPath = urlSearchParams.get('projectPath') || '';
@@ -2385,7 +2387,7 @@ export function ProjectBoardApp() {
                 aria-current={activeSurfaceTab === tab ? 'page' : undefined}
                 className={`h-8 cursor-pointer rounded-lg border-0 px-3 text-sm font-normal transition-colors ${
                   activeSurfaceTab === tab
-                    ? 'bg-white/[0.06] text-foreground'
+                    ? 'bg-foreground/[0.06] text-foreground'
                     : 'bg-transparent text-muted-foreground hover:text-foreground/80'
                 }`}
                 data-active={activeSurfaceTab === tab ? 'true' : 'false'}
@@ -2463,7 +2465,7 @@ export function ProjectBoardApp() {
                 {searchQuery.length > 0 ? (
                   <button
                     aria-label='Clear ticket search'
-                    className='absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground [&_svg]:size-4'
+                    className='absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground [&_svg]:size-4'
                     onClick={() => {
                       setSearchQuery('');
                       searchInputRef.current?.focus();
@@ -2504,7 +2506,7 @@ export function ProjectBoardApp() {
                     <span className='text-xs font-medium text-muted-foreground'>Filters</span>
                     {activeBoardFilterCount > 0 ? (
                       <button
-                        className='cursor-pointer rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground'
+                        className='cursor-pointer rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground'
                         onClick={() => {
                           setPriorityFilter('all');
                           setEstimateFilter('all');
@@ -3033,12 +3035,12 @@ export function ProjectBoardApp() {
         closeButton
         position='bottom-center'
         richColors
-        theme='dark'
+        theme={workareaTheme}
         toastOptions={{
           style: {
             background: 'var(--project-board-panel)',
             border: '1px solid var(--project-board-border-strong)',
-            color: '#f4f4f5',
+            color: 'var(--foreground)',
           },
         }}
       />

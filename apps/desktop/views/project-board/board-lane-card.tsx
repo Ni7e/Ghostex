@@ -72,7 +72,7 @@ function chipToneColor(seed: string): string {
 }
 
 const CARD_CHIP_CLASS =
-  'inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border border-border/80 bg-white/[0.02] px-2 py-[3px] text-[11px] font-normal leading-4 text-muted-foreground [&_svg]:size-3 [&_svg]:shrink-0';
+  'inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border border-border/80 bg-foreground/[0.02] px-2 py-[3px] text-[11px] font-normal leading-4 text-muted-foreground [&_svg]:size-3 [&_svg]:shrink-0';
 
 function TicketPriorityIcon({ priority }: { priority: number | undefined }) {
   const value = priority ?? 2;
@@ -136,7 +136,7 @@ export function BoardLane({
   return (
     /* `project-board-lane` carries only the scrollbar hover-reveal rules in styles.ts now. */
     <section
-      className='project-board-lane group/lane flex min-h-0 min-w-[220px] flex-col rounded-xl border border-border/80 bg-white/[0.02] transition-colors data-[drop-target=true]:border-border data-[drop-target=true]:bg-white/[0.04]'
+      className='project-board-lane group/lane flex min-h-0 min-w-[220px] flex-col rounded-xl border border-border/80 bg-foreground/[0.02] transition-colors data-[drop-target=true]:border-border data-[drop-target=true]:bg-foreground/[0.04]'
       data-drop-target={String(isDropTarget)}
       data-tone={column.tone}
       ref={ref}
@@ -248,7 +248,7 @@ export function TicketCard({
 
   return (
     <Card
-      className='w-full min-w-0 max-w-full cursor-default select-none gap-1.5 rounded-lg border-border/80 bg-white/[0.04] p-3 shadow-none transition-colors hover:bg-white/[0.06] data-[dragging=true]:opacity-55'
+      className='w-full min-w-0 max-w-full cursor-default select-none gap-1.5 rounded-lg border-border/80 bg-foreground/[0.04] p-3 shadow-none transition-colors hover:bg-foreground/[0.06] data-[dragging=true]:opacity-55'
       data-dragging={String(isDragging)}
       onClick={() => onOpenTicket(ticket)}
       onContextMenu={(event) => {
@@ -453,7 +453,7 @@ export function ProjectBoardTicketContextMenu({
         style={menuStyle}
       >
         <button
-          className='flex h-8 items-center gap-2 rounded-md border-0 bg-transparent px-2.5 text-left text-[13px] font-normal text-foreground/90 outline-none hover:bg-white/[0.06] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:text-muted-foreground'
+          className='flex h-8 items-center gap-2 rounded-md border-0 bg-transparent px-2.5 text-left text-[13px] font-normal text-foreground/90 outline-none hover:bg-foreground/[0.06] disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:text-muted-foreground'
           disabled={primaryActionDisabled}
           onClick={onPrimaryAction}
           role='menuitem'

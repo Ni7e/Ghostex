@@ -103,7 +103,7 @@ function AutomationSectionLabel({ children }: { children: React.ReactNode }) {
 
 function AutomationGroupCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className='min-w-0 overflow-hidden divide-y divide-border/60 rounded-xl border border-border/80 bg-white/[0.03]'>
+    <div className='min-w-0 overflow-hidden divide-y divide-border/60 rounded-xl border border-border/80 bg-foreground/[0.03]'>
       {children}
     </div>
   );
@@ -122,7 +122,7 @@ export function AutomationComingSoonOverlay({ surfaceName }: { surfaceName: stri
   return (
     <section aria-label={`${surfaceName} coming soon`} className='flex min-h-0 flex-1 items-center justify-center p-7'>
       <div className='flex max-w-md flex-col items-center gap-3 text-center' role='status'>
-        <div className='flex size-12 items-center justify-center rounded-xl border border-border/80 bg-white/[0.04] text-muted-foreground'>
+        <div className='flex size-12 items-center justify-center rounded-xl border border-border/80 bg-foreground/[0.04] text-muted-foreground'>
           <IconCalendarTime aria-hidden='true' className='size-6' />
         </div>
         <span className='text-xs text-muted-foreground'>Experimental</span>
@@ -155,7 +155,7 @@ export function AutomationEmptyState({
       data-variant={variant}
       {...(variant === 'detail' ? { 'aria-label': title } : {})}
     >
-      <div className='mb-1 flex size-12 items-center justify-center rounded-xl border border-border/80 bg-white/[0.04] text-muted-foreground'>
+      <div className='mb-1 flex size-12 items-center justify-center rounded-xl border border-border/80 bg-foreground/[0.04] text-muted-foreground'>
         <Icon aria-hidden='true' className='size-6' />
       </div>
       <span className='text-sm text-foreground'>{title}</span>
@@ -236,7 +236,7 @@ export function AutomationDefinitionList({
         ].filter(Boolean);
         return (
           <div
-            className='group/autorow flex w-full cursor-default items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors hover:bg-white/[0.04] focus-visible:bg-white/[0.04] data-[selected=true]:bg-white/[0.06]'
+            className='group/autorow flex w-full cursor-default items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:bg-foreground/[0.04] data-[selected=true]:bg-foreground/[0.06]'
             data-selected={isSelected}
             key={automation.id}
             onClick={() => onSelect(automation.id)}
@@ -251,7 +251,7 @@ export function AutomationDefinitionList({
           >
             <span
               aria-hidden='true'
-              className={`size-1.5 shrink-0 rounded-full ${automation.enabled ? 'bg-emerald-400/80' : 'bg-white/20'}`}
+              className={`size-1.5 shrink-0 rounded-full ${automation.enabled ? 'bg-emerald-400/80' : 'bg-foreground/20'}`}
             />
             <div className='min-w-0 flex-1'>
               <div className='flex min-w-0 items-center gap-2'>
@@ -329,7 +329,7 @@ export function AutomationRunList({
         const isSelected = run.id === selectedRunId;
         return (
           <div
-            className='group/autorow flex w-full cursor-default items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors hover:bg-white/[0.04] focus-visible:bg-white/[0.04] data-[selected=true]:bg-white/[0.06]'
+            className='group/autorow flex w-full cursor-default items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:bg-foreground/[0.04] data-[selected=true]:bg-foreground/[0.06]'
             data-selected={isSelected}
             data-unread={run.isUnread}
             key={run.id}
@@ -527,7 +527,7 @@ export function AutomationDefinitionDetail({
             </Button>
           </div>
         </div>
-        <div className='min-w-0 overflow-hidden rounded-xl border border-border/80 bg-white/[0.03] p-4'>
+        <div className='min-w-0 overflow-hidden rounded-xl border border-border/80 bg-foreground/[0.03] p-4'>
           <p className='whitespace-pre-wrap break-words text-sm font-normal leading-relaxed text-foreground/90'>
             {automation.prompt}
           </p>
@@ -691,7 +691,7 @@ export function AutomationRunDetail({
             </Button>
           </div>
         </div>
-        <div className='min-w-0 overflow-hidden rounded-xl border border-border/80 bg-white/[0.03] p-4'>
+        <div className='min-w-0 overflow-hidden rounded-xl border border-border/80 bg-foreground/[0.03] p-4'>
           <p className='whitespace-pre-wrap break-words text-sm font-normal leading-relaxed text-foreground/90'>
             {run.findingsSummary || run.errorMessage || 'Run is waiting for agent output.'}
           </p>

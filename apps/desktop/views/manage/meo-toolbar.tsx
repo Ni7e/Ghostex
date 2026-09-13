@@ -1,3 +1,4 @@
+import { getWorkareaTheme } from '../workarea-theme';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import { IconMessagePlus } from '@tabler/icons-react';
 import {
@@ -717,6 +718,42 @@ export function ManageMeoSelectionFormatToolbar({
 }
 
 export function applyManageMeoTheme(): void {
+  const light = getWorkareaTheme() === 'light';
+  const theme = light
+    ? {
+        ...MANAGE_MEO_THEME,
+        backgroundColor: '#ffffff',
+        colors: {
+          ...MANAGE_MEO_THEME.colors,
+          base01: '#27272a',
+          base02: '#626269',
+          base03: '#d4d4d8',
+          base04: '#27272a',
+          base05: '#315d88',
+          base06: '#475569',
+          base07: '#27272a',
+          base08: '#715299',
+          base09: '#475569',
+        },
+        syntaxTokens: {
+          ...MANAGE_MEO_THEME.syntaxTokens,
+          atom: '#35684f',
+          bool: '#35684f',
+          constant: '#35684f',
+          definedVariable: '#35684f',
+          monospace: '#73513a',
+          keyword: '#715299',
+          operatorKeyword: '#715299',
+          quote: '#626269',
+          strong: '#27272a',
+          regexp: '#35684f',
+          specialVariable: '#35684f',
+          specialString: '#35684f',
+          string: '#35684f',
+          variableName: '#35684f',
+        },
+      }
+    : MANAGE_MEO_THEME;
   const rootStyle = document.documentElement.style;
   rootStyle.setProperty(
     '--vscode-editor-font-family',
@@ -724,14 +761,14 @@ export function applyManageMeoTheme(): void {
   );
   rootStyle.setProperty('--vscode-editor-font-size', '14px');
   rootStyle.setProperty('--vscode-editor-font-weight', '400');
-  rootStyle.setProperty('--vscode-editor-background', MANAGE_MEO_THEME.backgroundColor);
-  rootStyle.setProperty('--vscode-editor-foreground', MANAGE_MEO_THEME.colors.base01);
-  rootStyle.setProperty('--vscode-sideBar-background', '#0b0b0b');
-  rootStyle.setProperty('--vscode-panel-border', 'rgba(255, 255, 255, 0.10)');
+  rootStyle.setProperty('--vscode-editor-background', theme.backgroundColor);
+  rootStyle.setProperty('--vscode-editor-foreground', theme.colors.base01);
+  rootStyle.setProperty('--vscode-sideBar-background', light ? '#ffffff' : '#0b0b0b');
+  rootStyle.setProperty('--vscode-panel-border', light ? 'rgba(0, 0, 0, 0.14)' : 'rgba(255, 255, 255, 0.10)');
   rootStyle.setProperty('--vscode-editor-selectionBackground', 'rgba(155, 188, 224, 0.28)');
-  rootStyle.setProperty('--vscode-editorWidget-background', '#0b0b0b');
-  rootStyle.setProperty('--vscode-toolbar-hoverBackground', '#242424');
-  applyMeoThemeSettings(MANAGE_MEO_THEME);
+  rootStyle.setProperty('--vscode-editorWidget-background', light ? '#ffffff' : '#0b0b0b');
+  rootStyle.setProperty('--vscode-toolbar-hoverBackground', light ? '#e9e9eb' : '#242424');
+  applyMeoThemeSettings(theme);
 }
 
 export function createManageMeoAnnotationDecorations(

@@ -11,6 +11,7 @@ pub(crate) struct CefSurface {
     id: String,
     visible: bool,
     session_chat_pane_focused: Option<bool>,
+    workarea_light_theme: Option<bool>,
 }
 
 impl CefSurface {
@@ -125,6 +126,7 @@ impl CefSurface {
             id,
             visible,
             session_chat_pane_focused: None,
+            workarea_light_theme: None,
         }
     }
 
@@ -146,6 +148,15 @@ impl CefSurface {
         );
         if self.execute_app_owned_script(&script) {
             self.session_chat_pane_focused = Some(focused);
+        }
+    }
+
+    pub(crate) fn refresh_workarea_theme(&mut self, light: bool) {
+        if self.workarea_light_theme != Some(light)
+            && self.execute_app_owned_script(workarea_theme_script(light))
+        {
+            self.workarea_light_theme = Some(light);
+            self.background = chrome_color(0x0e0e0e, 0xffffff).into();
         }
     }
 
@@ -399,7 +410,13 @@ impl Render for CefSurface {
             .key_context(CEF_KEY_CONTEXT)
             .track_focus(&focus_handle)
             .size_full()
-            .bg(self.background)
+            .bg(if self.id == "gpui-sidebar" {
+                titlebar_background()
+            } else if self.id.starts_with("ghostex-gpui-session-chat-renderer-") {
+                gpui_session_chat_background_color()
+            } else {
+                self.background
+            })
             .child({
                 let view = view.clone();
                 canvas(

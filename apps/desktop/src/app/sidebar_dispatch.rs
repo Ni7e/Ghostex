@@ -64,11 +64,10 @@ impl GhostexGpuiApp {
                 self.refresh_open_gpui_app_modal_sidebar_state(message, cx);
                 cx.notify();
             }
-            if settings
-                .object()
-                .get("terminalColorScheme")
-                .and_then(serde_json::Value::as_str)
-                == Some("system")
+            if shared_settings::effective_content_color_scheme(
+                settings.object(),
+                "terminalColorScheme",
+            ) == "system"
             {
                 refresh_gpui_visual_settings(&settings);
                 self.reload_live_gpui_engine_terminal_config(cx);
@@ -81,8 +80,10 @@ impl GhostexGpuiApp {
                 serde_json::from_str::<serde_json::Value>(&previous_settings_json).ok();
             let appearance_settings_changed = [
                 "sidebarTheme",
+                "sessionChatTheme",
                 "terminalColorScheme",
                 "terminalGhosttyLightTheme",
+                "terminalGhosttyTheme",
             ]
             .iter()
             .any(|key| {
@@ -92,12 +93,7 @@ impl GhostexGpuiApp {
             appearance_settings_changed
         };
         if appearance_settings_changed {
-            refresh_gpui_visual_settings(&settings);
-            apply_gpui_component_theme(cx);
-            self.reload_live_gpui_engine_terminal_config(cx);
-            let message =
-                self.gpui_app_modal_sidebar_state_message_from_settings_snapshot(&settings);
-            self.refresh_open_gpui_app_modal_sidebar_state(message, cx);
+            self.refresh_gpui_shared_settings_consumers_after_save(&settings, cx);
             cx.notify();
         }
         changed
@@ -139,6 +135,7 @@ impl GhostexGpuiApp {
             self.tab_strip_built_in_buttons = next_built_in_buttons;
             cx.notify();
         }
+        self.refresh_workarea_page_themes(settings, cx);
         let next_snapshot = sidebar_runtime_settings_snapshot_from_shared_settings(settings);
         let Some(next_snapshot) = changed_sidebar_runtime_settings_snapshot(
             &self.sidebar_runtime_settings_snapshot,
@@ -165,6 +162,26 @@ impl GhostexGpuiApp {
             self.restart_source_code_server_runtime_after_settings_change(cx);
         }
         true
+    }
+
+    pub(crate) fn refresh_workarea_page_themes(
+        &self,
+        settings: &shared_settings::SharedSidebarSettingsSnapshot,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let light = sidebar_uses_light_theme(settings.object());
+        for (slot, owned) in &self.project_workarea_runtime_cef_surfaces {
+            if matches!(
+                slot,
+                ProjectWorkareaCefSurfaceSlotKey::Kanban
+                    | ProjectWorkareaCefSurfaceSlotKey::Automate
+                    | ProjectWorkareaCefSurfaceSlotKey::Manage
+            ) {
+                owned
+                    .surface
+                    .update(cx, |surface, _| surface.refresh_workarea_theme(light));
+            }
+        }
     }
 
     pub(crate) fn refresh_sidebar_gxserver_bootstrap_if_changed(
@@ -1961,7 +1978,7 @@ impl GhostexGpuiApp {
             .border_t_1()
             .border_color(titlebar_button_border_color())
             .cursor_ew_resize()
-            .bg(workspace_background_color())
+            .bg(sidebar_divider_background_color())
             .on_hover(cx.listener(|this, hovered, _, cx| {
                 this.set_sidebar_divider_hovering(*hovered, cx);
             }))

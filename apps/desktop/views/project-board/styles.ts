@@ -1,42 +1,42 @@
 export const PROJECT_BOARD_STYLES = `
   :root {
     color-scheme: dark;
-    background: var(--app-background, #0e0e0e);
-    color: #f4f4f5;
+    background: var(--app-background, light-dark(#f7f7f8, #0e0e0e));
+    color: var(--foreground);
     font-family: Inter Variable, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-    --background: var(--app-background, #0e0e0e);
-    --foreground: oklch(0.985 0 0);
-    --card: #161616;
-    --card-foreground: oklch(0.985 0 0);
-    --popover: #161616;
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: #242424;
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: #242424;
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: #242424;
-    --accent-foreground: oklch(0.985 0 0);
+    --background: var(--app-background, light-dark(#f7f7f8, #0e0e0e));
+    --foreground: light-dark(#27272a, oklch(0.985 0 0));
+    --card: light-dark(#ffffff, #161616);
+    --card-foreground: light-dark(#27272a, oklch(0.985 0 0));
+    --popover: light-dark(#ffffff, #161616);
+    --popover-foreground: light-dark(#27272a, oklch(0.985 0 0));
+    --primary: light-dark(#27272a, oklch(0.922 0 0));
+    --primary-foreground: light-dark(#fafafa, oklch(0.205 0 0));
+    --secondary: light-dark(#e9e9eb, #242424);
+    --secondary-foreground: light-dark(#27272a, oklch(0.985 0 0));
+    --muted: light-dark(#e9e9eb, #242424);
+    --muted-foreground: light-dark(#626269, oklch(0.708 0 0));
+    --accent: light-dark(#e9e9eb, #242424);
+    --accent-foreground: light-dark(#27272a, oklch(0.985 0 0));
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --border: light-dark(rgba(0, 0, 0, 0.14), oklch(1 0 0 / 10%));
+    --input: light-dark(rgba(0, 0, 0, 0.16), oklch(1 0 0 / 15%));
+    --ring: light-dark(#737373, oklch(0.556 0 0));
     --radius: 8px;
-    --project-board-bg: var(--app-background, #0e0e0e);
-    --project-board-panel: #161616;
-    --project-board-panel-hover: #1b1b1b;
+    --project-board-bg: var(--app-background, light-dark(#f7f7f8, #0e0e0e));
+    --project-board-panel: light-dark(#ffffff, #161616);
+    --project-board-panel-hover: light-dark(#ededee, #1b1b1b);
     /*
      * CDXC:ProjectBoard 2026-06-19-09:14:
      * Kanban card surfaces need a brighter resting background than their lane panels so cards stand out in the macOS Project board.
      * Keep hover one step brighter than the resting card color so hover feedback remains visible after raising the base card tone.
      */
-    --project-board-card: #1d1d1d;
-    --project-board-card-hover: #232323;
-    --project-board-border: rgba(255, 255, 255, 0.1);
-    --project-board-border-strong: rgba(255, 255, 255, 0.16);
+    --project-board-card: light-dark(#f2f2f3, #1d1d1d);
+    --project-board-card-hover: light-dark(#e7e7e9, #232323);
+    --project-board-border: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+    --project-board-border-strong: light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.16));
     --project-board-control-height: 32px;
-    --project-board-scrollbar: rgba(255, 255, 255, 0.28);
+    --project-board-scrollbar: light-dark(rgba(0, 0, 0, 0.28), rgba(255, 255, 255, 0.28));
     /*
      * CDXC:ProjectBoard 2026-06-29-20:55:
      * The Kanban ticket dialog and board cards/controls should adopt the Settings surface roundness instead of the global square theme.
@@ -45,7 +45,7 @@ export const PROJECT_BOARD_STYLES = `
     --project-board-radius-compact: 4px;
     --project-board-radius-control: var(--radius);
     --project-board-radius-section: 12px;
-    --project-board-focus-border: color-mix(in srgb, #f4f4f5 58%, var(--project-board-border) 42%);
+    --project-board-focus-border: color-mix(in srgb, light-dark(#27272a, #f4f4f5) 58%, var(--project-board-border) 42%);
     /*
      * CDXC:Theming 2026-08-24:
      * The Kanban/Automate page is loaded outside the sidebar chrome effects and
@@ -429,7 +429,7 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   [data-slot="segmented-control-item"]:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.04);
+    background: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
     color: var(--foreground);
   }
 
@@ -501,7 +501,7 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   .project-board-columns-error {
-    color: rgba(248, 113, 113, 0.92);
+    color: light-dark(#b91c1c, rgba(248, 113, 113, 0.92));
     font-size: 12px;
     margin: 8px 0 0;
   }
@@ -517,7 +517,7 @@ export const PROJECT_BOARD_STYLES = `
   .project-board-loading-overlay {
     align-items: center;
     background: rgba(10, 10, 10, 0.48);
-    color: rgba(244, 244, 245, 0.9);
+    color: light-dark(rgba(24, 24, 27, 0.9), rgba(244, 244, 245, 0.9));
     display: flex;
     inset: 0;
     justify-content: center;
@@ -539,7 +539,7 @@ export const PROJECT_BOARD_STYLES = `
     background: var(--project-board-panel);
     border: 1px solid var(--project-board-border);
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
-    color: rgba(244, 244, 245, 0.9);
+    color: light-dark(rgba(24, 24, 27, 0.9), rgba(244, 244, 245, 0.9));
     flex: 0 0 auto;
   }
 
@@ -558,7 +558,7 @@ export const PROJECT_BOARD_STYLES = `
   .project-board-notice[data-kind="install"] .project-board-notice-icon {
     background: rgba(94, 164, 255, 0.12);
     border-color: rgba(94, 164, 255, 0.2);
-    color: #7ab7ff;
+    color: light-dark(#1d4ed8, #7ab7ff);
   }
 
   .project-board-notice [data-slot="card-content"] {
@@ -573,7 +573,7 @@ export const PROJECT_BOARD_STYLES = `
     background: rgba(231, 184, 91, 0.13);
     border: 1px solid rgba(231, 184, 91, 0.2);
     border-radius: 9999px;
-    color: #e7b85b;
+    color: light-dark(#854d0e, #e7b85b);
     display: flex;
     flex: 0 0 auto;
     height: 34px;
@@ -595,7 +595,7 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   .project-board-notice strong {
-    color: rgba(250, 250, 250, 0.94);
+    color: light-dark(rgba(24, 24, 27, 0.94), rgba(250, 250, 250, 0.94));
     font-size: 13px;
     font-weight: 500;
     letter-spacing: 0;
@@ -603,7 +603,7 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   .project-board-notice p {
-    color: rgba(244, 244, 245, 0.64);
+    color: light-dark(rgba(24, 24, 27, 0.64), rgba(244, 244, 245, 0.64));
     font-size: 12px;
     line-height: 1.45;
     margin: 0;
@@ -612,7 +612,7 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-board-notice-body > a {
     align-self: flex-start;
-    color: #7ab7ff;
+    color: light-dark(#1d4ed8, #7ab7ff);
     font-size: 12px;
     margin-top: 2px;
     text-decoration: none;
@@ -633,7 +633,7 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-board-migration-option {
     background: rgba(0, 0, 0, 0.14);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    border: 1px solid light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.07));
     display: flex;
     flex-direction: column;
     gap: 5px;
@@ -646,7 +646,7 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   .project-board-migration-option .project-board-migration-risk {
-    color: rgba(231, 184, 91, 0.82);
+    color: light-dark(#854d0e, rgba(231, 184, 91, 0.82));
   }
 
   @media (max-width: 760px) {
@@ -668,8 +668,8 @@ export const PROJECT_BOARD_STYLES = `
      * at #161616, so the dialogs sit on the shared --popover surface instead of
      * the app-modal background they used to borrow from the sidebar theme.
      */
-    background: var(--popover, #161616);
-    background-color: var(--popover, #161616);
+    background: var(--popover, light-dark(#ffffff, #161616));
+    background-color: var(--popover, light-dark(#ffffff, #161616));
     border-radius: var(--project-board-radius-section);
     max-width: min(780px, calc(100vw - 44px));
     overflow: hidden;
@@ -786,7 +786,7 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   .project-ticket-creator-value {
-    color: rgba(250, 250, 250, 0.72);
+    color: light-dark(rgba(24, 24, 27, 0.72), rgba(250, 250, 250, 0.72));
     font-size: 13px;
     font-weight: 400;
     min-width: 0;
@@ -797,7 +797,7 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-ticket-assignee-value {
     align-items: center;
-    color: rgba(250, 250, 250, 0.92);
+    color: light-dark(rgba(24, 24, 27, 0.92), rgba(250, 250, 250, 0.92));
     display: flex;
     font-size: 13px;
     font-weight: 400;
@@ -819,7 +819,7 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-ticket-field textarea,
   .project-ticket-field input {
-    color: rgba(250, 250, 250, 0.92);
+    color: light-dark(rgba(24, 24, 27, 0.92), rgba(250, 250, 250, 0.92));
     max-width: 100%;
     min-width: 0;
     overflow-wrap: anywhere;
@@ -849,9 +849,9 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-ticket-label-chip {
     align-items: center;
-    background: rgba(255, 255, 255, 0.06);
+    background: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
     border: 1px solid var(--border);
-    color: rgba(244, 244, 245, 0.82);
+    color: light-dark(rgba(24, 24, 27, 0.82), rgba(244, 244, 245, 0.82));
     cursor: pointer;
     display: inline-flex;
     font-size: 11px;
@@ -907,7 +907,7 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-ticket-image-thumb {
     background: rgba(0, 0, 0, 0.24);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
     display: block;
     height: 72px;
     overflow: hidden;
@@ -921,7 +921,7 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-ticket-image-thumb[role="button"]:hover,
   .project-ticket-image-thumb[role="button"]:focus-visible {
-    border-color: rgba(255, 255, 255, 0.28);
+    border-color: light-dark(rgba(0, 0, 0, 0.28), rgba(255, 255, 255, 0.28));
   }
 
   .project-ticket-image-thumb img {
@@ -931,7 +931,7 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   .project-ticket-image-thumb span {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+    background: linear-gradient(135deg, light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08)), light-dark(rgba(0, 0, 0, 0.02), rgba(255, 255, 255, 0.02)));
     display: block;
     height: 100%;
     width: 100%;
@@ -940,8 +940,8 @@ export const PROJECT_BOARD_STYLES = `
   .project-ticket-image-remove {
     align-items: center;
     background: rgba(10, 10, 12, 0.78);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    color: rgba(255, 255, 255, 0.9);
+    border: 1px solid light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.16));
+    color: light-dark(rgba(0, 0, 0, 0.9), rgba(255, 255, 255, 0.9));
     cursor: pointer;
     display: inline-flex;
     height: 22px;
@@ -964,7 +964,7 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-ticket-conversations {
     /* Same sectioned rhythm as .project-ticket-section (round 2 redesign). */
-    border-top: 1px solid var(--project-board-hairline, rgba(255, 255, 255, 0.07));
+    border-top: 1px solid var(--project-board-hairline, light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.07)));
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -1020,13 +1020,13 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   .project-ticket-conversation-name {
-    color: rgba(250, 250, 250, 0.9);
+    color: light-dark(rgba(24, 24, 27, 0.9), rgba(250, 250, 250, 0.9));
     font-size: 13px;
     font-weight: 400;
   }
 
   .project-ticket-conversation-status {
-    color: rgba(244, 244, 245, 0.46);
+    color: light-dark(rgba(24, 24, 27, 0.46), rgba(244, 244, 245, 0.46));
     font-size: 11px;
     margin-top: 2px;
   }
@@ -1051,7 +1051,7 @@ export const PROJECT_BOARD_STYLES = `
    * organized sections rather than a flat run of fields.
    */
   .project-ticket-section {
-    border-top: 1px solid var(--project-board-hairline, rgba(255, 255, 255, 0.07));
+    border-top: 1px solid var(--project-board-hairline, light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.07)));
     display: grid;
     gap: 10px;
     padding-top: 14px;
@@ -1065,7 +1065,7 @@ export const PROJECT_BOARD_STYLES = `
      * label below it.
      */
     --edge-fade-distance: 14px;
-    background: rgba(255, 255, 255, 0.02);
+    background: light-dark(rgba(0, 0, 0, 0.02), rgba(255, 255, 255, 0.02));
     border: 1px solid var(--border);
     max-height: 180px;
     min-height: 92px;
@@ -1108,7 +1108,7 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-ticket-comment p,
   .project-ticket-empty {
-    color: rgba(244, 244, 245, 0.72);
+    color: light-dark(rgba(24, 24, 27, 0.72), rgba(244, 244, 245, 0.72));
     font-size: 13px;
     line-height: 1.45;
     overflow-wrap: anywhere;
@@ -1122,8 +1122,8 @@ export const PROJECT_BOARD_STYLES = `
 
   .project-ticket-comment-session {
     align-items: center;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
-    color: rgba(244, 244, 245, 0.48);
+    border-top: 1px solid light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.07));
+    color: light-dark(rgba(24, 24, 27, 0.48), rgba(244, 244, 245, 0.48));
     display: flex;
     gap: 8px;
     justify-content: space-between;
@@ -1140,7 +1140,7 @@ export const PROJECT_BOARD_STYLES = `
   }
 
   .project-ticket-comment-session code {
-    color: rgba(244, 244, 245, 0.74);
+    color: light-dark(rgba(24, 24, 27, 0.74), rgba(244, 244, 245, 0.74));
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 11px;
     min-width: 0;
