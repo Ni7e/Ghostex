@@ -79,6 +79,7 @@ pub(crate) fn refresh_gpui_visual_settings(
     settings: &shared_settings::SharedSidebarSettingsSnapshot,
 ) {
     let object = settings.object();
+    CHROME_LIGHT_APPEARANCE.store(sidebar_uses_light_theme(object), Ordering::Relaxed);
     SHOW_ACTIVE_PANE_OUTLINE.store(
         object
             .get("showActivePaneOutline")
@@ -96,8 +97,15 @@ pub(crate) fn refresh_gpui_visual_settings(
         .map(str::trim)
         .and_then(|_| gpui_settings_hex_rgb(object.get("workspaceBackgroundColor")))
         .map(|rgb| if rgb == 0 { 0x010101 } else { rgb });
-    let workspace = configured_workspace
-        .unwrap_or_else(|| GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB.load(Ordering::Relaxed) as u32);
+    let terminal_settings = settings.gpui_terminal_engine_settings();
+    let workspace = if terminal_settings.uses_light_theme(gpui_system_uses_light_appearance()) {
+        let color =
+            crate::terminal_gpui_engine::light_theme_background(&terminal_settings.light_theme);
+        (u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)
+    } else {
+        configured_workspace
+            .unwrap_or_else(|| GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB.load(Ordering::Relaxed) as u32)
+    };
     GPUI_WORKSPACE_BACKGROUND_RGB.store(u64::from(workspace), Ordering::Relaxed);
 
     /*
@@ -111,9 +119,12 @@ pub(crate) fn refresh_gpui_visual_settings(
     than the sidebar actually renders. Mirror the TS resolution instead.
     */
     let titlebar_background = resolved_custom_sidebar_titlebar_background(object);
-    let titlebar_foreground =
+    let titlebar_foreground = if sidebar_uses_light_theme(object) {
+        0x262626
+    } else {
         gpui_settings_hex_rgb(object.get("customSidebarTitlebarForegroundColor"))
-            .unwrap_or(0xffffff);
+            .unwrap_or(0xffffff)
+    };
     GPUI_TITLEBAR_BACKGROUND_RGB.store(u64::from(titlebar_background), Ordering::Relaxed);
     /*
     CDXC:Theming 2026-07-22:
@@ -126,7 +137,11 @@ pub(crate) fn refresh_gpui_visual_settings(
     here so the GPUI titlebar strip fades with the same colors; when custom
     chrome is disabled the stops collapse to the flat titlebar color.
     */
-    let (gradient_left, gradient_right) = sidebar_titlebar_gradient_stops(titlebar_background);
+    let (gradient_left, gradient_right) = if sidebar_uses_light_theme(object) {
+        (titlebar_background, titlebar_background)
+    } else {
+        sidebar_titlebar_gradient_stops(titlebar_background)
+    };
     GPUI_TITLEBAR_GRADIENT_LEFT_RGB.store(u64::from(gradient_left), Ordering::Relaxed);
     GPUI_TITLEBAR_GRADIENT_RIGHT_RGB.store(u64::from(gradient_right), Ordering::Relaxed);
     GPUI_TITLEBAR_FOREGROUND_RGB.store(u64::from(titlebar_foreground), Ordering::Relaxed);

@@ -365,6 +365,7 @@ pub struct GhostexGpuiApp {
     GPUI stores the last sidebar runtime settings snapshot it installed or sent so polling and Settings-save refreshes can no-op unchanged strict debug/beta plus saved-settings payloads and refresh only the sidebar CEF bridge when they change. Docs titlebar visibility and active-mode fallback use project-context availability instead of this settings snapshot.
     */
     pub(crate) sidebar_runtime_settings_snapshot: cef::SidebarRuntimeSettingsSnapshot,
+    pub(crate) system_color_scheme_is_light: bool,
     /*
     CDXC:ServerDaemon 2026-06-24-11:17:
     The GPUI sidebar gxserver bootstrap is runtime memory only and may contain the localhost base URL plus bearer token read through the existing gxserver token helper. Store only the last sidebar-sent snapshot for change detection; never persist it, log it, copy it to Browser/workarea/modal CEF clients, or derive optional project/session ids from paths, titles, shell placeholders, or fixtures.

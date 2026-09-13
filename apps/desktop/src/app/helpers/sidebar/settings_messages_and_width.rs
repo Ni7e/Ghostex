@@ -218,6 +218,13 @@ pub(crate) fn gpui_app_modal_sidebar_theme_from_settings(
         Some("dark-1") => "dark-1",
         Some("dark-2") => "dark-2",
         Some("plain-light") => "plain-light",
+        Some("system") => {
+            if gpui_system_uses_light_appearance() {
+                "plain-light"
+            } else {
+                "dark-2"
+            }
+        }
         Some("dark-green") => "dark-green",
         Some("dark-blue") => "dark-blue",
         Some("dark-red") => "dark-red",

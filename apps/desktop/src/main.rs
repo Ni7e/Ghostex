@@ -236,7 +236,7 @@ fn main() {
     application.on_open_urls(queue_gpui_os_integration_urls);
     application.run(move |cx| {
         gpui_component::init(cx);
-        apply_gpui_component_dark_theme(cx);
+        apply_gpui_component_theme(cx);
         #[cfg(target_os = "macos")]
         {
             let source_id = app_icon::source_id_from_settings(

@@ -323,6 +323,8 @@ pub struct SharedGpuiTerminalEngineSettings {
     pub font_size: f32,
     pub font_weight: f32,
     pub ghostty_theme: String,
+    pub color_scheme: String,
+    pub light_theme: String,
     pub terminal_background_rgb: Option<[u8; 3]>,
     pub background_image_path: String,
     pub background_image_opacity: f32,
@@ -336,6 +338,12 @@ pub struct SharedGpuiTerminalEngineSettings {
     pub scrollback_limit_bytes: u64,
     pub scroll_to_bottom_when_typing: bool,
     pub confirm_close_surface: SharedTerminalConfirmCloseSurface,
+}
+
+impl SharedGpuiTerminalEngineSettings {
+    pub fn uses_light_theme(&self, system_is_light: bool) -> bool {
+        self.color_scheme == "light" || (self.color_scheme == "system" && system_is_light)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -858,6 +866,14 @@ impl SharedSidebarSettingsSnapshot {
                 "terminalGhosttyTheme",
                 DEFAULT_TERMINAL_GHOSTTY_THEME,
             )),
+            color_scheme: read_string_field(&self.object, "terminalColorScheme", "dark")
+                .to_string(),
+            light_theme: read_string_field(
+                &self.object,
+                "terminalGhosttyLightTheme",
+                "GitHub Light Default",
+            )
+            .to_string(),
             terminal_background_rgb: normalize_terminal_background_rgb(read_string_field(
                 &self.object,
                 "workspaceBackgroundColor",

@@ -360,8 +360,10 @@ impl CefBrowser {
                 uses_system_page_appearance,
                 keyboard_zoom_enabled,
             );
-            if profile == "session-chat" && !native_view.is_null() {
-                CHAT_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
+            if (profile == "session-chat" || is_shared_sidebar_surface || profile == "app-modal")
+                && !native_view.is_null()
+            {
+                SYSTEM_APP_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
                     views.borrow_mut().insert(native_view as usize);
                 });
                 apply_page_color_scheme(&browser, BrowserPageAppearance::System);
@@ -834,7 +836,8 @@ impl CefBrowser {
     }
 
     pub fn refresh_session_chat_zoom(&self) {
-        self.session_chat_zoom.refresh(&self.browser.borrow(), false);
+        self.session_chat_zoom
+            .refresh(&self.browser.borrow(), false);
     }
 
     pub fn zoom_level(&self) -> f64 {
@@ -1082,7 +1085,7 @@ pub(crate) fn unregister_native_view_browser(native_view: *mut c_void) {
     SYSTEM_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
         views.borrow_mut().remove(&(native_view as usize));
     });
-    CHAT_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
+    SYSTEM_APP_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
         views.borrow_mut().remove(&(native_view as usize));
     });
     set_cef_native_view_hidden(native_view, false);
@@ -1097,7 +1100,7 @@ pub(crate) fn unregister_native_view_browser(native_view: *mut c_void) {
 
 pub(crate) fn refresh_system_page_appearance_for_native_view(native_view: *mut c_void) -> c_int {
     if !native_view.is_null()
-        && CHAT_PAGE_APPEARANCE_CEF_NATIVE_VIEWS
+        && SYSTEM_APP_PAGE_APPEARANCE_CEF_NATIVE_VIEWS
             .with(|views| views.borrow().contains(&(native_view as usize)))
     {
         if let Some(browser) = CEF_BROWSERS_BY_NATIVE_VIEW

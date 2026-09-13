@@ -1401,6 +1401,54 @@ pub(crate) fn titlebar_update_downloading_color() -> Hsla {
         .into()
 }
 
+pub(crate) static CHROME_LIGHT_APPEARANCE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+static SYSTEM_LIGHT_APPEARANCE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn refresh_gpui_system_appearance(cx: &App) -> bool {
+    let light = cef::system_page_color_scheme()
+        .map(|scheme| scheme == "light")
+        .unwrap_or(matches!(
+            cx.window_appearance(),
+            gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight
+        ));
+    SYSTEM_LIGHT_APPEARANCE.store(light, Ordering::Relaxed);
+    light
+}
+
+pub(crate) fn gpui_system_uses_light_appearance() -> bool {
+    cef::system_page_color_scheme()
+        .map(|scheme| scheme == "light")
+        .unwrap_or_else(|| SYSTEM_LIGHT_APPEARANCE.load(Ordering::Relaxed))
+}
+
+pub(crate) fn sidebar_uses_light_theme(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    match object
+        .get("sidebarTheme")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("plain-light") => true,
+        Some("system") => gpui_system_uses_light_appearance(),
+        _ => false,
+    }
+}
+
+fn titlebar_uses_light_theme() -> bool {
+    CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed)
+}
+
+fn titlebar_overlay_base() -> gpui::Rgba {
+    rgb(if titlebar_uses_light_theme() {
+        0x000000
+    } else {
+        0xffffff
+    })
+}
+
 pub(crate) fn titlebar_background() -> Hsla {
     rgb(GPUI_TITLEBAR_BACKGROUND_RGB.load(Ordering::Relaxed) as u32).into()
 }
@@ -1427,15 +1475,20 @@ pub(crate) fn titlebar_gradient_fill() -> gpui::Background {
 }
 
 pub(crate) fn titlebar_button_border_color() -> Hsla {
-    rgb(0x252525).into()
+    rgb(if titlebar_uses_light_theme() {
+        0xd4d4d4
+    } else {
+        0x252525
+    })
+    .into()
 }
 
 pub(crate) fn titlebar_button_hover_color() -> Hsla {
-    rgb(0xffffff).opacity(0.08).into()
+    titlebar_overlay_base().opacity(0.08).into()
 }
 
 pub(crate) fn titlebar_active_segment_color() -> Hsla {
-    rgb(0xffffff).opacity(0.11).into()
+    titlebar_overlay_base().opacity(0.11).into()
 }
 
 /*
@@ -1445,15 +1498,32 @@ Tips/Resources CEF reading panels) share one chrome spec after visual review:
 #0e0e0e background, 1px #303030 border, 2px corner radius.
 */
 pub(crate) fn titlebar_popup_menu_background() -> Hsla {
-    rgb(0x0e0e0e).into()
+    rgb(if titlebar_uses_light_theme() {
+        0xffffff
+    } else {
+        0x0e0e0e
+    })
+    .into()
 }
 
 pub(crate) fn titlebar_popup_menu_border_color() -> Hsla {
-    rgb(0x3f3f3f).into()
+    rgb(if titlebar_uses_light_theme() {
+        0xd4d4d4
+    } else {
+        0x3f3f3f
+    })
+    .into()
 }
 
-pub(crate) fn apply_gpui_component_dark_theme(cx: &mut App) {
-    Theme::change(ThemeMode::Dark, None, cx);
+pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
+    let mode = if titlebar_uses_light_theme() {
+        ThemeMode::Light
+    } else {
+        ThemeMode::Dark
+    };
+    if Theme::global(cx).mode != mode {
+        Theme::change(mode, None, cx);
+    }
     let theme = Theme::global_mut(cx);
     theme.popover = titlebar_popup_menu_background();
     theme.popover_foreground = titlebar_text_color();
@@ -1462,19 +1532,19 @@ pub(crate) fn apply_gpui_component_dark_theme(cx: &mut App) {
 }
 
 pub(crate) fn titlebar_popup_menu_disabled_text_color() -> Hsla {
-    rgb(0xffffff).opacity(0.34).into()
+    titlebar_overlay_base().opacity(0.34).into()
 }
 
 pub(crate) fn titlebar_popup_menu_preview_text_color() -> Hsla {
-    rgb(0xffffff).opacity(0.48).into()
+    titlebar_overlay_base().opacity(0.48).into()
 }
 
 pub(crate) fn titlebar_popup_git_section_label_color() -> Hsla {
-    rgb(0xffffff).opacity(0.55).into()
+    titlebar_overlay_base().opacity(0.55).into()
 }
 
 pub(crate) fn titlebar_popup_git_disabled_icon_color() -> Hsla {
-    rgb(0xffffff).opacity(0.42).into()
+    titlebar_overlay_base().opacity(0.42).into()
 }
 
 pub(crate) fn titlebar_popup_git_additions_color() -> Hsla {
@@ -1514,7 +1584,7 @@ pub(crate) fn titlebar_disabled_text_color() -> Hsla {
 }
 
 pub(crate) fn titlebar_disabled_segment_color() -> Hsla {
-    rgb(0xffffff).opacity(0.025).into()
+    titlebar_overlay_base().opacity(0.025).into()
 }
 
 pub(crate) fn titlebar_icon_color() -> Hsla {
@@ -1678,6 +1748,9 @@ pub(crate) fn sidebar_titlebar_background_for_darkness(darkness_percent: f64, ti
 pub(crate) fn resolved_custom_sidebar_titlebar_background(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> u32 {
+    if sidebar_uses_light_theme(object) {
+        return 0xf3f3f3;
+    }
     let legacy_background =
         gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundColor"));
     let darkness_fallback = legacy_background

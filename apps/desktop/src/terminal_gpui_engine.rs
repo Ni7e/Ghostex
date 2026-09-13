@@ -94,7 +94,6 @@ impl GpuiTerminalEngineConfig {
         config
     }
 
-    #[allow(dead_code)] // no caller: superseded by the shared-settings theme path used by the engine today
     pub(crate) fn apply_ghostty_theme(&mut self, name: &str) {
         let Some(theme) = gpui_terminal_theme(name) else {
             return;
@@ -108,6 +107,30 @@ impl GpuiTerminalEngineConfig {
         self.view.cursor_text = theme.cursor_text.map(TerminalConfiguredColor::Rgb);
         self.view.selection_background =
             theme.selection_background.map(TerminalConfiguredColor::Rgb);
+    }
+
+    /// CDXC:Theming 2026-09-13 DECISION:
+    /// User: terminals can follow the system with a separate light theme, while dark mode stays exactly as it is.
+    /// Only light mode replaces the finalized color palette and background; returning to dark restores the existing Ghostty config and custom background.
+    pub(crate) fn apply_color_scheme(
+        &mut self,
+        settings: &SharedGpuiTerminalEngineSettings,
+        system_is_light: bool,
+    ) {
+        if settings.uses_light_theme(system_is_light) {
+            let theme = if gpui_terminal_theme(&settings.light_theme).is_some() {
+                &settings.light_theme
+            } else {
+                "GitHub Light Default"
+            };
+            self.apply_ghostty_theme(theme);
+            // CDXC:Theming 2026-09-13 WHY:
+            // GPUI retains ANSI foreground colors in selected text; Ghostty's opaque selection background assumes a separate selection foreground.
+            // Use the renderer's adaptive translucent selection tint so light palettes remain readable.
+            self.view.selection_background = None;
+        } else if let Some(background) = settings.terminal_background_rgb {
+            self.apply_terminal_background(background);
+        }
     }
 
     pub(crate) fn apply_terminal_background(&mut self, [r, g, b]: [u8; 3]) {
@@ -149,7 +172,6 @@ pub(crate) fn terminal_background_image_from_settings(
     })
 }
 
-#[allow(dead_code)] // no constructor: superseded by the shared-settings theme path used by the engine today
 struct GpuiTerminalTheme {
     foreground: Rgb,
     background: Rgb,
@@ -159,11 +181,17 @@ struct GpuiTerminalTheme {
     palette: [Rgb; 256],
 }
 
+pub(crate) fn light_theme_background(name: &str) -> Rgb {
+    gpui_terminal_theme(name)
+        .or_else(|| gpui_terminal_theme("GitHub Light Default"))
+        .expect("bundled GitHub Light Default palette")
+        .background
+}
+
 pub(crate) fn ghostty_theme_source(name: &str) -> Option<&'static str> {
     embedded_ghostty_theme_source(name)
 }
 
-#[allow(dead_code)] // no caller: superseded by the shared-settings theme path used by the engine today
 fn gpui_terminal_theme(name: &str) -> Option<GpuiTerminalTheme> {
     let source = ghostty_theme_source(name)?;
     let mut foreground = None;

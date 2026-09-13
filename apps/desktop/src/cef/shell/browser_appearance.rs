@@ -103,8 +103,8 @@ pub(crate) fn refresh_browser_page_appearances() {
 
 thread_local! {
     /// CDXC:Theming 2026-09-12 WHY:
-    /// The native app pins its own dark appearance, so chat must read the OS preference independently and keep following it even when Browser appearance is overridden.
-    pub(crate) static CHAT_PAGE_APPEARANCE_CEF_NATIVE_VIEWS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
+    /// The native app pins its own dark appearance, so app pages must read the OS preference independently and keep following it even when Browser appearance is overridden.
+    pub(crate) static SYSTEM_APP_PAGE_APPEARANCE_CEF_NATIVE_VIEWS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
 }
 
 pub(crate) fn system_page_color_scheme() -> Option<&'static str> {
@@ -153,7 +153,7 @@ pub(crate) fn apply_page_color_scheme(browser: &cef::Browser, appearance: Browse
 }
 
 pub(crate) fn refresh_chat_page_appearances() {
-    let browsers = CHAT_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
+    let browsers = SYSTEM_APP_PAGE_APPEARANCE_CEF_NATIVE_VIEWS.with(|views| {
         CEF_BROWSERS_BY_NATIVE_VIEW.with(|browsers| {
             let browsers = browsers.borrow();
             views

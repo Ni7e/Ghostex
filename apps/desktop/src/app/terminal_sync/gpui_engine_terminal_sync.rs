@@ -620,10 +620,7 @@ impl GhostexGpuiApp {
         #[cfg(not(target_os = "macos"))]
         let mut engine_config =
             terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(settings);
-        #[cfg(target_os = "macos")]
-        if let Some(background) = settings.terminal_background_rgb {
-            engine_config.apply_terminal_background(background);
-        }
+        engine_config.apply_color_scheme(settings, gpui_system_uses_light_appearance());
         engine_config.view.scroll_to_bottom_when_typing = settings.scroll_to_bottom_when_typing;
         engine_config.view.background_image =
             terminal_gpui_engine::terminal_background_image_from_settings(settings);

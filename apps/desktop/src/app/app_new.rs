@@ -31,6 +31,9 @@ use crate::app::model::*;
 use crate::*;
 impl GhostexGpuiApp {
     pub(crate) fn new(window: &mut Window, cx: &mut App) -> Result<Entity<Self>> {
+        let system_color_scheme_is_light = refresh_gpui_system_appearance(cx);
+        refresh_gpui_visual_settings(&shared_settings::shared_sidebar_settings_snapshot());
+        apply_gpui_component_theme(cx);
         let parent = cef_parent_native_view(window)?;
         let project_name = titlebar_project_label_from_latest_sidebar_snapshot(None);
         let sidebar_url = sidebar_url().context("failed to resolve sidebar bundle URL")?;
@@ -233,6 +236,7 @@ impl GhostexGpuiApp {
                 remote_attach_askpass_scripts: HashMap::new(),
                 project_workarea_runtime_cef_surfaces: HashMap::new(),
                 sidebar_runtime_settings_snapshot,
+                system_color_scheme_is_light,
                 sidebar_gxserver_bootstrap,
                 sidebar_gxserver_presentation_focus_state,
                 sidebar_global_actions: Vec::new(),

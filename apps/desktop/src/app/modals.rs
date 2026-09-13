@@ -1994,6 +1994,7 @@ impl GhostexGpuiApp {
         self.apply_gpui_sidebar_visibility_memory_from_saved_settings(settings_snapshot);
         self.apply_gpui_command_pane_side_from_saved_settings(settings_snapshot);
         refresh_gpui_visual_settings(settings_snapshot);
+        apply_gpui_component_theme(cx);
         self.refresh_sidebar_runtime_settings_from_shared_settings(settings_snapshot, cx);
         self.coerce_active_mode_to_available_project_context(cx);
         self.prune_project_workarea_runtime_cef_surfaces_for_current_gates(cx);
@@ -2111,10 +2112,7 @@ impl GhostexGpuiApp {
         #[cfg(not(target_os = "macos"))]
         let mut config =
             terminal_gpui_engine::GpuiTerminalEngineConfig::from_shared(&shared_engine_settings);
-        #[cfg(target_os = "macos")]
-        if let Some(background) = shared_engine_settings.terminal_background_rgb {
-            config.apply_terminal_background(background);
-        }
+        config.apply_color_scheme(&shared_engine_settings, gpui_system_uses_light_appearance());
 
         // This setting is app-owned and is not part of Ghostty's finalized
         // config string on macOS.

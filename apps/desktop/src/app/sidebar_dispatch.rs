@@ -44,7 +44,63 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         let settings = shared_settings::shared_sidebar_settings_snapshot();
-        self.refresh_sidebar_runtime_settings_from_shared_settings(&settings, cx)
+        let previous_settings_json = self
+            .sidebar_runtime_settings_snapshot
+            .saved_settings_json
+            .clone();
+        let system_is_light = refresh_gpui_system_appearance(cx);
+        if self.system_color_scheme_is_light != system_is_light {
+            self.system_color_scheme_is_light = system_is_light;
+            if settings
+                .object()
+                .get("sidebarTheme")
+                .and_then(serde_json::Value::as_str)
+                == Some("system")
+            {
+                refresh_gpui_visual_settings(&settings);
+                apply_gpui_component_theme(cx);
+                let message =
+                    self.gpui_app_modal_sidebar_state_message_from_settings_snapshot(&settings);
+                self.refresh_open_gpui_app_modal_sidebar_state(message, cx);
+                cx.notify();
+            }
+            if settings
+                .object()
+                .get("terminalColorScheme")
+                .and_then(serde_json::Value::as_str)
+                == Some("system")
+            {
+                refresh_gpui_visual_settings(&settings);
+                self.reload_live_gpui_engine_terminal_config(cx);
+                cx.notify();
+            }
+        }
+        let changed = self.refresh_sidebar_runtime_settings_from_shared_settings(&settings, cx);
+        let appearance_settings_changed = changed && {
+            let previous_settings =
+                serde_json::from_str::<serde_json::Value>(&previous_settings_json).ok();
+            let appearance_settings_changed = [
+                "sidebarTheme",
+                "terminalColorScheme",
+                "terminalGhosttyLightTheme",
+            ]
+            .iter()
+            .any(|key| {
+                previous_settings.as_ref().and_then(|value| value.get(*key))
+                    != settings.object().get(*key)
+            });
+            appearance_settings_changed
+        };
+        if appearance_settings_changed {
+            refresh_gpui_visual_settings(&settings);
+            apply_gpui_component_theme(cx);
+            self.reload_live_gpui_engine_terminal_config(cx);
+            let message =
+                self.gpui_app_modal_sidebar_state_message_from_settings_snapshot(&settings);
+            self.refresh_open_gpui_app_modal_sidebar_state(message, cx);
+            cx.notify();
+        }
+        changed
     }
 
     pub(crate) fn refresh_sidebar_runtime_settings_from_shared_settings(
