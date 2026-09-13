@@ -1,21 +1,12 @@
-import { useSyncExternalStore } from 'react';
+import { systemColorScheme, useSystemColorScheme } from '../use-system-color-scheme';
+export { subscribeSystemColorScheme as subscribeSystemChatTheme } from '../use-system-color-scheme';
 import type { SessionChatTheme, SessionChatThemeSetting } from '@/packages/shared/session-chat';
 
-function systemChatTheme(): SessionChatTheme {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-export function subscribeSystemChatTheme(listener: () => void): () => void {
-  const media = window.matchMedia('(prefers-color-scheme: dark)');
-  media.addEventListener('change', listener);
-  return () => media.removeEventListener('change', listener);
-}
-
 export function resolveSessionChatTheme(setting: SessionChatThemeSetting): SessionChatTheme {
-  return setting === 'system' ? systemChatTheme() : setting;
+  return setting === 'system' ? systemColorScheme() : setting;
 }
 
 export function useSessionChatTheme(setting: SessionChatThemeSetting): SessionChatTheme {
-  const systemTheme = useSyncExternalStore(subscribeSystemChatTheme, systemChatTheme, () => 'light' as const);
+  const systemTheme = useSystemColorScheme();
   return setting === 'system' ? systemTheme : setting;
 }

@@ -242,6 +242,7 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup {
   --muted-foreground: oklch(55.2% 0.016 285.938);
   --chat-card-muted-foreground: var(--muted-foreground);
   --ghostex-codex-logo: var(--foreground);
+  --ghostex-light-icon-color: var(--foreground);
   --gx-account-meter-track: color-mix(in srgb, var(--foreground) 12%, transparent);
   --gx-account-meter-fill: color-mix(in srgb, var(--foreground) 65%, var(--background));
   --accent: oklch(96.7% 0.001 286.375);
@@ -283,6 +284,8 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup {
 .ghostex-session-chat-scope[data-chat-theme='dark'],
 body[data-session-chat-theme='dark'] .ghostex-session-chat-popup {
   color-scheme: dark;
+  --ghostex-codex-logo: #ffffff;
+  --ghostex-light-icon-color: initial;
   /*
    * CDXC:AppModal 2026-08-24 (round 2):
    * Keep every chat backing layer on the same #0d0d0d tone. A one-step

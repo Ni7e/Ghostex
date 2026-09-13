@@ -320,7 +320,7 @@ export function useSidebarDocumentChromeEffects({
      */
     document.body.style.setProperty('--ghostex-accent', effectiveSettings.accentColor);
 
-    document.body.dataset.customSidebarTitlebarColors = 'true';
+    document.body.dataset.customSidebarTitlebarColors = String(theme !== 'plain-light' && !theme.startsWith('light-'));
     document.body.style.setProperty('--custom-sidebar-titlebar-foreground-color', customSidebarTitlebarForegroundColor);
     document.body.style.setProperty(
       '--custom-sidebar-titlebar-background-color',

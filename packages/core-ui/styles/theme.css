@@ -178,6 +178,21 @@ body[data-sidebar-theme='plain-light'],
 .ghostex-root[data-sidebar-theme='plain-light'],
 .ghostex-settings-shadcn[data-sidebar-theme='plain-light'] {
   color-scheme: light;
+  --ghostex-codex-logo: #262626;
+  --ghostex-light-icon-color: #262626;
+  --sidebar-chrome-separator: #d4d4d4;
+  --primary: #262626;
+  --primary-foreground: #ffffff;
+  --secondary: #ebebeb;
+  --secondary-foreground: #262626;
+  --accent: #e7e7e7;
+  --accent-foreground: #262626;
+  --ring: #737373;
+  --ghostex-tooltip-background: rgba(255, 255, 255, 0.98);
+  --ghostex-tooltip-foreground: #27272a;
+  --ghostex-tooltip-strong-foreground: #18181b;
+  --ghostex-tooltip-border: rgba(0, 0, 0, 0.14);
+  --ghostex-tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
   --app-background: #f3f3f3;
   --app-modal-background: #ffffff;
   --app-dropdown-background: #ffffff;
@@ -480,6 +495,15 @@ body {
 /* CDXC:Tooltips 2026-09-13 DECISION:
  * User: chat tooltips are light in light mode. The provider carries the owning chat's theme through portals so the surrounding shell can keep its own tooltip appearance.
  */
+[data-slot='tooltip-content'][data-tooltip-theme='dark'] {
+  color-scheme: dark;
+  --ghostex-tooltip-background: rgba(11, 11, 11, 0.98);
+  --ghostex-tooltip-foreground: rgba(255, 255, 255, 0.78);
+  --ghostex-tooltip-strong-foreground: rgba(255, 255, 255, 0.94);
+  --ghostex-tooltip-border: rgba(255, 255, 255, 0.12);
+  --ghostex-tooltip-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
 [data-slot='tooltip-content'][data-tooltip-theme='light'] {
   color-scheme: light;
   --ghostex-tooltip-background: rgba(255, 255, 255, 0.98);

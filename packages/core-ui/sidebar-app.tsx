@@ -1,3 +1,5 @@
+import { useSystemColorScheme } from './use-system-color-scheme';
+import { resolveSidebarTheme } from '@/packages/shared/session-grid-contract';
 import { ImportSessionsCard, useImportSessionsIntro } from './sidebar-app/import-sessions-card';
 import { monitorAccountSetup } from './accounts/setup-monitor';
 import { Cursor, KeyboardSensor, PointerSensor } from '@dnd-kit/dom';
@@ -544,7 +546,7 @@ export function SidebarApp({
     settings,
     revision,
     sessionsById,
-    theme,
+    theme: hostTheme,
     workspaceGroupIds,
   } = useSidebarStore(
     useShallow((state) => ({
@@ -621,6 +623,11 @@ export function SidebarApp({
   }, [hasGxserverUnavailablePlaceholder, onStartGxserver]);
 
   const effectiveSettings = settings ?? DEFAULT_ghostex_SETTINGS;
+  const systemColorScheme = useSystemColorScheme();
+  const theme =
+    effectiveSettings.sidebarTheme === 'plain-light' || effectiveSettings.sidebarTheme === 'system'
+      ? resolveSidebarTheme(effectiveSettings.sidebarTheme, systemColorScheme)
+      : hostTheme;
   /*
    * CDXC:Spaces 2026-08-28:
    * Spaces are opt-in. The daemon keeps owning the Space document either way —
