@@ -352,13 +352,14 @@ pub(crate) fn build_agent_resume_command(
                 quote_shell_double_arg(&reference)
             )
         }),
-        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" | "zcode" => exact_reference
-            .map(|reference| {
+        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" | "zcode" => {
+            exact_reference.map(|reference| {
                 format!(
                     "{agent_command} --resume {}",
                     quote_shell_double_arg(&reference)
                 )
-            }),
+            })
+        }
         "grok" => exact_reference
             .map(|reference| format!("{agent_command} -r {}", quote_shell_double_arg(&reference))),
         "kiro" => exact_reference.map(|reference| {
@@ -491,13 +492,14 @@ pub(crate) fn build_agent_resume_copy_command(input: &AgentResumeInput) -> Optio
                 quote_shell_double_arg(&reference)
             )
         }),
-        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" => exact_reference
-            .map(|reference| {
+        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" | "zcode" => {
+            exact_reference.map(|reference| {
                 format!(
                     "{agent_command} --resume {}",
                     quote_shell_double_arg(&reference)
                 )
-            }),
+            })
+        }
         "grok" => exact_reference
             .map(|reference| format!("{agent_command} -r {}", quote_shell_double_arg(&reference))),
         "kiro" => exact_reference.map(|reference| {
@@ -617,10 +619,8 @@ pub(crate) fn restorable_agent_id(value: Option<&str>) -> Option<&str> {
     match value {
         "amp" | "antigravity" | "campfire" | "claude" | "codebuddy" | "codex" | "command-code"
         | "copilot" | "cursor" | "devin" | "droid" | "gemini" | "grok" | "hermes-agent"
-            | "kimi" | "kiro" | "omp" | "openclaude" | "opencode" | "pi" | "qoder" | "rovodev"
-            | "zcode" => {
-            Some(value)
-        }
+        | "kimi" | "kiro" | "omp" | "openclaude" | "opencode" | "pi" | "qoder" | "rovodev"
+        | "zcode" => Some(value),
         _ => None,
     }
 }

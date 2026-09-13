@@ -216,6 +216,11 @@ Manual Generate Name and `/rename` in chat remain available for Claude and Codex
   CLI with resume and fork. The History icon immediately to the
   right of Add Worktree on a project header opens Quick Access > Sessions with
   that project selected and Closed active, ready to search sessions you closed.
+  Quick Access also discovers existing Claude, Codex, and ZCode conversations
+  from outside Ghostex. Opening an imported ZCode conversation resumes it in
+  a terminal with `zcode --resume <session-id>`; install the ZCode CLI on that
+  computer first. Deleted, archived, running, and subagent ZCode conversations
+  are excluded from discovery.
 - Search by Prompt (More Options, or `gx f` in a terminal) fuzzy-searches every
   prompt you ever sent to an agent; Enter resumes that session, and starred
   prompts stay on top. Ctrl+G is agents, Ctrl+J is projects inside the picker.
