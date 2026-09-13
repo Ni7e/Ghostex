@@ -71,6 +71,7 @@ declare global {
     ghostexSetSessionChatFileEditPreviews?: (enabled: unknown) => void;
     ghostexSetSessionChatHotkeys?: (hotkeys: unknown) => void;
     ghostexSetSessionChatVerboseMode?: (verboseMode: unknown) => void;
+    ghostexSetSessionChatSimpleMode?: (enabled: unknown) => void;
   }
 }
 
@@ -223,6 +224,7 @@ export function activateSessionChatPage(root: ReturnType<typeof createRoot>, act
   );
   let chatFileEditPreviews = searchParams.get('fileEditPreviews') === 'true';
   let chatVerboseMode = searchParams.get('verboseMode') === 'true';
+  let chatSimpleMode = searchParams.get('simpleMode') === 'true';
   let renderReadyChat: ((theme: SessionChatTheme) => void) | null = null;
 
   function applyDocumentChatTheme(theme: SessionChatTheme): void {
@@ -292,6 +294,10 @@ made the chat's typeface impossible to change from CSS.
   };
   window.ghostexSetSessionChatFileEditPreviews = (value) => {
     chatFileEditPreviews = value === true;
+    renderReadyChat?.(chatTheme);
+  };
+  window.ghostexSetSessionChatSimpleMode = (value) => {
+    chatSimpleMode = value === true;
     renderReadyChat?.(chatTheme);
   };
   window.ghostexSetSessionChatHotkeys = (value) => {
@@ -1076,6 +1082,7 @@ setting is off.
       GPUI_SESSION_CHAT_HOST_ACTIONS,
       GPUI_SESSION_CHAT_HOST_LINKS,
       chatVerboseMode,
+      chatSimpleMode,
       chatFileEditPreviews,
       remote,
     }),

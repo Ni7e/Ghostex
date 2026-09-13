@@ -701,6 +701,13 @@ impl GhostexGpuiApp {
                 .to_string(),
             ),
             (
+                "simpleMode",
+                gpui_session_chat_simple_mode_from_settings(
+                    shared_settings::shared_sidebar_settings_snapshot().object(),
+                )
+                .to_string(),
+            ),
+            (
                 "hotkeys",
                 shared_settings::shared_sidebar_settings_snapshot()
                     .object()

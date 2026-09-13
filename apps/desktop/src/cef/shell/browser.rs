@@ -52,6 +52,7 @@ pub struct CefBrowser {
     pub(crate) uses_system_page_appearance: bool,
     pub(crate) extension_bridge_installed: bool,
     session_chat_activation: StdRc<RefCell<Option<SessionChatActivation>>>,
+    session_chat_zoom: StdRc<SessionChatZoom>,
     session_chat_bootstrap: StdRc<RefCell<Option<SidebarGxserverBootstrap>>>,
     trusted_gxserver_entry_identity: Option<String>,
 }
@@ -241,6 +242,7 @@ impl CefBrowser {
             surface_keyboard_handler(keyboard_zoom_enabled, page_metadata_handler.clone());
         let browser_lifecycle_handler = page_metadata_handler.clone();
         let session_chat_activation = StdRc::new(RefCell::new(None));
+        let session_chat_zoom = StdRc::new(SessionChatZoom::default());
         let session_chat_bootstrap = StdRc::new(RefCell::new(sidebar_gxserver_bootstrap.clone()));
         let load_handler = if let Some(surface) = extension_bridge_surface
             .clone()
@@ -272,6 +274,7 @@ impl CefBrowser {
             Some(GhostexGpuiSessionChatGxserverBootstrapLoadHandler::new(
                 session_chat_bootstrap.clone(),
                 session_chat_activation.clone(),
+                session_chat_zoom.clone(),
                 trusted_gxserver_entry_identity.clone(),
             ))
         } else if project_workarea_bridge_event_handler.is_some() {
@@ -380,6 +383,7 @@ impl CefBrowser {
             uses_system_page_appearance,
             extension_bridge_installed,
             session_chat_activation,
+            session_chat_zoom,
             session_chat_bootstrap,
             trusted_gxserver_entry_identity,
         })
@@ -717,6 +721,7 @@ impl CefBrowser {
         {
             return;
         }
+        self.session_chat_zoom.refresh(&self.browser.borrow(), true);
         *self.session_chat_bootstrap.borrow_mut() = Some(bootstrap.clone());
         *self.session_chat_activation.borrow_mut() = Some(SessionChatActivation {
             url: url.to_string(),
@@ -826,6 +831,10 @@ impl CefBrowser {
             return;
         };
         host.stop_finding(clear_selection as c_int);
+    }
+
+    pub fn refresh_session_chat_zoom(&self) {
+        self.session_chat_zoom.refresh(&self.browser.borrow(), false);
     }
 
     pub fn zoom_level(&self) -> f64 {

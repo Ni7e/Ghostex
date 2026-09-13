@@ -308,6 +308,15 @@ pub(crate) fn gpui_session_chat_verbose_mode_from_settings(
         .unwrap_or(false)
 }
 
+pub(crate) fn gpui_session_chat_simple_mode_from_settings(
+    settings: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    settings
+        .get("sessionChatSimpleMode")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
 pub(crate) fn current_sidebar_max_width(window: &Window) -> f32 {
     let max_for_window =
         window.bounds().size.width.as_f32() - SIDEBAR_DIVIDER_WIDTH - WORKSPACE_MIN_WIDTH;

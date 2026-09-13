@@ -2035,6 +2035,10 @@ impl GhostexGpuiApp {
         let chat_file_edit_previews_script = format!(
             "window.ghostexSetSessionChatFileEditPreviews?.({chat_file_edit_previews});undefined;"
         );
+        let chat_simple_mode =
+            gpui_session_chat_simple_mode_from_settings(settings_snapshot.object());
+        let chat_simple_mode_script =
+            format!("window.ghostexSetSessionChatSimpleMode?.({chat_simple_mode});undefined;");
         let chat_verbose_mode =
             gpui_session_chat_verbose_mode_from_settings(settings_snapshot.object());
         let chat_verbose_mode_script =
@@ -2060,8 +2064,10 @@ impl GhostexGpuiApp {
                 .flat_map(|parked| parked.surfaces.values()),
         ) {
             surface.update(cx, |surface, _| {
+                surface.refresh_session_chat_zoom();
                 surface.execute_app_owned_script(&account_privacy_script);
                 surface.execute_app_owned_script(&chat_file_edit_previews_script);
+                surface.execute_app_owned_script(&chat_simple_mode_script);
                 surface.execute_app_owned_script(&chat_hotkeys_script);
             });
         }

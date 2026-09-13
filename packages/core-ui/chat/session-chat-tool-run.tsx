@@ -10,6 +10,7 @@ import {
 } from '@tabler/icons-react';
 import { useContext, useRef, type ReactNode } from 'react';
 import { useSessionChatDisclosureState } from './session-chat-interaction-state';
+import { SessionChatSimpleModeContext } from './session-chat-simple-mode';
 import type { SessionChatToolCallBlock, SessionChatToolResultBlock } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
 import { diffFromSessionChatText, diffFromSessionChatToolCall, type SessionChatDiffLine } from './session-chat-diff';
@@ -120,6 +121,7 @@ function ToolLine({
 }) {
   const [open, setOpen] = useSessionChatDisclosureState(`tool:${index}:${call?.name ?? 'result'}`, expandSignal);
   const subagentViewer = useContext(SessionChatSubagentContext);
+  const simpleMode = useContext(SessionChatSimpleModeContext);
   const subagent = subagentViewer ? sessionChatToolSubagent(call, result, subagentViewer.agentPath) : null;
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -133,7 +135,9 @@ function ToolLine({
   const resultDiff = result ? diffFromSessionChatText(result.output) : null;
   const diff = callDiff ?? resultDiff;
   const inputDetail = call ? formatSessionChatToolInput(call.input) : '';
-  const inputAddsInfo = Boolean(call && (commandTool || inputDetail.replace(/\s+/g, ' ').trim() !== preview));
+  const inputAddsInfo = Boolean(
+    call && (simpleMode || commandTool || inputDetail.replace(/\s+/g, ' ').trim() !== preview)
+  );
   const hasResultBody = Boolean(result?.output && resultDiff === null);
   const hasDetail = diff !== null || inputAddsInfo || hasResultBody;
 
@@ -157,7 +161,7 @@ function ToolLine({
         >
           <span className='ghostex-chat-work-icon'>{toolIcon(name)}</span>
           <span className='ghostex-chat-work-heading'>{name}</span>
-          {preview && !subagent ? <span className='ghostex-chat-work-preview'>{preview}</span> : null}
+          {preview && !subagent && !simpleMode ? <span className='ghostex-chat-work-preview'>{preview}</span> : null}
           {hasDetail ? (
             <IconChevronRight aria-hidden='true' className={cn('ghostex-chat-disclosure-chevron', open && 'is-open')} />
           ) : null}
@@ -190,6 +194,7 @@ export function SessionChatToolRun({
   questionPairsAsRows = false,
 }: SessionChatToolRunProps) {
   const pairs = pairSessionChatToolBlocks(blocks);
+  const simpleMode = useContext(SessionChatSimpleModeContext);
   const [expanded, setExpanded] = useSessionChatDisclosureState('tool-run', showAllRows || expandSignal);
 
   const exchanges = pairs.map((pair) => (questionPairsAsRows ? null : answeredSessionChatQuestionExchange(pair)));
@@ -232,6 +237,47 @@ export function SessionChatToolRun({
 
   const allRows = pairs.map((_, index) => renderItem(index));
   const collapsedRows = pairs.map((_, index) => (collapsedVisible[index] ? renderItem(index) : null));
+
+  /** CDXC:SessionChat 2026-09-13 DECISION:
+   * User: Simple mode hides the command previews even when no message or reasoning precedes the tools; show only the tool-call count until expanded.
+   */
+  if (simpleMode && !showAllRows) {
+    const work = pairs.map((pair, index) => ({ pair, index })).filter(({ index }) => exchanges[index] === null);
+    const count = work.filter(({ pair }) => pair.call).length;
+    const label = count === 0 ? 'Tool output' : `${count} tool ${count === 1 ? 'call' : 'calls'}`;
+    return (
+      <div className='ghostex-chat-tool-run'>
+        {work.length > 0 ? (
+          <>
+            <button
+              aria-expanded={expanded}
+              className='ghostex-chat-tool-run-toggle'
+              onClick={() => setExpanded((current) => !current)}
+              type='button'
+            >
+              <span className='ghostex-chat-work-icon'>
+                <IconChevronRight
+                  aria-hidden='true'
+                  className={cn('ghostex-chat-disclosure-chevron', expanded && 'is-open')}
+                />
+              </span>
+              <span>{label}</span>
+            </button>
+            {expanded ? (
+              <SessionChatExpansion
+                bodyClassName='ghostex-chat-tool-run-expanded'
+                label='Collapse tool calls'
+                onCollapse={() => setExpanded(false)}
+              >
+                {work.map(({ index }) => renderItem(index))}
+              </SessionChatExpansion>
+            ) : null}
+          </>
+        ) : null}
+        {pairs.map((_, index) => (exchanges[index] !== null ? renderItem(index) : null))}
+      </div>
+    );
+  }
 
   return (
     <div className='ghostex-chat-tool-run'>

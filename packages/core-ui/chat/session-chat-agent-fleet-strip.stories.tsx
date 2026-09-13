@@ -1,7 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
+import { Button } from '../../components/ui/button';
+import { Switch } from '../../components/ui/switch';
 import type { SessionChatAgentFleet, SessionChatQueuedPrompt } from '../../shared/session-chat';
 import { SessionChatComposer } from './session-chat-composer';
+import { SessionChatPresentationProvider } from './session-chat-presentation-provider';
 import { moveSessionChatQueueRow } from './session-chat-queue';
 import type { SessionChatQueueController } from './use-session-chat';
 
@@ -28,7 +31,7 @@ The clocks tick for real: they interpolate from the fleet's `detectedAt`, a
 fixed timestamp here, exactly as they do against a live daemon.
 */
 
-const AT = '2026-08-23T10:00:00.000Z';
+const AT = new Date().toISOString();
 
 /*
 Realistic tasks, NOT pre-ellipsized ones. The CLI truncates to whatever its own
@@ -42,12 +45,16 @@ const FLEET: SessionChatAgentFleet = {
     {
       elapsedSeconds: 756,
       name: 'general-purpose',
+      model: 'claude-opus-5',
+      effort: 'high',
       task: 'Fixing tool-row alignment in the transcript',
       tokens: '↓ 155.4k tokens',
     },
     {
       elapsedSeconds: 195,
       name: 'general-purpose',
+      model: 'claude-opus-5',
+      effort: 'high',
       nested: 1,
       task: 'Launching board_gxserver.rs split',
       tokens: '↓ 76.0k tokens',
@@ -57,6 +64,8 @@ const FLEET: SessionChatAgentFleet = {
     {
       elapsedSeconds: 12,
       name: 'explore',
+      model: 'claude-sonnet-4-6',
+      effort: 'medium',
       task: 'Reviewing the diff…',
       tokens: '↑ 4.6k tokens',
     },
@@ -78,6 +87,7 @@ function SessionChatAgentFleetStripStory({
   isWorking,
   paneWidth,
   queued: queuedCount,
+  simpleMode: initialSimpleMode,
   theme,
 }: {
   agents: number;
@@ -85,12 +95,25 @@ function SessionChatAgentFleetStripStory({
   /** Chat-pane width in px. The strip drops columns as this shrinks. */
   paneWidth: number;
   queued: number;
+  simpleMode: boolean;
   theme: 'dark' | 'light';
 }) {
   const [prompts, setPrompts] = useState<SessionChatQueuedPrompt[]>(() => QUEUE_SEED.slice(0, queuedCount));
   const [sent, setSent] = useState<string[]>([]);
+  const [simpleMode, setSimpleMode] = useState(initialSimpleMode);
+  const [session, setSession] = useState('A');
+  const [showFleet, setShowFleet] = useState(true);
 
-  const fleet: SessionChatAgentFleet | null = agents === 0 ? null : { ...FLEET, agents: FLEET.agents.slice(0, agents) };
+  const fleet: SessionChatAgentFleet | null =
+    !showFleet || agents === 0
+      ? null
+      : {
+          ...FLEET,
+          agents: Array.from({ length: agents }, (_, index) => ({
+            ...FLEET.agents[index % FLEET.agents.length]!,
+            id: `preview-agent-${index}`,
+          })),
+        };
 
   // The shape useSessionChat builds from a live daemon, with every capability
   // on so no control is hidden behind a missing endpoint.
@@ -139,35 +162,63 @@ function SessionChatAgentFleetStripStory({
   };
 
   return (
-    <div
-      className='ghostex-session-chat-scope flex h-screen flex-col justify-end bg-background p-4 text-foreground'
-      data-chat-theme={theme}
+    <SessionChatPresentationProvider
+      simpleMode={simpleMode}
+      onSimpleModeChange={setSimpleMode}
+      fileEditPreviews={false}
     >
-      <div className='mx-auto flex w-full flex-col gap-2' style={{ maxWidth: `${paneWidth}px` }}>
-        {/* Standing in for the transcript, so a send has somewhere to land. */}
-        {sent.length > 0 ? (
-          <div className='text-xs text-muted-foreground'>Sent: {sent.map((text) => `“${text}”`).join(', ')}</div>
-        ) : null}
-        <SessionChatComposer
-          agentFleet={fleet}
-          isWorking={isWorking}
-          onInterrupt={() => undefined}
-          onSend={(text) => {
-            setSent((current) => [...current, text]);
-          }}
-          queue={queue}
-          sendOnEnter
-          sessionKey='story-agent-fleet'
-        />
+      <div
+        className='ghostex-session-chat-scope flex flex-col gap-4 bg-background p-4 text-foreground'
+        data-chat-theme={theme}
+        style={{ minHeight: '100dvh' }}
+      >
+        <div
+          className='mx-auto flex w-full flex-wrap items-center gap-3 text-sm'
+          style={{ maxWidth: `${paneWidth}px` }}
+        >
+          <label className='flex items-center gap-2'>
+            <Switch checked={simpleMode} onCheckedChange={setSimpleMode} aria-label='Simple mode' />
+            Simple mode
+          </label>
+          <span>Chat {session}</span>
+          <Button variant='outline' size='sm' onClick={() => setSession(session === 'A' ? 'B' : 'A')}>
+            Switch to Chat {session === 'A' ? 'B' : 'A'}
+          </Button>
+          <Button variant='outline' size='sm' onClick={() => setShowFleet(!showFleet)}>
+            {showFleet ? 'Hide subagents' : 'Show subagents'}
+          </Button>
+          <p className='w-full text-muted-foreground'>
+            Click the Subagents header, switch chats, or reload. Each chat remembers your choice. Cards you have not
+            toggled follow the mode's default.
+          </p>
+        </div>
+        <div className='mx-auto mt-auto flex w-full flex-col gap-2' style={{ maxWidth: `${paneWidth}px` }}>
+          {/* Standing in for the transcript, so a send has somewhere to land. */}
+          {sent.length > 0 ? (
+            <div className='text-xs text-muted-foreground'>Sent: {sent.map((text) => `“${text}”`).join(', ')}</div>
+          ) : null}
+          <SessionChatComposer
+            key={session}
+            agentFleet={fleet}
+            isWorking={isWorking}
+            onInterrupt={() => undefined}
+            onSend={(text) => {
+              setSent((current) => [...current, text]);
+            }}
+            queue={queue}
+            sendOnEnter
+            sessionKey={`story-agent-fleet-${initialSimpleMode ? 'simple' : 'regular'}:${session}`}
+          />
+        </div>
       </div>
-    </div>
+    </SessionChatPresentationProvider>
   );
 }
 
 const meta = {
-  args: { agents: 3, isWorking: true, paneWidth: 768, queued: 2, theme: 'dark' },
+  args: { agents: 3, isWorking: true, paneWidth: 768, queued: 2, simpleMode: false, theme: 'dark' },
   argTypes: {
-    agents: { control: { max: 3, min: 0, step: 1, type: 'range' } },
+    agents: { control: { max: 7, min: 0, step: 1, type: 'range' } },
     paneWidth: { control: { max: 900, min: 220, step: 10, type: 'range' } },
     queued: { control: { max: 2, min: 0, step: 1, type: 'range' } },
     theme: { control: 'inline-radio', options: ['dark', 'light'] },
@@ -185,6 +236,8 @@ type Story = StoryObj<typeof meta>;
 export const Dark: Story = { args: { theme: 'dark' } };
 
 export const Light: Story = { args: { theme: 'light' } };
+
+export const SimpleMode: Story = { args: { simpleMode: true, agents: 7 } };
 
 /** A single sub-agent, no queue — the quietest the strip ever gets. */
 export const OneAgent: Story = { args: { agents: 1, queued: 0 } };

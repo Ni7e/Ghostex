@@ -9,8 +9,8 @@ the result over as `terminalNotice`.
 
 It wears the interactive card's visual language (shell / panel / action row)
 tinted by severity, and sits directly above that card in the composer stack.
-The `kind` is an OPEN set: nothing here branches on it, so an unknown kind from
-a newer daemon still renders as title + detail + actions.
+The `kind` is an OPEN set: an unknown kind from a newer daemon still renders
+as title + detail + actions. Account recovery is offered only for known account notices.
 
 Dismissal is local and per-detection: hiding a notice remembers `kind` +
 `detectedAt`, so the same detection stays hidden while a NEW one (a fresh
@@ -456,9 +456,17 @@ export function SessionChatTerminalNoticeCard({
     label: collapsed ? collapsedChoiceLabel(notice.dialog?.rows[choice.index]?.label ?? choice.label) : choice.label,
   }));
   const toggleExpanded = (): void => setExpanded((value) => !value);
-  const accountMenu = renderAccountMenu ? <NoticeAccountMenu key={sessionKey} renderMenu={renderAccountMenu} /> : null;
+  const accountMenu =
+    renderAccountMenu && (notice.kind === 'loginExpired' || notice.kind === 'usageLimit') ? (
+      <NoticeAccountMenu key={sessionKey} renderMenu={renderAccountMenu} />
+    ) : null;
   return (
-    <SessionChatNoticeCard ref={cardRef} kind={notice.kind} severity={notice.severity}>
+    <SessionChatNoticeCard
+      className='ghostex-chat-terminal-notice'
+      ref={cardRef}
+      kind={notice.kind}
+      severity={notice.severity}
+    >
       <div
         className={cn(
           'relative flex items-start gap-2',
@@ -570,7 +578,7 @@ export function SessionChatTerminalNoticeCard({
                 ) : null}
               </div>
               {tailOpen ? (
-                <div className='mt-2 min-w-0 rounded-lg border border-border/65 bg-background/70 p-3'>
+                <div className='ghostex-chat-notice-tail mt-2 min-w-0 rounded-lg border border-border/65 bg-background/70 p-3'>
                   <pre
                     className='max-h-40 min-w-0 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]'
                     ref={screenTailRef}
@@ -656,7 +664,7 @@ export function SessionChatTerminalNoticeCard({
   );
 }
 
-/** CDXC:AgentProviders 2026-09-12 DECISION: User: terminal notice cards offer a Switch account button to the left of Open terminal that opens the existing account picker. */
+/** CDXC:AgentProviders 2026-09-13 DECISION: User approved restricting Switch account to relevant notices after it appeared on a queued reply. Only sign-in and usage-limit notices offer the existing account picker beside Open terminal, superseding the September 12 rule for all terminal notices. */
 function NoticeAccountMenu({ renderMenu }: { renderMenu: (close: () => void) => ReactNode }) {
   const [open, setOpen] = useState(false);
   return (

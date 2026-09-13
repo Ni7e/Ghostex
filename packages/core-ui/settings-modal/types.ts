@@ -198,9 +198,11 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
     'preferredAgentInterface',
     'sessionChatTheme',
     'sessionChatFontFamily',
+    'sessionChatZoomPercent',
     'sessionChatCustomTranscriptWidthEnabled',
     'sessionChatTranscriptWidthPercent',
     'sessionChatVerboseMode',
+    'sessionChatSimpleMode',
     'sessionChatFileEditPreviews',
   ],
   sidebar: [

@@ -310,6 +310,8 @@ impl CefBrowser {
 
     pub fn stop_finding(&self, _clear_selection: bool) {}
 
+    pub fn refresh_session_chat_zoom(&self) {}
+
     pub fn zoom_level(&self) -> f64 {
         0.0
     }

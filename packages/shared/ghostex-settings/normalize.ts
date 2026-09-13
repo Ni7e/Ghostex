@@ -71,6 +71,7 @@ import {
   clampCommandsPanelDefaultHeightPx,
   clampProjectSessionListCollapsedCount,
   clampSessionChatTranscriptWidthPercent,
+  clampSessionChatZoomPercent,
   clampTerminalViewWidthPercent,
   clampSidebarCollapseAnimationDurationMs,
   clampSidebarDefaultWidthPx,
@@ -635,6 +636,9 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       'sessionChatFontFamily',
       DEFAULT_ghostex_SETTINGS.sessionChatFontFamily
     ).trim(),
+    sessionChatZoomPercent: clampSessionChatZoomPercent(
+      readNumber(source, 'sessionChatZoomPercent', DEFAULT_ghostex_SETTINGS.sessionChatZoomPercent)
+    ),
     sessionChatCustomTranscriptWidthEnabled: readBoolean(
       source,
       'sessionChatCustomTranscriptWidthEnabled',
@@ -657,6 +661,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       'sessionChatVerboseMode',
       DEFAULT_ghostex_SETTINGS.sessionChatVerboseMode
     ),
+    sessionChatSimpleMode: readBoolean(source, 'sessionChatSimpleMode', DEFAULT_ghostex_SETTINGS.sessionChatSimpleMode),
     customSidebarTitlebarForegroundColor: getSidebarTitlebarForegroundForBackground(
       customSidebarTitlebarBackgroundColor
     ),

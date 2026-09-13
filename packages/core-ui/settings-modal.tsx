@@ -46,6 +46,7 @@ import {
   AUTO_SLEEP_IDLE_MINUTE_OPTIONS,
   DEFAULT_ghostex_SETTINGS,
   MAX_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
+  MAX_SESSION_CHAT_ZOOM_PERCENT,
   MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MAX_TERMINAL_PANE_PADDING_PX,
   MAX_TERMINAL_VIEW_WIDTH_PERCENT,
@@ -60,6 +61,7 @@ import {
   MIN_TERMINAL_VIEW_WIDTH_PERCENT,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   MIN_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
+  MIN_SESSION_CHAT_ZOOM_PERCENT,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   type PromptEditorBackend,
   SIDEBAR_SIDE_OPTIONS,
@@ -80,6 +82,7 @@ import {
   SIDEBAR_COLLAPSE_ANIMATION_DURATION_STEP_MS,
   SIDEBAR_TOOLTIP_DELAY_STEP_MS,
   SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT_STEP,
+  SESSION_CHAT_ZOOM_PERCENT_STEP,
   TERMINAL_VIEW_WIDTH_PERCENT_STEP,
   normalizeghostexSettings,
   type AutoSleepIdleMinutes,
@@ -1730,6 +1733,19 @@ export function SettingsModal({
                                 value={draft.sessionChatFontFamily}
                               />
                             ) : null}
+                            {mainSettingVisible(settingsSearch.chat, 'sessionChatZoomPercent') ? (
+                              <SliderNumberField
+                                description='Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.'
+                                label='Default Chat Zoom (%)'
+                                {...getSettingModificationProps('sessionChatZoomPercent')}
+                                max={MAX_SESSION_CHAT_ZOOM_PERCENT}
+                                min={MIN_SESSION_CHAT_ZOOM_PERCENT}
+                                onCommit={(value) => updateDraft('sessionChatZoomPercent', value)}
+                                onChange={(value) => updateDraftDebounced('sessionChatZoomPercent', value)}
+                                step={SESSION_CHAT_ZOOM_PERCENT_STEP}
+                                value={draft.sessionChatZoomPercent}
+                              />
+                            ) : null}
                             {mainSettingVisible(settingsSearch.chat, 'sessionChatCustomTranscriptWidthEnabled') ? (
                               <ToggleField
                                 checked={draft.sessionChatCustomTranscriptWidthEnabled}
@@ -1770,6 +1786,15 @@ export function SettingsModal({
                                 label='Verbose Mode'
                                 {...getSettingModificationProps('sessionChatVerboseMode')}
                                 onChange={(checked) => updateDraft('sessionChatVerboseMode', checked)}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.chat, 'sessionChatSimpleMode') ? (
+                              <ToggleField
+                                checked={draft.sessionChatSimpleMode}
+                                description='Simplify all chats: hide tool command previews and group file edits behind an expandable file count.'
+                                label='Simple mode'
+                                {...getSettingModificationProps('sessionChatSimpleMode')}
+                                onChange={(checked) => updateDraft('sessionChatSimpleMode', checked)}
                               />
                             ) : null}
                           </SettingsSection>

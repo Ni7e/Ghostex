@@ -14,7 +14,8 @@
 
 import { cn } from '@/packages/components/utils';
 import { IconChevronRight } from '@tabler/icons-react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { SessionChatSimpleModeContext, sessionChatSimpleEditLabel } from '../session-chat-simple-mode';
 import { Button } from '../../../components/ui/button';
 import { Message, MessageContent } from '../../../components/ui/message';
 import {
@@ -445,6 +446,7 @@ function CompletedWorkBody({
   verboseMode: boolean;
 }) {
   const [open, setOpen] = useSessionChatDisclosureState('completed-work', verboseMode);
+  const simpleMode = useContext(SessionChatSimpleModeContext);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const visibleArtifacts = turn.work.filter(isVisibleAssistantArtifact);
   const collapsedWork = turn.work.filter((message) => !isVisibleAssistantArtifact(message));
@@ -517,10 +519,14 @@ function CompletedWorkBody({
       {changedFileCount > 0 ? (
         <SessionChatDisclosure
           stateKey='files-changed'
-          label={`${changedFileCount} ${changedFileCount === 1 ? 'file' : 'files'} changed`}
+          label={
+            simpleMode
+              ? sessionChatSimpleEditLabel(changedFileCount)
+              : `${changedFileCount} ${changedFileCount === 1 ? 'file' : 'files'} changed`
+          }
           onExpand={onExpand}
         >
-          <SessionChatFileChangeCards changes={fileChanges} messageId={turn.user.id} />
+          <SessionChatFileChangeCards changes={fileChanges} messageId={turn.user.id} inDisclosure />
         </SessionChatDisclosure>
       ) : null}
       {visibleArtifacts.map((message) => (
@@ -782,14 +788,17 @@ export function SessionChatMessageList({
     []
   );
 
-  // Remember bottom-follow intent before content growth changes scrollHeight.
-  useEffect(() => {
+  /** CDXC:SessionChat 2026-09-13 DECISION:
+   * User: keep the latest message visible when working indicators or other components above the composer appear, while preserving history navigation and the streaming hold.
+   * The composer changes the transcript's bottom padding, which content-box observation misses; observe the border box and retain follow intent through programmatic adjustments.
+   */
+  useLayoutEffect(() => {
     const content = contentRef.current;
-    if (!content) {
+    const viewport = viewportRef.current;
+    if (!content || !viewport) {
       return;
     }
     const observer = new ResizeObserver(() => {
-      const viewport = viewportRef.current;
       if (!scrollRestorationControlRef.current.finished) return;
       if (streamHoldRef.current) {
         if (!readerScrolledInHoldRef.current) {
@@ -797,19 +806,15 @@ export function SessionChatMessageList({
         }
         return;
       }
-      if (
-        viewport &&
-        shouldFollowBottomRef.current &&
-        !composerCollapsedRef.current &&
-        !fileNavigationActiveRef.current
-      ) {
-        viewport.scrollTop = viewport.scrollHeight;
+      if (shouldFollowBottomRef.current && !composerCollapsedRef.current && !fileNavigationActiveRef.current) {
+        setViewportScrollTop(viewport.scrollHeight);
       }
     });
-    observer.observe(content);
-    viewportRef.current?.setAttribute(FOLLOW_BOTTOM_ATTRIBUTE, shouldFollowBottomRef.current ? 'true' : 'false');
+    observer.observe(content, { box: 'border-box' });
+    observer.observe(viewport);
+    viewport.setAttribute(FOLLOW_BOTTOM_ATTRIBUTE, shouldFollowBottomRef.current ? 'true' : 'false');
     return () => observer.disconnect();
-  }, [anchorStreamTop]);
+  }, [anchorStreamTop, setViewportScrollTop]);
 
   const loadEarlierIfNearTop = useCallback(
     (viewport: HTMLDivElement): void => {

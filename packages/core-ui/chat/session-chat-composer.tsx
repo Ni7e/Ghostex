@@ -2672,7 +2672,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
             </div>
           ) : null}
           <SessionChatAgentTasksPanel tasks={agentTasks ?? null} />
-          <SessionChatAgentFleetStrip fleet={agentFleet ?? null} provider={agentFleetProvider} />
+          <SessionChatAgentFleetStrip
+            fleet={agentFleet ?? null}
+            provider={agentFleetProvider}
+            sessionKey={sessionKey}
+          />
           {incomingDraft ? (
             <SessionChatDraftConflict
               draft={incomingDraft}

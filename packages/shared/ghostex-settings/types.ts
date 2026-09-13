@@ -44,6 +44,20 @@ export const MIN_SIDEBAR_TOOLTIP_DELAY_MS = 0;
 export const MAX_SIDEBAR_TOOLTIP_DELAY_MS = 2_000;
 export const SIDEBAR_TOOLTIP_DELAY_STEP_MS = 100;
 export const DEFAULT_SIDEBAR_TOOLTIP_DELAY_MS = 600;
+/** CDXC:SessionChat 2026-09-13 DECISION:
+ * User: Settings > Chat offers a default chat zoom from 70% to 200% in 5% steps.
+ */
+export const MIN_SESSION_CHAT_ZOOM_PERCENT = 70;
+export const MAX_SESSION_CHAT_ZOOM_PERCENT = 200;
+export const SESSION_CHAT_ZOOM_PERCENT_STEP = 5;
+export const DEFAULT_SESSION_CHAT_ZOOM_PERCENT = 100;
+
+export function clampSessionChatZoomPercent(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_SESSION_CHAT_ZOOM_PERCENT;
+  const clamped = Math.min(MAX_SESSION_CHAT_ZOOM_PERCENT, Math.max(MIN_SESSION_CHAT_ZOOM_PERCENT, value));
+  return Math.round(clamped / SESSION_CHAT_ZOOM_PERCENT_STEP) * SESSION_CHAT_ZOOM_PERCENT_STEP;
+}
+
 export const MIN_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT = 50;
 export const MAX_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT = 100;
 export const SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT_STEP = 5;
@@ -548,6 +562,8 @@ export type ghostexSettings = {
   sessionChatTheme: SessionChatThemeSetting;
   /** CSS font-family used by chat messages and the prompt composer. */
   sessionChatFontFamily: string;
+  /** Default zoom percentage for the desktop chat interface. */
+  sessionChatZoomPercent: number;
   /** Whether the transcript departs from the prompt composer's 48rem column. */
   sessionChatCustomTranscriptWidthEnabled: boolean;
   /** Centered transcript width as a percentage of wide chat panes. */
@@ -558,6 +574,10 @@ export type ghostexSettings = {
    * this (packages/core-ui/chat/session-chat-verbose-override.ts).
    */
   sessionChatVerboseMode: boolean;
+  /** CDXC:SessionChat 2026-09-13 DECISION:
+   * User: Simple mode applies to all chats, and the chat menu and Settings > Chat reflect the same global toggle.
+   */
+  sessionChatSimpleMode: boolean;
   /** CDXC:SessionChat 2026-09-09 DECISION:
    * User: file edits default to a single collapsed row; Chat settings can opt into seven-line previews.
    */

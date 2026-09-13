@@ -7,6 +7,7 @@ import {
   IconFileExport,
   IconGitBranch,
   IconLayoutColumns,
+  IconLeaf,
   IconListCheck,
   IconListDetails,
   IconMaximize,
@@ -20,7 +21,8 @@ import {
   IconTerminal2,
   type Icon as TablerIcon,
 } from '@tabler/icons-react';
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { SessionChatSimpleModeContext, SessionChatSimpleModeChangeContext } from './session-chat-simple-mode';
 import { Button } from '../../components/ui/button';
 import {
   DropdownMenu,
@@ -44,6 +46,7 @@ import { SessionChatHostActionAgentIcon } from './session-chat-host-action-agent
 import type { SessionChatHostAction, SessionChatHostActions } from './session-chat-host-actions';
 import { sessionChatSummaryToggleHotkey } from './session-chat-summary-override';
 import { formatSessionTerminalTailPreview, useSessionTerminalTail } from './use-session-terminal-tail';
+import { useSessionChatComposerOverflow } from './use-session-chat-composer-overflow';
 
 /**
  * Host actions intentionally excluded from the dots menu. Most already render
@@ -146,6 +149,8 @@ export function SessionChatComposerActions({
   summaryMode,
   verboseMode,
 }: SessionChatComposerActionsProps) {
+  const simpleMode = useContext(SessionChatSimpleModeContext);
+  const onSimpleModeChange = useContext(SessionChatSimpleModeChangeContext);
   /*
   When shortcut labels are enabled, every footer control names its shortcut in
   its tooltip, the way the desktop terminal's action bar does, so the two
@@ -224,11 +229,10 @@ export function SessionChatComposerActions({
     setInputAction(null);
   };
 
-  const [expandedMenuOpen, setExpandedMenuOpen] = useState(false);
-  const [compactMenuOpen, setCompactMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { toolbarRef, isOverflowed } = useSessionChatComposerOverflow(inputAction !== null);
   const closeMoreActions = () => {
-    setExpandedMenuOpen(false);
-    setCompactMenuOpen(false);
+    setMenuOpen(false);
   };
   const hostActionList = hostActions?.actions ?? [];
   const runHostAction = (action: SessionChatHostAction) => {
@@ -252,7 +256,7 @@ export function SessionChatComposerActions({
           {hostActionIcon(action.id)}
           {action.label}
         </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent className='w-56'>
+        <DropdownMenuSubContent className='ghostex-session-chat-popup w-56'>
           {action.items.map((item) => (
             <DropdownMenuItem key={item.id} onClick={() => hostActions?.onAction?.(action.id, item.id)}>
               <SessionChatHostActionAgentIcon icon={item.icon} />
@@ -290,7 +294,7 @@ export function SessionChatComposerActions({
   const agentHostActions = foldedHostActions.filter((action) => AGENT_HOST_ACTION_IDS.has(action.id));
   const otherHostActions = foldedHostActions.filter((action) => !AGENT_HOST_ACTION_IDS.has(action.id));
 
-  // Verbose mode, Delayed actions, and Close After Done are shared by both menus.
+  // These actions always live in More actions.
   const verboseMenuItem = onToggleVerbose ? (
     <DropdownMenuCheckboxItem
       className={cn('whitespace-nowrap', verboseMode && 'font-medium')}
@@ -304,6 +308,12 @@ export function SessionChatComposerActions({
     >
       <VerboseIcon aria-hidden='true' />
       Verbose mode
+    </DropdownMenuCheckboxItem>
+  ) : null;
+  const simpleMenuItem = onSimpleModeChange ? (
+    <DropdownMenuCheckboxItem checked={simpleMode} closeOnClick={false} onCheckedChange={onSimpleModeChange}>
+      <IconLeaf aria-hidden='true' />
+      Simple mode
     </DropdownMenuCheckboxItem>
   ) : null;
   const summaryMenuItem = onToggleSummary ? (
@@ -352,7 +362,7 @@ export function SessionChatComposerActions({
         <IconSwitchHorizontal aria-hidden='true' />
         Switch Account
       </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className='gx-account-submenu' sideOffset={8}>
+      <DropdownMenuSubContent className='ghostex-session-chat-popup gx-account-submenu' sideOffset={8}>
         {renderAccountMenu(closeMoreActions)}
       </DropdownMenuSubContent>
     </DropdownMenuSub>
@@ -386,12 +396,6 @@ export function SessionChatComposerActions({
       ) : null}
     </>
   );
-  const hasBaseMenuItems =
-    verboseMenuItem !== null ||
-    delayedActionsMenuItem !== null ||
-    closeAfterDoneMenuItem !== null ||
-    splitRightHostAction !== undefined;
-  const hasExpandedMenu = hasBaseMenuItems || agentMenuSection !== null || otherHostMenuSection !== null;
 
   /*
   CDXC:SessionChat 2026-08-28:
@@ -471,48 +475,100 @@ export function SessionChatComposerActions({
   }
 
   return (
-    <>
-      <div className='ghostex-chat-composer-footer-actions-expanded items-center gap-1.5'>
-        {hasExpandedMenu ? (
-          <DropdownMenu open={expandedMenuOpen} onOpenChange={setExpandedMenuOpen}>
-            <AppTooltip content={withShortcut('More actions', hostActions?.moreActionsShortcut)}>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    aria-label='More actions'
-                    className='ghostex-chat-footer-control rounded-full'
-                    size='icon-sm'
-                    variant='ghost'
-                  />
-                }
+    <div className='ghostex-chat-composer-toolbar' ref={toolbarRef}>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <AppTooltip content={withShortcut('More actions', hostActions?.moreActionsShortcut)}>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                aria-label='More actions'
+                className='ghostex-chat-footer-control rounded-full'
+                size='icon-sm'
+                variant='ghost'
+              />
+            }
+          >
+            <IconDots aria-hidden='true' stroke={2.2} />
+          </DropdownMenuTrigger>
+        </AppTooltip>
+        {/* CDXC:SessionChat 2026-09-13 DECISION: User: chat menus follow light mode. The root menu and both account submenu variants need the popup scope because each is portaled outside the chat palette. */}
+        <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-60' side='top'>
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Chat</DropdownMenuLabel>
+            {verboseMenuItem}
+            {simpleMenuItem}
+            {isOverflowed('summary') ? summaryMenuItem : null}
+            {delayedActionsMenuItem}
+            {closeAfterDoneMenuItem}
+            {/* CDXC:SessionChat 2026-09-05 DECISION: User: add Split Right below Close After Done in the chat composer's More menu. */}
+            {splitRightHostAction ? hostActionMenuItem(splitRightHostAction) : null}
+            {isOverflowed('note') && onSessionNote ? (
+              <DropdownMenuCheckboxItem
+                checked={sessionNoteActive}
+                onCheckedChange={(checked: boolean) => {
+                  if (checked !== sessionNoteActive) {
+                    onSessionNote();
+                  }
+                }}
               >
-                <IconDots aria-hidden='true' stroke={2.2} />
-              </DropdownMenuTrigger>
-            </AppTooltip>
-            <DropdownMenuContent align='end' className='w-60' side='top'>
-              {hasBaseMenuItems ? (
-                <DropdownMenuGroup>
-                  {/*
-                  CDXC:SessionChat 2026-08-26:
-                  The dots menu already names its host-action block "Agent"; the
-                  rows above it are chat-surface toggles, so they get the
-                  matching "Chat" heading instead of reading as an unlabeled
-                  preamble.
-                  */}
-                  <DropdownMenuLabel>Chat</DropdownMenuLabel>
-                  {verboseMenuItem}
-                  {delayedActionsMenuItem}
-                  {closeAfterDoneMenuItem}
-                  {/* CDXC:SessionChat 2026-09-05 DECISION: User: add Split Right below Close After Done in the chat composer's More menu. */}
-                  {splitRightHostAction ? hostActionMenuItem(splitRightHostAction) : null}
-                </DropdownMenuGroup>
-              ) : null}
-              {hostMenuSections(hasBaseMenuItems)}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-        {/* CDXC:SessionChat 2026-09-11 DECISION: User: show Summary mode between More actions and Session note when there is room; keep it in More actions in the compact toolbar. */}
-        {onToggleSummary ? (
+                <span className='ghostex-chat-composer-menu-indicator relative inline-flex'>
+                  <IconNote aria-hidden='true' />
+                  {sessionNoteHasText ? (
+                    <span aria-hidden='true' className='ghostex-chat-session-note-presence-dot'>
+                      1
+                    </span>
+                  ) : null}
+                </span>
+                Session note
+                {showShortcutLabels && hostActions?.sessionNoteShortcut ? (
+                  <DropdownMenuShortcut>{hostActions.sessionNoteShortcut}</DropdownMenuShortcut>
+                ) : null}
+              </DropdownMenuCheckboxItem>
+            ) : null}
+            {isOverflowed('stash') && onStash ? (
+              <AppTooltip content={stashTooltip} side='left'>
+                <DropdownMenuItem
+                  aria-label={stashLabel}
+                  disabled={hasSendableDraft ? false : onShowStashedPrompts === undefined}
+                  onClick={stashCurrentPrompt}
+                  onContextMenu={openSavedPromptsFromContextMenu}
+                >
+                  <span className='ghostex-chat-composer-menu-indicator relative inline-flex'>
+                    <IconStackPush aria-hidden='true' />
+                    {stashCountBadge}
+                  </span>
+                  {stashLabel}
+                </DropdownMenuItem>
+              </AppTooltip>
+            ) : null}
+            {isOverflowed('attach') && onAttach ? (
+              <DropdownMenuItem onClick={onAttach}>
+                <IconPaperclip aria-hidden='true' />
+                Attach a file or folder
+              </DropdownMenuItem>
+            ) : null}
+            {isOverflowed('maximize') ? (
+              <DropdownMenuItem onClick={onToggleMaximized}>
+                {maximized ? <IconMinimize aria-hidden='true' /> : <IconMaximize aria-hidden='true' />}
+                {maximizeLabel}
+              </DropdownMenuItem>
+            ) : null}
+            {isOverflowed('terminal') && hostActions ? (
+              <DropdownMenuItem onClick={hostActions.onSwitchToTerminal}>
+                <IconTerminal2 aria-hidden='true' />
+                Terminal View
+                {showShortcutLabels && hostActions.switchViewShortcut ? (
+                  <DropdownMenuShortcut>{hostActions.switchViewShortcut}</DropdownMenuShortcut>
+                ) : null}
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuGroup>
+          {hostMenuSections(true)}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* CDXC:SessionChat 2026-09-11 DECISION: User: show Summary mode between More actions and Session note when there is room; keep it in More actions in the compact toolbar. */}
+      {onToggleSummary ? (
+        <span data-composer-action='summary' data-overflowed={isOverflowed('summary')}>
           <AppTooltip content={withShortcut(summaryLabel, summaryShortcut)}>
             <Button
               aria-label='Summary mode'
@@ -525,8 +581,10 @@ export function SessionChatComposerActions({
               <SummaryIcon aria-hidden='true' stroke={2} />
             </Button>
           </AppTooltip>
-        ) : null}
-        {onSessionNote ? (
+        </span>
+      ) : null}
+      {onSessionNote ? (
+        <span data-composer-action='note' data-overflowed={isOverflowed('note')}>
           <AppTooltip content={withShortcut('Session note', hostActions?.sessionNoteShortcut)}>
             <span className='ghostex-chat-session-note-control relative inline-flex'>
               <Button
@@ -549,8 +607,10 @@ export function SessionChatComposerActions({
               ) : null}
             </span>
           </AppTooltip>
-        ) : null}
-        {onStash ? (
+        </span>
+      ) : null}
+      {onStash ? (
+        <span data-composer-action='stash' data-overflowed={isOverflowed('stash')}>
           <AppTooltip content={stashTooltip}>
             <span className='ghostex-chat-stash-control relative inline-flex'>
               <Button
@@ -567,8 +627,10 @@ export function SessionChatComposerActions({
               {stashCountBadge}
             </span>
           </AppTooltip>
-        ) : null}
-        {onAttach ? (
+        </span>
+      ) : null}
+      {onAttach ? (
+        <span data-composer-action='attach' data-overflowed={isOverflowed('attach')}>
           <AppTooltip content={withShortcut('Attach a file or folder', hostActionShortcut('attachPath'))}>
             <span className='inline-flex'>
               <Button
@@ -582,7 +644,9 @@ export function SessionChatComposerActions({
               </Button>
             </span>
           </AppTooltip>
-        ) : null}
+        </span>
+      ) : null}
+      <span data-composer-action='maximize' data-overflowed={isOverflowed('maximize')}>
         <AppTooltip content={maximizeLabel}>
           <span className='inline-flex'>
             <Button
@@ -601,91 +665,13 @@ export function SessionChatComposerActions({
             </Button>
           </span>
         </AppTooltip>
-        {/* Last in the cluster so it sits directly beside Send/Stop. */}
-        {switchViewButton}
-      </div>
-
-      <div className='ghostex-chat-composer-footer-actions-compact items-center gap-1.5'>
-        <DropdownMenu open={compactMenuOpen} onOpenChange={setCompactMenuOpen}>
-          <AppTooltip content={withShortcut('More actions', hostActions?.moreActionsShortcut)}>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  aria-label='More actions'
-                  className='ghostex-chat-footer-control rounded-full'
-                  size='icon-sm'
-                  variant='ghost'
-                />
-              }
-            >
-              <IconDots aria-hidden='true' stroke={2.2} />
-            </DropdownMenuTrigger>
-          </AppTooltip>
-          <DropdownMenuContent align='end' className='w-60' side='top'>
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Chat</DropdownMenuLabel>
-              {verboseMenuItem}
-              {summaryMenuItem}
-              {delayedActionsMenuItem}
-              {closeAfterDoneMenuItem}
-              {splitRightHostAction ? hostActionMenuItem(splitRightHostAction) : null}
-              {onSessionNote ? (
-                <DropdownMenuCheckboxItem
-                  checked={sessionNoteActive}
-                  onCheckedChange={(checked: boolean) => {
-                    if (checked !== sessionNoteActive) {
-                      onSessionNote();
-                    }
-                  }}
-                >
-                  <span className='ghostex-chat-composer-menu-indicator relative inline-flex'>
-                    <IconNote aria-hidden='true' />
-                    {sessionNoteHasText ? (
-                      <span aria-hidden='true' className='ghostex-chat-session-note-presence-dot'>
-                        1
-                      </span>
-                    ) : null}
-                  </span>
-                  Session note
-                  {showShortcutLabels && hostActions?.sessionNoteShortcut ? (
-                    <DropdownMenuShortcut>{hostActions.sessionNoteShortcut}</DropdownMenuShortcut>
-                  ) : null}
-                </DropdownMenuCheckboxItem>
-              ) : null}
-              {onStash ? (
-                <AppTooltip content={stashTooltip} side='left'>
-                  <DropdownMenuItem
-                    aria-label={stashLabel}
-                    disabled={hasSendableDraft ? false : onShowStashedPrompts === undefined}
-                    onClick={stashCurrentPrompt}
-                    onContextMenu={openSavedPromptsFromContextMenu}
-                  >
-                    <span className='ghostex-chat-composer-menu-indicator relative inline-flex'>
-                      <IconStackPush aria-hidden='true' />
-                      {stashCountBadge}
-                    </span>
-                    {stashLabel}
-                  </DropdownMenuItem>
-                </AppTooltip>
-              ) : null}
-              {onAttach ? (
-                <DropdownMenuItem onClick={onAttach}>
-                  <IconPaperclip aria-hidden='true' />
-                  Attach a file or folder
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem onClick={onToggleMaximized}>
-                {maximized ? <IconMinimize aria-hidden='true' /> : <IconMaximize aria-hidden='true' />}
-                {maximizeLabel}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            {hostMenuSections(true)}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        {/* The surface toggle stays a button at every width: it is the one
-            control users flip constantly, and burying it costs two clicks. */}
-        {switchViewButton}
-      </div>
-    </>
+      </span>
+      {/* Last in the cluster so it sits directly beside Send/Stop. */}
+      {switchViewButton ? (
+        <span data-composer-action='terminal' data-overflowed={isOverflowed('terminal')}>
+          {switchViewButton}
+        </span>
+      ) : null}
+    </div>
   );
 }

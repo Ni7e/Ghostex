@@ -235,6 +235,10 @@ impl CefSurface {
         self.browser.zoom_level().abs() > BROWSER_ZOOM_EPSILON
     }
 
+    pub(crate) fn refresh_session_chat_zoom(&mut self) {
+        self.browser.refresh_session_chat_zoom();
+    }
+
     pub(crate) fn zoom_level(&self) -> f64 {
         self.browser.zoom_level()
     }

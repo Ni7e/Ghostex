@@ -1021,6 +1021,23 @@
       "agentWritable": true
     },
     {
+      "key": "sessionChatZoomPercent",
+      "title": "Default chat zoom (%)",
+      "subtitle": "Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "number",
+      "default": 100,
+      "min": 70,
+      "max": 200,
+      "step": 5,
+      "agentWritable": true
+    },
+    {
       "key": "sessionChatCustomTranscriptWidthEnabled",
       "title": "Custom transcript width",
       "subtitle": "Let the transcript use a different width from the prompt composer.",
@@ -1055,6 +1072,20 @@
       "key": "sessionChatFileEditPreviews",
       "title": "Show file edit previews",
       "subtitle": "Show the first seven code lines in each file edit. Turn off to show only the path and change counts.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "sessionChatSimpleMode",
+      "title": "Simple mode",
+      "subtitle": "Simplify all chats: hide tool command previews and group file edits behind an expandable file count.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "chat",
@@ -6187,7 +6218,7 @@
     },
     {
       "key": "kanban",
-      "title": "Beads Kanban",
+      "title": "Kanban",
       "subtitle": "Plan upcoming work and track task progress at a glance.",
       "tab": "extensions",
       "tabTitle": "Extensions",

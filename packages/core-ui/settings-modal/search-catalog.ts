@@ -542,6 +542,12 @@ export function getSettingsSearchSectionDefinitions() {
           title: 'Chat font family',
         },
         {
+          key: 'sessionChatZoomPercent',
+          subtitle:
+            'Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.',
+          title: 'Default chat zoom (%)',
+        },
+        {
           key: 'sessionChatCustomTranscriptWidthEnabled',
           subtitle: 'Let the transcript use a different width from the prompt composer.',
           title: 'Custom transcript width',
@@ -556,6 +562,12 @@ export function getSettingsSearchSectionDefinitions() {
           subtitle:
             'Show the first seven code lines in each file edit. Turn off to show only the path and change counts.',
           title: 'Show file edit previews',
+        },
+        {
+          key: 'sessionChatSimpleMode',
+          subtitle:
+            'Simplify all chats: hide tool command previews and group file edits behind an expandable file count.',
+          title: 'Simple mode',
         },
         {
           key: 'sessionChatVerboseMode',

@@ -73,9 +73,11 @@ How to use this file:
 - **Default view for compatible agents** `preferredAgentInterface` (one of terminal | chat; default chat): Automatically switch to chat as soon as Ghostex detects that an agent session supports it. Option labels: terminal = Terminal, chat = Chat.
 - **Chat appearance** `sessionChatTheme` (one of system | light | dark; default system): Follow your computer’s appearance with System (the default), or choose Light or Dark for chat content. Option labels: system = System, light = Light, dark = Dark.
 - **Chat font family** `sessionChatFontFamily` (text, default (empty)): Use any installed font in chat messages and the prompt composer.
+- **Default chat zoom (%)** `sessionChatZoomPercent` (number 70 to 200 step 5 default 100): Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.
 - **Custom transcript width** `sessionChatCustomTranscriptWidthEnabled` (boolean, default false): Let the transcript use a different width from the prompt composer.
 - **Transcript width** `sessionChatTranscriptWidthPercent` (number 50 to 100 step 5 default 75): Set the centered transcript width without changing the prompt composer.
 - **Show file edit previews** `sessionChatFileEditPreviews` (boolean, default false): Show the first seven code lines in each file edit. Turn off to show only the path and change counts.
+- **Simple mode** `sessionChatSimpleMode` (boolean, default false): Simplify all chats: hide tool command previews and group file edits behind an expandable file count.
 - **Verbose mode** `sessionChatVerboseMode` (boolean, default false): Expand thinking blocks to show their tool calls by default. Each chat can override it from its composer.
 ### Tools
 
@@ -281,7 +283,7 @@ How to use this file:
 
 - **Code editor** `code` (Settings UI row without a settings key; use `ghostex settings open`): Explore, edit, and search your project in a familiar, full-featured workspace without ever leaving Ghostex.
 - **Browser** `browser` (Settings UI row without a settings key; use `ghostex settings open`): Open websites alongside your project and keep useful pages organized without leaving Ghostex.
-- **Beads Kanban** `kanban` (Settings UI row without a settings key; use `ghostex settings open`): Plan upcoming work and track task progress at a glance.
+- **Kanban** `kanban` (Settings UI row without a settings key; use `ghostex settings open`): Plan upcoming work and track task progress at a glance.
 - **Automate** `automate` (Settings UI row without a settings key; use `ghostex settings open`): Turn repeatable project routines into simple workflows you can run whenever you need them.
 - **Docs** `docs` (Settings UI row without a settings key; use `ghostex settings open`): Browse your project’s notes, plans, and reference files together in one focused reading space.
 - **Tips & Tricks** `tips` (Settings UI row without a settings key; use `ghostex settings open`): Title bar button that opens short tips for getting more out of Ghostex.

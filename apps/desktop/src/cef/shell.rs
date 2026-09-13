@@ -194,6 +194,7 @@ mod message_routing;
 mod native_view;
 mod remote_browser;
 mod request_handling;
+mod session_chat_zoom;
 mod v8_bridges;
 
 pub(crate) use browser::*;
@@ -205,4 +206,5 @@ pub(crate) use message_routing::*;
 pub(crate) use native_view::*;
 pub(crate) use remote_browser::*;
 pub(crate) use request_handling::*;
+pub(crate) use session_chat_zoom::*;
 pub(crate) use v8_bridges::*;

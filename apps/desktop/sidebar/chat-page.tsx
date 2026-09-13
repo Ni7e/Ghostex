@@ -63,6 +63,7 @@ interface ChatPageContext {
     GPUI_SESSION_CHAT_HOST_ACTIONS: SessionChatHostActions;
     GPUI_SESSION_CHAT_HOST_LINKS: SessionChatHostLinks;
     chatVerboseMode: boolean;
+    chatSimpleMode: boolean;
     chatFileEditPreviews: boolean;
     remote: boolean;
   };
@@ -216,6 +217,7 @@ export function createGpuiSessionChatPage({
       GPUI_SESSION_CHAT_HOST_ACTIONS,
       GPUI_SESSION_CHAT_HOST_LINKS,
       chatVerboseMode,
+      chatSimpleMode,
       chatFileEditPreviews,
       remote,
     } = getSettings();
@@ -242,6 +244,11 @@ export function createGpuiSessionChatPage({
         .catch(() => {});
     }, [bootstrap, remoteMachineId]);
     const [sessionTitle, setSessionTitle] = useState('');
+    const [workingDirectory, setWorkingDirectory] = useState('');
+    const hostLinks = useMemo(
+      () => ({ ...GPUI_SESSION_CHAT_HOST_LINKS, workingDirectory }),
+      [GPUI_SESSION_CHAT_HOST_LINKS, workingDirectory]
+    );
     const [extensions, setExtensions] = useState<GhostexInstalledExtension[]>([]);
     const extensionsRef = useRef<GhostexInstalledExtension[]>([]);
     const [panelState, setPanelState] = useState<GhostexChatBarPanelSessionState>({
@@ -396,6 +403,7 @@ export function createGpuiSessionChatPage({
             throw new Error(`Session ${sessionId} was not found in project ${projectId}.`);
           }
           setSessionTitle(session.displayTitle ?? session.primaryTitle ?? session.title);
+          setWorkingDirectory(session.cwd || project.path || '');
           const chatBarExtensions = extensionResult.extensions
             .filter(isChatBarExtension)
             .sort((a, b) => a.id.localeCompare(b.id));
@@ -638,7 +646,7 @@ export function createGpuiSessionChatPage({
             hostActions={GPUI_SESSION_CHAT_HOST_ACTIONS}
             hotkeys={normalizeghostexHotkeySettings(hotkeysValue)}
             hostComposerBridge={composerBridge}
-            hostLinks={GPUI_SESSION_CHAT_HOST_LINKS}
+            hostLinks={hostLinks}
             inputBackend='lexical'
             onChatBarBridgeRequest={handleBridgeRequest}
             onChatBarPanelStateChange={updatePanelState}
@@ -649,6 +657,8 @@ export function createGpuiSessionChatPage({
             theme={theme}
             transport={transport}
             verboseMode={chatVerboseMode}
+            simpleMode={chatSimpleMode}
+            onSimpleModeChange={(enabled) => postSessionChatHostAction('setSimpleMode', { enabled })}
             fileEditPreviews={chatFileEditPreviews}
           />
         </div>

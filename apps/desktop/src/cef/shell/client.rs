@@ -369,6 +369,7 @@ wrap_load_handler! {
     pub(crate) struct GhostexGpuiSessionChatGxserverBootstrapLoadHandler {
         gxserver_bootstrap: StdRc<RefCell<Option<SidebarGxserverBootstrap>>>,
         activation: StdRc<RefCell<Option<SessionChatActivation>>>,
+        zoom: StdRc<SessionChatZoom>,
         entry_identity: Option<String>,
     }
 
@@ -399,6 +400,7 @@ wrap_load_handler! {
             */
             if let Some(browser) = browser {
                 apply_page_color_scheme(browser, BrowserPageAppearance::System);
+                self.zoom.refresh(browser, true);
             }
             if let Some(activation) = self.activation.borrow().as_ref() {
                 send_session_chat_activation_process_message(frame, &activation.url, &activation.generation, activation.bootstrap.clone(), activation.initial_snapshot.clone());

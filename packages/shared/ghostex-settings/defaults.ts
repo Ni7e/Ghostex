@@ -21,6 +21,7 @@ import {
   DEFAULT_ACCENT_COLOR,
   DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
   DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
+  DEFAULT_SESSION_CHAT_ZOOM_PERCENT,
   DEFAULT_TERMINAL_VIEW_WIDTH_MODE,
   DEFAULT_TERMINAL_VIEW_WIDTH_PERCENT,
   DEFAULT_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
@@ -413,9 +414,11 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   sessionChatTheme: 'system',
   sessionChatFontFamily: '',
+  sessionChatZoomPercent: DEFAULT_SESSION_CHAT_ZOOM_PERCENT,
   sessionChatCustomTranscriptWidthEnabled: false,
   sessionChatTranscriptWidthPercent: DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
   sessionChatVerboseMode: false,
+  sessionChatSimpleMode: false,
   sessionChatFileEditPreviews: false,
   /**
    * CDXC:Theming 2026-06-15-11:24:

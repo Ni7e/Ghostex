@@ -3,12 +3,19 @@ import { useSessionChatDisclosureState } from './session-chat-interaction-state'
 import { cn } from '@/packages/components/utils';
 import { AppTooltip } from '../app-tooltip';
 import type { SessionChatFileChange } from './session-chat-file-changes';
+import { sessionChatFileChangeDisplayPath } from './session-chat-file-change-path';
 import { useSessionChatHostLinks } from './session-chat-links';
 import { SESSION_CHAT_FILE_PATH_ATTRIBUTE } from './session-chat-file-paths';
 import { revealSessionChatFileChangeHeader } from './session-chat-file-change-scroll';
 import './session-chat-file-change-card.css';
+import { SessionChatDisclosure, anchorSessionChatExpansionTop } from './session-chat-expansion';
+import {
+  SessionChatFileChangePreviewContext,
+  SessionChatSimpleModeContext,
+  sessionChatSimpleEditLabel,
+} from './session-chat-simple-mode';
 
-export const SessionChatFileChangePreviewContext = createContext(false);
+export { SessionChatFileChangePreviewContext } from './session-chat-simple-mode';
 export const SessionChatFileChangeInteractionContext = createContext<((messageId: string) => void) | null>(null);
 
 /** CDXC:SessionChat 2026-09-10 DECISION:
@@ -36,11 +43,13 @@ function FileChangeCard({
     false
   );
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const openFile = useSessionChatHostLinks()?.openFile;
+  const hostLinks = useSessionChatHostLinks();
+  const openFile = hostLinks?.openFile;
   const bodyId = useId();
   const headerRef = useRef<HTMLDivElement>(null);
-  const filename = change.path.split(/[\\/]/).at(-1) || change.path;
-  const parentPath = change.path.slice(0, -filename.length);
+  const displayPath = sessionChatFileChangeDisplayPath(change.path, hostLinks?.workingDirectory);
+  const filename = displayPath.split(/[\\/]/).at(-1) || displayPath;
+  const parentPath = displayPath.slice(0, -filename.length);
   useEffect(() => {
     if (copyStatus === null) return;
     const timeout = window.setTimeout(() => setCopyStatus(null), 1500);
@@ -185,15 +194,33 @@ function FileChangeCard({
 export function SessionChatFileChangeCards({
   changes,
   messageId,
+  inDisclosure = false,
 }: {
   changes: readonly SessionChatFileChange[];
   messageId?: string;
+  inDisclosure?: boolean;
 }) {
-  return changes.length ? (
+  const simpleMode = useContext(SessionChatSimpleModeContext);
+  if (!changes.length) return null;
+  const cards = (
     <div className='ghostex-chat-file-changes'>
       {changes.map((change, index) => (
         <FileChangeCard index={index} change={change} messageId={messageId} key={`${index}:${change.path}`} />
       ))}
     </div>
-  ) : null;
+  );
+  /** CDXC:SessionChat 2026-09-13 DECISION:
+   * User: in Simple mode, hide file edit cards under "Edited 1 file" or "Edited X files" and show the existing diff cards when expanded.
+   */
+  return simpleMode && !inDisclosure ? (
+    <SessionChatDisclosure
+      stateKey='simple-file-edits'
+      label={sessionChatSimpleEditLabel(new Set(changes.map((change) => change.path)).size)}
+      onExpand={anchorSessionChatExpansionTop}
+    >
+      {cards}
+    </SessionChatDisclosure>
+  ) : (
+    cards
+  );
 }
