@@ -3,7 +3,7 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 
 use gxserver::{
-    agent_hooks::{install_agent_hooks, read_agent_hook_status, repair_installed_agent_hook_paths},
+    agent_hooks::{read_agent_hook_status, repair_installed_agent_hook_paths},
     paths::get_gxserver_paths,
 };
 use serde_json::{json, Value};
@@ -322,13 +322,20 @@ fn repairs_installed_agent_hooks_after_storage_directory_migration() {
     // Pi moved to an agent-dir `ghostex-session.ts` extension (2026-08-24): the
     // old directory-layout plugin never loads, so repair migrates it away.
     let migrated_pi_text = fs::read_to_string(
-        &home.join(".pi").join("agent").join("extensions").join("ghostex-session.ts"),
+        &home
+            .join(".pi")
+            .join("agent")
+            .join("extensions")
+            .join("ghostex-session.ts"),
     )
     .expect("migrated Pi extension");
     assert!(migrated_pi_text.contains("ghostex-pi-session-extension-marker v4"));
     assert!(migrated_pi_text.contains(&current_notify_text));
     assert!(!migrated_pi_text.contains(&legacy_notify_text));
-    assert!(!legacy_pi_plugin.exists(), "legacy Pi plugin must be migrated away");
+    assert!(
+        !legacy_pi_plugin.exists(),
+        "legacy Pi plugin must be migrated away"
+    );
     assert_eq!(
         fs::read_to_string(&user_only_pi_plugin).expect("user-only Pi plugin after repair"),
         user_only_pi_plugin_before
