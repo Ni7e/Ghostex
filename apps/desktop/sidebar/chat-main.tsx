@@ -8,6 +8,7 @@ import {
   type SessionChatPageActivation,
 } from './chat-page-runtime';
 import { disposeSessionChatRuntime, updateSessionChatRuntimeEndpoint } from './session-chat-runtime';
+import { applyDocumentSessionChatTheme, initialSessionChatTheme } from './chat-page-theme';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Ghostex session chat root element was not found.');
@@ -43,6 +44,7 @@ function activate(activation: SessionChatPageActivation): void {
   activation.bootstrap = bootstrap;
   activeActivation = activation;
   namespace.sessionChatActivation = activation;
+  applyDocumentSessionChatTheme(initialSessionChatTheme(params));
   if (!bootstrap) {
     updateSessionChatRuntimeEndpoint(params.get('remoteMachineId') || 'local');
     awaitingBootstrap = true;

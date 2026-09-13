@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-session-chat-page>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,14 +7,29 @@
     <style>
       html,
       body {
-        /* The dark transcript's own page colour, so the frame the browser
-           paints before the bundle boots is already the surface it will become
-           (chat-main.tsx re-applies this per theme once it knows one). */
-        background: #0a0a0a;
+        background: var(--ghostex-chat-page-background, #0d0d0d);
         height: 100%;
         margin: 0;
       }
+      /* CDXC:Theming 2026-09-13 WHY:
+         CEF paints this document before the chat bundle or server bootstrap is ready.
+         Keep the shared sidebar body's dark background and transition from flashing through the chat's first paint. */
+      html[data-session-chat-page] body {
+        background: var(--ghostex-chat-page-background, #0d0d0d);
+        transition: none;
+      }
     </style>
+    <script>
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        const initialTheme = params.get('initialTheme');
+        const theme = params.get('theme');
+        const light = initialTheme === 'light' || (initialTheme !== 'dark' &&
+          (theme === 'light' || (theme === 'system' && matchMedia('(prefers-color-scheme: light)').matches)));
+        document.documentElement.style.setProperty('--ghostex-chat-page-background', light ? '#fdfdfd' : '#0d0d0d');
+        document.documentElement.style.colorScheme = light ? 'light' : 'dark';
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

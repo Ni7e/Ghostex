@@ -2,6 +2,7 @@ import { releaseDraftWriter } from '@/packages/core-ui/chat/session-chat-draft-o
 import { sessionChatDraftClientId } from '@/packages/core-ui/chat/session-chat-queue';
 import { createSessionChatDiagnosticRecorder } from '@/packages/core-ui/chat/session-chat-diagnostics';
 import { resolveSessionChatTheme, subscribeSystemChatTheme } from '@/packages/core-ui/chat/session-chat-theme';
+import { applyDocumentSessionChatTheme, initialSessionChatTheme } from './chat-page-theme';
 import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
 import {
   type SessionChatHostActions,
@@ -216,7 +217,7 @@ export function activateSessionChatPage(root: ReturnType<typeof createRoot>, act
   let GPUI_SESSION_CHAT_HOST_ACTIONS = createGpuiSessionChatHostActions(hotkeysValue);
   let hideAccountEmails = searchParams.get('hideAccountEmails') === 'true';
   let chatThemeSetting = normalizeSessionChatTheme(searchParams.get('theme'));
-  let chatTheme = resolveSessionChatTheme(chatThemeSetting);
+  let chatTheme = initialSessionChatTheme(searchParams);
   let chatFontFamily = searchParams.get('fontFamily')?.trim() ?? '';
   let chatCustomTranscriptWidthEnabled = searchParams.get('customTranscriptWidthEnabled') === 'true';
   let chatTranscriptWidthPercent = clampSessionChatTranscriptWidthPercent(
@@ -226,13 +227,6 @@ export function activateSessionChatPage(root: ReturnType<typeof createRoot>, act
   let chatVerboseMode = searchParams.get('verboseMode') === 'true';
   let chatSimpleMode = searchParams.get('simpleMode') === 'true';
   let renderReadyChat: ((theme: SessionChatTheme) => void) | null = null;
-
-  function applyDocumentChatTheme(theme: SessionChatTheme): void {
-    document.documentElement.style.colorScheme = theme;
-    /* Keep the document backing identical to the chat surface and native host. */
-    document.documentElement.style.backgroundColor = theme === 'light' ? '#fdfdfd' : '#0d0d0d';
-    document.body.style.backgroundColor = theme === 'light' ? '#fdfdfd' : '#0d0d0d';
-  }
 
   /*
 CDXC:SessionChat 2026-08-22:
@@ -261,7 +255,7 @@ made the chat's typeface impossible to change from CSS.
 
   document.body.dataset.sidebarTheme = 'plain-dark';
   document.body.classList.add('vscode-dark', 'native-sidebar-body');
-  applyDocumentChatTheme(chatTheme);
+  applyDocumentSessionChatTheme(chatTheme);
   applyDocumentChatFontFamily(chatFontFamily);
   applyDocumentChatTranscriptWidthPercent(chatTranscriptWidthPercent);
   window.ghostexSetHideAccountEmails = (value) => {
@@ -271,13 +265,13 @@ made the chat's typeface impossible to change from CSS.
   window.ghostexSetSessionChatTheme = (value) => {
     chatThemeSetting = normalizeSessionChatTheme(value);
     chatTheme = resolveSessionChatTheme(chatThemeSetting);
-    applyDocumentChatTheme(chatTheme);
+    applyDocumentSessionChatTheme(chatTheme);
     renderReadyChat?.(chatTheme);
   };
   const unsubscribeTheme = subscribeSystemChatTheme(() => {
     if (chatThemeSetting !== 'system') return;
     chatTheme = resolveSessionChatTheme(chatThemeSetting);
-    applyDocumentChatTheme(chatTheme);
+    applyDocumentSessionChatTheme(chatTheme);
     if (renderReadyChat) renderReadyChat(chatTheme);
   });
   window.ghostexSetSessionChatFontFamily = (value) => {

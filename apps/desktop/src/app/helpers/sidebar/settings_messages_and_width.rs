@@ -241,14 +241,7 @@ pub(crate) fn gpui_app_modal_sidebar_theme_from_settings(
 pub(crate) fn gpui_session_chat_theme_from_settings(
     settings: &serde_json::Map<String, serde_json::Value>,
 ) -> &'static str {
-    match settings
-        .get("sessionChatTheme")
-        .and_then(serde_json::Value::as_str)
-    {
-        Some("light") => "light",
-        Some("dark") => "dark",
-        _ => "system",
-    }
+    shared_settings::effective_content_color_scheme(settings, "sessionChatTheme")
 }
 
 pub(crate) fn gpui_session_chat_uses_light_theme(
@@ -256,7 +249,7 @@ pub(crate) fn gpui_session_chat_uses_light_theme(
 ) -> bool {
     match gpui_session_chat_theme_from_settings(settings) {
         "light" => true,
-        "system" => cef::system_page_color_scheme() == Some("light"),
+        "system" => gpui_system_uses_light_appearance(),
         _ => false,
     }
 }

@@ -24,6 +24,7 @@ import {
 import { cn } from '@/packages/components/utils';
 import type { GxserverSessionForkBranch } from '../../shared/gxserver-protocol';
 import type { SessionChatThemeSetting } from '../../shared/session-chat';
+import type { SidebarThemeSetting } from '../../shared/session-grid-contract-core';
 import { useSessionChatTheme } from './session-chat-theme';
 import { ghostexHotkeyTextFromKeyboardEvent, type ghostexHotkeySettings } from '../../shared/ghostex-hotkeys';
 import { useSessionChatScrollToBottom } from './use-session-chat-scroll-to-bottom';
@@ -271,6 +272,7 @@ export interface SessionChatViewProps {
   inputBackend?: 'lexical' | 'plain';
   /** Chat-only palette. It does not change the host application's chrome. */
   theme?: SessionChatThemeSetting;
+  appTheme?: SidebarThemeSetting;
   /** Let the transcript use its configured percentage instead of the composer column. */
   customTranscriptWidthEnabled?: boolean;
   /** Reveal thinking-owned tool calls without requiring a click. */
@@ -477,7 +479,8 @@ export function SessionChatView({
   showNewSessionWelcomeTitle = true,
   showShortcutLabels = true,
   showVerbosePill = true,
-  theme: themeSetting = 'system',
+  theme: themeSetting = 'app',
+  appTheme,
   transport,
   verboseMode = false,
   fileEditPreviews = false,
@@ -485,7 +488,7 @@ export function SessionChatView({
   onSimpleModeChange,
   working,
 }: SessionChatViewProps) {
-  const theme = useSessionChatTheme(themeSetting);
+  const theme = useSessionChatTheme(themeSetting, appTheme);
   useEffect(() => {
     // Chat dropdowns are portaled outside this root. Stamp the chat-only
     // palette on body so those explicitly scoped popup surfaces match.

@@ -667,6 +667,17 @@ impl GhostexGpuiApp {
                 .to_string(),
             ),
             (
+                "initialTheme",
+                if gpui_session_chat_uses_light_theme(
+                    shared_settings::shared_sidebar_settings_snapshot().object(),
+                ) {
+                    "light"
+                } else {
+                    "dark"
+                }
+                .to_string(),
+            ),
+            (
                 "fontFamily",
                 gpui_session_chat_font_family_from_settings(
                     shared_settings::shared_sidebar_settings_snapshot().object(),
