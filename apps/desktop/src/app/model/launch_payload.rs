@@ -393,6 +393,7 @@ impl CommandTerminalExplicitLaunchPayload {
 pub(crate) struct CommandTerminalLaunchPayloadSource {
     pub(crate) explicit_payloads_by_command_key:
         HashMap<CommandTerminalLaunchPayloadSourceKey, CommandTerminalExplicitLaunchPayload>,
+    pending_attach_input_by_session: HashMap<CommandSessionId, String>,
 }
 
 impl CommandTerminalLaunchPayloadSource {
@@ -400,15 +401,32 @@ impl CommandTerminalLaunchPayloadSource {
         Self::default()
     }
 
+    /// CDXC:CommandPane 2026-09-13 WHY:
+    /// Clicking an Action while its restored tab is still attaching must retain the command until that attach produces its launch payload.
+    pub(crate) fn queue_input_for_pending_attach(
+        &mut self,
+        session_id: CommandSessionId,
+        input: String,
+    ) {
+        self.pending_attach_input_by_session
+            .insert(session_id, input);
+    }
+
     pub(crate) fn insert_explicit_payload_for_mount_slot(
         &mut self,
         slot_id: CommandTerminalBodyMountSlotId,
-        payload: CommandTerminalExplicitLaunchPayload,
+        mut payload: CommandTerminalExplicitLaunchPayload,
     ) {
         /*
         CDXC:Titlebar 2026-06-24-14:24:
         Titlebar terminal Actions are allowed to feed command text only through the command-terminal launch-payload boundary for the exact command-pane mount slot they create. Keep the payload process-local and keyed by command runtime identity plus body slot; do not persist it, log it, infer it from labels/paths, or run it from the titlebar handler.
         */
+        if let Some(input) = self
+            .pending_attach_input_by_session
+            .remove(&slot_id.session_id)
+        {
+            payload.initial_input = Some(input);
+        }
         self.explicit_payloads_by_command_key.insert(
             CommandTerminalLaunchPayloadSourceKey::from_mount_slot(slot_id),
             payload,
@@ -448,11 +466,13 @@ impl CommandTerminalLaunchPayloadSource {
     }
 
     pub(crate) fn remove_payloads_for_command_session(&mut self, session_id: CommandSessionId) {
+        self.pending_attach_input_by_session.remove(&session_id);
         self.explicit_payloads_by_command_key
             .retain(|key, _| key.body_mount_slot_id.session_id != session_id);
     }
 
     pub(crate) fn remove_all_payloads(&mut self) {
+        self.pending_attach_input_by_session.clear();
         self.explicit_payloads_by_command_key.clear();
     }
 }

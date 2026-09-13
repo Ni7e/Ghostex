@@ -5,7 +5,7 @@
 // URI-encoding and random UUID utilities they depend on.
 // See docs/2026-08-22/repo-restructure/SPLITS.md C1.
 
-use std::{fs, io::Read, thread, time::Duration};
+use std::{collections::HashSet, fs, io::Read, thread, time::Duration};
 
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Security::Cryptography::{
@@ -181,12 +181,16 @@ pub(crate) fn gpui_update_command_terminal_gxserver_session_surface(
 
 pub(crate) fn gpui_prepare_command_terminal_attach_plan(
     input: GpuiCommandTerminalCreateInput,
+    closing_sessions: HashSet<GpuiLocalWorkspaceSessionKey>,
 ) -> Result<GpuiCommandTerminalAttachPlan, String> {
-    let reusable_key = gpui_reusable_command_terminal_gxserver_session_key(&input)?;
-    let (key, created) = match reusable_key {
-        Some(key) => (key, false),
-        None => (gpui_create_command_terminal_gxserver_session(&input)?, true),
-    };
+    let reusable_key =
+        gpui_reusable_command_terminal_gxserver_session_key(&input, &closing_sessions)?;
+    // CDXC:CommandPane 2026-09-13 WHY:
+    // A recovered live daemon discards provider startup text, so an explicit Action rerun must reach its shell through the existing-terminal input path.
+    if let Some(key) = reusable_key {
+        return gpui_prepare_existing_command_terminal_attach_plan(key, input.startup_text);
+    }
+    let key = gpui_create_command_terminal_gxserver_session(&input)?;
     match gpui_prepare_command_terminal_attach_plan_for_key(
         key.clone(),
         input.startup_text.as_deref(),
@@ -194,9 +198,7 @@ pub(crate) fn gpui_prepare_command_terminal_attach_plan(
     ) {
         Ok(plan) => Ok(plan),
         Err(message) => {
-            if created {
-                gpui_close_command_terminal_gxserver_session(&key);
-            }
+            gpui_close_command_terminal_gxserver_session(&key);
             Err(message)
         }
     }
@@ -204,6 +206,7 @@ pub(crate) fn gpui_prepare_command_terminal_attach_plan(
 
 pub(crate) fn gpui_reusable_command_terminal_gxserver_session_key(
     input: &GpuiCommandTerminalCreateInput,
+    closing_sessions: &HashSet<GpuiLocalWorkspaceSessionKey>,
 ) -> Result<Option<GpuiLocalWorkspaceSessionKey>, String> {
     let Some(command_id) = input.command_id.as_deref() else {
         return Ok(None);
@@ -241,10 +244,12 @@ pub(crate) fn gpui_reusable_command_terminal_gxserver_session_key(
             return None;
         }
         let session_id = gpui_trimmed_json_string_field(object, "sessionId")?;
-        gpui_remote_sidebar_session_id_allowed(session_id).then(|| GpuiLocalWorkspaceSessionKey {
+        let key = GpuiLocalWorkspaceSessionKey {
             project_id: input.project_id.clone(),
             session_id: session_id.to_string(),
-        })
+        };
+        (gpui_remote_sidebar_session_id_allowed(session_id) && !closing_sessions.contains(&key))
+            .then_some(key)
     });
     Ok(session)
 }

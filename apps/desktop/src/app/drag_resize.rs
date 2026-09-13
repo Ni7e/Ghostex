@@ -1878,6 +1878,10 @@ impl GhostexGpuiApp {
             .command_gxserver_attach_pending
             .insert(slot_id.session_id)
         {
+            if let Some(input) = initial_input {
+                self.command_terminal_launch_payload_source
+                    .queue_input_for_pending_attach(slot_id.session_id, input);
+            }
             return;
         }
         let command_pane_project_epoch = self.command_pane_project_epoch;
@@ -1985,6 +1989,10 @@ impl GhostexGpuiApp {
             .command_gxserver_attach_pending
             .contains(&slot_id.session_id)
         {
+            if let Some(input) = startup_text {
+                self.command_terminal_launch_payload_source
+                    .queue_input_for_pending_attach(slot_id.session_id, input);
+            }
             return;
         }
         if let Some(reference) = self.active_gpui_remote_project_reference() {
@@ -2017,11 +2025,17 @@ impl GhostexGpuiApp {
         self.command_gxserver_attach_pending
             .insert(slot_id.session_id);
         let command_pane_project_epoch = self.command_pane_project_epoch;
+        // CDXC:CommandPane 2026-09-13 WHY:
+        // Restart closes the old Action asynchronously. Exclude pending cleanup identities before yielding, or recovery can reattach the daemon that the close worker is about to kill.
+        let closing_sessions = self.pending_command_gxserver_cleanup.clone();
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
-            let result = background
-                .spawn(async move { gpui_prepare_command_terminal_attach_plan(input) })
-                .await;
+            let result =
+                background
+                    .spawn(async move {
+                        gpui_prepare_command_terminal_attach_plan(input, closing_sessions)
+                    })
+                    .await;
             let _ = this.update(cx, |this, cx| {
                 if this.command_pane_project_epoch != command_pane_project_epoch {
                     // The command pane was swapped to another project while the
