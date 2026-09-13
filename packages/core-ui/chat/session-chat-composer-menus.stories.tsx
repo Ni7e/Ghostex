@@ -35,6 +35,7 @@ const accounts: AgentAccountsState = {
 };
 
 function ComposerMenus({ theme, accountPanel }: { theme: 'light' | 'dark'; accountPanel: boolean }) {
+  const codex = getDefaultSidebarAgentByIcon('codex');
   useEffect(() => {
     const previous = document.body.dataset.sessionChatTheme;
     document.body.dataset.sessionChatTheme = theme;
@@ -99,7 +100,7 @@ function ComposerMenus({ theme, accountPanel }: { theme: 'light' | 'dark'; accou
             <AppTooltip content='GPT 6 Astra'>
               <Button variant='ghost' className='ghostex-chat-footer-control ghostex-chat-model-pill'>
                 <ProjectAgentLauncherIcon
-                  agent={getDefaultSidebarAgentByIcon('codex')}
+                  agent={codex ? { ...codex, isDefault: true } : undefined}
                   colorMode='brand'
                   accountIndicator='70'
                 />
