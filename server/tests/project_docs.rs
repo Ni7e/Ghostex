@@ -247,8 +247,9 @@ fn stops_directory_enumeration_at_the_global_scan_limit() {
     let project = tempfile::tempdir().expect("project tempdir");
     let docs = project.path().join("docs");
     fs::create_dir(&docs).expect("docs directory");
-    for index in (0..1_300).rev() {
-        fs::write(docs.join(format!("guide-{index:04}.md")), index.to_string())
+    // The global scan limit is FILE_LIST_MAX_ENTRIES (20k); exceed it by one.
+    for index in (0..20_001).rev() {
+        fs::write(docs.join(format!("guide-{index:05}.md")), index.to_string())
             .expect("docs entry");
     }
 
@@ -264,7 +265,7 @@ fn stops_directory_enumeration_at_the_global_scan_limit() {
     assert_eq!(listed["requestId"], "bounded-list");
     assert!(listed["error"]
         .as_str()
-        .is_some_and(|error| error.contains("too many directory entries")));
+        .is_some_and(|error| error.contains("exceeds the scan limit")));
 }
 
 /// A Docs directory ADDS a tree; it never takes the project's own docs away.
