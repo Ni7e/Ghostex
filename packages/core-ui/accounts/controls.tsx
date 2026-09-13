@@ -160,7 +160,7 @@ export function PolicyControls({
               <SelectTrigger aria-label={`${scope} account preference`} className='w-full'>
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className='ghostex-session-chat-popup'>
                 <SelectItem value='leastUsed'>Lowest usage first</SelectItem>
                 <SelectItem value='mostUsed'>Highest usage first</SelectItem>
                 <SelectItem value='soonestReset'>Earliest reset first</SelectItem>

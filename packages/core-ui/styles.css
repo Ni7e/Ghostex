@@ -33,17 +33,18 @@
  * --app-dropdown-background so Dark 1 uses #191919, Dark 2 preserves #0e0e0e,
  * and Light can render shadcn/Base UI overlay content on light surfaces.
  */
-[data-slot='dropdown-menu-content'],
-[data-slot='dropdown-menu-sub-content'],
-[data-slot='popover-content'],
-[data-slot='select-content'],
-.command-icon-picker-menu,
-.git-action-menu,
-.quick-action-menu,
-.session-context-menu {
-  background: var(--app-dropdown-background) !important;
-  background-color: var(--app-dropdown-background) !important;
-  border: 1px solid var(--ghostex-tooltip-border, rgba(255, 255, 255, 0.12)) !important;
+/* CDXC:DesignSystem 2026-09-13 DECISION:
+ * User: shared popup defaults must respect the owning theme and a component's explicit styling.
+ * Base UI primitives already use bg-popover and the shared border style; only bespoke menus need these base-layer defaults.
+ */
+@layer base {
+  .command-icon-picker-menu,
+  .git-action-menu,
+  .quick-action-menu,
+  .session-context-menu {
+    background: var(--popover);
+    border: 1px solid var(--ghostex-tooltip-border, var(--border));
+  }
 }
 
 [data-slot='dropdown-menu-checkbox-item'],
@@ -141,11 +142,6 @@ button,
   cursor: default !important;
 }
 
-* {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
 /*
  * CDXC:Sidebar 2026-07-22:
  * The sidebar must never rubber-band, per explicit user request. Chromium can
@@ -153,44 +149,17 @@ button,
  * not scroll, so the root opts out alongside the sidebar scrollers in
  * group-panels.css that hard-stop at their ends.
  */
-html,
-body {
+html:has(> body.native-sidebar-body),
+html:has(> body.app-modal-host-body),
+body.native-sidebar-body,
+body.app-modal-host-body {
   overscroll-behavior: none;
 }
 
-*::-webkit-scrollbar {
-  display: none;
-  height: 0;
-  width: 0;
-}
-
-/* CDXC:DesignSystem 2026-05-07-18:03: Only shadcn Button instances need
-   protection from legacy sidebar button globals. Radix controls such as Select
-   and Switch also render buttons with data-slot attributes; resetting all of
-   them strips their shadcn backgrounds and makes dropdowns blend into the
-   settings modal. */
+/* Shared buttons own their appearance; Settings supplies its text scale. */
 .ghostex-settings-shadcn button[data-slot='button'] {
-  background: revert-layer;
-  border: revert-layer;
-  border-radius: var(--settings-radius-control);
-  color: revert-layer;
-  cursor: revert-layer;
-  font: revert-layer;
-  transition: revert-layer;
-  /*
-   * CDXC:AppModal 2026-08-24:
-   * `font: revert-layer` rolls the whole font shorthand back to the shadcn
-   * utility layer, which reinstates Button's 14px/500. Re-state the redesign's
-   * quiet type here, after the shorthand, so buttons match the 13px/400 used
-   * by every other control in the same row.
-   */
   font-size: var(--settings-text-body);
   font-weight: 400;
-}
-
-.ghostex-settings-shadcn button[data-slot='button']:disabled {
-  cursor: revert-layer;
-  opacity: revert-layer;
 }
 
 /*
@@ -400,63 +369,63 @@ body {
 }
 
 /*
- * CDXC:Theming 2026-05-29:
- * The app chrome now uses squared controls everywhere. Keep this as a final
- * theme override so shadcn/Base UI primitives and older bespoke sidebar
- * controls share the same zero-radius treatment. Select popups and their rows
- * are deliberately excluded: they are portaled outside modal scopes, so their
- * shared primitive must retain the app's rounded dropdown geometry everywhere.
+ * CDXC:DesignSystem 2026-09-13 WHY:
+ * The May square-theme reset was unlayered, so it overrode every Tailwind rounded utility regardless of specificity or import order.
+ * Keep legacy square geometry only as a base-layer default; components and utilities own their explicit corners.
+ * This supersedes the 2026-05-29 blanket square override. The matching radius token lives in styles/shadcn.css.
  */
-:is(
-  button,
-  input,
-  textarea,
-  select,
-  [role='button'],
-  [data-slot='button'],
-  [data-slot='button-group'],
-  [data-slot='button-group-text'],
-  [data-slot='card'],
-  [data-slot='command'],
-  [data-slot='command-item'],
-  [data-slot='dialog-content'],
-  [data-slot='dropdown-menu-content'],
-  [data-slot='dropdown-menu-item'],
-  [data-slot='dropdown-menu-checkbox-item'],
-  [data-slot='dropdown-menu-radio-item'],
-  [data-slot='dropdown-menu-sub-content'],
-  [data-slot='dropdown-menu-sub-trigger'],
-  [data-slot='empty'],
-  [data-slot='empty-icon'],
-  [data-slot='field-label'],
-  [data-slot='input-group'],
-  [data-slot='popover-content'],
-  [data-slot='select-trigger'],
-  [data-slot='slider-thumb'],
-  [data-slot='slider-track'],
-  [data-slot='switch'],
-  [data-slot='switch-thumb'],
-  [data-slot='tabs-list'],
-  [data-slot='tabs-trigger'],
-  [data-slot='textarea'],
-  [data-slot='toggle'],
-  [data-slot='toggle-group'],
-  [data-slot='tooltip-content'],
-  .app-modal-host-body,
-  .command-icon-picker-menu,
-  .command-icon-picker-option,
-  .git-action-menu,
-  .git-action-menu-item,
-  .group-agent-menu-item,
-  .group-control-menu-item,
-  .quick-action-menu,
-  .quick-action-menu-item,
-  .session-context-menu,
-  .session-context-menu-item,
-  .session-context-menu-split-item,
-  .workspace-theme-menu-item
-) {
-  border-radius: 0;
+@layer base {
+  :is(
+    button,
+    input,
+    textarea,
+    select,
+    [role='button'],
+    [data-slot='button'],
+    [data-slot='button-group'],
+    [data-slot='button-group-text'],
+    [data-slot='card'],
+    [data-slot='command'],
+    [data-slot='command-item'],
+    [data-slot='dialog-content'],
+    [data-slot='dropdown-menu-content'],
+    [data-slot='dropdown-menu-item'],
+    [data-slot='dropdown-menu-checkbox-item'],
+    [data-slot='dropdown-menu-radio-item'],
+    [data-slot='dropdown-menu-sub-content'],
+    [data-slot='dropdown-menu-sub-trigger'],
+    [data-slot='empty'],
+    [data-slot='empty-icon'],
+    [data-slot='field-label'],
+    [data-slot='input-group'],
+    [data-slot='popover-content'],
+    [data-slot='select-trigger'],
+    [data-slot='slider-thumb'],
+    [data-slot='slider-track'],
+    [data-slot='switch'],
+    [data-slot='switch-thumb'],
+    [data-slot='tabs-list'],
+    [data-slot='tabs-trigger'],
+    [data-slot='textarea'],
+    [data-slot='toggle'],
+    [data-slot='toggle-group'],
+    [data-slot='tooltip-content'],
+    .app-modal-host-body,
+    .command-icon-picker-menu,
+    .command-icon-picker-option,
+    .git-action-menu,
+    .git-action-menu-item,
+    .group-agent-menu-item,
+    .group-control-menu-item,
+    .quick-action-menu,
+    .quick-action-menu-item,
+    .session-context-menu,
+    .session-context-menu-item,
+    .session-context-menu-split-item,
+    .workspace-theme-menu-item
+  ) {
+    border-radius: 0;
+  }
 }
 
 /*
@@ -506,11 +475,8 @@ body {
  * Dropdown menus, submenus, popovers, and the chat surface's right-click
  * context menu share the select popup's geometry: an
  * 8px panel with 6px rows, so a hovered row's highlight sits inside the panel's
- * 4px padding. The square-theme reset above still lists these slots for the
- * rest of its chrome family, and Tailwind's `rounded-[8px]`/`rounded-[6px]` on
- * the shared primitives lives in the utilities layer, which unlayered CSS
- * outranks. Re-assert the radius here, after that reset, so the computed value
- * is rounded in the sidebar, the modal host, and portaled menus alike.
+ * 4px padding. Keep the shared geometry consistent in the sidebar, modal host,
+ * and portaled menus alike.
  */
 [data-slot='context-menu-content'],
 [data-slot='context-menu-sub-content'],
@@ -557,58 +523,43 @@ body {
   border-radius: 6px;
 }
 
-.app-modal-host-body [data-slot='dialog-content'],
-[data-slot='dialog-content'] {
-  border-radius: 0;
+@layer base {
+  .app-modal-host-body [data-slot='dialog-content'],
+  [data-slot='dialog-content'] {
+    border-radius: 0;
+  }
 }
 
 /*
- * CDXC:SessionChat 2026-08-02:
- * The Session Chat surface keeps rounded controls even though the shared
- * Button primitive and app chrome are square by default. Apply the chat radius
- * explicitly instead of reverting to the primitive's rounded-none layer. The
- * popup marker class covers chat-owned dropdown menus portalled outside the
- * chat root. Collapse rails and the terminal/agent floating strip keep their
- * purpose-built geometry. File-change cards also own their link, code pane,
- * and padded disclosure-button shapes.
+ * CDXC:SessionChat 2026-09-13 WHY:
+ * Chat defaults to rounded controls, including its portaled menus, but component classes must be able to choose their own radius.
+ * The base layer replaces the 2026-08-02 unlayered override so rounded-sm, rounded-full and rounded-none work on newly added controls.
+ * Collapse rails, floating terminal controls and file-change cards retain their own geometry.
  */
-.ghostex-session-chat-scope :is(input, textarea),
-.ghostex-session-chat-popup,
-.ghostex-session-chat-scope
-  :is(button, [role='button'], [data-slot='button']):not([data-slot='session-chat-host-action']):not(
-    .ghostex-chat-expansion-rail
-  ):not(.ghostex-chat-file-change-card button):not(.ghostex-chat-terminal-search-button),
-.ghostex-session-chat-popup
-  :is(
-    button,
-    [role='button'],
-    [data-slot='dropdown-menu-item'],
-    [data-slot='dropdown-menu-checkbox-item'],
-    [data-slot='dropdown-menu-radio-item'],
-    [data-slot='dropdown-menu-sub-trigger'],
-    [data-slot='dropdown-menu-sub-content']
-  ):not(.ghostex-chat-file-change-card button) {
-  border-radius: calc(var(--radius, 0.625rem) - 2px);
+@layer base {
+  .ghostex-session-chat-scope :is(input, textarea),
+  .ghostex-session-chat-popup,
+  .ghostex-session-chat-scope
+    :is(button, [role='button'], [data-slot='button']):not([data-slot='session-chat-host-action']):not(
+      .ghostex-chat-expansion-rail
+    ):not(.ghostex-chat-file-change-card button):not(.ghostex-chat-terminal-search-button),
+  .ghostex-session-chat-popup
+    :is(
+      button,
+      [role='button'],
+      [data-slot='dropdown-menu-item'],
+      [data-slot='dropdown-menu-checkbox-item'],
+      [data-slot='dropdown-menu-radio-item'],
+      [data-slot='dropdown-menu-sub-trigger'],
+      [data-slot='dropdown-menu-sub-content']
+    ):not(.ghostex-chat-file-change-card button) {
+    border-radius: calc(var(--radius, 0.625rem) - 2px);
+  }
 }
 
 .ghostex-session-chat-scope :is(input, textarea),
 .ghostex-session-chat-popup {
   border-radius: revert-layer;
-}
-
-/*
- * Chat popups are portalled under <body>, while their palette belongs to the
- * chat surface rather than the surrounding desktop shell. The shared overlay
- * rule at the top of this sheet deliberately uses !important, so reassert the
- * chat-owned surface tokens here after that rule. Without this, light chat
- * menus combine light-theme foreground tokens with the shell's near-black
- * --app-dropdown-background.
- */
-body[data-session-chat-theme] .ghostex-session-chat-popup {
-  background: var(--popover) !important;
-  background-color: var(--popover) !important;
-  border-color: var(--border) !important;
-  color: var(--popover-foreground);
 }
 
 /* Preserve controls intentionally designed as circles/pills. Send is 6px, not
@@ -4655,54 +4606,56 @@ body[data-session-chat-theme] .ghostex-session-chat-popup {
   }
 }
 
-.ghostex-settings-shadcn [data-slot='button'],
-.ghostex-settings-shadcn [data-slot='button-group'],
-.ghostex-settings-shadcn [data-slot='button-group-text'],
-.ghostex-settings-shadcn [data-slot='card'],
-.ghostex-settings-shadcn [data-slot='command'],
-.ghostex-settings-shadcn [data-slot='command-item'],
-.ghostex-settings-shadcn [data-slot='dropdown-menu-content'],
-.ghostex-settings-shadcn [data-slot='dropdown-menu-item'],
-.ghostex-settings-shadcn [data-slot='dropdown-menu-sub-content'],
-.ghostex-settings-shadcn [data-slot='dropdown-menu-sub-trigger'],
-.ghostex-settings-shadcn [data-slot='empty'],
-.ghostex-settings-shadcn [data-slot='empty-icon'],
-.ghostex-settings-shadcn [data-slot='field-label'],
-.ghostex-settings-shadcn [data-slot='input'],
-.ghostex-settings-shadcn [data-slot='input-group'],
-.ghostex-settings-shadcn [data-slot='popover-content'],
-.ghostex-settings-shadcn [data-slot='select-content'],
-.ghostex-settings-shadcn [data-slot='select-item'],
-.ghostex-settings-shadcn [data-slot='select-trigger'],
-.ghostex-settings-shadcn [data-slot='slider-thumb'],
-.ghostex-settings-shadcn [data-slot='slider-track'],
-.ghostex-settings-shadcn [data-slot='switch'],
-.ghostex-settings-shadcn [data-slot='switch-thumb'],
-.ghostex-settings-shadcn [data-slot='tabs-list'],
-.ghostex-settings-shadcn [data-slot='tabs-trigger'],
-.ghostex-settings-shadcn [data-slot='textarea'],
-.ghostex-settings-shadcn [data-slot='toggle'],
-.ghostex-settings-shadcn [data-slot='toggle-group'],
-.ghostex-settings-shadcn [data-slot='tooltip-content'],
-.ghostex-settings-shadcn .command-icon-picker-option,
-.ghostex-settings-shadcn .first-launch-setup-preference-card,
-.ghostex-settings-shadcn .first-launch-setup-preference-command-preview,
-.ghostex-settings-shadcn .first-launch-setup-preference-icon,
-.ghostex-settings-shadcn .first-launch-setup-preference-input,
-.ghostex-settings-shadcn .first-launch-setup-preference-select,
-.ghostex-settings-shadcn .first-launch-setup-preset-button,
-.ghostex-settings-shadcn .settings-management-edit-button,
-.ghostex-settings-shadcn .settings-management-icon,
-.ghostex-settings-shadcn .settings-management-row,
-.ghostex-settings-shadcn .settings-open-target-icon,
-.ghostex-settings-shadcn .settings-row-advanced-button,
-.ghostex-settings-shadcn .settings-row-info-button,
-.ghostex-settings-shadcn .settings-show-advanced-toggle {
-  border-radius: var(--settings-radius-control);
-}
-
-.ghostex-settings-shadcn .rounded-none {
-  border-radius: var(--settings-radius-control) !important;
+/* CDXC:DesignSystem 2026-09-13 WHY:
+ * Shared primitives leave default geometry to the base layer instead of hard-coding rounded-none, so Settings keeps its intended radii without overriding explicit component utilities.
+ * Structural flat corners inside joined controls remain explicit in those components.
+ */
+@layer base {
+  .ghostex-settings-shadcn [data-slot='button'],
+  .ghostex-settings-shadcn [data-slot='button-group'],
+  .ghostex-settings-shadcn [data-slot='button-group-text'],
+  .ghostex-settings-shadcn [data-slot='card'],
+  .ghostex-settings-shadcn [data-slot='command'],
+  .ghostex-settings-shadcn [data-slot='command-item'],
+  .ghostex-settings-shadcn [data-slot='dropdown-menu-content'],
+  .ghostex-settings-shadcn [data-slot='dropdown-menu-item'],
+  .ghostex-settings-shadcn [data-slot='dropdown-menu-sub-content'],
+  .ghostex-settings-shadcn [data-slot='dropdown-menu-sub-trigger'],
+  .ghostex-settings-shadcn [data-slot='empty'],
+  .ghostex-settings-shadcn [data-slot='empty-icon'],
+  .ghostex-settings-shadcn [data-slot='field-label'],
+  .ghostex-settings-shadcn [data-slot='input'],
+  .ghostex-settings-shadcn [data-slot='input-group'],
+  .ghostex-settings-shadcn [data-slot='popover-content'],
+  .ghostex-settings-shadcn [data-slot='select-content'],
+  .ghostex-settings-shadcn [data-slot='select-item'],
+  .ghostex-settings-shadcn [data-slot='select-trigger'],
+  .ghostex-settings-shadcn [data-slot='slider-thumb'],
+  .ghostex-settings-shadcn [data-slot='slider-track'],
+  .ghostex-settings-shadcn [data-slot='switch'],
+  .ghostex-settings-shadcn [data-slot='switch-thumb'],
+  .ghostex-settings-shadcn [data-slot='tabs-list'],
+  .ghostex-settings-shadcn [data-slot='tabs-trigger'],
+  .ghostex-settings-shadcn [data-slot='textarea'],
+  .ghostex-settings-shadcn [data-slot='toggle'],
+  .ghostex-settings-shadcn [data-slot='toggle-group'],
+  .ghostex-settings-shadcn [data-slot='tooltip-content'],
+  .ghostex-settings-shadcn .command-icon-picker-option,
+  .ghostex-settings-shadcn .first-launch-setup-preference-card,
+  .ghostex-settings-shadcn .first-launch-setup-preference-command-preview,
+  .ghostex-settings-shadcn .first-launch-setup-preference-icon,
+  .ghostex-settings-shadcn .first-launch-setup-preference-input,
+  .ghostex-settings-shadcn .first-launch-setup-preference-select,
+  .ghostex-settings-shadcn .first-launch-setup-preset-button,
+  .ghostex-settings-shadcn .settings-management-edit-button,
+  .ghostex-settings-shadcn .settings-management-icon,
+  .ghostex-settings-shadcn .settings-management-row,
+  .ghostex-settings-shadcn .settings-open-target-icon,
+  .ghostex-settings-shadcn .settings-row-advanced-button,
+  .ghostex-settings-shadcn .settings-row-info-button,
+  .ghostex-settings-shadcn .settings-show-advanced-toggle {
+    border-radius: var(--settings-radius-control);
+  }
 }
 
 /*
@@ -4737,20 +4690,23 @@ body[data-session-chat-theme] .ghostex-session-chat-popup {
   border-radius: var(--settings-radius-compact);
 }
 
-.ghostex-settings-shadcn[data-slot='dialog-content'],
-.ghostex-settings-shadcn [data-slot='card'],
-.ghostex-settings-shadcn [data-slot='dialog-content'],
-.ghostex-settings-shadcn [data-slot='empty'],
-.ghostex-settings-shadcn [data-slot='popover-content'],
-.ghostex-settings-shadcn .first-launch-setup-preference-card {
-  border-radius: var(--settings-radius-section) !important;
+@layer base {
+  .ghostex-settings-shadcn[data-slot='dialog-content'],
+  .ghostex-settings-shadcn [data-slot='card'],
+  .ghostex-settings-shadcn [data-slot='dialog-content'],
+  .ghostex-settings-shadcn [data-slot='empty'],
+  .ghostex-settings-shadcn [data-slot='popover-content'],
+  .ghostex-settings-shadcn .first-launch-setup-preference-card {
+    border-radius: var(--settings-radius-section);
+  }
 }
 
+/* CDXC:DesignSystem 2026-09-13 WHY:
+ * A size utility describes dimensions, not shape; matching its text also caught descendant icon variants and rounded segmented-control items.
+ * Only named icon tiles receive this geometry. Explicit rounded-none is no longer rewritten either.
+ */
 .ghostex-settings-shadcn .settings-management-icon,
-.ghostex-settings-shadcn .settings-open-target-icon,
-.ghostex-settings-shadcn [class*='size-'],
-.ghostex-settings-shadcn [class*=' w-10'],
-.ghostex-settings-shadcn [class*=' h-10'] {
+.ghostex-settings-shadcn .settings-open-target-icon {
   border-radius: var(--settings-radius-adaptive);
 }
 
@@ -4814,11 +4770,8 @@ body[data-session-chat-theme] .ghostex-session-chat-popup {
  * single hairline, only the outer corners rounded, and a highlighted fill on
  * the selected segment.
  *
- * Stated here rather than left to the component's utility classes because the
- * app's square theme and the settings sheet rewrite radii and button chrome
- * from unlayered rules that beat Tailwind's utilities layer. Keeping the
- * declaration unscoped means every surface — settings, modals, sidebar —
- * renders exactly one segmented control.
+ * Keeping the declaration unscoped means settings, modals and the sidebar
+ * render the same segmented control.
  */
 [data-slot='segmented-control'] {
   border: 1px solid var(--settings-hairline, var(--border));
@@ -4827,13 +4780,7 @@ body[data-session-chat-theme] .ghostex-session-chat-popup {
   overflow: hidden;
 }
 
-/*
- * The segment rules are written as descendants of the container so they
- * outrank the settings sheet's blanket `[class*='size-']` radius rule, which
- * matches any element whose class list mentions a size utility — the icon
- * sizing variant on these segments does — and would otherwise round each
- * segment's fill into a separate button again.
- */
+/* The container owns the outside corners; segments remain flat within it. */
 [data-slot='segmented-control'] [data-slot='segmented-control-item'] {
   background: transparent;
   border: 0;

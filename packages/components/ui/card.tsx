@@ -8,7 +8,7 @@ function Card({ className, size = 'default', ...props }: React.ComponentProps<'d
       data-slot='card'
       data-size={size}
       className={cn(
-        'group/card flex flex-col gap-6 overflow-hidden rounded-none bg-card py-6 text-sm text-card-foreground ring-1 ring-foreground/10 has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:py-4 *:[img:first-child]:rounded-t-none *:[img:last-child]:rounded-b-none',
+        'group/card flex flex-col gap-6 overflow-hidden bg-card py-6 text-sm text-card-foreground ring-1 ring-foreground/10 has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:py-4 *:[img:first-child]:rounded-t-none *:[img:last-child]:rounded-b-none',
         className
       )}
       {...props}

@@ -477,7 +477,19 @@ body {
   min-height: 100%;
 }
 
-#root {
+/* CDXC:Tooltips 2026-09-13 DECISION:
+ * User: chat tooltips are light in light mode. The provider carries the owning chat's theme through portals so the surrounding shell can keep its own tooltip appearance.
+ */
+[data-slot='tooltip-content'][data-tooltip-theme='light'] {
+  color-scheme: light;
+  --ghostex-tooltip-background: rgba(255, 255, 255, 0.98);
+  --ghostex-tooltip-foreground: #27272a;
+  --ghostex-tooltip-strong-foreground: #18181b;
+  --ghostex-tooltip-border: rgba(0, 0, 0, 0.14);
+  --ghostex-tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+body:where(.native-sidebar-body, .app-modal-host-body) > #root {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
@@ -485,38 +497,55 @@ body {
 }
 
 body {
-  overflow: hidden;
-  padding: calc(12px * var(--sidebar-density-scale));
-  zoom: var(--ghostex-agent-manager-zoom, 100%);
   font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', sans-serif);
   font-size: calc(var(--vscode-font-size, 13px) * var(--sidebar-density-scale));
   font-weight: var(--vscode-font-weight, 400);
   line-height: 1.4;
   color: var(--app-foreground);
   background: var(--app-background);
-  -webkit-user-select: none;
-  user-select: none;
   transition:
     background-color 180ms ease,
     color 180ms ease;
 }
 
-/* CDXC:DesignSystem 2026-05-07-18:57: shadcn/Radix controls render
-   button elements with data-slot attributes, and invisible connector buttons
-   own explicit component styles. Keep the legacy sidebar button base low
-   specificity so component classes can remove borders while Select triggers
-   keep their shadcn bg-input/30 fill. */
-button:where(:not([data-slot])) {
-  border: 1px solid var(--app-border);
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  transition:
-    border-color 120ms ease,
-    background-color 120ms ease,
-    color 120ms ease;
+/* CDXC:DesignSystem 2026-09-13 DECISION:
+ * User: keep viewport locks and non-selectable chrome in the app shell, so new pages can scroll and their content can be selected normally.
+ * Existing desktop, web and mobile hosts already mark their body; scrolling panes and sidebar scrollbar rules keep ownership of their own behavior.
+ */
+body:where(.native-sidebar-body, .app-modal-host-body) {
+  overflow: hidden;
+  padding: calc(12px * var(--sidebar-density-scale));
+  zoom: var(--ghostex-agent-manager-zoom, 100%);
+}
+
+@layer base {
+  :where(button, [role='button'], .sidebar-reference-layout, body[data-titlebar-dropdown-panel]) {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  :where(input, textarea, [contenteditable='true']) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
+/* CDXC:DesignSystem 2026-09-13 WHY:
+ * The legacy button defaults must live below component styles and Tailwind utilities; selector specificity alone cannot override unlayered CSS.
+ * Named primitive slots continue to own their entire appearance.
+ */
+@layer base {
+  button:where(:not([data-slot])) {
+    border: 1px solid var(--app-border);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    transition:
+      border-color 120ms ease,
+      background-color 120ms ease,
+      color 120ms ease;
+  }
 }
 
 input,
@@ -525,9 +554,11 @@ select {
   font-family: inherit;
 }
 
-button:where(:not([data-slot])):disabled {
-  cursor: default;
-  opacity: 0.58;
+@layer base {
+  button:where(:not([data-slot])):disabled {
+    cursor: default;
+    opacity: 0.58;
+  }
 }
 
 .stack {
