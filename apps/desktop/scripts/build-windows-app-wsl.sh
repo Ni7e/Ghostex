@@ -434,6 +434,9 @@ mkdir -p "$APP_DIR/resources/native"
 for native_binary in gxserver.exe ghostex.exe ghostex-session-host.exe; do
 	cp "$RUST_RELEASE_DIR/$native_binary" "$APP_DIR/resources/native/$native_binary"
 done
+# Keep this seal identical to build-windows-app.ps1; gxserver reads the identity one directory above its native binaries.
+NATIVE_FINGERPRINT="sha256:$(for native_binary in gxserver.exe ghostex.exe ghostex-session-host.exe; do sha256sum "$APP_DIR/resources/native/$native_binary" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
+printf '{"buildIdentity":"gxserver:0.1.0:%s","fingerprint":"%s","packageVersion":"0.1.0"}\n' "$NATIVE_FINGERPRINT" "$NATIVE_FINGERPRINT" >"$APP_DIR/resources/build-identity.json"
 LOCALES_DIR=""
 for locale_candidate in "$CEF_RELEASE/locales" "$CEF_RESOURCES/locales"; do
 	if [[ -d "$locale_candidate" ]]; then

@@ -216,6 +216,21 @@ New-Item -ItemType Directory -Force -Path $NativeResources | Out-Null
 foreach ($binary in @("gxserver.exe", "ghostex.exe", "ghostex-session-host.exe")) {
     Copy-Item (Join-Path $RepoRoot "server/target/release/$binary") $NativeResources
 }
+# CDXC:PlatformSupport 2026-09-14 WHY:
+# Native gxserver survives app exit. Seal its runtime identity so an updated app replaces an older control plane while preserving session hosts.
+$NativeHashes = @("gxserver.exe", "ghostex.exe", "ghostex-session-host.exe") | ForEach-Object {
+    (Get-FileHash (Join-Path $NativeResources $_) -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$NativeHasher = [Security.Cryptography.SHA256]::Create()
+try {
+    $NativeFingerprint = "sha256:" + (-join ($NativeHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes(($NativeHashes -join "`n") + "`n")) | ForEach-Object { $_.ToString("x2") }))
+} finally { $NativeHasher.Dispose() }
+$NativeIdentity = @{
+    buildIdentity = "gxserver:0.1.0:$NativeFingerprint"
+    fingerprint = $NativeFingerprint
+    packageVersion = "0.1.0"
+} | ConvertTo-Json
+[IO.File]::WriteAllText((Join-Path $AppDir "resources/build-identity.json"), $NativeIdentity + "`n", [Text.UTF8Encoding]::new($false))
 $WslArchive = $env:GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE
 $WslCodeServerArchive = $env:GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE
 $RequireWslArchive = $env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0"

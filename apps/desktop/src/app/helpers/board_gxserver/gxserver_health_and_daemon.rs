@@ -99,7 +99,6 @@ pub(crate) fn gpui_probe_local_gxserver_health_with_diagnostics()
             gpui_gxserver_protocol_mismatch_message(reported_protocol),
         );
     }
-    #[cfg(not(target_os = "windows"))]
     if let Some(expected_build_identity) = gpui_expected_local_gxserver_build_identity() {
         let reported_build_identity = health
             .get("buildIdentity")
@@ -123,8 +122,13 @@ pub(crate) fn gpui_probe_local_gxserver_health_with_diagnostics()
     )
 }
 
-#[cfg(not(target_os = "windows"))]
 pub(crate) fn gpui_expected_local_gxserver_build_identity() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    if windows_terminal_backend::current_preference()
+        == windows_terminal_backend::WindowsTerminalBackendPreference::Wsl
+    {
+        return None;
+    }
     let binary = gpui_resolve_local_gxserver_binary()?;
     let package_root = binary.parent()?.parent()?;
     let value: serde_json::Value =
