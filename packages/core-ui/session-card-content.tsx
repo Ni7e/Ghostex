@@ -159,6 +159,11 @@ export function SessionCardContent({
   });
   const displayedHeadingText = isGeneratingFirstPromptTitle ? 'Generating title...' : headingText;
   const hasLiveTimerDeadline = Boolean(session.delayedSendDeadlineAt || session.closeAfterDoneDeadlineAt);
+  /**
+   * CDXC:SessionStatus 2026-09-13 DECISION:
+   * User: hide Last Active while the question dot is shown so they do not overlap, including when the session is not working.
+   */
+  const canShowLastActiveTime = showLastActiveTime && (session.pendingQuestionCount ?? 0) === 0;
   /*
   CDXC:DelayedSend 2026-08-31:
   gxserver persists Delayed Send and publishes an absolute deadline, but its
@@ -168,13 +173,13 @@ export function SessionCardContent({
   this interval changes display text only and does not own or fire the timer.
   */
   const relativeTimeTick = useRelativeTimeTick(
-    hasLiveTimerDeadline || (showLastActiveTime && Boolean(session.lastInteractionAt)),
+    hasLiveTimerDeadline || (canShowLastActiveTime && Boolean(session.lastInteractionAt)),
     1_000,
     hasLiveTimerDeadline ? undefined : session.lastInteractionAt
   );
   const timerTrailingLabel = getSessionCardTimerTrailingLabel(session, relativeTimeTick);
   const hasLastInteractionTime =
-    timerTrailingLabel === undefined && showLastActiveTime && Boolean(session.lastInteractionAt);
+    timerTrailingLabel === undefined && canShowLastActiveTime && Boolean(session.lastInteractionAt);
   const showHeaderLoadingSpinner = session.isReloading === true || isGeneratingFirstPromptTitle;
   const showTerminalSessionIcon = !hideHeaderAgentIcon && shouldShowTerminalSessionIcon(session);
   const shouldAllowFullWidthTitle =

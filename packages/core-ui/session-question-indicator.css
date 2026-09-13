@@ -15,7 +15,7 @@
   top: 5px;
   left: 5px;
   border-radius: 50%;
-  background: var(--done-attention-color, #95d7f6);
+  background: #f472b6;
 }
 
 .session-question-indicator[data-working='true']::before {
