@@ -123,12 +123,7 @@ impl GhostexGpuiApp {
                     })
                     .await;
                 match preparation {
-                    Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell) => {
-                        let _ = this.update(cx, |this, cx| {
-                            this.replay_sidebar_gxserver_bootstrap(cx);
-                        });
-                        return;
-                    }
+                    Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell) => {}
                     Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::Wsl { .. }) => {}
                     Err(message) => {
                         if windows_first_run_setup_active {
@@ -333,6 +328,13 @@ impl GhostexGpuiApp {
                 match health {
                     GpuiLocalGxserverHealthState::Healthy { tools_available } => {
                         let _ = this.update(cx, |this, cx| {
+                            #[cfg(windows)]
+                            if windows_first_run_setup_active && tools_available {
+                                this.windows_first_run_setup_state = GpuiWindowsFirstRunSetupState::Ready;
+                                let mut state = load_gpui_first_run_onboarding_state();
+                                state.windows_terminal_setup_complete = true;
+                                persist_gpui_first_run_onboarding_state(&state);
+                            }
                             if !tools_available {
                                 this.show_gpui_gxserver_bootstrap_toast(
                                     "error",

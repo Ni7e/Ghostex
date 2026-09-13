@@ -798,7 +798,7 @@ fn create_worktree_for_run(
     let name = format!("{}-automation-{slug}", source_project.name);
     let path = parent.join(&name);
     let branch = format!("ghostex/automation/{slug}");
-    let output = Command::new("git")
+    let output = crate::platform::process::background_command("git")
         .current_dir(&source_project.path)
         .arg("worktree")
         .arg("add")
@@ -857,7 +857,7 @@ fn archive_run(
                 .get("sourcePath")
                 .and_then(Value::as_str)
                 .unwrap_or(&project.path);
-            let _ = Command::new("git")
+            let _ = crate::platform::process::background_command("git")
                 .current_dir(source)
                 .arg("worktree")
                 .arg("remove")
@@ -1615,7 +1615,7 @@ fn is_path_inside_git_work_tree(path: &str) -> bool {
             }
         }
     }
-    let output = Command::new("git")
+    let output = crate::platform::process::background_command("git")
         .current_dir(path)
         .arg("rev-parse")
         .arg("--is-inside-work-tree")

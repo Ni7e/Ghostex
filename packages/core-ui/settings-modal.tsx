@@ -1,3 +1,4 @@
+import { WindowsTerminalFields } from './settings-modal/tabs/windows-terminal-fields';
 import { useSystemColorScheme } from './use-system-color-scheme';
 import {
   Fragment,
@@ -2062,17 +2063,13 @@ export function SettingsModal({
                                 />
                               </>
                             ) : null}
-                            {IS_WINDOWS_HOST &&
-                            mainSettingVisible(settingsSearch.terminal, 'windowsWslDistribution') ? (
-                              <TextField
-                                description='Leave blank to use the default initialized WSL2 distribution. If discovery cannot find the intended install, enter its exact name as shown by `wsl.exe --list --verbose` (for example, Ubuntu-24.04). Ghostex never installs WSL automatically.'
-                                label='WSL Distribution'
-                                {...getSettingModificationProps('windowsWslDistribution')}
-                                onChange={(value) => updateDraft('windowsWslDistribution', value)}
-                                placeholder='Automatic'
-                                value={draft.windowsWslDistribution}
-                              />
-                            ) : null}
+                            {IS_WINDOWS_HOST ? <WindowsTerminalFields
+                              settings={draft}
+                              visible={(key) => mainSettingVisible(settingsSearch.terminal, key)}
+                              onBackend={(value) => updateDraft('windowsTerminalBackend', value)}
+                              onDistribution={(value) => updateDraft('windowsWslDistribution', value)}
+                              modification={getSettingModificationProps}
+                            /> : null}
                             {mainSettingVisible(settingsSearch.terminal, 'workspaceBackgroundColor') ? (
                               <ColorField
                                 description='Color shown behind terminal panes.'

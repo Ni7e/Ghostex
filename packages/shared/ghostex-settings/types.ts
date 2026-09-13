@@ -625,10 +625,10 @@ export type ghostexSettings = {
   terminalCursorStyle: TerminalCursorStyle;
   terminalCursorStyleBlink: boolean;
   /**
-   * Windows currently runs terminals only through WSL2. The optional
-   * distribution override selects an exact initialized distro when automatic
-   * discovery cannot choose the intended install.
+   * Windows selects native PowerShell projects or a WSL2 workspace.
+   * Existing installs keep their WSL environment until explicitly switched.
    */
+  windowsTerminalBackend: 'wsl' | 'powershell';
   windowsWslDistribution: string;
   terminalFontFamily: string;
   terminalFontSize: number;

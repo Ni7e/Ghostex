@@ -7201,6 +7201,18 @@
       "agentWritable": false
     },
     {
+      "key": "windowsTerminalBackend",
+      "title": "windowsTerminalBackend",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "string",
+      "default": "wsl",
+      "agentWritable": false
+    },
+    {
       "key": "hotkeys",
       "title": "hotkeys",
       "subtitle": "App-managed state saved with the settings; not a user preference.",

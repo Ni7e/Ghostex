@@ -428,6 +428,15 @@ as the chat transcript), `terminalWidthApplyToCommandPaneTerminals`.
 
 ## Terminal
 
+On Windows, Settings > General > Terminal > Windows Environment selects native
+PowerShell projects and agents or Linux projects in WSL. PowerShell uses Windows
+folders and installed Windows agent CLIs without requiring WSL. First-time setup
+also offers **Use PowerShell without WSL**. Restart Ghostex after switching;
+projects and running sessions remain in their original environment. Native
+sessions stay alive when the app closes or gxserver restarts. The Code view
+still requires the WSL environment.
+Keys: `windowsTerminalBackend`, `windowsWslDistribution`.
+
 Terminals are embedded Ghostty surfaces. Font, theme, cursor, padding,
 scrollback, clipboard, and scrolling are Settings > General > Terminal rows and
 are written into a managed Ghostty config; the Ghostty settings actions row

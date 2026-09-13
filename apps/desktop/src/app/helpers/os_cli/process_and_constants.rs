@@ -363,7 +363,15 @@ pub(crate) fn gpui_local_gxserver_api_port() -> u16 {
         .ok()
         .and_then(|value| value.trim().parse::<u16>().ok())
         .filter(|port| *port != 0)
-        .unwrap_or(GPUI_GXSERVER_LOCAL_API_PORT)
+        .unwrap_or_else(|| {
+            #[cfg(windows)]
+            if crate::windows_terminal_backend::current_preference()
+                == crate::windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
+            {
+                return 58_746;
+            }
+            GPUI_GXSERVER_LOCAL_API_PORT
+        })
 }
 pub(crate) const GPUI_GXSERVER_PRODUCT: &str = "gxserver";
 pub(crate) const GPUI_GXSERVER_PROTOCOL_HEADER: &str = "x-gxserver-protocol-version";

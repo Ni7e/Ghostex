@@ -705,6 +705,8 @@ async fn run_clone_process(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
     let mut child = command.spawn().map_err(|error| {
         RepositoryCloneError::dependency_unavailable(format!("Could not start git clone: {error}"))
     })?;

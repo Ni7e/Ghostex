@@ -264,6 +264,10 @@ pub(crate) fn gpui_resolve_local_gxserver_binary() -> Option<PathBuf> {
     }
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(current_exe) = std::env::current_exe() {
+        #[cfg(windows)]
+        if let Some(directory) = current_exe.parent() {
+            candidates.push(directory.join("resources/native/gxserver.exe"));
+        }
         if let Some(contents_dir) = current_exe.parent().and_then(Path::parent) {
             candidates.push(contents_dir.join("Resources/Web/gxserver/bin/gxserver"));
         }

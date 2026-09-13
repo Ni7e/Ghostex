@@ -14,6 +14,8 @@ enum PlatformShellKind {
     Bash,
     Sh,
     Zsh,
+    #[cfg(windows)]
+    PowerShell,
 }
 
 /*
@@ -26,7 +28,11 @@ pub fn command_shell() -> PlatformShell {
         PlatformShell::new("/bin/zsh")
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        return PlatformShell::new(powershell_executable());
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         for candidate in command_shell_candidates() {
             if is_supported_shell(&candidate) && is_executable_file(Path::new(&candidate)) {
@@ -145,10 +151,18 @@ impl PlatformShell {
     }
 
     pub fn script_args(&self, script: &str) -> Vec<String> {
+        #[cfg(windows)]
+        if matches!(self.kind, PlatformShellKind::PowerShell) {
+            return powershell_script_args(script, false);
+        }
         vec![self.command_flag(false).to_string(), script.to_string()]
     }
 
     pub fn interactive_script_args(&self, script: &str) -> Vec<String> {
+        #[cfg(windows)]
+        if matches!(self.kind, PlatformShellKind::PowerShell) {
+            return powershell_script_args(script, false);
+        }
         vec![self.command_flag(true).to_string(), script.to_string()]
     }
 
@@ -162,6 +176,10 @@ impl PlatformShell {
     `command_flag`, because they hand the user their own shell.
     */
     pub fn profileless_script_args(&self, script: &str) -> Vec<String> {
+        #[cfg(windows)]
+        if matches!(self.kind, PlatformShellKind::PowerShell) {
+            return powershell_script_args(script, true);
+        }
         vec![
             self.profileless_command_flag().to_string(),
             script.to_string(),
@@ -174,6 +192,8 @@ impl PlatformShell {
 
     pub fn command_flag(&self, interactive: bool) -> &'static str {
         match (&self.kind, interactive) {
+            #[cfg(windows)]
+            (PlatformShellKind::PowerShell, _) => "-Command",
             (PlatformShellKind::Bash | PlatformShellKind::Zsh, true) => "-lic",
             (PlatformShellKind::Bash | PlatformShellKind::Zsh, false) => "-lc",
             (PlatformShellKind::Sh, true) => "-ic",
@@ -182,6 +202,14 @@ impl PlatformShell {
     }
 
     pub fn command_string(&self, script: &str, interactive: bool) -> String {
+        #[cfg(windows)]
+        if matches!(self.kind, PlatformShellKind::PowerShell) {
+            return format!(
+                "& '{}' {}",
+                self.executable.replace('\'', "''"),
+                powershell_script_args(script, !interactive).join(" ")
+            );
+        }
         format!(
             "{} {} {}",
             self.executable,
@@ -221,6 +249,8 @@ fn shell_kind_for_path(path: &str) -> PlatformShellKind {
         .and_then(|name| name.to_str())
         .unwrap_or_default()
     {
+        #[cfg(windows)]
+        "pwsh.exe" | "powershell.exe" => PlatformShellKind::PowerShell,
         "bash" => PlatformShellKind::Bash,
         "zsh" => PlatformShellKind::Zsh,
         _ => PlatformShellKind::Sh,
@@ -263,4 +293,40 @@ fn dedupe(values: Vec<String>) -> Vec<String> {
         .filter(|value| !value.trim().is_empty())
         .filter(|value| seen.insert(PathBuf::from(value).to_string_lossy().to_string()))
         .collect()
+}
+
+#[cfg(windows)]
+pub fn powershell_executable() -> String {
+    let program_files = env::var_os("ProgramFiles").map(PathBuf::from);
+    if let Some(path) = program_files
+        .map(|root| root.join("PowerShell/7/pwsh.exe"))
+        .filter(|path| path.is_file())
+    {
+        return path.to_string_lossy().into_owned();
+    }
+    env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("C:/Windows"))
+        .join("System32/WindowsPowerShell/v1.0/powershell.exe")
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[cfg(windows)]
+fn powershell_script_args(script: &str, profileless: bool) -> Vec<String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let mut args = vec!["-NoLogo".into(), "-NonInteractive".into()];
+    if profileless {
+        args.push("-NoProfile".into());
+    }
+    args.push("-EncodedCommand".into());
+    args.push(
+        STANDARD.encode(
+            script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        ),
+    );
+    args
 }

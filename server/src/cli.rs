@@ -97,6 +97,10 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         Some("agent-skills") => {
             run_agent_skills_command(args.iter().skip(1).cloned().collect()).await?;
         }
+        #[cfg(windows)]
+        Some("agent-hook-notify-native") => {
+            crate::agent_hooks::windows::notify(args.iter().skip(1).cloned().collect())?;
+        }
         Some("agent-hook-notify") => {
             run_notify_hook(args.iter().skip(1).cloned().collect())?;
         }

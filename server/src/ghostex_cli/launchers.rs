@@ -358,7 +358,19 @@ pub fn run_interactive_shell_command(
     command: &str,
     cwd: Option<&std::path::Path>,
 ) -> CliResult<i32> {
+    #[cfg(windows)]
+    {
+        let shell = crate::platform::shell::command_shell();
+        return run_interactive_process(
+            &shell.executable,
+            &shell.interactive_script_args(command),
+            cwd,
+            &[],
+        );
+    }
+    #[cfg(not(windows))]
     let shell = resolve_cli_interactive_shell_launch();
+    #[cfg(not(windows))]
     run_interactive_process(
         &shell.executable,
         &[shell.command_flag.clone(), command.to_string()],

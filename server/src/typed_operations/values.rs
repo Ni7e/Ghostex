@@ -208,6 +208,8 @@ pub(crate) async fn run_process_command(
         })
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    process.creation_flags(0x0800_0000);
     let mut child = process.spawn().map_err(|error| {
         TypedOperationError::dependency_unavailable(format!(
             "Could not start typed operation command: {error}"

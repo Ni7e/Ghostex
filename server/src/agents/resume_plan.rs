@@ -1,6 +1,10 @@
 use serde_json::{Map, Value};
 
+#[cfg(windows)]
+mod windows;
 use super::*;
+#[cfg(windows)]
+pub(crate) use windows::*;
 
 pub(crate) fn build_agent_resume_plan(
     project: &Value,
@@ -33,6 +37,13 @@ pub(crate) fn build_agent_resume_plan(
             } else {
                 "--resume"
             };
+            #[cfg(windows)]
+            let command = format!(
+                "$env:{variable}={}; {command} {selector} {}",
+                quote_shell_arg(home),
+                quote_shell_arg(id)
+            );
+            #[cfg(not(windows))]
             let command = format!(
                 "env {variable}={} {command} {selector} {}",
                 quote_shell_arg(home),
@@ -850,6 +861,7 @@ pub(crate) fn build_rovodev_resume_command(agent_command: &str, session_referenc
     }
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_claude_resume_lookup_command(
     agent_command: &str,
     input: &AgentResumeInput,
@@ -882,6 +894,7 @@ pub(crate) fn build_claude_resume_lookup_command(
     .join(" ")
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_cursor_resume_lookup_command(
     agent_command: &str,
     project_path: &str,
@@ -923,6 +936,7 @@ pub(crate) fn build_opencode_resume_command(
     )
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_codex_validated_resume_command(
     agent_command: &str,
     session_reference: &str,
@@ -950,6 +964,7 @@ pub(crate) fn build_codex_validated_resume_command(
     .join(" ")
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_codex_resume_lookup_command(agent_command: &str, resume_title: &str) -> String {
     [
         "CODEX_RESUME_SESSION_ID=\"$(".to_string(),
@@ -988,6 +1003,9 @@ pub(crate) fn build_resume_lookup_command() -> String {
         .map(|path| path.to_string_lossy().to_string())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "gxserver".to_string());
+    #[cfg(windows)]
+    return format!("& {} resume-lookup", quote_shell_arg(&executable));
+    #[cfg(not(windows))]
     format!("{} resume-lookup", quote_shell_arg(&executable))
 }
 

@@ -202,7 +202,14 @@ fn normalize_git_worktree_branch(branch: Option<&str>) -> String {
 }
 
 fn run_git(cwd: &str, args: &[&str]) -> String {
-    let Ok(output) = Command::new("git").args(args).current_dir(cwd).output() else {
+    let mut command = Command::new("git");
+    command.args(args).current_dir(cwd);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let Ok(output) = command.output() else {
         return String::new();
     };
     if !output.status.success() {

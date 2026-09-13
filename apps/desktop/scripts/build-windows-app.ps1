@@ -1,13 +1,6 @@
-# CDXC:PlatformSupport 2026-07-04:
-# Windows packaging skeleton for the GPUI app, mirroring the shape of
-# build-macos-app.sh: build the sidebar bundle, build both Rust binaries,
-# then stage a flat CEF-conventional layout. Written best-effort from macOS
-# during P2 (Windows bring-up) — NEEDS-DEVICE-VERIFY: never executed on real
-# Windows hardware. Deliberately not yet covered here (macOS-script parity
-# items to port as Windows support matures): completion sound assets, CLI
-# resources, portless admin runtime, and remote gxserver Linux packages. The
-# release workflow wraps this staged directory with Velopack, which injects
-# the installed/portable updater manifest and creates signed packages.
+# Build the sidebar, desktop and native Windows session binaries, then stage
+# the CEF runtime and bundled resources. The release workflow wraps this
+# directory with Velopack to create signed installed and portable packages.
 #
 # Development layouts keep the conventional flat CEF payload beside the app.
 # Release layouts stage a CEF-free native bootstrap plus an internal runtime;
@@ -83,6 +76,15 @@ if ($BuildPhase -ne "stage") {
     }
 }
 
+if ($BuildPhase -ne "stage") {
+    Push-Location (Join-Path $RepoRoot "server")
+    try {
+        cargo build --release --bin gxserver --bin ghostex --bin ghostex-session-host
+        if ($LASTEXITCODE -ne 0) { throw "Native Windows runtime build failed" }
+    }
+    finally { Pop-Location }
+}
+
 if ($BuildPhase -eq "compile") {
     Write-Host "Compiled $AppName ($ReleaseArch); staging deferred to the stage phase"
     exit 0
@@ -118,6 +120,20 @@ if (-not $CefVersionMatch) {
     throw "Could not resolve the CEF component version from $CefVersionHeader"
 }
 $CefComponentVersion = $CefVersionMatch.Matches[0].Groups[1].Value -replace '[^A-Za-z0-9._-]', '-'
+
+# CDXC:PlatformSupport 2026-09-14 WHY:
+# Native session hosts outlive the app and keep their executable mapped.
+# Retire the old runtime before staging so rebuilding does not kill agents or fail on a locked host executable.
+$PreviousNativeRuntime = Join-Path $AppDir "resources/native"
+if (Test-Path $PreviousNativeRuntime) {
+    $RetiredNativeRoot = Join-Path $GpuiDir "build/windows/retired-native-runtimes"
+    New-Item -ItemType Directory -Force -Path $RetiredNativeRoot | Out-Null
+    Get-ChildItem -LiteralPath $RetiredNativeRoot -Directory | ForEach-Object {
+        try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop }
+        catch { Write-Verbose "A retired native runtime is still in use." }
+    }
+    Move-Item -LiteralPath $PreviousNativeRuntime -Destination (Join-Path $RetiredNativeRoot ([Guid]::NewGuid().ToString("N")))
+}
 
 # 4) Stage the app directory. Clear generated contents without deleting the
 # directory inode, because a terminal may still have the staged directory as
@@ -193,9 +209,13 @@ if ($OnDemandComponents) {
     if ($LASTEXITCODE -ne 0) { throw "Could not seal Windows CEF component metadata" }
 }
 
-# Windows is WSL2-only for now. The base app keeps its matching gxserver
-# runtime, while Source/code-server is sealed as an optional component and is
-# never copied into the installer.
+# Both environments ship their matching runtime. Source/code-server remains
+# an optional WSL component.
+$NativeResources = Join-Path $AppDir "resources/native"
+New-Item -ItemType Directory -Force -Path $NativeResources | Out-Null
+foreach ($binary in @("gxserver.exe", "ghostex.exe", "ghostex-session-host.exe")) {
+    Copy-Item (Join-Path $RepoRoot "server/target/release/$binary") $NativeResources
+}
 $WslArchive = $env:GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE
 $WslCodeServerArchive = $env:GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE
 $RequireWslArchive = $env:GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME -ne "0"

@@ -198,6 +198,7 @@ How to use this file:
 - **gpuiTitlebarActionCommandByProject** `gpuiTitlebarActionCommandByProject` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **gpuiTitlebarOpenTargetByProject** `gpuiTitlebarOpenTargetByProject` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **settingsModalNavigation** `settingsModalNavigation` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
+- **windowsTerminalBackend** `windowsTerminalBackend` (text, default wsl) [not agent-writable]: App-managed state saved with the settings; not a user preference.
 - **hotkeys** `hotkeys` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **customViewTemplates** `customViewTemplates` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **customWorkspaceOpenTargets** `customWorkspaceOpenTargets` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.

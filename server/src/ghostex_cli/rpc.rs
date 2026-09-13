@@ -484,7 +484,11 @@ pub fn local_gxserver_api_port() -> u16 {
         .filter(|value| !value.is_empty())
         .and_then(|value| value.parse::<u16>().ok())
         .filter(|port| *port != 0)
-        .unwrap_or(GXSERVER_LOCAL_API_PORT)
+        .unwrap_or(if cfg!(windows) {
+            58_746
+        } else {
+            GXSERVER_LOCAL_API_PORT
+        })
 }
 
 pub fn resolve_local_gxserver_target() -> CliResult<Target> {

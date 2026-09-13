@@ -337,7 +337,10 @@ pub(crate) async fn run_zmx_title_observer(
                 continue;
             }
         };
-        let mut child = match Command::new(&zmx.executable_path)
+        let mut command = Command::new(&zmx.executable_path);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000);
+        let mut child = match command
             .args(["watch-title", zmx_name.as_str()])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())

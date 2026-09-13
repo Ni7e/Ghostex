@@ -143,6 +143,12 @@ pub(crate) fn command_exists_uncached(command: &str, home_dir: &Path) -> bool {
     refresh_resolved_command_path(command, home_dir).is_some()
 }
 
+#[cfg(windows)]
+pub(super) fn resolve_command_path(command: &str, _home_dir: &Path) -> Option<String> {
+    super::windows::resolve_command(command)
+}
+
+#[cfg(not(windows))]
 pub(super) fn resolve_command_path(command: &str, home_dir: &Path) -> Option<String> {
     /*
     CDXC:AgentHooks 2026-06-23-07:52:
@@ -236,6 +242,11 @@ fn apply_hook_command_environment(command: &mut Command, home_dir: &Path) {
 }
 
 fn run_command_stdout_with_timeout(mut command: Command, timeout: Duration) -> Option<String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

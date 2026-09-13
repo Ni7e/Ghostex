@@ -242,6 +242,27 @@ impl GhostexGpuiApp {
     ) {
         match action {
             GpuiWindowsFirstRunSetupAction::Retry => self.retry_windows_first_run_setup(cx),
+            GpuiWindowsFirstRunSetupAction::NativePowerShell => {
+                let mut settings = shared_settings::shared_sidebar_settings_snapshot()
+                    .object()
+                    .clone();
+                settings.insert(
+                    "windowsTerminalBackend".into(),
+                    serde_json::json!("powershell"),
+                );
+                match shared_settings::write_shared_sidebar_settings_object(settings) {
+                    Ok(_) => {
+                        windows_terminal_backend::reload_preference_for_setup();
+                        self.retry_windows_first_run_setup(cx);
+                    }
+                    Err(error) => {
+                        self.windows_first_run_setup_state = GpuiWindowsFirstRunSetupState::Failed(
+                            format!("Could not save the Windows environment: {error:?}"),
+                        );
+                        cx.notify();
+                    }
+                }
+            }
             GpuiWindowsFirstRunSetupAction::OpenWslGuide => {
                 let _ =
                     gpui_open_external_http_url("https://learn.microsoft.com/windows/wsl/install");
@@ -313,12 +334,12 @@ impl GhostexGpuiApp {
         let (title, description, detail, progress) = match &state {
             GpuiWindowsFirstRunSetupState::Checking => (
                 "Checking Windows",
-                "Ghostex uses WSL2 for fast terminals, agents, and persistent sessions.",
+                "Use native PowerShell or a WSL2 Linux environment for terminals and agents.",
                 "Looking for an initialized Linux environment…".to_string(),
                 0.12,
             ),
             GpuiWindowsFirstRunSetupState::MissingWsl => (
-                "Ghostex requires WSL2",
+                "Choose your Windows environment",
                 "Install Windows Subsystem for Linux, then return here. Ghostex will never install it or request administrator access without you choosing to do so.",
                 "WSL is not available on this PC.".to_string(),
                 0.0,
@@ -361,7 +382,7 @@ impl GhostexGpuiApp {
                 };
                 (
                     "Setting up Ghostex terminals",
-                    "This is a one-time setup for the selected Linux environment.",
+                    "Preparing the selected terminal environment.",
                     detail.to_string(),
                     progress,
                 )
@@ -484,6 +505,16 @@ impl GhostexGpuiApp {
         };
         if let Some(actions) = actions {
             content = content.child(actions);
+        }
+        if windows_terminal_backend::current_preference()
+            == windows_terminal_backend::WindowsTerminalBackendPreference::Wsl
+        {
+            content = content.child(self.render_windows_first_run_setup_button(
+                "Use PowerShell without WSL",
+                true,
+                GpuiWindowsFirstRunSetupAction::NativePowerShell,
+                cx,
+            ));
         }
 
         div()

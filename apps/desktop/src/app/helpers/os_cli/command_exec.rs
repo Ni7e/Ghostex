@@ -11,7 +11,13 @@ pub(crate) fn gpui_run_command_with_timeout(
     args: &[&str],
     timeout: Duration,
 ) -> Result<bool, String> {
-    let mut child = std::process::Command::new(command)
+    let mut process = std::process::Command::new(command);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        process.creation_flags(0x0800_0000);
+    }
+    let mut child = process
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -64,7 +70,13 @@ pub(crate) fn gpui_run_command_with_captured_output_timeout(
     timeout: Duration,
     max_capture_bytes: usize,
 ) -> Result<GpuiCapturedCommandOutput, String> {
-    let mut child = std::process::Command::new(command)
+    let mut process = std::process::Command::new(command);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        process.creation_flags(0x0800_0000);
+    }
+    let mut child = process
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

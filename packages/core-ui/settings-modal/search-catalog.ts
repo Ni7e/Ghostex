@@ -652,6 +652,12 @@ export function getSettingsSearchSectionDefinitions() {
         ...(IS_WINDOWS_HOST
           ? [
               {
+                key: 'windowsTerminalBackend',
+                title: 'Windows Environment',
+                subtitle: 'Native Windows projects and agents in PowerShell, or Linux projects in WSL. Restart Ghostex to apply.',
+                options: [{ label: 'PowerShell (native Windows)', value: 'powershell' }, { label: 'WSL (Linux)', value: 'wsl' }],
+              },
+              {
                 key: 'windowsWslDistribution',
                 subtitle:
                   'Optional exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.',

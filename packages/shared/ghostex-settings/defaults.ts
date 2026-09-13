@@ -472,6 +472,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   terminalCursorStyle: 'bar',
   terminalCursorStyleBlink: true,
+  windowsTerminalBackend: 'wsl',
   windowsWslDistribution: '',
   terminalFontFamily: 'JetBrains Mono',
   terminalFontSize: 13,
