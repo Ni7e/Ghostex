@@ -308,7 +308,7 @@ function SettingsModalStory({
         projects={projects}
         settings={settings}
         tailcatRpc={remoteRpc}
-        theme={settings.sidebarTheme === 'light-orange' ? 'light-orange' : 'dark-blue'}
+        theme={settings.sidebarTheme === 'plain-light' ? 'plain-light' : 'dark-blue'}
       />
     </div>
   );
@@ -464,4 +464,14 @@ export const NarrowModal: Story = {
     },
   },
   render: () => <SettingsModalStory />,
+};
+
+export const Light: Story = {
+  render: () => (
+    <SettingsModalStory
+      initialSettings={{ ...modalSettings, sidebarTheme: 'plain-light', showAdvancedSettings: true }}
+      projects={storyProjects}
+      remoteRpc={createRemoteStoryRpc({})}
+    />
+  ),
 };

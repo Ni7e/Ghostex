@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { ModalStorySurface } from './modal-gallery/modal-story-surface';
 import { AgentsHubModal } from './agents-hub-modal';
 import type { WebviewApi } from './webview-api';
 import type { AgentsHubCatalogMessage, AgentsHubTab } from '../shared/session-grid-contract';
@@ -471,15 +472,9 @@ function AgentsHubModalStory({
   initialTab: AgentsHubTab;
 }) {
   return (
-    <div
-      style={{
-        background: '#0e0e0e',
-        height: '100vh',
-        width: '100vw',
-      }}
-    >
+    <ModalStorySurface>
       <AgentsHubModal catalog={catalog} initialTab={initialTab} isOpen onClose={() => undefined} vscode={mockVscode} />
-    </div>
+    </ModalStorySurface>
   );
 }
 
@@ -538,4 +533,9 @@ export const EmptyCatalog: Story = {
      */
     <AgentsHubModalStory catalog={emptyCatalog} initialTab='configs' />
   ),
+};
+
+export const Light: Story = {
+  globals: { modalTheme: 'light' },
+  render: () => <AgentsHubModalStory initialTab='skills' />,
 };

@@ -4,6 +4,8 @@
  * Keep the existing dark rules intact and supply their light counterparts only when the resolved sidebar appearance is light.
  */
 body[data-sidebar-theme='plain-light'] .sidebar-reference-layout[data-reference-sidebar='true'] {
+  /* CDXC:Sidebar 2026-09-13 DECISION: User wants the remaining dark hairline beside the white resize rail removed in light mode. Keep its width so sidebar rows do not shift. */
+  --reference-sidebar-edge-color: #ffffff;
   --sidebar-active-session-border: #525252;
   --sidebar-composer-surface: #ffffff;
   --sidebar-composer-outline: rgb(0 0 0 / 12%);

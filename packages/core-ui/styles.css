@@ -16,6 +16,8 @@
 @import './styles/chat.css';
 @import './styles/find.css';
 @import './styles/new-thread-palette.css';
+@import './styles/modals-light.css';
+@import './styles/settings-light.css';
 /**
  * CDXC:ContextMenus 2026-05-11-01:39
  * Sidebar and app context menus should behave like native menus: menu items
@@ -292,11 +294,14 @@ body.app-modal-host-body {
    * The popup is portaled, so it repeats the Codex surface tokens instead of
    * inheriting them: #161616 popover, 8px popup radius, 6px row radius.
    */
+  --settings-popup-background: #161616;
+  --settings-popup-border: rgba(255, 255, 255, 0.08);
+  --settings-popup-selected: #2c2c2c;
+  --settings-popup-selected-foreground: #ffffff;
   --accent: #232323;
   --accent-foreground: var(--popover-foreground, currentColor);
-  background: #161616 !important;
-  background-color: #161616 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: var(--settings-popup-background) !important;
+  border: 1px solid var(--settings-popup-border) !important;
   border-radius: 8px !important;
   padding: 4px;
 }
@@ -346,7 +351,7 @@ body.app-modal-host-body {
 
 .settings-select-content [data-slot='select-item']:is(:hover, :focus, :focus-visible),
 .settings-select-content [data-slot='select-item'][data-highlighted] {
-  background: #232323 !important;
+  background: var(--accent) !important;
   color: var(--accent-foreground);
   outline: none;
 }
@@ -360,8 +365,8 @@ body.app-modal-host-body {
  */
 .settings-select-content [data-slot='select-item'][data-selected],
 .settings-select-content [data-slot='select-item'][aria-selected='true'] {
-  background: #2c2c2c !important;
-  color: #ffffff !important;
+  background: var(--settings-popup-selected) !important;
+  color: var(--settings-popup-selected-foreground) !important;
 }
 
 .settings-select-content [data-slot='select-item'][data-selected] *,

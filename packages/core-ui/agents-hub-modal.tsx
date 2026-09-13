@@ -56,6 +56,7 @@ declare global {
           setValue: (value: string) => void;
         };
         setModelLanguage: (model: unknown, language: string) => void;
+        setTheme: (theme: string) => void;
       };
     };
   }
@@ -675,6 +676,12 @@ function EditorPane({
   useEffect(() => {
     let disposed = false;
     let contentDisposable: { dispose: () => void } | null = null;
+    const editorTheme = () =>
+      containerRef.current && getComputedStyle(containerRef.current).colorScheme === 'light' ? 'vs' : 'vs-dark';
+    const themeObserver = new MutationObserver(() => {
+      if (editorRef.current) window.monaco?.editor.setTheme(editorTheme());
+    });
+    themeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-sidebar-theme'] });
 
     loadMonaco()
       .then(() => {
@@ -702,7 +709,7 @@ function EditorPane({
             horizontalScrollbarSize: 7,
             verticalScrollbarSize: 7,
           },
-          theme: 'vs-dark',
+          theme: editorTheme(),
           value: initialFile.content,
         });
         contentDisposable = editor.onDidChangeModelContent(() => {
@@ -718,6 +725,7 @@ function EditorPane({
 
     return () => {
       disposed = true;
+      themeObserver.disconnect();
       contentDisposable?.dispose();
       editorRef.current?.dispose();
       editorRef.current = null;

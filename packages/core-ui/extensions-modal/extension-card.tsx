@@ -11,7 +11,7 @@ const EXTENSION_ICON_COLOR = '#b9b9b9';
 function extensionIconMaskStyle(src: string): CSSProperties {
   const maskImage = `url(${JSON.stringify(src)})`;
   return {
-    backgroundColor: EXTENSION_ICON_COLOR,
+    backgroundColor: `var(--extension-icon-color, ${EXTENSION_ICON_COLOR})`,
     maskImage,
     maskPosition: 'center',
     maskRepeat: 'no-repeat',

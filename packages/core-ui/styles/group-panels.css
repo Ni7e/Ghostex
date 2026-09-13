@@ -752,7 +752,7 @@ body.native-sidebar-body .sidebar-reference-layout[data-reference-sidebar='true'
    */
   --reference-sidebar-primary-nav-edge-bleed-left: 9px;
   /*
-   * The sidebar's workspace-facing edge carries a 1px #252525 hairline. With
+   * The sidebar's workspace-facing edge carries a 1px hairline (#252525 in dark mode). With
    * border-box sizing the border sits at the page edge just past the 5px
    * gutter, and the layout root's overflow clip runs along its inner face, so
    * full-bleed hairlines (Search separator, footer top border) meet it
@@ -769,14 +769,14 @@ body.native-sidebar-body .sidebar-reference-layout[data-reference-sidebar='true'
   --reference-sidebar-page-inset-left: 14px;
   --reference-sidebar-page-inset-right: 6px;
   --reference-sidebar-scrollbar-shift-right: 4px;
-  border-right: 1px solid #252525;
+  border-right: 1px solid var(--reference-sidebar-edge-color, #252525);
   margin-left: 0;
   padding-left: 14px;
   padding-right: 6px;
 }
 
 body.native-sidebar-body .sidebar-reference-layout[data-reference-sidebar='true'][data-sidebar-side='right'] {
-  border-left: 1px solid #252525;
+  border-left: 1px solid var(--reference-sidebar-edge-color, #252525);
   border-right: none;
 }
 
