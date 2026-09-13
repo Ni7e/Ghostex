@@ -190,7 +190,8 @@ export function getBrandAgentLogoStyle(icon: SidebarAgentIcon): CSSProperties {
   }
 
   return {
-    backgroundColor: AGENT_LOGO_COLORS[icon],
+    // CDXC:SessionChat 2026-09-13 DECISION: User: the GPT/Codex icon is dark in light chat. Share the palette token across model pills, account panels and agent menus instead of coloring each instance separately.
+    backgroundColor: icon === 'codex' ? 'var(--ghostex-codex-logo, #fff)' : AGENT_LOGO_COLORS[icon],
     maskImage: `url("${AGENT_LOGOS[icon]}")`,
     WebkitMaskImage: `url("${AGENT_LOGOS[icon]}")`,
   };
