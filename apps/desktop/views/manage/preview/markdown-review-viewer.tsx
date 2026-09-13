@@ -53,7 +53,9 @@ export function ManageMarkdownReviewViewer({
   selectionToolbarMode: ManageSelectionToolbarMode;
 }) {
   const workareaTheme = useWorkareaTheme();
-  useEffect(() => { applyManageMeoTheme(); }, [workareaTheme]);
+  useEffect(() => {
+    applyManageMeoTheme();
+  }, [workareaTheme]);
   const editorHostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<ManageMeoEditor | null>(null);
   const latestContentRef = useRef(content);
