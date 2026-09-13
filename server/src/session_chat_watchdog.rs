@@ -425,9 +425,18 @@ async fn run_session_chat_send_watchdog(
     let started = Instant::now();
     // Polls observed since the affirmative evidence became complete.
     let mut mismatch_polls = 0u32;
+    // CDXC:AgentScreenDetection 2026-09-13 WHY:
+    // A queued notice used to end verification at ten seconds, leaving it visible after the answer arrived. Keep checking the transcript until delivery, notice retirement/expiry, or a newer send; terminal capture still happens only at escalation.
+    let mut queued_notice_published = false;
     loop {
         tokio::time::sleep(WATCHDOG_POLL_INTERVAL).await;
         if superseded() {
+            return;
+        }
+        if queued_notice_published
+            && session_chat_watchdog_notice(&probe.project_id, &probe.session_id)
+                .is_none_or(|notice| notice.kind != SESSION_CHAT_NOTICE_QUEUED_INPUT)
+        {
             return;
         }
         let poll_probe = probe.clone();
@@ -458,45 +467,55 @@ async fn run_session_chat_send_watchdog(
             }
             return;
         }
+        if queued_notice_published {
+            continue;
+        }
         // Affirmative non-delivery: the composer was submitted past our message
         // and the agent is answering what it submitted instead. Nothing the
         // remaining deadline could observe would change that verdict.
-        if cursor.mismatched_input.is_some() && cursor.agent_answered_mismatch {
-            if mismatch_polls >= WATCHDOG_MISMATCH_GRACE_POLLS {
-                break;
-            }
-            mismatch_polls += 1;
-        }
-        if started.elapsed() >= WATCHDOG_DEADLINE {
-            break;
-        }
-    }
-
-    if superseded() {
-        return;
-    }
-    let reason = match cursor.mismatched_input {
-        Some(submitted_empty) => UndeliveredSendReason::MismatchedInput { submitted_empty },
-        None => UndeliveredSendReason::TranscriptSilent,
-    };
-    // Silence plus the sent text back in Claude's composer is an Escape this
-    // daemon never saw (a web or mobile terminal), not a lost message.
-    if reason == UndeliveredSendReason::TranscriptSilent {
-        if let Some(screen) =
-            crate::session_chat_send::capture_session_terminal_text(&probe.zmx_name).await
+        let mismatch_ready = cursor.mismatched_input.is_some() && cursor.agent_answered_mismatch;
+        if started.elapsed() < WATCHDOG_DEADLINE
+            && (!mismatch_ready || mismatch_polls < WATCHDOG_MISMATCH_GRACE_POLLS)
         {
-            if crate::session_chat_returned_prompt::screen_shows_returned_session_chat_send(
-                &probe.project_id,
-                &probe.session_id,
-                probe.agent.as_deref(),
-                &screen,
-            ) {
-                returned_prompt();
-                return;
+            if mismatch_ready {
+                mismatch_polls += 1;
+            }
+            continue;
+        }
+
+        if superseded() {
+            return;
+        }
+        let reason = match cursor.mismatched_input {
+            Some(submitted_empty) => UndeliveredSendReason::MismatchedInput { submitted_empty },
+            None => UndeliveredSendReason::TranscriptSilent,
+        };
+        // Silence plus the sent text back in Claude's composer is an Escape this
+        // daemon never saw (a web or mobile terminal), not a lost message.
+        if reason == UndeliveredSendReason::TranscriptSilent {
+            if let Some(screen) =
+                crate::session_chat_send::capture_session_terminal_text(&probe.zmx_name).await
+            {
+                if crate::session_chat_returned_prompt::screen_shows_returned_session_chat_send(
+                    &probe.project_id,
+                    &probe.session_id,
+                    probe.agent.as_deref(),
+                    &screen,
+                ) {
+                    returned_prompt();
+                    return;
+                }
             }
         }
+        escalate_undelivered_send(&probe, cursor.path.is_some(), &publish, &read_state, reason)
+            .await;
+        queued_notice_published =
+            session_chat_watchdog_notice(&probe.project_id, &probe.session_id)
+                .is_some_and(|notice| notice.kind == SESSION_CHAT_NOTICE_QUEUED_INPUT);
+        if !queued_notice_published {
+            return;
+        }
     }
-    escalate_undelivered_send(&probe, cursor.path.is_some(), &publish, &read_state, reason).await;
 }
 
 /*
@@ -578,10 +597,29 @@ async fn escalate_undelivered_send(
     let typed_into_terminal = reason != UndeliveredSendReason::WriteFailed;
     let reasoning_from_silence = reason == UndeliveredSendReason::TranscriptSilent;
     let screen = crate::session_chat_send::capture_session_terminal_text(&probe.zmx_name).await;
-    if let Some(screen) = screen.as_deref().filter(|_| typed_into_terminal) {
-        // A queue banner explains a silent transcript; it explains nothing about
-        // a message the terminal never accepted.
-        if session_chat_screen_shows_queued_input(probe.agent.as_deref(), screen) {
+    // CDXC:AgentScreenDetection 2026-09-13 DECISION:
+    // User: do not show a delivery warning for a message waiting behind compaction.
+    // This only explains transcript silence; failed writes and mismatched submissions still report their evidence.
+    if reasoning_from_silence
+        && screen.as_deref().is_some_and(|screen| {
+            crate::session_chat_terminal_activity::is_session_chat_compacting_activity(
+                crate::session_chat_terminal_activity::detect_session_chat_terminal_activity(
+                    probe.agent.as_deref(),
+                    screen,
+                )
+                .as_ref(),
+            )
+        })
+    {
+        return;
+    }
+    if let Some(screen) = screen.as_deref().filter(|_| reasoning_from_silence) {
+        // A queued preview explains silence, never a failed write or a different submitted prompt.
+        if session_chat_screen_shows_queued_input(probe.agent.as_deref(), screen, &probe.text) {
+            // Delivery may have happened while the terminal capture was in flight.
+            if delivered_elsewhere_at_deadline(probe).await {
+                return;
+            }
             publish_watchdog_notice(
                 probe,
                 SessionChatTerminalNotice::new(

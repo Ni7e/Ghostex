@@ -1966,15 +1966,63 @@ predicate instead of as a user-facing notice.
 */
 /// CDXC:AgentScreenDetection 2026-09-11 DECISION:
 /// User: scan the whole terminal screen for Codex's queued-message indicator, so long queued messages cannot hide it from the delivery watchdog.
-pub fn session_chat_screen_shows_queued_input(agent: Option<&str>, screen_text: &str) -> bool {
+pub fn session_chat_screen_shows_queued_input(
+    agent: Option<&str>,
+    screen_text: &str,
+    sent_text: &str,
+) -> bool {
     if session_chat_option_agent(agent) != Some(SessionChatOptionAgent::Codex) {
         return false;
     }
-    let screen = normalize_spaces(&strip_ansi_sgr(screen_text))
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    screen.contains("Queued follow-up inputs") || screen.contains("Queued followup inputs")
+    // CDXC:AgentScreenDetection 2026-09-13 WHY:
+    // Codex also renders this heading for unanswered async questions. Only a matching outgoing message preview (the ↳ row) proves this send is queued; the heading alone produced a false card after an answer arrived.
+    let lines: Vec<String> = strip_ansi_sgr(screen_text)
+        .lines()
+        .map(normalize_spaces)
+        .collect();
+    let Some(header) = lines.iter().rposition(|line| {
+        matches!(
+            line.trim(),
+            "• Queued follow-up inputs" | "• Queued followup inputs"
+        )
+    }) else {
+        return false;
+    };
+    let needle = sent_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if needle.is_empty() {
+        return false;
+    }
+    let matches_preview = |preview: &str| {
+        !preview.is_empty()
+            && (needle == preview || (preview.chars().count() >= 12 && needle.starts_with(preview)))
+    };
+    let mut preview = String::new();
+    for line in &lines[header + 1..] {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(first) = trimmed.strip_prefix("↳ ") {
+            if matches_preview(&preview) {
+                return true;
+            }
+            preview = first.split_whitespace().collect::<Vec<_>>().join(" ");
+        } else if trimmed == "…" && !preview.is_empty() {
+            if matches_preview(&preview) {
+                return true;
+            }
+            preview.clear();
+        } else if !preview.is_empty()
+            && line.starts_with("    ")
+            && !trimmed.contains("edit last queued message")
+        {
+            preview.push(' ');
+            preview.push_str(&trimmed.split_whitespace().collect::<Vec<_>>().join(" "));
+        } else {
+            break;
+        }
+    }
+    matches_preview(&preview)
 }
 
 /// The trimmed screen tail a watchdog notice attaches as evidence.
