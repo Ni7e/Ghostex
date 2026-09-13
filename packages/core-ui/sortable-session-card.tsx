@@ -3623,6 +3623,7 @@ function supportsResumeCommandCopy(session: SidebarSessionItem): boolean {
     session.agentIcon === 'gemini' ||
     session.agentIcon === 'opencode' ||
     session.agentIcon === 'pi' ||
+    (session.agentName === 'zcode' && Boolean(session.agentSessionId)) ||
     session.agentIcon === 'cursor-cli' ||
     session.agentIcon === 'antigravity-cli'
   );
