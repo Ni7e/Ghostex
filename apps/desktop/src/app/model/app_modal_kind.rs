@@ -266,13 +266,12 @@ impl GpuiAppModalKind {
                 px(APP_MODAL_HOST_DELETE_WORKTREE_WINDOW_HEIGHT),
             ),
             /*
-            CDXC:Spaces 2026-08-28:
-            New/Edit Space is a name field, an icon grid, and a color row, so it
-            uses the compact modal width with a 380px GPUI content height. The
-            native titlebar and frame are outside these window content bounds.
+            CDXC:Spaces 2026-09-13 DECISION:
+            User: make the New Space / Edit Space modal narrower, with every color swatch still on one line.
+            This supersedes the 2026-08-28 compact (760px) width. Height stays 380px GPUI content; native titlebar and frame are outside these bounds.
             */
             Self::SidebarSpaceEditor => size(
-                px(APP_MODAL_HOST_COMPACT_WINDOW_WIDTH),
+                px(APP_MODAL_HOST_SIDEBAR_SPACE_EDITOR_WINDOW_WIDTH),
                 px(APP_MODAL_HOST_SIDEBAR_SPACE_EDITOR_WINDOW_HEIGHT),
             ),
             Self::PortlessSetup => size(

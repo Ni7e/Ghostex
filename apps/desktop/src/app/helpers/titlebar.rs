@@ -117,9 +117,9 @@ pub(crate) fn titlebar_popup_window_bounds_for_trigger_bounds(
     }
     let max_height = match kind {
         GpuiTitlebarPopupKind::AccountUsage(_) => 640.0,
+        GpuiTitlebarPopupKind::Notifications => TITLEBAR_POPUP_NOTIFICATIONS_MAX_HEIGHT,
         GpuiTitlebarPopupKind::Resources
         | GpuiTitlebarPopupKind::Tips
-        | GpuiTitlebarPopupKind::Notifications
         | GpuiTitlebarPopupKind::RemoteSites => TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT,
         _ => TITLEBAR_POPUP_MENU_MAX_HEIGHT,
     };

@@ -3254,7 +3254,7 @@ html:has(body.app-modal-host-native-window-body) {
  */
 .gx-app-modal .space-editor-color-strip {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
 }
 

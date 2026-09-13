@@ -765,6 +765,11 @@ pub(crate) const APP_MODAL_HOST_COMMAND_PALETTE_WINDOW_WIDTH: f32 = 654.0 + 19.0
 
 pub(crate) const APP_MODAL_HOST_COMPACT_WINDOW_WIDTH: f32 = 760.0;
 
+/// CDXC:Spaces 2026-09-13 DECISION:
+/// User: make the New Space / Edit Space modal narrower, with every color swatch still on one line.
+/// Thirteen 22px swatches with 8px gaps need 382px plus the 24px native padding on each side.
+pub(crate) const APP_MODAL_HOST_SIDEBAR_SPACE_EDITOR_WINDOW_WIDTH: f32 = 480.0;
+
 pub(crate) const APP_MODAL_HOST_SIDEBAR_SPACE_EDITOR_WINDOW_HEIGHT: f32 = 380.0;
 
 pub(crate) const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT: f32 = 680.0;
@@ -914,7 +919,11 @@ pub(crate) const TITLEBAR_POPUP_HELP_WIDTH: f32 = 380.0;
 
 pub(crate) const TITLEBAR_POPUP_RESOURCES_WIDTH: f32 = 656.0;
 
-pub(crate) const TITLEBAR_POPUP_NOTIFICATIONS_WIDTH: f32 = 600.0;
+/// CDXC:Notifications 2026-09-13 DECISION:
+/// User: reduce the Notifications dropdown width and height by 20% from 600 by 650.
+pub(crate) const TITLEBAR_POPUP_NOTIFICATIONS_WIDTH: f32 = 480.0;
+
+pub(crate) const TITLEBAR_POPUP_NOTIFICATIONS_MAX_HEIGHT: f32 = 520.0;
 
 pub(crate) const TITLEBAR_POPUP_MENU_MAX_HEIGHT: f32 = 420.0;
 
