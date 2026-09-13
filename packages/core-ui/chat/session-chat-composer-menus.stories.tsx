@@ -1,7 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useEffect } from 'react';
+import { Button } from '@/packages/components/ui/button';
+import { getDefaultSidebarAgentByIcon } from '@/packages/shared/sidebar-agents';
 import { DEFAULT_ACCOUNT_POLICY, type AgentAccountsState } from '@/packages/shared/agent-accounts';
 import { SessionAccountsPanel } from '../accounts/session-panel';
+import { AppTooltip, TooltipProvider } from '../app-tooltip';
+import { ProjectAgentLauncherIcon } from '../project-agent-launcher-icon';
 import { SessionChatComposerActions } from './session-chat-composer-actions';
 
 const accounts: AgentAccountsState = {
@@ -40,56 +44,73 @@ function ComposerMenus({ theme, accountPanel }: { theme: 'light' | 'dark'; accou
     };
   }, [theme]);
   return (
-    <main
-      className='ghostex-session-chat-scope flex flex-col gap-6 bg-background p-6 text-foreground'
-      data-chat-theme={theme}
-      style={{ minHeight: 'max(460px, 100dvh)' }}
-    >
-      <h1 className='text-lg font-medium'>Chat menus</h1>
-      <p>Open More actions, then click Switch Account. The menu and submenu follow the chat palette.</p>
-      <div className='mt-auto'>
-        <SessionChatComposerActions
-          sendBlocked={false}
-          hasSendableDraft={false}
-          maximized={false}
-          onToggleMaximized={() => {}}
-          onToggleVerbose={() => {}}
-          sessionNoteActive={false}
-          sessionNoteHasText={false}
-          stashedPromptCount={0}
-          summaryMode={false}
-          verboseMode={false}
-          hostActions={{
-            onSwitchToTerminal: () => {},
-            onAction: () => {},
-            actions: [
-              { id: 'rename', label: 'Rename' },
-              { id: 'sleep', label: 'Sleep' },
-              { id: 'fork', label: 'Fork Session' },
-              {
-                id: 'switchAccount',
-                label: 'Switch Account',
-                items: [{ id: 'other', label: 'Other account' }],
-              },
-            ],
-          }}
-          renderAccountMenu={
-            accountPanel
-              ? (close) => (
-                  <SessionAccountsPanel
-                    data={accounts}
-                    busy={false}
-                    error=''
-                    request={async () => true}
-                    close={close}
-                  />
-                )
-              : undefined
-          }
-        />
-      </div>
-      <footer className='text-xs text-muted-foreground'>End of menu preview</footer>
-    </main>
+    <TooltipProvider theme={theme}>
+      <main
+        className='ghostex-session-chat-scope flex flex-col gap-6 bg-background p-6 text-foreground'
+        data-chat-theme={theme}
+        style={{ minHeight: 'max(460px, 100dvh)' }}
+      >
+        <h1 className='text-lg font-medium'>Chat menus</h1>
+        <p>Hover Stash prompt or the model icon to check tooltips. Open More actions, then click Switch Account.</p>
+        <div className='mt-auto flex flex-wrap items-center justify-between gap-4'>
+          <SessionChatComposerActions
+            sendBlocked={false}
+            hasSendableDraft={false}
+            maximized={false}
+            onToggleMaximized={() => {}}
+            onToggleVerbose={() => {}}
+            onStash={() => {}}
+            onShowStashedPrompts={() => {}}
+            onSessionNote={() => {}}
+            sessionNoteActive={false}
+            sessionNoteHasText
+            stashedPromptCount={3}
+            summaryMode={false}
+            verboseMode={false}
+            hostActions={{
+              onSwitchToTerminal: () => {},
+              onAction: () => {},
+              actions: [
+                { id: 'rename', label: 'Rename' },
+                { id: 'sleep', label: 'Sleep' },
+                { id: 'fork', label: 'Fork Session' },
+                {
+                  id: 'switchAccount',
+                  label: 'Switch Account',
+                  items: [{ id: 'other', label: 'Other account' }],
+                },
+              ],
+            }}
+            renderAccountMenu={
+              accountPanel
+                ? (close) => (
+                    <SessionAccountsPanel
+                      data={accounts}
+                      busy={false}
+                      error=''
+                      request={async () => true}
+                      close={close}
+                    />
+                  )
+                : undefined
+            }
+          />
+          <TooltipProvider>
+            <AppTooltip content='GPT 6 Astra'>
+              <Button variant='ghost' className='ghostex-chat-footer-control ghostex-chat-model-pill'>
+                <ProjectAgentLauncherIcon
+                  agent={getDefaultSidebarAgentByIcon('codex')}
+                  colorMode='brand'
+                  accountIndicator='70'
+                />
+                GPT 6 Astra
+              </Button>
+            </AppTooltip>
+          </TooltipProvider>
+        </div>
+        <footer className='text-xs text-muted-foreground'>End of menu preview</footer>
+      </main>
+    </TooltipProvider>
   );
 }
 
