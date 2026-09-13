@@ -497,8 +497,7 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'sessionChatTheme',
           options: SESSION_CHAT_THEME_OPTIONS,
-          subtitle:
-            'Follow the app theme by default, or override chat with Light, Dark, or System.',
+          subtitle: 'Follow the app theme by default, or override chat with Light, Dark, or System.',
           title: 'Chat theme',
         },
         {
