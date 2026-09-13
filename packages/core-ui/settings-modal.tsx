@@ -2051,8 +2051,8 @@ export function SettingsModal({
                                     The Ghostty controls also apply to your external Ghostty terminal because this
                                     Ghostty terminal uses the same settings file. ghostex reloads its embedded Ghostty
                                     terminal about 3 seconds after you stop changing these controls; external Ghostty
-                                    windows may still need Cmd+Shift+, to reload. Theme overrides and the terminal light palette apply only
-                                    to Ghostex.
+                                    windows may still need Cmd+Shift+, to reload. Theme overrides and the terminal light
+                                    palette apply only to Ghostex.
                                   </p>
                                 </div>
                                 <GhosttySettingsActions
