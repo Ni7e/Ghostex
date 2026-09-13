@@ -130,7 +130,12 @@ session inside the project you are already in switches to Agents.
 - Parking is enabled by default. Right-click a session and choose Park, or
   select several sessions and choose Park selected, to move them into the
   collapsible Parked section at the bottom. Use Unpark or Unpark selected to
-  bring them back. Parking keeps sessions running unless Sleep session when
+  bring them back. On mobile, long-press a session and choose Park or Unpark;
+  each project has its own Parked section, which starts collapsed. Parked
+  sessions are always ordered from most recently active to oldest on desktop,
+  mobile, and web, including when ordinary sessions use manual sorting.
+  Mobile parking needs a connected computer with the `ghostex park-session
+<selector> true|false --json` command. Parking keeps sessions running unless Sleep session when
   parking is enabled (off by default). Park & Snooze with tags (on by
   default) makes Park and Snooze open the Tag as menu: pick a tag to tag and
   park in one step, or the No tag change row at the top to park as is.
@@ -236,18 +241,25 @@ your starred selections stay saved.
 Codex can ask questions while it keeps working. These appear above the composer,
 so you can keep writing your next message. Choose a suggested answer or write
 your own, then press Enter or Send answer; Shift+Enter adds a new line, and
-selecting an option alone sends nothing. An orange spinner with a blue dot in
+selecting an option alone sends nothing. An orange spinner with a pink dot in
 the sidebar means the agent is working and has an unanswered question. The dot
 stays visible until you answer or skip, even while that chat is focused; if the
-agent finishes first, the blue attention dot remains.
+agent finishes first, the pink attention dot remains.
 Use the arrows to move between questions, collapse the panel to answer later,
 or Skip a question without interrupting the agent.
 
 Press Ctrl+Shift+Down to scroll the focused chat to the bottom, including while
-typing. The Scroll to bottom button shows your current shortcut. Both stop any
+typing. The Scroll to bottom button shows your current shortcut on desktop and web;
+mobile shows the button without a keyboard shortcut. Both stop any
 ongoing scroll momentum so the conversation settles at the bottom. This takes
 priority over paragraph selection or adding a cursor in the composer; rebind or
 clear Scroll Chat to Bottom in Settings > Hotkeys (`scrollChatToBottom`).
+On mobile, choose Codex models and effort directly from the chat box dropdowns,
+including before sending the first message in a new draft. Mobile does not offer
+the Quick picker. Model, effort, and mode choices wait until the agent can apply
+them. The connected computer needs a Ghostex version with
+`ghostex select-session-chat-model <selector> --model <model> --effort <effort> --defer --json`;
+the same command accepts `--mode <mode>` and `--fast-mode on|off`.
 Codex rewind continues in a new conversation before the selected prompt and
 returns that prompt for editing. If the chat cannot reconnect after the rewind,
 choose Retry synchronization in the dialog to reconnect without rewinding again
@@ -260,6 +272,9 @@ or continuing on another device.
 Claude children stay in the Subagents card while the terminal lists them, including
 between monitor events. Idle children are labelled Idle and their clocks pause;
 click a child's name or task to open its transcript.
+Click the Subagents header to minimize the card to its header or expand it again.
+It starts minimized in Simple mode and expanded otherwise. Your last choice is
+remembered per session and takes precedence over the mode's default.
 For Codex and Claude, the Subagents card and popup title show the child's latest
 model and effort in compact form, such as Opus 5 High or Astra xHigh. Codex rows
 show the child's name/path beside the model and effort, after a ‣ separator.
@@ -268,10 +283,22 @@ Unrecorded model values are labelled Model not recorded.
 Slash commands sent from chat stay in the conversation after a reload, together
 with any captured output. Long command output expands when clicked; model, effort,
 Fast mode, and compaction results keep their status rows.
+During `/compact`, Claude and Codex show a compaction card above the input.
+Claude shows its reported progress; Codex shows a looping bar. Messages sent or
+queued during compaction wait until it finishes without a delivery warning.
+In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
 While Claude Code writes a reply, the chat shows the text as it appears in the
 terminal, updated about once a second, and swaps in the saved message the moment
 Claude records it; nothing to enable.
+The live tool card at the bottom of chat shows current work until the same tool
+is available in the conversation. It clears when the turn ends, you stop the
+agent, or the agent asks for input. Completed searches and commands stay in
+that turn's expandable work details; changing model or effort does not bring
+them back. Background commands that are still running, compaction, and
+requests for approval keep their own status cards.
 Chat Appearance defaults to System, following your computer’s light or dark appearance as it changes. Choose Light or Dark to keep chat in one palette; the surrounding app stays dark. Set it in Settings > Chat with `sessionChatTheme`.
+
+Set Default Chat Zoom (%) in Settings > Chat to scale the desktop chat interface, including messages, controls, and the prompt composer. Choose 70% to 200% in 5% steps; the initial default is 100%. The saved level applies to open chats and when chats open again (`sessionChatZoomPercent`).
 
 Toggle chat and terminal for a session with one click on the pane header or
 the pane hotkey. Compatible agents can default to chat. On macOS and Linux,
@@ -279,7 +306,11 @@ Ghostex can release unused terminal viewers for persistent sessions and load the
 again when needed. The agent keeps running while you use Chat or another project;
 returning to Terminal reconnects to the same running session. This does not sleep
 the agent.
-File writes and code
+When an assistant message
+has tool calls, click its text or the chevron beside it to expand the tools directly
+under that message. Its full text and formatting stay visible when collapsed;
+links and code controls keep their own actions. Verbose mode opens these tools
+by default (`sessionChatVerboseMode`). File writes and code
 edits appear outside the tool groups while the agent works. When a turn shows
 "Worked for", all its file changes are grouped in a collapsed "N files changed"
 section directly below it. The count includes each file once, even if it was
@@ -299,9 +330,20 @@ also toggle the diff. After expanding or collapsing, the header stays visible;
 chat scrolls to it if needed. This covers Claude's Write and Edit tools and Codex's apply_patch
 changes.
 
+Simple mode in More actions or Settings > Chat applies to every chat. Tool groups
+without a message above them collapse to a tool-call count, and tool rows hide
+command previews; expand a tool to inspect its full input and result. File edits
+collapse under "Edited 1 file" or "Edited X files", counting each path once; expand
+the row to see the usual file and diff cards. The menu and Settings use the same
+toggle (`sessionChatSimpleMode`, off by default).
+
 Summary mode has its own button between More actions and Session note when the
 chat toolbar has room. In a narrow chat, find it under More actions instead.
 The button highlights when Summary mode is on; its tooltip shows the shortcut.
+As space gets tighter, toolbar buttons move into More actions one at a time:
+Summary mode, Session note, Stash prompt, Attach, Maximize, then Terminal View.
+This keeps the context ring and effort controls clear. Buttons return as space
+opens up; More actions and Send or Stop stay visible.
 
 Unsent chat drafts are saved automatically. Switching between Chat and Terminal
 keeps a saved copy while the text moves, and a late transfer preserves anything
@@ -332,8 +374,8 @@ reset the one whose limit resets first, Most used first keeps draining the
 account already in use, and Same as last session reuses the account of the last
 session. Pick a specific account instead to always start
 with it. When the rule finds no account, new sessions use the current CLI login.
-Terminal notices in Claude and Codex chats also offer Switch account beside
-Open terminal, so you can choose another account directly from a usage-limit warning.
+Sign-in and usage-limit notices in Claude and Codex chats offer Switch account
+beside Open terminal, so you can choose another account directly from those notices.
 In the chat's More actions menu, click Switch Account to open its submenu;
 hovering over it does not open it.
 Switching a running Claude or Codex session to another account, from More
@@ -476,7 +518,18 @@ sessions, so any client can control agents on any machine.
   Remote). Easy Connect installs the Tailcat helper, turns on SSH access with
   one admin prompt, and shows a pairing QR code; scan it with the Ghostex
   mobile app (Android ships today). A Tailscale path is offered for tailnets.
-  Paired devices are listed and can be removed.
+  Paired devices are listed and can be removed. On the phone, open Web Preview
+  from the machine menu and enter a website address or a port such as `3000`
+  immediately, or choose a listening port from the list. The address bar stays
+  editable while browsing. The list groups Web pages, Development tools,
+  Services, and Other ports into collapsible sections; services and unidentified
+  ports start collapsed. Search by page title, process, or port. With a computer
+  supporting `ghostex ports --json --web`, responding pages show their title,
+  HTTP status, and supported favicons. Common-port labels such as Storybook on
+  6006 are marked “likely” until identified by the page or process.
+  Localhost links in chat, terminals, and browser
+  actions open in Web Preview through the connected computer, including their
+  path and query, instead of the phone's external browser.
 - **From another computer**: Settings > Remote > Remote machines > Add a
   machine with SSH details or an Easy Connect code, then Install / Connect
   gxserver on it. The machine appears as a sidebar section with its own
