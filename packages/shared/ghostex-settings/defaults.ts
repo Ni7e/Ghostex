@@ -403,11 +403,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   expandCollapsedProjectsOnJump: true,
   showLessForExpandedProjectJumps: false,
   sidebarTheme: 'dark-2',
-  /**
-   * CDXC:Theming 2026-09-12 DECISION:
-   * User: add System to chat Appearance and make it the default.
-   */
-  sessionChatTheme: 'system',
+  sessionChatTheme: 'app',
   sessionChatFontFamily: '',
   sessionChatZoomPercent: DEFAULT_SESSION_CHAT_ZOOM_PERCENT,
   sessionChatCustomTranscriptWidthEnabled: false,
@@ -480,7 +476,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   terminalFontFamily: 'JetBrains Mono',
   terminalFontSize: 13,
   terminalFontWeight: 300,
-  terminalColorScheme: 'dark',
+  terminalColorScheme: 'app',
   terminalGhosttyLightTheme: 'GitHub Light Default',
   terminalGhosttyTheme: 'GitHub Dark',
   terminalBackgroundImage: '',

@@ -1,4 +1,5 @@
 import { normalizeProjectViewTemplates } from './project-views';
+import { normalizeContentThemeSetting } from '../appearance';
 import { clampAgentManagerZoomPercent, clampSidebarThemeSetting } from '../session-grid-contract-session';
 import { normalizeSessionChatTheme } from '../session-chat';
 import { clampCompletionSoundPreference, clampCompletionSoundSetting } from '../completion-sound';
@@ -708,10 +709,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      * the settings list, or an empty unmanaged value that keeps an existing
      * user-authored Ghostty `theme` line outside ghostex control.
      */
-    terminalColorScheme:
-      source.terminalColorScheme === 'light' || source.terminalColorScheme === 'system'
-        ? source.terminalColorScheme
-        : DEFAULT_ghostex_SETTINGS.terminalColorScheme,
+    terminalColorScheme: normalizeContentThemeSetting(source.terminalColorScheme),
     terminalGhosttyLightTheme:
       normalizeGhosttyTheme(
         readString(source, 'terminalGhosttyLightTheme', DEFAULT_ghostex_SETTINGS.terminalGhosttyLightTheme)

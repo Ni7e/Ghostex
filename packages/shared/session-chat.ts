@@ -1,4 +1,5 @@
 import type { AccountSwitchProgress } from './agent-accounts';
+import { normalizeContentThemeSetting, type ContentThemeSetting } from './appearance';
 import type { SessionChatDraftVersion } from './session-chat-queue';
 // Session Chat — normalized chat projection of an agent terminal session.
 // Canonical wire types shared by gxserver (Rust mirror in server/src/session_chat.rs),
@@ -127,10 +128,10 @@ export type SessionChatSource = 'transcript' | 'hook' | 'client';
 /** Visual palette for the shared chat surface, independent of app chrome. */
 export type SessionChatTheme = 'light' | 'dark';
 
-export type SessionChatThemeSetting = SessionChatTheme | 'system';
+export type SessionChatThemeSetting = ContentThemeSetting;
 
 export function normalizeSessionChatTheme(value: unknown): SessionChatThemeSetting {
-  return value === 'light' || value === 'dark' ? value : 'system';
+  return normalizeContentThemeSetting(value);
 }
 
 // Higher wins when the same message id/turn arrives from two sources.

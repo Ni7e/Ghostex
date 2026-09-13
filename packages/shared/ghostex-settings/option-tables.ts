@@ -53,6 +53,7 @@ export const SESSION_CHAT_THEME_OPTIONS: ReadonlyArray<{
   label: string;
   value: SessionChatThemeSetting;
 }> = [
+  { label: 'Follow app', value: 'app' },
   { label: 'System', value: 'system' },
   { label: 'Light', value: 'light' },
   { label: 'Dark', value: 'dark' },

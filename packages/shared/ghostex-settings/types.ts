@@ -1,4 +1,5 @@
 import { type SidebarThemeSetting } from '../session-grid-contract-core';
+import type { ContentThemeSetting } from '../appearance';
 import { DEFAULT_COMMANDS_PANEL_HEIGHT_PX } from '../session-grid-contract-session';
 import { type SessionChatThemeSetting } from '../session-chat';
 import { type CompletionSoundPreference, type CompletionSoundSetting } from '../completion-sound';
@@ -558,7 +559,7 @@ export type ghostexSettings = {
    */
   showLessForExpandedProjectJumps: boolean;
   sidebarTheme: SidebarThemeSetting;
-  /** Theme for chat content only; the surrounding Ghostex chrome stays dark. */
+  /** Follow the app theme, or override chat with Light, Dark, or System. */
   sessionChatTheme: SessionChatThemeSetting;
   /** CSS font-family used by chat messages and the prompt composer. */
   sessionChatFontFamily: string;
@@ -632,7 +633,7 @@ export type ghostexSettings = {
   terminalFontFamily: string;
   terminalFontSize: number;
   terminalFontWeight: number;
-  terminalColorScheme: 'dark' | 'light' | 'system';
+  terminalColorScheme: ContentThemeSetting;
   terminalGhosttyLightTheme: string;
   terminalGhosttyTheme: string;
   terminalBackgroundImage: string;

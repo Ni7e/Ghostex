@@ -486,13 +486,40 @@ export function getSettingsSearchSectionDefinitions() {
       ],
     },
     theming: {
-      title: 'Theming',
+      title: 'Theme',
       settings: [
         {
           key: 'sidebarTheme',
           options: SIDEBAR_THEME_SETTING_OPTIONS,
           subtitle: 'Light, Dark Gray, or follow the system appearance.',
-          title: 'Theme',
+          title: 'App theme',
+        },
+        {
+          key: 'sessionChatTheme',
+          options: SESSION_CHAT_THEME_OPTIONS,
+          subtitle:
+            'Follow the app theme by default, or override chat with Light, Dark, or System.',
+          title: 'Chat theme',
+        },
+        {
+          key: 'terminalColorScheme',
+          options: SESSION_CHAT_THEME_OPTIONS,
+          subtitle: 'Follow the app theme by default, or override terminals with Light, Dark, or System.',
+          title: 'Terminal theme',
+        },
+        {
+          key: 'terminalGhosttyLightTheme',
+          options: GHOSTTY_THEME_SETTING_OPTIONS.filter(
+            (option) => option.value !== '__ghostex_ghostty_theme_unmanaged__'
+          ),
+          subtitle: 'Palette and background used by Ghostex terminals in light mode.',
+          title: 'Terminal light palette',
+        },
+        {
+          key: 'terminalGhosttyTheme',
+          options: GHOSTTY_THEME_SETTING_OPTIONS,
+          subtitle: 'Theme used in dark mode, with your existing Ghostty config and background.',
+          title: 'Terminal dark palette',
         },
         {
           key: 'customSidebarTitlebarBackgroundDarknessPercent',
@@ -530,13 +557,6 @@ export function getSettingsSearchSectionDefinitions() {
           options: PREFERRED_AGENT_INTERFACE_OPTIONS,
           subtitle: 'Automatically switch to chat as soon as Ghostex detects that an agent session supports it.',
           title: 'Default view for compatible agents',
-        },
-        {
-          key: 'sessionChatTheme',
-          options: SESSION_CHAT_THEME_OPTIONS,
-          subtitle:
-            'Follow your computer’s appearance with System (the default), or choose Light or Dark for chat content.',
-          title: 'Chat appearance',
         },
         {
           key: 'sessionChatFontFamily',
@@ -649,26 +669,6 @@ export function getSettingsSearchSectionDefinitions() {
           ],
           subtitle: 'Recommended Ghostty settings, Ghostty config file, Ghostty docs, and Ghostty defaults.',
           title: 'Ghostty settings actions',
-        },
-        {
-          key: 'terminalColorScheme',
-          options: SESSION_CHAT_THEME_OPTIONS,
-          subtitle: 'Dark, light, or system appearance for Ghostex terminals.',
-          title: 'Appearance',
-        },
-        {
-          key: 'terminalGhosttyLightTheme',
-          options: GHOSTTY_THEME_SETTING_OPTIONS.filter(
-            (option) => option.value !== '__ghostex_ghostty_theme_unmanaged__'
-          ),
-          subtitle: 'Palette and background used by Ghostex terminals in light mode.',
-          title: 'Light Theme',
-        },
-        {
-          key: 'terminalGhosttyTheme',
-          options: GHOSTTY_THEME_SETTING_OPTIONS,
-          subtitle: 'Theme used in dark mode, with your existing Ghostty config and background.',
-          title: 'Dark Theme',
         },
         {
           key: 'workspaceBackgroundColor',
@@ -982,7 +982,7 @@ export const MAIN_SETTINGS_GROUP_SECTIONS: Record<
   MainSettingsGroupId,
   { sections: readonly SettingsSearchSectionId[]; title: string }
 > = {
-  appearance: { sections: ['theming', 'appIcon'], title: 'Appearance' },
+  appearance: { sections: ['theming', 'appIcon'], title: 'Theme' },
   chat: { sections: ['chat'], title: 'Chat' },
   sidebar: { sections: ['sidebar', 'sessionCards', 'sidebarTags'], title: 'Sidebar' },
   terminal: { sections: ['terminal', 'terminalBehavior', 'terminalScrolling'], title: 'Terminal' },
@@ -1024,12 +1024,12 @@ export function getMainSettingsSectionNavigation(mainSettingsGroupSearch: MainSe
      * subsections, but clicking down this rail should always move down the
      * Settings page instead of jumping above an earlier-looking destination.
      */
-    { id: 'sidebar', searchResult: mainSettingsGroupSearch.sidebar, title: 'Sidebar' },
     {
       id: 'appearance',
       searchResult: mainSettingsGroupSearch.appearance,
-      title: 'Appearance',
+      title: 'Theme',
     },
+    { id: 'sidebar', searchResult: mainSettingsGroupSearch.sidebar, title: 'Sidebar' },
     { id: 'chat', searchResult: mainSettingsGroupSearch.chat, title: 'Chat' },
     ...(PET_CONTROLS_VISIBLE
       ? [

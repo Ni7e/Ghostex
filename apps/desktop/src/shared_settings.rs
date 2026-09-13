@@ -13,6 +13,10 @@ use std::{
 
 use serde_json::{Map, Value};
 
+#[path = "shared_settings/appearance.rs"]
+mod appearance;
+pub use appearance::effective_content_color_scheme;
+
 pub const PROJECT_EDITOR_AUTO_SLEEP_DEFAULT_IDLE_MINUTES: f64 = 5.0;
 pub const PROJECT_EDITOR_AUTO_SLEEP_MAX_IDLE_MINUTES: f64 = 300.0;
 pub const DEFAULT_TERMINAL_FONT_SIZE: f32 = 13.0;
@@ -866,7 +870,7 @@ impl SharedSidebarSettingsSnapshot {
                 "terminalGhosttyTheme",
                 DEFAULT_TERMINAL_GHOSTTY_THEME,
             )),
-            color_scheme: read_string_field(&self.object, "terminalColorScheme", "dark")
+            color_scheme: effective_content_color_scheme(&self.object, "terminalColorScheme")
                 .to_string(),
             light_theme: read_string_field(
                 &self.object,

@@ -303,7 +303,7 @@ agent, or the agent asks for input. Completed searches and commands stay in
 that turn's expandable work details; changing model or effort does not bring
 them back. Background commands that are still running, compaction, and
 requests for approval keep their own status cards.
-Chat Appearance defaults to System, following your computer’s light or dark appearance as it changes. Choose Light or Dark to keep chat in one palette; the surrounding app stays dark. Set it in Settings > Chat with `sessionChatTheme`.
+Chat follows the app theme by default. In Settings > General > Theme, set Chat theme to Light, Dark, or System for a separate appearance, or choose Follow app to use the main App theme (`sessionChatTheme`, `sidebarTheme`).
 
 Set Default Chat Zoom (%) in Settings > Chat to scale the desktop chat interface, including messages, controls, and the prompt composer. Choose 70% to 200% in 5% steps; the initial default is 100%. The saved level applies to open chats and when chats open again (`sessionChatZoomPercent`).
 
@@ -439,12 +439,12 @@ undo/redo, and image previews. Cmd+S/Ctrl+S or Ctrl+G saves and closes it; Cance
 leaves the original prompt unchanged. Dev Servers detects localhost URLs from output and
 lists them in Resources.
 
-Terminal Appearance offers Dark, Light, and System independently of the sidebar
-and chat. Dark keeps the existing Ghostty theme and background. Light Theme
-chooses the light palette and background (GitHub Light Default initially); System
-switches between the two as the operating system appearance changes, including
-in already-open terminals. These two appearance controls apply to Ghostex only.
-Dark remains the default.
+Terminals follow the app theme by default. Settings > General > Theme groups
+App theme, Chat theme, and Terminal theme together at the top of Settings.
+Terminal theme can override the app with Light, Dark, or System. Terminal light
+palette starts with GitHub Light Default; Terminal dark palette keeps the existing
+Ghostty theme and background. Already-open terminals update when the app or system
+appearance changes. The appearance override and light palette apply to Ghostex only.
 
 Terminal links (`ghostex://terminal`) without a folder open in the active local
 project. A folder supplied in the link takes precedence.
@@ -659,10 +659,11 @@ docs directory), `hideProjectHeaderDiffStats`,
 ## Appearance and app
 
 Theme, background contrast and tint, accent color, active pane outline, and
-the app icon live under Settings > General > Appearance. Theme offers Dark Gray,
-Light, and System for the sidebar and titlebar. System follows the operating
-system appearance. Dark Gray remains the default, and its saved contrast and
-tint return unchanged when switching back from Light. Keep Awake (Power)
+the app icon live under Settings > General > Theme, the first section.
+App theme offers Dark Gray, Light, and System. Chat and terminal default to
+Follow app, with optional Light, Dark, or System overrides in the same section.
+System follows the operating system appearance. Dark Gray remains the app default,
+and its saved contrast and tint return unchanged when switching back from Light. Keep Awake (Power)
 prevents sleep while agents work.
 Advanced holds Enable Experimental Features and the Debugging rows (Show debug
 UI controls gates diagnostic disk logging; leave these to the user).

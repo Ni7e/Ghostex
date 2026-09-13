@@ -188,6 +188,10 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
    */
   appearance: [
     'sidebarTheme',
+    'sessionChatTheme',
+    'terminalColorScheme',
+    'terminalGhosttyLightTheme',
+    'terminalGhosttyTheme',
     'customSidebarTitlebarBackgroundDarknessPercent',
     'customSidebarTitlebarBackgroundTintColor',
     'showActivePaneOutline',
@@ -196,7 +200,6 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
   ],
   chat: [
     'preferredAgentInterface',
-    'sessionChatTheme',
     'sessionChatFontFamily',
     'sessionChatZoomPercent',
     'sessionChatCustomTranscriptWidthEnabled',
@@ -261,9 +264,6 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
   statusIndicators: ['petOverlayEnabled', 'selectedPetId'],
   terminal: [
     'ghosttySettingsActions',
-    'terminalColorScheme',
-    'terminalGhosttyLightTheme',
-    'terminalGhosttyTheme',
     'workspaceBackgroundColor',
     'terminalBackgroundImage',
     'terminalBackgroundImageOpacity',
@@ -351,6 +351,10 @@ export const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
   ...MAIN_SETTINGS_SECTION_SETTING_KEYS,
   theming: [
     'sidebarTheme',
+    'sessionChatTheme',
+    'terminalColorScheme',
+    'terminalGhosttyLightTheme',
+    'terminalGhosttyTheme',
     'customSidebarTitlebarBackgroundDarknessPercent',
     'customSidebarTitlebarBackgroundTintColor',
     'accentColor',
@@ -454,7 +458,7 @@ export const MAIN_SETTINGS_SUBSECTION_NAVIGATION: Partial<
     { id: 'debugging', title: 'Debugging' },
   ],
   appearance: [
-    { id: 'theming', title: 'Theming' },
+    { id: 'theming', title: 'Theme' },
     { id: 'appIcon', title: 'App Icon' },
   ],
   sidebar: [

@@ -126,7 +126,6 @@ import {
   PetPickerField,
   PreferredAgentInterfaceField,
   SelectField,
-  SessionChatThemeField,
   SettingButton,
   SettingRow,
   SettingsListItem,
@@ -442,7 +441,7 @@ export function SettingsModal({
    */
   const showAdvancedSettings = draft.showAdvancedSettings;
   const [settingsSearchQuery, setSettingsSearchQuery] = useState('');
-  const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] = useState<MainSettingsScrollTargetId>('sidebar');
+  const [activeMainSettingsSectionId, setActiveMainSettingsSectionId] = useState<MainSettingsScrollTargetId>('theming');
   const [activeHotkeySettingsSectionId, setActiveHotkeySettingsSectionId] =
     useState<HotkeySettingsSectionId>('general');
   const [expandedSettingsSidebarPages, setExpandedSettingsSidebarPages] = useState<
@@ -1004,7 +1003,7 @@ export function SettingsModal({
         ref={dialogContentRef}
         showCloseButton={false}
       >
-        <TooltipProvider delayDuration={300}>
+        <TooltipProvider delayDuration={300} theme={isModalDarkTheme ? 'dark' : 'light'}>
           <Tabs
             className='flex min-h-0 flex-1 flex-col'
             onValueChange={(value) => setActiveTab(value as SettingsModalTab)}
@@ -1138,6 +1137,207 @@ export function SettingsModal({
                          * jump across unrelated content and breaks the visible
                          * hierarchy promised by the navigation.
                          */}
+                        {mainSubsectionVisible('theming', settingsSearch.theming) ? (
+                          <SettingsSection
+                            description='Choose the app appearance. Chat and terminal follow it unless you set an override below.'
+                            sectionRef={themingSectionRef}
+                            title='Theme'
+                          >
+                            {/*
+                  CDXC:Theming 2026-06-16-01:35:
+                  Theming remains a distinct section on the General settings
+                  page so theme-related controls scan separately from Sidebar
+                  layout controls.
+
+                  CDXC:Theming 2026-06-15-13:22:
+                  Users should only pick the sidebar/titlebar background. The
+                  foreground is derived automatically from that background so
+                  light and dark custom colors keep readable chrome.
+
+                  CDXC:Theming 2026-06-15-13:45:
+                  Replace the freeform background color picker with a constrained
+                  contrast slider. The slider outputs calibrated dark
+                  backgrounds so sidebar row states remain predictable.
+
+                  CDXC:Theming 2026-06-15-15:01:
+                  Limit the contrast slider to 85-100 because lower values made
+                  custom sidebar chrome too gray.
+
+                  CDXC:Theming 2026-06-15-15:15:
+                  Call the user-facing control Contrast while keeping the stored
+                  background darkness key stable for existing settings and native
+                  startup compatibility.
+
+                  CDXC:Theming 2026-06-15-15:28:
+                  Add Background Tint as a web-only color picker. Do not use
+                  input[type=color], because macOS replaces that with a native
+                  color panel instead of the in-app picker requested here.
+                */}
+                            {mainSettingVisible(settingsSearch.theming, 'sidebarTheme') ? (
+                              <SelectField
+                                label='App theme'
+                                description='Choose Light, Dark Gray, or System to follow your computer’s appearance.'
+                                {...getSettingModificationProps('sidebarTheme')}
+                                onChange={(value) =>
+                                  updateDraft('sidebarTheme', value as ghostexSettings['sidebarTheme'])
+                                }
+                                options={SIDEBAR_THEME_SETTING_OPTIONS}
+                                value={draft.sidebarTheme}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'sessionChatTheme') ? (
+                              <SelectField
+                                description='Follow the app theme, or choose a separate appearance for chat.'
+                                label='Chat theme'
+                                {...getSettingModificationProps('sessionChatTheme')}
+                                onChange={(value) =>
+                                  updateDraft('sessionChatTheme', value as ghostexSettings['sessionChatTheme'])
+                                }
+                                options={SESSION_CHAT_THEME_OPTIONS}
+                                value={draft.sessionChatTheme}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'terminalColorScheme') ? (
+                              <SelectField
+                                label='Terminal theme'
+                                description='Follow the app theme, or choose a separate appearance for terminals.'
+                                {...getSettingModificationProps('terminalColorScheme')}
+                                onChange={(value) =>
+                                  updateDraft('terminalColorScheme', value as ghostexSettings['terminalColorScheme'])
+                                }
+                                options={SESSION_CHAT_THEME_OPTIONS}
+                                value={draft.terminalColorScheme}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'terminalGhosttyLightTheme') ? (
+                              <SelectField
+                                label='Terminal light palette'
+                                description='Palette and background used by Ghostex terminals in light mode.'
+                                contentClassName='max-h-80'
+                                {...getSettingModificationProps('terminalGhosttyLightTheme')}
+                                onChange={(value) => updateDraft('terminalGhosttyLightTheme', value)}
+                                options={GHOSTTY_THEME_SETTING_OPTIONS.filter(
+                                  (option) => option.value !== GHOSTTY_THEME_UNMANAGED_VALUE
+                                )}
+                                showScrollButtons={false}
+                                value={draft.terminalGhosttyLightTheme}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'terminalGhosttyTheme') ? (
+                              <SelectField
+                                contentClassName='max-h-80'
+                                description='Theme used in dark mode, with your existing Ghostty config and background.'
+                                label='Terminal dark palette'
+                                {...getSettingModificationProps('terminalGhosttyTheme')}
+                                onChange={(value) =>
+                                  updateDraft(
+                                    'terminalGhosttyTheme',
+                                    value === GHOSTTY_THEME_UNMANAGED_VALUE ? '' : value
+                                  )
+                                }
+                                options={GHOSTTY_THEME_SETTING_OPTIONS}
+                                showScrollButtons={false}
+                                value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
+                              />
+                            ) : null}
+                            {mainSettingVisible(
+                              settingsSearch.theming,
+                              'customSidebarTitlebarBackgroundDarknessPercent'
+                            ) ? (
+                              <SliderNumberField
+                                description='Dark mode: 85 is softer gray; 100 is black. Text and icons adjust automatically.'
+                                label='Background Contrast'
+                                {...getSettingModificationProps('customSidebarTitlebarBackgroundDarknessPercent')}
+                                max={MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
+                                min={MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
+                                onCommit={(value) =>
+                                  updateDraft('customSidebarTitlebarBackgroundDarknessPercent', value)
+                                }
+                                onChange={(value) =>
+                                  updateDraftDebounced('customSidebarTitlebarBackgroundDarknessPercent', value)
+                                }
+                                step={1}
+                                value={draft.customSidebarTitlebarBackgroundDarknessPercent}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'customSidebarTitlebarBackgroundTintColor') ? (
+                              <WebColorPickerField
+                                description='Applies a subtle hue to the sidebar and titlebar background in dark mode.'
+                                label='Background Tint'
+                                {...getSettingModificationProps('customSidebarTitlebarBackgroundTintColor')}
+                                onChange={(value) =>
+                                  updateDraftDebounced('customSidebarTitlebarBackgroundTintColor', value)
+                                }
+                                onCommit={(value) => updateDraft('customSidebarTitlebarBackgroundTintColor', value)}
+                                value={draft.customSidebarTitlebarBackgroundTintColor}
+                              />
+                            ) : null}
+                            {/*
+                  CDXC:Theming 2026-08-24:
+                  The accent color drives --ghostex-accent on every React
+                  surface, so it uses the same web color picker as Background
+                  Tint instead of a native input[type=color].
+
+                  CDXC:Theming 2026-08-30:
+                  Accent Color is an advanced Theming row. It also colors the
+                  up-arrow markers on advanced Settings rows.
+                */}
+                            {mainSettingVisible(settingsSearch.theming, 'accentColor') ? (
+                              <WebColorPickerField
+                                description='Highlight color for accent text, status highlights, and advanced-setting markers. This color is used minimally in the app.'
+                                label='Accent Color'
+                                {...getSettingModificationProps('accentColor')}
+                                onChange={(value) => updateDraftDebounced('accentColor', value)}
+                                onCommit={(value) => updateDraft('accentColor', value)}
+                                value={draft.accentColor}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.theming, 'showActivePaneOutline') ? (
+                              <ToggleField
+                                checked={draft.showActivePaneOutline}
+                                description='Show an outline around the currently focused pane.'
+                                label='Show Active Pane Outline'
+                                {...getSettingModificationProps('showActivePaneOutline')}
+                                onChange={(checked) => updateDraft('showActivePaneOutline', checked)}
+                              />
+                            ) : null}
+                            {draft.showActivePaneOutline &&
+                            mainSettingVisible(settingsSearch.theming, 'workspaceActivePaneBorderColor') ? (
+                              <WebColorPickerField
+                                description='Color of the outline around the currently focused pane.'
+                                dependent
+                                label='Active Pane Border'
+                                {...getSettingModificationProps('workspaceActivePaneBorderColor')}
+                                onChange={(value) => updateDraftDebounced('workspaceActivePaneBorderColor', value)}
+                                onCommit={(value) => updateDraft('workspaceActivePaneBorderColor', value)}
+                                value={draft.workspaceActivePaneBorderColor}
+                              />
+                            ) : null}
+                          </SettingsSection>
+                        ) : null}
+
+                        {/*
+                         * CDXC:Icons 2026-06-28-06:05:
+                         * The advanced App Icon section is a custom-image control, not a bundled preset picker. Show one preview, one Select Image action, and an inline X on the custom preview to restore the default icon; omit separate reset and folder-reveal actions so the flow stays direct.
+                         */}
+                        {mainSubsectionVisible('appIcon', settingsSearch.appIcon) ? (
+                          <SettingsSection
+                            description='Changes the Dock and app-switcher icon. The app file icon may also change when macOS allows it.'
+                            sectionRef={appIconSectionRef}
+                            title='App Icon'
+                          >
+                            {mainSettingVisible(settingsSearch.appIcon, 'appIconSourceId') ? (
+                              <AppIconPickerField
+                                advanced={isAdvancedMainSetting('appIconSourceId')}
+                                error={appIconError}
+                                onChooseFile={chooseAppIconFile}
+                                onSelect={selectAppIcon}
+                                state={appIconState}
+                              />
+                            ) : null}
+                          </SettingsSection>
+                        ) : null}
+
                         {mainSubsectionVisible('sidebar', settingsSearch.sidebar) ? (
                           <SettingsSection sectionRef={sidebarSectionRef} title='Sidebar'>
                             {/* CDXC:Settings 2026-06-12-07:10: Preset is the first Sidebar setting so users can apply Codex, Minimal, Detailed, or Recommended sidebar UI defaults before tuning individual controlled settings. */}
@@ -1562,152 +1762,6 @@ export function SettingsModal({
                           </SettingsSection>
                         ) : null}
 
-                        {mainSubsectionVisible('theming', settingsSearch.theming) ? (
-                          <SettingsSection sectionRef={themingSectionRef} title='Theming'>
-                            {/*
-                  CDXC:Theming 2026-06-15-21:35:
-                  General settings needs Theming in the second group, separate
-                  from Sidebar layout controls.
-
-                  CDXC:Theming 2026-06-16-01:35:
-                  Theming remains a distinct section on the General settings
-                  page so theme-related controls scan separately from Sidebar
-                  layout controls.
-
-                  CDXC:Theming 2026-06-15-13:22:
-                  Users should only pick the sidebar/titlebar background. The
-                  foreground is derived automatically from that background so
-                  light and dark custom colors keep readable chrome.
-
-                  CDXC:Theming 2026-06-15-13:45:
-                  Replace the freeform background color picker with a constrained
-                  contrast slider. The slider outputs calibrated dark
-                  backgrounds so sidebar row states remain predictable.
-
-                  CDXC:Theming 2026-06-15-15:01:
-                  Limit the contrast slider to 85-100 because lower values made
-                  custom sidebar chrome too gray.
-
-                  CDXC:Theming 2026-06-15-15:15:
-                  Call the user-facing control Contrast while keeping the stored
-                  background darkness key stable for existing settings and native
-                  startup compatibility.
-
-                  CDXC:Theming 2026-06-15-15:28:
-                  Add Background Tint as a web-only color picker. Do not use
-                  input[type=color], because macOS replaces that with a native
-                  color panel instead of the in-app picker requested here.
-                */}
-                            {mainSettingVisible(settingsSearch.theming, 'sidebarTheme') ? (
-                              <SelectField
-                                label='Theme'
-                                description='Choose Light, keep Dark Gray, or follow the system appearance.'
-                                {...getSettingModificationProps('sidebarTheme')}
-                                onChange={(value) =>
-                                  updateDraft('sidebarTheme', value as ghostexSettings['sidebarTheme'])
-                                }
-                                options={SIDEBAR_THEME_SETTING_OPTIONS}
-                                value={draft.sidebarTheme}
-                              />
-                            ) : null}
-                            {mainSettingVisible(
-                              settingsSearch.theming,
-                              'customSidebarTitlebarBackgroundDarknessPercent'
-                            ) ? (
-                              <SliderNumberField
-                                description='Dark mode: 85 is softer gray; 100 is black. Text and icons adjust automatically.'
-                                label='Background Contrast'
-                                {...getSettingModificationProps('customSidebarTitlebarBackgroundDarknessPercent')}
-                                max={MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
-                                min={MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
-                                onCommit={(value) =>
-                                  updateDraft('customSidebarTitlebarBackgroundDarknessPercent', value)
-                                }
-                                onChange={(value) =>
-                                  updateDraftDebounced('customSidebarTitlebarBackgroundDarknessPercent', value)
-                                }
-                                step={1}
-                                value={draft.customSidebarTitlebarBackgroundDarknessPercent}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'customSidebarTitlebarBackgroundTintColor') ? (
-                              <WebColorPickerField
-                                description='Applies a subtle hue to the sidebar and titlebar background in dark mode.'
-                                label='Background Tint'
-                                {...getSettingModificationProps('customSidebarTitlebarBackgroundTintColor')}
-                                onChange={(value) =>
-                                  updateDraftDebounced('customSidebarTitlebarBackgroundTintColor', value)
-                                }
-                                onCommit={(value) => updateDraft('customSidebarTitlebarBackgroundTintColor', value)}
-                                value={draft.customSidebarTitlebarBackgroundTintColor}
-                              />
-                            ) : null}
-                            {/*
-                  CDXC:Theming 2026-08-24:
-                  The accent color drives --ghostex-accent on every React
-                  surface, so it uses the same web color picker as Background
-                  Tint instead of a native input[type=color].
-
-                  CDXC:Theming 2026-08-30:
-                  Accent Color is an advanced Theming row. It also colors the
-                  up-arrow markers on advanced Settings rows.
-                */}
-                            {mainSettingVisible(settingsSearch.theming, 'accentColor') ? (
-                              <WebColorPickerField
-                                description='Highlight color for accent text, status highlights, and advanced-setting markers. This color is used minimally in the app.'
-                                label='Accent Color'
-                                {...getSettingModificationProps('accentColor')}
-                                onChange={(value) => updateDraftDebounced('accentColor', value)}
-                                onCommit={(value) => updateDraft('accentColor', value)}
-                                value={draft.accentColor}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.theming, 'showActivePaneOutline') ? (
-                              <ToggleField
-                                checked={draft.showActivePaneOutline}
-                                description='Show an outline around the currently focused pane.'
-                                label='Show Active Pane Outline'
-                                {...getSettingModificationProps('showActivePaneOutline')}
-                                onChange={(checked) => updateDraft('showActivePaneOutline', checked)}
-                              />
-                            ) : null}
-                            {draft.showActivePaneOutline &&
-                            mainSettingVisible(settingsSearch.theming, 'workspaceActivePaneBorderColor') ? (
-                              <WebColorPickerField
-                                description='Color of the outline around the currently focused pane.'
-                                dependent
-                                label='Active Pane Border'
-                                {...getSettingModificationProps('workspaceActivePaneBorderColor')}
-                                onChange={(value) => updateDraftDebounced('workspaceActivePaneBorderColor', value)}
-                                onCommit={(value) => updateDraft('workspaceActivePaneBorderColor', value)}
-                                value={draft.workspaceActivePaneBorderColor}
-                              />
-                            ) : null}
-                          </SettingsSection>
-                        ) : null}
-
-                        {/*
-                         * CDXC:Icons 2026-06-28-06:05:
-                         * The advanced App Icon section is a custom-image control, not a bundled preset picker. Show one preview, one Select Image action, and an inline X on the custom preview to restore the default icon; omit separate reset and folder-reveal actions so the flow stays direct.
-                         */}
-                        {mainSubsectionVisible('appIcon', settingsSearch.appIcon) ? (
-                          <SettingsSection
-                            description='Changes the Dock and app-switcher icon. The app file icon may also change when macOS allows it.'
-                            sectionRef={appIconSectionRef}
-                            title='App Icon'
-                          >
-                            {mainSettingVisible(settingsSearch.appIcon, 'appIconSourceId') ? (
-                              <AppIconPickerField
-                                advanced={isAdvancedMainSetting('appIconSourceId')}
-                                error={appIconError}
-                                onChooseFile={chooseAppIconFile}
-                                onSelect={selectAppIcon}
-                                state={appIconState}
-                              />
-                            ) : null}
-                          </SettingsSection>
-                        ) : null}
-
                         {mainSectionVisible('chat', settingsSearch.chat) ? (
                           <SettingsSection sectionRef={chatSectionRef} title='Chat'>
                             {mainSettingVisible(settingsSearch.chat, 'preferredAgentInterface') ? (
@@ -1719,15 +1773,6 @@ export function SettingsModal({
                                   updateDraft('preferredAgentInterface', preferredAgentInterface)
                                 }
                                 value={draft.preferredAgentInterface}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.chat, 'sessionChatTheme') ? (
-                              <SessionChatThemeField
-                                description='System follows your computer’s light or dark appearance. Changes chat content only; the surrounding Ghostex app remains dark.'
-                                label='Appearance'
-                                {...getSettingModificationProps('sessionChatTheme')}
-                                onChange={(value) => updateDraft('sessionChatTheme', value)}
-                                value={draft.sessionChatTheme}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.chat, 'sessionChatFontFamily') ? (
@@ -2005,7 +2050,7 @@ export function SettingsModal({
                                     The Ghostty controls also apply to your external Ghostty terminal because this
                                     Ghostty terminal uses the same settings file. ghostex reloads its embedded Ghostty
                                     terminal about 3 seconds after you stop changing these controls; external Ghostty
-                                    windows may still need Cmd+Shift+, to reload. Appearance and Light Theme apply only
+                                    windows may still need Cmd+Shift+, to reload. Theme overrides and the terminal light palette apply only
                                     to Ghostex.
                                   </p>
                                 </div>
@@ -2016,49 +2061,6 @@ export function SettingsModal({
                                   onResetDefaults={resetGhosttySettingsToDefault}
                                 />
                               </>
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.terminal, 'terminalColorScheme') ? (
-                              <SelectField
-                                label='Appearance'
-                                description='Use your current dark appearance, a light theme, or follow the system. Applies to Ghostex terminals.'
-                                {...getSettingModificationProps('terminalColorScheme')}
-                                onChange={(value) =>
-                                  updateDraft('terminalColorScheme', value as ghostexSettings['terminalColorScheme'])
-                                }
-                                options={SESSION_CHAT_THEME_OPTIONS}
-                                value={draft.terminalColorScheme}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.terminal, 'terminalGhosttyLightTheme') ? (
-                              <SelectField
-                                label='Light Theme'
-                                description='Palette and background used by Ghostex terminals in light mode.'
-                                contentClassName='max-h-80'
-                                {...getSettingModificationProps('terminalGhosttyLightTheme')}
-                                onChange={(value) => updateDraft('terminalGhosttyLightTheme', value)}
-                                options={GHOSTTY_THEME_SETTING_OPTIONS.filter(
-                                  (option) => option.value !== GHOSTTY_THEME_UNMANAGED_VALUE
-                                )}
-                                showScrollButtons={false}
-                                value={draft.terminalGhosttyLightTheme}
-                              />
-                            ) : null}
-                            {mainSettingVisible(settingsSearch.terminal, 'terminalGhosttyTheme') ? (
-                              <SelectField
-                                contentClassName='max-h-80'
-                                description='Theme used in dark mode, with your existing Ghostty config and background.'
-                                label='Dark Theme'
-                                {...getSettingModificationProps('terminalGhosttyTheme')}
-                                onChange={(value) =>
-                                  updateDraft(
-                                    'terminalGhosttyTheme',
-                                    value === GHOSTTY_THEME_UNMANAGED_VALUE ? '' : value
-                                  )
-                                }
-                                options={GHOSTTY_THEME_SETTING_OPTIONS}
-                                showScrollButtons={false}
-                                value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
-                              />
                             ) : null}
                             {IS_WINDOWS_HOST &&
                             mainSettingVisible(settingsSearch.terminal, 'windowsWslDistribution') ? (
