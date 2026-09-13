@@ -74,6 +74,7 @@ export type SidebarTheme =
   | 'light-orange';
 
 export type SidebarThemeSetting =
+  | 'system'
   | 'auto'
   | 'plain'
   | 'dark-1'

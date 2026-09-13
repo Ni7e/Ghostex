@@ -22,6 +22,7 @@ import {
   SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SIDE_OPTIONS,
+  SIDEBAR_THEME_SETTING_OPTIONS,
   SIDEBAR_SPACES_ENABLED_OPTIONS,
   SIDEBAR_SPACE_SWITCH_BEHAVIOR_OPTIONS,
   SIDEBAR_VISIBILITY_MEMORY_OPTIONS,
@@ -489,7 +490,8 @@ export function getSettingsSearchSectionDefinitions() {
       settings: [
         {
           key: 'sidebarTheme',
-          subtitle: 'Light theme coming soon.',
+          options: SIDEBAR_THEME_SETTING_OPTIONS,
+          subtitle: 'Light, Dark Gray, or follow the system appearance.',
           title: 'Theme',
         },
         {
@@ -649,10 +651,24 @@ export function getSettingsSearchSectionDefinitions() {
           title: 'Ghostty settings actions',
         },
         {
+          key: 'terminalColorScheme',
+          options: SESSION_CHAT_THEME_OPTIONS,
+          subtitle: 'Dark, light, or system appearance for Ghostex terminals.',
+          title: 'Appearance',
+        },
+        {
+          key: 'terminalGhosttyLightTheme',
+          options: GHOSTTY_THEME_SETTING_OPTIONS.filter(
+            (option) => option.value !== '__ghostex_ghostty_theme_unmanaged__'
+          ),
+          subtitle: 'Palette and background used by Ghostex terminals in light mode.',
+          title: 'Light Theme',
+        },
+        {
           key: 'terminalGhosttyTheme',
           options: GHOSTTY_THEME_SETTING_OPTIONS,
-          subtitle: 'Choose a bundled Ghostty theme or leave the config unmanaged.',
-          title: 'Theme',
+          subtitle: 'Theme used in dark mode, with your existing Ghostty config and background.',
+          title: 'Dark Theme',
         },
         {
           key: 'workspaceBackgroundColor',

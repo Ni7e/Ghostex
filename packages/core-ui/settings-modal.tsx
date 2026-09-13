@@ -1,3 +1,4 @@
+import { useSystemColorScheme } from './use-system-color-scheme';
 import {
   Fragment,
   useCallback,
@@ -65,6 +66,8 @@ import {
   PROMPT_EDITOR_BACKEND_OPTIONS,
   type PromptEditorBackend,
   SIDEBAR_SIDE_OPTIONS,
+  SIDEBAR_THEME_SETTING_OPTIONS,
+  SESSION_CHAT_THEME_OPTIONS,
   SIDEBAR_SPACE_SWITCH_BEHAVIOR_OPTIONS,
   SIDEBAR_VISIBILITY_MEMORY_OPTIONS,
   WEB_LINK_OPEN_TARGET_OPTIONS,
@@ -511,7 +514,8 @@ export function SettingsModal({
   const hasRequestedAppIconsRef = useRef(false);
   const pendingMainSettingsSectionViewportRef = useRef<HTMLElement | null>(null);
   const mainSettingsSectionFrameRef = useRef<number | undefined>(undefined);
-  const modalTheme = resolveSidebarTheme(draft.sidebarTheme, getSidebarThemeVariant(theme));
+  const systemColorScheme = useSystemColorScheme();
+  const modalTheme = resolveSidebarTheme(draft.sidebarTheme, systemColorScheme);
   const isModalDarkTheme = getSidebarThemeVariant(modalTheme) === 'dark';
   const rememberActiveScrollPosition = () => {
     const viewport = getActiveSettingsModalScrollViewport(dialogContentRef.current);
@@ -1570,12 +1574,6 @@ export function SettingsModal({
                   page so theme-related controls scan separately from Sidebar
                   layout controls.
 
-                  CDXC:Theming 2026-06-16-08:58:
-                  Theme selection is not ready for the Settings UI. Hide the
-                  dropdown control and show a simple "Light theme coming soon"
-                  message while keeping all Theming rows visible without Show
-                  Advanced.
-
                   CDXC:Theming 2026-06-15-13:22:
                   Users should only pick the sidebar/titlebar background. The
                   foreground is derived automatically from that background so
@@ -1601,14 +1599,23 @@ export function SettingsModal({
                   color panel instead of the in-app picker requested here.
                 */}
                             {mainSettingVisible(settingsSearch.theming, 'sidebarTheme') ? (
-                              <StaticNoteField label='Theme' surface='plain' value='Light theme coming soon' />
+                              <SelectField
+                                label='Theme'
+                                description='Choose Light, keep Dark Gray, or follow the system appearance.'
+                                {...getSettingModificationProps('sidebarTheme')}
+                                onChange={(value) =>
+                                  updateDraft('sidebarTheme', value as ghostexSettings['sidebarTheme'])
+                                }
+                                options={SIDEBAR_THEME_SETTING_OPTIONS}
+                                value={draft.sidebarTheme}
+                              />
                             ) : null}
                             {mainSettingVisible(
                               settingsSearch.theming,
                               'customSidebarTitlebarBackgroundDarknessPercent'
                             ) ? (
                               <SliderNumberField
-                                description='85 is softer gray; 100 is black. Text and icons adjust automatically.'
+                                description='Dark mode: 85 is softer gray; 100 is black. Text and icons adjust automatically.'
                                 label='Background Contrast'
                                 {...getSettingModificationProps('customSidebarTitlebarBackgroundDarknessPercent')}
                                 max={MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
@@ -1625,7 +1632,7 @@ export function SettingsModal({
                             ) : null}
                             {mainSettingVisible(settingsSearch.theming, 'customSidebarTitlebarBackgroundTintColor') ? (
                               <WebColorPickerField
-                                description='Applies a subtle hue to the sidebar and titlebar background.'
+                                description='Applies a subtle hue to the sidebar and titlebar background in dark mode.'
                                 label='Background Tint'
                                 {...getSettingModificationProps('customSidebarTitlebarBackgroundTintColor')}
                                 onChange={(value) =>
@@ -1995,10 +2002,11 @@ export function SettingsModal({
                                     className='mt-0.5 size-4 shrink-0 text-muted-foreground'
                                   />
                                   <p className='m-0'>
-                                    Whatever you set here also applies to your external Ghostty terminal because this
+                                    The Ghostty controls also apply to your external Ghostty terminal because this
                                     Ghostty terminal uses the same settings file. ghostex reloads its embedded Ghostty
                                     terminal about 3 seconds after you stop changing these controls; external Ghostty
-                                    windows may still need Cmd+Shift+, to reload.
+                                    windows may still need Cmd+Shift+, to reload. Appearance and Light Theme apply only
+                                    to Ghostex.
                                   </p>
                                 </div>
                                 <GhosttySettingsActions
@@ -2009,11 +2017,37 @@ export function SettingsModal({
                                 />
                               </>
                             ) : null}
+                            {mainSettingVisible(settingsSearch.terminal, 'terminalColorScheme') ? (
+                              <SelectField
+                                label='Appearance'
+                                description='Use your current dark appearance, a light theme, or follow the system. Applies to Ghostex terminals.'
+                                {...getSettingModificationProps('terminalColorScheme')}
+                                onChange={(value) =>
+                                  updateDraft('terminalColorScheme', value as ghostexSettings['terminalColorScheme'])
+                                }
+                                options={SESSION_CHAT_THEME_OPTIONS}
+                                value={draft.terminalColorScheme}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.terminal, 'terminalGhosttyLightTheme') ? (
+                              <SelectField
+                                label='Light Theme'
+                                description='Palette and background used by Ghostex terminals in light mode.'
+                                contentClassName='max-h-80'
+                                {...getSettingModificationProps('terminalGhosttyLightTheme')}
+                                onChange={(value) => updateDraft('terminalGhosttyLightTheme', value)}
+                                options={GHOSTTY_THEME_SETTING_OPTIONS.filter(
+                                  (option) => option.value !== GHOSTTY_THEME_UNMANAGED_VALUE
+                                )}
+                                showScrollButtons={false}
+                                value={draft.terminalGhosttyLightTheme}
+                              />
+                            ) : null}
                             {mainSettingVisible(settingsSearch.terminal, 'terminalGhosttyTheme') ? (
                               <SelectField
                                 contentClassName='max-h-80'
-                                description='Choose a bundled Ghostty theme, or leave your existing Ghostty config in charge.'
-                                label='Theme'
+                                description='Theme used in dark mode, with your existing Ghostty config and background.'
+                                label='Dark Theme'
                                 {...getSettingModificationProps('terminalGhosttyTheme')}
                                 onChange={(value) =>
                                   updateDraft(

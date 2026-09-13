@@ -44,13 +44,9 @@ export const SIDEBAR_THEME_SETTING_OPTIONS: ReadonlyArray<{
   label: string;
   value: SidebarThemeSetting;
 }> = [
-  /**
-   * CDXC:Theming 2026-06-15-02:29:
-   * The Settings theme dropdown is disabled while themes are coming soon.
-   * Keep the persisted value concrete as Dark 2, but use the friendly label
-   * Dark Gray so the disabled control matches the current app chrome.
-   */
   { label: 'Dark Gray', value: 'dark-2' },
+  { label: 'Light', value: 'plain-light' },
+  { label: 'System', value: 'system' },
 ];
 
 export const SESSION_CHAT_THEME_OPTIONS: ReadonlyArray<{

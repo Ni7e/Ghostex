@@ -439,11 +439,19 @@ undo/redo, and image previews. Cmd+S/Ctrl+S or Ctrl+G saves and closes it; Cance
 leaves the original prompt unchanged. Dev Servers detects localhost URLs from output and
 lists them in Resources.
 
+Terminal Appearance offers Dark, Light, and System independently of the sidebar
+and chat. Dark keeps the existing Ghostty theme and background. Light Theme
+chooses the light palette and background (GitHub Light Default initially); System
+switches between the two as the operating system appearance changes, including
+in already-open terminals. These two appearance controls apply to Ghostex only.
+Dark remains the default.
+
 Terminal links (`ghostex://terminal`) without a folder open in the active local
 project. A folder supplied in the link takes precedence.
 
 Related settings: `terminalFontFamily`, `terminalFontSize`,
-`terminalGhosttyTheme`, `terminalCursorStyle`, `terminalPane*PaddingPx`,
+`terminalGhosttyTheme`, `terminalColorScheme`, `terminalGhosttyLightTheme`,
+`terminalCursorStyle`, `terminalPane*PaddingPx`,
 `terminalScrollbackLimitMb`, `terminalCopyOnSelect`, `promptEditorBackend`,
 `terminalDevServerDetectionEnabled`.
 
@@ -651,7 +659,10 @@ docs directory), `hideProjectHeaderDiffStats`,
 ## Appearance and app
 
 Theme, background contrast and tint, accent color, active pane outline, and
-the app icon live under Settings > General > Appearance. Keep Awake (Power)
+the app icon live under Settings > General > Appearance. Theme offers Dark Gray,
+Light, and System for the sidebar and titlebar. System follows the operating
+system appearance. Dark Gray remains the default, and its saved contrast and
+tint return unchanged when switching back from Light. Keep Awake (Power)
 prevents sleep while agents work.
 Advanced holds Enable Experimental Features and the Debugging rows (Show debug
 UI controls gates diagnostic disk logging; leave these to the user).

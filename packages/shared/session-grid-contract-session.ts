@@ -256,60 +256,25 @@ export function clampAgentManagerZoomPercent(value: number | undefined): number 
   return Math.min(MAX_AGENT_MANAGER_ZOOM_PERCENT, Math.max(MIN_AGENT_MANAGER_ZOOM_PERCENT, Math.round(value)));
 }
 
+/**
+ * CDXC:Theming 2026-09-13 DECISION:
+ * User: add Light and System while keeping dark mode exactly as it is, including the default and saved contrast/tint.
+ * Legacy Auto and retired presets keep their existing Dark Gray migration; following the OS requires selecting System explicitly.
+ */
 export function clampSidebarThemeSetting(value: string | undefined): SidebarThemeSetting {
-  switch (value) {
-    case 'auto':
-      /**
-       * CDXC:Theming 2026-06-15-02:29:
-       * Theme selection is disabled again while themes are coming soon, so
-       * legacy Auto should resolve to the active Dark Gray/Dark 2 chrome.
-       */
-      return 'dark-2';
-    case 'plain':
-      /**
-       * CDXC:Theming 2026-06-15-01:43:
-       * The old persisted "plain" setting is the current shipped dark surface.
-       * Keep it as the Dark 2 snapshot so existing users do not silently move
-       * off the exact #0e0e0e chrome they selected before Dark 1 became the
-       * default.
-       */
-      return 'dark-2';
-    case 'dark-2':
-      return 'dark-2';
-    case 'dark-1':
-    case 'plain-light':
-    case 'dark-modern':
-    case 'dark-green':
-      /**
-       * CDXC:Theming 2026-06-15-02:29:
-       * Hidden theme values may exist from prior builds or settings files, but
-       * the disabled Settings control must keep the app on Dark Gray/Dark 2.
-       */
-      return 'dark-2';
-    case 'dark-plus':
-    case 'dark-blue':
-    case 'dark-red':
-    case 'dark-pink':
-    case 'dark-orange':
-    case 'light-plus':
-    case 'light-blue':
-    case 'light-green':
-    case 'light-pink':
-    case 'light-orange':
-    case 'monokai':
-    case 'solarized-dark':
-      return 'dark-2';
-    default:
-      return 'dark-2';
-  }
+  return value === 'plain-light' || value === 'system' ? value : 'dark-2';
 }
 
 export function resolveSidebarTheme(themeSetting: SidebarThemeSetting, variant: SidebarThemeVariant): SidebarTheme {
+  if (themeSetting === 'system') {
+    return variant === 'light' ? 'plain-light' : 'dark-2';
+  }
+
   if (themeSetting === 'auto') {
     /**
      * CDXC:Theming 2026-06-15-02:29:
-     * Theme selection is disabled again; direct Auto callers should use the
-     * same active Dark Gray/Dark 2 chrome as normalized settings.
+     * Legacy Auto callers retain Dark Gray/Dark 2, matching the migration in
+     * normalized settings. The explicit System value follows the OS.
      */
     return 'dark-2';
   }

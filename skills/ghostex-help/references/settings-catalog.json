@@ -811,15 +811,29 @@
     {
       "key": "sidebarTheme",
       "title": "Theme",
-      "subtitle": "Light theme coming soon.",
+      "subtitle": "Light, Dark Gray, or follow the system appearance.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
       "groupTitle": "Appearance",
       "section": "theming",
       "sectionTitle": "Theming",
-      "type": "string",
+      "type": "enum",
       "default": "dark-2",
+      "options": [
+        {
+          "label": "Dark Gray",
+          "value": "dark-2"
+        },
+        {
+          "label": "Light",
+          "value": "plain-light"
+        },
+        {
+          "label": "System",
+          "value": "system"
+        }
+      ],
       "agentWritable": true
     },
     {
@@ -1298,9 +1312,1997 @@
       "agentWritable": false
     },
     {
+      "key": "terminalColorScheme",
+      "title": "Appearance",
+      "subtitle": "Dark, light, or system appearance for Ghostex terminals.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "dark",
+      "options": [
+        {
+          "label": "System",
+          "value": "system"
+        },
+        {
+          "label": "Light",
+          "value": "light"
+        },
+        {
+          "label": "Dark",
+          "value": "dark"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
+      "key": "terminalGhosttyLightTheme",
+      "title": "Light Theme",
+      "subtitle": "Palette and background used by Ghostex terminals in light mode.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "GitHub Light Default",
+      "options": [
+        {
+          "label": "0x96f",
+          "value": "0x96f"
+        },
+        {
+          "label": "12-bit Rainbow",
+          "value": "12-bit Rainbow"
+        },
+        {
+          "label": "3024 Day",
+          "value": "3024 Day"
+        },
+        {
+          "label": "3024 Night",
+          "value": "3024 Night"
+        },
+        {
+          "label": "Aardvark Blue",
+          "value": "Aardvark Blue"
+        },
+        {
+          "label": "Abernathy",
+          "value": "Abernathy"
+        },
+        {
+          "label": "Adventure",
+          "value": "Adventure"
+        },
+        {
+          "label": "Adventure Time",
+          "value": "Adventure Time"
+        },
+        {
+          "label": "Adwaita",
+          "value": "Adwaita"
+        },
+        {
+          "label": "Adwaita Dark",
+          "value": "Adwaita Dark"
+        },
+        {
+          "label": "Afterglow",
+          "value": "Afterglow"
+        },
+        {
+          "label": "Aizen Dark",
+          "value": "Aizen Dark"
+        },
+        {
+          "label": "Aizen Light",
+          "value": "Aizen Light"
+        },
+        {
+          "label": "Alabaster",
+          "value": "Alabaster"
+        },
+        {
+          "label": "Alien Blood",
+          "value": "Alien Blood"
+        },
+        {
+          "label": "Andromeda",
+          "value": "Andromeda"
+        },
+        {
+          "label": "Apple Classic",
+          "value": "Apple Classic"
+        },
+        {
+          "label": "Apple System Colors",
+          "value": "Apple System Colors"
+        },
+        {
+          "label": "Apple System Colors Light",
+          "value": "Apple System Colors Light"
+        },
+        {
+          "label": "Arcoiris",
+          "value": "Arcoiris"
+        },
+        {
+          "label": "Ardoise",
+          "value": "Ardoise"
+        },
+        {
+          "label": "Argonaut",
+          "value": "Argonaut"
+        },
+        {
+          "label": "Arthur",
+          "value": "Arthur"
+        },
+        {
+          "label": "Atelier Sulphurpool",
+          "value": "Atelier Sulphurpool"
+        },
+        {
+          "label": "Atom",
+          "value": "Atom"
+        },
+        {
+          "label": "Atom One Dark",
+          "value": "Atom One Dark"
+        },
+        {
+          "label": "Atom One Light",
+          "value": "Atom One Light"
+        },
+        {
+          "label": "Aura",
+          "value": "Aura"
+        },
+        {
+          "label": "Aurora",
+          "value": "Aurora"
+        },
+        {
+          "label": "Ayu",
+          "value": "Ayu"
+        },
+        {
+          "label": "Ayu Light",
+          "value": "Ayu Light"
+        },
+        {
+          "label": "Ayu Mirage",
+          "value": "Ayu Mirage"
+        },
+        {
+          "label": "Banana Blueberry",
+          "value": "Banana Blueberry"
+        },
+        {
+          "label": "Batman",
+          "value": "Batman"
+        },
+        {
+          "label": "Belafonte Day",
+          "value": "Belafonte Day"
+        },
+        {
+          "label": "Belafonte Night",
+          "value": "Belafonte Night"
+        },
+        {
+          "label": "Birds Of Paradise",
+          "value": "Birds Of Paradise"
+        },
+        {
+          "label": "Black Metal",
+          "value": "Black Metal"
+        },
+        {
+          "label": "Black Metal (Bathory)",
+          "value": "Black Metal (Bathory)"
+        },
+        {
+          "label": "Black Metal (Burzum)",
+          "value": "Black Metal (Burzum)"
+        },
+        {
+          "label": "Black Metal (Dark Funeral)",
+          "value": "Black Metal (Dark Funeral)"
+        },
+        {
+          "label": "Black Metal (Gorgoroth)",
+          "value": "Black Metal (Gorgoroth)"
+        },
+        {
+          "label": "Black Metal (Immortal)",
+          "value": "Black Metal (Immortal)"
+        },
+        {
+          "label": "Black Metal (Khold)",
+          "value": "Black Metal (Khold)"
+        },
+        {
+          "label": "Black Metal (Marduk)",
+          "value": "Black Metal (Marduk)"
+        },
+        {
+          "label": "Black Metal (Mayhem)",
+          "value": "Black Metal (Mayhem)"
+        },
+        {
+          "label": "Black Metal (Nile)",
+          "value": "Black Metal (Nile)"
+        },
+        {
+          "label": "Black Metal (Venom)",
+          "value": "Black Metal (Venom)"
+        },
+        {
+          "label": "Blazer",
+          "value": "Blazer"
+        },
+        {
+          "label": "Blue Berry Pie",
+          "value": "Blue Berry Pie"
+        },
+        {
+          "label": "Blue Dolphin",
+          "value": "Blue Dolphin"
+        },
+        {
+          "label": "Blue Matrix",
+          "value": "Blue Matrix"
+        },
+        {
+          "label": "Bluloco Dark",
+          "value": "Bluloco Dark"
+        },
+        {
+          "label": "Bluloco Light",
+          "value": "Bluloco Light"
+        },
+        {
+          "label": "Borland",
+          "value": "Borland"
+        },
+        {
+          "label": "Box",
+          "value": "Box"
+        },
+        {
+          "label": "Breadog",
+          "value": "Breadog"
+        },
+        {
+          "label": "Breeze",
+          "value": "Breeze"
+        },
+        {
+          "label": "Bright Lights",
+          "value": "Bright Lights"
+        },
+        {
+          "label": "Broadcast",
+          "value": "Broadcast"
+        },
+        {
+          "label": "Brogrammer",
+          "value": "Brogrammer"
+        },
+        {
+          "label": "Builtin Dark",
+          "value": "Builtin Dark"
+        },
+        {
+          "label": "Builtin Light",
+          "value": "Builtin Light"
+        },
+        {
+          "label": "Builtin Pastel Dark",
+          "value": "Builtin Pastel Dark"
+        },
+        {
+          "label": "Builtin Tango Dark",
+          "value": "Builtin Tango Dark"
+        },
+        {
+          "label": "Builtin Tango Light",
+          "value": "Builtin Tango Light"
+        },
+        {
+          "label": "C64",
+          "value": "C64"
+        },
+        {
+          "label": "CGA",
+          "value": "CGA"
+        },
+        {
+          "label": "CLRS",
+          "value": "CLRS"
+        },
+        {
+          "label": "Calamity",
+          "value": "Calamity"
+        },
+        {
+          "label": "Carbonfox",
+          "value": "Carbonfox"
+        },
+        {
+          "label": "Catppuccin Frappe",
+          "value": "Catppuccin Frappe"
+        },
+        {
+          "label": "Catppuccin Latte",
+          "value": "Catppuccin Latte"
+        },
+        {
+          "label": "Catppuccin Macchiato",
+          "value": "Catppuccin Macchiato"
+        },
+        {
+          "label": "Catppuccin Mocha",
+          "value": "Catppuccin Mocha"
+        },
+        {
+          "label": "Chalk",
+          "value": "Chalk"
+        },
+        {
+          "label": "Chalkboard",
+          "value": "Chalkboard"
+        },
+        {
+          "label": "Challenger Deep",
+          "value": "Challenger Deep"
+        },
+        {
+          "label": "Chester",
+          "value": "Chester"
+        },
+        {
+          "label": "Ciapre",
+          "value": "Ciapre"
+        },
+        {
+          "label": "Citruszest",
+          "value": "Citruszest"
+        },
+        {
+          "label": "Cobalt Neon",
+          "value": "Cobalt Neon"
+        },
+        {
+          "label": "Cobalt Next",
+          "value": "Cobalt Next"
+        },
+        {
+          "label": "Cobalt Next Dark",
+          "value": "Cobalt Next Dark"
+        },
+        {
+          "label": "Cobalt Next Minimal",
+          "value": "Cobalt Next Minimal"
+        },
+        {
+          "label": "Cobalt2",
+          "value": "Cobalt2"
+        },
+        {
+          "label": "Coffee Theme",
+          "value": "Coffee Theme"
+        },
+        {
+          "label": "Crayon Pony Fish",
+          "value": "Crayon Pony Fish"
+        },
+        {
+          "label": "Cursor Dark",
+          "value": "Cursor Dark"
+        },
+        {
+          "label": "Cursor Light",
+          "value": "Cursor Light"
+        },
+        {
+          "label": "Cutie Pro",
+          "value": "Cutie Pro"
+        },
+        {
+          "label": "Cyberdyne",
+          "value": "Cyberdyne"
+        },
+        {
+          "label": "Cyberpunk",
+          "value": "Cyberpunk"
+        },
+        {
+          "label": "Cyberpunk Scarlet Protocol",
+          "value": "Cyberpunk Scarlet Protocol"
+        },
+        {
+          "label": "Dalton Dark",
+          "value": "Dalton Dark"
+        },
+        {
+          "label": "Dark Modern",
+          "value": "Dark Modern"
+        },
+        {
+          "label": "Dark Pastel",
+          "value": "Dark Pastel"
+        },
+        {
+          "label": "Dark+",
+          "value": "Dark+"
+        },
+        {
+          "label": "Darkermatrix",
+          "value": "Darkermatrix"
+        },
+        {
+          "label": "Darkmatrix",
+          "value": "Darkmatrix"
+        },
+        {
+          "label": "Darkside",
+          "value": "Darkside"
+        },
+        {
+          "label": "Dawnfox",
+          "value": "Dawnfox"
+        },
+        {
+          "label": "Dayfox",
+          "value": "Dayfox"
+        },
+        {
+          "label": "Deep",
+          "value": "Deep"
+        },
+        {
+          "label": "Desert",
+          "value": "Desert"
+        },
+        {
+          "label": "Detuned",
+          "value": "Detuned"
+        },
+        {
+          "label": "Dimidium",
+          "value": "Dimidium"
+        },
+        {
+          "label": "Dimmed Monokai",
+          "value": "Dimmed Monokai"
+        },
+        {
+          "label": "Django",
+          "value": "Django"
+        },
+        {
+          "label": "Django Reborn Again",
+          "value": "Django Reborn Again"
+        },
+        {
+          "label": "Django Smooth",
+          "value": "Django Smooth"
+        },
+        {
+          "label": "Dogxi Misty",
+          "value": "Dogxi Misty"
+        },
+        {
+          "label": "Doom One",
+          "value": "Doom One"
+        },
+        {
+          "label": "Doom Peacock",
+          "value": "Doom Peacock"
+        },
+        {
+          "label": "Dot Gov",
+          "value": "Dot Gov"
+        },
+        {
+          "label": "Dracula",
+          "value": "Dracula"
+        },
+        {
+          "label": "Dracula+",
+          "value": "Dracula+"
+        },
+        {
+          "label": "Duckbones",
+          "value": "Duckbones"
+        },
+        {
+          "label": "Duotone Dark",
+          "value": "Duotone Dark"
+        },
+        {
+          "label": "Duskfox",
+          "value": "Duskfox"
+        },
+        {
+          "label": "ENCOM",
+          "value": "ENCOM"
+        },
+        {
+          "label": "Earthsong",
+          "value": "Earthsong"
+        },
+        {
+          "label": "Electron Highlighter",
+          "value": "Electron Highlighter"
+        },
+        {
+          "label": "Elegant",
+          "value": "Elegant"
+        },
+        {
+          "label": "Elemental",
+          "value": "Elemental"
+        },
+        {
+          "label": "Elementary",
+          "value": "Elementary"
+        },
+        {
+          "label": "Embark",
+          "value": "Embark"
+        },
+        {
+          "label": "Embers Dark",
+          "value": "Embers Dark"
+        },
+        {
+          "label": "Espresso",
+          "value": "Espresso"
+        },
+        {
+          "label": "Espresso Libre",
+          "value": "Espresso Libre"
+        },
+        {
+          "label": "Everblush",
+          "value": "Everblush"
+        },
+        {
+          "label": "Everforest Dark Hard",
+          "value": "Everforest Dark Hard"
+        },
+        {
+          "label": "Everforest Light Med",
+          "value": "Everforest Light Med"
+        },
+        {
+          "label": "Fahrenheit",
+          "value": "Fahrenheit"
+        },
+        {
+          "label": "Fairyfloss",
+          "value": "Fairyfloss"
+        },
+        {
+          "label": "Farmhouse Dark",
+          "value": "Farmhouse Dark"
+        },
+        {
+          "label": "Farmhouse Light",
+          "value": "Farmhouse Light"
+        },
+        {
+          "label": "Fideloper",
+          "value": "Fideloper"
+        },
+        {
+          "label": "Firefly Traditional",
+          "value": "Firefly Traditional"
+        },
+        {
+          "label": "Firefox Dev",
+          "value": "Firefox Dev"
+        },
+        {
+          "label": "Firewatch",
+          "value": "Firewatch"
+        },
+        {
+          "label": "Fish Tank",
+          "value": "Fish Tank"
+        },
+        {
+          "label": "Flat",
+          "value": "Flat"
+        },
+        {
+          "label": "Flatland",
+          "value": "Flatland"
+        },
+        {
+          "label": "Flexoki Dark",
+          "value": "Flexoki Dark"
+        },
+        {
+          "label": "Flexoki Light",
+          "value": "Flexoki Light"
+        },
+        {
+          "label": "Floraverse",
+          "value": "Floraverse"
+        },
+        {
+          "label": "Forest Blue",
+          "value": "Forest Blue"
+        },
+        {
+          "label": "Framer",
+          "value": "Framer"
+        },
+        {
+          "label": "Front End Delight",
+          "value": "Front End Delight"
+        },
+        {
+          "label": "Fun Forrest",
+          "value": "Fun Forrest"
+        },
+        {
+          "label": "Galaxy",
+          "value": "Galaxy"
+        },
+        {
+          "label": "Galizur",
+          "value": "Galizur"
+        },
+        {
+          "label": "Ghostty Default Style Dark",
+          "value": "Ghostty Default Style Dark"
+        },
+        {
+          "label": "GitHub",
+          "value": "GitHub"
+        },
+        {
+          "label": "GitHub Dark",
+          "value": "GitHub Dark"
+        },
+        {
+          "label": "GitHub Dark Colorblind",
+          "value": "GitHub Dark Colorblind"
+        },
+        {
+          "label": "GitHub Dark Default",
+          "value": "GitHub Dark Default"
+        },
+        {
+          "label": "GitHub Dark Dimmed",
+          "value": "GitHub Dark Dimmed"
+        },
+        {
+          "label": "GitHub Dark High Contrast",
+          "value": "GitHub Dark High Contrast"
+        },
+        {
+          "label": "GitHub Light Colorblind",
+          "value": "GitHub Light Colorblind"
+        },
+        {
+          "label": "GitHub Light Default",
+          "value": "GitHub Light Default"
+        },
+        {
+          "label": "GitHub Light High Contrast",
+          "value": "GitHub Light High Contrast"
+        },
+        {
+          "label": "GitLab Dark",
+          "value": "GitLab Dark"
+        },
+        {
+          "label": "GitLab Dark Grey",
+          "value": "GitLab Dark Grey"
+        },
+        {
+          "label": "GitLab Light",
+          "value": "GitLab Light"
+        },
+        {
+          "label": "Glacier",
+          "value": "Glacier"
+        },
+        {
+          "label": "Grape",
+          "value": "Grape"
+        },
+        {
+          "label": "Grass",
+          "value": "Grass"
+        },
+        {
+          "label": "Grey Green",
+          "value": "Grey Green"
+        },
+        {
+          "label": "Gruber Darker",
+          "value": "Gruber Darker"
+        },
+        {
+          "label": "Gruvbox Dark",
+          "value": "Gruvbox Dark"
+        },
+        {
+          "label": "Gruvbox Dark Hard",
+          "value": "Gruvbox Dark Hard"
+        },
+        {
+          "label": "Gruvbox Light",
+          "value": "Gruvbox Light"
+        },
+        {
+          "label": "Gruvbox Light Hard",
+          "value": "Gruvbox Light Hard"
+        },
+        {
+          "label": "Gruvbox Material",
+          "value": "Gruvbox Material"
+        },
+        {
+          "label": "Gruvbox Material Dark",
+          "value": "Gruvbox Material Dark"
+        },
+        {
+          "label": "Gruvbox Material Light",
+          "value": "Gruvbox Material Light"
+        },
+        {
+          "label": "Guezwhoz",
+          "value": "Guezwhoz"
+        },
+        {
+          "label": "HaX0R Blue",
+          "value": "HaX0R Blue"
+        },
+        {
+          "label": "HaX0R Gr33N",
+          "value": "HaX0R Gr33N"
+        },
+        {
+          "label": "HaX0R R3D",
+          "value": "HaX0R R3D"
+        },
+        {
+          "label": "Hacktober",
+          "value": "Hacktober"
+        },
+        {
+          "label": "Hardcore",
+          "value": "Hardcore"
+        },
+        {
+          "label": "Harper",
+          "value": "Harper"
+        },
+        {
+          "label": "Havn Daggry",
+          "value": "Havn Daggry"
+        },
+        {
+          "label": "Havn Skumring",
+          "value": "Havn Skumring"
+        },
+        {
+          "label": "Heeler",
+          "value": "Heeler"
+        },
+        {
+          "label": "Highway",
+          "value": "Highway"
+        },
+        {
+          "label": "Hipster Green",
+          "value": "Hipster Green"
+        },
+        {
+          "label": "Hivacruz",
+          "value": "Hivacruz"
+        },
+        {
+          "label": "Homebrew",
+          "value": "Homebrew"
+        },
+        {
+          "label": "Hopscotch",
+          "value": "Hopscotch"
+        },
+        {
+          "label": "Hopscotch.256",
+          "value": "Hopscotch.256"
+        },
+        {
+          "label": "Horizon",
+          "value": "Horizon"
+        },
+        {
+          "label": "Horizon Bright",
+          "value": "Horizon Bright"
+        },
+        {
+          "label": "Hot Dog Stand",
+          "value": "Hot Dog Stand"
+        },
+        {
+          "label": "Hot Dog Stand (Mustard)",
+          "value": "Hot Dog Stand (Mustard)"
+        },
+        {
+          "label": "Hurtado",
+          "value": "Hurtado"
+        },
+        {
+          "label": "Hybrid",
+          "value": "Hybrid"
+        },
+        {
+          "label": "IBM 5153 CGA",
+          "value": "IBM 5153 CGA"
+        },
+        {
+          "label": "IBM 5153 CGA (Black)",
+          "value": "IBM 5153 CGA (Black)"
+        },
+        {
+          "label": "IC Green PPL",
+          "value": "IC Green PPL"
+        },
+        {
+          "label": "IC Orange PPL",
+          "value": "IC Orange PPL"
+        },
+        {
+          "label": "IR Black",
+          "value": "IR Black"
+        },
+        {
+          "label": "IRIX Console",
+          "value": "IRIX Console"
+        },
+        {
+          "label": "IRIX Terminal",
+          "value": "IRIX Terminal"
+        },
+        {
+          "label": "Iceberg Dark",
+          "value": "Iceberg Dark"
+        },
+        {
+          "label": "Iceberg Light",
+          "value": "Iceberg Light"
+        },
+        {
+          "label": "Idea",
+          "value": "Idea"
+        },
+        {
+          "label": "Idle Toes",
+          "value": "Idle Toes"
+        },
+        {
+          "label": "Jackie Brown",
+          "value": "Jackie Brown"
+        },
+        {
+          "label": "Japanesque",
+          "value": "Japanesque"
+        },
+        {
+          "label": "Jellybeans",
+          "value": "Jellybeans"
+        },
+        {
+          "label": "JetBrains Darcula",
+          "value": "JetBrains Darcula"
+        },
+        {
+          "label": "Jubi",
+          "value": "Jubi"
+        },
+        {
+          "label": "Kanagawa Dragon",
+          "value": "Kanagawa Dragon"
+        },
+        {
+          "label": "Kanagawa Lotus",
+          "value": "Kanagawa Lotus"
+        },
+        {
+          "label": "Kanagawa Wave",
+          "value": "Kanagawa Wave"
+        },
+        {
+          "label": "Kanagawabones",
+          "value": "Kanagawabones"
+        },
+        {
+          "label": "Kanso Ink",
+          "value": "Kanso Ink"
+        },
+        {
+          "label": "Kanso Mist",
+          "value": "Kanso Mist"
+        },
+        {
+          "label": "Kanso Pearl",
+          "value": "Kanso Pearl"
+        },
+        {
+          "label": "Kanso Zen",
+          "value": "Kanso Zen"
+        },
+        {
+          "label": "Kibble",
+          "value": "Kibble"
+        },
+        {
+          "label": "Kitty Default",
+          "value": "Kitty Default"
+        },
+        {
+          "label": "Kitty Low Contrast",
+          "value": "Kitty Low Contrast"
+        },
+        {
+          "label": "Kolorit",
+          "value": "Kolorit"
+        },
+        {
+          "label": "Konsolas",
+          "value": "Konsolas"
+        },
+        {
+          "label": "Kurokula",
+          "value": "Kurokula"
+        },
+        {
+          "label": "Lab Fox",
+          "value": "Lab Fox"
+        },
+        {
+          "label": "Laser",
+          "value": "Laser"
+        },
+        {
+          "label": "Later This Evening",
+          "value": "Later This Evening"
+        },
+        {
+          "label": "Lavandula",
+          "value": "Lavandula"
+        },
+        {
+          "label": "Light Owl",
+          "value": "Light Owl"
+        },
+        {
+          "label": "Liquid Carbon",
+          "value": "Liquid Carbon"
+        },
+        {
+          "label": "Liquid Carbon Transparent",
+          "value": "Liquid Carbon Transparent"
+        },
+        {
+          "label": "Lovelace",
+          "value": "Lovelace"
+        },
+        {
+          "label": "Man Page",
+          "value": "Man Page"
+        },
+        {
+          "label": "Mariana",
+          "value": "Mariana"
+        },
+        {
+          "label": "Material",
+          "value": "Material"
+        },
+        {
+          "label": "Material Dark",
+          "value": "Material Dark"
+        },
+        {
+          "label": "Material Darker",
+          "value": "Material Darker"
+        },
+        {
+          "label": "Material Design Colors",
+          "value": "Material Design Colors"
+        },
+        {
+          "label": "Material Ocean",
+          "value": "Material Ocean"
+        },
+        {
+          "label": "Mathias",
+          "value": "Mathias"
+        },
+        {
+          "label": "Matrix",
+          "value": "Matrix"
+        },
+        {
+          "label": "Matte Black",
+          "value": "Matte Black"
+        },
+        {
+          "label": "Medallion",
+          "value": "Medallion"
+        },
+        {
+          "label": "Melange Dark",
+          "value": "Melange Dark"
+        },
+        {
+          "label": "Melange Light",
+          "value": "Melange Light"
+        },
+        {
+          "label": "Mellifluous",
+          "value": "Mellifluous"
+        },
+        {
+          "label": "Mellow",
+          "value": "Mellow"
+        },
+        {
+          "label": "Miasma",
+          "value": "Miasma"
+        },
+        {
+          "label": "Midnight In Mojave",
+          "value": "Midnight In Mojave"
+        },
+        {
+          "label": "Mirage",
+          "value": "Mirage"
+        },
+        {
+          "label": "Misterioso",
+          "value": "Misterioso"
+        },
+        {
+          "label": "Modus Operandi",
+          "value": "Modus Operandi"
+        },
+        {
+          "label": "Modus Operandi Tinted",
+          "value": "Modus Operandi Tinted"
+        },
+        {
+          "label": "Modus Vivendi",
+          "value": "Modus Vivendi"
+        },
+        {
+          "label": "Modus Vivendi Tinted",
+          "value": "Modus Vivendi Tinted"
+        },
+        {
+          "label": "Molokai",
+          "value": "Molokai"
+        },
+        {
+          "label": "Mona Lisa",
+          "value": "Mona Lisa"
+        },
+        {
+          "label": "Monokai Classic",
+          "value": "Monokai Classic"
+        },
+        {
+          "label": "Monokai Pro",
+          "value": "Monokai Pro"
+        },
+        {
+          "label": "Monokai Pro Light",
+          "value": "Monokai Pro Light"
+        },
+        {
+          "label": "Monokai Pro Light Sun",
+          "value": "Monokai Pro Light Sun"
+        },
+        {
+          "label": "Monokai Pro Machine",
+          "value": "Monokai Pro Machine"
+        },
+        {
+          "label": "Monokai Pro Octagon",
+          "value": "Monokai Pro Octagon"
+        },
+        {
+          "label": "Monokai Pro Ristretto",
+          "value": "Monokai Pro Ristretto"
+        },
+        {
+          "label": "Monokai Pro Spectrum",
+          "value": "Monokai Pro Spectrum"
+        },
+        {
+          "label": "Monokai Remastered",
+          "value": "Monokai Remastered"
+        },
+        {
+          "label": "Monokai Soda",
+          "value": "Monokai Soda"
+        },
+        {
+          "label": "Monokai Vivid",
+          "value": "Monokai Vivid"
+        },
+        {
+          "label": "Monospace Dark",
+          "value": "Monospace Dark"
+        },
+        {
+          "label": "Monospace Light",
+          "value": "Monospace Light"
+        },
+        {
+          "label": "Moonfly",
+          "value": "Moonfly"
+        },
+        {
+          "label": "N0Tch2K",
+          "value": "N0Tch2K"
+        },
+        {
+          "label": "Neobones Dark",
+          "value": "Neobones Dark"
+        },
+        {
+          "label": "Neobones Light",
+          "value": "Neobones Light"
+        },
+        {
+          "label": "Neon",
+          "value": "Neon"
+        },
+        {
+          "label": "Neopolitan",
+          "value": "Neopolitan"
+        },
+        {
+          "label": "Neutron",
+          "value": "Neutron"
+        },
+        {
+          "label": "Night Lion V1",
+          "value": "Night Lion V1"
+        },
+        {
+          "label": "Night Lion V2",
+          "value": "Night Lion V2"
+        },
+        {
+          "label": "Night Owl",
+          "value": "Night Owl"
+        },
+        {
+          "label": "Night Owlish Light",
+          "value": "Night Owlish Light"
+        },
+        {
+          "label": "Nightfox",
+          "value": "Nightfox"
+        },
+        {
+          "label": "Niji",
+          "value": "Niji"
+        },
+        {
+          "label": "No Clown Fiesta",
+          "value": "No Clown Fiesta"
+        },
+        {
+          "label": "No Clown Fiesta Light",
+          "value": "No Clown Fiesta Light"
+        },
+        {
+          "label": "Nocturnal Winter",
+          "value": "Nocturnal Winter"
+        },
+        {
+          "label": "Nord",
+          "value": "Nord"
+        },
+        {
+          "label": "Nord Light",
+          "value": "Nord Light"
+        },
+        {
+          "label": "Nord Wave",
+          "value": "Nord Wave"
+        },
+        {
+          "label": "Nordfox",
+          "value": "Nordfox"
+        },
+        {
+          "label": "Novel",
+          "value": "Novel"
+        },
+        {
+          "label": "Nvim Dark",
+          "value": "Nvim Dark"
+        },
+        {
+          "label": "Nvim Light",
+          "value": "Nvim Light"
+        },
+        {
+          "label": "Obsidian",
+          "value": "Obsidian"
+        },
+        {
+          "label": "Ocean",
+          "value": "Ocean"
+        },
+        {
+          "label": "Oceanic Material",
+          "value": "Oceanic Material"
+        },
+        {
+          "label": "Oceanic Next",
+          "value": "Oceanic Next"
+        },
+        {
+          "label": "Ollie",
+          "value": "Ollie"
+        },
+        {
+          "label": "One Dark Two",
+          "value": "One Dark Two"
+        },
+        {
+          "label": "One Double Dark",
+          "value": "One Double Dark"
+        },
+        {
+          "label": "One Double Light",
+          "value": "One Double Light"
+        },
+        {
+          "label": "One Half Dark",
+          "value": "One Half Dark"
+        },
+        {
+          "label": "One Half Light",
+          "value": "One Half Light"
+        },
+        {
+          "label": "Onenord",
+          "value": "Onenord"
+        },
+        {
+          "label": "Onenord Light",
+          "value": "Onenord Light"
+        },
+        {
+          "label": "Operator Mono Dark",
+          "value": "Operator Mono Dark"
+        },
+        {
+          "label": "Overnight Slumber",
+          "value": "Overnight Slumber"
+        },
+        {
+          "label": "Oxocarbon",
+          "value": "Oxocarbon"
+        },
+        {
+          "label": "Pale Night Hc",
+          "value": "Pale Night Hc"
+        },
+        {
+          "label": "Pandora",
+          "value": "Pandora"
+        },
+        {
+          "label": "Paraiso Dark",
+          "value": "Paraiso Dark"
+        },
+        {
+          "label": "Paul Millr",
+          "value": "Paul Millr"
+        },
+        {
+          "label": "Pencil Dark",
+          "value": "Pencil Dark"
+        },
+        {
+          "label": "Pencil Light",
+          "value": "Pencil Light"
+        },
+        {
+          "label": "Peppermint",
+          "value": "Peppermint"
+        },
+        {
+          "label": "Phala Green Dark",
+          "value": "Phala Green Dark"
+        },
+        {
+          "label": "Piatto Light",
+          "value": "Piatto Light"
+        },
+        {
+          "label": "Pierre Dark",
+          "value": "Pierre Dark"
+        },
+        {
+          "label": "Pierre Light",
+          "value": "Pierre Light"
+        },
+        {
+          "label": "Pnevma",
+          "value": "Pnevma"
+        },
+        {
+          "label": "Poimandres",
+          "value": "Poimandres"
+        },
+        {
+          "label": "Poimandres Darker",
+          "value": "Poimandres Darker"
+        },
+        {
+          "label": "Poimandres Storm",
+          "value": "Poimandres Storm"
+        },
+        {
+          "label": "Poimandres White",
+          "value": "Poimandres White"
+        },
+        {
+          "label": "Popping And Locking",
+          "value": "Popping And Locking"
+        },
+        {
+          "label": "Powershell",
+          "value": "Powershell"
+        },
+        {
+          "label": "Primary",
+          "value": "Primary"
+        },
+        {
+          "label": "Pro",
+          "value": "Pro"
+        },
+        {
+          "label": "Pro Light",
+          "value": "Pro Light"
+        },
+        {
+          "label": "Purple Rain",
+          "value": "Purple Rain"
+        },
+        {
+          "label": "Purplepeter",
+          "value": "Purplepeter"
+        },
+        {
+          "label": "Rapture",
+          "value": "Rapture"
+        },
+        {
+          "label": "Raycast Dark",
+          "value": "Raycast Dark"
+        },
+        {
+          "label": "Raycast Light",
+          "value": "Raycast Light"
+        },
+        {
+          "label": "Rebecca",
+          "value": "Rebecca"
+        },
+        {
+          "label": "Red Alert",
+          "value": "Red Alert"
+        },
+        {
+          "label": "Red Planet",
+          "value": "Red Planet"
+        },
+        {
+          "label": "Red Sands",
+          "value": "Red Sands"
+        },
+        {
+          "label": "Relaxed",
+          "value": "Relaxed"
+        },
+        {
+          "label": "Retro",
+          "value": "Retro"
+        },
+        {
+          "label": "Retro Legends",
+          "value": "Retro Legends"
+        },
+        {
+          "label": "Rippedcasts",
+          "value": "Rippedcasts"
+        },
+        {
+          "label": "Rose Pine",
+          "value": "Rose Pine"
+        },
+        {
+          "label": "Rose Pine Dawn",
+          "value": "Rose Pine Dawn"
+        },
+        {
+          "label": "Rose Pine Moon",
+          "value": "Rose Pine Moon"
+        },
+        {
+          "label": "Rouge 2",
+          "value": "Rouge 2"
+        },
+        {
+          "label": "Royal",
+          "value": "Royal"
+        },
+        {
+          "label": "Ryuuko",
+          "value": "Ryuuko"
+        },
+        {
+          "label": "Sakura",
+          "value": "Sakura"
+        },
+        {
+          "label": "Scarlet Protocol",
+          "value": "Scarlet Protocol"
+        },
+        {
+          "label": "Sea Shells",
+          "value": "Sea Shells"
+        },
+        {
+          "label": "Seafoam Pastel",
+          "value": "Seafoam Pastel"
+        },
+        {
+          "label": "SeedFlip Abyss",
+          "value": "SeedFlip Abyss"
+        },
+        {
+          "label": "SeedFlip Amethyst",
+          "value": "SeedFlip Amethyst"
+        },
+        {
+          "label": "SeedFlip Canopy",
+          "value": "SeedFlip Canopy"
+        },
+        {
+          "label": "SeedFlip Carbon",
+          "value": "SeedFlip Carbon"
+        },
+        {
+          "label": "SeedFlip Coral",
+          "value": "SeedFlip Coral"
+        },
+        {
+          "label": "SeedFlip Ember",
+          "value": "SeedFlip Ember"
+        },
+        {
+          "label": "SeedFlip Glacier",
+          "value": "SeedFlip Glacier"
+        },
+        {
+          "label": "SeedFlip Inkwell",
+          "value": "SeedFlip Inkwell"
+        },
+        {
+          "label": "SeedFlip Ivory",
+          "value": "SeedFlip Ivory"
+        },
+        {
+          "label": "SeedFlip Nightfall",
+          "value": "SeedFlip Nightfall"
+        },
+        {
+          "label": "SeedFlip Phosphor",
+          "value": "SeedFlip Phosphor"
+        },
+        {
+          "label": "SeedFlip Pulse",
+          "value": "SeedFlip Pulse"
+        },
+        {
+          "label": "SeedFlip Ultraviolet",
+          "value": "SeedFlip Ultraviolet"
+        },
+        {
+          "label": "SeedFlip Voltage",
+          "value": "SeedFlip Voltage"
+        },
+        {
+          "label": "SeedFlip Wavelength",
+          "value": "SeedFlip Wavelength"
+        },
+        {
+          "label": "Selenized Black",
+          "value": "Selenized Black"
+        },
+        {
+          "label": "Selenized Dark",
+          "value": "Selenized Dark"
+        },
+        {
+          "label": "Selenized Light",
+          "value": "Selenized Light"
+        },
+        {
+          "label": "Seoulbones Dark",
+          "value": "Seoulbones Dark"
+        },
+        {
+          "label": "Seoulbones Light",
+          "value": "Seoulbones Light"
+        },
+        {
+          "label": "Seti",
+          "value": "Seti"
+        },
+        {
+          "label": "Shades Of Purple",
+          "value": "Shades Of Purple"
+        },
+        {
+          "label": "Shaman",
+          "value": "Shaman"
+        },
+        {
+          "label": "Slate",
+          "value": "Slate"
+        },
+        {
+          "label": "Sleepy Hollow",
+          "value": "Sleepy Hollow"
+        },
+        {
+          "label": "Smyck",
+          "value": "Smyck"
+        },
+        {
+          "label": "Snazzy",
+          "value": "Snazzy"
+        },
+        {
+          "label": "Snazzy Soft",
+          "value": "Snazzy Soft"
+        },
+        {
+          "label": "Soft Server",
+          "value": "Soft Server"
+        },
+        {
+          "label": "Solarized Darcula",
+          "value": "Solarized Darcula"
+        },
+        {
+          "label": "Solarized Dark Higher Contrast",
+          "value": "Solarized Dark Higher Contrast"
+        },
+        {
+          "label": "Solarized Dark Patched",
+          "value": "Solarized Dark Patched"
+        },
+        {
+          "label": "Solarized Osaka Night",
+          "value": "Solarized Osaka Night"
+        },
+        {
+          "label": "Sonokai",
+          "value": "Sonokai"
+        },
+        {
+          "label": "Spacedust",
+          "value": "Spacedust"
+        },
+        {
+          "label": "Spacegray",
+          "value": "Spacegray"
+        },
+        {
+          "label": "Spacegray Bright",
+          "value": "Spacegray Bright"
+        },
+        {
+          "label": "Spacegray Eighties",
+          "value": "Spacegray Eighties"
+        },
+        {
+          "label": "Spacegray Eighties Dull",
+          "value": "Spacegray Eighties Dull"
+        },
+        {
+          "label": "Spiderman",
+          "value": "Spiderman"
+        },
+        {
+          "label": "Spring",
+          "value": "Spring"
+        },
+        {
+          "label": "Square",
+          "value": "Square"
+        },
+        {
+          "label": "Squirrelsong Dark",
+          "value": "Squirrelsong Dark"
+        },
+        {
+          "label": "Srcery",
+          "value": "Srcery"
+        },
+        {
+          "label": "Starlight",
+          "value": "Starlight"
+        },
+        {
+          "label": "Sublette",
+          "value": "Sublette"
+        },
+        {
+          "label": "Subliminal",
+          "value": "Subliminal"
+        },
+        {
+          "label": "Sugarplum",
+          "value": "Sugarplum"
+        },
+        {
+          "label": "Sundried",
+          "value": "Sundried"
+        },
+        {
+          "label": "Sunset Drive",
+          "value": "Sunset Drive"
+        },
+        {
+          "label": "Symfonic",
+          "value": "Symfonic"
+        },
+        {
+          "label": "Synthwave",
+          "value": "Synthwave"
+        },
+        {
+          "label": "Synthwave Alpha",
+          "value": "Synthwave Alpha"
+        },
+        {
+          "label": "Synthwave Everything",
+          "value": "Synthwave Everything"
+        },
+        {
+          "label": "Tango Adapted",
+          "value": "Tango Adapted"
+        },
+        {
+          "label": "Tango Half Adapted",
+          "value": "Tango Half Adapted"
+        },
+        {
+          "label": "Tearout",
+          "value": "Tearout"
+        },
+        {
+          "label": "Teerb",
+          "value": "Teerb"
+        },
+        {
+          "label": "Terafox",
+          "value": "Terafox"
+        },
+        {
+          "label": "Terminal Basic",
+          "value": "Terminal Basic"
+        },
+        {
+          "label": "Terminal Basic Dark",
+          "value": "Terminal Basic Dark"
+        },
+        {
+          "label": "Thayer Bright",
+          "value": "Thayer Bright"
+        },
+        {
+          "label": "The Hulk",
+          "value": "The Hulk"
+        },
+        {
+          "label": "Tinacious Design Dark",
+          "value": "Tinacious Design Dark"
+        },
+        {
+          "label": "Tinacious Design Light",
+          "value": "Tinacious Design Light"
+        },
+        {
+          "label": "TokyoNight",
+          "value": "TokyoNight"
+        },
+        {
+          "label": "TokyoNight Day",
+          "value": "TokyoNight Day"
+        },
+        {
+          "label": "TokyoNight Moon",
+          "value": "TokyoNight Moon"
+        },
+        {
+          "label": "TokyoNight Night",
+          "value": "TokyoNight Night"
+        },
+        {
+          "label": "TokyoNight Storm",
+          "value": "TokyoNight Storm"
+        },
+        {
+          "label": "Tomorrow",
+          "value": "Tomorrow"
+        },
+        {
+          "label": "Tomorrow Night",
+          "value": "Tomorrow Night"
+        },
+        {
+          "label": "Tomorrow Night Blue",
+          "value": "Tomorrow Night Blue"
+        },
+        {
+          "label": "Tomorrow Night Bright",
+          "value": "Tomorrow Night Bright"
+        },
+        {
+          "label": "Tomorrow Night Burns",
+          "value": "Tomorrow Night Burns"
+        },
+        {
+          "label": "Tomorrow Night Eighties",
+          "value": "Tomorrow Night Eighties"
+        },
+        {
+          "label": "Toy Chest",
+          "value": "Toy Chest"
+        },
+        {
+          "label": "Treehouse",
+          "value": "Treehouse"
+        },
+        {
+          "label": "Twilight",
+          "value": "Twilight"
+        },
+        {
+          "label": "Ubuntu",
+          "value": "Ubuntu"
+        },
+        {
+          "label": "Ultra Dark",
+          "value": "Ultra Dark"
+        },
+        {
+          "label": "Ultra Violent",
+          "value": "Ultra Violent"
+        },
+        {
+          "label": "Under The Sea",
+          "value": "Under The Sea"
+        },
+        {
+          "label": "Unikitty",
+          "value": "Unikitty"
+        },
+        {
+          "label": "Urple",
+          "value": "Urple"
+        },
+        {
+          "label": "Vague",
+          "value": "Vague"
+        },
+        {
+          "label": "Vaughn",
+          "value": "Vaughn"
+        },
+        {
+          "label": "Vercel",
+          "value": "Vercel"
+        },
+        {
+          "label": "Vesper",
+          "value": "Vesper"
+        },
+        {
+          "label": "Vibrant Ink",
+          "value": "Vibrant Ink"
+        },
+        {
+          "label": "Vimbones",
+          "value": "Vimbones"
+        },
+        {
+          "label": "Violet Dark",
+          "value": "Violet Dark"
+        },
+        {
+          "label": "Violet Light",
+          "value": "Violet Light"
+        },
+        {
+          "label": "Violite",
+          "value": "Violite"
+        },
+        {
+          "label": "Warm Neon",
+          "value": "Warm Neon"
+        },
+        {
+          "label": "Wez",
+          "value": "Wez"
+        },
+        {
+          "label": "Whimsy",
+          "value": "Whimsy"
+        },
+        {
+          "label": "Wild Cherry",
+          "value": "Wild Cherry"
+        },
+        {
+          "label": "Wilmersdorf",
+          "value": "Wilmersdorf"
+        },
+        {
+          "label": "Wombat",
+          "value": "Wombat"
+        },
+        {
+          "label": "Wryan",
+          "value": "Wryan"
+        },
+        {
+          "label": "Xcode Dark",
+          "value": "Xcode Dark"
+        },
+        {
+          "label": "Xcode Dark hc",
+          "value": "Xcode Dark hc"
+        },
+        {
+          "label": "Xcode Light",
+          "value": "Xcode Light"
+        },
+        {
+          "label": "Xcode Light hc",
+          "value": "Xcode Light hc"
+        },
+        {
+          "label": "Xcode WWDC",
+          "value": "Xcode WWDC"
+        },
+        {
+          "label": "Zenbones",
+          "value": "Zenbones"
+        },
+        {
+          "label": "Zenbones Dark",
+          "value": "Zenbones Dark"
+        },
+        {
+          "label": "Zenbones Light",
+          "value": "Zenbones Light"
+        },
+        {
+          "label": "Zenburn",
+          "value": "Zenburn"
+        },
+        {
+          "label": "Zenburned",
+          "value": "Zenburned"
+        },
+        {
+          "label": "Zenwritten Dark",
+          "value": "Zenwritten Dark"
+        },
+        {
+          "label": "Zenwritten Light",
+          "value": "Zenwritten Light"
+        },
+        {
+          "label": "branch",
+          "value": "branch"
+        },
+        {
+          "label": "hazyland",
+          "value": "hazyland"
+        },
+        {
+          "label": "iTerm2 Dark Background",
+          "value": "iTerm2 Dark Background"
+        },
+        {
+          "label": "iTerm2 Default",
+          "value": "iTerm2 Default"
+        },
+        {
+          "label": "iTerm2 Light Background",
+          "value": "iTerm2 Light Background"
+        },
+        {
+          "label": "iTerm2 Pastel Dark Background",
+          "value": "iTerm2 Pastel Dark Background"
+        },
+        {
+          "label": "iTerm2 Smoooooth",
+          "value": "iTerm2 Smoooooth"
+        },
+        {
+          "label": "iTerm2 Solarized Dark",
+          "value": "iTerm2 Solarized Dark"
+        },
+        {
+          "label": "iTerm2 Solarized Light",
+          "value": "iTerm2 Solarized Light"
+        },
+        {
+          "label": "iTerm2 Tango Dark",
+          "value": "iTerm2 Tango Dark"
+        },
+        {
+          "label": "iTerm2 Tango Light",
+          "value": "iTerm2 Tango Light"
+        },
+        {
+          "label": "novmbr",
+          "value": "novmbr"
+        },
+        {
+          "label": "owl",
+          "value": "owl"
+        },
+        {
+          "label": "traffic",
+          "value": "traffic"
+        },
+        {
+          "label": "urban",
+          "value": "urban"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
       "key": "terminalGhosttyTheme",
-      "title": "Theme",
-      "subtitle": "Choose a bundled Ghostty theme or leave the config unmanaged.",
+      "title": "Dark Theme",
+      "subtitle": "Theme used in dark mode, with your existing Ghostty config and background.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "terminal",

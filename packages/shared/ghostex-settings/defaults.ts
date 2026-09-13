@@ -402,11 +402,6 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   sidebarVisibilityMemory: 'shared',
   expandCollapsedProjectsOnJump: true,
   showLessForExpandedProjectJumps: false,
-  /**
-   * CDXC:Theming 2026-06-15-02:29:
-   * Theme selection is disabled again until the full theme system is ready.
-   * Use Dark 2 as the active app theme and present it to users as Dark Gray.
-   */
   sidebarTheme: 'dark-2',
   /**
    * CDXC:Theming 2026-09-12 DECISION:
@@ -485,6 +480,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   terminalFontFamily: 'JetBrains Mono',
   terminalFontSize: 13,
   terminalFontWeight: 300,
+  terminalColorScheme: 'dark',
+  terminalGhosttyLightTheme: 'GitHub Light Default',
   terminalGhosttyTheme: 'GitHub Dark',
   terminalBackgroundImage: '',
   terminalBackgroundImageOpacity: 1,

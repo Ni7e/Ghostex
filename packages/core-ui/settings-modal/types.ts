@@ -261,6 +261,8 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
   statusIndicators: ['petOverlayEnabled', 'selectedPetId'],
   terminal: [
     'ghosttySettingsActions',
+    'terminalColorScheme',
+    'terminalGhosttyLightTheme',
     'terminalGhosttyTheme',
     'workspaceBackgroundColor',
     'terminalBackgroundImage',

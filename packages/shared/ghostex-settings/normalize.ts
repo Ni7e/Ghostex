@@ -708,6 +708,14 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
      * the settings list, or an empty unmanaged value that keeps an existing
      * user-authored Ghostty `theme` line outside ghostex control.
      */
+    terminalColorScheme:
+      source.terminalColorScheme === 'light' || source.terminalColorScheme === 'system'
+        ? source.terminalColorScheme
+        : DEFAULT_ghostex_SETTINGS.terminalColorScheme,
+    terminalGhosttyLightTheme:
+      normalizeGhosttyTheme(
+        readString(source, 'terminalGhosttyLightTheme', DEFAULT_ghostex_SETTINGS.terminalGhosttyLightTheme)
+      ) || DEFAULT_ghostex_SETTINGS.terminalGhosttyLightTheme,
     terminalGhosttyTheme: normalizeGhosttyTheme(
       readString(source, 'terminalGhosttyTheme', DEFAULT_ghostex_SETTINGS.terminalGhosttyTheme)
     ),

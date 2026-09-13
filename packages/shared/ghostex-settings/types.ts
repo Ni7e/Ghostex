@@ -632,6 +632,8 @@ export type ghostexSettings = {
   terminalFontFamily: string;
   terminalFontSize: number;
   terminalFontWeight: number;
+  terminalColorScheme: 'dark' | 'light' | 'system';
+  terminalGhosttyLightTheme: string;
   terminalGhosttyTheme: string;
   terminalBackgroundImage: string;
   terminalBackgroundImageOpacity: number;
