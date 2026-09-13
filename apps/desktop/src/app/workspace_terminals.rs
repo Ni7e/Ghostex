@@ -1424,9 +1424,7 @@ impl GhostexGpuiApp {
             pane_id,
             session_id: shell_session_id,
         };
-        if self.local_workspace_terminal_has_live_terminal_owner(slot_id)
-            || self.local_workspace_terminal_has_pending_attach_payload(slot_id)
-        {
+        if self.local_workspace_terminal_has_attach_state(slot_id) {
             return;
         }
         #[cfg(target_os = "macos")]
@@ -1532,6 +1530,19 @@ impl GhostexGpuiApp {
         false
     }
 
+    /// CDXC:FocusRouting 2026-09-13 WHY:
+    /// Chat intentionally releases a zmx terminal viewer while retaining the runtime's attach recipe.
+    /// Treating that state as a missing runtime repeatedly fetched attach plans, promoted restore completions to sidebar focus, and stole the keyboard from menus and transcript selections.
+    /// The recipe must match the current runtime, just as a live viewer must; a stale recipe still requires the normal attach path.
+    pub(crate) fn local_workspace_terminal_has_attach_state(
+        &self,
+        slot_id: AgentsTerminalBodyMountSlotId,
+    ) -> bool {
+        self.local_workspace_terminal_has_live_terminal_owner(slot_id)
+            || self.agents_terminal_has_detachable_viewer(slot_id.session_id)
+            || self.local_workspace_terminal_has_pending_attach_payload(slot_id)
+    }
+
     pub(crate) fn local_workspace_terminal_can_focus_existing(
         &self,
         pane_id: WorkspacePaneId,
@@ -1547,8 +1558,7 @@ impl GhostexGpuiApp {
             pane_id,
             session_id: shell_session_id,
         };
-        self.local_workspace_terminal_has_live_terminal_owner(slot_id)
-            || self.local_workspace_terminal_has_pending_attach_payload(slot_id)
+        self.local_workspace_terminal_has_attach_state(slot_id)
     }
 
     pub(crate) fn agents_tab_selected_local_runtime_missing(
@@ -1558,7 +1568,7 @@ impl GhostexGpuiApp {
     ) -> bool {
         /*
         CDXC:FocusRouting 2026-07-11:
-        A restored-after-restart mapped tab keeps Running presentation while nothing local can render it: no live terminal owner, no pending mount-slot attach payload, and no parked owner waiting for same-slot reattach. Only that fully-empty Running combination reports `localRuntimeMissing`; sleeping, mounting, popped-out, parked-inactive, and attach-in-flight tabs keep the ordinary one-way selection path.
+        A restored-after-restart mapped tab keeps Running presentation while nothing local can render it: no live terminal owner, no reusable viewer recipe, no pending mount-slot attach payload, and no parked owner waiting for same-slot reattach. Only that fully-empty Running combination reports `localRuntimeMissing`; sleeping, mounting, popped-out, parked-inactive, and attach-in-flight tabs keep the ordinary one-way selection path.
         */
         let Some(session) = self.agents_workspace.session(shell_session_id) else {
             return false;
@@ -1570,9 +1580,7 @@ impl GhostexGpuiApp {
             pane_id,
             session_id: shell_session_id,
         };
-        if self.local_workspace_terminal_has_live_terminal_owner(slot_id)
-            || self.local_workspace_terminal_has_pending_attach_payload(slot_id)
-        {
+        if self.local_workspace_terminal_has_attach_state(slot_id) {
             return false;
         }
         #[cfg(target_os = "macos")]
@@ -2001,7 +2009,7 @@ impl GhostexGpuiApp {
         }
         /*
         CDXC:FocusRouting 2026-06-26-06:34:
-        Focusing an already-mapped local gxserver session reuses the existing GPUI tab only after the session has a live terminal owner or an inserted attach payload for the exact mount slot. Reconciled sidebar placeholders without attach state intentionally fall through to the gxserver attach pipeline so they cannot mount a default shell.
+        Focusing an already-mapped local gxserver session reuses the existing GPUI tab only after the session has a live terminal owner, a reusable viewer recipe, or an inserted attach payload for the exact mount slot. Reconciled sidebar placeholders without attach state intentionally fall through to the gxserver attach pipeline so they cannot mount a default shell.
         */
         focus_existing_local_workspace_terminal_tab_model(
             &mut self.agents_workspace,
