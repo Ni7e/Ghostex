@@ -512,6 +512,7 @@ pub(crate) fn is_agent_command_executable_name(value: &str) -> bool {
             | "opencode"
             | "pi"
             | "qodercli"
+            | "zcode"
     )
 }
 

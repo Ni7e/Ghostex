@@ -58,6 +58,7 @@ pub(crate) fn default_agent_command(agent_id: &str) -> Option<&'static str> {
         "pi" => Some("pi"),
         "qoder" => Some("qodercli"),
         "rovodev" => Some("acli rovodev run"),
+        "zcode" => Some("zcode"),
         _ => None,
     }
 }
