@@ -5,14 +5,23 @@ import { cn } from '../utils';
 import { tooltipSurfaceStyle } from './overlay-surface';
 import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION_CLASS_NAME } from './tooltip-config';
 
+const TooltipThemeContext = React.createContext<'light' | 'dark' | undefined>(undefined);
+
 function TooltipProvider({
   delayDuration,
   delay = TOOLTIP_DELAY_MS,
+  theme,
   ...props
 }: TooltipPrimitive.Provider.Props & {
   delayDuration?: number;
+  theme?: 'light' | 'dark';
 }) {
-  return <TooltipPrimitive.Provider data-slot='tooltip-provider' delay={delayDuration ?? delay} {...props} />;
+  const inheritedTheme = React.useContext(TooltipThemeContext);
+  return (
+    <TooltipThemeContext.Provider value={theme ?? inheritedTheme}>
+      <TooltipPrimitive.Provider data-slot='tooltip-provider' delay={delayDuration ?? delay} {...props} />
+    </TooltipThemeContext.Provider>
+  );
 }
 
 function Tooltip({
@@ -49,6 +58,7 @@ function TooltipContent({
   Pick<TooltipPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'anchor' | 'side' | 'sideOffset'> & {
     collisionPadding?: number;
   }) {
+  const theme = React.useContext(TooltipThemeContext);
   return (
     <TooltipPrimitive.Portal>
       {/*
@@ -69,6 +79,7 @@ function TooltipContent({
       >
         <TooltipPrimitive.Popup
           data-slot='tooltip-content'
+          data-tooltip-theme={theme}
           className={cn(
             'pointer-events-none z-50 inline-block w-fit whitespace-pre-line px-3 py-1.5 text-xs [overflow-wrap:anywhere] has-data-[slot=kbd]:pr-1.5 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-none',
             TOOLTIP_MOTION_CLASS_NAME,
