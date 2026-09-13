@@ -88,7 +88,7 @@ export const GHOSTEX_OFFICIAL_EXTENSIONS: readonly GhostexOfficialExtension[] = 
     id: 'kanban',
     placement: 'view',
     settingsKey: 'kanbanViewTabHidden',
-    title: 'Beads Kanban',
+    title: 'Kanban',
   },
   {
     description: 'Turn repeatable project routines into simple workflows you can run whenever you need them.',
