@@ -366,7 +366,7 @@ impl RemoteSitesPanel {
                 resource_row_frame().child(
                     resource_row_content()
                         .text_size(px(12.0))
-                        .text_color(rgb(0xd5ae6b))
+                        .text_color(chrome_color(0xd5ae6b, 0x8a5c16))
                         .child(error.clone()),
                 ),
             );
@@ -411,7 +411,7 @@ impl RemoteSitesPanel {
                 resource_row_frame().child(
                     resource_row_content()
                         .text_size(px(12.0))
-                        .text_color(rgb(0xffffff).opacity(0.58))
+                        .text_color(chrome_ink().opacity(0.58))
                         .child(if group.loading {
                             "Checking this computer's local sites…"
                         } else {
@@ -439,7 +439,7 @@ impl RemoteSitesPanel {
                         h_flex()
                             .items_center()
                             .gap(px(10.0))
-                            .text_color(rgb(0xffffff).opacity(0.52))
+                            .text_color(chrome_ink().opacity(0.52))
                             .child(
                                 h_flex()
                                     .items_center()
@@ -453,7 +453,7 @@ impl RemoteSitesPanel {
                             )
                             .child(
                                 div()
-                                    .text_color(rgb(0xffffff).opacity(0.38))
+                                    .text_color(chrome_ink().opacity(0.38))
                                     .child(group.sites.len().to_string()),
                             ),
                     ),
@@ -604,7 +604,7 @@ impl RemoteSitesPanel {
                         .child(evidence)
                         .tooltip(move |window, cx| Tooltip::new(detail.clone()).build(window, cx)))))
             .when(self.expanded.contains(&key), |row| row.child(div().pb(px(8.0)).pr(px(8.0)).pl(px(64.0))
-                .text_size(px(12.0)).text_color(rgb(0xffffff).opacity(0.58))
+                .text_size(px(12.0)).text_color(chrome_ink().opacity(0.58))
                 .child(format!("{}. This TCP port is listening, but the HTTP/HTTPS check did not return a web response. It may be a non-web service or still starting.", site.detail))))
             .into_any_element()
     }
@@ -620,7 +620,7 @@ fn site_icon(path: &'static str, size: f32) -> gpui::Svg {
     svg()
         .path(path)
         .size(px(size))
-        .text_color(rgb(0xffffff).opacity(0.82))
+        .text_color(chrome_ink().opacity(0.82))
 }
 
 fn status_dot(color: u32) -> gpui::Div {
@@ -628,7 +628,15 @@ fn status_dot(color: u32) -> gpui::Div {
         .flex_shrink_0()
         .size(px(5.0))
         .rounded_full()
-        .bg(rgb(color))
+        .bg(chrome_color(
+            color,
+            match color {
+                0x7acb9d | 0x9bb79f => 0x287a48,
+                0xe28b88 => 0xb43d39,
+                0xd5ae6b => 0x8a5c16,
+                _ => 0x666666,
+            },
+        ))
 }
 
 fn site_action_slot() -> gpui::Div {
@@ -646,7 +654,7 @@ fn site_icon_button(
     tooltip: &'static str,
 ) -> gpui::Stateful<gpui::Div> {
     resource_square_button(id)
-        .child(site_icon(icon, 12.0).text_color(rgb(0xffffff).opacity(0.90)))
+        .child(site_icon(icon, 12.0).text_color(chrome_ink().opacity(0.90)))
         .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
 }
 
@@ -658,13 +666,13 @@ fn site_button(id: String, label: &'static str) -> gpui::Stateful<gpui::Div> {
         .items_center()
         .justify_center()
         .border_1()
-        .border_color(rgb(0xffffff).opacity(0.13))
-        .bg(rgb(0xffffff).opacity(0.08))
+        .border_color(chrome_ink().opacity(0.13))
+        .bg(chrome_ink().opacity(0.08))
         .px(px(8.0))
         .text_size(px(11.0))
-        .text_color(rgb(0xffffff).opacity(0.86))
+        .text_color(chrome_ink().opacity(0.86))
         .cursor_pointer()
-        .hover(|this| this.bg(rgb(0xffffff).opacity(0.14)))
+        .hover(|this| this.bg(chrome_ink().opacity(0.14)))
         .child(label)
 }
 
@@ -678,10 +686,10 @@ fn toolbar_segment(id: &'static str) -> gpui::Stateful<gpui::Div> {
         .gap(px(8.0))
         .px(px(15.0))
         .border_l_1()
-        .border_color(rgb(0xffffff).opacity(0.12))
+        .border_color(chrome_ink().opacity(0.12))
         .text_size(px(TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE))
         .font_weight(FontWeight::NORMAL)
-        .text_color(rgb(0xffffff).opacity(0.78))
+        .text_color(chrome_ink().opacity(0.78))
 }
 
 impl Render for RemoteSitesPanel {
@@ -720,26 +728,26 @@ impl Render for RemoteSitesPanel {
         resource_panel_frame().child(v_flex().size_full().overflow_hidden()
             .child(resource_header()
                 .child(resource_heading()
-                    .child(site_icon(BROWSER_ICON_WORLD, 18.0).text_color(rgb(0xffffff).opacity(0.96)))
+                    .child(site_icon(BROWSER_ICON_WORLD, 18.0).text_color(chrome_ink().opacity(0.96)))
                     .child(div().truncate().child("Dev servers")))
                 .child(toolbar_segment("remote-sites-info").px_0().w(px(TITLEBAR_POPUP_READING_HEADER_HEIGHT))
-                    .cursor_pointer().hover(|this| this.bg(rgb(0xffffff).opacity(0.14)))
-                    .when(self.info_open, |this| this.bg(rgb(0xffffff).opacity(0.14)))
+                    .cursor_pointer().hover(|this| this.bg(chrome_ink().opacity(0.14)))
+                    .when(self.info_open, |this| this.bg(chrome_ink().opacity(0.14)))
                     .child(site_icon(TITLEBAR_ICON_INFO, TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE))
                     .tooltip(|window, cx| Tooltip::new("About dev servers").build(window, cx))
                     .on_click(cx.listener(|panel, _, _, cx| { panel.info_open = !panel.info_open; cx.notify(); })))
                 .child(toolbar_segment("remote-sites-refresh")
-                    .when(!loading, |this| this.cursor_pointer().hover(|this| this.bg(rgb(0xffffff).opacity(0.14))))
-                    .when(loading, |this| this.text_color(rgb(0xffffff).opacity(0.30)).opacity(0.55))
+                    .when(!loading, |this| this.cursor_pointer().hover(|this| this.bg(chrome_ink().opacity(0.14))))
+                    .when(loading, |this| this.text_color(chrome_ink().opacity(0.30)).opacity(0.55))
                     .child(site_icon(BROWSER_ICON_RELOAD, TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE)
-                        .text_color(rgb(0xffffff).opacity(if loading { 0.30 } else { 0.78 })))
+                        .text_color(chrome_ink().opacity(if loading { 0.30 } else { 0.78 })))
                     .child(if loading { "Checking…" } else { "Recheck all" })
                     .on_click(cx.listener(|panel, _, _, cx| { if !panel.groups.iter().any(|group| group.loading) { panel.refresh(cx); } })))
-                .child(toolbar_segment("remote-sites-connected").px(px(12.0)).gap(px(5.0)).text_color(rgb(0xffffff).opacity(0.72))
-                    .child(site_icon(TITLEBAR_ICON_DEVICE_DESKTOP, 13.0).text_color(rgb(0xffffff).opacity(0.62)))
+                .child(toolbar_segment("remote-sites-connected").px(px(12.0)).gap(px(5.0)).text_color(chrome_ink().opacity(0.72))
+                    .child(site_icon(TITLEBAR_ICON_DEVICE_DESKTOP, 13.0).text_color(chrome_ink().opacity(0.62)))
                     .child(format!("{connected} remote"))))
             .when(self.info_open, |panel| panel.child(div().flex_shrink_0().p(px(10.0)).border_b_1()
-                .border_color(rgb(0xffffff).opacity(0.14)).bg(rgb(0x3a3a3a)).text_size(px(12.0)).line_height(px(16.2)).text_color(rgb(0xffffff).opacity(0.62))
+                .border_color(chrome_ink().opacity(0.14)).bg(chrome_color(0x3a3a3a, 0xf0f0f0)).text_size(px(12.0)).line_height(px(16.2)).text_color(chrome_ink().opacity(0.62))
                 .child("Dev servers on this computer appear first and update automatically. Remote computers follow below. Open browses through the computer running that server; Copy URL copies its localhost address. Recheck all refreshes discovery and web checks.")))
             .child(div().relative().w_full().min_h_0().flex_1()
                 .child(v_flex().id("remote-sites-scroll").size_full().overflow_y_scroll().track_scroll(&self.scroll)
@@ -747,7 +755,7 @@ impl Render for RemoteSitesPanel {
                     .children(self.groups.iter().map(|group| self.render_group(group, cx))))
                 .child(Scrollbar::vertical(&self.scroll).thickness(px(TITLEBAR_DROPDOWN_SCROLLBAR_WIDTH))))
             .child(h_flex().flex_shrink_0().px(px(12.0)).py(px(7.0)).gap(px(8.0)).items_center()
-                .border_t_1().border_color(rgb(0xffffff).opacity(0.12)).text_size(px(11.0)).text_color(rgb(0xffffff).opacity(0.52))
+                .border_t_1().border_color(chrome_ink().opacity(0.12)).text_size(px(11.0)).text_color(chrome_ink().opacity(0.52))
                 .child(div().flex_1().min_w_0().truncate().child("Local first · Remote sites use their computer"))
                 .child(format!("{total} locations · {freshness}"))))
     }

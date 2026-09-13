@@ -34,7 +34,6 @@ use gpui::div;
 use gpui::point;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
-use gpui::rgb;
 use gpui::size;
 use gpui_component::ElementExt;
 use gpui_component::Selectable;
@@ -392,8 +391,8 @@ impl GhostexGpuiApp {
         same non-overlapping content frame; the hidden CEF child replaces it
         only after React reports ready.
         */
-        let skeleton_fill: Hsla = rgb(0xffffff).opacity(0.08).into();
-        let skeleton_border: Hsla = rgb(0xffffff).opacity(0.06).into();
+        let skeleton_fill: Hsla = chrome_ink().opacity(0.08).into();
+        let skeleton_border: Hsla = chrome_ink().opacity(0.06).into();
 
         v_flex()
             .size_full()

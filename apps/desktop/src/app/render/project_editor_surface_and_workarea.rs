@@ -75,7 +75,7 @@ impl GhostexGpuiApp {
             .bg(if slot_key == ProjectWorkareaCefSurfaceSlotKey::Source {
                 source_view_background_color()
             } else {
-                workspace_terminal_placeholder_color()
+                chrome_color(0x000000, 0xffffff).into()
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -305,7 +305,11 @@ impl GhostexGpuiApp {
             .bg(if mode == TitlebarMode::Source {
                 source_view_background_color()
             } else {
-                workspace_background_color()
+                if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+                    rgb(0xffffff).into()
+                } else {
+                    workspace_background_color()
+                }
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -329,7 +333,7 @@ impl GhostexGpuiApp {
                             .text_center()
                             .text_size(px(12.5))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(workspace_terminal_placeholder_message_color())
+                            .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
                             .child(signature.title),
                     )
                     .child(
@@ -339,7 +343,7 @@ impl GhostexGpuiApp {
                             .text_center()
                             .text_size(px(12.0))
                             .line_height(px(17.0))
-                            .text_color(workspace_terminal_placeholder_message_color())
+                            .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
                             .child(signature.message),
                     ),
             )
@@ -480,7 +484,11 @@ impl GhostexGpuiApp {
             .bg(if mode == TitlebarMode::Source {
                 source_view_background_color()
             } else {
-                workspace_background_color()
+                if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+                    rgb(0xffffff).into()
+                } else {
+                    workspace_background_color()
+                }
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -505,7 +513,7 @@ impl GhostexGpuiApp {
                                 .text_center()
                                 .text_size(px(12.5))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(workspace_terminal_placeholder_message_color())
+                                .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
                                 .child(title),
                         )
                     })
@@ -522,7 +530,7 @@ impl GhostexGpuiApp {
                                 .when(project_view, |this| this.text_left())
                                 .text_size(px(12.0))
                                 .line_height(px(17.0))
-                                .text_color(workspace_terminal_placeholder_message_color())
+                                .text_color(chrome_color(0xe5e8ec, 0x111111).opacity(0.64))
                                 .child(message),
                         )
                     })

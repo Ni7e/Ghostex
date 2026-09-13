@@ -811,7 +811,7 @@ pub(crate) fn resource_metric_chip(icon: &'static str, label: String, width: f32
         .child(titlebar_svg_icon(
             icon,
             12.0,
-            rgb(0xffffff).opacity(0.62).into(),
+            chrome_ink().opacity(0.62).into(),
         ))
         .child(label)
         .into_any_element()
@@ -837,7 +837,7 @@ impl GpuiTitlebarTipsPanel {
             parent_ns_view,
             url,
             TITLEBAR_TIPS_PANEL_CEF_PROFILE_ID.to_string(),
-            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            pane_prepaint_background_color(),
             false,
             titlebar_popup_menu_background(),
             None,
@@ -943,7 +943,7 @@ impl GpuiTitlebarResourcesPanel {
             parent_ns_view,
             &url,
             TITLEBAR_RESOURCES_PANEL_CEF_PROFILE_ID,
-            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            pane_prepaint_background_color(),
             false,
             None,
             None,

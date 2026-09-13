@@ -54,6 +54,7 @@ pub(crate) static GPUI_KEYBOARD_ROUTER_NEXT_WINDOW_ID: AtomicU64 = AtomicU64::ne
 pub(crate) static GPUI_GHOSTTY_WORKSPACE_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x050505);
 
 pub(crate) static GPUI_WORKSPACE_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x050505);
+pub(crate) static GPUI_TERMINAL_PADDING_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x000000);
 
 pub(crate) static GPUI_TITLEBAR_BACKGROUND_RGB: AtomicU64 = AtomicU64::new(0x0e0e0e);
 

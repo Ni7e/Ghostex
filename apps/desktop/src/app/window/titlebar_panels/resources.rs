@@ -60,7 +60,7 @@ impl GpuiTitlebarReadingPanel {
                     .child(titlebar_svg_icon(
                         TITLEBAR_ICON_DEVICE_DESKTOP,
                         18.0,
-                        rgb(0xffffff).opacity(0.96).into(),
+                        chrome_ink().opacity(0.96).into(),
                     ))
                     .child("Resources"),
             )
@@ -122,17 +122,17 @@ impl GpuiTitlebarReadingPanel {
                     .items_center()
                     .gap(px(12.0))
                     .border_l_1()
-                    .border_color(rgb(0xffffff).opacity(0.12))
+                    .border_color(chrome_ink().opacity(0.12))
                     .px(px(12.0))
                     .text_size(px(12.0))
-                    .text_color(rgb(0xffffff).opacity(0.72))
+                    .text_color(chrome_ink().opacity(0.72))
                     .child(
                         h_flex()
                             .gap(px(5.0))
                             .child(titlebar_svg_icon(
                                 "titlebar/cpu.svg",
                                 13.0,
-                                rgb(0xffffff).opacity(0.62).into(),
+                                chrome_ink().opacity(0.62).into(),
                             ))
                             .child(format_gpui_resource_cpu_compact(snapshot.total_cpu)),
                     )
@@ -142,7 +142,7 @@ impl GpuiTitlebarReadingPanel {
                             .child(titlebar_svg_icon(
                                 TITLEBAR_ICON_DEVICE_DESKTOP,
                                 13.0,
-                                rgb(0xffffff).opacity(0.62).into(),
+                                chrome_ink().opacity(0.62).into(),
                             ))
                             .child(format_gpui_resource_memory_compact(
                                 snapshot.total_memory_mb,
@@ -198,18 +198,18 @@ impl GpuiTitlebarReadingPanel {
             .items_center()
             .justify_center()
             .border_l_1()
-            .border_color(rgb(0xffffff).opacity(0.12))
-            .when(active, |this| this.bg(rgb(0xffffff).opacity(0.14)))
+            .border_color(chrome_ink().opacity(0.12))
+            .when(active, |this| this.bg(chrome_ink().opacity(0.14)))
             .when(enabled, |this| {
                 this.cursor_pointer()
-                    .hover(|this| this.bg(rgb(0xffffff).opacity(0.14)))
+                    .hover(|this| this.bg(chrome_ink().opacity(0.14)))
                     .on_mouse_down(MouseButton::Left, listener)
             })
             .when(!enabled, |this| this.opacity(0.45))
             .child(titlebar_svg_icon(
                 icon,
                 TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE,
-                rgb(0xffffff).opacity(0.82).into(),
+                chrome_ink().opacity(0.82).into(),
             ))
             .into_any_element()
     }
@@ -230,21 +230,21 @@ impl GpuiTitlebarReadingPanel {
             .justify_center()
             .gap(px(8.0))
             .border_l_1()
-            .border_color(rgb(0xffffff).opacity(0.12))
+            .border_color(chrome_ink().opacity(0.12))
             .px(px(15.0))
             .text_size(px(TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE))
             .font_weight(FontWeight::NORMAL)
-            .text_color(rgb(0xffffff).opacity(if enabled { 0.78 } else { 0.30 }))
+            .text_color(chrome_ink().opacity(if enabled { 0.78 } else { 0.30 }))
             .when(enabled, |this| {
                 this.cursor_pointer()
-                    .hover(|this| this.bg(rgb(0xffffff).opacity(0.14)))
+                    .hover(|this| this.bg(chrome_ink().opacity(0.14)))
                     .on_mouse_down(MouseButton::Left, listener)
             })
             .when(!enabled, |this| this.opacity(0.55))
             .child(titlebar_svg_icon(
                 icon,
                 TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE,
-                rgb(0xffffff)
+                chrome_ink()
                     .opacity(if enabled { 0.78 } else { 0.30 })
                     .into(),
             ))
@@ -267,12 +267,12 @@ impl GpuiTitlebarReadingPanel {
                 .w(px(620.0))
                 .gap(px(10.0))
                 .border_1()
-                .border_color(rgb(0xffffff).opacity(0.14))
-                .bg(rgb(0x3a3a3a))
+                .border_color(chrome_ink().opacity(0.14))
+                .bg(chrome_color(0x3a3a3a, 0xe5e5e5))
                 .p(px(10.0))
                 .text_size(px(12.0))
                 .line_height(px(16.2))
-                .text_color(rgb(0xffffff).opacity(0.62))
+                .text_color(chrome_ink().opacity(0.62))
                 .child("This app uses native Ghostty terminals as they're lighter on CPU & RAM than electron/web terminals.")
                 .child("The RAM use you see here is the lowest possible for the Agent CLI that you're using.")
                 .child("Keep in mind that each CLI uses more/less RAM based on a lot of factors.")
@@ -305,7 +305,7 @@ impl GpuiTitlebarReadingPanel {
                     .p(px(4.0))
                     .py(px(10.0))
                     .text_size(px(12.0))
-                    .text_color(rgb(0xffffff).opacity(0.54))
+                    .text_color(chrome_ink().opacity(0.54))
                     .child("No grouped sessions matched running processes.")
                     .into_any_element(),
             );
@@ -366,22 +366,22 @@ impl GpuiTitlebarReadingPanel {
                 .border_color(if action_label == "Quit" {
                     rgb(0xf87171).opacity(0.28)
                 } else {
-                    rgb(0xffffff).opacity(0.13)
+                    chrome_ink().opacity(0.13)
                 })
                 .bg(if action_label == "Quit" {
                     rgb(0xdc2626).opacity(0.18)
                 } else {
-                    rgb(0xffffff).opacity(0.08)
+                    chrome_ink().opacity(0.08)
                 })
                 .px(px(8.0))
                 .text_size(px(11.0))
-                .text_color(rgb(0xffffff).opacity(0.86))
+                .text_color(chrome_ink().opacity(0.86))
                 .cursor_pointer()
                 .hover(move |this| {
                     this.bg(if action_label == "Quit" {
                         rgb(0xdc2626).opacity(0.28)
                     } else {
-                        rgb(0xffffff).opacity(0.14)
+                        chrome_ink().opacity(0.14)
                     })
                 })
                 .on_mouse_down(
@@ -487,14 +487,14 @@ impl GpuiTitlebarReadingPanel {
                                 this.mt(px(8.0))
                             })
                             .gap(px(10.0))
-                            .text_color(rgb(0xffffff).opacity(0.52))
+                            .text_color(chrome_ink().opacity(0.52))
                             .child(
                                 h_flex()
                                     .gap(px(4.0))
                                     .child(titlebar_svg_icon(
                                         "titlebar/cpu.svg",
                                         12.0,
-                                        rgb(0xffffff).opacity(0.52).into(),
+                                        chrome_ink().opacity(0.52).into(),
                                     ))
                                     .child(format_gpui_resource_cpu_compact(cpu)),
                             )
@@ -504,13 +504,13 @@ impl GpuiTitlebarReadingPanel {
                                     .child(titlebar_svg_icon(
                                         TITLEBAR_ICON_DEVICE_DESKTOP,
                                         12.0,
-                                        rgb(0xffffff).opacity(0.52).into(),
+                                        chrome_ink().opacity(0.52).into(),
                                     ))
                                     .child(format_gpui_resource_memory_compact(memory)),
                             )
                             .child(
                                 div()
-                                    .text_color(rgb(0xffffff).opacity(0.38))
+                                    .text_color(chrome_ink().opacity(0.38))
                                     .child(format!("{}", rows.len())),
                             )
                             .into_any_element()
@@ -560,7 +560,7 @@ impl GpuiTitlebarReadingPanel {
                 resource_name_text()
                     .id(format!("gpui-titlebar-resource-link-{row_index}"))
                     .cursor_pointer()
-                    .hover(|this| this.text_color(rgb(0x9dd7f6).opacity(0.98)))
+                    .hover(|this| this.text_color(chrome_color(0x9dd7f6, 0x286282).opacity(0.98)))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -598,7 +598,7 @@ impl GpuiTitlebarReadingPanel {
                 .text_color(rgb(workspace_tab_agent_icon_accent_color(agent_icon)))
                 .into_any_element()
         } else {
-            titlebar_svg_icon(row.icon_path, 15.0, rgb(0xffffff).opacity(0.82).into())
+            titlebar_svg_icon(row.icon_path, 15.0, chrome_ink().opacity(0.82).into())
                 .into_any_element()
         };
         let primary_action = if let Some(session_id) = session_id {
@@ -785,7 +785,7 @@ impl GpuiTitlebarReadingPanel {
                                                 TITLEBAR_ICON_CHEVRON_DOWN
                                             },
                                             12.0,
-                                            rgb(0xffffff).opacity(0.55).into(),
+                                            chrome_ink().opacity(0.55).into(),
                                         )
                                     })),
                             )
@@ -842,7 +842,7 @@ impl GpuiTitlebarReadingPanel {
                                         .min_w_0()
                                         .flex_1()
                                         .text_size(px(12.0))
-                                        .text_color(rgb(0xffffff).opacity(0.58))
+                                        .text_color(chrome_ink().opacity(0.58))
                                         .child(child.label)
                                         .child(
                                             div()
@@ -877,7 +877,7 @@ impl GpuiTitlebarReadingPanel {
             .child(titlebar_svg_icon(
                 icon,
                 12.0,
-                rgb(0xffffff).opacity(0.90).into(),
+                chrome_ink().opacity(0.90).into(),
             ))
             .into_any_element()
     }

@@ -84,7 +84,7 @@ impl AccountUsagePanel {
                     .line_height(px(15.95))
                     .text_color(p.muted)
                     .cursor_pointer()
-                    .hover(|this| this.text_color(rgb(0xe4e4e2)))
+                    .hover(|this| this.text_color(chrome_color(0xe4e4e2, 0x292524)))
                     .on_click(cx.listener(|this, _, _, cx| {
                         cx.stop_propagation();
                         this.toggle_models(cx);
@@ -158,7 +158,7 @@ impl AccountUsagePanel {
                     .border_1()
                     .border_color(p.accent_line)
                     .bg(p.soft)
-                    .text_color(p.accent)
+                    .text_color(p.accent_ink)
                     .text_size(px(10.5))
                     .font_weight(FontWeight::SEMIBOLD)
                     .cursor_pointer()
@@ -174,11 +174,12 @@ impl AccountUsagePanel {
                         }
                     }))
                     .child(extra_text)
-                    .child(chevron(true, self.resets_open, p.accent)),
+                    .child(chevron(true, self.resets_open, p.accent_ink)),
             );
         } else {
             footer = footer.child(
-                label(extra_text, 11.0, rgb(0xe4e4e2).into()).font_weight(FontWeight::MEDIUM),
+                label(extra_text, 11.0, chrome_color(0xe4e4e2, 0x292524).into())
+                    .font_weight(FontWeight::MEDIUM),
             );
         }
         card = card.child(footer);
@@ -214,9 +215,13 @@ impl AccountUsagePanel {
         if let Some(percent) = percent {
             meta = meta
                 .child(
-                    label(format!("{}%", percent.round()), 11.5, rgb(0xf2f2f0).into())
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .mr(px(1.0)),
+                    label(
+                        format!("{}%", percent.round()),
+                        11.5,
+                        chrome_color(0xf2f2f0, 0x1c1917).into(),
+                    )
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .mr(px(1.0)),
                 )
                 .when(!reset.is_empty(), |this| this.child(format!(" · {reset}")));
         } else {
@@ -236,7 +241,7 @@ impl AccountUsagePanel {
             (
                 rgb(0xd98a2b).into(),
                 rgb(0xf5b95c).into(),
-                rgb(0xf0a94f).opacity(0.45).into(),
+                chrome_color(0xf0a94f, 0x986009).opacity(0.45).into(),
             )
         } else {
             (p.deep, p.light, p.accent.opacity(0.45))
@@ -252,7 +257,7 @@ impl AccountUsagePanel {
                     .gap(px(10.0))
                     .mb(px(6.0))
                     .child(
-                        label(title, label_size, rgb(0xe4e4e2).into())
+                        label(title, label_size, chrome_color(0xe4e4e2, 0x292524).into())
                             .min_w_0()
                             .font_weight(FontWeight::MEDIUM)
                             .whitespace_nowrap()
@@ -267,7 +272,7 @@ impl AccountUsagePanel {
                     .h(px(6.0))
                     .rounded_full()
                     .overflow_hidden()
-                    .bg(mix(p.accent, 0.07, rgb(0x2c2b2a).into()))
+                    .bg(mix(p.accent, 0.07, chrome_color(0x2c2b2a, 0xe7e5e4).into()))
                     .shadow(vec![
                         shadow(0.0, 1.0, 1.0, rgb(0).opacity(0.35).into()).inset(),
                     ])
@@ -290,13 +295,13 @@ impl AccountUsagePanel {
                         .gap(px(5.0))
                         .text_size(px(10.5))
                         .line_height(px(15.225))
-                        .text_color(rgb(0xf0a94f))
+                        .text_color(chrome_color(0xf0a94f, 0x986009))
                         .child(
                             div()
                                 .size(px(6.0))
                                 .flex_shrink_0()
                                 .rounded_full()
-                                .bg(rgb(0xf0a94f)),
+                                .bg(chrome_color(0xf0a94f, 0x986009)),
                         )
                         .child(warning),
                 )
@@ -359,7 +364,7 @@ impl AccountUsagePanel {
                                     .justify_center()
                                     .rounded_full()
                                     .bg(p.soft)
-                                    .text_color(p.accent)
+                                    .text_color(p.accent_ink)
                                     .text_size(px(10.0))
                                     .font_weight(usage_font_weight(650.0))
                                     .child((index + 1).to_string()),
@@ -380,7 +385,7 @@ impl AccountUsagePanel {
                                                 })
                                                 .unwrap_or_else(|| "No expiry reported".into()),
                                             12.0,
-                                            rgb(0xececea).into(),
+                                            chrome_color(0xececea, 0x292524).into(),
                                         )
                                         .font_weight(usage_font_weight(550.0))
                                         .whitespace_nowrap()
@@ -424,7 +429,7 @@ impl AccountUsagePanel {
                     .border_1()
                     .border_color(p.accent_line)
                     .bg(p.soft)
-                    .text_color(p.accent)
+                    .text_color(p.accent_ink)
                     .text_size(px(12.0))
                     .font_weight(usage_font_weight(650.0))
                     .when(disabled, |this| this.opacity(0.4).cursor_default())

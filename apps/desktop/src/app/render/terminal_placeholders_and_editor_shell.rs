@@ -52,7 +52,7 @@ impl GhostexGpuiApp {
                     .rounded(px(6.0))
                     .border_1()
                     .border_color(rgb(0x7f8a99).opacity(0.22))
-                    .bg(rgb(0x11151b))
+                    .bg(chrome_color(0x11151b, 0xf5f6f8))
                     .px(px(28.0))
                     .py(px(24.0))
                     .child(
@@ -66,7 +66,7 @@ impl GhostexGpuiApp {
                             .py(px(3.0))
                             .text_size(px(10.5))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(0xd8dee8).opacity(0.92))
+                            .text_color(chrome_color(0xd8dee8, 0x252525).opacity(0.92))
                             .child("Missing"),
                     )
                     .child(

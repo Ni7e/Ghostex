@@ -7,6 +7,7 @@
 pub(crate) mod agents_hub;
 pub(crate) mod board_gxserver;
 pub(crate) mod browser;
+pub(crate) mod chrome_palette;
 pub(crate) mod dev_servers;
 pub(crate) mod manage_docs;
 pub(crate) mod manage_docs_listing;
@@ -22,6 +23,7 @@ pub(crate) mod titlebar;
 pub(crate) use agents_hub::*;
 pub(crate) use board_gxserver::*;
 pub(crate) use browser::*;
+pub(crate) use chrome_palette::*;
 pub(crate) use dev_servers::*;
 pub(crate) use manage_docs::*;
 pub(crate) use manage_docs_listing::*;

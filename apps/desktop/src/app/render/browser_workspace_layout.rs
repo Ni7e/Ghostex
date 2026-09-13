@@ -17,7 +17,6 @@ use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
 use gpui::relative;
-use gpui::rgb;
 use gpui_component::Sizable as _;
 use gpui_component::Size as ComponentSize;
 use gpui_component::h_flex;
@@ -229,7 +228,7 @@ impl GhostexGpuiApp {
             .min_h_0()
             .overflow_hidden()
             .border_1()
-            .border_color(workspace_pane_border_color_for_state(border_state))
+            .border_color(browser_pane_border_color_for_state(border_state))
             .bg(workspace_terminal_placeholder_color())
             .child(self.render_browser_toolbar(pane_id, cx))
             .when_some(
@@ -398,7 +397,7 @@ impl GhostexGpuiApp {
                 .px(px(BROWSER_TOOLBAR_HORIZONTAL_PADDING))
                 .bg(browser_toolbar_background())
                 .border_b_1()
-                .border_color(rgb(0x252525))
+                .border_color(chrome_color(0x252525, 0xd4d4d4))
                 .child(titlebar_svg_icon(
                     icon,
                     15.0,
@@ -412,7 +411,7 @@ impl GhostexGpuiApp {
                         .whitespace_nowrap()
                         .text_ellipsis()
                         .text_size(px(12.5))
-                        .text_color(rgb(0xffffff).opacity(0.88))
+                        .text_color(chrome_ink().opacity(0.88))
                         .child(message),
                 )
                 .child(self.render_browser_media_permission_button(
@@ -460,14 +459,14 @@ impl GhostexGpuiApp {
             .justify_center()
             .rounded(px(5.0))
             .border_1()
-            .border_color(rgb(0xffffff).opacity(border))
-            .bg(rgb(0xffffff).opacity(background))
+            .border_color(chrome_ink().opacity(border))
+            .bg(chrome_ink().opacity(background))
             .px(px(12.0))
             .text_size(px(12.0))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(0xffffff).opacity(text))
+            .text_color(chrome_ink().opacity(text))
             .cursor_pointer()
-            .hover(|this| this.bg(rgb(0xffffff).opacity(hover_background)))
+            .hover(|this| this.bg(chrome_ink().opacity(hover_background)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|_this, _event: &MouseDownEvent, window, cx| {

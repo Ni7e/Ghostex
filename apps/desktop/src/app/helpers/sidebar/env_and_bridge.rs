@@ -26,6 +26,16 @@ pub(crate) fn sidebar_cef_prepaint_background_color() -> u32 {
     0xff00_0000 | GPUI_TITLEBAR_BACKGROUND_RGB.load(Ordering::Relaxed) as u32
 }
 
+/// CDXC:Sidebar 2026-09-13 DECISION:
+/// User: the five-pixel grab handle between the sidebar and main agent area is white in light mode.
+pub(crate) fn sidebar_divider_background_color() -> Hsla {
+    if CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed) {
+        rgb(0xffffff).into()
+    } else {
+        workspace_background_color()
+    }
+}
+
 pub(crate) fn sidebar_divider_line_color() -> Hsla {
     rgb(0x000000).opacity(0.0).into()
 }

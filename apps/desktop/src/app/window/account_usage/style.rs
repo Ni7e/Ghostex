@@ -11,6 +11,8 @@ use std::sync::Arc;
 #[derive(Clone, Copy)]
 pub(super) struct Palette {
     pub accent: Hsla,
+    pub accent_ink: Hsla,
+    pub light_appearance: bool,
     pub deep: Hsla,
     pub light: Hsla,
     pub soft: Hsla,
@@ -41,16 +43,22 @@ impl Palette {
         let accent: Hsla = rgb(if codex { 0x8cbbe8 } else { 0xd97757 }).into();
         Self {
             accent,
+            accent_ink: chrome_color(
+                if codex { 0x8cbbe8 } else { 0xd97757 },
+                if codex { 0x285b8c } else { 0x9c4328 },
+            )
+            .into(),
+            light_appearance: CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed),
             deep: mix(accent, 0.86, rgb(0).into()),
             light: mix(accent, 0.78, rgb(0xffffff).into()),
             soft: accent.opacity(0.14),
             accent_line: accent.opacity(0.34),
-            line: mix(accent, 0.09, rgb(0x2b2a29).into()),
-            strong: mix(accent, 0.12, rgb(0x363433).into()),
-            muted: mix(accent, 0.12, rgb(0xa09c98).into()),
-            dim: mix(accent, 0.10, rgb(0x78746f).into()),
-            raised: mix(accent, 0.04, rgb(0x201f1e).into()),
-            outline: mix(accent, 0.16, rgb(0x4a4846).into()),
+            line: mix(accent, 0.09, chrome_color(0x2b2a29, 0xdedbd8).into()),
+            strong: mix(accent, 0.12, chrome_color(0x363433, 0xd1ccc7).into()),
+            muted: mix(accent, 0.12, chrome_color(0xa09c98, 0x57534e).into()),
+            dim: mix(accent, 0.10, chrome_color(0x78746f, 0x68635e).into()),
+            raised: mix(accent, 0.04, chrome_color(0x201f1e, 0xeeebe8).into()),
+            outline: mix(accent, 0.16, chrome_color(0x4a4846, 0xb8b1aa).into()),
             codex,
         }
     }
@@ -64,9 +72,15 @@ impl Palette {
             .border_1()
             .border_color(self.line)
             .rounded(px(12.0))
-            .bg(rgb(0x1a1918).opacity(0.90))
+            .bg(chrome_color(0x1a1918, 0xffffff).opacity(0.90))
             .shadow(vec![
-                shadow(0.0, 1.0, 0.0, rgb(0xffffff).opacity(0.035).into()).inset(),
+                shadow(
+                    0.0,
+                    1.0,
+                    0.0,
+                    chrome_color(0xffffff, 0x181818).opacity(0.035).into(),
+                )
+                .inset(),
                 shadow(0.0, 10.0, 28.0, rgb(0).opacity(0.28).into()),
             ])
     }
@@ -83,12 +97,12 @@ impl Palette {
             .bg(if accent {
                 self.soft
             } else {
-                rgb(0x222222).into()
+                chrome_color(0x222222, 0xe7e5e4).into()
             })
             .text_color(if accent {
-                self.accent
+                self.accent_ink
             } else {
-                rgb(0xb4b4b2).into()
+                chrome_color(0xb4b4b2, 0x57534e).into()
             })
             .text_size(px(10.0))
             .line_height(px(14.5))
@@ -106,18 +120,24 @@ impl Palette {
             .border_1()
             .border_color(self.line)
             .rounded(px(8.0))
-            .bg(rgb(0x1a1918).opacity(0.90))
-            .text_color(rgb(0xe2dfdc))
+            .bg(chrome_color(0x1a1918, 0xffffff).opacity(0.90))
+            .text_color(chrome_color(0xe2dfdc, 0x292524))
             .text_size(px(11.5))
             .font_weight(FontWeight::MEDIUM)
             .shadow(vec![
-                shadow(0.0, 1.0, 0.0, rgb(0xffffff).opacity(0.035).into()).inset(),
+                shadow(
+                    0.0,
+                    1.0,
+                    0.0,
+                    chrome_color(0xffffff, 0x181818).opacity(0.035).into(),
+                )
+                .inset(),
             ])
             .cursor_pointer()
             .hover(move |this| {
                 this.bg(self.raised)
                     .border_color(mix(self.accent, 0.28, self.strong))
-                    .text_color(rgb(0xffffff))
+                    .text_color(chrome_color(0xffffff, 0x181818))
             })
     }
 
@@ -132,11 +152,24 @@ impl Palette {
         let cy = height * -0.04;
         let radius = cx.max(width - cx).hypot(cy.max(height - cy));
         let radius2 = (width * 1.1).hypot(height * 1.1);
-        let top = color(mix(self.accent, 0.30, rgb(0x0e0e0e).into()));
-        let middle = color(mix(self.accent, 0.12, rgb(0x0e0e0e).into()));
-        let bottom = color(mix(self.accent, 0.07, rgb(0x0e0e0e).into()));
+        let top = color(mix(
+            self.accent,
+            0.30,
+            chrome_color(0x0e0e0e, 0xfafafa).into(),
+        ));
+        let middle = color(mix(
+            self.accent,
+            0.12,
+            chrome_color(0x0e0e0e, 0xfafafa).into(),
+        ));
+        let bottom = color(mix(
+            self.accent,
+            0.07,
+            chrome_color(0x0e0e0e, 0xfafafa).into(),
+        ));
+        let base = color(chrome_color(0x111111, 0xffffff).into());
         let svg = format!(
-            r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><defs><radialGradient id="a" gradientUnits="userSpaceOnUse" cx="{cx}" cy="{cy}" r="{radius}" color-interpolation="sRGB"><stop stop-color="{top}"/><stop offset=".22" stop-color="{middle}"/><stop offset=".46" stop-color="{middle}" stop-opacity="0"/></radialGradient><radialGradient id="b" gradientUnits="userSpaceOnUse" cx="{}" cy="{}" r="{radius2}" color-interpolation="sRGB"><stop stop-color="{bottom}"/><stop offset=".34" stop-color="{bottom}" stop-opacity="0"/></radialGradient></defs><path fill="#111" d="M0 0H{width}V{height}H0Z"/><path fill="url(#b)" d="M0 0H{width}V{height}H0Z"/><path fill="url(#a)" d="M0 0H{width}V{height}H0Z"/></svg>"##,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><defs><radialGradient id="a" gradientUnits="userSpaceOnUse" cx="{cx}" cy="{cy}" r="{radius}" color-interpolation="sRGB"><stop stop-color="{top}"/><stop offset=".22" stop-color="{middle}"/><stop offset=".46" stop-color="{middle}" stop-opacity="0"/></radialGradient><radialGradient id="b" gradientUnits="userSpaceOnUse" cx="{}" cy="{}" r="{radius2}" color-interpolation="sRGB"><stop stop-color="{bottom}"/><stop offset=".34" stop-color="{bottom}" stop-opacity="0"/></radialGradient></defs><path fill="{base}" d="M0 0H{width}V{height}H0Z"/><path fill="url(#b)" d="M0 0H{width}V{height}H0Z"/><path fill="url(#a)" d="M0 0H{width}V{height}H0Z"/></svg>"##,
             -0.1 * width,
             1.1 * height
         );
@@ -201,7 +234,7 @@ pub(super) fn tabular_numbers() -> gpui::FontFeatures {
 pub(super) fn focus_ring(palette: Palette) -> Vec<BoxShadow> {
     vec![
         shadow(0.0, 0.0, 0.0, palette.accent).spread_radius(px(4.0)),
-        shadow(0.0, 0.0, 0.0, rgb(0x1a1918).into()).spread_radius(px(2.0)),
+        shadow(0.0, 0.0, 0.0, chrome_color(0x1a1918, 0xffffff).into()).spread_radius(px(2.0)),
     ]
 }
 

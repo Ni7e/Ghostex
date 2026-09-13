@@ -13,7 +13,7 @@ impl GpuiTitlebarReadingPanel {
             .flex_shrink_0()
             .items_stretch()
             .border_b_1()
-            .border_color(rgb(0xffffff).opacity(0.12))
+            .border_color(chrome_ink().opacity(0.12))
             .child(
                 h_flex()
                     .min_w_0()
@@ -23,11 +23,11 @@ impl GpuiTitlebarReadingPanel {
                     .pl(px(12.0))
                     .text_size(px(14.0))
                     .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(0xffffff).opacity(0.96))
+                    .text_color(chrome_ink().opacity(0.96))
                     .child(titlebar_svg_icon(
                         TITLEBAR_ICON_INFO,
                         18.0,
-                        rgb(0xffffff).opacity(0.96).into(),
+                        chrome_ink().opacity(0.96).into(),
                     ))
                     .child("Tips"),
             )
@@ -45,15 +45,15 @@ impl GpuiTitlebarReadingPanel {
                             .justify_center()
                             .gap(px(6.0))
                             .border_l_1()
-                            .border_color(rgb(0xffffff).opacity(0.12))
+                            .border_color(chrome_ink().opacity(0.12))
                             .px(px(15.0))
                             .text_size(px(TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE))
                             .font_weight(FontWeight::NORMAL)
-                            .text_color(rgb(0xffffff).opacity(0.78))
+                            .text_color(chrome_ink().opacity(0.78))
                             .cursor_pointer()
                             .hover(|this| {
-                                this.bg(rgb(0xffffff).opacity(0.14))
-                                    .text_color(rgb(0xffffff).opacity(0.94))
+                                this.bg(chrome_ink().opacity(0.14))
+                                    .text_color(chrome_ink().opacity(0.94))
                             })
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -66,7 +66,7 @@ impl GpuiTitlebarReadingPanel {
                             .child(titlebar_svg_icon(
                                 icon,
                                 TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE,
-                                rgb(0xffffff).opacity(0.78).into(),
+                                chrome_ink().opacity(0.78).into(),
                             ))
                             .child(label)
                     }),
@@ -83,7 +83,7 @@ impl GpuiTitlebarReadingPanel {
             .pb(px(7.0))
             .text_size(px(11.0))
             .font_weight(FontWeight::BOLD)
-            .text_color(rgb(0xffffff).opacity(0.62))
+            .text_color(chrome_ink().opacity(0.62))
             .child(title)
             .into_any_element()
     }
@@ -124,11 +124,11 @@ impl GpuiTitlebarReadingPanel {
                     .size(px(28.0))
                     .items_center()
                     .justify_center()
-                    .bg(rgb(0xffffff).opacity(0.10))
+                    .bg(chrome_ink().opacity(0.10))
                     .child(titlebar_svg_icon(
                         tip.icon_path,
                         16.0,
-                        rgb(0xffffff).opacity(0.84).into(),
+                        chrome_ink().opacity(0.84).into(),
                     )),
             )
             .child(
@@ -143,7 +143,7 @@ impl GpuiTitlebarReadingPanel {
                             .text_ellipsis()
                             .text_size(px(13.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0xffffff).opacity(0.94))
+                            .text_color(chrome_ink().opacity(0.94))
                             .child(tip.title),
                     )
                     .child(
@@ -153,7 +153,7 @@ impl GpuiTitlebarReadingPanel {
                             .text_size(px(12.0))
                             .font_weight(FontWeight::MEDIUM)
                             .line_height(px(16.2))
-                            .text_color(rgb(0xffffff).opacity(0.58))
+                            .text_color(chrome_ink().opacity(0.58))
                             .child(tip.body),
                     ),
             );
@@ -163,15 +163,15 @@ impl GpuiTitlebarReadingPanel {
             .items_start()
             .gap(px(10.0))
             .border_1()
-            .border_color(rgb(0xffffff).opacity(0.10))
-            .bg(rgb(0xffffff).opacity(0.025))
+            .border_color(chrome_ink().opacity(0.10))
+            .bg(chrome_ink().opacity(0.025))
             .p(px(8.0))
             .pt(px(9.0))
             .when(read, |this| this.opacity(0.72))
             .when(actionable, |this| {
                 this.hover(|this| {
-                    this.bg(rgb(0xffffff).opacity(0.05))
-                        .border_color(rgb(0xffffff).opacity(0.18))
+                    this.bg(chrome_ink().opacity(0.05))
+                        .border_color(chrome_ink().opacity(0.18))
                 })
             })
             .child(detail)
@@ -185,16 +185,16 @@ impl GpuiTitlebarReadingPanel {
                     .items_center()
                     .justify_center()
                     .text_color(if read {
-                        rgb(0xffffff).opacity(0.46)
+                        chrome_ink().opacity(0.46)
                     } else {
-                        rgb(0xffffff).opacity(0.90)
+                        chrome_ink().opacity(0.90)
                     })
                     .when(!read, |this| {
                         this.cursor_pointer()
                             .border_1()
-                            .border_color(rgb(0xffffff).opacity(0.16))
-                            .bg(rgb(0xffffff).opacity(0.14))
-                            .hover(|this| this.bg(rgb(0xffffff).opacity(0.20)))
+                            .border_color(chrome_ink().opacity(0.16))
+                            .bg(chrome_ink().opacity(0.14))
+                            .hover(|this| this.bg(chrome_ink().opacity(0.20)))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -208,9 +208,9 @@ impl GpuiTitlebarReadingPanel {
                         "titlebar/check.svg",
                         15.0,
                         if read {
-                            rgb(0xffffff).opacity(0.46).into()
+                            chrome_ink().opacity(0.46).into()
                         } else {
-                            rgb(0xffffff).opacity(0.90).into()
+                            chrome_ink().opacity(0.90).into()
                         },
                     )),
             )
@@ -230,8 +230,8 @@ impl GpuiTitlebarReadingPanel {
             .items_start()
             .gap(px(10.0))
             .border_1()
-            .border_color(rgb(0xffffff).opacity(0.10))
-            .bg(rgb(0xffffff).opacity(0.025))
+            .border_color(chrome_ink().opacity(0.10))
+            .bg(chrome_ink().opacity(0.025))
             .p(px(8.0))
             .pt(px(9.0))
             .cursor_pointer()
@@ -273,7 +273,7 @@ impl GpuiTitlebarReadingPanel {
                             .text_ellipsis()
                             .text_size(px(13.0))
                             .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0xffffff).opacity(0.94))
+                            .text_color(chrome_ink().opacity(0.94))
                             .child(notice.title.clone()),
                     )
                     .child(
@@ -283,7 +283,7 @@ impl GpuiTitlebarReadingPanel {
                             .text_size(px(12.0))
                             .font_weight(FontWeight::MEDIUM)
                             .line_height(px(16.2))
-                            .text_color(rgb(0xffffff).opacity(0.58))
+                            .text_color(chrome_ink().opacity(0.58))
                             .child(notice.body.clone()),
                     ),
             )
@@ -466,7 +466,7 @@ impl GpuiTitlebarReadingPanel {
                         .py(px(10.0))
                         .text_size(px(12.0))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(0xffffff).opacity(0.54))
+                        .text_color(chrome_ink().opacity(0.54))
                         .child("No read tips yet.")
                         .into_any_element()
                 } else {

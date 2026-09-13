@@ -11,6 +11,7 @@ pub(super) fn resource_panel_frame() -> gpui::Div {
         .border_1()
         .border_color(titlebar_popup_menu_border_color())
         .bg(titlebar_popup_menu_background())
+        .text_color(chrome_ink())
 }
 
 pub(super) fn resource_header() -> gpui::Div {
@@ -20,7 +21,7 @@ pub(super) fn resource_header() -> gpui::Div {
         .flex_shrink_0()
         .items_stretch()
         .border_b_1()
-        .border_color(rgb(0xffffff).opacity(0.12))
+        .border_color(chrome_ink().opacity(0.12))
 }
 
 pub(super) fn resource_heading() -> gpui::Div {
@@ -32,7 +33,7 @@ pub(super) fn resource_heading() -> gpui::Div {
         .pl(px(12.0))
         .text_size(px(14.0))
         .font_weight(FontWeight::BOLD)
-        .text_color(rgb(0xffffff).opacity(0.96))
+        .text_color(chrome_ink().opacity(0.96))
 }
 
 pub(super) fn resource_section_heading() -> gpui::Div {
@@ -42,7 +43,7 @@ pub(super) fn resource_section_heading() -> gpui::Div {
         .gap(px(6.0))
         .px(px(2.0))
         .text_size(px(11.0))
-        .text_color(rgb(0xffffff).opacity(0.62))
+        .text_color(chrome_ink().opacity(0.62))
 }
 
 pub(super) fn resource_row_frame() -> gpui::Div {
@@ -50,8 +51,8 @@ pub(super) fn resource_row_frame() -> gpui::Div {
         .w_full()
         .overflow_hidden()
         .border_1()
-        .border_color(rgb(0xffffff).opacity(0.10))
-        .bg(rgb(0xffffff).opacity(0.025))
+        .border_color(chrome_ink().opacity(0.10))
+        .bg(chrome_ink().opacity(0.025))
 }
 
 pub(super) fn resource_row_content() -> gpui::Div {
@@ -70,7 +71,7 @@ pub(super) fn resource_avatar_tile() -> gpui::Div {
         .size(px(28.0))
         .items_center()
         .justify_center()
-        .bg(rgb(0xffffff).opacity(0.10))
+        .bg(chrome_ink().opacity(0.10))
 }
 
 pub(super) fn resource_name_text() -> gpui::Div {
@@ -79,7 +80,7 @@ pub(super) fn resource_name_text() -> gpui::Div {
         .whitespace_nowrap()
         .text_ellipsis()
         .text_size(px(13.0))
-        .text_color(rgb(0xffffff).opacity(0.94))
+        .text_color(chrome_ink().opacity(0.94))
 }
 
 pub(super) fn resource_detail_text() -> gpui::Div {
@@ -88,7 +89,7 @@ pub(super) fn resource_detail_text() -> gpui::Div {
         .whitespace_nowrap()
         .text_ellipsis()
         .text_size(px(12.0))
-        .text_color(rgb(0xffffff).opacity(0.58))
+        .text_color(chrome_ink().opacity(0.58))
 }
 
 pub(super) fn resource_metric(width: f32) -> gpui::Div {
@@ -100,10 +101,10 @@ pub(super) fn resource_metric(width: f32) -> gpui::Div {
         .justify_center()
         .gap(px(6.0))
         .border_1()
-        .border_color(rgb(0xffffff).opacity(0.105))
-        .bg(rgb(0xffffff).opacity(0.055))
+        .border_color(chrome_ink().opacity(0.105))
+        .bg(chrome_ink().opacity(0.055))
         .text_size(px(12.0))
-        .text_color(rgb(0xffffff).opacity(0.88))
+        .text_color(chrome_ink().opacity(0.88))
 }
 
 pub(super) fn resource_square_button(id: String) -> gpui::Stateful<gpui::Div> {
@@ -114,8 +115,8 @@ pub(super) fn resource_square_button(id: String) -> gpui::Stateful<gpui::Div> {
         .items_center()
         .justify_center()
         .border_1()
-        .border_color(rgb(0xffffff).opacity(0.16))
-        .bg(rgb(0xffffff).opacity(0.14))
+        .border_color(chrome_ink().opacity(0.16))
+        .bg(chrome_ink().opacity(0.14))
         .cursor_pointer()
-        .hover(|this| this.bg(rgb(0xffffff).opacity(0.20)))
+        .hover(|this| this.bg(chrome_ink().opacity(0.20)))
 }

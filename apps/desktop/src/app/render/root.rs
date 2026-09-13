@@ -1141,7 +1141,7 @@ impl Render for GhostexGpuiApp {
                     .mt(px(-1.0))
                     .items_start()
                     .overflow_hidden()
-                    .bg(workspace_background_color())
+                    .bg(sidebar_divider_background_color())
                     .when(sidebar_chrome_visible && sidebar_on_left, |this| {
                         this.child(
                             /*

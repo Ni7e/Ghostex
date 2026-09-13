@@ -6,7 +6,7 @@ use super::resources_style::*;
 use crate::app::helpers::*;
 use crate::notification_feed::{
     GpuiNotificationFeedItem, GpuiNotificationFeedState, NOTIFICATION_ATTENTION_BLUE,
-    notification_feed_badge_label, notification_feed_relative_time,
+    notification_feed_relative_time,
 };
 use crate::*;
 
@@ -268,13 +268,14 @@ impl GpuiTitlebarReadingPanel {
             .pb(px(7.0))
             .text_size(px(11.0))
             .font_weight(FontWeight::BOLD)
-            .text_color(rgb(0xffffff).opacity(0.62))
+            .text_color(chrome_ink().opacity(0.62))
             .child(title)
             .into_any_element()
     }
-    /// CDXC:Notifications 2026-09-12 DECISION:
+    /// CDXC:Notifications 2026-09-13 DECISION:
     /// User: keep the Notifications panel in native GPUI and match the Tips header buttons with full-height, equal-width, unfilled actions separated by thin borders, with an icon beside each label.
     /// User: call the jump action "Next unread" and show each action's configured hotkey in its tooltip when one exists.
+    /// User: do not show the notification count next to the dropdown title.
     fn render_notifications_header(
         &self,
         feed: &GpuiNotificationFeedState,
@@ -282,31 +283,23 @@ impl GpuiTitlebarReadingPanel {
     ) -> AnyElement {
         let unread_count = feed.unread_count;
         resource_header()
+            .border_color(chrome_ink().opacity(0.12))
             .child(
-                resource_heading()
-                    .child("Notifications")
-                    .when(unread_count > 0, |this| {
-                        this.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .h(px(18.0))
-                                .px(px(6.0))
-                                .rounded_full()
-                                .bg(rgb(NOTIFICATION_ATTENTION_BLUE))
-                                .text_size(px(11.0))
-                                .line_height(px(16.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(titlebar_popup_menu_background())
-                                .child(notification_feed_badge_label(unread_count)),
-                        )
-                    }),
+                h_flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .px(px(8.0))
+                    .whitespace_nowrap()
+                    .text_size(px(13.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(chrome_ink().opacity(0.96))
+                    .child("Notifications"),
             )
             .child(
                 h_flex()
                     .h_full()
-                    .flex_shrink_0()
+                    .min_w_0()
+                    .flex_1()
                     .items_stretch()
                     .child(Self::render_notification_header_action(
                         "ghostex-gpui-titlebar-notifications-jump",
@@ -349,6 +342,8 @@ impl GpuiTitlebarReadingPanel {
             .into_any_element()
     }
 
+    /// CDXC:Notifications 2026-09-13 WHY:
+    /// Fixed 144px actions consumed 432px of the 480px dropdown and squeezed the heading into the buttons; equal flex shares with compact padding leave room for the title.
     fn render_notification_header_action(
         id: &'static str,
         label: &'static str,
@@ -360,14 +355,14 @@ impl GpuiTitlebarReadingPanel {
         h_flex()
             .id(id)
             .h_full()
-            .w(px(144.0))
-            .px(px(15.0))
-            .flex_shrink_0()
+            .min_w_0()
+            .flex_1()
+            .px(px(4.0))
             .items_center()
             .justify_center()
-            .gap(px(6.0))
+            .gap(px(4.0))
             .border_l_1()
-            .border_color(rgb(0xffffff).opacity(0.12))
+            .border_color(chrome_ink().opacity(0.12))
             .whitespace_nowrap()
             .text_size(px(TITLEBAR_POPUP_READING_HEADER_BUTTON_TEXT_SIZE))
             .font_weight(FontWeight::NORMAL)
@@ -379,22 +374,21 @@ impl GpuiTitlebarReadingPanel {
                 Tooltip::new(tooltip).build(window, cx)
             })
             .when(enabled, |this| {
-                this.text_color(rgb(0xffffff).opacity(0.78))
+                this.text_color(chrome_ink().opacity(0.78))
                     .cursor_pointer()
                     .hover(|this| {
-                        this.bg(rgb(0xffffff).opacity(0.14))
-                            .text_color(rgb(0xffffff).opacity(0.94))
+                        this.bg(chrome_ink().opacity(0.14))
+                            .text_color(chrome_ink().opacity(0.94))
                     })
                     .on_mouse_down(MouseButton::Left, listener)
             })
             .when(!enabled, |this| {
-                this.text_color(rgb(0xffffff).opacity(0.38))
-                    .cursor_default()
+                this.text_color(chrome_ink().opacity(0.38)).cursor_default()
             })
             .child(titlebar_svg_icon(
                 icon,
                 TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE,
-                rgb(0xffffff)
+                chrome_ink()
                     .opacity(if enabled { 0.78 } else { 0.38 })
                     .into(),
             ))
@@ -448,18 +442,18 @@ impl GpuiTitlebarReadingPanel {
                 .border_color(if unread {
                     rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.45)
                 } else {
-                    rgb(0xffffff).opacity(0.16)
+                    chrome_ink().opacity(0.16)
                 })
                 .bg(if unread {
                     rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.18)
                 } else {
-                    rgb(0xffffff).opacity(0.12)
+                    chrome_ink().opacity(0.12)
                 })
                 .hover(move |this| {
                     this.bg(if unread {
                         rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.32)
                     } else {
-                        rgb(0xffffff).opacity(0.22)
+                        chrome_ink().opacity(0.22)
                     })
                 })
                 .on_mouse_down(
@@ -477,7 +471,7 @@ impl GpuiTitlebarReadingPanel {
                 .child(titlebar_svg_icon(
                     NOTIFICATION_PANEL_CHECK_ICON,
                     14.0,
-                    rgb(0xffffff).opacity(0.92).into(),
+                    chrome_ink().opacity(0.92).into(),
                 ))
                 .into_any_element()
         });
@@ -486,22 +480,29 @@ impl GpuiTitlebarReadingPanel {
             .whitespace_nowrap()
             .text_size(px(11.0))
             .line_height(px(16.0))
-            .text_color(rgb(0xffffff).opacity(0.45))
+            .text_color(chrome_ink().opacity(0.45))
             .child(time_label);
         // The agent's own logo when the session has one, else an icon for the kind.
         let tile_icon: AnyElement = if let Some(agent_name) = item.agent_name.as_deref()
             && let Some(icon_path) = workspace_tab_agent_icon_path(agent_name)
         {
+            let mut icon_color: Hsla =
+                rgb(workspace_tab_agent_icon_accent_color(agent_name)).into();
+            // CDXC:Notifications 2026-09-13 WHY:
+            // Agent accents target dark terminal tabs, including white logos; cap their lightness on light notification tiles while retaining the brand hue.
+            if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+                icon_color.l = icon_color.l.min(0.3);
+            }
             svg()
                 .path(icon_path)
                 .size(px(16.0))
-                .text_color(rgb(workspace_tab_agent_icon_accent_color(agent_name)))
+                .text_color(icon_color)
                 .into_any_element()
         } else {
             titlebar_svg_icon(
                 item.kind.icon_path(),
                 16.0,
-                rgb(0xffffff).opacity(0.84).into(),
+                chrome_ink().opacity(0.84).into(),
             )
             .into_any_element()
         };
@@ -520,7 +521,7 @@ impl GpuiTitlebarReadingPanel {
                     .bg(if unread {
                         rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.16)
                     } else {
-                        rgb(0xffffff).opacity(0.10)
+                        chrome_ink().opacity(0.10)
                     })
                     .child(tile_icon),
             )
@@ -545,7 +546,7 @@ impl GpuiTitlebarReadingPanel {
                                     .text_ellipsis()
                                     .text_size(px(13.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xffffff).opacity(0.94))
+                                    .text_color(chrome_ink().opacity(0.94))
                                     .child(title),
                             )
                             .child(time_slot),
@@ -559,7 +560,7 @@ impl GpuiTitlebarReadingPanel {
                                 .text_size(px(12.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .line_height(px(16.2))
-                                .text_color(rgb(0xffffff).opacity(0.58))
+                                .text_color(chrome_ink().opacity(0.58))
                                 .child(item.body.clone()),
                         )
                     })
@@ -574,7 +575,7 @@ impl GpuiTitlebarReadingPanel {
                             .text_color(if unread {
                                 rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.85)
                             } else {
-                                rgb(0xffffff).opacity(0.45)
+                                chrome_ink().opacity(0.45)
                             })
                             .child(meta_line),
                     ),
@@ -591,12 +592,12 @@ impl GpuiTitlebarReadingPanel {
             .border_color(if unread {
                 rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.30)
             } else {
-                rgb(0xffffff).opacity(0.10)
+                chrome_ink().opacity(0.10)
             })
             .bg(if unread {
                 rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.05)
             } else {
-                rgb(0xffffff).opacity(0.025)
+                chrome_ink().opacity(0.025)
             })
             .p(px(8.0))
             .pt(px(9.0))
@@ -607,12 +608,12 @@ impl GpuiTitlebarReadingPanel {
                     .bg(if unread {
                         rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.10)
                     } else {
-                        rgb(0xffffff).opacity(0.05)
+                        chrome_ink().opacity(0.05)
                     })
                     .border_color(if unread {
                         rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.48)
                     } else {
-                        rgb(0xffffff).opacity(0.18)
+                        chrome_ink().opacity(0.18)
                     })
             })
             .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
@@ -647,20 +648,20 @@ impl GpuiTitlebarReadingPanel {
             .child(titlebar_svg_icon(
                 NOTIFICATION_PANEL_BELL_ICON,
                 32.0,
-                rgb(0xffffff).opacity(0.35).into(),
+                chrome_ink().opacity(0.35).into(),
             ))
             .child(
                 div()
                     .mt(px(4.0))
                     .text_size(px(13.0))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(0xffffff).opacity(0.86))
+                    .text_color(chrome_ink().opacity(0.86))
                     .child("No notifications yet"),
             )
             .child(
                 div()
                     .text_size(px(11.5))
-                    .text_color(rgb(0xffffff).opacity(0.50))
+                    .text_color(chrome_ink().opacity(0.50))
                     .child("Agents that finish or need you will show up here."),
             )
             .into_any_element()

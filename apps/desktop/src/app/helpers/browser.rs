@@ -30,15 +30,15 @@ use crate::app::helpers::*;
 use crate::*;
 
 pub(crate) fn browser_toolbar_background() -> Hsla {
-    rgb(0x000000).into()
+    chrome_color(0x000000, 0xffffff).into()
 }
 
 pub(crate) fn browser_toolbar_text_color() -> Hsla {
-    rgb(0xf0f0f0).opacity(0.95).into()
+    chrome_color(0xf0f0f0, 0x262626).opacity(0.95).into()
 }
 
 pub(crate) fn browser_toolbar_security_icon_color() -> Hsla {
-    rgb(0xc7c7c7).opacity(0.9).into()
+    chrome_color(0xc7c7c7, 0x525252).opacity(0.9).into()
 }
 
 pub(crate) fn browser_toolbar_button_icon_color() -> Hsla {
@@ -46,33 +46,33 @@ pub(crate) fn browser_toolbar_button_icon_color() -> Hsla {
 }
 
 pub(crate) fn browser_toolbar_disabled_icon_color() -> Hsla {
-    rgb(0xcfcfcf).opacity(0.4).into()
+    chrome_color(0xcfcfcf, 0x404040).opacity(0.4).into()
 }
 
 pub(crate) fn browser_tab_bar_color() -> Hsla {
-    rgb(0x050608).opacity(0.96).into()
+    chrome_color(0x050608, 0xf4f4f5).opacity(0.96).into()
 }
 
 pub(crate) fn browser_tab_active_color() -> Hsla {
-    rgb(0xffffff).opacity(0.13).into()
+    chrome_ink().opacity(0.13).into()
 }
 
 pub(crate) fn browser_tab_inactive_color() -> Hsla {
-    rgb(0xffffff).opacity(0.06).into()
+    chrome_ink().opacity(0.06).into()
 }
 
 pub(crate) fn browser_tab_action_cluster_color() -> Hsla {
-    rgb(0x0e0e0e).into()
+    chrome_color(0x0e0e0e, 0xfafafa).into()
 }
 
 pub(crate) fn browser_tab_separator_color() -> Hsla {
-    rgb(0x252525).into()
+    chrome_color(0x252525, 0xd4d4d4).into()
 }
 
 pub(crate) fn browser_tab_text_color(state: BrowserTabState, is_active: bool) -> Hsla {
     match (state, is_active) {
-        (_, true) => rgb(0xf5f5f5).opacity(0.98).into(),
-        (_, false) => rgb(0xc7c7c7).opacity(0.82).into(),
+        (_, true) => chrome_color(0xf5f5f5, 0x262626).opacity(0.98).into(),
+        (_, false) => chrome_color(0xc7c7c7, 0x525252).opacity(0.82).into(),
     }
 }
 
@@ -745,11 +745,11 @@ pub(crate) fn browser_tab_icon_element(
             .justify_center()
             .rounded_full()
             .border_1()
-            .border_color(rgb(0xffffff).opacity(0.42))
-            .bg(rgb(0xffffff).opacity(0.12))
+            .border_color(chrome_ink().opacity(0.42))
+            .bg(chrome_ink().opacity(0.12))
             .text_size(px(if profile_number < 10 { 9.0 } else { 7.0 }))
             .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(0xffffff).opacity(0.9))
+            .text_color(chrome_ink().opacity(0.9))
             .child(profile_number.to_string())
             .into_any_element();
     }
@@ -877,7 +877,7 @@ pub(crate) fn browser_tab_generic_icon_inner_element(
 pub(crate) fn browser_tab_favicon_bitmap_border_color(runtime_favicon_url: Option<&str>) -> Hsla {
     runtime_favicon_url
         .map(browser_tab_favicon_icon_border_color)
-        .unwrap_or_else(|| rgb(0xffffff).opacity(0.24).into())
+        .unwrap_or_else(|| chrome_ink().opacity(0.24).into())
 }
 
 pub(crate) fn browser_tab_favicon_bitmap_background_color(
@@ -885,7 +885,7 @@ pub(crate) fn browser_tab_favicon_bitmap_background_color(
 ) -> Hsla {
     runtime_favicon_url
         .map(browser_tab_favicon_icon_background_color)
-        .unwrap_or_else(|| rgb(0xffffff).opacity(0.08).into())
+        .unwrap_or_else(|| chrome_ink().opacity(0.08).into())
 }
 
 pub(crate) fn browser_tab_icon_border_color(chrome_status: BrowserTabChromeStatus) -> Hsla {
@@ -895,7 +895,7 @@ pub(crate) fn browser_tab_icon_border_color(chrome_status: BrowserTabChromeStatu
                 .opacity(0.48)
                 .into()
         }
-        BrowserTabChromeStatus::AddressOnly => rgb(0xffffff).opacity(0.18).into(),
+        BrowserTabChromeStatus::AddressOnly => chrome_ink().opacity(0.18).into(),
     }
 }
 
@@ -906,7 +906,7 @@ pub(crate) fn browser_tab_icon_background_color(chrome_status: BrowserTabChromeS
                 .opacity(0.14)
                 .into()
         }
-        BrowserTabChromeStatus::AddressOnly => rgb(0xffffff).opacity(0.055).into(),
+        BrowserTabChromeStatus::AddressOnly => chrome_ink().opacity(0.055).into(),
     }
 }
 
@@ -958,11 +958,11 @@ pub(crate) fn browser_tab_favicon_palette_color(url: &str) -> u32 {
 }
 
 pub(crate) fn browser_tab_close_color() -> Hsla {
-    rgb(0xcfcfcf).into()
+    chrome_color(0xcfcfcf, 0x404040).into()
 }
 
 pub(crate) fn browser_tab_close_background_color() -> Hsla {
-    rgb(0x0e0e0e).into()
+    chrome_color(0x0e0e0e, 0xfafafa).into()
 }
 
 pub(crate) fn browser_tab_close_hover_color() -> Hsla {
@@ -974,7 +974,7 @@ pub(crate) fn browser_tab_action_hover_color() -> Hsla {
 }
 
 pub(crate) fn browser_tab_action_icon_color() -> Hsla {
-    rgb(0xcfcfcf).into()
+    chrome_color(0xcfcfcf, 0x404040).into()
 }
 
 pub(crate) fn browser_find_count_label(find: &GpuiBrowserFindState) -> String {
@@ -992,7 +992,7 @@ pub(crate) fn browser_find_count_label(find: &GpuiBrowserFindState) -> String {
 }
 
 pub(crate) fn browser_split_separator_color() -> Hsla {
-    rgb(0x333333).into()
+    chrome_color(0x333333, 0xd4d4d4).into()
 }
 
 pub(crate) fn browser_security_icon_path(url: &str) -> &'static str {

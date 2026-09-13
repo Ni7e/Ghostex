@@ -260,7 +260,7 @@ impl GhostexGpuiApp {
             .items_center()
             .bg(browser_toolbar_background())
             .border_b_1()
-            .border_color(rgb(0x252525))
+            .border_color(chrome_color(0x252525, 0xd4d4d4))
             .when_some(remote_machine_name, |bar, name| {
                 bar.child(
                     h_flex()
@@ -280,7 +280,7 @@ impl GhostexGpuiApp {
                                 .min_w_0()
                                 .truncate()
                                 .text_size(px(11.0))
-                                .text_color(rgb(0xb7b7b7))
+                                .text_color(chrome_color(0xb7b7b7, 0x525252))
                                 .child(name),
                         ),
                 )

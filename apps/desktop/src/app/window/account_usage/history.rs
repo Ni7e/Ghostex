@@ -188,7 +188,7 @@ impl AccountUsagePanel {
                 .mt(px(12.0)),
             )
             .when(!notice.is_empty(), |this| {
-                this.child(label(notice, 10.5, rgb(0xf0a94f).into()).mt(px(8.0)))
+                this.child(label(notice, 10.5, chrome_color(0xf0a94f, 0x986009).into()).mt(px(8.0)))
             })
             .into_any_element()
     }

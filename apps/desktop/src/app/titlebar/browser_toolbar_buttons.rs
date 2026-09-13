@@ -27,7 +27,6 @@ use gpui::Styled as _;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
-use gpui::rgb;
 use gpui_component::Sizable as _;
 use gpui_component::Size as ComponentSize;
 use gpui_component::h_flex;
@@ -60,7 +59,7 @@ impl GhostexGpuiApp {
             .border_l_1()
             .border_color(titlebar_button_border_color())
             .cursor_default()
-            .hover(|this| this.bg(rgb(0x212121)))
+            .hover(|this| this.bg(chrome_color(0x212121, 0xe5e5e5)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -195,7 +194,7 @@ impl GhostexGpuiApp {
             })
             .when(enabled, |this| {
                 this.hover(|this| {
-                    this.bg(rgb(0x212121))
+                    this.bg(chrome_color(0x212121, 0xe5e5e5))
                         .text_color(titlebar_icon_hover_color())
                 })
                 .on_mouse_down(
@@ -255,8 +254,8 @@ impl GhostexGpuiApp {
                         .justify_center()
                         .rounded_full()
                         .border_1()
-                        .border_color(rgb(0xffffff).opacity(0.5))
-                        .bg(rgb(0xffffff).opacity(0.12))
+                        .border_color(chrome_ink().opacity(0.5))
+                        .bg(chrome_ink().opacity(0.12))
                         .text_size(px(if profile_number < 10 { 10.0 } else { 8.0 }))
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(profile_number.to_string()),

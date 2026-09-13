@@ -27,21 +27,33 @@ fn titlebar_entry(account: &Value, machine: &str) -> Value {
 fn icon(codex: bool) -> Arc<gpui::Image> {
     static CODEX: OnceLock<Arc<gpui::Image>> = OnceLock::new();
     static CLAUDE: OnceLock<Arc<gpui::Image>> = OnceLock::new();
-    let (slot, bytes): (_, &[u8]) = if codex {
+    static CODEX_LIGHT: OnceLock<Arc<gpui::Image>> = OnceLock::new();
+    static CLAUDE_LIGHT: OnceLock<Arc<gpui::Image>> = OnceLock::new();
+    let light = CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed);
+    let (slot, svg) = if codex {
         (
-            &CODEX,
-            include_bytes!("../../../assets/account-usage/codex.svg"),
+            if light { &CODEX_LIGHT } else { &CODEX },
+            include_str!("../../../assets/account-usage/codex.svg"),
         )
     } else {
         (
-            &CLAUDE,
-            include_bytes!("../../../assets/account-usage/claude.svg"),
+            if light { &CLAUDE_LIGHT } else { &CLAUDE },
+            include_str!("../../../assets/account-usage/claude.svg"),
         )
     };
     slot.get_or_init(|| {
+        let svg = if light {
+            if codex {
+                svg.replace("#ffffff", "#285b8c")
+            } else {
+                svg.replace("#d97757", "#9c4328")
+            }
+        } else {
+            svg.to_string()
+        };
         Arc::new(gpui::Image::from_bytes(
             gpui::ImageFormat::Svg,
-            bytes.to_vec(),
+            svg.into_bytes(),
         ))
     })
     .clone()
@@ -304,8 +316,9 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// CDXC:AgentProviders 2026-09-09 DECISION:
-    /// User wants the account label centered over a larger agent icon, keeping its font and Claude color, with Codex text #7db8fb. Always use original provider colors. Use a 19.2px background icon, 9.9px label, and 9.5px usage text in the chat indicator’s monospace font. Keep usage percentages and reset counts beside it. This replaces the label-underneath design.
+    /// CDXC:AgentProviders 2026-09-13 DECISION:
+    /// User wants darker Claude/Codex titlebar colors in light mode, superseding the original-color requirement there while retaining the dark palette.
+    /// Keep the account label centered over a 19.2px background icon, with a 9.9px label and 9.5px usage text in the chat indicator’s monospace font. Keep usage percentages and reset counts beside it.
     /// Account buttons still precede extensions and open their usage popup.
     pub(crate) fn render_titlebar_account_buttons(
         &self,
@@ -333,9 +346,9 @@ impl GhostexGpuiApp {
                             icon_image: icon(codex),
                             badge_lines: badge_lines(account),
                             indicator_color: if codex {
-                                gpui::rgb(0x7db8fb)
+                                chrome_color(0x7db8fb, 0x285b8c)
                             } else {
-                                gpui::rgb(0xa4a8af)
+                                chrome_color(0xa4a8af, 0x9c4328)
                             },
                             indicator: (!indicator.is_empty() && indicator != "-")
                                 .then(|| indicator.to_string()),

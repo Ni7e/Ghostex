@@ -69,7 +69,7 @@ impl GpuiAppModalHostWindow {
                 CEF_FIND_PROMPTS_DARK_PREPAINT_BACKGROUND_COLOR,
                 rgb(0x111111).into(),
             ),
-            None => (CEF_DARK_PREPAINT_BACKGROUND_COLOR, titlebar_background()),
+            None => (pane_prepaint_background_color(), titlebar_background()),
         };
         let surface = if let Some((extension_bridge_surface, extension_bridge_event_handler)) =
             extension_bridge

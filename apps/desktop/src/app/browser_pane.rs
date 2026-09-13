@@ -650,7 +650,7 @@ impl GhostexGpuiApp {
             parent_ns_view,
             url,
             profile,
-            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            pane_prepaint_background_color(),
             true,
             rgb(0xFFFFFF).into(),
             None,

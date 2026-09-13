@@ -36,24 +36,24 @@ impl GhostexGpuiApp {
             .justify_center()
             .gap(px(12.0))
             .p(px(24.0))
-            .bg(rgb(0x101010))
+            .bg(chrome_color(0x101010, 0xffffff))
             .child(
                 svg()
                     .path(BROWSER_ICON_WORLD)
                     .size(px(28.0))
-                    .text_color(rgb(0xaaaaaa)),
+                    .text_color(chrome_color(0xaaaaaa, 0x666666)),
             )
             .child(
                 div()
                     .text_size(px(20.0))
-                    .text_color(rgb(0xeeeeee))
+                    .text_color(chrome_color(0xeeeeee, 0x252525))
                     .child(name),
             )
             .child(
                 div()
                     .max_w(px(480.0))
                     .text_size(px(12.0))
-                    .text_color(rgb(0xaaaaaa))
+                    .text_color(chrome_color(0xaaaaaa, 0x666666))
                     .child(detail),
             )
             .when(!pending, |body| {
@@ -64,9 +64,9 @@ impl GhostexGpuiApp {
                         .py(px(7.0))
                         .rounded(px(8.0))
                         .border_1()
-                        .border_color(rgb(0x3b3b3b))
-                        .bg(rgb(0x252525))
-                        .text_color(rgb(0xeeeeee))
+                        .border_color(chrome_color(0x3b3b3b, 0xd4d4d4))
+                        .bg(chrome_color(0x252525, 0xf0f0f0))
+                        .text_color(chrome_color(0xeeeeee, 0x252525))
                         .cursor_pointer()
                         .child(if connected { "Retry" } else { "Connect" })
                         .on_click(cx.listener(move |app, _, window, cx| {

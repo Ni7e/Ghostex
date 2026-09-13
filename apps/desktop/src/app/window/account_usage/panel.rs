@@ -167,7 +167,7 @@ impl AccountUsagePanel {
                     .border_1()
                     .border_color(p.accent_line)
                     .rounded(px(10.0))
-                    .bg(mix(p.accent, 0.16, rgb(0x141312).into()))
+                    .bg(mix(p.accent, 0.16, chrome_color(0x141312, 0xf5f5f4).into()))
                     .shadow(vec![
                         shadow(0.0, 0.0, 14.0, p.accent.opacity(0.22)).inset(),
                         shadow(0.0, 4.0, 14.0, p.accent.opacity(0.14)),
@@ -199,7 +199,7 @@ impl AccountUsagePanel {
                                 this.child(
                                     div()
                                         .text_size(px(10.0))
-                                        .text_color(p.accent)
+                                        .text_color(p.accent_ink)
                                         .child(tracked(indicator.to_string(), 0.2))
                                         .flex_shrink_0()
                                         .h(px(16.0))
@@ -295,6 +295,12 @@ impl Render for AccountUsagePanel {
     /// CDXC:AgentProviders 2026-09-12 DECISION:
     /// User wants text in the usage dropdowns to be non-selectable.
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        if self.palette.light_appearance
+            != CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            self.palette = Palette::new(self.palette.codex);
+            self.background = None;
+        }
         let viewport = window.viewport_size();
         let size = size(
             (viewport.width - px(2.0)).max(px(0.0)),
@@ -326,13 +332,13 @@ impl Render for AccountUsagePanel {
             .child(self.render_limits(cx))
             .when(!notice.is_empty(), |this| {
                 this.child(
-                    label(notice, 10.5, rgb(0xf0a94f).into())
+                    label(notice, 10.5, chrome_color(0xf0a94f, 0x986009).into())
                         .py(px(7.0))
                         .px(px(10.0))
                         .rounded(px(8.0))
-                        .bg(rgb(0xf0a94f).opacity(0.09))
+                        .bg(chrome_color(0xf0a94f, 0x986009).opacity(0.09))
                         .border_1()
-                        .border_color(rgb(0xf0a94f).opacity(0.18)),
+                        .border_color(chrome_color(0xf0a94f, 0x986009).opacity(0.18)),
                 )
             })
             .child(self.render_history())
@@ -351,7 +357,7 @@ impl Render for AccountUsagePanel {
             .font_smoothing(false)
             .text_size(px(12.0))
             .line_height(px(17.4))
-            .text_color(rgb(0xf2f0ee))
+            .text_color(chrome_color(0xf2f0ee, 0x292524))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 if event.keystroke.key == "tab" {

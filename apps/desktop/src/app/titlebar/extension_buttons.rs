@@ -303,7 +303,7 @@ impl GhostexGpuiApp {
                                     this.font_family(ACCOUNT_INDICATOR_FONT_FAMILY)
                                 })
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(rgb(0xb9b9b9))
+                                .text_color(chrome_color(0xb9b9b9, 0x404040))
                                 .children(badge_lines),
                         ),
                     )

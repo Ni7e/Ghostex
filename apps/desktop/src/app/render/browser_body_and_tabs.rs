@@ -46,7 +46,7 @@ impl GhostexGpuiApp {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .bg(workspace_terminal_placeholder_color())
+            .bg(chrome_color(0x000000, 0xffffff))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -104,7 +104,7 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         /*
         CDXC:Browser 2026-06-22-06:59:
-        Address-only Browser tabs are real shell tabs but not real page surfaces yet. Render an empty black GPUI body for those tabs so creating or selecting a new tab never exposes the previous tab's CEF page.
+        Address-only Browser tabs are real shell tabs but not real page surfaces yet. Render an empty theme-colored GPUI body for those tabs so creating or selecting a new tab never exposes the previous tab's CEF page.
 
         CDXC:Browser 2026-06-22-09:02:
         Browser split panes remain visible shell panes even when their active loaded tab has no existing CEF entity. Render those loaded bodies as restored/sleeping placeholders while preserving their tab groups and selected tab ids for later focused activation or wake materialization.
@@ -122,7 +122,7 @@ impl GhostexGpuiApp {
                 pane_id.0
             ))
             .size_full()
-            .bg(workspace_terminal_placeholder_color())
+            .bg(chrome_color(0x000000, 0xffffff))
             .into_any_element()
     }
 
@@ -144,8 +144,8 @@ impl GhostexGpuiApp {
             .items_center()
             .justify_center()
             .border_1()
-            .border_color(rgb(0x1f1f1f))
-            .bg(rgb(0x000000))
+            .border_color(chrome_color(0x1f1f1f, 0xffffff))
+            .bg(chrome_color(0x000000, 0xffffff))
             .px(px(32.0))
             .child(
                 v_flex()
@@ -163,14 +163,14 @@ impl GhostexGpuiApp {
                             .text_ellipsis()
                             .text_size(px(24.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(0xf2f2f2))
+                            .text_color(chrome_color(0xf2f2f2, 0x252525))
                             .child(title),
                     )
                     .child(
                         div()
                             .mt(px(8.0))
                             .text_size(px(12.5))
-                            .text_color(rgb(0x8f8f8f))
+                            .text_color(chrome_color(0x8f8f8f, 0x666666))
                             .child("Click to load tab"),
                     ),
             )

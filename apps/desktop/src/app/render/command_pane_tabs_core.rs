@@ -77,6 +77,7 @@ impl GhostexGpuiApp {
         Keep the total edge inset constant at 2px across focus changes: the 1px
         focused border gains 1px padding so showing first-responder chrome never
         shifts or resizes the command group content.
+        The inset belongs to app chrome; using the terminal placeholder fill exposes a black frame around light tabs.
         */
         let group = match border_width {
             CommandPaneGroupBorderWidth::Focused => group.border_1().p(px(1.0)),
@@ -85,7 +86,7 @@ impl GhostexGpuiApp {
 
         let group = group
             .border_color(border_color)
-            .bg(command_terminal_placeholder_color())
+            .bg(command_pane_chrome_color())
             .child(self.render_command_pane_titlebar(leaf, estimated_chrome_width, cx))
             .when_some(
                 self.render_command_terminal_search_bar(leaf, cx),

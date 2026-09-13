@@ -590,7 +590,7 @@ impl GhostexGpuiApp {
         let keep_open_active = matches!(action, CommandPaneControlAction::ToggleKeepOpen)
             && self.command_pane_keep_open();
         let icon_color = if keep_open_active {
-            gpui::rgb(0x72b7ff).into()
+            chrome_color(0x72b7ff, 0x245b91).into()
         } else {
             command_pane_control_text_color()
         };
@@ -606,12 +606,14 @@ impl GhostexGpuiApp {
             })
             .rounded(px(COMMAND_PANE_CONTROL_CORNER_RADIUS))
             .bg(command_pane_control_button_color())
-            .when(keep_open_active, |this| this.bg(gpui::rgb(0x19354f)))
+            .when(keep_open_active, |this| {
+                this.bg(chrome_color(0x19354f, 0xdbeafe))
+            })
             .text_color(command_pane_control_text_color())
             .cursor_default()
             .hover(move |this| {
                 this.bg(if keep_open_active {
-                    gpui::rgb(0x244968).into()
+                    chrome_color(0x244968, 0xbfdbfe).into()
                 } else {
                     command_pane_control_hover_color()
                 })

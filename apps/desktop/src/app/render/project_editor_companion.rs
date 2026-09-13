@@ -437,7 +437,7 @@ impl GhostexGpuiApp {
                         .top(px(6.0))
                         .right(px(3.0))
                         .text_size(px(10.0))
-                        .text_color(rgb(0xffffff).opacity(0.24))
+                        .text_color(chrome_ink().opacity(0.24))
                         .child(label),
                 )
             });
@@ -636,7 +636,7 @@ impl GhostexGpuiApp {
             .items_center()
             .justify_center()
             .border_l_1()
-            .border_color(rgb(0x252525))
+            .border_color(chrome_color(0x252525, 0xd4d4d4))
             .text_color(if is_focused {
                 workspace_tab_close_active_color()
             } else {

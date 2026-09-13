@@ -33,7 +33,7 @@ impl GpuiTitlebarExtensionPanel {
             parent_ns_view,
             url,
             &format!("titlebar-extension-{id}"),
-            CEF_DARK_PREPAINT_BACKGROUND_COLOR,
+            pane_prepaint_background_color(),
             false,
             None,
             Some(popup_open_handler),
