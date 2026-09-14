@@ -51,6 +51,7 @@ export default defineConfig({
       '**/DerivedData/**',
       '**/target/**',
       '.dependencies/**',
+      'apps/desktop/runtime/**',
       'apps/mobile/app/android/.gradle/**',
       'apps/mobile/app/android/**/build/**',
       '.dependencies/code-server/lib/**',
