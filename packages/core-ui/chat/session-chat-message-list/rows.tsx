@@ -11,7 +11,7 @@ import {
   IconPhoto,
   IconSparkles,
 } from '@tabler/icons-react';
-import { memo, useId, useRef } from 'react';
+import { memo, useContext, useId, useRef } from 'react';
 import {
   Attachment,
   AttachmentContent,
@@ -36,6 +36,7 @@ import {
 } from '../session-chat-image-viewer';
 import { SessionChatInteractionScope, useSessionChatDisclosureState } from '../session-chat-interaction-state';
 import { SessionChatMarkdown } from '../session-chat-markdown';
+import { SessionChatAgentLineBreaksContext } from '../session-chat-presentation-provider';
 import { sameSessionChatMessage } from '../session-chat-message-equality';
 import {
   sessionChatSuppressedTurnPresentation,
@@ -457,6 +458,7 @@ export function AgentToolsDisclosure({
   tools: ReturnType<typeof splitSessionChatBlocks>['tools'];
   verboseMode: boolean;
 }) {
+  const preserveLineBreaks = useContext(SessionChatAgentLineBreaksContext);
   const [open, setOpen] = useSessionChatDisclosureState('tools', verboseMode);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const bodyId = useId();
@@ -496,7 +498,7 @@ export function AgentToolsDisclosure({
           >
             <IconChevronRight aria-hidden='true' className={cn('ghostex-chat-disclosure-chevron', open && 'is-open')} />
           </button>
-          <SessionChatMarkdown isStreaming={isStreaming} markdown={markdown} />
+          <SessionChatMarkdown isStreaming={isStreaming} markdown={markdown} preserveLineBreaks={preserveLineBreaks} />
         </div>
         <div hidden={!open} id={bodyId}>
           {open ? (
@@ -701,6 +703,7 @@ export function MessageRowBody({
   showAssistantCopy: boolean;
   verboseMode: boolean;
 } & SessionChatStartupSendActions) {
+  const preserveLineBreaks = useContext(SessionChatAgentLineBreaksContext);
   const { prose, tools: allTools } = splitSessionChatBlocks(message.blocks);
   const { tools, changes } = splitSessionChatFileChanges(allTools);
   const fileCards = hideFileChanges ? null : <SessionChatFileChangeCards changes={changes} messageId={message.id} />;
@@ -922,7 +925,7 @@ export function MessageRowBody({
           />
         ) : markdown.length > 0 ? (
           <div className='ghostex-chat-agent-message'>
-            <SessionChatMarkdown isStreaming={isStreaming} markdown={markdown} />
+            <SessionChatMarkdown isStreaming={isStreaming} markdown={markdown} preserveLineBreaks={preserveLineBreaks} />
           </div>
         ) : null}
         {tools.length > 0 && markdown.length === 0 ? (

@@ -146,6 +146,7 @@ const REMARK_PLUGINS = [
  * remarkSessionChatDetails parsed into existence.
  */
 const CHAT_TEXT_REMARK_PLUGINS = [...REMARK_PLUGINS, remarkSessionChatBareFilePaths, remarkSessionChatHardBreaks];
+const LINE_BREAK_REMARK_PLUGINS = [...REMARK_PLUGINS, remarkSessionChatHardBreaks];
 
 /**
  * GitHub's five alert kinds, with GitHub's own labels and colour families. The
@@ -1018,6 +1019,7 @@ function markdownComponents(
 
 export function SessionChatMarkdown({
   chatText = false,
+  preserveLineBreaks = false,
   isStreaming = false,
   interactionKey = 'body',
   markdown,
@@ -1030,6 +1032,8 @@ export function SessionChatMarkdown({
    * else about the render — GFM, fences, links, chips — is identical.
    */
   chatText?: boolean;
+  /** Preserve paragraph newlines without applying composer-specific quote or path handling. */
+  preserveLineBreaks?: boolean;
   interactionKey?: string;
   /**
    * True while this body is still being appended to by a working agent. Only
@@ -1051,7 +1055,10 @@ export function SessionChatMarkdown({
       <SessionChatMarkdownStreamingContext value={isStreaming}>
         <SessionChatMarkdownSourceContext value={source}>
           <div className='ghostex-chat-markdown'>
-            <ReactMarkdown components={components} remarkPlugins={chatText ? CHAT_TEXT_REMARK_PLUGINS : REMARK_PLUGINS}>
+            <ReactMarkdown
+              components={components}
+              remarkPlugins={chatText ? CHAT_TEXT_REMARK_PLUGINS : preserveLineBreaks ? LINE_BREAK_REMARK_PLUGINS : REMARK_PLUGINS}
+            >
               {source}
             </ReactMarkdown>
           </div>

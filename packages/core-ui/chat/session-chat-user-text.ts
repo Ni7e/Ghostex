@@ -12,9 +12,9 @@
  *     so `> quoted` followed by `ordinary` swallows the ordinary line into the
  *     quote.
  *
- * Both are corrected here, and only for user-authored text — an agent's answer
- * is real markdown, written by something that knows what a blank line means, so
- * it keeps standard GFM semantics.
+ * Composer text applies both corrections. Agent answers keep standard GFM
+ * semantics by default; Pi, OMP, Hermes, and Antigravity prose reuse the
+ * hard-break transform alone to match their terminal rendering.
  *
  * The stylesheet used to fake the first half of this with `white-space:
  * pre-wrap` on the bubble's paragraphs, list items and quotes. That paints the
