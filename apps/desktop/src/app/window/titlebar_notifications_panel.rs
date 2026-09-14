@@ -490,7 +490,11 @@ impl GpuiTitlebarReadingPanel {
                 rgb(workspace_tab_agent_icon_accent_color(agent_name)).into();
             // CDXC:Notifications 2026-09-13 WHY:
             // Agent accents target dark terminal tabs, including white logos; cap their lightness on light notification tiles while retaining the brand hue.
-            if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+            // CDXC:Notifications 2026-09-15 DECISION:
+            // User: Claude's notification icon uses its brand color #d97757 as-is, so it is exempt from the light-mode lightness cap.
+            if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed)
+                && agent_name != "claude"
+            {
                 icon_color.l = icon_color.l.min(0.3);
             }
             svg()
