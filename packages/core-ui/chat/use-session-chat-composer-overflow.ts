@@ -8,6 +8,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 export function useSessionChatComposerOverflow(editingHostAction: boolean) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [overflowed, setOverflowed] = useState<string[]>([]);
+  const [optionsOverflowed, setOptionsOverflowed] = useState(false);
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
@@ -23,6 +24,7 @@ export function useSessionChatComposerOverflow(editingHostAction: boolean) {
       // Measuring the compressed row would make buttons alternate between fitting and overflowing.
       footer.dataset.composerMeasuring = 'true';
       let next: string[];
+      let nextOptionsOverflowed = false;
       try {
         const footerStyle = getComputedStyle(footer);
         const available =
@@ -40,10 +42,14 @@ export function useSessionChatComposerOverflow(editingHostAction: boolean) {
           next.push(action.dataset.composerAction!);
           required -= action.getBoundingClientRect().width + gap;
         }
+        nextOptionsOverflowed =
+          required > available && options.querySelector('[data-composer-option-overflow]') !== null;
       } finally {
         delete footer.dataset.composerMeasuring;
       }
       setOverflowed((previous) => (previous.join(',') === next.join(',') ? previous : next));
+      footer.dataset.optionsOverflowed = String(nextOptionsOverflowed);
+      setOptionsOverflowed(nextOptionsOverflowed);
     };
 
     measure();
@@ -63,5 +69,5 @@ export function useSessionChatComposerOverflow(editingHostAction: boolean) {
     };
   }, [editingHostAction]);
 
-  return { toolbarRef, isOverflowed: (id: string) => overflowed.includes(id) };
+  return { toolbarRef, optionsOverflowed, isOverflowed: (id: string) => overflowed.includes(id) };
 }

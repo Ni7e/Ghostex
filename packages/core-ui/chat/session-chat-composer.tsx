@@ -124,6 +124,7 @@ import { SessionChatAgentFleetStrip } from './session-chat-agent-fleet-strip';
 import { SessionChatAgentTasksPanel } from './session-chat-agent-tasks-panel';
 import { SessionChatQueueRows } from './session-chat-queue-rows';
 import { SessionChatComposerActions } from './session-chat-composer-actions';
+import { SessionChatComposerOptionsMenuProvider } from './session-chat-composer-options-menu';
 import { SessionChatComposerNotReadyNotice } from './session-chat-composer-not-ready';
 import {
   readSessionChatDroppedAttachments,
@@ -2898,111 +2899,113 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                 )}
               </ContextMenuContent>
             </ContextMenu>
-            <div className='ghostex-chat-composer-footer flex w-full items-center justify-between gap-2'>
-              <div className='ghostex-chat-composer-footer-options flex min-w-0 items-center gap-0.5'>
-                {optionPills}
-              </div>
-              <div className='ghostex-chat-composer-footer-actions ml-auto flex items-center gap-1.5'>
-                {onPasteImage || onAttachFile || onPickPaths ? (
-                  <>
-                    {onPickPaths ? null : (
-                      <input
-                        className='hidden'
-                        multiple
-                        onChange={(event) => {
-                          const files = Array.from(event.target.files ?? []);
-                          // Same input element every time: clear it so re-picking
-                          // the same file still fires change.
-                          event.target.value = '';
-                          const images = files.filter((file) => isImageFile(file) && onPasteImage !== undefined);
-                          const others = files.filter((file) => !images.includes(file) && onAttachFile !== undefined);
-                          if (images.length > 0) {
-                            consumeImageFiles(images);
-                          }
-                          if (others.length > 0) {
-                            consumeAttachmentFiles(others);
-                          }
-                        }}
-                        ref={fileInputRef}
-                        tabIndex={-1}
-                        type='file'
-                        {...(onAttachFile ? {} : { accept: 'image/*' })}
-                      />
-                    )}
-                  </>
-                ) : null}
-                <SessionChatComposerActions
-                  sendBlocked={sendBlocked}
-                  hasSendableDraft={hasSendableDraft}
-                  maximized={maximized}
-                  onToggleMaximized={() => {
-                    setMaximizedAndFocus(!maximized);
-                  }}
-                  sessionNoteActive={sessionNoteActive}
-                  sessionNoteHasText={sessionNoteHasText}
-                  showShortcutLabels={showShortcutLabels}
-                  stashedPromptCount={stashedPromptCount}
-                  summaryMode={summaryMode}
-                  verboseMode={verboseMode}
-                  {...(hostActions ? { hostActions } : {})}
-                  {...(renderAccountMenu ? { renderAccountMenu } : {})}
-                  {...(onDelayedActions ? { onDelayedActions } : {})}
-                  {...(onReadTerminalTail ? { onReadTerminalTail } : {})}
-                  {...(onSessionNote ? { onSessionNote } : {})}
-                  {...(onShowStashedPrompts ? { onShowStashedPrompts } : {})}
-                  {...(onStash ? { onStash } : {})}
-                  {...(onToggleSummary ? { onToggleSummary } : {})}
-                  {...(onToggleVerbose ? { onToggleVerbose } : {})}
-                  {...(onPasteImage || onAttachFile || onPickPaths
-                    ? {
-                        onAttach: () => {
-                          if (onPickPaths) {
-                            attachFromNativePicker();
-                          } else {
-                            fileInputRef.current?.click();
-                          }
-                        },
-                      }
-                    : {})}
-                />
-                {showStopButton ? (
-                  <Button
-                    aria-label='Stop the agent'
-                    className='ghostex-chat-stop-button size-6'
-                    disabled={stopButtonCoolingDown}
-                    onClick={handleStopClick}
-                    size='icon'
-                    variant='secondary'
-                  >
-                    <IconPlayerStopFilled aria-hidden='true' className='size-3' stroke={1.6} />
-                  </Button>
-                ) : (
-                  <Button
-                    aria-disabled={sendBlocked ? 'true' : undefined}
-                    aria-label={canQueueDraft ? 'Send (hold to queue)' : 'Send'}
-                    // A blocked send stays clickable so the tap can explain
-                    // itself with a toast; only an empty draft truly disables it.
-                    className={cn('ghostex-chat-send-button size-6', sendBlocked && 'opacity-50')}
-                    disabled={!hasSendableDraft}
-                    onClick={handleSendClick}
-                    onContextMenu={(event) => {
-                      // A touch long-press otherwise raises the platform callout
-                      // menu on top of the queue gesture.
-                      if (canQueueDraft) {
-                        event.preventDefault();
-                      }
+            <SessionChatComposerOptionsMenuProvider>
+              <div className='ghostex-chat-composer-footer flex w-full items-center justify-between gap-2'>
+                <div className='ghostex-chat-composer-footer-options flex min-w-0 items-center gap-0.5'>
+                  {optionPills}
+                </div>
+                <div className='ghostex-chat-composer-footer-actions ml-auto flex items-center gap-1.5'>
+                  {onPasteImage || onAttachFile || onPickPaths ? (
+                    <>
+                      {onPickPaths ? null : (
+                        <input
+                          className='hidden'
+                          multiple
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files ?? []);
+                            // Same input element every time: clear it so re-picking
+                            // the same file still fires change.
+                            event.target.value = '';
+                            const images = files.filter((file) => isImageFile(file) && onPasteImage !== undefined);
+                            const others = files.filter((file) => !images.includes(file) && onAttachFile !== undefined);
+                            if (images.length > 0) {
+                              consumeImageFiles(images);
+                            }
+                            if (others.length > 0) {
+                              consumeAttachmentFiles(others);
+                            }
+                          }}
+                          ref={fileInputRef}
+                          tabIndex={-1}
+                          type='file'
+                          {...(onAttachFile ? {} : { accept: 'image/*' })}
+                        />
+                      )}
+                    </>
+                  ) : null}
+                  <SessionChatComposerActions
+                    sendBlocked={sendBlocked}
+                    hasSendableDraft={hasSendableDraft}
+                    maximized={maximized}
+                    onToggleMaximized={() => {
+                      setMaximizedAndFocus(!maximized);
                     }}
-                    onPointerCancel={cancelSendLongPress}
-                    onPointerDown={beginSendLongPress}
-                    onPointerLeave={cancelSendLongPress}
-                    onPointerUp={cancelSendLongPress}
-                    size='icon'
-                  >
-                    <IconArrowUp aria-hidden='true' className='size-3' stroke={2.2} />
-                  </Button>
-                )}
+                    sessionNoteActive={sessionNoteActive}
+                    sessionNoteHasText={sessionNoteHasText}
+                    showShortcutLabels={showShortcutLabels}
+                    stashedPromptCount={stashedPromptCount}
+                    summaryMode={summaryMode}
+                    verboseMode={verboseMode}
+                    {...(hostActions ? { hostActions } : {})}
+                    {...(renderAccountMenu ? { renderAccountMenu } : {})}
+                    {...(onDelayedActions ? { onDelayedActions } : {})}
+                    {...(onReadTerminalTail ? { onReadTerminalTail } : {})}
+                    {...(onSessionNote ? { onSessionNote } : {})}
+                    {...(onShowStashedPrompts ? { onShowStashedPrompts } : {})}
+                    {...(onStash ? { onStash } : {})}
+                    {...(onToggleSummary ? { onToggleSummary } : {})}
+                    {...(onToggleVerbose ? { onToggleVerbose } : {})}
+                    {...(onPasteImage || onAttachFile || onPickPaths
+                      ? {
+                          onAttach: () => {
+                            if (onPickPaths) {
+                              attachFromNativePicker();
+                            } else {
+                              fileInputRef.current?.click();
+                            }
+                          },
+                        }
+                      : {})}
+                  />
+                  {showStopButton ? (
+                    <Button
+                      aria-label='Stop the agent'
+                      className='ghostex-chat-stop-button size-6'
+                      disabled={stopButtonCoolingDown}
+                      onClick={handleStopClick}
+                      size='icon'
+                      variant='secondary'
+                    >
+                      <IconPlayerStopFilled aria-hidden='true' className='size-3' stroke={1.6} />
+                    </Button>
+                  ) : (
+                    <Button
+                      aria-disabled={sendBlocked ? 'true' : undefined}
+                      aria-label={canQueueDraft ? 'Send (hold to queue)' : 'Send'}
+                      // A blocked send stays clickable so the tap can explain
+                      // itself with a toast; only an empty draft truly disables it.
+                      className={cn('ghostex-chat-send-button size-6', sendBlocked && 'opacity-50')}
+                      disabled={!hasSendableDraft}
+                      onClick={handleSendClick}
+                      onContextMenu={(event) => {
+                        // A touch long-press otherwise raises the platform callout
+                        // menu on top of the queue gesture.
+                        if (canQueueDraft) {
+                          event.preventDefault();
+                        }
+                      }}
+                      onPointerCancel={cancelSendLongPress}
+                      onPointerDown={beginSendLongPress}
+                      onPointerLeave={cancelSendLongPress}
+                      onPointerUp={cancelSendLongPress}
+                      size='icon'
+                    >
+                      <IconArrowUp aria-hidden='true' className='size-3' stroke={2.2} />
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
+            </SessionChatComposerOptionsMenuProvider>
           </div>
         </Field>
       </>

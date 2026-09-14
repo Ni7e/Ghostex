@@ -47,6 +47,7 @@ import type { SessionChatHostAction, SessionChatHostActions } from './session-ch
 import { sessionChatSummaryToggleHotkey } from './session-chat-summary-override';
 import { formatSessionTerminalTailPreview, useSessionTerminalTail } from './use-session-terminal-tail';
 import { useSessionChatComposerOverflow } from './use-session-chat-composer-overflow';
+import { SessionChatComposerOptionsMenuContext } from './session-chat-composer-options-menu';
 
 /**
  * Host actions intentionally excluded from the dots menu. Most already render
@@ -230,7 +231,8 @@ export function SessionChatComposerActions({
   };
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const { toolbarRef, isOverflowed } = useSessionChatComposerOverflow(inputAction !== null);
+  const { toolbarRef, isOverflowed, optionsOverflowed } = useSessionChatComposerOverflow(inputAction !== null);
+  const optionsMenu = useContext(SessionChatComposerOptionsMenuContext);
   const closeMoreActions = () => {
     setMenuOpen(false);
   };
@@ -493,6 +495,15 @@ export function SessionChatComposerActions({
         </AppTooltip>
         {/* CDXC:SessionChat 2026-09-13 DECISION: User: chat menus follow light mode. The root menu and both account submenu variants need the popup scope because each is portaled outside the chat palette. */}
         <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-60' side='top'>
+          {optionsOverflowed && optionsMenu ? (
+            <>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Model settings</DropdownMenuLabel>
+                {optionsMenu}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
           <DropdownMenuGroup>
             <DropdownMenuLabel>Chat</DropdownMenuLabel>
             {verboseMenuItem}

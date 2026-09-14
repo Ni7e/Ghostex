@@ -6,6 +6,7 @@ User: restore the ring that fills with context usage; changing it to a number wa
 import { IconPencil } from '@tabler/icons-react';
 import { Button } from '../../components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
+import { DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from '../../components/ui/dropdown-menu';
 import type { SessionChatContextUsage } from '../../shared/session-chat';
 import { AppTooltip } from '../app-tooltip';
 import { AccountText } from '../accounts/account-text';
@@ -85,7 +86,9 @@ export function SessionChatContextMeter({
   compactDisabledReason,
   details,
   onEditDetails,
+  inMenu = false,
 }: {
+  inMenu?: boolean;
   usage: SessionChatContextMeterUsage;
   onCompact?: (() => void) | undefined;
   compactDisabled?: boolean;
@@ -111,12 +114,142 @@ export function SessionChatContextMeter({
           ? 'Context usage not yet reported'
           : `Context window ${formatSessionChatContextTokens(usage.usedTokens)} tokens used`;
 
+  const ring = (
+    <span className='relative flex size-4 items-center justify-center'>
+      <svg aria-hidden='true' className='absolute inset-0 size-full -rotate-90 transform-gpu' viewBox='0 0 24 24'>
+        <circle
+          cx='12'
+          cy='12'
+          fill='none'
+          r={RING_RADIUS}
+          stroke='color-mix(in oklab, var(--muted-foreground) 24%, transparent)'
+          strokeWidth='3'
+        />
+        <circle
+          className='transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none'
+          cx='12'
+          cy='12'
+          fill='none'
+          r={RING_RADIUS}
+          stroke={usageColor}
+          strokeDasharray={RING_CIRCUMFERENCE}
+          strokeDashoffset={dashOffset}
+          strokeLinecap='round'
+          strokeWidth='3'
+        />
+      </svg>
+    </span>
+  );
+  const content = (
+    <>
+      <div className='flex items-center justify-between gap-3'>
+        <div className='text-xs font-medium text-muted-foreground'>Context window</div>
+        {usage.windowSize !== null && percentageLabel ? (
+          <div className='text-[11px] text-muted-foreground tabular-nums'>
+            <span>{percentageLabel}</span>
+            <span className='mx-1'>·</span>
+            <span>
+              {formatSessionChatContextTokens(usage.usedTokens)}/{formatSessionChatContextTokens(usage.windowSize)}
+            </span>
+          </div>
+        ) : (
+          <div className='text-[11px] text-muted-foreground tabular-nums'>
+            {percentageLabel ??
+              (usage.usedTokens === null ? 'Not yet reported' : formatSessionChatContextTokens(usage.usedTokens))}
+          </div>
+        )}
+      </div>
+      {usage.usedPercentage !== null ? (
+        <div
+          aria-label='Context window usage'
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={Math.round(normalizedPercentage)}
+          className='h-1.5 w-full overflow-hidden rounded-full bg-muted/60'
+          role='progressbar'
+        >
+          <div
+            className='h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none'
+            style={{ width: `${normalizedPercentage}%`, backgroundColor: usageColor }}
+          />
+        </div>
+      ) : null}
+      <div className='text-[11px] text-muted-foreground'>Compacts automatically as the window fills.</div>
+      {onCompact ? (
+        <AppTooltip content={compactDisabled ? compactDisabledReason : null} side='top'>
+          <span className={compactDisabled ? 'mt-1 block w-full cursor-not-allowed' : 'mt-1 block w-full'}>
+            <Button
+              className='w-full justify-center rounded-md'
+              disabled={compactDisabled}
+              onClick={onCompact}
+              size='xs'
+              variant='outline'
+            >
+              Compact context
+            </Button>
+          </span>
+        </AppTooltip>
+      ) : null}
+      {details ? (
+        <div className='ghostex-chat-context-details mt-1 border-t border-border/60 pt-2'>
+          <div className='flex items-center justify-between'>
+            <div className='text-[11px] font-medium text-muted-foreground'>More details</div>
+            {onEditDetails ? (
+              <AppTooltip content='Choose which details to show' side='top'>
+                <Button
+                  aria-label='Choose which details to show'
+                  className='ghostex-chat-context-details-edit -mr-1 rounded-md text-muted-foreground'
+                  onClick={onEditDetails}
+                  size='icon-xs'
+                  variant='ghost'
+                >
+                  <IconPencil size={12} stroke={1.8} />
+                </Button>
+              </AppTooltip>
+            ) : null}
+          </div>
+          {details.length === 0 ? (
+            <div className='mt-1 text-[11px] text-muted-foreground'>Nothing selected.</div>
+          ) : (
+            details.map((group) => (
+              <div className='ghostex-chat-context-details-group' key={group.id}>
+                <div className='ghostex-chat-context-details-group-label'>{group.label}</div>
+                {group.items.map((item) => (
+                  <div className='ghostex-chat-context-details-row' key={item.id}>
+                    <span className='ghostex-chat-context-details-key'>{item.label}</span>
+                    <span className='ghostex-chat-context-details-value'>
+                      <AccountText text={item.value} />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
+    </>
+  );
+  const contentClassName = details
+    ? 'ghostex-session-chat-popup ghostex-chat-context-meter-popover w-80 gap-2 rounded-xl p-3 text-left whitespace-normal [--radius:0.625rem]'
+    : 'ghostex-session-chat-popup ghostex-chat-context-meter-popover w-64 gap-2 rounded-xl p-3 text-left whitespace-normal [--radius:0.625rem]';
+
+  if (inMenu) {
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger aria-label={ariaLabel} openOnHover={false}>
+          {ring}
+          Context window
+          {percentageLabel ? <span className='ml-auto text-xs text-muted-foreground'>{percentageLabel}</span> : null}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className={contentClassName}>{content}</DropdownMenuSubContent>
+      </DropdownMenuSub>
+    );
+  }
+
   return (
     <Popover>
       <PopoverTrigger
-        closeDelay={onCompact ? 150 : 0}
-        delay={150}
-        openOnHover
+        openOnHover={false}
         render={
           <Button
             aria-label={ariaLabel}
@@ -126,126 +259,10 @@ export function SessionChatContextMeter({
           />
         }
       >
-        <span className='relative flex size-4 items-center justify-center'>
-          <svg aria-hidden='true' className='absolute inset-0 size-full -rotate-90 transform-gpu' viewBox='0 0 24 24'>
-            <circle
-              cx='12'
-              cy='12'
-              fill='none'
-              r={RING_RADIUS}
-              stroke='color-mix(in oklab, var(--muted-foreground) 24%, transparent)'
-              strokeWidth='3'
-            />
-            <circle
-              className='transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none'
-              cx='12'
-              cy='12'
-              fill='none'
-              r={RING_RADIUS}
-              stroke={usageColor}
-              strokeDasharray={RING_CIRCUMFERENCE}
-              strokeDashoffset={dashOffset}
-              strokeLinecap='round'
-              strokeWidth='3'
-            />
-          </svg>
-        </span>
+        {ring}
       </PopoverTrigger>
-      <PopoverContent
-        align='end'
-        className={
-          details
-            ? 'ghostex-session-chat-popup ghostex-chat-context-meter-popover w-80 gap-2 rounded-xl p-3 text-left whitespace-normal [--radius:0.625rem]'
-            : 'ghostex-session-chat-popup ghostex-chat-context-meter-popover w-64 gap-2 rounded-xl p-3 text-left whitespace-normal [--radius:0.625rem]'
-        }
-        side='top'
-        sideOffset={8}
-      >
-        <div className='flex items-center justify-between gap-3'>
-          <div className='text-xs font-medium text-muted-foreground'>Context window</div>
-          {usage.windowSize !== null && percentageLabel ? (
-            <div className='text-[11px] text-muted-foreground tabular-nums'>
-              <span>{percentageLabel}</span>
-              <span className='mx-1'>·</span>
-              <span>
-                {formatSessionChatContextTokens(usage.usedTokens)}/{formatSessionChatContextTokens(usage.windowSize)}
-              </span>
-            </div>
-          ) : (
-            <div className='text-[11px] text-muted-foreground tabular-nums'>
-              {percentageLabel ??
-                (usage.usedTokens === null ? 'Not yet reported' : formatSessionChatContextTokens(usage.usedTokens))}
-            </div>
-          )}
-        </div>
-        {usage.usedPercentage !== null ? (
-          <div
-            aria-label='Context window usage'
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={Math.round(normalizedPercentage)}
-            className='h-1.5 w-full overflow-hidden rounded-full bg-muted/60'
-            role='progressbar'
-          >
-            <div
-              className='h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none'
-              style={{ width: `${normalizedPercentage}%`, backgroundColor: usageColor }}
-            />
-          </div>
-        ) : null}
-        <div className='text-[11px] text-muted-foreground'>Compacts automatically as the window fills.</div>
-        {onCompact ? (
-          <AppTooltip content={compactDisabled ? compactDisabledReason : null} side='top'>
-            <span className={compactDisabled ? 'mt-1 block w-full cursor-not-allowed' : 'mt-1 block w-full'}>
-              <Button
-                className='w-full justify-center rounded-md'
-                disabled={compactDisabled}
-                onClick={onCompact}
-                size='xs'
-                variant='outline'
-              >
-                Compact context
-              </Button>
-            </span>
-          </AppTooltip>
-        ) : null}
-        {details ? (
-          <div className='ghostex-chat-context-details mt-1 border-t border-border/60 pt-2'>
-            <div className='flex items-center justify-between'>
-              <div className='text-[11px] font-medium text-muted-foreground'>More details</div>
-              {onEditDetails ? (
-                <AppTooltip content='Choose which details to show' side='top'>
-                  <Button
-                    aria-label='Choose which details to show'
-                    className='ghostex-chat-context-details-edit -mr-1 rounded-md text-muted-foreground'
-                    onClick={onEditDetails}
-                    size='icon-xs'
-                    variant='ghost'
-                  >
-                    <IconPencil size={12} stroke={1.8} />
-                  </Button>
-                </AppTooltip>
-              ) : null}
-            </div>
-            {details.length === 0 ? (
-              <div className='mt-1 text-[11px] text-muted-foreground'>Nothing selected.</div>
-            ) : (
-              details.map((group) => (
-                <div className='ghostex-chat-context-details-group' key={group.id}>
-                  <div className='ghostex-chat-context-details-group-label'>{group.label}</div>
-                  {group.items.map((item) => (
-                    <div className='ghostex-chat-context-details-row' key={item.id}>
-                      <span className='ghostex-chat-context-details-key'>{item.label}</span>
-                      <span className='ghostex-chat-context-details-value'>
-                        <AccountText text={item.value} />
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ))
-            )}
-          </div>
-        ) : null}
+      <PopoverContent align='end' className={contentClassName} side='top' sideOffset={8}>
+        {content}
       </PopoverContent>
     </Popover>
   );

@@ -1,3 +1,4 @@
+import { SessionChatComposerOptionsMenu } from './session-chat-composer-options-menu';
 import { modelPickerProvider } from './session-chat-model-picker-request';
 import { QUICK_MODEL_PICKER_ENABLED } from './session-chat-model-picker-platform';
 import { resolveContextDetailStatus, type ContextDetailStatus } from './session-chat-context-details-agents';
@@ -1051,6 +1052,70 @@ export function SessionChatSessionOptionPills({
   const skeletonFor = (pill: PillSkeleton, value: string | null | undefined): PillSkeleton | undefined =>
     !value && (pill !== 'mode' || !screenProbed) ? pill : undefined;
 
+  const optionsMenuContent = (
+    <>
+      {menuSections.map((section, index) => (
+        <Fragment key={section.label}>
+          {index > 0 ? <DropdownMenuSeparator /> : null}
+          {/* Base UI's GroupLabel throws outside a Menu.Group context. */}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>{section.label}</DropdownMenuLabel>
+            {section.description ? (
+              <DropdownMenuLabel className='whitespace-normal pt-0'>{section.description}</DropdownMenuLabel>
+            ) : null}
+            {section.descriptors.map((descriptor) => (
+              <Fragment key={descriptor.id}>{menuRows(descriptor)}</Fragment>
+            ))}
+          </DropdownMenuGroup>
+        </Fragment>
+      ))}
+    </>
+  );
+  const showOptions =
+    menuOptions.length > 0 || (menuOptionsMayResolve && skeletonFor('options', optionsLabel) !== undefined);
+  const contextMeter = (inMenu = false) =>
+    contextMeterUsage || hasContextDetails ? (
+      <SessionChatContextMeter
+        inMenu={inMenu}
+        compactDisabled={disabled}
+        compactDisabledReason={isWorking ? 'Available once the agent is idle.' : null}
+        onCompact={() => {
+          void onDispatchCommand('/compact');
+        }}
+        usage={contextMeterUsage ?? { usedPercentage: null, usedTokens: null, windowSize: null }}
+        {...(contextDetails ? { details: contextDetails } : {})}
+        {...(contextDetails && onEditContextDetails ? { onEditDetails: onEditContextDetails } : {})}
+      />
+    ) : null;
+
+  /**
+   * CDXC:SessionChat 2026-09-14 DECISION:
+   * User: when the context ring and effort would overlap the model, move them into a new section at the very top of More actions.
+   * User: effort and context controls open when clicked, not hovered.
+   * The existing toolbar actions overflow first; the same measured width budget returns these controls when space opens up.
+   */
+  const overflowMenu =
+    showOptions || contextMeterUsage || hasContextDetails ? (
+      <>
+        {showOptions ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger
+              openOnHover={false}
+              disabled={optionsDisabled || skeletonFor('options', optionsLabel) !== undefined}
+            >
+              {optionsTitle}
+              <span className='ml-auto text-xs text-muted-foreground'>{optionsLabel}</span>
+              {optionsTrailingIcon}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className='ghostex-session-chat-popup w-60 rounded-xl [--radius:0.625rem]'>
+              {optionsMenuContent}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        ) : null}
+        {contextMeter(true)}
+      </>
+    ) : null;
+
   /*
   Read-only pills (grok): both values come from the statusline gxserver reads,
   and either pill hands the user to the terminal — where the host also raises
@@ -1165,6 +1230,7 @@ export function SessionChatSessionOptionPills({
 
   return (
     <>
+      <SessionChatComposerOptionsMenu>{overflowMenu}</SessionChatComposerOptionsMenu>
       <SessionChatModelPickerLauncher
         key={controller.sessionKey}
         actionsRef={modelPickerActions}
@@ -1203,35 +1269,23 @@ export function SessionChatSessionOptionPills({
       </DropdownMenu>
       {/* The trigger is disabled while its skeleton shows, so the empty menu a
           still-loading pill would open is unreachable. */}
-      {menuOptions.length > 0 || (menuOptionsMayResolve && skeletonFor('options', optionsLabel) !== undefined) ? (
-        <DropdownMenu>
-          <PillTrigger
-            ariaLabel={optionsTitle}
-            className='ghostex-chat-options-pill'
-            disabled={optionsDisabled}
-            label={optionsLabel ?? 'Options'}
-            skeleton={skeletonFor('options', optionsLabel)}
-            title={optionsTitle}
-            trailingIcon={optionsTrailingIcon}
-          />
-          <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-60 rounded-xl [--radius:0.625rem]'>
-            {menuSections.map((section, index) => (
-              <Fragment key={section.label}>
-                {index > 0 ? <DropdownMenuSeparator /> : null}
-                {/* Base UI's GroupLabel throws outside a Menu.Group context. */}
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>{section.label}</DropdownMenuLabel>
-                  {section.description ? (
-                    <DropdownMenuLabel className='whitespace-normal pt-0'>{section.description}</DropdownMenuLabel>
-                  ) : null}
-                  {section.descriptors.map((descriptor) => (
-                    <Fragment key={descriptor.id}>{menuRows(descriptor)}</Fragment>
-                  ))}
-                </DropdownMenuGroup>
-              </Fragment>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {showOptions ? (
+        <span data-composer-option-overflow='effort'>
+          <DropdownMenu>
+            <PillTrigger
+              ariaLabel={optionsTitle}
+              className='ghostex-chat-options-pill'
+              disabled={optionsDisabled}
+              label={optionsLabel ?? 'Options'}
+              skeleton={skeletonFor('options', optionsLabel)}
+              title={optionsTitle}
+              trailingIcon={optionsTrailingIcon}
+            />
+            <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-60 rounded-xl [--radius:0.625rem]'>
+              {optionsMenuContent}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
       ) : null}
       {contextWindow ? (
         <DropdownMenu>
@@ -1275,16 +1329,7 @@ export function SessionChatSessionOptionPills({
         </DropdownMenu>
       ) : null}
       {contextMeterUsage || hasContextDetails ? (
-        <SessionChatContextMeter
-          compactDisabled={disabled}
-          compactDisabledReason={isWorking ? 'Available once the agent is idle.' : null}
-          onCompact={() => {
-            void onDispatchCommand('/compact');
-          }}
-          usage={contextMeterUsage ?? { usedPercentage: null, usedTokens: null, windowSize: null }}
-          {...(contextDetails ? { details: contextDetails } : {})}
-          {...(contextDetails && onEditContextDetails ? { onEditDetails: onEditContextDetails } : {})}
-        />
+        <span data-composer-option-overflow='context'>{contextMeter()}</span>
       ) : null}
     </>
   );
