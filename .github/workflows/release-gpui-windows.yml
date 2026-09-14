@@ -151,6 +151,11 @@ jobs:
             if ($install.ExitCode -notin @(0, 3010)) { throw "Spectre libraries installation failed: $($install.ExitCode)" }
           }
           "npm_config_msvs_version=$vs" >> $env:GITHUB_ENV
+          # CDXC:CodeEditor 2026-09-14 WHY:
+          # The release runners ship Visual Studio 2026, and VS Code's preinstall probe only recognizes the 2019 and 2022 install layouts,
+          # so it rejected the toolchain and the native editor build failed before it started. Point its documented override at the
+          # installation vswhere already resolved above.
+          "vs2022_install=$vs" >> $env:GITHUB_ENV
           git -C .dependencies/code-server submodule update --init --depth=1 -- lib/vscode
           if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the pinned VS Code sources.' }
       - name: Resolve immutable code-server component identity
