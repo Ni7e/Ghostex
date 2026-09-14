@@ -2048,8 +2048,8 @@ export function SessionChatView({
                             skillHeading={`${draftAgentRow?.name ?? displayAgentName(resolvedAgentLabel) ?? 'Agent'} skills`}
                           />
                           <SessionChatStatusLine
-                            key={sessionKey}
-                            presentation={transport.presentation}
+                            // CDXC:SessionChat 2026-09-14 WHY: Sharing the composer's session key makes React retain duplicate composers during reconciliation; the status line needs its own per-session identity.
+                            key={`session-status:${sessionKey}`}
                             hasConfiguredItems={hasConfiguredStatusLineItems}
                             items={starredContextDetails}
                           />

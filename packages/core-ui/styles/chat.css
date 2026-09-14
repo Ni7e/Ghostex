@@ -1252,6 +1252,17 @@ the markdown block) rather than pinned to a tier of its own.
   display: inline-flex;
 }
 
+.ghostex-chat-composer-footer-options > [data-composer-option-overflow] {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ghostex-chat-composer-footer[data-options-overflowed='true']:not([data-composer-measuring])
+  .ghostex-chat-composer-footer-options
+  > [data-composer-option-overflow] {
+  display: none;
+}
+
 .ghostex-chat-context-pill {
   flex: 0 0 auto;
 }
@@ -1308,18 +1319,13 @@ the markdown block) rather than pinned to a tier of its own.
   text-align: right;
 }
 
-/* CDXC:SessionChatDetectedOptions 2026-09-04 DECISION: the starred rows under
-   the chat box. User: centre the CONTAINER, never the text. The line is a
-   fit-content box centred in the composer column and capped at the chat box
-   width, so a single line sits centred and, once it wraps, the lines stay
-   left-aligned inside the box. */
 .ghostex-chat-status-line {
   color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
   display: flex;
   flex-wrap: wrap;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  gap: 0 0.375rem;
+  justify-content: center;
   justify-self: center;
   line-height: 16px;
   max-width: 100%;
@@ -1328,7 +1334,27 @@ the markdown block) rather than pinned to a tier of its own.
   pointer-events: none;
   transition: opacity 220ms ease;
   visibility: hidden;
-  width: fit-content;
+  width: 100%;
+}
+
+.ghostex-chat-status-line[hidden] {
+  display: none;
+}
+
+.ghostex-chat-status-line-break {
+  flex-basis: 100%;
+  height: 0;
+}
+
+.ghostex-chat-status-line-group {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.ghostex-chat-status-line[data-status-measuring] .ghostex-chat-status-line-group {
+  max-width: none;
 }
 
 .ghostex-chat-status-line.is-visible {
@@ -1350,10 +1376,16 @@ the markdown block) rather than pinned to a tier of its own.
 .ghostex-chat-status-line-separator {
   color: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
   font-size: 7px;
+  flex: 0 0 1.125rem;
+  width: 1.125rem;
+  text-align: center;
 }
 
 .ghostex-chat-status-line-item {
   cursor: default;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

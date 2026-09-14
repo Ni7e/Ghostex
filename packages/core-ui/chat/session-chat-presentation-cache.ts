@@ -7,7 +7,6 @@ export interface SessionChatPresentationState {
   sessionAgentId?: string | null;
   agentSessionId?: string | null;
   agent?: string;
-  statusLineReady?: boolean;
   sessionTitle?: string;
 }
 
