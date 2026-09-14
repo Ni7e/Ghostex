@@ -1808,6 +1808,8 @@ function AppModalHost() {
 
   useEffect(() => {
     document.body.dataset.sidebarTheme = theme;
+    document.documentElement.dataset.appAppearance =
+      theme === 'plain-light' || theme.startsWith('light-') ? 'light' : 'dark';
     /**
      * CDXC:Theming 2026-08-24:
      * Modals read their accent from --ghostex-accent, so publish the setting

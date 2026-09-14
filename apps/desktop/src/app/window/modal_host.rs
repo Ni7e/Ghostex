@@ -71,6 +71,24 @@ impl GpuiAppModalHostWindow {
             ),
             None => (pane_prepaint_background_color(), titlebar_background()),
         };
+        // CDXC:AppModal 2026-09-14 WHY: modal-host.html needs the native appearance before its first paint, before the sidebar hydrate can reach React.
+        let url = if uses_react_modal_host {
+            gpui::http_client::Url::parse(&url)
+                .map(|mut parsed| {
+                    parsed.query_pairs_mut().append_pair(
+                        "appAppearance",
+                        if prepaint_background == CEF_LIGHT_PREPAINT_BACKGROUND_COLOR {
+                            "light"
+                        } else {
+                            "dark"
+                        },
+                    );
+                    parsed.to_string()
+                })
+                .unwrap_or(url)
+        } else {
+            url
+        };
         let surface = if let Some((extension_bridge_surface, extension_bridge_event_handler)) =
             extension_bridge
         {

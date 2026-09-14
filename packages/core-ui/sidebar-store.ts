@@ -292,7 +292,8 @@ function getInitialSidebarTheme(): SidebarHudState['theme'] {
     return 'dark-blue';
   }
 
-  return document.body.classList.contains('vscode-light') ||
+  return document.documentElement.dataset.appAppearance === 'light' ||
+    document.body.classList.contains('vscode-light') ||
     document.body.classList.contains('vscode-high-contrast-light')
     ? 'light-blue'
     : 'dark-blue';

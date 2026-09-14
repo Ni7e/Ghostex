@@ -4,11 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ghostex App Modal Host</title>
+    <!-- CDXC:AppModal 2026-09-14 WHY: Native windows must carry their appearance into the first HTML paint; waiting for React hydration flashes dark when opening Quick Access or Settings in light mode. -->
+    <script>
+      document.documentElement.dataset.appAppearance =
+        new URLSearchParams(location.search).get('appAppearance') === 'light' ? 'light' : 'dark';
+    </script>
     <style>
       html,
       body {
         background: #0e0e0e;
         margin: 0;
+      }
+      html[data-app-appearance='light'] {
+        --app-modal-background: #ffffff;
+        color-scheme: light;
+      }
+      html[data-app-appearance='light'],
+      html[data-app-appearance='light'] body {
+        background: #ffffff;
       }
     </style>
   </head>

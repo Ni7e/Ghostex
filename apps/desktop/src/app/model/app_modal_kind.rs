@@ -381,6 +381,10 @@ impl GpuiAppModalKind {
                 | Self::AgentsHub
                 | Self::DelayedSend
                 | Self::RenameSession
+                // CDXC:Spaces 2026-09-14 DECISION:
+                // User: the New Space / Edit Space modal must support light mode the same way Rename Session does.
+                // The child window only learns the workspace theme from the sidebar hydrate, so this dialog has to receive that snapshot or it stays on the default dark palette.
+                | Self::SidebarSpaceEditor
                 // The export result dialog's agent picker renders the user's
                 // configured agents, which only reach the modal host through
                 // the sidebar-state snapshot.
