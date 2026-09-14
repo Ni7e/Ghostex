@@ -101,6 +101,16 @@ fn is_selected_numbered_choice(line: &str) -> bool {
     digit_count > 0 && matches!(rest.chars().nth(digit_count), Some('.' | ')'))
 }
 
+fn is_selected_checkbox(line: &str) -> bool {
+    strip_box_border(line)
+        .strip_prefix('›')
+        .is_some_and(|rest| {
+            ["[ ]", "[x]", "[-]"]
+                .iter()
+                .any(|prefix| rest.trim_start().starts_with(prefix))
+        })
+}
+
 fn composer_after(lines: &[String], index: usize) -> bool {
     lines
         .iter()
@@ -129,9 +139,22 @@ fn latest_selected_choice(lines: &[String]) -> Option<usize> {
 pub(crate) fn is_codex_modal_footer(line: &str) -> bool {
     let line = strip_box_border(line).to_ascii_lowercase();
     let hint = line.strip_prefix("press ").unwrap_or(&line);
-    if !["esc ", "enter ", "space ", "tab ", "↑", "↓", "←", "→"]
-        .iter()
-        .any(|prefix| hint.starts_with(prefix))
+    if ![
+        "esc ",
+        "enter ",
+        "space ",
+        "tab ",
+        "left/right ",
+        "ctrl ",
+        "ctrl+",
+        "ctrl-",
+        "↑",
+        "↓",
+        "←",
+        "→",
+    ]
+    .iter()
+    .any(|prefix| hint.starts_with(prefix))
     {
         return false;
     }
@@ -147,7 +170,7 @@ pub(crate) fn is_codex_modal_footer(line: &str) -> bool {
         let action = action.strip_prefix(&["to"]).unwrap_or(action);
         matches!(
             action.first(),
-            Some(&"close" | &"cancel" | &"back" | &"quit" | &"exit")
+            Some(&"close" | &"cancel" | &"back" | &"quit" | &"exit" | &"tasks")
         ) || action.starts_with(&["go", "back"])
     })
 }
@@ -156,7 +179,7 @@ fn latest_modal_footer(lines: &[String]) -> Option<usize> {
     // Like the answerable dialog parser, only the final four rows can own a footer.
     (lines.len().saturating_sub(4)..lines.len())
         .rev()
-        .find(|&index| is_codex_modal_footer(&lines[index]))
+        .find(|&index| is_codex_modal_footer(&lines[index..].join(" ")))
 }
 
 fn live_named_screen(
@@ -185,6 +208,54 @@ pub fn detect_codex_blocking_screen(text: &str) -> Option<CodexBlockingScreen> {
     let lines = scan_lines(text);
     if lines.is_empty() {
         return None;
+    }
+
+    // A real textarea can contain numbered lists, checkbox text or shell-looking continuation rows, and answered dialogs remain in scrollback.
+    // VT distinguishes its ordinary text from the bold label of a selected menu row.
+    if crate::session_chat_composer::session_chat_composer_input("codex", text).is_some()
+        && latest_modal_footer(&lines).is_none()
+    {
+        return None;
+    }
+
+    // CDXC:AgentScreenDetection 2026-09-14 WHY:
+    // Codex retains its prompt glyph while shutting down, setting up the sandbox, viewing a parent-owned subagent, or searching history. Those screens cannot receive an ordinary chat submission.
+    if let Some(prompt) = lines
+        .iter()
+        .rposition(|line| line.starts_with(['›', '»', '!']) && !is_selected_numbered_choice(line))
+    {
+        let body = lines[prompt][lines[prompt].chars().next().unwrap().len_utf8()..].trim();
+        if lines[prompt].starts_with('!') {
+            return Some(CodexBlockingScreen {
+                title: "Codex is in shell-command mode",
+                detail: "Leave shell-command mode in the terminal before sending a chat message.",
+            });
+        }
+        let disabled_label = body.starts_with("Input disabled")
+            || body == "Shutting down..."
+            || body == "Chat stopped as a precaution"
+            || body == "Answer the questions to continue."
+            || body == "Respond to the tool suggestion to continue."
+            || body == "Respond to the MCP server request to continue."
+            || body.starts_with("Viewing sub-agent");
+        if disabled_label
+            && crate::session_chat_composer::session_chat_composer_input("codex", text)
+                .is_none_or(|input| input.is_empty())
+        {
+            return Some(CodexBlockingScreen {
+                title: "Codex input is disabled",
+                detail: "Codex is not accepting chat input in this terminal. Return to the main conversation or finish its pending setup before sending.",
+            });
+        }
+        if lines[prompt + 1..]
+            .iter()
+            .any(|line| line.starts_with("reverse-i-search:"))
+        {
+            return Some(CodexBlockingScreen {
+                title: "Codex is searching prompt history",
+                detail: "Accept or cancel the history search in the terminal before sending a chat message.",
+            });
+        }
     }
 
     if let Some(screen) = live_named_screen(
@@ -326,6 +397,16 @@ pub fn detect_codex_blocking_screen(text: &str) -> Option<CodexBlockingScreen> {
             return Some(CodexBlockingScreen {
                 title: "Codex is waiting for input in a terminal dialog",
                 detail: "A Codex picker or text prompt has replaced the chat composer. Complete or close it in the terminal before sending another message.",
+            });
+        }
+    }
+
+    // Checkbox pickers can replace their key hints with save progress or failure text.
+    if let Some(index) = lines.iter().rposition(|line| is_selected_checkbox(line)) {
+        if !composer_after(&lines, index) {
+            return Some(CodexBlockingScreen {
+                title: "Codex is waiting for a settings selection",
+                detail: "Finish or close the settings picker in the terminal before sending a chat message.",
             });
         }
     }

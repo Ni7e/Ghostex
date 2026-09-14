@@ -625,7 +625,17 @@ pub(crate) fn read_zmx_session_history_capture(
     };
     let session = require_session(repository, &lifecycle)?;
     let zmx_name = provider_zmx_session_name(&session)?;
-    read_zmx_session_screen_capture(&zmx_name).map_err(ZmxEndpointError::DependencyUnavailable)
+    // CDXC:AgentScreenDetection 2026-09-14 SEE-ALSO:
+    // Codex readiness in session_chat_composer.rs distinguishes enabled input from disabled prompts using VT style. Keep the cached chat verdict on the same capture format as the send gate.
+    let capture = if crate::session_chat_composer::session_chat_composer_agent_id(&session)
+        .as_deref()
+        == Some("codex")
+    {
+        read_zmx_session_screen_capture_vt(&zmx_name)
+    } else {
+        read_zmx_session_screen_capture(&zmx_name)
+    };
+    capture.map_err(ZmxEndpointError::DependencyUnavailable)
 }
 
 /*

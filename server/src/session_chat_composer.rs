@@ -13,15 +13,15 @@ chat message, and the user only learned about it from a delivery-failed banner
 minutes later.
 
 So this module asks the opposite question and requires an answer: WHERE is the
-composer? Each supported CLI paints its input box with chrome that is stable
-across versions and survives the zmx plain capture verbatim, and that chrome is
-what a signature matches. Three outcomes, and the middle one is the whole point:
+composer? Each supported CLI paints identifying chrome around its input box.
+Codex also needs VT styles to distinguish its enabled composer from menu rows
+and disabled placeholders. Three outcomes:
 
   - `Ready`    — the composer's own chrome is on screen.
   - `NotReady` — the agent HAS a known signature and it is absent, so something
                  else owns the screen. Refuse the send.
   - `Unknown`  — no signature for this agent, or the screen could not be read.
-                 FAIL OPEN for unmeasured agents; Grok requires positive evidence.
+                 FAIL OPEN for unmeasured agents; Grok and Codex require positive evidence.
                  Other callers proceed, because a detector that
                  cannot see must never be the thing that blocks a message.
 
@@ -123,8 +123,10 @@ impl SessionChatComposerReadiness {
     /// User: do not send while Grok is not ready. Missing capture evidence must hold its message just like a missing input box.
     pub fn blocks_message_for(&self, agent_id: Option<&str>) -> bool {
         self.is_not_ready()
-            || (normalize_agent_id(agent_id).as_deref() == Some("grok")
-                && self.state != SessionChatComposerState::Ready)
+            || (matches!(
+                normalize_agent_id(agent_id).as_deref(),
+                Some("grok" | "codex")
+            ) && self.state != SessionChatComposerState::Ready)
     }
 
     pub fn is_not_ready(&self) -> bool {
@@ -614,11 +616,14 @@ fn signature_matches(signature: ComposerSignature, lines: &[String]) -> bool {
                 is_horizontal_rule(&lines[index + 1]) && is_titled_horizontal_rule(&lines[index])
             })
         }
-        ComposerSignature::BareMarkers { markers } => lines.iter().rev().any(|line| {
-            // A `›` inside a box belongs to that box's content, not to a
-            // frameless composer.
-            !line.contains('\u{2502}') && markers.iter().any(|marker| is_marker_line(line, *marker))
-        }),
+        ComposerSignature::BareMarkers { markers } => lines
+            .iter()
+            .rev()
+            .find(|line| line.starts_with('!') || markers.iter().any(|m| line.starts_with(*m)))
+            .is_some_and(|line| {
+                !line.contains('\u{2502}')
+                    && markers.iter().any(|marker| is_marker_line(line, *marker))
+            }),
         ComposerSignature::BoxedMarker { marker } => lines
             .iter()
             .rev()
@@ -689,13 +694,26 @@ pub fn detect_session_chat_composer_ready(
     let Some(signature) = composer_signature(&agent) else {
         return SessionChatComposerReadiness::unknown(screen_tail);
     };
+    if agent == "codex" {
+        let blocked = crate::session_chat_codex_dialog::detect_codex_dialog(screen_text)
+            .map(|dialog| format!("Codex's {} dialog is open.", dialog.title))
+            .or_else(|| {
+                crate::session_chat_codex_blocking::detect_codex_blocking_screen(screen_text)
+                    .map(|screen| screen.title.to_string())
+            });
+        if let Some(reason) = blocked {
+            return SessionChatComposerReadiness::not_ready(reason, screen_tail);
+        }
+    }
     if is_claude_code_settings_screen(agent_id, screen_text) {
         return SessionChatComposerReadiness::not_ready_dismiss_with_escape(
             "Claude Code settings are open instead of the input box.".to_string(),
             screen_tail,
         );
     }
-    let matches = if matches!(agent.as_str(), "cursor" | "hermes-agent" | "pi" | "omp") {
+    let matches = if agent == "codex" && screen_text.contains('\u{1b}') {
+        session_chat_composer_input("codex", screen_text).is_some()
+    } else if matches!(agent.as_str(), "cursor" | "hermes-agent" | "pi" | "omp") {
         let raw_lines: Vec<_> = screen_text.lines().map(strip_ansi_sgr).collect();
         match agent.as_str() {
             "cursor" => input::cursor_input_region(&raw_lines).is_some(),
@@ -753,10 +771,11 @@ pub struct SessionChatComposerWaitPolicy {
     /*
     How long an UNKNOWN verdict is allowed to hold the caller.
 
-    Zero is the send path: a screen it cannot read must not delay a message by
-    even one poll. The launch paths pass the blind delay they used to sleep
-    unconditionally, so an agent with no signature keeps exactly the behaviour
-    it had, while a signed one is released the moment its composer appears.
+    Zero is the send path for agents that allow unknown captures. Grok and Codex
+    require positive evidence and use timeout_ms instead. The launch paths pass
+    the blind delay they used to sleep unconditionally, so an agent with no
+    signature keeps its existing behaviour while a signed one can proceed as
+    soon as its composer appears.
     */
     pub unknown_hold_ms: u64,
 }
@@ -797,10 +816,17 @@ pub async fn wait_for_session_chat_composer(
     }
     let started = Instant::now();
     tokio::time::sleep(Duration::from_millis(policy.settle_ms)).await;
-    let grok = normalize_agent_id(agent_id).as_deref() == Some("grok");
-    let mut last_not_ready = grok.then(|| {
+    // CDXC:AgentScreenDetection 2026-09-14 DECISION:
+    // User: cover Codex's input-owning states so we know when we can type. Require a readable, enabled composer before releasing a write, including when the terminal capture is unavailable.
+    let agent = normalize_agent_id(agent_id);
+    let codex = agent.as_deref() == Some("codex");
+    let require_ready = matches!(agent.as_deref(), Some("grok" | "codex"));
+    let mut last_not_ready = require_ready.then(|| {
         SessionChatComposerReadiness::not_ready(
-            "Waiting for a readable Grok input box before sending.".to_string(),
+            format!(
+                "Waiting for a readable {} input box before sending.",
+                agent.as_deref().unwrap()
+            ),
             Vec::new(),
         )
     });
@@ -808,9 +834,14 @@ pub async fn wait_for_session_chat_composer(
         if cancelled() {
             return SessionChatComposerWait::Cancelled;
         }
-        match crate::session_chat_send::capture_session_terminal_text(zmx_name).await {
+        let capture = if codex {
+            crate::session_chat_send::capture_session_terminal_text_vt(zmx_name).await
+        } else {
+            crate::session_chat_send::capture_session_terminal_text(zmx_name).await
+        };
+        match capture {
             Some(screen) => {
-                let notice = grok
+                let notice = require_ready
                     .then(|| {
                         crate::session_chat_notice::classify_session_chat_terminal_notice(
                             agent_id, &screen,
@@ -823,7 +854,7 @@ pub async fn wait_for_session_chat_composer(
                     SessionChatComposerState::Ready => return SessionChatComposerWait::Ready,
                     SessionChatComposerState::NotReady => last_not_ready = Some(readiness),
                     SessionChatComposerState::Unknown => {
-                        if !grok
+                        if !require_ready
                             && started.elapsed() >= Duration::from_millis(policy.unknown_hold_ms)
                         {
                             return SessionChatComposerWait::Unknown;
@@ -832,8 +863,9 @@ pub async fn wait_for_session_chat_composer(
                 }
             }
             None => {
-                // Grok needs positive evidence even when the capture is unavailable.
-                if !grok && started.elapsed() >= Duration::from_millis(policy.unknown_hold_ms) {
+                if !require_ready
+                    && started.elapsed() >= Duration::from_millis(policy.unknown_hold_ms)
+                {
                     return SessionChatComposerWait::Unknown;
                 }
             }
@@ -907,9 +939,13 @@ pub fn read_session_terminal_tail(
         .or_else(|| session_chat_composer_agent_id(&session));
     // A capture that lost its tail cannot answer either question, so it reports
     // as unreadable rather than as an empty screen.
-    let capture = crate::zmx::read_zmx_session_screen_capture(&zmx_name)
-        .ok()
-        .filter(|capture| !capture.truncated);
+    let capture = if normalize_agent_id(agent.as_deref()).as_deref() == Some("codex") {
+        crate::zmx::read_zmx_session_screen_capture_vt(&zmx_name)
+    } else {
+        crate::zmx::read_zmx_session_screen_capture(&zmx_name)
+    }
+    .ok()
+    .filter(|capture| !capture.truncated);
     let readiness = match capture.as_ref() {
         Some(capture) => detect_session_chat_composer_readiness(
             agent.as_deref(),

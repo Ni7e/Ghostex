@@ -129,7 +129,12 @@ struct Style {
     faint: bool,
     italic: bool,
     inverse: bool,
+    underline: bool,
+    blink: bool,
+    hidden: bool,
+    crossed_out: bool,
     foreground_rgb: Option<[u16; 3]>,
+    foreground_index: Option<u16>,
     background_rgb: Option<[u16; 3]>,
 }
 
@@ -171,9 +176,24 @@ fn styled_lines(screen: &str) -> Vec<StyledLine> {
                                     2 => style.faint = true,
                                     3 => style.italic = true,
                                     23 => style.italic = false,
+                                    4 | 21 => style.underline = true,
+                                    24 => style.underline = false,
+                                    5 | 6 => style.blink = true,
+                                    25 => style.blink = false,
+                                    8 => style.hidden = true,
+                                    28 => style.hidden = false,
+                                    9 => style.crossed_out = true,
+                                    29 => style.crossed_out = false,
                                     7 => style.inverse = true,
                                     27 => style.inverse = false,
-                                    30..=37 | 39 | 90..=97 => style.foreground_rgb = None,
+                                    30..=37 | 39 | 90..=97 => {
+                                        style.foreground_rgb = None;
+                                        style.foreground_index = match values[index] {
+                                            30..=37 => Some(values[index] - 30),
+                                            90..=97 => Some(values[index] - 90 + 8),
+                                            _ => None,
+                                        };
+                                    }
                                     40..=47 | 49 | 100..=107 => style.background_rgb = None,
                                     22 => {
                                         style.bold = false;
@@ -188,7 +208,15 @@ fn styled_lines(screen: &str) -> Vec<StyledLine> {
                                             None
                                         };
                                         match values[index] {
-                                            38 => style.foreground_rgb = rgb,
+                                            38 => {
+                                                style.foreground_rgb = rgb;
+                                                style.foreground_index =
+                                                    if values.get(index + 1) == Some(&5) {
+                                                        values.get(index + 2).copied()
+                                                    } else {
+                                                        None
+                                                    };
+                                            }
                                             48 => style.background_rgb = rgb,
                                             _ => {}
                                         }
@@ -216,42 +244,149 @@ fn styled_lines(screen: &str) -> Vec<StyledLine> {
         .collect()
 }
 
-/// CDXC:AgentScreenDetection 2026-09-10 WHY:
-/// Codex 0.154.0 paints grayscale Braille particles over the composer's blank cells, including its padding and the gap after the prompt marker.
-/// Those non-faint decorations made an empty composer fail clear verification. Only remove particles with the live composer's background and explicit grayscale foreground, preserving ordinary typed Braille and styled input.
+/// CDXC:AgentScreenDetection 2026-09-14 WHY:
+/// Codex's sparkle.rs blends eight single-dot Braille glyphs with the terminal palette, so light and tinted themes are not grayscale. Stars have explicit RGB foreground/background and no text modifiers; typed Braille inherits the default foreground.
+/// Effort animations tint columns independently, so a star's background need not equal the prompt's background.
 fn clear_codex_composer_particles(lines: &mut [StyledLine]) {
-    let Some((start, background)) = lines.iter().enumerate().rev().find_map(|(i, line)| {
-        let (ch, style) = line.chars.iter().find(|(ch, _)| !ch.is_whitespace())?;
-        (matches!(ch, '›' | '»') && style.bold && !style.faint)
-            .then_some(style.background_rgb)
-            .flatten()
-            .map(|background| (i, background))
-    }) else {
+    let Some(start) = codex_composer_start(lines) else {
         return;
     };
+    let Some(background) = lines[start].chars[0].1.background_rgb else {
+        return;
+    };
+    let start = (0..start)
+        .rev()
+        .find(|&i| {
+            !lines[i]
+                .chars
+                .first()
+                .is_some_and(|(_, style)| style.background_rgb == Some(background))
+        })
+        .map_or(0, |i| i + 1);
     for line in &mut lines[start..] {
         if !line
             .chars
-            .iter()
-            .any(|(_, style)| style.background_rgb == Some(background))
+            .first()
+            .is_some_and(|(_, style)| style.background_rgb == Some(background))
         {
             break;
         }
         for (ch, style) in &mut line.chars {
-            if ('\u{2800}'..='\u{28ff}').contains(ch)
+            if matches!(ch, '⠁' | '⠂' | '⠄' | '⠈' | '⠐' | '⠠' | '⡀' | '⢀')
                 && !style.bold
                 && !style.faint
+                && !style.italic
                 && !style.inverse
-                && style.background_rgb == Some(background)
-                && style
-                    .foreground_rgb
-                    .is_some_and(|[r, g, b]| r == g && g == b)
+                && !style.underline
+                && !style.blink
+                && !style.hidden
+                && !style.crossed_out
+                && style.background_rgb.is_some()
+                && style.foreground_rgb.is_some()
             {
                 *ch = ' ';
             }
         }
         line.text = line.chars.iter().map(|(ch, _)| *ch).collect();
     }
+}
+
+fn codex_composer_start(lines: &[StyledLine]) -> Option<usize> {
+    // The live prefix is in column zero; continuation rows start after LIVE_PREFIX_COLS.
+    // Stop at the newest prefix, including disabled and shell composers, rather than a transcript echo.
+    let start = lines.iter().rposition(|line| {
+        line.chars
+            .first()
+            .is_some_and(|(ch, _)| matches!(ch, '›' | '»' | '!'))
+    })?;
+    let (marker, style) = lines[start].chars[0];
+    (marker != '!' && style.bold && !style.faint).then_some(start)
+}
+
+fn codex_input_region(lines: &[StyledLine]) -> Option<Range<usize>> {
+    let start = codex_composer_start(lines)?;
+    // Selection rows make both the marker and label bold. The textarea only adds bold with inverse for search matches, which can remain after accepting a Vim search.
+    if lines[start].chars[1..]
+        .iter()
+        .find(|(ch, _)| !ch.is_whitespace())
+        .is_some_and(|(_, style)| style.bold && !style.faint && !style.inverse)
+    {
+        return None;
+    }
+    let foot = if let Some(background) = lines[start].chars[0].1.background_rgb {
+        // The composer owns one bottom padding row, even with no statusline or a multiline footer.
+        let end = (start + 1..lines.len())
+            .find(|&i| {
+                !lines[i]
+                    .chars
+                    .first()
+                    .is_some_and(|(_, style)| style.background_rgb == Some(background))
+            })
+            .unwrap_or(lines.len());
+        end.checked_sub(1).filter(|&foot| foot > start)?
+    } else {
+        let last = (start + 1..lines.len()).rfind(|&i| !lines[i].text.trim().is_empty())?;
+        (start + 1..last).rfind(|&i| lines[i].text.trim().is_empty())?
+    };
+    if !lines[foot].text.trim().is_empty() {
+        return None;
+    }
+    // History/Vim searches keep the draft visible but route input into a separate footer editor.
+    if lines[foot + 1..].iter().any(|line| {
+        let text = line.text.trim();
+        text.starts_with("reverse-i-search:")
+            || line
+                .chars
+                .iter()
+                .find(|(ch, _)| !ch.is_whitespace())
+                .is_some_and(|(ch, style)| {
+                    matches!(ch, '/' | '?')
+                        && !style.bold
+                        && !style.faint
+                        && style.foreground_index == Some(6)
+                })
+    }) {
+        return None;
+    }
+    let body = &lines[start].text;
+    if body.contains("Viewing sub-agent")
+        && lines[start].chars[1..]
+            .iter()
+            .filter(|(ch, _)| !ch.is_whitespace())
+            .all(|(_, style)| style.faint)
+    {
+        return None;
+    }
+    Some(start..foot)
+}
+
+/// Codex renders remote attachments above the marker, separated from its textarea by a blank row.
+/// They must count as a draft or clear verification skips Ctrl+C and attaches old images to the next message.
+fn codex_remote_images(lines: &[StyledLine], start: usize) -> Vec<String> {
+    if start == 0 || !lines[start - 1].text.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut images: Vec<_> = lines[..start - 1]
+        .iter()
+        .rev()
+        .take_while(|line| {
+            let label = line.text.trim();
+            label
+                .strip_prefix("[Image #")
+                .and_then(|label| label.strip_suffix(']'))
+                .is_some_and(|number| {
+                    !number.is_empty() && number.chars().all(|ch| ch.is_ascii_digit())
+                })
+                && line
+                    .chars
+                    .iter()
+                    .filter(|(ch, _)| !ch.is_whitespace())
+                    .all(|(_, style)| style.foreground_index == Some(6))
+        })
+        .map(|line| line.text.trim().to_string())
+        .collect();
+    images.reverse();
+    images
 }
 
 /// Input only, excluding transcript and footer. Call with a VT capture when proving a draft empty.
@@ -336,19 +471,7 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
         "hermes-agent" => hermes_input_region(&plain)?,
         // CDXC:AgentScreenDetection 2026-09-11 DECISION:
         // User: keep Codex 0.153 and earlier working alongside 0.154, with or without stars. The bold prompt and dim placeholder identify input independently of optional particles and background colors.
-        "codex" => {
-            let start = lines.iter().rposition(|line| {
-                line.chars
-                    .iter()
-                    .find(|(ch, _)| !ch.is_whitespace())
-                    .is_some_and(|(ch, style)| {
-                        matches!(ch, '›' | '»') && style.bold && !style.faint
-                    })
-            })?;
-            let last = (start + 1..lines.len()).rfind(|&i| !plain[i].trim().is_empty())?;
-            let foot = (start + 1..last).rfind(|&i| plain[i].trim().is_empty())?;
-            start..foot
-        }
+        "codex" => codex_input_region(&lines)?,
         _ => return None,
     };
     let first = &lines[region.start];
@@ -392,9 +515,21 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
                 || (agent == "cursor" && index == 0 && style.inverse && body.len() > 1)
         })
         && !text.to_lowercase().contains("[paste");
-    Some(SessionChatComposerInput {
+    let mut input = SessionChatComposerInput {
         text,
         rows: region.len(),
         placeholder,
-    })
+    };
+    if agent == "codex" {
+        let mut images = codex_remote_images(&lines, region.start);
+        if !images.is_empty() {
+            input.rows += images.len() + 1;
+            if !input.placeholder && !input.text.is_empty() {
+                images.push(input.text);
+            }
+            input.text = images.join("\n");
+            input.placeholder = false;
+        }
+    }
+    Some(input)
 }
