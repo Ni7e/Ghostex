@@ -3400,7 +3400,13 @@ html:has(body.app-modal-host-native-window-body) {
 .delayed-send-trigger-detail-slot {
   align-items: center;
   display: grid;
-  height: 70px;
+  min-height: 70px;
+}
+
+/* CDXC:DelayedSend 2026-09-14 WHY:
+   Native modals fit their window once when opened. Reserve the awake picker's height before switching triggers so the footer stays reachable. */
+.delayed-send-has-agent-picker .delayed-send-trigger-detail-slot {
+  min-height: 112px;
 }
 
 .delayed-send-trigger-description {

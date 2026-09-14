@@ -34,6 +34,7 @@ impl GhostexGpuiApp {
         };
 
         match message_type {
+            "requestDelayedSendAgents" => self.request_delayed_send_agents(&message, cx),
             "browserHistoryQuery" | "browserHistoryOpen" => {
                 self.receive_browser_history_message(&message, cx);
             }

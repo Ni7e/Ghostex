@@ -5,8 +5,8 @@ use std::{
 };
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
-use serde_json::{json, Map, Value};
+use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::{Map, Value, json};
 use tokio::sync::broadcast;
 
 use crate::{
@@ -42,6 +42,8 @@ struct DelayedSendRecord {
     project_id: String,
     session_id: String,
     trigger: String,
+    watched_project_id: Option<String>,
+    watched_session_id: Option<String>,
 }
 
 impl DelayedSendRuntime {
@@ -116,9 +118,30 @@ impl DelayedSendRuntime {
             .get("sendWhenAllProjectSessionsStop")
             .and_then(Value::as_bool)
             == Some(true);
+        let watched = params
+            .get("sendWhenSpecificAgentFinishes")
+            .filter(|value| !value.is_null());
+        let watched_target = watched
+            .map(|value| {
+                let object = value.as_object().ok_or_else(|| {
+                    DomainStateError::bad_request("Choose an awake session to wait for.")
+                })?;
+                let ids = require_target(&repository, object)?;
+                let session = repository.get_session(&ids.0, &ids.1)?.ok_or_else(|| {
+                    DomainStateError::not_found("The selected agent session no longer exists.")
+                })?;
+                if effective_lifecycle_state(&session) != "running" {
+                    return Err(DomainStateError::bad_request(
+                        "Choose an awake session to wait for.",
+                    ));
+                }
+                Ok(ids)
+            })
+            .transpose()?;
         if usize::from(delay_ms.is_some())
             + usize::from(when_agent_stops)
             + usize::from(when_all_stop)
+            + usize::from(watched_target.is_some())
             != 1
         {
             return Err(DomainStateError::bad_request(
@@ -137,7 +160,7 @@ impl DelayedSendRuntime {
         let now = Utc::now();
         let trigger = if delay_ms.is_some() {
             "timer"
-        } else if when_agent_stops {
+        } else if when_agent_stops || watched_target.is_some() {
             "agentStops"
         } else {
             "allAgentsStop"
@@ -151,10 +174,12 @@ impl DelayedSendRuntime {
             r#"
             INSERT INTO delayed_sends (
               projectId, sessionId, trigger, deadlineAt, nonWorkingSinceAt,
-              state, errorMessage, createdAt, updatedAt
+              state, errorMessage, createdAt, updatedAt, watchedProjectId, watchedSessionId
             )
-            VALUES (?1, ?2, ?3, ?4, NULL, 'armed', NULL, ?5, ?5)
+            VALUES (?1, ?2, ?3, ?4, NULL, 'armed', NULL, ?5, ?5, ?6, ?7)
             ON CONFLICT(projectId, sessionId) DO UPDATE SET
+              watchedProjectId = excluded.watchedProjectId,
+              watchedSessionId = excluded.watchedSessionId,
               trigger = excluded.trigger,
               deadlineAt = excluded.deadlineAt,
               nonWorkingSinceAt = NULL,
@@ -162,7 +187,15 @@ impl DelayedSendRuntime {
               errorMessage = NULL,
               updatedAt = excluded.updatedAt
             "#,
-            params![project_id, session_id, trigger, deadline_at, timestamp],
+            params![
+                project_id,
+                session_id,
+                trigger,
+                deadline_at,
+                timestamp,
+                watched_target.as_ref().map(|ids| &ids.0),
+                watched_target.as_ref().map(|ids| &ids.1)
+            ],
         )
         .map_err(sql_error)?;
         self.publish_session_change(&db, &project_id, &session_id)?;
@@ -295,7 +328,22 @@ impl DelayedSendRuntime {
                     effective_lifecycle_state(session) == "running"
                         && presentation_activity(session, &now_iso()) == "working"
                 };
-                let working = if record.trigger == "agentStops" {
+                // CDXC:DelayedSend 2026-09-14 DECISION:
+                // User: wait for a specific awake session to finish, then confirm it stays finished for 10 seconds.
+                // A sleeping or missing session is not evidence of completion; working again resets the observation window.
+                let working = if let (Some(project_id), Some(session_id)) =
+                    (&record.watched_project_id, &record.watched_session_id)
+                {
+                    let Some(watched) = repository.get_session(project_id, session_id)? else {
+                        self.expire_record(
+                            db,
+                            &record,
+                            "The selected agent session no longer exists.",
+                        )?;
+                        return Ok(());
+                    };
+                    effective_lifecycle_state(&watched) != "running" || session_is_working(&watched)
+                } else if record.trigger == "agentStops" {
                     session_is_working(&target)
                 } else {
                     repository
@@ -612,6 +660,7 @@ fn merge_projection(session: &mut Map<String, Value>, projection: &Map<String, V
         "delayedSendRemainingMs",
         "sendWhenAllProjectSessionsStopActive",
         "sendWhenAgentStopsActive",
+        "sendWhenSpecificAgentFinishes",
     ] {
         if let Some(value) = projection.get(key) {
             session.insert(key.to_string(), value.clone());
@@ -641,7 +690,7 @@ fn read_delayed_send_projection(
     let record = db
         .query_row(
             r#"
-            SELECT projectId, sessionId, trigger, deadlineAt, nonWorkingSinceAt
+            SELECT projectId, sessionId, trigger, deadlineAt, nonWorkingSinceAt, watchedProjectId, watchedSessionId
             FROM delayed_sends
             WHERE projectId = ?1 AND sessionId = ?2 AND state = 'armed'
             "#,
@@ -697,7 +746,19 @@ fn record_projection(record: &DelayedSendRecord, now: DateTime<Utc>) -> Value {
     }
     match record.trigger.as_str() {
         "agentStops" => {
-            output.insert("sendWhenAgentStopsActive".to_string(), Value::Bool(true));
+            if let (Some(project_id), Some(session_id)) =
+                (&record.watched_project_id, &record.watched_session_id)
+            {
+                output.insert(
+                    "sendWhenSpecificAgentFinishes".to_string(),
+                    json!({
+                        "projectId": project_id,
+                        "sessionId": session_id,
+                    }),
+                );
+            } else {
+                output.insert("sendWhenAgentStopsActive".to_string(), Value::Bool(true));
+            }
         }
         "allAgentsStop" => {
             output.insert(
@@ -714,7 +775,7 @@ fn read_armed_records(db: &Connection) -> Result<Vec<DelayedSendRecord>, DomainS
     let mut statement = db
         .prepare(
             r#"
-            SELECT projectId, sessionId, trigger, deadlineAt, nonWorkingSinceAt
+            SELECT projectId, sessionId, trigger, deadlineAt, nonWorkingSinceAt, watchedProjectId, watchedSessionId
             FROM delayed_sends
             WHERE state = 'armed'
             ORDER BY updatedAt, projectId, sessionId
@@ -736,6 +797,8 @@ fn record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DelayedSendRecor
         trigger: row.get(2)?,
         deadline_at: row.get(3)?,
         non_working_since_at: row.get(4)?,
+        watched_project_id: row.get(5)?,
+        watched_session_id: row.get(6)?,
     })
 }
 

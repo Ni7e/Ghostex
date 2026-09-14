@@ -1,3 +1,5 @@
+import { useDesktopDelayedSendAgents } from './delayed-send-agents';
+import type { DelayedSendAgentReference } from '@/packages/shared/delayed-send';
 import { createRoot } from 'react-dom/client';
 import { notifyAccountsConnectionsChanged } from '@/packages/core-ui/accounts/transport';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -232,6 +234,7 @@ type AppModalHostMessage =
       delayedSendRemainingLabel?: string;
       sendWhenAllProjectSessionsStopActive?: boolean;
       sendWhenAgentStopsActive?: boolean;
+      sendWhenSpecificAgentFinishes?: DelayedSendAgentReference;
       supportsSendWhenAllProjectSessionsStop?: boolean;
       supportsSendWhenAgentStops?: boolean;
       initialTitle?: string;
@@ -518,6 +521,7 @@ type DelayedSendModalState = {
   delayedSendRemainingLabel?: string;
   sendWhenAllProjectSessionsStopActive?: boolean;
   sendWhenAgentStopsActive?: boolean;
+  sendWhenSpecificAgentFinishes?: DelayedSendAgentReference;
   sessionId: string;
   supportsSendWhenAllProjectSessionsStop?: boolean;
   supportsSendWhenAgentStops?: boolean;
@@ -1381,6 +1385,9 @@ function AppModalHost() {
   const portless = useSidebarStore((state) => state.hud.portless);
   const customThemeColor = useSidebarStore((state) => state.hud.customThemeColor);
   const theme = useSidebarStore((state) => state.hud.theme);
+  const delayedSendAgents = useDesktopDelayedSendAgents(
+    activeModal === 'delayedSend' ? delayedSend?.sessionId : undefined
+  );
   const delayedSendCloseAfterDoneActive = useSidebarStore((state) => {
     const sessionId = delayedSend?.sessionId;
     if (!sessionId) {
@@ -2155,6 +2162,10 @@ function AppModalHost() {
         vscode={vscode}
       />
       <DelayedSendModal
+        awakeSessions={delayedSend?.supportsSendWhenAllProjectSessionsStop ? delayedSendAgents.sessions : undefined}
+        awakeSessionsError={delayedSendAgents.error}
+        awakeSessionsLoading={delayedSendAgents.loading}
+        sendWhenSpecificAgentFinishes={delayedSendAgents.active ?? delayedSend?.sendWhenSpecificAgentFinishes}
         agentIcon={delayedSend?.agentIcon}
         closeAfterDoneActive={delayedSendCloseAfterDoneActive}
         delayedSendDeadlineAt={delayedSend?.delayedSendDeadlineAt}
@@ -2171,12 +2182,13 @@ function AppModalHost() {
           });
           closeModal();
         }}
-        onConfirm={(delayMs, sendWhenAgentStops, sendWhenAllProjectSessionsStop) => {
+        onConfirm={(delayMs, sendWhenAgentStops, sendWhenAllProjectSessionsStop, sendWhenSpecificAgentFinishes) => {
           if (!delayedSend) {
             return;
           }
           vscode.postMessage({
             ...(delayMs === undefined ? {} : { delayMs }),
+            sendWhenSpecificAgentFinishes,
             sendWhenAllProjectSessionsStop,
             sendWhenAgentStops,
             sessionId: delayedSend.sessionId,
@@ -3460,6 +3472,7 @@ function useModalStateFromNative() {
                 typeof message.delayedSendRemainingLabel === 'string' ? message.delayedSendRemainingLabel : undefined,
               sendWhenAllProjectSessionsStopActive: message.sendWhenAllProjectSessionsStopActive === true,
               sendWhenAgentStopsActive: message.sendWhenAgentStopsActive === true,
+              sendWhenSpecificAgentFinishes: message.sendWhenSpecificAgentFinishes,
               sessionId: message.sessionId,
               supportsSendWhenAgentStops: message.supportsSendWhenAgentStops === true,
               supportsSendWhenAllProjectSessionsStop: message.supportsSendWhenAllProjectSessionsStop === true,

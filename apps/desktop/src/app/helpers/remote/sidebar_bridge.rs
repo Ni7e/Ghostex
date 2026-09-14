@@ -217,9 +217,13 @@ pub(crate) fn gpui_remote_sidebar_delayed_send_params(
         .get("sendWhenAllProjectSessionsStop")
         .and_then(serde_json::Value::as_bool)
         == Some(true);
+    let watched = object
+        .get("sendWhenSpecificAgentFinishes")
+        .filter(|value| !value.is_null());
     if usize::from(delay_ms.is_some())
         + usize::from(send_when_agent_stops)
         + usize::from(send_when_all_project_sessions_stop)
+        + usize::from(watched.is_some())
         != 1
     {
         return None;
@@ -227,6 +231,21 @@ pub(crate) fn gpui_remote_sidebar_delayed_send_params(
     if let Some(delay_ms) = delay_ms {
         gpui_command_delayed_send_duration_from_millis(delay_ms)?;
         shaped.insert("delayMs".to_string(), serde_json::json!(delay_ms));
+    } else if let Some(watched) = watched {
+        let project_id = watched.get("projectId")?.as_str()?;
+        let session_id = watched.get("sessionId")?.as_str()?;
+        if !gpui_remote_sidebar_project_id_allowed(project_id)
+            || !gpui_remote_sidebar_session_id_allowed(session_id)
+        {
+            return None;
+        }
+        shaped.insert(
+            "sendWhenSpecificAgentFinishes".to_string(),
+            serde_json::json!({
+                "projectId": project_id,
+                "sessionId": session_id,
+            }),
+        );
     } else if send_when_agent_stops {
         shaped.insert(
             "sendWhenAgentStops".to_string(),

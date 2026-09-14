@@ -719,10 +719,23 @@ impl GhostexGpuiApp {
             open_message["agentIcon"] = serde_json::json!(agent_icon);
         }
         open_message["supportsSendWhenAgentStops"] = serde_json::json!(true);
-        let supports_project_scope = self
-            .local_workspace_session_mappings
+        let remote_key = self
+            .remote_attach_sessions
             .iter()
-            .any(|(_, mapped_session_id)| *mapped_session_id == session_id);
+            .find_map(|(key, mapped_session_id)| (*mapped_session_id == session_id).then_some(key));
+        if let Some(key) = remote_key {
+            // Native hotkeys start with a shell id; both the awake picker and the saved action need the hosting daemon's routed identity.
+            open_message["sessionId"] = serde_json::json!(gpui_remote_scoped_session_id(
+                &key.remote_machine_id,
+                &key.project_id,
+                &key.session_id,
+            ));
+        }
+        let supports_project_scope = remote_key.is_some()
+            || self
+                .local_workspace_session_mappings
+                .iter()
+                .any(|(_, mapped_session_id)| *mapped_session_id == session_id);
         open_message["supportsSendWhenAllProjectSessionsStop"] =
             serde_json::json!(supports_project_scope);
         /*
@@ -813,9 +826,13 @@ impl GhostexGpuiApp {
             .get("sendWhenAllProjectSessionsStop")
             .and_then(serde_json::Value::as_bool)
             == Some(true);
+        let watched = command
+            .get("sendWhenSpecificAgentFinishes")
+            .filter(|value| !value.is_null());
         if usize::from(delay_ms.is_some())
             + usize::from(send_when_agent_stops)
             + usize::from(send_when_all_project_sessions_stop)
+            + usize::from(watched.is_some())
             != 1
             || delay_ms.is_some_and(|delay_ms| {
                 gpui_command_delayed_send_duration_from_millis(delay_ms).is_none()
@@ -834,9 +851,13 @@ impl GhostexGpuiApp {
             "sessionId": key.session_id,
             "delayMs": delay_ms,
             "sendWhenAgentStops": send_when_agent_stops,
+            "sendWhenSpecificAgentFinishes": watched,
             "sendWhenAllProjectSessionsStop": send_when_all_project_sessions_stop,
         });
-        let description = if send_when_agent_stops {
+        let description = if watched.is_some() {
+            "Presses Enter after the selected agent has finished working for 10 seconds."
+                .to_string()
+        } else if send_when_agent_stops {
             "Presses Enter after the agent has finished working for 10 seconds.".to_string()
         } else if send_when_all_project_sessions_stop {
             "Presses Enter after all agents in the project have finished working for 10 seconds."

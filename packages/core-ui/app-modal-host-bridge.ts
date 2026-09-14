@@ -1,3 +1,4 @@
+import type { DelayedSendAgentReference } from '@/packages/shared/delayed-send';
 import type { AgentConfigDraft } from './agent-config-modal';
 import { logAppModalError } from './app-modal-error-log';
 import type { GitCommitModalDraft } from './git-commit-modal';
@@ -286,6 +287,7 @@ export type OpenAppModalMessage =
       modal: 'delayedSend';
       sendWhenAllProjectSessionsStopActive?: boolean;
       sendWhenAgentStopsActive?: boolean;
+      sendWhenSpecificAgentFinishes?: DelayedSendAgentReference;
       sessionId: string;
       supportsSendWhenAgentStops?: boolean;
       supportsSendWhenAllProjectSessionsStop?: boolean;

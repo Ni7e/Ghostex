@@ -236,8 +236,12 @@ Manual Generate Name and `/rename` in chat remain available for Claude and Codex
 - Search by Prompt (More Options, or `gx f` in a terminal) fuzzy-searches every
   prompt you ever sent to an agent; Enter resumes that session, and starred
   prompts stay on top. Ctrl+G is agents, Ctrl+J is projects inside the picker.
-- Delayed Send arms Enter for later or when agents finish; Close After Done
-  closes a pane once its command exits.
+- Delayed Actions opens Session Automations. Send Enter can run after a delay,
+  when this agent finishes, when all agents in the project finish, or **When a
+  specific agent finishes**. Choose the specific agent from the Awake sessions
+  on the same computer; sleeping sessions are excluded. Ghostex waits until the
+  selected agent has remained idle for 10 seconds and restarts that wait if it
+  resumes work. Close After Done closes a pane once its command exits.
 
 Related settings: `autoSleep*`, `clickToWakeSleepingSessions`,
 `showSessionIdInTerminalPanes`, `sessionTitleGenerationAgent`,

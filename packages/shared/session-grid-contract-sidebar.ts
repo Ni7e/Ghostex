@@ -1,3 +1,4 @@
+import type { DelayedSendAgentReference } from '@/packages/shared/delayed-send';
 import type { CompletionSoundSetting } from './completion-sound';
 import type { BundledGhostexAgentSkillId } from './ghostex-agent-skills';
 import type { AgentAcceptAllMode } from './sidebar-agent-accept-all';
@@ -583,6 +584,7 @@ export type SidebarSessionItem = {
   sendWhenAllProjectSessionsStopActive?: boolean;
   /** True when Delayed Send is armed for this agent to finish. */
   sendWhenAgentStopsActive?: boolean;
+  sendWhenSpecificAgentFinishes?: DelayedSendAgentReference;
   /**
    * CDXC:Workarea 2026-05-19-10:15:
    * Sidebar session context menus need the live pop-out presentation flag so
@@ -2551,6 +2553,7 @@ export type SidebarToExtensionMessage =
       delayMs?: number;
       sendWhenAllProjectSessionsStop?: boolean;
       sendWhenAgentStops?: boolean;
+      sendWhenSpecificAgentFinishes?: DelayedSendAgentReference;
       sessionId: string;
       type: 'scheduleDelayedSend';
     }

@@ -1626,6 +1626,7 @@ export function SortableSessionCard({
       modal: 'delayedSend',
       sendWhenAllProjectSessionsStopActive: session.sendWhenAllProjectSessionsStopActive === true,
       sendWhenAgentStopsActive: session.sendWhenAgentStopsActive === true,
+      sendWhenSpecificAgentFinishes: session.sendWhenSpecificAgentFinishes,
       sessionId: session.sessionId,
       supportsSendWhenAgentStops: true,
       supportsSendWhenAllProjectSessionsStop: true,

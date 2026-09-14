@@ -1,3 +1,4 @@
+import type { DelayedSendAgentReference } from './delayed-send';
 import type { SessionChatDraftVersion } from './session-chat-queue';
 /*
 CDXC:ServerApi 2026-05-30-14:04:
@@ -2845,6 +2846,7 @@ export interface GxserverPresentationSession {
   sessionTag?: GxserverSessionTag;
   sendWhenAllProjectSessionsStopActive?: boolean;
   sendWhenAgentStopsActive?: boolean;
+  sendWhenSpecificAgentFinishes?: DelayedSendAgentReference;
   /**
    * CDXC:StateSync 2026-07-29-00:00:
    * Server-owned Sidebar V2 inbox lifecycle. `settledOverride` is the explicit

@@ -76,14 +76,18 @@ export const gpuiSidebarRuntimeCloseAfterDoneMethods = {
       return;
     }
 
-    const trigger: 'afterDelay' | 'agentStops' | 'allAgentsStop' = message.sendWhenAllProjectSessionsStop
-      ? 'allAgentsStop'
-      : message.sendWhenAgentStops
-        ? 'agentStops'
-        : 'afterDelay';
+    const trigger = message.sendWhenSpecificAgentFinishes
+      ? 'specificAgentStops'
+      : message.sendWhenAllProjectSessionsStop
+        ? 'allAgentsStop'
+        : message.sendWhenAgentStops
+          ? 'agentStops'
+          : 'afterDelay';
     let delayMs: number | undefined;
     let description: string;
-    if (trigger === 'allAgentsStop') {
+    if (trigger === 'specificAgentStops') {
+      description = 'Presses Enter after the selected agent has finished working for 10 seconds.';
+    } else if (trigger === 'allAgentsStop') {
       description = 'Presses Enter after all agents in the project have finished working for 10 seconds.';
     } else if (trigger === 'agentStops') {
       description = 'Presses Enter after this agent has finished working for 10 seconds.';
@@ -108,6 +112,9 @@ export const gpuiSidebarRuntimeCloseAfterDoneMethods = {
         projectId: reference.projectId,
         ...(trigger === 'allAgentsStop' ? { sendWhenAllProjectSessionsStop: true } : {}),
         ...(trigger === 'agentStops' ? { sendWhenAgentStops: true } : {}),
+        ...(trigger === 'specificAgentStops'
+          ? { sendWhenSpecificAgentFinishes: message.sendWhenSpecificAgentFinishes }
+          : {}),
         sessionId: reference.sessionId,
       });
       this.postSidebarActionToast('info', 'Delayed Send scheduled', { description });

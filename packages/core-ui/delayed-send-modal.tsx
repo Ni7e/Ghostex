@@ -1,3 +1,4 @@
+import type { DelayedSendAgentOption, DelayedSendAgentReference } from '@/packages/shared/delayed-send';
 import {
   useCallback,
   useEffect,
@@ -39,10 +40,14 @@ const SECOND_MS = 1_000;
 const MINUTE_MS = 60 * SECOND_MS;
 const HOUR_MS = 60 * MINUTE_MS;
 
-type DelayedSendTrigger = 'afterDelay' | 'agentStops' | 'allAgentsStop';
+type DelayedSendTrigger = 'afterDelay' | 'agentStops' | 'allAgentsStop' | 'specificAgentStops';
 
 export type DelayedSendModalProps = {
   agentIcon?: SidebarAgentIcon;
+  awakeSessions?: readonly DelayedSendAgentOption[];
+  awakeSessionsError?: string;
+  awakeSessionsLoading?: boolean;
+  sendWhenSpecificAgentFinishes?: DelayedSendAgentReference;
   closeAfterDoneActive?: boolean;
   delayedSendDeadlineAt?: string;
   delayedSendRemainingLabel?: string;
@@ -59,7 +64,8 @@ export type DelayedSendModalProps = {
   onConfirm: (
     delayMs: number | undefined,
     sendWhenAgentStops: boolean,
-    sendWhenAllProjectSessionsStop: boolean
+    sendWhenAllProjectSessionsStop: boolean,
+    sendWhenSpecificAgentFinishes?: DelayedSendAgentReference
   ) => void;
   onToggleCloseAfterDone: () => void;
   sendWhenAllProjectSessionsStopActive?: boolean;
@@ -104,6 +110,10 @@ export type DelayedSendModalProps = {
  */
 export function DelayedSendModal({
   agentIcon,
+  awakeSessions,
+  awakeSessionsError,
+  awakeSessionsLoading,
+  sendWhenSpecificAgentFinishes,
   closeAfterDoneActive = false,
   delayedSendDeadlineAt,
   delayedSendRemainingLabel,
@@ -118,6 +128,9 @@ export function DelayedSendModal({
   supportsSendWhenAgentStops = false,
   supportsSendWhenAllProjectSessionsStop = false,
 }: DelayedSendModalProps) {
+  const activeSpecificAgentKey = sendWhenSpecificAgentFinishes ? agentReferenceKey(sendWhenSpecificAgentFinishes) : '';
+  const [specificAgentKey, setSpecificAgentKey] = useState(activeSpecificAgentKey);
+  const specificAgentInputId = useId();
   const [hours, setHours] = useState('0');
   const [minutes, setMinutes] = useState('5');
   const [sendEnterEnabled, setSendEnterEnabled] = useState(true);
@@ -186,13 +199,16 @@ export function DelayedSendModal({
       supportsSendWhenAllProjectSessionsStop && sendWhenAllProjectSessionsStopActive;
     const shouldSendWhenAgentStops =
       !shouldSendWhenAllProjectSessionsStop && supportsSendWhenAgentStops && sendWhenAgentStopsActive;
-    const initialTrigger: DelayedSendTrigger = shouldSendWhenAllProjectSessionsStop
-      ? 'allAgentsStop'
-      : shouldSendWhenAgentStops
-        ? 'agentStops'
-        : 'afterDelay';
+    const initialTrigger: DelayedSendTrigger = activeSpecificAgentKey
+      ? 'specificAgentStops'
+      : shouldSendWhenAllProjectSessionsStop
+        ? 'allAgentsStop'
+        : shouldSendWhenAgentStops
+          ? 'agentStops'
+          : 'afterDelay';
     setSendEnterEnabled(true);
     setTrigger(initialTrigger);
+    setSpecificAgentKey(activeSpecificAgentKey);
     setCloseAfterDoneEnabled(closeAfterDoneActive);
     /*
      * CDXC:DelayedSend 2026-05-21-12:21:
@@ -209,6 +225,7 @@ export function DelayedSendModal({
       clearScheduledMinutesFocus();
     };
   }, [
+    activeSpecificAgentKey,
     clearScheduledMinutesFocus,
     closeAfterDoneActive,
     delayedSendDeadlineAt,
@@ -227,9 +244,13 @@ export function DelayedSendModal({
   const delayMs = getDelayMs(hours, minutes);
   const isValidDelay = delayMs >= MINUTE_MS && delayMs <= MAX_DELAY_MS;
   const hasStatusTrigger = trigger !== 'afterDelay';
-  const isValidSchedule = hasStatusTrigger || isValidDelay;
+  const selectedAgent = awakeSessions?.find((session) => agentReferenceKey(session) === specificAgentKey);
+  const isValidSchedule = trigger === 'specificAgentStops' ? Boolean(selectedAgent) : hasStatusTrigger || isValidDelay;
   const hasActiveSend = Boolean(
-    delayedSendRemainingLabel || sendWhenAgentStopsActive || sendWhenAllProjectSessionsStopActive
+    activeSpecificAgentKey ||
+    delayedSendRemainingLabel ||
+    sendWhenAgentStopsActive ||
+    sendWhenAllProjectSessionsStopActive
   );
   const closeAfterDoneChanged = closeAfterDoneEnabled !== closeAfterDoneActive;
   const canDisableActiveSend = !hasActiveSend || Boolean(onCancelTimer);
@@ -244,19 +265,22 @@ export function DelayedSendModal({
   const triggerOptions: { label: string; value: DelayedSendTrigger }[] = [
     { label: 'After a delay', value: 'afterDelay' },
     ...(supportsSendWhenAgentStops ? [{ label: 'When this agent finishes', value: 'agentStops' as const }] : []),
+    ...(awakeSessions ? [{ label: 'When a specific agent finishes', value: 'specificAgentStops' as const }] : []),
     ...(supportsSendWhenAllProjectSessionsStop
       ? [{ label: 'When all agents finish', value: 'allAgentsStop' as const }]
       : []),
   ];
   const sendAutomationDescription = !sendEnterEnabled
     ? 'No Enter keypress will be scheduled.'
-    : sendWhenAllProjectSessionsStopActive
-      ? 'Active when all agents finish working.'
-      : sendWhenAgentStopsActive
-        ? 'Active when this agent finishes working.'
-        : delayedSendRemainingLabel
-          ? `Active. Enter sends in ${delayedSendRemainingLabel}.`
-          : 'Press Enter later using the selected trigger.';
+    : activeSpecificAgentKey
+      ? 'Active when the selected agent finishes working.'
+      : sendWhenAllProjectSessionsStopActive
+        ? 'Active when all agents finish working.'
+        : sendWhenAgentStopsActive
+          ? 'Active when this agent finishes working.'
+          : delayedSendRemainingLabel
+            ? `Active. Enter sends in ${delayedSendRemainingLabel}.`
+            : 'Press Enter later using the selected trigger.';
   /*
    * CDXC:AppModal 2026-08-24:
    * The Codex-style language reserves the accent color for live status text, so
@@ -274,7 +298,14 @@ export function DelayedSendModal({
       onToggleCloseAfterDone();
     }
     if (sendEnterEnabled) {
-      onConfirm(hasStatusTrigger ? undefined : delayMs, sendWhenAgentStops, sendWhenAllProjectSessionsStop);
+      onConfirm(
+        hasStatusTrigger ? undefined : delayMs,
+        sendWhenAgentStops,
+        sendWhenAllProjectSessionsStop,
+        trigger === 'specificAgentStops' && selectedAgent
+          ? { projectId: selectedAgent.projectId, sessionId: selectedAgent.sessionId }
+          : undefined
+      );
     } else if (hasActiveSend) {
       onCancelTimer?.();
     }
@@ -295,7 +326,9 @@ export function DelayedSendModal({
 
   return (
     <AppModalShell
-      className='delayed-send-modal-shadcn'
+      className={
+        awakeSessions ? 'delayed-send-modal-shadcn delayed-send-has-agent-picker' : 'delayed-send-modal-shadcn'
+      }
       isOpen={isOpen}
       onClose={onCancel}
       onOpenAutoFocus={handleOpenAutoFocus}
@@ -402,6 +435,45 @@ export function DelayedSendModal({
                           />
                         </Field>
                       </div>
+                    ) : trigger === 'specificAgentStops' ? (
+                      <Field>
+                        <FieldLabel htmlFor={specificAgentInputId}>Awake session</FieldLabel>
+                        <Select
+                          items={awakeSessions?.map((session) => ({
+                            label: session.label,
+                            value: agentReferenceKey(session),
+                          }))}
+                          disabled={!awakeSessions?.length}
+                          value={selectedAgent ? specificAgentKey : null}
+                          onValueChange={(value) => setSpecificAgentKey(value ?? '')}
+                        >
+                          <SelectTrigger className='w-full' id={specificAgentInputId}>
+                            <SelectValue
+                              placeholder={
+                                awakeSessionsError ||
+                                (awakeSessionsLoading
+                                  ? 'Loading awake sessions...'
+                                  : awakeSessions?.length
+                                    ? 'Select an awake session'
+                                    : 'No awake sessions available')
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent alignItemWithTrigger={false} className={APP_MODAL_SELECT_CONTENT_CLASS}>
+                            <SelectGroup>
+                              {awakeSessions?.map((session) => (
+                                <SelectItem key={agentReferenceKey(session)} value={agentReferenceKey(session)}>
+                                  {session.label}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <p className='delayed-send-trigger-description'>
+                          Ghostex will send Enter after the selected agent finishes working and remains idle for 10
+                          seconds.
+                        </p>
+                      </Field>
                     ) : (
                       <p className='delayed-send-trigger-description'>
                         {trigger === 'agentStops'
@@ -470,4 +542,8 @@ function durationPartsFromMs(delayMs: number): { hours: number; minutes: number 
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return { hours, minutes };
+}
+
+function agentReferenceKey(reference: DelayedSendAgentReference): string {
+  return JSON.stringify([reference.projectId, reference.sessionId]);
 }

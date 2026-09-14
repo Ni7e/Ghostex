@@ -1,3 +1,4 @@
+import type { DelayedSendAgentReference } from '@/packages/shared/delayed-send';
 import {
   GRID_COLUMN_COUNT,
   clampVisibleSessionCount,
@@ -32,6 +33,7 @@ export type GxserverPresentationDelayedSendProjection = {
   remainingMs?: number;
   sendWhenAllProjectSessionsStopActive?: boolean;
   sendWhenAgentStopsActive?: boolean;
+  sendWhenSpecificAgentFinishes?: DelayedSendAgentReference;
 };
 
 export type GxserverPresentationCloseAfterDoneProjection = {
@@ -377,6 +379,7 @@ export function createGxserverPresentationSidebarSession({
           remainingMs: presentation.delayedSendRemainingMs,
           sendWhenAllProjectSessionsStopActive: presentation.sendWhenAllProjectSessionsStopActive,
           sendWhenAgentStopsActive: presentation.sendWhenAgentStopsActive,
+          sendWhenSpecificAgentFinishes: presentation.sendWhenSpecificAgentFinishes,
         }
       : undefined;
   const delayedSend = serverDelayedSend ?? resolveDelayedSend?.(projectId, presentation.sessionId);
@@ -425,6 +428,7 @@ export function createGxserverPresentationSidebarSession({
     delayedSendRemainingMs: delayedSend?.remainingMs,
     sendWhenAllProjectSessionsStopActive: delayedSend?.sendWhenAllProjectSessionsStopActive === true ? true : undefined,
     sendWhenAgentStopsActive: delayedSend?.sendWhenAgentStopsActive === true ? true : undefined,
+    sendWhenSpecificAgentFinishes: delayedSend?.sendWhenSpecificAgentFinishes,
     /*
     CDXC:SessionChat 2026-08-21:
     The queued-prompt count is daemon-owned, exactly like the Delayed Send
