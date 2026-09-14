@@ -111,7 +111,7 @@ fn drop_orphaned_notification_feed_rows(db: &Connection) -> DomainResult<()> {
     Ok(())
 }
 
-/// Mark the session's unread rows read. Deferred rows stay unread on purpose: deferring means "come back to this one last".
+/// Mark the session's unread rows read. Automatic activity transitions preserve deferred rows; explicit acknowledgement includes them.
 pub(crate) fn mark_session_notifications_read(
     db: &Connection,
     session_id: &str,

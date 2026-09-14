@@ -19,7 +19,10 @@ use super::store::{
 const OBSERVER_BUSY_TIMEOUT: Duration = Duration::from_millis(2_000);
 
 /// Feed rows are written from the one place every attention transition already passes through, after the endpoint's own transaction committed.
-/// Entering attention writes a row; leaving attention by any route (acknowledge, escape, a new turn, exit) reads the session's rows, so the bell count tracks the sidebar's blue dots without a second acknowledge path.
+/// Entering attention writes a row; leaving attention reads the session's rows, preserving deferrals on automatic transitions.
+/// CDXC:Notifications 2026-09-14 DECISION:
+/// User: clearing a session's attention from the sidebar or another acknowledgement action also marks its notification read.
+/// Explicit acknowledgement and Escape read even deferred rows and rows whose stored activity already settled before the client acknowledged them.
 /// Never fails the request: every error is logged and swallowed.
 pub(crate) fn observe_agent_activity_result(
     state: &AppState,
@@ -48,7 +51,14 @@ pub(crate) fn observe_agent_activity_result(
         .unwrap_or("idle");
     let entered_attention = result.get("enteredAttention").and_then(Value::as_bool) == Some(true);
     let left_attention = previous == "attention" && next != "attention";
-    if !entered_attention && !left_attention {
+    let explicitly_acknowledged = endpoint_path == "/api/updateAgentActivity"
+        && matches!(
+            params.get("event").and_then(Value::as_str),
+            Some("acknowledge" | "escape")
+        )
+        && next != "attention"
+        && activity.get("isAcknowledged").and_then(Value::as_bool) == Some(true);
+    if !entered_attention && !left_attention && !explicitly_acknowledged {
         return;
     }
     let Some(session) = result.get("session") else {
@@ -71,7 +81,7 @@ pub(crate) fn observe_agent_activity_result(
     let outcome = if entered_attention {
         record_attention_row(state, session, project_id, session_id, activity, params)
     } else {
-        record_attention_left(state, session_id)
+        record_attention_left(state, session_id, explicitly_acknowledged)
     };
     match outcome {
         Ok(changed) => {
@@ -164,12 +174,16 @@ fn record_attention_row(
     Ok(true)
 }
 
-fn record_attention_left(state: &AppState, session_id: &str) -> Result<bool, DomainStateError> {
+fn record_attention_left(
+    state: &AppState,
+    session_id: &str,
+    include_deferred: bool,
+) -> Result<bool, DomainStateError> {
     let db = open_gxserver_database_with_busy_timeout(&state.paths, OBSERVER_BUSY_TIMEOUT)
         .map_err(|error| DomainStateError {
             code: "internalError",
             message: format!("SQLite gxserver state error: {error}"),
         })?;
-    let changed = mark_session_notifications_read(&db, session_id, false)?;
+    let changed = mark_session_notifications_read(&db, session_id, include_deferred)?;
     Ok(changed > 0)
 }
