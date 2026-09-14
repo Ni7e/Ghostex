@@ -74,14 +74,15 @@ impl GhostexGpuiApp {
             .overflow_hidden();
 
         /*
-        Keep the total edge inset constant at 2px across focus changes: the 1px
-        focused border gains 1px padding so showing first-responder chrome never
-        shifts or resizes the command group content.
-        The inset belongs to app chrome; using the terminal placeholder fill exposes a black frame around light tabs.
+        CDXC:CommandPane 2026-09-14 DECISION:
+        User: remove the 2px top and left gaps around command-pane tabs.
+        Keep the remaining right and bottom inset constant across focus changes so first-responder chrome does not resize the content.
         */
         let group = match border_width {
-            CommandPaneGroupBorderWidth::Focused => group.border_1().p(px(1.0)),
-            CommandPaneGroupBorderWidth::Inactive => group.border_2(),
+            CommandPaneGroupBorderWidth::Focused => {
+                group.border_r_1().border_b_1().pr(px(1.0)).pb(px(1.0))
+            }
+            CommandPaneGroupBorderWidth::Inactive => group.border_r_2().border_b_2(),
         };
 
         let group = group
@@ -356,8 +357,8 @@ impl GhostexGpuiApp {
         CDXC:CommandPane 2026-06-25-12:32:
         Native minimized command panels are command tab chrome only: the panel frame does not prepend a separate "Command" label block before the tabs. Keep the right edge flush so Expand has the same horizontal placement as Minimize.
 
-        CDXC:CommandPane 2026-09-03:
-        The collapsed strip must line up with the expanded titlebar so minimizing does not move the first tab or drop the panel's left edge line. The expanded leaf draws a 1px side edge plus a 2px group border before its tab bar, so the strip draws the same 1px side edge and a 2px inner pad instead of a plain 4px margin, which shifted the tabs right by 1px and lost the edge line.
+        CDXC:CommandPane 2026-09-14 WHY:
+        The collapsed strip keeps only the same 1px side edge as the expanded leaf so minimizing does not move the first tab. This replaces the previous 2px inner pad now that expanded tabs have no left group inset.
         */
         h_flex()
             .id("ghostex-gpui-command-pane-collapsed-strip-row")
