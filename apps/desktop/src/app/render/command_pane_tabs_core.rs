@@ -355,7 +355,7 @@ impl GhostexGpuiApp {
 
         /*
         CDXC:CommandPane 2026-06-25-12:32:
-        Native minimized command panels are command tab chrome only: the panel frame does not prepend a separate "Command" label block before the tabs. Keep the right edge flush so Expand has the same horizontal placement as Minimize.
+        Native minimized command panels are command tab chrome only: the panel frame does not prepend a separate "Command" label block before the tabs.
 
         CDXC:CommandPane 2026-09-14 WHY:
         The collapsed strip keeps only the same 1px side edge as the expanded leaf so minimizing does not move the first tab. This replaces the previous 2px inner pad now that expanded tabs have no left group inset.

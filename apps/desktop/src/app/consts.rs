@@ -1223,7 +1223,11 @@ pub(crate) const COMMAND_PANE_COLLAPSED_STRIP_LEFT_MARGIN: f32 = 1.0;
 
 pub(crate) const COMMAND_PANE_COLLAPSED_STRIP_LEFT_EDGE_WIDTH: f32 = 1.0;
 
-pub(crate) const COMMAND_PANE_COLLAPSED_STRIP_RIGHT_MARGIN: f32 = 0.0;
+/// CDXC:CommandPane 2026-09-14 DECISION:
+/// User: collapsed Expand and expanded Minimize must have the same horizontal position.
+/// Match the expanded panel's outer right inset plus its stable group border inset.
+pub(crate) const COMMAND_PANE_COLLAPSED_STRIP_RIGHT_MARGIN: f32 =
+    COMMAND_PANE_OUTER_CONTENT_RIGHT_INSET + COMMAND_PANE_GROUP_INACTIVE_BORDER_WIDTH as f32;
 
 /*
 CDXC:CommandPane 2026-06-25-18:07:

@@ -503,7 +503,7 @@ impl GhostexGpuiApp {
         Collapsed command-strip chrome keeps New Terminal inline with the tab run and keeps Expand in the fixed panel cluster, but omits Pin/Unpin because macOS hidden command tabs expose expand-only panel actions. Panel mode mutation stays scoped to expanded titlebars so a hidden strip cannot flip pinned/floating state before opening.
 
         CDXC:CommandPane 2026-06-25-13:47:
-        Native command-panel action buttons are normal titlebar button frames, not a padded cluster: keep buttons contiguous, flat, stable-colored, and apply the 8px trailing inset only in expanded command titlebars.
+        Command-panel action buttons use contiguous, flat, stable-colored titlebar frames. The surrounding chrome supplies the matching right inset for expanded and collapsed controls.
         */
         h_flex()
             .id(controls_id)
