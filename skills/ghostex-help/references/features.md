@@ -232,11 +232,17 @@ Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
 agent stops, transcript with thinking, tool, and edit cards, subagent
 transcripts, question and approval cards, rewind, and a note per session.
+Scrolling up collapses the composer; returning to the bottom expands it.
+An empty collapsed composer shows only the first placeholder line, and scrolling
+keeps the same toolbar buttons visible.
 
 Use Cmd+P (Recent Sessions) to jump between chats across projects, or
 Cmd+Ctrl+[ and Cmd+Ctrl+] to go back and forward through visited sessions.
 Recently visited chats show their loaded messages while catching up with the
-agent. Each chat remembers your reading position, expanded tool cards, and
+agent. On desktop, returning to a recently visited chat also restores its account
+badge, context usage, and status line while their values refresh. The status
+line's initial wait runs only before it has first appeared for that chat.
+Each chat remembers your reading position, expanded tool cards, and
 composer cursor. Older messages load as needed when returning to a place in
 the conversation's history. Shortcuts: `openSessionSearchPalette`,
 `navigateHistoryBack`, `navigateHistoryForward`.
@@ -416,8 +422,8 @@ line under the chat box. Every row holds one value, for example Cost, Session
 time, and API time, or 5h limit, 7d limit, Model limit (such as Fable), 5h
 reset, and 7d reset, read from the session's saved account, or from the agent
 itself when the session has no account.
-Claude Code and Codex keep separate choices; the copy buttons in the dialog
-header transfer them between the two.
+Claude Code and Codex keep separate choices. Copying settings between them
+is temporarily hidden in this dialog.
 
 Related settings: `hideAccountEmails`, `preferredAgentInterface`, `sessionChatTheme`,
 `sessionChatFontFamily`, `sessionChatCustomTranscriptWidthEnabled`,
@@ -575,6 +581,9 @@ unread, Mark all read, and Clear all. Hover a header button to see its configure
 hotkey when one is available. Hotkeys: Cmd+I opens the panel,
 Cmd+Shift+U jumps to the latest unread notification, and Cmd+Ctrl+U pushes the
 current session to the back of the unread queue and jumps to the next one.
+Clearing a session's attention by selecting it in the sidebar, focusing its
+terminal, or pressing Escape also marks its notification read, including one
+you previously moved to the back of the unread queue.
 Scripts and agent hooks can post their own rows with
 `ghostex notify --title <text> [--body <text>]`.
 
@@ -627,7 +636,9 @@ docs directory), `hideProjectHeaderDiffStats`,
   and picker rows and the Accounts figures use the same two numbers. Each
   button opens that login's live limits, reset times, and extra usage or rate
   limit resets, with the Fable limit as a main bar for Claude. Click the same
-  usage button again to close its dropdown. Clicking outside, including in
+  usage button again to close its dropdown. Click another titlebar dropdown's
+  button to close the current dropdown and open that one in a single click.
+  Clicking outside, including in
   Session Chat, closes usage dropdowns and Tips. More model
   limits starts collapsed. Click the Codex reset
   count to see each reset's expiry date. Redeem a reset opens a Codex terminal
