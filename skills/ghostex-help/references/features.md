@@ -594,6 +594,14 @@ sessions, so any client can control agents on any machine.
 - **CLI**: `ghostex attach <selector>` attaches to a session from any terminal,
   including over SSH.
 
+Windows computers accept both Android and macOS desktop connections over SSH.
+Install Ghostex on Windows, enable SSH, and add the Windows address with your
+Windows username. The connection uses the Windows Environment selected in
+Windows Ghostex: native PowerShell with Windows folders, or the selected WSL
+distribution with Linux folders. Windows agent CLIs must be installed for native
+PowerShell projects. After changing the Windows environment and restarting the
+Windows app, reconnect the phone or remote desktop machine to use that environment.
+
 Related settings: Settings > Remote (all rows are user-only; open them with
 `ghostex settings open --tab remote`), `hideKeepAwakeTitlebarControl` and the
 Keep Awake rows for machines that must stay reachable.

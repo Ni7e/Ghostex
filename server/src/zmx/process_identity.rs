@@ -355,7 +355,12 @@ pub(crate) fn process_open_file_paths(process_id: i64) -> Vec<PathBuf> {
         .collect()
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(windows)]
+pub(crate) fn process_open_file_paths(process_id: i64) -> Vec<PathBuf> {
+    crate::platform::process_files::open_paths(process_id)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub(crate) fn process_open_file_paths(_process_id: i64) -> Vec<PathBuf> {
     Vec::new()
 }

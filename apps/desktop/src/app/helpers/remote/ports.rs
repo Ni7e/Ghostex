@@ -35,7 +35,7 @@ pub(crate) fn gpui_prepare_remote_ports_browser_page(
     let result = gpui_run_remote_ssh_in_execution_target(
         config,
         execution_target,
-        GPUI_REMOTE_LISTENING_PORTS_COMMAND,
+        gpui_remote_ports_command_for(execution_target),
         Duration::from_secs(12),
     );
     if result.exit_code != 0 {

@@ -127,8 +127,11 @@ pub(crate) fn current_zmx_wire_generation(zmx_executable_path: &str) -> Option<u
 }
 
 /// Runs `zmx version` through the same profile-free shell spawn as the probe
-/// reads, so a Windows host reaches its WSL-side binary the same way.
+/// reads, using the native wmx invocation on Windows.
 fn read_zmx_wire_generation(zmx_executable_path: &str) -> Option<u32> {
+    #[cfg(windows)]
+    let script = super::scripts_windows::version_command(zmx_executable_path);
+    #[cfg(not(windows))]
     let script = format!(
         "unset ZMX_SESSION ZMX_SESSION_PREFIX\nexec {} version",
         shell_quote(zmx_executable_path)
@@ -169,6 +172,16 @@ fn recorded_zmx_wire_generation(session: &Value) -> Option<u32> {
     {
         return u32::try_from(generation).ok();
     }
+    // CDXC:ZmxWireGeneration 2026-09-14 WHY:
+    // The extracted Windows host and its predecessor share generation 1. Import the native protocol stamp so installing wmx preserves running agents.
+    #[cfg(windows)]
+    if provider_state
+        .get("nativeSessionProtocol")
+        .and_then(Value::as_u64)
+        == Some(1)
+    {
+        return Some(1);
+    }
     provider_state
         .get(LEGACY_ZMX_BINARY_STAMP_KEY)
         .and_then(Value::as_str)
@@ -189,7 +202,6 @@ pub(crate) fn started_provider_state_patch(
     {
         provider_state.insert("terminalBackend".into(), json!("nativeWindows"));
         provider_state.insert("nativeSessionProtocol".into(), json!(1));
-        return Ok(provider_state);
     }
     provider_state.remove(LEGACY_ZMX_BINARY_STAMP_KEY);
     match current_zmx_wire_generation(zmx_executable_path) {
@@ -382,14 +394,20 @@ fn terminate_zmx_session_daemon_process(zmx_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/*
-Windows gxserver runs its daemons inside WSL, whose socket namespace it cannot
-reach, so `zmx_session_daemon_socket_present` never reports a live daemon there
-and this is unreachable. It stays explicit rather than silently succeeding.
-*/
-#[cfg(not(unix))]
-fn terminate_zmx_session_daemon_process(_zmx_name: &str) -> Result<(), String> {
-    Err("zmx daemons cannot be signalled directly on this platform".to_string())
+#[cfg(windows)]
+fn terminate_zmx_session_daemon_process(zmx_name: &str) -> Result<(), String> {
+    let zmx = require_zmx().map_err(zmx_endpoint_error_message)?;
+    let result = run_zmx_probe_script(
+        super::scripts_windows::force_kill_command(&zmx.executable_path, zmx_name),
+        ZmxCommandOptions {
+            timeout_ms: Some(10_000),
+            ..ZmxCommandOptions::default()
+        },
+    )?;
+    if result.exit_code != 0 {
+        return Err("The incompatible Windows session host could not be stopped.".into());
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

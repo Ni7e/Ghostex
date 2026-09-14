@@ -323,6 +323,13 @@ pub fn run_interactive_process(
     env: &[(String, String)],
 ) -> CliResult<i32> {
     let mut child = Command::new(command);
+    #[cfg(windows)]
+    {
+        use std::{io::IsTerminal, os::windows::process::CommandExt};
+        if !std::io::stdin().is_terminal() && !std::io::stdout().is_terminal() {
+            child.creation_flags(0x0800_0000);
+        }
+    }
     child.args(args);
     if let Some(cwd) = cwd {
         child.current_dir(cwd);
@@ -894,7 +901,11 @@ pub fn resolve_gxserver_cli_launch() -> CliResult<Launch> {
     binary (where the Node CLI resolved its sibling node entrypoint), so the
     sibling native binary wins before the shared root fallbacks.
     */
-    let sibling = cli_dir.join("gxserver");
+    let sibling = cli_dir.join(if cfg!(windows) {
+        "gxserver.exe"
+    } else {
+        "gxserver"
+    });
     if file_exists_sync(&sibling) {
         return resolve_gxserver_cli_launch_for_path(&sibling, false);
     }
@@ -911,6 +922,11 @@ pub fn resolve_gxserver_cli_launch() -> CliResult<Launch> {
 }
 
 pub fn resolve_gxserver_cli_launch_from_root(root: &Path) -> CliResult<Option<Launch>> {
+    let binary = if cfg!(windows) {
+        "gxserver.exe"
+    } else {
+        "gxserver"
+    };
     /*
     `gx server ...` must prefer the packaged gxserver binary. Remote Ubuntu
     packages are standalone gxserver roots rather than macOS Web roots, so
@@ -918,8 +934,8 @@ pub fn resolve_gxserver_cli_launch_from_root(root: &Path) -> CliResult<Option<La
     fallback. JavaScript CLI discovery comes only after the native binary.
     */
     for candidate in [
-        root.join("gxserver").join("bin").join("gxserver"),
-        root.join("bin").join("gxserver"),
+        root.join("gxserver").join("bin").join(binary),
+        root.join("bin").join(binary),
         root.join("native")
             .join("macos")
             .join("ghostexHost")

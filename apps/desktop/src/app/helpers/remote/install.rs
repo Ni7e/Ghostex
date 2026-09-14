@@ -42,9 +42,8 @@ pub(crate) fn gpui_probe_remote_gxserver_install(
     The probe's own exit code decides which login environment answered: the
     marked payload and the "nothing installed" code can only come from a shell
     that actually ran the script, so any other outcome means this endpoint is
-    not a POSIX host. Native Windows OpenSSH is exactly that case and keeps
-    gxserver inside WSL2, so the same script is re-run in the saved (or
-    default) distribution instead of reporting the machine as missing gxserver.
+    not a POSIX host. Native Windows OpenSSH is probed for its configured
+    PowerShell or WSL runtime before reporting gxserver as missing.
     */
     if config.ssh_host.trim().is_empty() {
         return GpuiRemoteGxserverInstallProbe::default();
@@ -69,19 +68,27 @@ pub(crate) fn gpui_probe_remote_gxserver_install(
         */
         return GpuiRemoteGxserverInstallProbe::default();
     }
-    /*
-    A WSL2 distribution that no command has entered yet has to boot before it
-    can answer, so give this attempt the longer connect budget instead of the
-    short probe budget used for an already-running POSIX login shell.
-    */
-    let wsl_result = gpui_run_remote_ssh_in_windows_wsl(
+    let Ok(target) = gpui_probe_remote_execution_target(&config) else {
+        return GpuiRemoteGxserverInstallProbe::default();
+    };
+    let command = if matches!(target, GpuiRemoteExecutionTarget::WindowsPowerShell) {
+        format!(
+            "{}\nWrite-Output '{}'; & $gxExe server version; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; Write-Output '{}'",
+            gpui_remote_windows_cli_setup(),
+            GPUI_REMOTE_GXSERVER_INSTALLED_VERSION_START_MARKER,
+            GPUI_REMOTE_GXSERVER_INSTALLED_VERSION_END_MARKER
+        )
+    } else {
+        gpui_remote_installed_gxserver_version_command().to_string()
+    };
+    let result = gpui_run_remote_ssh_in_execution_target(
         &config,
-        config.wsl_distribution.as_deref(),
-        gpui_remote_installed_gxserver_version_command(),
+        &target,
+        &command,
         GPUI_REMOTE_GXSERVER_CONNECT_TIMEOUT,
     );
-    gpui_log_remote_gxserver_install_probe(&config, "windowsWsl", &wsl_result);
-    gpui_remote_gxserver_install_probe_from_result(&wsl_result).unwrap_or_default()
+    gpui_log_remote_gxserver_install_probe(&config, "configuredEnvironment", &result);
+    gpui_remote_gxserver_install_probe_from_result(&result).unwrap_or_default()
 }
 
 #[cfg(target_os = "macos")]
@@ -133,7 +140,7 @@ pub(crate) fn gpui_remote_managed_gxserver_package_needs_update(
     let target_probe = gpui_run_remote_ssh_in_execution_target(
         config,
         execution_target,
-        gpui_remote_install_target_probe_command(),
+        gpui_remote_platform_probe_command_for(execution_target),
         GPUI_REMOTE_GXSERVER_INSTALL_PROBE_TIMEOUT,
     );
     let Some(target) = (target_probe.exit_code == 0)
@@ -172,7 +179,7 @@ pub(crate) fn gpui_install_bundled_remote_gxserver_and_read_token(
     let probe_result = gpui_run_remote_ssh_in_execution_target(
         config,
         execution_target,
-        gpui_remote_install_target_probe_command(),
+        gpui_remote_platform_probe_command_for(execution_target),
         GPUI_REMOTE_GXSERVER_INSTALL_PROBE_TIMEOUT,
     );
     if probe_result.exit_code != 0 {

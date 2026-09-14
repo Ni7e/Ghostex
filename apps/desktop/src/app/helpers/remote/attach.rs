@@ -123,8 +123,16 @@ pub(crate) fn gpui_remote_attach_terminal_plan_from_result(
     let title = gpui_workspace_attach_title(attach);
     let clipboard_command =
         gpui_remote_ghostex_attach_ssh_command(config, &target.execution_target, reference)?;
-    let terminal_remote_command =
-        format!("printf '\\033]2;{TEMP_REMOTE_SSH_READY_TITLE}\\007'; {attach_command}");
+    let terminal_remote_command = if matches!(
+        target.execution_target,
+        GpuiRemoteExecutionTarget::WindowsPowerShell
+    ) {
+        format!(
+            "[Console]::Write([string][char]27 + ']2;{TEMP_REMOTE_SSH_READY_TITLE}' + [char]7); {attach_command}"
+        )
+    } else {
+        format!("printf '\\033]2;{TEMP_REMOTE_SSH_READY_TITLE}\\007'; {attach_command}")
+    };
     let terminal_ssh_command = gpui_remote_ssh_shell_command(
         config,
         &target.execution_target,
@@ -306,7 +314,19 @@ pub(crate) fn gpui_prepare_remote_resume_clipboard_command(
         .map(str::trim)
         .filter(|cwd| !cwd.is_empty());
     let remote_command = cwd
-        .map(|cwd| format!("cd {} && {resume_command}", gpui_shell_single_quote(cwd)))
+        .map(|cwd| {
+            if matches!(
+                target.execution_target,
+                GpuiRemoteExecutionTarget::WindowsPowerShell
+            ) {
+                format!(
+                    "Set-Location -LiteralPath {}; {resume_command}",
+                    gpui_powershell_quote(cwd)
+                )
+            } else {
+                format!("cd {} && {resume_command}", gpui_shell_single_quote(cwd))
+            }
+        })
         .unwrap_or_else(|| resume_command.to_string());
     gpui_remote_ssh_shell_command(
         config,
@@ -325,7 +345,7 @@ pub(crate) fn gpui_remote_ghostex_attach_ssh_command(
     gpui_remote_ssh_shell_command(
         config,
         execution_target,
-        gpui_remote_ghostex_attach_command(reference).as_str(),
+        gpui_remote_ghostex_attach_command_for(execution_target, reference).as_str(),
         true,
         true,
     )
@@ -352,7 +372,8 @@ pub(crate) fn gpui_remote_ssh_shell_command(
             GpuiRemoteExecutionTarget::PosixHost => {
                 gpui_noninteractive_login_shell_remote_command(remote_command)
             }
-            GpuiRemoteExecutionTarget::WindowsWsl { .. } => {
+            GpuiRemoteExecutionTarget::WindowsWsl { .. }
+            | GpuiRemoteExecutionTarget::WindowsPowerShell => {
                 gpui_remote_command_for_execution_target(execution_target, remote_command)
             }
         }
@@ -405,4 +426,20 @@ pub(crate) fn gpui_remote_ghostex_attach_command(
         format!("\"$remote_ghostex\" {}", parts.join(" ")),
     ]
     .join("; ")
+}
+
+pub(crate) fn gpui_remote_ghostex_attach_command_for(
+    target: &GpuiRemoteExecutionTarget,
+    reference: &GpuiRemoteAttachSessionReference,
+) -> String {
+    if matches!(target, GpuiRemoteExecutionTarget::WindowsPowerShell) {
+        format!(
+            "{}\n& $gxExe attach --session-id {} --project-id {} --prompt-editor code-server; exit $LASTEXITCODE",
+            gpui_remote_windows_cli_setup(),
+            gpui_powershell_quote(&reference.session_id),
+            gpui_powershell_quote(&reference.project_id)
+        )
+    } else {
+        gpui_remote_ghostex_attach_command(reference)
+    }
 }

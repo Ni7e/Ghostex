@@ -35,10 +35,7 @@ pub(crate) fn source_code_server_runtime_url(
     project_path: &Path,
 ) -> Option<ProjectWorkareaRealRuntimeUrl> {
     let folder = gpui_path_string(project_path);
-    #[cfg(windows)]
-    let folder = if windows_terminal_backend::current_preference()
-        == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
-    {
+    let folder = if gpui_is_windows_remote_path(&folder) {
         // CDXC:CodeEditor 2026-09-14 WHY:
         // The web workbench treats C: as a URI scheme unless a Windows drive path starts with / and uses forward slashes.
         let folder = folder.replace('\\', "/");
@@ -126,6 +123,15 @@ pub(crate) fn on_demand_component_store() -> Result<Option<component_store::Comp
 pub(crate) fn source_code_server_runtime_availability(
     target: &SourceCodeServerRuntimeTarget,
 ) -> SourceCodeServerRuntimeAvailability {
+    if matches!(
+        &target.endpoint,
+        SourceCodeServerRuntimeEndpoint::Remote {
+            execution_target: GpuiRemoteExecutionTarget::WindowsPowerShell,
+            ..
+        }
+    ) {
+        return SourceCodeServerRuntimeAvailability::Available;
+    }
     #[cfg(windows)]
     if windows_terminal_backend::current_preference()
         == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell

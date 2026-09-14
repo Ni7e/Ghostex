@@ -126,15 +126,18 @@ pub(crate) fn gpui_connect_remote_gxserver_platform_inner(
         CDXC:RemoteMachines 2026-07-26:
         Keep the established Unix SSH command byte-for-byte as the first
         attempt. When that cannot run, identify the SSH host boundary and, for
-        Windows OpenSSH, move every Linux runtime operation into the selected
-        or default WSL distro before interpreting the gxserver exit contract.
+        Windows OpenSSH, use the configured PowerShell or WSL runtime before
+        interpreting the gxserver exit contract.
         */
         match gpui_probe_remote_execution_target(&config) {
-            Ok(target @ GpuiRemoteExecutionTarget::WindowsWsl { .. }) => {
+            Ok(
+                target @ (GpuiRemoteExecutionTarget::WindowsWsl { .. }
+                | GpuiRemoteExecutionTarget::WindowsPowerShell),
+            ) => {
                 token_result = gpui_run_remote_ssh_in_execution_target(
                     &config,
                     &target,
-                    gpui_remote_token_read_command(),
+                    &gpui_remote_token_read_command_for(&target),
                     GPUI_REMOTE_GXSERVER_CONNECT_TIMEOUT,
                 );
                 execution_target = target;
@@ -402,7 +405,7 @@ pub(crate) fn gpui_probe_remote_execution_target(
                 return Ok(GpuiRemoteExecutionTarget::PosixHost);
             }
             return Err(GpuiRemoteExecutionTargetProbeError::Unsupported(format!(
-                "Remote platform {} is unsupported. Ghostex remote setup supports macOS, Linux, and Windows through WSL2.",
+                "Remote platform {} is unsupported. Ghostex remote setup supports macOS, Linux, and Windows with PowerShell or WSL2.",
                 target.display_label()
             )));
         }
@@ -413,7 +416,7 @@ pub(crate) fn gpui_probe_remote_execution_target(
 
     let windows_probe = gpui_run_remote_ssh_raw(
         config,
-        "cmd.exe /d /s /c \"echo __GHOSTEX_REMOTE_WINDOWS__\"",
+        &gpui_remote_powershell_command(&gpui_remote_windows_environment_probe()),
         GPUI_REMOTE_GXSERVER_INSTALL_PROBE_TIMEOUT,
     );
     support_logs::append(
@@ -440,10 +443,32 @@ pub(crate) fn gpui_probe_remote_execution_target(
             return Err(GpuiRemoteExecutionTargetProbeError::Ssh(windows_probe));
         }
         return Err(GpuiRemoteExecutionTargetProbeError::Unsupported(
-            "Ghostex could not identify the remote SSH login environment. Remote setup supports macOS, Linux, and native Windows OpenSSH through WSL2."
+            "Ghostex could not identify the remote SSH login environment. Remote setup supports macOS, Linux, and Windows OpenSSH with PowerShell or WSL2."
                 .to_string(),
         ));
     }
+
+    let settings = windows_probe
+        .stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("__GHOSTEX_REMOTE_ENV__"))
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .unwrap_or_default();
+    if config.wsl_distribution.is_none()
+        && settings.get("backend").and_then(serde_json::Value::as_str) != Some("wsl")
+    {
+        return Ok(GpuiRemoteExecutionTarget::WindowsPowerShell);
+    }
+    let configured_distribution = config
+        .wsl_distribution
+        .as_deref()
+        .or_else(|| {
+            settings
+                .get("distribution")
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
 
     /*
     A blank saved distribution means "the default for a new connection", but
@@ -454,7 +479,7 @@ pub(crate) fn gpui_probe_remote_execution_target(
     let wsl_probe_command = gpui_remote_wsl_target_probe_command();
     let wsl_probe = gpui_run_remote_ssh_in_windows_wsl(
         config,
-        config.wsl_distribution.as_deref(),
+        configured_distribution,
         wsl_probe_command.as_str(),
         GPUI_REMOTE_GXSERVER_INSTALL_PROBE_TIMEOUT,
     );
@@ -513,6 +538,7 @@ pub(crate) fn gpui_remote_command_for_execution_target(
 ) -> String {
     match target {
         GpuiRemoteExecutionTarget::PosixHost => gpui_login_shell_remote_command(command),
+        GpuiRemoteExecutionTarget::WindowsPowerShell => gpui_remote_powershell_command(command),
         GpuiRemoteExecutionTarget::WindowsWsl { distribution } => {
             gpui_remote_command_for_windows_wsl(Some(distribution.as_str()), command)
         }

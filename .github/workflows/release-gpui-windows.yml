@@ -53,7 +53,7 @@ on:
       plan:
         description: Resolved release plan JSON from the prepare job
         required: false
-        default: ""
+        default: ''
         type: string
     secrets:
       WINDOWS_CODE_SIGN_PFX_BASE64:
@@ -109,10 +109,10 @@ jobs:
       GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
       GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
       OUTPUT_DIR: build/release-gpui/${{ inputs.version }}/windows-${{ inputs.arch }}
-      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_GHA_VERSION: windows-${{ inputs.arch }}-1
       RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: "0"
+      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -374,7 +374,7 @@ jobs:
           GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\gxserver-linux-${{ inputs.arch }}.tar.gz
           GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
           GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\${{ steps.code_server_identity.outputs.archive_name }}
-          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: "900"
+          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: '900'
         run: |
           & $env:GHOSTEX_WINDOWS_WATCHDOG -Phase compile -Version '${{ inputs.version }}' -Arch '${{ inputs.arch }}'
       # The runtime artifacts are only read by the packaging phase (WSL
@@ -438,7 +438,7 @@ jobs:
           GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\gxserver-linux-${{ inputs.arch }}.tar.gz
           GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
           GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\${{ steps.code_server_identity.outputs.archive_name }}
-          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: "900"
+          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: '900'
         run: |
           & $env:GHOSTEX_WINDOWS_WATCHDOG -Phase package -Version '${{ inputs.version }}' -Arch '${{ inputs.arch }}'
       - name: Write release provenance

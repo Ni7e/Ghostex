@@ -190,7 +190,9 @@ pub(crate) fn ghostty_theme_source(name: &str) -> Option<&'static str> {
 
 fn gpui_terminal_theme(name: &str) -> Option<GpuiTerminalTheme> {
     let custom_source = custom_ghostty_theme_source(name);
-    let source = custom_source.as_deref().or_else(|| ghostty_theme_source(name))?;
+    let source = custom_source
+        .as_deref()
+        .or_else(|| ghostty_theme_source(name))?;
     let mut foreground = None;
     let mut background = None;
     let mut cursor = None;
@@ -257,7 +259,9 @@ fn custom_ghostty_theme_source(name: &str) -> Option<String> {
             paths.push(parent.join("themes").join(name));
         }
     }
-    paths.into_iter().find_map(|path| std::fs::read_to_string(path).ok())
+    paths
+        .into_iter()
+        .find_map(|path| std::fs::read_to_string(path).ok())
 }
 
 fn parse_theme_rgb(value: &str) -> Option<Rgb> {

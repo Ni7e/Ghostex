@@ -82,8 +82,14 @@ if ($BuildPhase -ne "stage") {
 if ($BuildPhase -ne "stage") {
     Push-Location (Join-Path $RepoRoot "server")
     try {
-        cargo build --release --bin gxserver --bin ghostex --bin ghostex-session-host
+        cargo build --release --bin gxserver --bin ghostex
         if ($LASTEXITCODE -ne 0) { throw "Native Windows runtime build failed" }
+    }
+    finally { Pop-Location }
+    Push-Location (Join-Path $RepoRoot ".dependencies/wmx")
+    try {
+        cargo build --release --locked
+        if ($LASTEXITCODE -ne 0) { throw "wmx build failed" }
     }
     finally { Pop-Location }
 }
@@ -216,12 +222,13 @@ if ($OnDemandComponents) {
 # an optional WSL component.
 $NativeResources = Join-Path $AppDir "resources/native"
 New-Item -ItemType Directory -Force -Path $NativeResources | Out-Null
-foreach ($binary in @("gxserver.exe", "ghostex.exe", "ghostex-session-host.exe")) {
+foreach ($binary in @("gxserver.exe", "ghostex.exe")) {
     Copy-Item (Join-Path $RepoRoot "server/target/release/$binary") $NativeResources
 }
+Copy-Item (Join-Path $RepoRoot ".dependencies/wmx/target/release/wmx.exe") $NativeResources
 # CDXC:PlatformSupport 2026-09-14 WHY:
 # Native gxserver survives app exit. Seal its runtime identity so an updated app replaces an older control plane while preserving session hosts.
-$NativeHashes = @("gxserver.exe", "ghostex.exe", "ghostex-session-host.exe") | ForEach-Object {
+$NativeHashes = @("gxserver.exe", "ghostex.exe", "wmx.exe") | ForEach-Object {
     (Get-FileHash (Join-Path $NativeResources $_) -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $NativeHasher = [Security.Cryptography.SHA256]::Create()

@@ -299,6 +299,12 @@ pub(crate) fn gpui_open_remote_path_in_editor(
             gpui_open_remote_path_in_vscode_remote_ssh(config, target, remote_path)
         }
         GpuiWorkspaceEditorLaunchKind::ZedCompatible => {
+            if matches!(
+                execution_target,
+                GpuiRemoteExecutionTarget::WindowsPowerShell
+            ) {
+                return Err("Zed does not support native Windows SSH servers. Open this project in a VS Code-compatible editor.".into());
+            }
             gpui_open_remote_path_in_zed_remote_ssh(config, target, remote_path)
         }
         GpuiWorkspaceEditorLaunchKind::DirectPath => {
@@ -556,7 +562,7 @@ pub(crate) fn gpui_vscode_remote_ssh_authority_part(value: &str) -> Option<Strin
 
 pub(crate) fn gpui_remote_ide_path_allowed(value: &str) -> bool {
     !value.is_empty()
-        && value.starts_with('/')
+        && (value.starts_with('/') || gpui_is_windows_remote_path(value))
         && value.chars().count() <= GPUI_PROJECT_CONTRACT_PATH_MAX_CHARS
         && !value.contains('\0')
         && !value.chars().any(char::is_control)
@@ -619,4 +625,13 @@ pub(crate) fn gpui_remote_gxserver_git_action_result(
         }),
         Duration::from_secs(15),
     )
+}
+
+pub(crate) fn gpui_is_windows_remote_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\'))
+        || value.starts_with("\\\\")
 }

@@ -140,18 +140,28 @@ pub(crate) fn gpui_upload_terminal_attachment_to_remote(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let remote_path = format!(
+    let mut remote_path = format!(
         "/tmp/ghostex-gpui-attachments/{}-{unique_id}-{filename}",
         std::process::id()
     );
     let quoted_remote_path = gpui_shell_single_quote(remote_path.as_str());
-    let remote_command = match kind {
-        GpuiTerminalAttachmentKind::Folder => format!(
-            "umask 077; mkdir -p /tmp/ghostex-gpui-attachments; mkdir -- {quoted_remote_path} && tar -xzf - -C {quoted_remote_path} --strip-components=1"
-        ),
-        GpuiTerminalAttachmentKind::Image | GpuiTerminalAttachmentKind::File => format!(
-            "umask 077; mkdir -p /tmp/ghostex-gpui-attachments; cat > {quoted_remote_path} && chmod 600 {quoted_remote_path}"
-        ),
+    let remote_command = if matches!(
+        execution_target,
+        GpuiRemoteExecutionTarget::WindowsPowerShell
+    ) {
+        gpui_remote_windows_upload_command(
+            &format!("{}-{unique_id}-{filename}", std::process::id()),
+            kind == GpuiTerminalAttachmentKind::Folder,
+        )
+    } else {
+        match kind {
+            GpuiTerminalAttachmentKind::Folder => format!(
+                "umask 077; mkdir -p /tmp/ghostex-gpui-attachments; mkdir -- {quoted_remote_path} && tar -xzf - -C {quoted_remote_path} --strip-components=1"
+            ),
+            GpuiTerminalAttachmentKind::Image | GpuiTerminalAttachmentKind::File => format!(
+                "umask 077; mkdir -p /tmp/ghostex-gpui-attachments; cat > {quoted_remote_path} && chmod 600 {quoted_remote_path}"
+            ),
+        }
     };
 
     let staged_archive;
@@ -195,6 +205,18 @@ pub(crate) fn gpui_upload_terminal_attachment_to_remote(
     }
     if upload_result.exit_code != 0 {
         return Err("Could not upload the selected item to the remote machine.".to_string());
+    }
+    if matches!(
+        execution_target,
+        GpuiRemoteExecutionTarget::WindowsPowerShell
+    ) {
+        remote_path = upload_result
+            .stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("__GHOSTEX_UPLOAD__"))
+            .filter(|path| gpui_is_windows_remote_path(path))
+            .ok_or_else(|| "Windows did not return the uploaded path.".to_string())?
+            .to_string();
     }
     Ok(GpuiTerminalAttachmentReference {
         kind,

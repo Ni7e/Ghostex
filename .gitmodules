@@ -37,3 +37,6 @@
 [submodule "web"]
 	path = apps/web
 	url = https://github.com/maddada/ghostex-web.git
+[submodule ".dependencies/wmx"]
+	path = .dependencies/wmx
+	url = https://github.com/maddada/wmx.git

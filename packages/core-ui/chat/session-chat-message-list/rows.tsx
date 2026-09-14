@@ -925,7 +925,11 @@ export function MessageRowBody({
           />
         ) : markdown.length > 0 ? (
           <div className='ghostex-chat-agent-message'>
-            <SessionChatMarkdown isStreaming={isStreaming} markdown={markdown} preserveLineBreaks={preserveLineBreaks} />
+            <SessionChatMarkdown
+              isStreaming={isStreaming}
+              markdown={markdown}
+              preserveLineBreaks={preserveLineBreaks}
+            />
           </div>
         ) : null}
         {tools.length > 0 && markdown.length === 0 ? (

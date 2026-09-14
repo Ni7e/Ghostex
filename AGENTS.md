@@ -172,6 +172,12 @@ Add `apps/desktop/views` to that list only when the task is about the desktop mo
 - Two hotkeys moved in **both** the terminal picker and the GUI so the surfaces share one key map: agents is `^g` (was `^t`) and projects is `^j` (was `^r`), because browsers reserve Ctrl+T and Ctrl+R and will not hand them to a page.
 - The GUI (`packages/core-ui/find/`) and `gx f` share the same scanner, matcher, Codex cache, and favorites file, so a prompt starred in one is starred in the other. Anything that would make them rank or star differently is a bug.
 
+### Windows session parity: wmx
+
+`.dependencies/wmx/` is the independent [maddada/wmx](https://github.com/maddada/wmx) submodule, the native Windows ConPTY counterpart to `.dependencies/zmx/`. Its README contains the shared API/behavior table and its AGENTS.md contains maintenance rules. The server selects wmx on native Windows and zmx on POSIX, including WSL. App-specific startup and paths belong in `server/src/zmx/scripts_windows.rs`, not wmx.
+
+Whenever changing a Ghostex-consumed zmx feature, inspect the matching wmx implementation and update both providers or explain why the other is unaffected. In particular, keep visibility OSCs, the 200-column resting grid, client leadership, attach/detach persistence, history/refresh, title coalescing, and prompt-editor capabilities aligned. Run wmx's real Windows smoke script after changes to these contracts. Each provider has its own wire generation; bump only for incompatible IPC changes. Existing `nativeSessionProtocol: 1` sessions migrate as wmx generation 1 without being killed.
+
 ### Changing zmx: the wire generation and the wire-cycle pass
 
 A zmx daemon keeps running the code of the binary that spawned it, and the bundled zmx client talks to it over a private IPC tag contract (`.dependencies/zmx/src/ipc.zig`). When that contract breaks (tags renumbered, a payload layout changed, an existing tag given a new meaning), a new client and a surviving old daemon cannot talk at all: `zmx attach` shows a blank pane and every request is ignored. gxserver therefore runs a **wire-cycle pass** on every startup (`cycle_wire_incompatible_zmx_session_daemons` in `server/src/zmx/wire_cycle.rs`, called from `server/src/server/mod.rs`):

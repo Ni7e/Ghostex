@@ -13,7 +13,12 @@ struct Invocation {
     environment: HashMap<String, String>,
 }
 
-fn invocation(program: &str, args: Vec<String>, environment: HashMap<String, String>) -> String {
+fn invocation(
+    program: &str,
+    args: Vec<String>,
+    mut environment: HashMap<String, String>,
+) -> String {
+    environment.insert("WMX_DIR".into(), session_directory());
     format!(
         "{PREFIX}{}",
         serde_json::to_string(&Invocation {
@@ -58,9 +63,15 @@ fn quote(text: &str) -> String {
 
 pub(crate) fn build_zmx_attach_command(input: ZmxAttachCommandInput) -> String {
     format!(
-        "& {} attach {}",
+        "$env:WMX_DIR={}; & {} attach --require-existing {}{}",
+        quote(&session_directory()),
         quote(&input.zmx_executable_path),
-        quote(&input.session_name)
+        quote(&input.session_name),
+        input
+            .prompt_editor
+            .as_deref()
+            .map(|editor| format!(" --prompt-editor {}", quote(editor)))
+            .unwrap_or_default()
     )
 }
 pub(crate) fn build_started_zmx_attach_command(input: ZmxAttachCommandInput) -> String {
@@ -145,14 +156,21 @@ fn start(
             version.map(|value| value.to_string()),
         ),
         ("GHOSTEX_SESSION_ID", Some(name.to_string())),
+        ("GHOSTEX_ZMX_BIN", Some(program.to_string())),
     ] {
         if let Some(value) = value {
             environment.insert(key.into(), value);
         }
     }
+    // CDXC:PromptEditor 2026-09-14 WHY:
+    // Apply Ghostex's editor handshake after the user's PowerShell profile; otherwise profile-assigned VS Code blocks chat/terminal transfers.
+    let startup = format!(
+        "$env:GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL=$env:VISUAL; $env:GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR=$env:EDITOR; $env:VISUAL='ghostex prompt-editor'; $env:EDITOR=$env:VISUAL; $env:GHOSTEX_PROMPT_EDITING_ENABLED='1'; {}",
+        startup.unwrap_or_default().trim_end_matches(['\r', '\n'])
+    );
     let launch = json!({"name": name, "cwd": cwd,
         "shell": crate::platform::shell::command_shell().executable,
-        "startup": startup.map(|text| text.trim_end_matches(['\r', '\n']))});
+        "startup": startup});
     let encoded =
         STANDARD.encode(serde_json::to_vec(&launch).expect("serialize native session launch"));
     invocation(program, vec!["start-encoded".into(), encoded], environment)
@@ -160,4 +178,28 @@ fn start(
 
 pub(crate) fn process_snapshot_command(program: &str) -> String {
     invocation(program, vec!["process-snapshot".into()], HashMap::new())
+}
+
+/// CDXC:PlatformSupport 2026-09-14 WHY:
+/// Keep the existing endpoint directory when migrating to wmx so running native sessions remain attachable without restarting their agents.
+fn session_directory() -> String {
+    ghostex_paths::GhostexPaths::resolve()
+        .runtime_dir
+        .join("windows-sessions")
+        .to_string_lossy()
+        .into_owned()
+}
+
+pub(crate) fn version_command(program: &str) -> String {
+    invocation(program, vec!["version".into()], HashMap::new())
+}
+pub(crate) fn inspect_command(program: &str, name: &str) -> String {
+    simple(program, "inspect", name)
+}
+pub(crate) fn force_kill_command(program: &str, name: &str) -> String {
+    invocation(
+        program,
+        vec!["kill".into(), "--force".into(), name.into()],
+        HashMap::new(),
+    )
 }

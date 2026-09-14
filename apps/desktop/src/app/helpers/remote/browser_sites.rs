@@ -64,7 +64,7 @@ pub(crate) fn discover_remote_browser_sites(
     let result = gpui_run_remote_ssh_in_execution_target(
         config,
         target,
-        GPUI_REMOTE_LISTENING_PORTS_COMMAND,
+        gpui_remote_ports_command_for(target),
         Duration::from_secs(12),
     );
     if result.exit_code != 0 {

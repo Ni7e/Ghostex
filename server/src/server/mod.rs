@@ -603,8 +603,6 @@ pub async fn run_gxserver_foreground(
     so each affected session is simply sleeping and the ordinary wake-on-open
     path restores it with its saved resume plan.
     */
-    // Native Windows runs the ConPTY host; WSL runs this Unix zmx lifecycle in Linux.
-    #[cfg(not(windows))]
     if let Ok(db) = open_gxserver_database(&paths) {
         let repository = DomainRepository::new(&db, metadata.server_id.as_str());
         cycle_wire_incompatible_zmx_session_daemons(&repository, &logger, &metadata.server_id);

@@ -27,6 +27,8 @@ pub(crate) mod ssh_process;
 pub(crate) mod tunnel_and_auth;
 pub(crate) mod types;
 pub(crate) mod websocket_presentation;
+pub(crate) mod windows;
+pub(crate) mod windows_code;
 
 pub(crate) use attach::*;
 pub(crate) use attach_terminal_process::*;
@@ -49,3 +51,5 @@ pub(crate) use ssh_process::*;
 pub(crate) use tunnel_and_auth::*;
 pub(crate) use types::*;
 pub(crate) use websocket_presentation::*;
+pub(crate) use windows::*;
+pub(crate) use windows_code::*;

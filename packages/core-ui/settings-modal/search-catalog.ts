@@ -527,13 +527,13 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'customSidebarTitlebarBackgroundTintColor',
-          subtitle: 'Subtle tint color for the sidebar and titlebar background in dark mode. Light mode stays light gray.',
+          subtitle:
+            'Subtle tint color for the sidebar and titlebar background in dark mode. Light mode stays light gray.',
           title: 'Dark theme background tint',
         },
         {
           key: 'accentColor',
-          subtitle:
-            'Highlight color for accent text, status highlights, and advanced-setting markers in dark mode.',
+          subtitle: 'Highlight color for accent text, status highlights, and advanced-setting markers in dark mode.',
           title: 'Dark theme accent color',
         },
         {
@@ -653,8 +653,12 @@ export function getSettingsSearchSectionDefinitions() {
               {
                 key: 'windowsTerminalBackend',
                 title: 'Windows Environment',
-                subtitle: 'PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.',
-                options: [{ label: 'PowerShell (native Windows)', value: 'powershell' }, { label: 'WSL (Linux)', value: 'wsl' }],
+                subtitle:
+                  'PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.',
+                options: [
+                  { label: 'PowerShell (native Windows)', value: 'powershell' },
+                  { label: 'WSL (Linux)', value: 'wsl' },
+                ],
               },
               {
                 key: 'windowsWslDistribution',

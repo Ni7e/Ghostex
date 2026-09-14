@@ -1057,7 +1057,9 @@ export function SessionChatMarkdown({
           <div className='ghostex-chat-markdown'>
             <ReactMarkdown
               components={components}
-              remarkPlugins={chatText ? CHAT_TEXT_REMARK_PLUGINS : preserveLineBreaks ? LINE_BREAK_REMARK_PLUGINS : REMARK_PLUGINS}
+              remarkPlugins={
+                chatText ? CHAT_TEXT_REMARK_PLUGINS : preserveLineBreaks ? LINE_BREAK_REMARK_PLUGINS : REMARK_PLUGINS
+              }
             >
               {source}
             </ReactMarkdown>

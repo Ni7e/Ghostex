@@ -163,6 +163,7 @@ impl GpuiRemoteMachineConfig {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum GpuiRemoteExecutionTarget {
     PosixHost,
+    WindowsPowerShell,
     WindowsWsl { distribution: String },
 }
 

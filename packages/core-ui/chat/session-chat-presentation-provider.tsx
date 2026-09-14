@@ -37,7 +37,9 @@ export function SessionChatPresentationProvider({
     <SessionChatSimpleModeContext value={simpleMode}>
       <SessionChatSimpleModeChangeContext value={onSimpleModeChange}>
         <SessionChatFileChangePreviewContext value={fileEditPreviews}>
-          <SessionChatAgentLineBreaksContext value={preserveAgentLineBreaks}>{children}</SessionChatAgentLineBreaksContext>
+          <SessionChatAgentLineBreaksContext value={preserveAgentLineBreaks}>
+            {children}
+          </SessionChatAgentLineBreaksContext>
         </SessionChatFileChangePreviewContext>
       </SessionChatSimpleModeChangeContext>
     </SessionChatSimpleModeContext>

@@ -105,9 +105,24 @@ pub(crate) fn zmx_session_daemon_socket_present(session_name: &str) -> Option<bo
     )
 }
 
-#[cfg(not(unix))]
-pub(crate) fn zmx_session_daemon_socket_present(_session_name: &str) -> Option<bool> {
-    None
+#[cfg(windows)]
+pub(crate) fn zmx_session_daemon_socket_present(session_name: &str) -> Option<bool> {
+    let zmx = require_zmx().ok()?;
+    let result = run_zmx_probe_script(
+        super::scripts_windows::inspect_command(&zmx.executable_path, session_name),
+        ZmxCommandOptions {
+            timeout_ms: Some(2_000),
+            ..ZmxCommandOptions::default()
+        },
+    )
+    .ok()?;
+    if result.exit_code != 0 {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(&result.stdout)
+        .ok()?
+        .get("exists")?
+        .as_bool()
 }
 
 /// Frees a session name whose daemon was signalled rather than asked to quit.

@@ -48,7 +48,7 @@ pub(crate) fn gpui_open_remote_gxserver_tunnel(
         let _ = tunnel.child.wait();
     }
     Err(match execution_target {
-        GpuiRemoteExecutionTarget::PosixHost => {
+        GpuiRemoteExecutionTarget::PosixHost | GpuiRemoteExecutionTarget::WindowsPowerShell => {
             "Could not open an authenticated SSH tunnel to remote gxserver.".to_string()
         }
         GpuiRemoteExecutionTarget::WindowsWsl { .. } => {
@@ -65,12 +65,15 @@ pub(crate) fn gpui_remote_code_server_component_platform(
     let probe = gpui_run_remote_ssh_in_execution_target(
         config,
         execution_target,
-        gpui_remote_install_target_probe_command(),
+        gpui_remote_platform_probe_command_for(execution_target),
         GPUI_REMOTE_GXSERVER_INSTALL_PROBE_TIMEOUT,
     );
     let target = (probe.exit_code == 0)
         .then(|| gpui_extract_remote_install_target(probe.stdout.as_str()))
         .flatten()?;
+    if target.normalized_os() == "windows" && target.normalized_arch() == "x64" {
+        return Some("windows-x64".to_string());
+    }
     if target.normalized_os() != "linux" {
         return None;
     }
@@ -90,7 +93,19 @@ pub(crate) fn gpui_spawn_remote_gxserver_tunnel(
     let target_arguments = gpui_remote_ssh_target_arguments(config)?;
     let askpass = gpui_remote_ssh_askpass_script(config)?;
     let mut arguments = Vec::new();
-    if matches!(execution_target, GpuiRemoteExecutionTarget::PosixHost) {
+    // Native Windows and WSL can run together; their loopback API ports differ.
+    let remote_port = if matches!(
+        execution_target,
+        GpuiRemoteExecutionTarget::WindowsPowerShell
+    ) {
+        58_746
+    } else {
+        GPUI_GXSERVER_LOCAL_API_PORT
+    };
+    if !matches!(
+        execution_target,
+        GpuiRemoteExecutionTarget::WindowsWsl { .. }
+    ) {
         arguments.push("-N".to_string());
     }
     arguments.extend(gpui_remote_ssh_client_options(config.has_saved_password));
@@ -98,7 +113,7 @@ pub(crate) fn gpui_spawn_remote_gxserver_tunnel(
         "-o".to_string(),
         "ExitOnForwardFailure=yes".to_string(),
         "-L".to_string(),
-        format!("{local_port}:127.0.0.1:{GPUI_GXSERVER_LOCAL_API_PORT}"),
+        format!("{local_port}:127.0.0.1:{remote_port}"),
     ]);
     arguments.extend(target_arguments);
     if let GpuiRemoteExecutionTarget::WindowsWsl { distribution } = execution_target {

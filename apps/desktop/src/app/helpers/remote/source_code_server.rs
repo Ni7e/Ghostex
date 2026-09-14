@@ -31,15 +31,32 @@ pub(crate) fn source_code_server_spawn_remote_runtime(
     else {
         return Err("Remote Source runtime target is invalid.".to_string());
     };
-    let store = on_demand_component_store()?
-        .ok_or_else(|| "The sealed code-server component manifest is unavailable.".to_string())?;
-    let installed =
-        store.query_current_for_platform(SOURCE_CODE_SERVER_COMPONENT_NAME, component_platform)?;
-    if !installed.installed {
-        return Err("The Linux code-server component is not installed.".to_string());
+    let native_windows = matches!(
+        execution_target,
+        GpuiRemoteExecutionTarget::WindowsPowerShell
+    );
+    if native_windows {
+        let check = gpui_run_remote_ssh_in_execution_target(
+            machine_config,
+            execution_target,
+            &gpui_remote_windows_code_setup(),
+            Duration::from_secs(15),
+        );
+        if check.exit_code != 0 {
+            return Err("The Windows Ghostex installation is missing its native Code editor. Update Ghostex on that machine.".into());
+        }
+    } else {
+        let store = on_demand_component_store()?.ok_or_else(|| {
+            "The sealed code-server component manifest is unavailable.".to_string()
+        })?;
+        let installed = store
+            .query_current_for_platform(SOURCE_CODE_SERVER_COMPONENT_NAME, component_platform)?;
+        if !installed.installed {
+            return Err("The Linux code-server component is not installed.".to_string());
+        }
+        source_code_server_validate_remote_linux_payload(&installed.path)?;
+        source_code_server_ensure_remote_payload(machine_config, execution_target, &installed)?;
     }
-    source_code_server_validate_remote_linux_payload(&installed.path)?;
-    source_code_server_ensure_remote_payload(machine_config, execution_target, &installed)?;
 
     for local_port in source_code_server_remote_candidate_ports() {
         if Instant::now() >= startup_deadline {
@@ -56,7 +73,11 @@ pub(crate) fn source_code_server_spawn_remote_runtime(
         arguments.extend(gpui_remote_ssh_target_arguments(machine_config)?);
         arguments.push(gpui_remote_command_for_execution_target(
             execution_target,
-            source_code_server_remote_launch_command(target.project_path.as_path()).as_str(),
+            &if native_windows {
+                gpui_remote_windows_code_launch(&target.project_path)
+            } else {
+                source_code_server_remote_launch_command(&target.project_path)
+            },
         ));
         let mut command = Command::new("/usr/bin/ssh");
         command

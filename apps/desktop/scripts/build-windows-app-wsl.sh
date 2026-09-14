@@ -260,7 +260,9 @@ printf '%s\r\n' \
 	'if errorlevel 1 exit /b %errorlevel%' \
 	"\"$WINDOWS_CARGO_WIN\" build --release --bin ghostex-gpui-cef-bootstrap --bin ghostex-gpui --bin ghostex-gpui-cef-helper --target $RUST_TARGET" \
 	'if errorlevel 1 exit /b %errorlevel%' \
-	"\"$WINDOWS_CARGO_WIN\" build --release --manifest-path \"$REPO_ROOT_WIN\\server\\Cargo.toml\" --target $RUST_TARGET --bin gxserver --bin ghostex --bin ghostex-session-host" \
+	"\"$WINDOWS_CARGO_WIN\" build --release --manifest-path \"$REPO_ROOT_WIN\\server\\Cargo.toml\" --target $RUST_TARGET --bin gxserver --bin ghostex" \
+	'if errorlevel 1 exit /b %errorlevel%' \
+	"\"$WINDOWS_CARGO_WIN\" build --release --locked --manifest-path \"$REPO_ROOT_WIN\\.dependencies\\wmx\\Cargo.toml\" --target $RUST_TARGET" \
 	'exit /b %errorlevel%' \
 	>"$WINDOWS_BUILD_BATCH"
 report_build_phase "Building the native Windows GPUI shell..."
@@ -431,11 +433,11 @@ else
 fi
 cp "$RUST_RELEASE_DIR/ghostex-gpui-cef-helper.exe" "$APP_DIR/"
 mkdir -p "$APP_DIR/resources/native"
-for native_binary in gxserver.exe ghostex.exe ghostex-session-host.exe; do
+for native_binary in gxserver.exe ghostex.exe wmx.exe; do
 	cp "$RUST_RELEASE_DIR/$native_binary" "$APP_DIR/resources/native/$native_binary"
 done
 # Keep this seal identical to build-windows-app.ps1; gxserver reads the identity one directory above its native binaries.
-NATIVE_FINGERPRINT="sha256:$(for native_binary in gxserver.exe ghostex.exe ghostex-session-host.exe; do sha256sum "$APP_DIR/resources/native/$native_binary" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
+NATIVE_FINGERPRINT="sha256:$(for native_binary in gxserver.exe ghostex.exe wmx.exe; do sha256sum "$APP_DIR/resources/native/$native_binary" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
 printf '{"buildIdentity":"gxserver:0.1.0:%s","fingerprint":"%s","packageVersion":"0.1.0"}\n' "$NATIVE_FINGERPRINT" "$NATIVE_FINGERPRINT" >"$APP_DIR/resources/build-identity.json"
 LOCALES_DIR=""
 for locale_candidate in "$CEF_RELEASE/locales" "$CEF_RESOURCES/locales"; do

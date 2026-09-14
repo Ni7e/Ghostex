@@ -184,11 +184,13 @@ fn get_bd_tool_status_for_candidates(candidates: &[ToolCandidate]) -> ToolCapabi
 fn bundled_tool_candidates(tool: &str) -> Vec<ToolCandidate> {
     #[cfg(windows)]
     if tool == "zmx" {
+        // CDXC:PlatformSupport 2026-09-14 DECISION:
+        // User: extract the Windows session host into the independent .dependencies/wmx submodule, implementing the zmx features Ghostex uses and keeping both providers aligned.
         return std::env::current_exe()
             .ok()
             .and_then(|path| {
                 path.parent().map(|parent| ToolCandidate {
-                    executable_path: parent.join("ghostex-session-host.exe"),
+                    executable_path: parent.join("wmx.exe"),
                     source: ToolSource::GxserverBundle,
                 })
             })
@@ -249,7 +251,7 @@ fn system_bd_tool_candidates() -> Vec<ToolCandidate> {
         directories
             .into_iter()
             .map(|directory| ToolCandidate {
-                executable_path: directory.join("bd"),
+                executable_path: directory.join(if cfg!(windows) { "bd.exe" } else { "bd" }),
                 source: ToolSource::SystemPath,
             })
             .collect(),

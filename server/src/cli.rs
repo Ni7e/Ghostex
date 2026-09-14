@@ -609,20 +609,28 @@ fn json_array(values: Vec<String>) -> Value {
 }
 
 fn spawn_detached(command: &mut Command) -> Result<u32> {
-    #[cfg(unix)]
+    #[cfg(windows)]
     {
-        use std::os::unix::process::CommandExt;
-        unsafe {
-            command.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
+        return crate::platform::process::spawn_detached_server(command.get_program())
+            .with_context(|| "spawn gxserver background");
     }
-    let child = command
-        .spawn()
-        .with_context(|| "spawn gxserver background")?;
-    Ok(child.id())
+    #[cfg(not(windows))]
+    {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                command.pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                });
+            }
+        }
+        let child = command
+            .spawn()
+            .with_context(|| "spawn gxserver background")?;
+        Ok(child.id())
+    }
 }
 
 #[allow(dead_code)]

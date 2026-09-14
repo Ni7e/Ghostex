@@ -677,7 +677,8 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       'terminalCursorStyleBlink',
       DEFAULT_ghostex_SETTINGS.terminalCursorStyleBlink
     ),
-    windowsTerminalBackend: source.windowsTerminalBackend === 'wsl' ? 'wsl' : DEFAULT_ghostex_SETTINGS.windowsTerminalBackend,
+    windowsTerminalBackend:
+      source.windowsTerminalBackend === 'wsl' ? 'wsl' : DEFAULT_ghostex_SETTINGS.windowsTerminalBackend,
     windowsWslDistribution: normalizeWindowsWslDistribution(
       readString(source, 'windowsWslDistribution', DEFAULT_ghostex_SETTINGS.windowsWslDistribution)
     ),
