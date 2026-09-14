@@ -991,12 +991,13 @@ describe('normalizeghostexSettings', () => {
     ]);
   });
 
-  test('defaults sidebar theme to Dark Gray and keeps the theme option disabled', () => {
+  test('defaults sidebar theme to Dark Gray and offers Light and System', () => {
     /**
-     * CDXC:Theming 2026-06-15-02:29:
-     * Theme selection is disabled while themes are coming soon. New installs,
-     * legacy Auto, old plain, and temporarily exposed theme values all resolve
-     * to Dark 2, whose disabled Settings label is Dark Gray.
+     * CDXC:Theming 2026-09-13 DECISION:
+     * User: add Light and System while keeping dark mode exactly as it is,
+     * including the default. New installs still resolve to Dark 2 (labelled
+     * Dark Gray), legacy Auto, old plain, and retired presets keep migrating to
+     * it, and only the explicit Light and System values pass through.
      */
     expect(DEFAULT_ghostex_SETTINGS.sidebarTheme).toBe('dark-2');
     expect(normalizeghostexSettings({})).toMatchObject({
@@ -1012,9 +1013,16 @@ describe('normalizeghostexSettings', () => {
       sidebarTheme: 'dark-2',
     });
     expect(normalizeghostexSettings({ sidebarTheme: 'plain-light' })).toMatchObject({
-      sidebarTheme: 'dark-2',
+      sidebarTheme: 'plain-light',
     });
-    expect(SIDEBAR_THEME_SETTING_OPTIONS).toEqual([{ label: 'Dark Gray', value: 'dark-2' }]);
+    expect(normalizeghostexSettings({ sidebarTheme: 'system' })).toMatchObject({
+      sidebarTheme: 'system',
+    });
+    expect(SIDEBAR_THEME_SETTING_OPTIONS).toEqual([
+      { label: 'Dark Gray', value: 'dark-2' },
+      { label: 'Light', value: 'plain-light' },
+      { label: 'System', value: 'system' },
+    ]);
   });
 
   test('derives custom sidebar and titlebar background from the theming contrast slider', () => {

@@ -217,7 +217,7 @@ describe('Project Board form event handling', () => {
       '.project-ticket-dialog-body {'
     );
 
-    expect(dialogSurfaceSource).toContain('background: var(--popover, #161616);');
+    expect(dialogSurfaceSource).toContain('background: var(--popover, light-dark(#ffffff, #161616));');
     expect(dialogSurfaceSource).toContain('border-radius: var(--project-board-radius-section);');
     expect(dialogSurfaceSource).not.toContain('--app-modal-background');
     expect(stylesSource).not.toContain('font-weight: 650;');
@@ -231,12 +231,17 @@ describe('Project Board form event handling', () => {
     /*
      * CDXC:ProjectBoard 2026-06-19-09:14:
      * Kanban cards should stand out from the macOS Project board lanes before hover, so the card background token must stay visibly brighter than the lane panel token.
+     *
+     * CDXC:Theming 2026-09-14 WHY:
+     * Each surface is a light-dark() pair now that the board follows the app
+     * theme, so both halves are pinned: the light card stays brighter than the
+     * light panel just as the dark one does.
      */
     const variableSource = sourceBetweenIn(stylesSource, ':root {', '* { box-sizing: border-box; }');
 
-    expect(variableSource).toContain('--project-board-panel: #161616;');
-    expect(variableSource).toContain('--project-board-card: #1d1d1d;');
-    expect(variableSource).toContain('--project-board-card-hover: #232323;');
+    expect(variableSource).toContain('--project-board-panel: light-dark(#ffffff, #161616);');
+    expect(variableSource).toContain('--project-board-card: light-dark(#f2f2f3, #1d1d1d);');
+    expect(variableSource).toContain('--project-board-card-hover: light-dark(#e7e7e9, #232323);');
   });
 
   test('prevents accidental text selection inside Kanban bead cards', () => {
