@@ -15,6 +15,10 @@
 // dismiss-on-outside-press menu surface, like the titlebar's dropdown panels —
 // and it occludes only its own visible rectangle.
 
+mod palette;
+
+use palette::*;
+
 use gpui::AnyElement;
 use gpui::BoxShadow;
 use gpui::ClipboardItem;
@@ -52,9 +56,8 @@ edges and its centre line sits 12 + 1 + 10 + 16 = 39px above the pane's bottom
 edge. A 44px-tall bar therefore needs a 17px bottom inset to put its buttons on
 that same centre line.
 
-The bar draws the composer's own rounded border around itself and fills with
-the dark composer's #141414 surface so the controls sit on the same raised
-pill instead of on the black terminal. It is the same hairline pill, at the
+The bar draws the composer's own rounded border around itself and uses the
+app appearance for its raised pill and controls. It is the same hairline pill, at the
 same width and the same side inset — only as tall as the controls inside it,
 because there is no message field here to give it height.
 */
@@ -86,37 +89,9 @@ const TERMINAL_AGENT_BAR_STASH_ICON_SIZE: f32 = 20.0;
 const TERMINAL_AGENT_BAR_MENU_ICON_SIZE: f32 = 14.0;
 const TERMINAL_AGENT_BAR_MENU_SHORTCUT_SIZE: f32 = 11.0;
 const TERMINAL_AGENT_BAR_INDICATOR_SIZE: f32 = 12.0;
-const TERMINAL_AGENT_BAR_INDICATOR_BACKGROUND: u32 = 0xe0e0e0;
 const TERMINAL_AGENT_BAR_MENU_WIDTH: f32 = 200.0;
 /// Distance from the ⋯ button's top edge up to the menu's bottom edge.
 const TERMINAL_AGENT_BAR_MENU_GAP: f32 = 6.0;
-const TERMINAL_AGENT_BAR_ICON_COLOR: u32 = 0xa6a6a6;
-/// Controls the chat footer owns but the terminal has no route to. They keep
-/// their slot so the two footers stay column-for-column identical.
-const TERMINAL_AGENT_BAR_DISABLED_ICON_COLOR: u32 = 0x5a5a5a;
-/*
-The chat composer's `border-input`, which the dark chat theme resolves to 8%
-white (packages/core-ui/styles/chat.css). That mix is computed against the chat
-page's #0e0e0e; the terminal pane behind this bar is black, where the same 8%
-lands at #141414 and disappears. This is the app-wide `--input` from
-packages/core-ui/styles/theme.css (15% white) composited on black instead, so
-the pill reads as the same hairline the composer draws rather than as a fainter
-one.
-*/
-/// Dark chat composer fill (`packages/core-ui/styles/chat.css`).
-const TERMINAL_AGENT_BAR_BACKGROUND: u32 = 0x141414;
-const TERMINAL_AGENT_BAR_BORDER_COLOR: u32 = 0x262626;
-const TERMINAL_AGENT_BAR_HOVER_BACKGROUND: u32 = 0x343434;
-const TERMINAL_AGENT_BAR_SESSION_ID_COLOR: u32 = 0x6f6f6f;
-const TERMINAL_AGENT_BAR_SESSION_ID_HOVER_COLOR: u32 = 0xc4c4c4;
-/// Dark chat `--primary` (`oklch(92.2% 0 0)` → #e5e5e5).
-const TERMINAL_AGENT_BAR_ACCENT_BACKGROUND: u32 = 0xe5e5e5;
-const TERMINAL_AGENT_BAR_ACCENT_HOVER_BACKGROUND: u32 = 0xffffff;
-const TERMINAL_AGENT_BAR_ACCENT_ICON_COLOR: u32 = 0x111111;
-const TERMINAL_AGENT_BAR_MENU_BACKGROUND: u32 = 0x151515;
-const TERMINAL_AGENT_BAR_MENU_BORDER: u32 = 0x2a2a2a;
-const TERMINAL_AGENT_BAR_MENU_SEPARATOR: u32 = 0x222222;
-const TERMINAL_AGENT_BAR_MENU_TEXT_COLOR: u32 = 0xd6d6d6;
 
 /*
 Every glyph below is the Tabler outline icon the chat footer imports from
@@ -447,8 +422,8 @@ impl GhostexGpuiApp {
                         .px(px(TERMINAL_AGENT_BAR_INNER_PADDING))
                         .rounded_full()
                         .border_1()
-                        .border_color(rgb(TERMINAL_AGENT_BAR_BORDER_COLOR))
-                        .bg(rgb(TERMINAL_AGENT_BAR_BACKGROUND))
+                        .border_color(terminal_agent_bar_border_color())
+                        .bg(terminal_agent_bar_background())
                         .items_center()
                         .gap(px(TERMINAL_AGENT_BAR_BUTTON_GAP))
                         .when_some(full_session_id, |this, full_session_id| {
@@ -683,8 +658,8 @@ impl GhostexGpuiApp {
             .p(px(5.0))
             .rounded(px(10.0))
             .border_1()
-            .border_color(rgb(TERMINAL_AGENT_BAR_MENU_BORDER))
-            .bg(rgb(TERMINAL_AGENT_BAR_MENU_BACKGROUND))
+            .border_color(terminal_agent_bar_menu_border())
+            .bg(terminal_agent_bar_menu_background())
             .shadow(vec![
                 BoxShadow::new(
                     px(0.0),
@@ -785,8 +760,8 @@ impl GhostexGpuiApp {
             .p(px(5.0))
             .rounded(px(10.0))
             .border_1()
-            .border_color(rgb(TERMINAL_AGENT_BAR_MENU_BORDER))
-            .bg(rgb(TERMINAL_AGENT_BAR_MENU_BACKGROUND))
+            .border_color(terminal_agent_bar_menu_border())
+            .bg(terminal_agent_bar_menu_background())
             .shadow(vec![
                 BoxShadow::new(
                     px(0.0),
@@ -821,7 +796,7 @@ impl GhostexGpuiApp {
                     terminal_agent_bar_icon(
                         TERMINAL_AGENT_BAR_SWITCH_ACCOUNT_ICON,
                         TERMINAL_AGENT_BAR_MENU_ICON_SIZE,
-                        TERMINAL_AGENT_BAR_ICON_COLOR,
+                        terminal_agent_bar_icon_color(),
                     )
                 });
             submenu = submenu.child(
@@ -837,8 +812,8 @@ impl GhostexGpuiApp {
                     .rounded(px(7.0))
                     .cursor_default()
                     .text_size(px(13.0))
-                    .text_color(rgb(TERMINAL_AGENT_BAR_MENU_TEXT_COLOR))
-                    .hover(|this| this.bg(rgb(TERMINAL_AGENT_BAR_HOVER_BACKGROUND)))
+                    .text_color(terminal_agent_bar_menu_text_color())
+                    .hover(|this| this.bg(terminal_agent_bar_hover_background()))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -1092,7 +1067,7 @@ impl GhostexGpuiApp {
         terminal_agent_bar_button_base(action, &state, suffix)
             .size(px(TERMINAL_AGENT_BAR_BUTTON_SIZE))
             .when(enabled, |this| {
-                this.hover(|this| this.bg(rgb(TERMINAL_AGENT_BAR_HOVER_BACKGROUND)))
+                this.hover(|this| this.bg(terminal_agent_bar_hover_background()))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -1124,9 +1099,9 @@ impl GhostexGpuiApp {
                 state.icon_path,
                 action.icon_size(),
                 if enabled {
-                    TERMINAL_AGENT_BAR_ICON_COLOR
+                    terminal_agent_bar_icon_color()
                 } else {
-                    TERMINAL_AGENT_BAR_DISABLED_ICON_COLOR
+                    terminal_agent_bar_disabled_icon_color()
                 },
             ))
             .when(show_note_dot, |this| {
@@ -1138,10 +1113,10 @@ impl GhostexGpuiApp {
                         .size(px(TERMINAL_AGENT_BAR_INDICATOR_SIZE))
                         .justify_center()
                         .rounded_full()
-                        .bg(rgb(TERMINAL_AGENT_BAR_INDICATOR_BACKGROUND))
+                        .bg(terminal_agent_bar_indicator_background())
                         .text_size(px(9.0))
                         .font_weight(FontWeight::BOLD)
-                        .text_color(rgb(TERMINAL_AGENT_BAR_ACCENT_ICON_COLOR))
+                        .text_color(terminal_agent_bar_accent_icon_color())
                         .child("1"),
                 )
             })
@@ -1170,9 +1145,9 @@ impl GhostexGpuiApp {
             .then(|| terminal_element::terminal_overlay_hotkey_label(state.hotkey_action_id))
             .flatten();
         let icon_color = if enabled {
-            TERMINAL_AGENT_BAR_ICON_COLOR
+            terminal_agent_bar_icon_color()
         } else {
-            TERMINAL_AGENT_BAR_DISABLED_ICON_COLOR
+            terminal_agent_bar_disabled_icon_color()
         };
         h_flex()
             .id(format!(
@@ -1187,13 +1162,13 @@ impl GhostexGpuiApp {
             .rounded(px(7.0))
             .cursor_default()
             .text_size(px(13.0))
-            .text_color(rgb(if enabled {
-                TERMINAL_AGENT_BAR_MENU_TEXT_COLOR
+            .text_color(if enabled {
+                terminal_agent_bar_menu_text_color()
             } else {
-                TERMINAL_AGENT_BAR_DISABLED_ICON_COLOR
-            }))
+                terminal_agent_bar_disabled_icon_color()
+            })
             .when(enabled, |this| {
-                this.hover(|this| this.bg(rgb(TERMINAL_AGENT_BAR_HOVER_BACKGROUND)))
+                this.hover(|this| this.bg(terminal_agent_bar_hover_background()))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -1217,7 +1192,7 @@ impl GhostexGpuiApp {
                     div()
                         .flex_shrink_0()
                         .text_size(px(TERMINAL_AGENT_BAR_MENU_SHORTCUT_SIZE))
-                        .text_color(rgb(TERMINAL_AGENT_BAR_SESSION_ID_COLOR))
+                        .text_color(terminal_agent_bar_session_id_color())
                         .child(shortcut),
                 )
             })
@@ -1227,7 +1202,7 @@ impl GhostexGpuiApp {
                 this.child(terminal_agent_bar_icon(
                     TERMINAL_AGENT_BAR_SUBMENU_CHEVRON_ICON,
                     12.0,
-                    TERMINAL_AGENT_BAR_SESSION_ID_COLOR,
+                    terminal_agent_bar_session_id_color(),
                 ))
             })
             .into_any_element()
@@ -1272,9 +1247,9 @@ fn terminal_agent_bar_session_id(
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .text_size(px(12.0))
-                .text_color(rgb(TERMINAL_AGENT_BAR_SESSION_ID_COLOR))
+                .text_color(terminal_agent_bar_session_id_color())
                 .group_hover(group.clone(), |this| {
-                    this.text_color(rgb(TERMINAL_AGENT_BAR_SESSION_ID_HOVER_COLOR))
+                    this.text_color(terminal_agent_bar_session_id_hover_color())
                 })
                 .child(full_session_id),
         )
@@ -1288,15 +1263,13 @@ fn terminal_agent_bar_session_id(
                 .items_center()
                 .justify_center()
                 .rounded_full()
-                .group_hover(group, |this| {
-                    this.bg(rgb(TERMINAL_AGENT_BAR_HOVER_BACKGROUND))
-                })
+                .group_hover(group, |this| this.bg(terminal_agent_bar_hover_background()))
                 .child(
                     svg()
                         .flex_shrink_0()
                         .size(px(TERMINAL_AGENT_BAR_ICON_SIZE))
                         .path(TERMINAL_AGENT_BAR_COPY_SESSION_ID_ICON)
-                        .text_color(rgb(TERMINAL_AGENT_BAR_ICON_COLOR)),
+                        .text_color(terminal_agent_bar_icon_color()),
                 ),
         )
         .into_any_element()
@@ -1323,8 +1296,8 @@ fn terminal_agent_bar_accent_button(
     terminal_agent_bar_button_base(action, &state, suffix)
         .size(px(TERMINAL_AGENT_BAR_ACCENT_BUTTON_SIZE))
         .rounded(px(TERMINAL_AGENT_BAR_ACCENT_BUTTON_RADIUS))
-        .bg(rgb(TERMINAL_AGENT_BAR_ACCENT_BACKGROUND))
-        .hover(|this| this.bg(rgb(TERMINAL_AGENT_BAR_ACCENT_HOVER_BACKGROUND)))
+        .bg(terminal_agent_bar_accent_background())
+        .hover(|this| this.bg(terminal_agent_bar_accent_hover_background()))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
@@ -1338,7 +1311,7 @@ fn terminal_agent_bar_accent_button(
                 .flex_shrink_0()
                 .size(px(action.icon_size()))
                 .path(action.icon_path())
-                .text_color(rgb(TERMINAL_AGENT_BAR_ACCENT_ICON_COLOR)),
+                .text_color(terminal_agent_bar_accent_icon_color()),
         )
         .into_any_element()
 }
@@ -1406,10 +1379,10 @@ fn terminal_agent_bar_stashed_prompt_count_badge(count: u64) -> AnyElement {
         .size(px(TERMINAL_AGENT_BAR_INDICATOR_SIZE))
         .justify_center()
         .rounded_full()
-        .bg(rgb(TERMINAL_AGENT_BAR_INDICATOR_BACKGROUND))
+        .bg(terminal_agent_bar_indicator_background())
         .text_size(px(9.0))
         .font_weight(FontWeight::BOLD)
-        .text_color(rgb(TERMINAL_AGENT_BAR_ACCENT_ICON_COLOR))
+        .text_color(terminal_agent_bar_accent_icon_color())
         .child(label)
         .into_any_element()
 }
@@ -1443,7 +1416,7 @@ fn terminal_agent_bar_menu_group_label(label: &'static str) -> AnyElement {
         .pt(px(5.0))
         .pb(px(3.0))
         .text_size(px(11.0))
-        .text_color(rgb(TERMINAL_AGENT_BAR_SESSION_ID_COLOR))
+        .text_color(terminal_agent_bar_session_id_color())
         .child(label)
         .into_any_element()
 }
@@ -1453,15 +1426,15 @@ fn terminal_agent_bar_menu_separator() -> AnyElement {
         .h(px(1.0))
         .mx(px(4.0))
         .my(px(5.0))
-        .bg(rgb(TERMINAL_AGENT_BAR_MENU_SEPARATOR))
+        .bg(terminal_agent_bar_menu_separator_color())
         .into_any_element()
 }
 
-fn terminal_agent_bar_icon(path: &'static str, icon_size: f32, color: u32) -> AnyElement {
+fn terminal_agent_bar_icon(path: &'static str, icon_size: f32, color: Rgba) -> AnyElement {
     svg()
         .flex_shrink_0()
         .size(px(icon_size))
         .path(path)
-        .text_color(rgb(color))
+        .text_color(color)
         .into_any_element()
 }

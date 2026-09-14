@@ -1416,6 +1416,27 @@ the markdown block) rather than pinned to a tier of its own.
   width: 12px;
 }
 
+/* CDXC:SessionChat 2026-09-14 DECISION:
+ * User: in light mode, Send uses #7db8fb blue with a white arrow and Stop uses pastel red.
+ */
+.ghostex-session-chat-scope[data-chat-theme='light'] button.ghostex-chat-send-button {
+  background-color: #7db8fb;
+  color: #ffffff;
+}
+
+.ghostex-session-chat-scope[data-chat-theme='light'] button.ghostex-chat-send-button:not(:disabled):hover {
+  background-color: #68aaf5;
+}
+
+.ghostex-session-chat-scope[data-chat-theme='light'] button.ghostex-chat-stop-button {
+  background-color: #f6b5b5;
+  color: #7a2929;
+}
+
+.ghostex-session-chat-scope[data-chat-theme='light'] button.ghostex-chat-stop-button:not(:disabled):hover {
+  background-color: #f29f9f;
+}
+
 /* Maximize: a centered overlay that turns the composer into a full editing
    surface for long prompts. The field keeps its slot in the React tree and
    only changes its box, so the editor, the caret, the undo
@@ -2138,22 +2159,6 @@ The plain input extends 0.75rem into the composer's padding, keeping its 3px thu
   -webkit-user-select: text;
   user-select: text;
   cursor: auto;
-}
-
-/* --- Conversation scrollbar ------------------------------------------------- */
-
-/* Terminal-pane behavior: the chat log's scrollbar stays hidden until the
-   reader scrolls, then fades back out a couple of seconds after the last
-   scroll (the message list stamps data-user-scrolling). Autoscroll following
-   live output never shows it. */
-[data-slot='message-scroller-viewport'] {
-  scrollbar-gutter: stable both-edges;
-  scrollbar-color: transparent transparent;
-  transition: scrollbar-color 0.4s ease;
-}
-
-[data-slot='message-scroller-viewport'][data-user-scrolling]:not([data-autoscrolling]) {
-  scrollbar-color: color-mix(in srgb, var(--foreground) 30%, transparent) transparent;
 }
 
 /* --- Suppressed harness turns ----------------------------------------------- */
@@ -2972,6 +2977,19 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 
 /* --- Image preview overlay ------------------------------------------------- */
 
+/* CDXC:SessionChat 2026-09-14 DECISION:
+ * User: the image preview close button is light in the light chat theme, and the rightmost copy button has rounded outer corners.
+ */
+.ghostex-session-chat-scope[data-chat-theme='light'] .ghostex-chat-image-preview-close {
+  background: var(--background);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.ghostex-session-chat-scope[data-chat-theme='light'] .ghostex-chat-image-preview-close:hover {
+  background: var(--muted);
+}
+
 /* The three common image actions sit beside the close button, outside the
    scrolling layer so zooming and panning never move them. ButtonGroup owns
    their shared borders and joined corners. */
@@ -2996,9 +3014,13 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   border-top-left-radius: calc(var(--radius, 0.625rem) - 2px) !important;
 }
 
-.ghostex-session-chat-scope .ghostex-chat-image-preview-actions > [data-slot='button']:last-child {
-  border-bottom-right-radius: calc(var(--radius, 0.625rem) - 2px) !important;
-  border-top-right-radius: calc(var(--radius, 0.625rem) - 2px) !important;
+/* Layered important rules outrank unlayered important rules, so the trailing
+   corners must compete in the same layer as ButtonGroup's square-end utility. */
+@layer utilities {
+  .ghostex-session-chat-scope .ghostex-chat-image-preview-actions > [data-slot='button']:last-child {
+    border-bottom-right-radius: calc(var(--radius, 0.625rem) - 2px) !important;
+    border-top-right-radius: calc(var(--radius, 0.625rem) - 2px) !important;
+  }
 }
 
 /* `width: fit-content` with `min-width: 100%` centres the picture while it fits

@@ -756,7 +756,7 @@ export function SessionChatImageViewerProvider({
           ) : null}
           <button
             aria-label='Close image preview'
-            className='absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:text-white'
+            className='ghostex-chat-image-preview-close absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:text-white'
             onClick={close}
             type='button'
           >
