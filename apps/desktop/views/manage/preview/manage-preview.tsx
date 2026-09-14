@@ -494,8 +494,9 @@ export function ManagePreview({
         {isMarkdown ? (
           <div className='manage-preview-header-actions'>
             {/*
-              CDXC:Docs 2026-09-06 DECISION:
-              User: order the Markdown header actions from right to left as files-list toggle, Reload, Clear, Copy, Add global comment, and Annotations list; make the files-list toggle 40px, the four action buttons 42px each, and Annotations list 85px; use a trash icon for Clear and label the annotations tooltip "Annotations list".
+              CDXC:Docs 2026-09-14 DECISION:
+              User: keep the actions ordered from right to left as files-list toggle, Reload, Clear, Copy, Add global comment, and Annotations list; use a trash icon for Clear and label the annotations tooltip "Annotations list".
+              Match the supplied compact, borderless toolbar reference, superseding the earlier segmented button widths; the hidden sidebar's expand button retains its requested 41px width.
             */}
             <div className='manage-annotation-dropdown-shell' ref={annotationsDropdownRef}>
               <ManageTooltipButton

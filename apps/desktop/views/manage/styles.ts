@@ -34,9 +34,13 @@ export const MANAGE_STYLES = `
      * CDXC:Docs 2026-08-23:
      * One control height for every free-standing in-row control (inputs,
      * buttons, dropdowns that share a row), matching the Kanban/Automate
-     * 32px convention. Header bars keep their own 35px full-height segments.
+     * 32px convention. Header bars keep their own 35px row height.
      */
     --manage-control-height: 32px;
+    --manage-header-button-size: 28px;
+    --manage-toolbar-icon-color: light-dark(#3f3f46, #a3a3a3);
+    --manage-toolbar-disabled-color: light-dark(#b5b5bd, #55555d);
+    --manage-sidebar-edge-button-width: 41px;
     --manage-green: light-dark(#376c51, #9db6aa);
     --manage-red: light-dark(#be123c, #fda4af);
     --manage-yellow: light-dark(#85632f, #c6ad80);
@@ -298,13 +302,13 @@ export const MANAGE_STYLES = `
     border-bottom: 1px solid var(--manage-border);
     box-sizing: border-box;
     display: flex;
-    gap: 8px;
+    gap: 1px;
     height: 35px;
     justify-content: flex-end;
     max-height: 35px;
     min-height: 35px;
     overflow: visible;
-    padding: 0;
+    padding: 0 3px;
   }
 
   .manage-sidebar-header[data-root-drop-target="true"] {
@@ -316,7 +320,7 @@ export const MANAGE_STYLES = `
     align-self: stretch;
     display: inline-flex;
     flex: 0 0 auto;
-    gap: 0;
+    gap: 1px;
     height: 100%;
     position: relative;
   }
@@ -348,39 +352,33 @@ export const MANAGE_STYLES = `
   .manage-sidebar-restore-button {
     background: transparent;
     border: 0;
-    border-radius: 0;
+    border-radius: 4px;
     box-shadow: none;
     box-sizing: border-box;
-    color: light-dark(rgba(0, 0, 0, 0.84), rgba(255, 255, 255, 0.84));
-    height: 35px;
-    max-height: 35px;
-    min-height: 35px;
+    color: var(--manage-toolbar-icon-color);
+    height: var(--manage-header-button-size);
+    max-height: var(--manage-header-button-size);
+    min-height: var(--manage-header-button-size);
     padding: 0;
-    width: 38px;
+    width: var(--manage-header-button-size);
   }
 
+  /*
+   * CDXC:Docs 2026-09-14 DECISION:
+   * User: make the document, formatting, and file-sidebar header actions match the compact, borderless toolbar reference, with darker enabled icons in light mode so disabled controls are obvious.
+   * Icons sit in 28px controls with 1px gaps and rounded hover fills, superseding the earlier full-height, titlebar-aligned segments.
+   */
   .manage-sidebar-header .manage-icon-button {
-    border-left: 1px solid light-dark(#d4d4d8, #252525);
-    width: 42px;
-  }
-
-  .manage-sidebar-header .manage-icon-button:last-child {
-    width: 40px;
+    flex: 0 0 var(--manage-header-button-size);
+    width: var(--manage-header-button-size);
   }
 
   .manage-sidebar-restore-button {
-    border-right: 1px solid light-dark(#d4d4d8, #252525);
-    width: 40px;
-  }
-
-  /* The edge button mirrors the corner restore button's geometry so a peek's pin control lands on the same pixels. */
-  .manage-sidebar-header .manage-sidebar-edge-button {
-    width: 40px;
+    flex: 0 0 var(--manage-sidebar-edge-button-width);
+    width: var(--manage-sidebar-edge-button-width);
   }
 
   .manage-shell[data-sidebar-side="left"] .manage-sidebar-header .manage-sidebar-edge-button {
-    border-left: 0;
-    border-right: 1px solid light-dark(#d4d4d8, #252525);
     margin-right: auto;
   }
 
@@ -390,26 +388,26 @@ export const MANAGE_STYLES = `
   .manage-sidebar-restore-button:not(:disabled):hover,
   .manage-sidebar-restore-button:not(:disabled):focus-visible {
     background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
-    color: light-dark(rgba(0, 0, 0, 0.96), rgba(255, 255, 255, 0.96));
+    color: var(--manage-text);
     outline: none;
   }
 
   .manage-sidebar-header .manage-icon-button:disabled {
     background: transparent;
-    color: light-dark(rgba(0, 0, 0, 0.34), rgba(255, 255, 255, 0.34));
+    color: var(--manage-toolbar-disabled-color);
     cursor: default;
+    opacity: 1;
   }
 
   .manage-sidebar-header .manage-icon-button svg,
   .manage-sidebar-restore-button svg {
-    height: 16px;
-    width: 16px;
+    height: 18px;
+    width: 18px;
+    stroke-width: 1.7;
   }
 
   .manage-sidebar-tree-toggle svg {
-    height: 14px;
     transform: rotate(90deg);
-    width: 14px;
   }
 
   /*
@@ -496,28 +494,26 @@ export const MANAGE_STYLES = `
   }
 
   .manage-sidebar-restore-button {
-    left: 0;
+    left: 3px;
     position: absolute;
-    top: 0;
+    top: 3px;
     z-index: 5;
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar-restore-button {
-    border-left: 1px solid light-dark(#d4d4d8, #252525);
-    border-right: 0;
     left: auto;
-    right: 0;
+    right: 3px;
   }
 
   .manage-shell[data-sidebar-hidden="true"] .manage-preview-header,
   .manage-shell[data-sidebar-floating="true"] .manage-preview-header {
-    padding-left: 51px;
+    padding-left: calc(var(--manage-sidebar-edge-button-width) + 16px);
   }
 
   .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-header,
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-header {
     padding-left: 16px;
-    padding-right: 51px;
+    padding-right: calc(var(--manage-sidebar-edge-button-width) + 16px);
   }
 
   /*
@@ -537,7 +533,7 @@ export const MANAGE_STYLES = `
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="markdown"] .manage-preview-header,
   .manage-shell[data-sidebar-hidden="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="html"] .manage-preview-header,
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-preview-content[data-kind="html"] .manage-preview-header {
-    padding-right: 40px;
+    padding-right: calc(var(--manage-sidebar-edge-button-width) + 7px);
   }
 
   /*
@@ -923,7 +919,7 @@ export const MANAGE_STYLES = `
     max-height: 35px;
     min-height: 35px;
     overflow: visible;
-    padding: 0 0 0 13px;
+    padding: 0 3px 0 13px;
   }
 
   .manage-preview-content[data-kind="drawing"] .manage-preview-header {
@@ -990,11 +986,11 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-header-actions {
-    align-items: stretch;
+    align-items: center;
     align-self: stretch;
     display: inline-flex;
     flex: 0 0 auto;
-    gap: 0;
+    gap: 1px;
     height: 100%;
     min-width: 0;
   }
@@ -1112,19 +1108,18 @@ export const MANAGE_STYLES = `
   .manage-preview-header-actions button {
     background: transparent;
     border: 0;
-    border-left: 1px solid light-dark(#d4d4d8, #252525);
-    border-radius: 0;
+    border-radius: 4px;
     box-shadow: none;
     box-sizing: border-box;
-    color: light-dark(rgba(0, 0, 0, 0.84), rgba(255, 255, 255, 0.84));
+    color: var(--manage-toolbar-icon-color);
     font-size: 10.5px;
     font-weight: 500;
-    height: 35px;
-    line-height: 35px;
-    max-height: 35px;
-    min-height: 35px;
-    min-width: 38px;
-    padding: 0 10px;
+    height: var(--manage-header-button-size);
+    line-height: var(--manage-header-button-size);
+    max-height: var(--manage-header-button-size);
+    min-height: var(--manage-header-button-size);
+    min-width: var(--manage-header-button-size);
+    padding: 0 7px;
   }
 
   .manage-preview-header-actions button:not(:disabled):hover,
@@ -1143,7 +1138,7 @@ export const MANAGE_STYLES = `
   .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
     background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
     border-color: light-dark(#d4d4d8, #252525);
-    color: light-dark(rgba(0, 0, 0, 0.96), rgba(255, 255, 255, 0.96));
+    color: var(--manage-text);
     outline: none;
   }
 
@@ -1154,13 +1149,14 @@ export const MANAGE_STYLES = `
 
   .manage-preview-header-actions button:disabled {
     background: transparent;
-    color: light-dark(rgba(0, 0, 0, 0.34), rgba(255, 255, 255, 0.34));
+    color: var(--manage-toolbar-disabled-color);
     cursor: default;
+    opacity: 1;
   }
 
   .manage-preview-header-actions button:disabled:hover {
     background: transparent;
-    color: light-dark(rgba(0, 0, 0, 0.34), rgba(255, 255, 255, 0.34));
+    color: var(--manage-toolbar-disabled-color);
   }
 
   .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
@@ -1181,18 +1177,18 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-header-actions .manage-annotation-dropdown-trigger {
-    flex: 0 0 85px;
-    padding: 0 9px;
-    width: 85px;
+    flex: 0 0 auto;
+    padding: 0 7px;
+    width: auto;
   }
 
   .manage-preview-header-actions .manage-add-global-comment-button,
   .manage-preview-header-actions .manage-copy-feedback-button,
   .manage-preview-header-actions .manage-clear-annotations-button,
   .manage-preview-header-actions .manage-file-reload-button {
-    flex: 0 0 42px;
+    flex: 0 0 var(--manage-header-button-size);
     padding: 0;
-    width: 42px;
+    width: var(--manage-header-button-size);
   }
 
   .manage-preview-header-actions .manage-add-global-comment-button > span,
@@ -1208,8 +1204,9 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-header-actions button svg {
-    height: 16px;
-    width: 16px;
+    height: 18px;
+    width: 18px;
+    stroke-width: 1.7;
   }
 
   .manage-preview-header-actions .manage-file-reload-button {
@@ -1252,10 +1249,62 @@ export const MANAGE_STYLES = `
     display: flex;
     flex: 0 0 auto;
     gap: 8px;
+    height: 35px;
     inline-size: 100%;
     max-inline-size: 100%;
     min-width: 0;
     overflow: visible;
+    padding-block: 3px;
+    padding-right: 3px;
+  }
+
+  .manage-meo-markdown-editor .mode-toolbar .format-group,
+  .manage-meo-markdown-editor .mode-toolbar .right-group {
+    gap: 1px;
+  }
+
+  .manage-meo-markdown-editor .mode-toolbar > :is(.format-group, .right-group) .format-button,
+  .manage-meo-markdown-editor .mode-toolbar .heading-dropdown-option {
+    border-radius: 4px;
+    color: var(--manage-toolbar-icon-color);
+    flex: 0 0 var(--manage-header-button-size);
+    height: var(--manage-header-button-size);
+    width: var(--manage-header-button-size);
+  }
+
+  .manage-meo-markdown-editor .mode-toolbar > :is(.format-group, .right-group) .format-button svg,
+  .manage-meo-markdown-editor .mode-toolbar .heading-dropdown-option svg {
+    height: 18px;
+    width: 18px;
+    stroke-width: 1.7;
+  }
+
+  /* An unselected toggle is still enabled; Meo's default half opacity made it look disabled. */
+  .manage-meo-markdown-editor .mode-toolbar > :is(.format-group, .right-group) .format-button.toggle-button:not(.is-active) {
+    color: var(--manage-toolbar-icon-color);
+    opacity: 1;
+  }
+
+  .manage-meo-markdown-editor .mode-toolbar > :is(.format-group, .right-group) .format-button:not(:disabled):hover,
+  .manage-meo-markdown-editor .mode-toolbar > :is(.format-group, .right-group) .format-button:not(:disabled):focus-visible,
+  .manage-meo-markdown-editor .mode-toolbar .heading-dropdown-option:not(:disabled):hover,
+  .manage-meo-markdown-editor .mode-toolbar .heading-dropdown-option:not(:disabled):focus-visible {
+    background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+    color: var(--manage-text);
+  }
+
+  .manage-meo-markdown-editor .mode-toolbar > :is(.format-group, .right-group) .format-button.is-active {
+    background: var(--manage-row-surface);
+    color: var(--manage-text);
+  }
+
+  .manage-meo-markdown-editor .mode-toolbar > :is(.format-group, .right-group) .format-button:disabled,
+  .manage-meo-markdown-editor .mode-toolbar > :is(.format-group, .right-group) .format-button.toggle-button:disabled,
+  .manage-meo-markdown-editor .mode-toolbar .heading-dropdown-option:disabled {
+    background: transparent;
+    color: var(--manage-toolbar-disabled-color);
+    cursor: default;
+    opacity: 1;
   }
 
   .manage-meo-markdown-editor .format-group {
@@ -1283,14 +1332,17 @@ export const MANAGE_STYLES = `
   }
 
   .manage-meo-markdown-editor .mode-group {
-    background: light-dark(rgba(0, 0, 0, 0.025), rgba(255, 255, 255, 0.025));
-    border-color: light-dark(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.16));
-    border-radius: 9px;
-    gap: 2px;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    gap: 1px;
+    padding: 0;
   }
 
   .manage-meo-markdown-editor .mode-button {
-    color: var(--manage-muted);
+    border-radius: 4px;
+    color: var(--manage-toolbar-icon-color);
+    height: var(--manage-header-button-size);
     min-width: 64px;
   }
 
@@ -1917,7 +1969,7 @@ export const MANAGE_STYLES = `
     background: var(--manage-panel-raised);
     border: 1px solid var(--manage-border-strong);
     border-radius: 8px;
-    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.34);
+    box-shadow: 0 8px 24px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.34));
     display: flex;
     gap: 5px;
     max-width: calc(100vw - 36px);
@@ -2021,10 +2073,13 @@ export const MANAGE_STYLES = `
   }
 
   .manage-comment-popover {
-    background: color-mix(in srgb, var(--manage-panel-raised) 76%, #000 24%);
-    border: 1px solid color-mix(in srgb, var(--manage-border-strong) 74%, #000 26%);
+    background: var(--manage-panel-strong);
+    border: 1px solid var(--manage-border-strong);
     border-radius: 10px;
-    box-shadow: 0 20px 54px rgba(0, 0, 0, 0.44);
+    box-shadow:
+      0 12px 32px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.4)),
+      0 2px 6px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.2));
+    color: var(--manage-text);
     display: grid;
     gap: 10px;
     max-height: calc(100vh - 24px);
@@ -2035,6 +2090,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-comment-popover-close {
+    border-radius: 4px;
     color: var(--manage-muted);
     height: 24px;
     position: absolute;
@@ -2051,21 +2107,27 @@ export const MANAGE_STYLES = `
   }
 
   .manage-comment-popover textarea {
-    background: color-mix(in srgb, var(--manage-panel) 72%, #000 28%);
+    background: var(--manage-panel);
     border: 1px solid var(--manage-border-strong);
     border-radius: 8px;
     color: var(--manage-text);
     font-size: 12px;
     height: 116px;
     line-height: 1.45;
+    min-height: 80px;
     outline: 0;
     padding: 10px;
     resize: vertical;
   }
 
+  .manage-comment-popover textarea::placeholder {
+    color: var(--manage-subtle);
+    opacity: 1;
+  }
+
   .manage-comment-popover textarea:focus {
-    border-color: rgba(125, 211, 252, 0.46);
-    box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.16);
+    border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent);
   }
 
   .manage-comment-popover-actions {
@@ -2087,22 +2149,22 @@ export const MANAGE_STYLES = `
   }
 
   .manage-comment-popover-actions .manage-comment-popover-submit {
-    background: rgba(34, 197, 94, 0.18);
-    border-color: rgba(74, 222, 128, 0.48);
-    color: light-dark(#166534, #bbf7d0);
+    background: light-dark(#166534, #86efac);
+    border-color: transparent;
+    color: light-dark(#ffffff, #052e16);
   }
 
   .manage-comment-popover-actions .manage-comment-popover-submit:not(:disabled):hover,
   .manage-comment-popover-actions .manage-comment-popover-submit:not(:disabled):focus-visible {
-    background: rgba(34, 197, 94, 0.26);
-    border-color: rgba(74, 222, 128, 0.66);
-    color: light-dark(#14532d, #dcfce7);
+    background: light-dark(#14532d, #bbf7d0);
+    border-color: transparent;
+    color: light-dark(#ffffff, #052e16);
   }
 
   .manage-comment-popover-actions .manage-comment-popover-submit:disabled {
-    background: rgba(34, 197, 94, 0.08);
-    border-color: rgba(74, 222, 128, 0.2);
-    color: light-dark(rgba(22, 101, 52, 0.5), rgba(187, 247, 208, 0.42));
+    background: var(--manage-panel-raised);
+    border-color: var(--manage-border);
+    color: var(--manage-subtle);
   }
 
   .manage-hidden-file-input {
@@ -2169,7 +2231,7 @@ export const MANAGE_STYLES = `
       height: 35px;
       max-height: 35px;
       min-height: 35px;
-      padding: 0 0 0 13px;
+      padding: 0 3px 0 13px;
     }
 
     .manage-preview-meta {
@@ -2183,7 +2245,7 @@ export const MANAGE_STYLES = `
       height: 35px;
       max-height: 35px;
       min-height: 35px;
-      padding: 0 0 0 13px;
+      padding: 0 3px 0 13px;
     }
 
     .manage-preview-content[data-compact-header="true"] .manage-preview-meta {

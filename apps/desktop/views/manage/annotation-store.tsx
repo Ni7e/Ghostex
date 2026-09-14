@@ -67,8 +67,8 @@ export function manageAnnotationColor(annotation: Pick<ManageAnnotation, 'labelI
   return annotation.type === 'redline' ? MANAGE_REDLINE_ANNOTATION_COLOR : quickLabelColor(annotation.labelId);
 }
 
-export function manageToolbarActionStyle(color: string): CSSProperties {
-  return { '--manage-toolbar-action-color': color } as CSSProperties;
+export function manageToolbarActionStyle(darkColor: string, lightColor: string): CSSProperties {
+  return { '--manage-toolbar-action-color': `light-dark(${lightColor}, ${darkColor})` } as CSSProperties;
 }
 
 export function clampManageSelectionToolbarLeft(left: number): number {

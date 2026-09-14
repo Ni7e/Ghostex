@@ -34,6 +34,13 @@ import {
   renderManageQuickLabelIcon,
 } from '../annotation-store';
 
+/** CDXC:Docs 2026-09-14 WHY: Annotation highlight colors are pale on purpose, but toolbar icons need darker shades of the same hues to stay visible on a light background. */
+const QUICK_LABEL_LIGHT_ICON_COLORS: Record<ManageQuickLabel['id'], string> = {
+  clarify: '#7c3aed',
+  'needs-tests': '#b45309',
+  'looks-good': '#15803d',
+};
+
 export function ManageAnnotationToolbar({
   anchor,
   onComment,
@@ -59,7 +66,7 @@ export function ManageAnnotationToolbar({
         <button
           aria-label='Comment'
           onClick={onComment}
-          style={manageToolbarActionStyle(MANAGE_COMMENT_ANNOTATION_COLOR)}
+          style={manageToolbarActionStyle(MANAGE_COMMENT_ANNOTATION_COLOR, '#926b0e')}
           type='button'
         >
           <IconMessagePlus aria-hidden='true' size={15} />
@@ -69,7 +76,7 @@ export function ManageAnnotationToolbar({
         <button
           aria-label='Formatting'
           onClick={onFormatting}
-          style={manageToolbarActionStyle(MANAGE_MEO_HEADING_COLOR)}
+          style={manageToolbarActionStyle(MANAGE_MEO_HEADING_COLOR, '#3f3f46')}
           type='button'
         >
           <MeoBoldIcon aria-hidden='true' size={15} />
@@ -80,7 +87,7 @@ export function ManageAnnotationToolbar({
           <button
             aria-label={label.text}
             onClick={() => onQuickLabel(label)}
-            style={manageToolbarActionStyle(label.color)}
+            style={manageToolbarActionStyle(label.color, QUICK_LABEL_LIGHT_ICON_COLORS[label.id])}
             type='button'
           >
             {renderManageQuickLabelIcon(label.id)}
@@ -91,7 +98,7 @@ export function ManageAnnotationToolbar({
         <button
           aria-label='Dismiss'
           onClick={onDismiss}
-          style={manageToolbarActionStyle(MANAGE_DISMISS_TOOLBAR_COLOR)}
+          style={manageToolbarActionStyle(MANAGE_DISMISS_TOOLBAR_COLOR, '#dc2626')}
           type='button'
         >
           <IconX aria-hidden='true' size={15} />
