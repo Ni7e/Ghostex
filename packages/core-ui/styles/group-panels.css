@@ -979,11 +979,11 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot='zoom'] {
 /*
  * CDXC:Sidebar 2026-08-29:
  * Commands has one shared, fixed home at the bottom of the GPUI and web sidebar.
- * The footer owns exactly the bottom 36px, including its top border, and bleeds
+ * The footer owns exactly the bottom 35px, including its top border, and bleeds
  * through the reference layout padding without moving the icon/text scan columns
  * used by Search above it. Settings is in the More overflow menu.
  * CDXC:Sidebar 2026-09-14 DECISION:
- * User: reduce Search by 7px and Commands by 9px total, including the additional 2px reduction requested after the initial change.
+ * User: reduce Search by 8px and Commands by 10px total, superseding the earlier 7px and 9px reductions.
  */
 .reference-sidebar-footer {
   align-items: center;
@@ -992,14 +992,14 @@ body:focus-within .reference-sidebar-window-dot[data-window-dot='zoom'] {
   container-name: reference-sidebar-footer;
   container-type: inline-size;
   display: grid;
-  flex: 0 0 36px;
+  flex: 0 0 35px;
   grid-template-columns: minmax(0, 1fr);
-  height: 36px;
+  height: 35px;
   margin-bottom: -7px;
   margin-left: calc(-1 * var(--reference-sidebar-footer-edge-bleed-left));
   margin-right: calc(-1 * var(--reference-sidebar-edge-bleed-right));
   min-width: 0;
-  padding: 3px 0 4px;
+  padding: 3px 0;
   width: calc(100% + var(--reference-sidebar-footer-edge-bleed-left) + var(--reference-sidebar-edge-bleed-right));
 }
 
@@ -1186,9 +1186,9 @@ body.native-sidebar-body
 .sidebar-reference-layout[data-reference-sidebar='true']
   .reference-sidebar-search-more-row
   .reference-sidebar-nav-button {
-  height: 28px;
-  min-height: 28px;
-  padding-block: 5px;
+  height: 27px;
+  min-height: 27px;
+  padding-block: 4.5px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar='true']
