@@ -1,8 +1,8 @@
 diff --git a/ci/build/build-vscode.sh b/ci/build/build-vscode.sh
-index eb655e43..1ac7fe2d 100755
+index bb8bd7ed..e08e0710 100755
 --- a/ci/build/build-vscode.sh
 +++ b/ci/build/build-vscode.sh
-@@ -186,12 +186,38 @@ vscode-ripgrep-macho-arch() {
+@@ -187,6 +187,32 @@ vscode-ripgrep-macho-arch() {
    esac
  }
  
@@ -33,6 +33,10 @@ index eb655e43..1ac7fe2d 100755
 +}
 +
  ensure-vscode-ripgrep-platform() {
+   if [[ "$OS" == windows ]]; then
+     # CDXC:CodeEditor 2026-09-14 WHY:
+@@ -203,9 +229,9 @@ ensure-vscode-ripgrep-platform() {
+   fi
    local ripgrep_bin="node_modules/@vscode/ripgrep/bin/rg"
    local expected_arch
 -  expected_arch="$(vscode-ripgrep-macho-arch)"
@@ -43,7 +47,7 @@ index eb655e43..1ac7fe2d 100755
      return
    fi
  
-@@ -199,7 +225,7 @@ ensure-vscode-ripgrep-platform() {
+@@ -213,7 +239,7 @@ ensure-vscode-ripgrep-platform() {
    rm -rf node_modules/@vscode/ripgrep/bin
    env npm_config_arch="$(vscode-ripgrep-node-arch)" node node_modules/@vscode/ripgrep/lib/postinstall.js --force
  
