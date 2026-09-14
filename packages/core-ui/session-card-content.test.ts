@@ -1022,7 +1022,7 @@ describe('SessionCardContent', () => {
     expect(markup).toContain('data-default-trailing-display="time"');
     expect(markup).toContain('>03:00</div>');
     expect(markup).not.toContain('session-header-agent-icon');
-    expect(markup).not.toContain('session-card-hover-action');
+    expect(markup).toContain('session-card-hover-action');
   });
 
   test('should show active close-after-done countdown in the trailing timestamp slot', () => {

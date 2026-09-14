@@ -263,7 +263,7 @@ export function SessionCardContent({
    * it aligns to the established right-side title affordance and can hide those
    * competing indicators as a single hover state.
    */
-  const canShowHoverActions = hoverActions.length > 0 && Boolean(onHoverAction) && timerTrailingLabel === undefined;
+  const canShowHoverActions = hoverActions.length > 0 && Boolean(onHoverAction);
   const hasSessionHeadTrailing =
     Boolean(trailingPrefix) ||
     Boolean(trailingSuffix) ||
