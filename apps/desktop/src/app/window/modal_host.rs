@@ -5,6 +5,14 @@
 use crate::app::helpers::*;
 use crate::*;
 
+fn app_modal_host_background() -> Hsla {
+    if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
+        rgb(0xffffff).into()
+    } else {
+        titlebar_background()
+    }
+}
+
 pub(crate) struct GpuiAppModalHostWindow {
     pub(crate) current_modal: GpuiAppModalKind,
     pub(crate) initial_window_size: Size<Pixels>,
@@ -69,15 +77,18 @@ impl GpuiAppModalHostWindow {
                 CEF_FIND_PROMPTS_DARK_PREPAINT_BACKGROUND_COLOR,
                 rgb(0x111111).into(),
             ),
-            None => (pane_prepaint_background_color(), titlebar_background()),
+            None => (
+                pane_prepaint_background_color(),
+                app_modal_host_background(),
+            ),
         };
-        // CDXC:AppModal 2026-09-14 WHY: modal-host.html needs the native appearance before its first paint, before the sidebar hydrate can reach React.
+        // CDXC:AppModal 2026-09-14 WHY: modal-host.html needs the resolved app appearance before its first paint. Comparing prepaint colors sent "dark" even in light mode because pane white (#ffffff) differs from the chat/find light constant (#fdfdfd).
         let url = if uses_react_modal_host {
             gpui::http_client::Url::parse(&url)
                 .map(|mut parsed| {
                     parsed.query_pairs_mut().append_pair(
                         "appAppearance",
-                        if prepaint_background == CEF_LIGHT_PREPAINT_BACKGROUND_COLOR {
+                        if CHROME_LIGHT_APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
                             "light"
                         } else {
                             "dark"
@@ -393,7 +404,7 @@ impl Render for GpuiAppModalHostWindow {
     fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .bg(titlebar_background())
+            .bg(app_modal_host_background())
             .children(self.surface.clone())
     }
 }

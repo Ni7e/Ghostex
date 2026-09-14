@@ -180,6 +180,8 @@ body[data-sidebar-theme='plain-light'],
   color-scheme: light;
   --ghostex-codex-logo: #262626;
   --ghostex-light-icon-color: #262626;
+  /* CDXC:Theming 2026-09-14 DECISION: User: the three Dark theme color controls do not affect light mode. Override the saved inline accent while this appearance is active. */
+  --ghostex-accent: #262626 !important;
   --sidebar-chrome-separator: #d4d4d4;
   --primary: #262626;
   --primary-foreground: #ffffff;
@@ -193,7 +195,8 @@ body[data-sidebar-theme='plain-light'],
   --ghostex-tooltip-strong-foreground: #18181b;
   --ghostex-tooltip-border: rgba(0, 0, 0, 0.14);
   --ghostex-tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
-  --app-background: #f3f3f3;
+  /* CDXC:Theming 2026-09-14 SEE-ALSO: apps/desktop/src/app/helpers/titlebar.rs owns the matching #f4f4f5 light-mode chrome decision. */
+  --app-background: #f4f4f5;
   --app-modal-background: #ffffff;
   --app-dropdown-background: #ffffff;
   --app-foreground: #262626;
@@ -471,7 +474,7 @@ body[data-sidebar-custom-theme='true']:is([data-sidebar-theme='plain-light'], [d
 .ghostex-root[data-sidebar-custom-theme='true']:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']),
 .stack[data-sidebar-custom-theme='true']:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) {
   color-scheme: light;
-  --app-background: color-mix(in srgb, var(--workspace-sidebar-theme-color) 8%, #f5f7fb 92%);
+  --app-background: #f4f4f5;
   --app-card: color-mix(in srgb, var(--workspace-sidebar-theme-color) 5%, #ffffff 95%);
   --app-card-active: color-mix(in srgb, var(--workspace-sidebar-theme-color) 12%, #f1f5fb 88%);
   --app-border: color-mix(in srgb, var(--workspace-sidebar-theme-color) 30%, #000000 12%);

@@ -1999,8 +1999,8 @@ impl GhostexGpuiApp {
                     .w(px(SIDEBAR_DIVIDER_LINE_WIDTH))
                     .cursor_ew_resize()
                     .bg(sidebar_divider_line_color())
-                    .when(line_on_right, |this| this.right_0())
-                    .when(!line_on_right, |this| this.left_0()),
+                    .when(line_on_right, |this| this.left_0())
+                    .when(!line_on_right, |this| this.right_0()),
             )
             .when(self.sidebar_divider_hover_visible, |this| {
                 this.child(

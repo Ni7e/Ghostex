@@ -42,25 +42,17 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
   --destructive: #b91c1c;
 }
 
+body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
+  .gx-app-modal
+  [data-slot='card-description'].delayed-send-automation-status-active {
+  color: var(--foreground);
+}
+
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .agents-hub-dialog {
   --agents-hub-panel: #f5f5f5;
   --agents-hub-raised: #f0f0f0;
   --agents-hub-raised-hover: #e5e5e5;
   --agents-hub-line: rgba(0, 0, 0, 0.14);
-}
-
-body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
-  .agents-hub-dialog
-  .agents-hub-tabs-list
-  [data-slot='tabs-trigger']:hover {
-  background: color-mix(in srgb, #262626 5%, transparent) !important;
-}
-
-body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
-  .agents-hub-dialog
-  .agents-hub-tabs-list
-  [data-slot='tabs-trigger'][data-active] {
-  background: color-mix(in srgb, #262626 9%, transparent) !important;
 }
 
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .agents-hub-dialog .agents-hub-group:hover {
@@ -160,7 +152,7 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
   :is(.add-project-modal, .extensions-modal-toolbar)
   [data-slot='input-group']:focus-within {
-  border-color: #525252;
+  border-color: rgba(0, 0, 0, 0.16);
 }
 
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
@@ -176,7 +168,7 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .pre
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
   .previous-sessions-search-shell:focus-within
   .previous-sessions-search-input {
-  border-color: #525252;
+  border-color: rgba(0, 0, 0, 0.16);
 }
 
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .recent-projects-status-dot {
@@ -263,7 +255,12 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .add
 }
 
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .quick-access-surface {
+  /* CDXC:AppModal 2026-09-14 WHY: Commands and Saved Prompts nest this surface inside the dialog, where its dark foreground overrides inherited light tokens. Set the light tokens on the surface itself so switching sections cannot dim the header or segmented controls. */
+  --foreground: #262626;
+  --app-foreground: #262626;
+  --accent-foreground: #262626;
   --quick-access-item-color: #404040;
+  --settings-focus-border-color: var(--settings-hairline);
 }
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
   :is(
@@ -310,4 +307,30 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
     .first-launch-setup-step-chip[data-state='done'] .first-launch-setup-step-num
   ) {
   color: #047857;
+}
+
+/* CDXC:DesignSystem 2026-09-14 DECISION:
+ * User: search boxes must not acquire a black border when focused in the app's light mode.
+ * Keep search borders subtle, including the enclosing input group and focus on its clear/filter buttons.
+ * This extends the earlier Quick Access-only focus treatment to the other search fields and portaled pickers.
+ */
+:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
+  :is(
+    input.session-search-input,
+    input.command-icon-picker-search,
+    .agents-hub-search input,
+    input[type='search'],
+    input[role='searchbox']
+  ):is(:focus, :focus-visible),
+:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
+  .session-search-input-shell:focus-within input.session-search-input,
+:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
+  :is(
+    [data-slot='command-input-wrapper'] [data-slot='input-group'],
+    .extensions-modal-toolbar [data-slot='input-group'],
+    [data-slot='input-group']:has(#extensions-store-search)
+  ):focus-within {
+  border-color: rgba(0, 0, 0, 0.16);
+  box-shadow: none;
+  outline: none;
 }

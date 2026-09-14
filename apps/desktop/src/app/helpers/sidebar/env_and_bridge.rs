@@ -36,12 +36,20 @@ pub(crate) fn sidebar_divider_background_color() -> Hsla {
     }
 }
 
+/// CDXC:Sidebar 2026-09-14 DECISION:
+/// User: restore a one-pixel #d4d4d4 line between the sidebar and resize rail in light mode.
 pub(crate) fn sidebar_divider_line_color() -> Hsla {
-    rgb(0x000000).opacity(0.0).into()
+    if CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed) {
+        rgb(0xd4d4d4).into()
+    } else {
+        rgb(0x000000).opacity(0.0).into()
+    }
 }
 
+/// CDXC:Theming 2026-09-14 DECISION:
+/// User: the resize drag handle's hovered/active color is light blue in light mode.
 pub(crate) fn sidebar_divider_hover_line_color() -> Hsla {
-    rgb(0xffffff).into()
+    chrome_color(0xffffff, 0x93c5fd).into()
 }
 
 pub(crate) fn sidebar_url() -> Result<String> {

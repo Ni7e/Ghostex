@@ -705,14 +705,14 @@ pub(crate) fn workspace_pane_border_color_for_state(state: WorkspacePaneBorderSt
     }
 }
 
-/// CDXC:Theming 2026-09-13 DECISION:
-/// User: remove the visible one-pixel Browser pane frame in light mode.
-/// Keep the frame's layout width and explicit focus/attention indicators, but blend neutral edges into the white pane surround.
+/// CDXC:Theming 2026-09-14 DECISION:
+/// User: restore the one-pixel Browser pane border to #d4d4d4 in light mode, including the left edge and top edge above the address bar; keep dark mode unchanged.
+/// This supersedes the 2026-09-13 decision to blend the frame into the white surround; explicit focus/attention indicators remain.
 pub(crate) fn browser_pane_border_color_for_state(state: WorkspacePaneBorderState) -> Hsla {
     match state {
-        WorkspacePaneBorderState::Neutral => chrome_color(0x202020, 0xffffff).into(),
+        WorkspacePaneBorderState::Neutral => chrome_color(0x202020, 0xd4d4d4).into(),
         WorkspacePaneBorderState::Focused if !show_active_pane_outline() => {
-            chrome_color(0x202020, 0xffffff).into()
+            chrome_color(0x202020, 0xd4d4d4).into()
         }
         _ => workspace_pane_border_color_for_state(state),
     }
