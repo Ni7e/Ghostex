@@ -117,13 +117,9 @@ impl GpuiTerminalEngineConfig {
         settings: &SharedGpuiTerminalEngineSettings,
         system_is_light: bool,
     ) {
-        if settings.uses_light_theme(system_is_light) {
-            let theme = if gpui_terminal_theme(&settings.light_theme).is_some() {
-                &settings.light_theme
-            } else {
-                "GitHub Light Default"
-            };
-            self.apply_ghostty_theme(theme);
+        self.view.light_theme = settings.uses_light_theme(system_is_light);
+        if self.view.light_theme {
+            self.apply_ghostty_theme(&settings.light_theme);
             // CDXC:Theming 2026-09-13 WHY:
             // GPUI retains ANSI foreground colors in selected text; Ghostty's opaque selection background assumes a separate selection foreground.
             // Use the renderer's adaptive translucent selection tint so light palettes remain readable.
@@ -193,7 +189,8 @@ pub(crate) fn ghostty_theme_source(name: &str) -> Option<&'static str> {
 }
 
 fn gpui_terminal_theme(name: &str) -> Option<GpuiTerminalTheme> {
-    let source = ghostty_theme_source(name)?;
+    let custom_source = custom_ghostty_theme_source(name);
+    let source = custom_source.as_deref().or_else(|| ghostty_theme_source(name))?;
     let mut foreground = None;
     let mut background = None;
     let mut cursor = None;
@@ -234,6 +231,33 @@ fn gpui_terminal_theme(name: &str) -> Option<GpuiTerminalTheme> {
         selection_background,
         palette,
     })
+}
+
+/// CDXC:Theming 2026-09-14 SEE-ALSO:
+/// shared_settings/ghostty_themes.rs imports configured theme names, including user-defined files that are absent from the embedded catalog.
+fn custom_ghostty_theme_source(name: &str) -> Option<String> {
+    if name.is_empty() {
+        return None;
+    }
+    let path = Path::new(name);
+    if path.is_absolute() {
+        return std::fs::read_to_string(path).ok();
+    }
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    if let Some(relative) = name.strip_prefix("~/") {
+        return std::fs::read_to_string(home.join(relative)).ok();
+    }
+    let xdg = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home.join(".config"));
+    let mut paths = vec![xdg.join("ghostty/themes").join(name)];
+    if let Ok(config) = crate::shared_settings::selected_ghostty_config_path() {
+        if let Some(parent) = config.parent() {
+            paths.push(parent.join("themes").join(name));
+        }
+    }
+    paths.into_iter().find_map(|path| std::fs::read_to_string(path).ok())
 }
 
 fn parse_theme_rgb(value: &str) -> Option<Rgb> {

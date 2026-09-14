@@ -16,6 +16,8 @@ use serde_json::{Map, Value};
 #[path = "shared_settings/appearance.rs"]
 mod appearance;
 pub use appearance::effective_content_color_scheme;
+#[path = "shared_settings/ghostty_themes.rs"]
+mod ghostty_themes;
 
 pub const PROJECT_EDITOR_AUTO_SLEEP_DEFAULT_IDLE_MINUTES: f64 = 5.0;
 pub const PROJECT_EDITOR_AUTO_SLEEP_MAX_IDLE_MINUTES: f64 = 300.0;
@@ -1481,10 +1483,11 @@ impl SharedSidebarSettingsService {
         // stale identity behind, forcing one redundant re-read on the next
         // call instead of ever serving stale content.
         let identity = SharedSettingsFileIdentity::from_path(&self.path);
-        if identity.is_some() && identity == self.cached_file_identity {
+        if self.snapshot.revision > 0 && identity == self.cached_file_identity {
             return self.snapshot.clone();
         }
-        let read = read_settings_object_from_path(&self.path);
+        let mut read = read_settings_object_from_path(&self.path);
+        ghostty_themes::hydrate_ghostty_theme_selections(&mut read.object);
         /*
         CDXC:Settings 2026-07-26:
         Revision is the "GPUI has observed real settings state" signal the React
@@ -1939,14 +1942,32 @@ fn selected_ghostty_config_path_from_home(home: Option<OsString>) -> Option<Path
         .iter()
         .find(|candidate| candidate.exists())
         .cloned()
-        .or_else(|| Some(home.join(Path::new(GHOSTTY_CONFIG_DEFAULT_RELATIVE_PATH))))
+        .or_else(|| {
+            if cfg!(target_os = "macos") {
+                Some(home.join(Path::new(GHOSTTY_CONFIG_DEFAULT_RELATIVE_PATH)))
+            } else {
+                Some(ghostty_xdg_config_directory(&home).join("config"))
+            }
+        })
 }
 
 fn ghostty_config_candidate_paths_from_home(home: &Path) -> Vec<PathBuf> {
-    GHOSTTY_CONFIG_CANDIDATE_RELATIVE_PATHS
+    let mut candidates: Vec<_> = GHOSTTY_CONFIG_CANDIDATE_RELATIVE_PATHS
         .iter()
+        .filter(|_| cfg!(target_os = "macos"))
         .map(|relative_path| home.join(Path::new(relative_path)))
-        .collect()
+        .collect();
+    let xdg = ghostty_xdg_config_directory(home);
+    candidates.extend([xdg.join("config.ghostty"), xdg.join("config")]);
+    candidates
+}
+
+fn ghostty_xdg_config_directory(home: &Path) -> PathBuf {
+    env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home.join(".config"))
+        .join("ghostty")
 }
 
 fn merge_ghostty_config_lines(config: &str, managed_lines: &[&str]) -> String {

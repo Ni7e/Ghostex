@@ -136,6 +136,7 @@ export {
   GHOSTTY_SCROLLBAR_OPTIONS,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   GHOSTTY_THEME_SETTING_OPTIONS,
+  getGhosttyThemeSettingOptions,
 } from './ghostex-settings/option-tables';
 export {
   type RemoteMachineSettings,

@@ -9,7 +9,6 @@ import {
   normalizeTerminalFontPreset,
 } from '../terminal-font-preset';
 import { normalizeghostexHotkeySettings } from '../ghostex-hotkeys';
-import { GHOSTTY_THEME_OPTIONS } from '../ghostty-theme-options';
 import {
   normalizeCustomWorkspaceOpenTargets,
   normalizeWorkspaceOpenTargetAvailability,
@@ -706,9 +705,8 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     /**
      * CDXC:Theming 2026-04-29-09:32
-     * Ghostty themes are exact strings. Preserve only bundled theme names from
-     * the settings list, or an empty unmanaged value that keeps an existing
-     * user-authored Ghostty `theme` line outside ghostex control.
+     * Ghostty themes are exact strings, including user-defined themes imported from Ghostty config.
+     * An empty unmanaged value keeps an existing user-authored theme outside Ghostex control.
      */
     terminalColorScheme: normalizeContentThemeSetting(source.terminalColorScheme),
     terminalGhosttyLightTheme:
@@ -1241,7 +1239,7 @@ function normalizeGhosttyTheme(value: string | undefined): string {
   if (!value || value === '__ghostex_ghostty_theme_unmanaged__') {
     return '';
   }
-  return (GHOSTTY_THEME_OPTIONS as readonly string[]).includes(value) ? value : '';
+  return /[\r\n\0]/u.test(value) ? '' : value.trim();
 }
 
 function normalizeGhosttyFontFamily(value: string | undefined): string {

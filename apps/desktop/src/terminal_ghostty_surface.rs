@@ -899,6 +899,7 @@ fn parse_ghostty_terminal_engine_config(
     Ok(GpuiTerminalEngineConfig {
         font,
         view: TerminalViewSettings {
+            light_theme: false,
             cursor_shape,
             // The GhosttyKit surface path is not selected at runtime; the
             // composited engine owns background images.

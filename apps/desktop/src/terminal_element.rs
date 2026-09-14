@@ -224,8 +224,6 @@ fn install_terminal_paste_diagnostic_sink() {
         );
     }));
 }
-// #101010 blended 15% toward white.
-const TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB: u32 = 0x343434;
 
 /// Terminal font configuration used for cell metrics and run shaping.
 /// TODO(P1e): sync from the app's terminal settings (shared_settings
@@ -322,6 +320,10 @@ pub struct TerminalBackgroundImage {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerminalViewSettings {
+    /// CDXC:Theming 2026-09-14 DECISION:
+    /// User: terminal scroll-to-top and scroll-to-bottom buttons use light colors when the terminal is set to light.
+    /// Carry the resolved terminal appearance so these controls follow the terminal's override independently of the app theme.
+    pub light_theme: bool,
     pub cursor_shape: TerminalCursorShape,
     pub background_image: Option<TerminalBackgroundImage>,
     pub cursor_blink: bool,
@@ -345,6 +347,7 @@ pub struct TerminalViewSettings {
 impl Default for TerminalViewSettings {
     fn default() -> Self {
         Self {
+            light_theme: false,
             cursor_shape: TerminalCursorShape::Block,
             background_image: None,
             cursor_blink: false,
@@ -2452,6 +2455,7 @@ impl Render for TerminalView {
             root = root.child(terminal_scroll_button(
                 TerminalScrollEdge::Bottom,
                 self.scroll_button_visibility.bottom,
+                self.settings.light_theme,
                 cx,
             ));
         }
@@ -2459,6 +2463,7 @@ impl Render for TerminalView {
             root = root.child(terminal_scroll_button(
                 TerminalScrollEdge::Top,
                 self.scroll_button_visibility.bottom,
+                self.settings.light_theme,
                 cx,
             ));
         }
@@ -2482,7 +2487,12 @@ fn terminal_overlay_edge_insets() -> (f32, f32) {
     )
 }
 
-fn terminal_overlay_button(id: &'static str) -> gpui::Stateful<gpui::Div> {
+fn terminal_overlay_button(id: &'static str, light_theme: bool) -> gpui::Stateful<gpui::Div> {
+    let (background, border, hover) = if light_theme {
+        (0xf4f5f7, 0xdedfe3, 0xe5e7eb)
+    } else {
+        (0x101010, 0x2a2a2a, 0x343434)
+    };
     div()
         .id(id)
         .absolute()
@@ -2490,11 +2500,10 @@ fn terminal_overlay_button(id: &'static str) -> gpui::Stateful<gpui::Div> {
         .flex()
         .items_center()
         .justify_center()
-        .border_color(gpui::rgb(0x2a2a2a))
-        .bg(gpui::rgb(0x101010))
-        .text_color(gpui::rgb(0xa6a6a6))
+        .border_color(gpui::rgb(border))
+        .bg(gpui::rgb(background))
         .cursor_default()
-        .hover(|this| this.bg(gpui::rgb(TERMINAL_SCROLL_BUTTON_HOVER_BACKGROUND_RGB)))
+        .hover(move |this| this.bg(gpui::rgb(hover)))
         .block_mouse_except_scroll()
         .shadow(vec![
             BoxShadow::new(
@@ -2504,7 +2513,7 @@ fn terminal_overlay_button(id: &'static str) -> gpui::Stateful<gpui::Div> {
                     r: 0.0,
                     g: 0.0,
                     b: 0.0,
-                    a: 0.32,
+                    a: if light_theme { 0.12 } else { 0.32 },
                 }
                 .into(),
             )
@@ -2515,6 +2524,7 @@ fn terminal_overlay_button(id: &'static str) -> gpui::Stateful<gpui::Div> {
 fn terminal_scroll_button(
     edge: TerminalScrollEdge,
     bottom_button_visible: bool,
+    light_theme: bool,
     cx: &mut Context<TerminalView>,
 ) -> impl IntoElement {
     let (edge_right, edge_bottom) = terminal_overlay_edge_insets();
@@ -2534,7 +2544,7 @@ fn terminal_scroll_button(
     };
     let tooltip = terminal_overlay_tooltip(tooltip, hotkey_action_id);
 
-    terminal_overlay_button(id)
+    terminal_overlay_button(id, light_theme)
         .right(px(edge_right))
         .bottom(px(bottom))
         .border_l_1()
@@ -2555,7 +2565,7 @@ fn terminal_scroll_button(
         .managed_tooltip_with_placement(ManagedTooltipPlacement::Below, move |window, cx| {
             Tooltip::new(tooltip.clone()).build(window, cx)
         })
-        .child(terminal_scroll_button_glyph(edge))
+        .child(terminal_scroll_button_glyph(edge, light_theme))
 }
 
 /// Shared by the terminal's own scroll buttons and by the pane's agent action
@@ -2710,7 +2720,7 @@ pub(crate) fn terminal_overlay_hotkey_chord_label(chord: &str) -> String {
     labels.join(if cfg!(target_os = "macos") { "" } else { " + " })
 }
 
-fn terminal_scroll_button_glyph(edge: TerminalScrollEdge) -> impl IntoElement {
+fn terminal_scroll_button_glyph(edge: TerminalScrollEdge, light_theme: bool) -> impl IntoElement {
     canvas(
         move |_bounds, _window, _cx| {},
         move |bounds, _state: (), window, _cx| {
@@ -2725,7 +2735,7 @@ fn terminal_scroll_button_glyph(edge: TerminalScrollEdge) -> impl IntoElement {
                 point(px(center_x), px(center_y)),
                 point(px(center_x + 4.5), px(right_y)),
             ];
-            let color: Hsla = gpui::rgb(0xa6a6a6).into();
+            let color: Hsla = gpui::rgb(if light_theme { 0x626874 } else { 0xa6a6a6 }).into();
 
             // Separate segments plus filled endpoint circles reproduce the
             // deprecated NSBezierPath's round line caps and round line join.

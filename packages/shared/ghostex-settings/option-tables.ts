@@ -285,5 +285,17 @@ export const GHOSTTY_THEME_SETTING_OPTIONS: ReadonlyArray<{
    * until the user deliberately chooses a bundled theme from this modal.
    */
   { label: 'Use existing Ghostty config', value: '__ghostex_ghostty_theme_unmanaged__' },
-  ...GHOSTTY_THEME_OPTIONS.map((theme) => ({ label: theme, value: theme })),
+  // CDXC:Theming 2026-09-14 DECISION: User: display "GitHub Light" while retaining Ghostty's internal "GitHub Light Default" name.
+  ...GHOSTTY_THEME_OPTIONS.map((theme) => ({
+    label: theme === 'GitHub Light Default' ? 'GitHub Light' : theme,
+    value: theme,
+  })),
 ];
+
+/** Keep a configured custom theme visible even when it is not in Ghostty's bundled list. */
+export function getGhosttyThemeSettingOptions(selectedTheme: string) {
+  if (!selectedTheme || GHOSTTY_THEME_SETTING_OPTIONS.some((option) => option.value === selectedTheme)) {
+    return GHOSTTY_THEME_SETTING_OPTIONS;
+  }
+  return [{ label: selectedTheme, value: selectedTheme }, ...GHOSTTY_THEME_SETTING_OPTIONS];
+}
