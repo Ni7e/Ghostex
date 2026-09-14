@@ -35,6 +35,7 @@ function agentDisplayName(sender: string): string {
   return segments.at(-1) ?? sender;
 }
 
+/** CDXC:SessionChat 2026-09-14 DECISION: User: received subagent messages use the same font size as the rest of the agent messages, including the header, collapsed preview, and expanded body. */
 export function SessionChatAgentMessageCard({ body, sender }: SessionChatAgentMessage) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -63,7 +64,7 @@ export function SessionChatAgentMessageCard({ body, sender }: SessionChatAgentMe
 
   return (
     <div
-      className='ghostex-chat-activity-row ghostex-chat-status-card grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3'
+      className='ghostex-chat-activity-row ghostex-chat-status-card grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3 text-sm'
       data-kind='agent-message'
       data-sender={sender}
     >

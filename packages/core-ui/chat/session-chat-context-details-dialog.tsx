@@ -53,6 +53,12 @@ import {
   type SessionChatContextDetailsPreferences,
 } from './session-chat-context-details';
 
+/** CDXC:AgentProviders 2026-09-14 DECISION:
+ * User: hide Copy to and Copy from for both Claude and Codex for now because the feature is not working well.
+ * This temporarily supersedes the earlier decision to show the transfer buttons in the statusline settings modal.
+ */
+const SHOW_CONTEXT_DETAILS_COPY_BUTTONS = false;
+
 const rowSensors = [
   PointerSensor.configure({
     activationConstraints: () => [new PointerActivationConstraints.Distance({ value: 4 })],
@@ -220,30 +226,32 @@ export function SessionChatContextDetailsDialog({
         <DialogHeader>
           <div className='flex w-full items-center justify-between gap-2'>
             <DialogTitle>Context details</DialogTitle>
-            <div className='ml-auto flex shrink-0 items-center gap-1'>
-              <AppTooltip content={`Copy settings from ${otherAgentName}`}>
-                <Button
-                  aria-label={`Copy settings from ${otherAgentName}`}
-                  size='icon-xs'
-                  variant='ghost'
-                  type='button'
-                  onClick={() => transferSettings('from')}
-                >
-                  <IconFileImport className='size-3.5' />
-                </Button>
-              </AppTooltip>
-              <AppTooltip content={`Copy settings to ${otherAgentName}`}>
-                <Button
-                  aria-label={`Copy settings to ${otherAgentName}`}
-                  size='icon-xs'
-                  variant='ghost'
-                  type='button'
-                  onClick={() => transferSettings('to')}
-                >
-                  <IconFileExport className='size-3.5' />
-                </Button>
-              </AppTooltip>
-            </div>
+            {SHOW_CONTEXT_DETAILS_COPY_BUTTONS && (
+              <div className='ml-auto flex shrink-0 items-center gap-1'>
+                <AppTooltip content={`Copy settings from ${otherAgentName}`}>
+                  <Button
+                    aria-label={`Copy settings from ${otherAgentName}`}
+                    size='icon-xs'
+                    variant='ghost'
+                    type='button'
+                    onClick={() => transferSettings('from')}
+                  >
+                    <IconFileImport className='size-3.5' />
+                  </Button>
+                </AppTooltip>
+                <AppTooltip content={`Copy settings to ${otherAgentName}`}>
+                  <Button
+                    aria-label={`Copy settings to ${otherAgentName}`}
+                    size='icon-xs'
+                    variant='ghost'
+                    type='button'
+                    onClick={() => transferSettings('to')}
+                  >
+                    <IconFileExport className='size-3.5' />
+                  </Button>
+                </AppTooltip>
+              </div>
+            )}
           </div>
           <DialogDescription>
             Pick the rows shown under the context meter in {agent === 'claude' ? 'Claude Code' : 'Codex'} sessions. Drag
