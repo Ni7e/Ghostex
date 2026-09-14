@@ -1,10 +1,10 @@
 # Changelog
 
-## 9.5.0 - 2026-09-14
+## 9.5.1 - 2026-09-14
 
 - New Features
 
-  - Light mode, everywhere. Settings > General > Theme puts App theme first: Dark Gray, Light, or System, which follows your computer. The sidebar, titlebar and its popups, Settings, modals, Docs, Kanban, Automate, the Browser chrome, tooltips and native dialogs all follow it, and open windows change with the system instead of waiting for a restart. Chat and terminals follow the app theme by default and can each override it with Light, Dark or System. Dark Gray stays the default, and its saved contrast and tint come back unchanged if you switch away and back.
+  - Light mode, everywhere. Settings > General > Theme puts App theme first: Dark Gray, Light, or System, which follows your computer. The sidebar, titlebar and its popups, Settings, modals, Docs, Kanban, Automate, the Browser chrome, tooltips and native dialogs all follow it, and open windows change with the system instead of waiting for a restart. Chat and terminals follow the app theme by default and can each override it with Light, Dark or System. New installs start on System; a theme you already picked is kept, and the dark contrast and tint come back unchanged if you switch away and back. Terminal palettes come from the Ghostty themes already configured on your computer, including separate light and dark selections, and fall back to GitHub Light and GitHub Dark when nothing is configured.
   - Windows can run without WSL. Settings > General > Terminal > Windows Environment now offers native PowerShell projects and Windows agent CLIs, and that is the default. Native sessions persist, survive closing the app or restarting gxserver, and get their own agent hooks and resume commands. Switching environments asks whether to restart now or later, and existing projects and sessions stay in the environment they started in. The Code view still needs WSL.
   - Simple mode, in More actions or Settings > Chat, calms every chat at once: tool groups without a message collapse to a count, tool rows drop their command previews, and file edits collapse to "Edited 3 files". Expand any row for the usual detail.
   - Chat remembers where you were. Cmd+P opens Recent Sessions to jump between chats across projects, and Cmd+Ctrl+[ and Cmd+Ctrl+] walk back and forward through the ones you visited. Coming back restores your reading position, which tool cards were expanded, the composer cursor, and the account badge, context usage and status line while their values refresh. Older messages load as you scroll back into the conversation.
@@ -28,7 +28,14 @@
 
 - Minor Improvements
 
-  - As the chat narrows, toolbar buttons move into More actions one at a time (Summary mode, Session note, Stash prompt, Attach, Maximize, then Terminal View) so the context ring and effort controls stay clear, and come back as space opens up.
+  - As the chat narrows, toolbar buttons move into More actions one at a time (Summary mode, Session note, Stash prompt, Attach, Maximize, then Terminal View). If the context ring and effort still do not fit beside the model, they move together into a Model settings section at the top of More actions, and everything comes back as space opens up. Both open on a click instead of on hover.
+  - Starting a new agent from Code, Browser, Kanban, Automate or Docs keeps that view open instead of jumping to Agents. With two split companion panes, a sidebar click or a new session goes to the pane you last worked in.
+  - The chat status line appears as soon as its values are known, including the first time you open a chat, and wrapped rows stay centered with separators only between items on the same row.
+  - Agents Hub, Quick Access, Saved Prompts, Sessions, Add Worktree, Add a machine, Easy Connect, Browser History and the Automation editor share one tab strip: a rounded track with a raised selected tab, in both appearances.
+  - Background contrast, background tint and accent color are named "Dark theme ..." and live under Show Advanced, since they do not recolor light mode.
+  - Agent panes and chat companion sidepanes stop shrinking below 388px, and command pane tabs sit flush with the panel edge.
+  - The sidebar Search and Commands rows are shorter, giving the session list that space back, and Projects shows a loading skeleton until its first update arrives.
+  - Docs toolbars are compact and borderless, with annotation icons in darker shades of their highlight colors so they stay visible on a light page.
   - Click the Subagents header to minimize the card to its header or open it again. It starts minimized in Simple mode, and your choice is remembered per session.
   - The transcript scrollbar is a thin 5px overlay that fades out when you stop scrolling.
   - Extra-high effort is labelled xHigh.
@@ -51,6 +58,9 @@
   - Codex composer detection tells a real input box from a menu or a setup screen, so sends do not go to the wrong place.
   - The hooks permission prompt grows with its window instead of clipping.
   - A draft recovery you dismissed stays dismissed.
+  - Returning to a chat can no longer leave a second composer behind.
+  - Light mode keeps its one-pixel Browser pane and sidebar lines, app modals open white from the first paint, the active session row is easier to pick out, and search boxes no longer take a black border when focused.
+  - Linux and Windows find the Ghostty config in the XDG config folder instead of only the macOS location.
   - Light chat uses the shared Codex logo, and copying Context details between Claude and Codex is hidden for now while it is reworked.
 
 ## 9.4.0 - 2026-09-12
