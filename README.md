@@ -169,22 +169,6 @@ Also see list of all previous sessions from all agents by title/tag/last active 
 
 <img width="3456" height="2066" alt="2026-06-30_Ghostex_10-53-36@2x" src="https://github.com/user-attachments/assets/1d774329-6a5d-4d8d-98e7-34fd2613dd8b" />
 
-### Inbox Based Agent Management
-
-This optional inbox moves work beyond individual sessions. <br/>
-Organize around threads and worktrees, focus on one project or see every project together, then snooze or settle threads as needed.
-
-<img width="3456" height="2072" alt="Inbox-based agent management in Ghostex" src="media/readme/ghostex-inbox-agent-management.png" />
-
-### Extensible Architecture (client apps <-> gxserver daemon <-> zmx persistence)
-
-The client/server split allows your to install just the gxserver daemon on any remote machine then control the agents on that machine from any client device <br />
-
-Supported clients: macOS, Linux, Windows WSL2 beta, Android, TUI (based on herdr)<br />
-Supported hosts: macOS and linux (tested on ubuntu x64 and arm64)<br />
-
-<img width="3326" height="1514" alt="2026-06-12_Google Chrome_23-43-07@2x" src="https://github.com/user-attachments/assets/ecc84149-a9fc-4ec8-a387-af5ce35aa7be" />
-
 ### Cross-agent orchestration built in
 
 Agents can launch other agent session using the "ghostex" cli command.
