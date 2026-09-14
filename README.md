@@ -285,6 +285,16 @@ Rust builds require **sccache**:
 brew install sccache
 ```
 
+Windows builds also compile the native Code editor. Initialize
+`.dependencies/code-server` and its nested VS Code submodule, and install the
+Node version pinned in `.dependencies/code-server/.node-version`, Python 3,
+Git for Windows with Git LFS, jq, and Visual Studio C++ Build Tools with a Windows
+SDK and the matching x64/x86 or ARM64 Spectre libraries. Keep these tools on the build
+shell's PATH; `PYTHON` and `npm_config_msvs_version` can select a specific Python
+executable and Visual Studio installation. The Windows build invokes
+`apps/desktop/scripts/build-windows-code-server.ps1` and reuses its output when
+the editor sources and toolchain have not changed.
+
 Both crates set `rustc-wrapper = "sccache"` in their `.cargo/config.toml`, so every `cargo` invocation
 run from inside `apps/desktop/` or `server/` (the build scripts, `bun run release:preflight --cargo`,
 rust-analyzer, your shell) compiles each dependency crate once and replays it from the local disk cache

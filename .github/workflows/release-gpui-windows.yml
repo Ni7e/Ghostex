@@ -53,7 +53,7 @@ on:
       plan:
         description: Resolved release plan JSON from the prepare job
         required: false
-        default: ''
+        default: ""
         type: string
     secrets:
       WINDOWS_CODE_SIGN_PFX_BASE64:
@@ -109,10 +109,10 @@ jobs:
       GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
       GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
       OUTPUT_DIR: build/release-gpui/${{ inputs.version }}/windows-${{ inputs.arch }}
-      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_VERSION: windows-${{ inputs.arch }}-1
       RUSTC_WRAPPER: sccache
-      CARGO_INCREMENTAL: '0'
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -123,6 +123,36 @@ jobs:
           bun-version: 1.4.0
       - name: Restore code-server source identity input
         run: git submodule update --init --depth=1 -- .dependencies/code-server
+      - name: Set up the pinned native editor Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .dependencies/code-server/.node-version
+          architecture: ${{ inputs.arch }}
+      - name: Prepare native editor build tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($tool in @('python', 'jq', 'git-lfs')) {
+            Get-Command $tool -ErrorAction Stop | Out-Null
+          }
+          "PYTHON=$((Get-Command python).Source)" >> $env:GITHUB_ENV
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (!$vs) { throw 'The native editor requires Visual Studio C++ build tools.' }
+          $component = if ('${{ inputs.arch }}' -eq 'arm64') {
+            'Microsoft.VisualStudio.Component.VC.Runtimes.ARM64.Spectre'
+          } else {
+            'Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre'
+          }
+          $installed = & $vswhere -latest -products '*' -requires $component -property installationPath
+          if (!$installed -or $installed.Trim() -ne $vs) {
+            $installer = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/setup.exe"
+            $install = Start-Process $installer -Wait -PassThru -ArgumentList @('modify', '--installPath', ('"' + $vs + '"'), '--add', $component, '--quiet', '--norestart')
+            if ($install.ExitCode -notin @(0, 3010)) { throw "Spectre libraries installation failed: $($install.ExitCode)" }
+          }
+          "npm_config_msvs_version=$vs" >> $env:GITHUB_ENV
+          git -C .dependencies/code-server submodule update --init --depth=1 -- lib/vscode
+          if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the pinned VS Code sources.' }
       - name: Resolve immutable code-server component identity
         id: code_server_identity
         shell: bash
@@ -339,7 +369,7 @@ jobs:
           GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\gxserver-linux-${{ inputs.arch }}.tar.gz
           GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
           GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\${{ steps.code_server_identity.outputs.archive_name }}
-          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: '900'
+          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: "900"
         run: |
           & $env:GHOSTEX_WINDOWS_WATCHDOG -Phase compile -Version '${{ inputs.version }}' -Arch '${{ inputs.arch }}'
       # The runtime artifacts are only read by the packaging phase (WSL
@@ -403,7 +433,7 @@ jobs:
           GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\gxserver-linux-${{ inputs.arch }}.tar.gz
           GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
           GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\${{ steps.code_server_identity.outputs.archive_name }}
-          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: '900'
+          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: "900"
         run: |
           & $env:GHOSTEX_WINDOWS_WATCHDOG -Phase package -Version '${{ inputs.version }}' -Arch '${{ inputs.arch }}'
       - name: Write release provenance

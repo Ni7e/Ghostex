@@ -34,9 +34,25 @@ pub(crate) fn source_code_server_runtime_url(
     runtime_origin: &str,
     project_path: &Path,
 ) -> Option<ProjectWorkareaRealRuntimeUrl> {
+    let folder = gpui_path_string(project_path);
+    #[cfg(windows)]
+    let folder = if windows_terminal_backend::current_preference()
+        == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
+    {
+        // CDXC:CodeEditor 2026-09-14 WHY:
+        // The web workbench treats C: as a URI scheme unless a Windows drive path starts with / and uses forward slashes.
+        let folder = folder.replace('\\', "/");
+        if folder.as_bytes().get(1) == Some(&b':') {
+            format!("/{folder}")
+        } else {
+            folder
+        }
+    } else {
+        folder
+    };
     ProjectWorkareaRealRuntimeUrl::from_authorized_runtime_url(append_url_query_params(
         format!("{}/", runtime_origin.trim_end_matches('/')),
-        &[("folder", gpui_path_string(project_path))],
+        &[("folder", folder)],
     ))
 }
 
@@ -110,6 +126,18 @@ pub(crate) fn on_demand_component_store() -> Result<Option<component_store::Comp
 pub(crate) fn source_code_server_runtime_availability(
     target: &SourceCodeServerRuntimeTarget,
 ) -> SourceCodeServerRuntimeAvailability {
+    #[cfg(windows)]
+    if windows_terminal_backend::current_preference()
+        == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
+    {
+        return if source_code_server_resolve_repo_root().is_ok() {
+            SourceCodeServerRuntimeAvailability::Available
+        } else {
+            SourceCodeServerRuntimeAvailability::Failed(
+                SourceCodeServerRuntimeFailure::NativeEditorMissing,
+            )
+        };
+    }
     #[cfg(not(target_os = "windows"))]
     if target.component_platform().is_none() && source_code_server_resolve_repo_root().is_ok() {
         return SourceCodeServerRuntimeAvailability::Available;
@@ -382,6 +410,8 @@ pub(crate) fn source_code_server_bundled_node_candidates(repo_root: &Path) -> Ve
             candidates.push(candidate);
         }
     };
+    #[cfg(windows)]
+    append(repo_root.join("lib/node.exe"));
     append(repo_root.join("lib/node"));
     #[cfg(target_os = "macos")]
     {
@@ -475,7 +505,13 @@ pub(crate) fn source_code_server_node_major(node_path: &Path) -> Option<u64> {
     if !node_path.is_file() {
         return None;
     }
-    let output = Command::new(node_path)
+    let mut command = Command::new(node_path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command
         .arg("-v")
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -602,6 +638,7 @@ pub(crate) fn source_code_server_runtime_environment(repo_root: &Path) -> HashMa
 
 pub(crate) fn source_code_server_is_bundled_runtime(repo_root: &Path) -> bool {
     repo_root.join("lib/node").is_file()
+        || cfg!(windows) && repo_root.join("lib/node.exe").is_file()
 }
 
 #[derive(Clone, Copy, Default)]
@@ -722,6 +759,15 @@ pub(crate) fn source_code_server_open_file_in_existing_instance(
     column: Option<u32>,
     workspace_folder: &Path,
 ) -> Result<(), String> {
+    source_code_server_open_file_on_host(file_path, line, column, workspace_folder)
+}
+
+fn source_code_server_open_file_on_host(
+    file_path: &Path,
+    line: Option<u32>,
+    column: Option<u32>,
+    workspace_folder: &Path,
+) -> Result<(), String> {
     /*
     Hand the validated file to code-server's process-local open queue. If the
     matching Source workbench has not registered its VS Code socket yet, the
@@ -738,8 +784,16 @@ pub(crate) fn source_code_server_open_file_in_existing_instance(
     let node_path = source_code_server_resolve_node_path(&repo_root)?;
     let entrypoint_path = repo_root.join("out/node/entry.js");
     let (user_data_dir, _) = source_code_server_runtime_storage()?;
+    #[cfg(not(windows))]
     let session_socket = user_data_dir.join("code-server-ipc.sock");
+    #[cfg(windows)]
+    let session_socket = source_code_server_native_session_socket(&user_data_dir);
     let mut command = Command::new(&node_path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
     command
         .arg(&entrypoint_path)
         .arg("--user-data-dir")
@@ -786,6 +840,11 @@ pub(crate) fn source_code_server_open_file_in_existing_instance(
     column: Option<u32>,
     workspace_folder: &Path,
 ) -> Result<(), String> {
+    if windows_terminal_backend::current_preference()
+        == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
+    {
+        return source_code_server_open_file_on_host(file_path, line, column, workspace_folder);
+    }
     let mut command = windows_terminal_backend::source_code_server_open_file_command(
         file_path,
         line,
@@ -802,4 +861,18 @@ pub(crate) fn source_code_server_open_file_in_existing_instance(
     } else {
         Err("Ghostex Code could not accept the file-open request.".to_string())
     }
+}
+
+#[cfg(windows)]
+pub(crate) fn source_code_server_native_session_socket(user_data_dir: &Path) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    // CDXC:CodeEditor 2026-09-14 WHY:
+    // Node's Windows IPC endpoints are named pipes; a Unix socket filename leaves the editor's open-file queue unavailable.
+    // The profile-derived name keeps native editor instances isolated and must match on launch and queued file open.
+    let identity = user_data_dir
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_lowercase();
+    let digest = Sha256::digest(identity.as_bytes());
+    PathBuf::from(format!(r"\\.\pipe\ghostex-code-{digest:x}"))
 }

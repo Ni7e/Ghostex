@@ -63,6 +63,9 @@ if ($BuildPhase -ne "stage") {
         Pop-Location
     }
 
+    # Native Windows Code uses its own Windows editor payload; WSL keeps its Linux component.
+    & (Join-Path $ScriptDir "build-windows-code-server.ps1")
+
     # 2) Rust binaries (bootstrap, main app, CEF helper, and installer launcher). Requires MSVC toolchain, cmake,
     # and ninja (cef-dll-sys builds libcef_dll_wrapper), plus Zig 0.16.x for
     # libghostty-vt (GHOSTEX_ZIG override honored by apps/desktop/build.rs).
@@ -331,4 +334,11 @@ if ($OnDemandComponents -or ($WslCodeServerArchive -and (Test-Path $WslCodeServe
     if ($LASTEXITCODE -ne 0) { throw "Could not seal the Windows on-demand manifest" }
 }
 
+# Native Code is packaged beside the desktop runtime; the WSL editor remains a separate Linux component.
+$NativeCodeRoot = Join-Path $GpuiDir "build/native-code-server"
+if (!(Test-Path (Join-Path $NativeCodeRoot "lib/node.exe")) -or
+    !(Test-Path (Join-Path $NativeCodeRoot "lib/vscode/out/server-main.js"))) {
+    throw "The native Windows editor is missing. Run the compile phase before staging."
+}
+Copy-Item $NativeCodeRoot (Join-Path $AppDir "code-server") -Recurse -Force
 Write-Host "Staged $AppDir"

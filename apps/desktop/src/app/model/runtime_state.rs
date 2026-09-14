@@ -676,12 +676,16 @@ impl SourceCodeServerRuntimeSettings {
         } else {
             "Code"
         };
+        #[cfg(windows)]
+        let config_root = std::env::var_os("APPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| home_dir().join("AppData/Roaming"));
+        #[cfg(not(windows))]
+        let config_root = home_dir().join("Library/Application Support");
         Self {
             link_vscode_user_config,
             use_vscode_insiders_user_config,
-            vscode_user_config_dir: gpui_path_string(
-                &home_dir().join(format!("Library/Application Support/{app_name}/User")),
-            ),
+            vscode_user_config_dir: gpui_path_string(&config_root.join(format!("{app_name}/User"))),
         }
     }
 
@@ -725,6 +729,8 @@ pub(crate) enum SourceCodeServerRuntimeFailure {
     InstallDownload,
     InstallIntegrity,
     InstallOther,
+    #[cfg(windows)]
+    NativeEditorMissing,
     Launch,
 }
 
@@ -738,6 +744,10 @@ impl SourceCodeServerRuntimeFailure {
                 "The VS Code IDE component failed verification and was not installed. Try again."
             }
             Self::InstallOther => "The VS Code IDE component couldn’t be installed. Try again.",
+            #[cfg(windows)]
+            Self::NativeEditorMissing => {
+                "The native Windows editor is missing from this build. Install a build that includes the Windows editor."
+            }
             Self::Launch => "VS Code didn’t start in time.",
         }
     }

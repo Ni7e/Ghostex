@@ -315,6 +315,12 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     // focus guard recognizes this app-owned Windows handoff just as it does
     // the AppKit mouse/focus hook on macOS.
     super::shell::mark_native_view_focused(native_view);
+    // CDXC:FocusRouting 2026-09-14 WHY:
+    // A mouse click already focuses Chromium's inner widget on Windows. Moving focus to its browser root and back emits a window blur that immediately dismisses sidebar agent menus.
+    // Preserve the focused descendant while recording the app-owned grant.
+    if native_view_owns_first_responder(native_view) {
+        return;
+    }
     unsafe {
         SetFocus(hwnd);
     }

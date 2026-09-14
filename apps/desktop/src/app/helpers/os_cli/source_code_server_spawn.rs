@@ -14,6 +14,14 @@ pub(crate) fn source_code_server_spawn_runtime(
     settings: &SourceCodeServerRuntimeSettings,
     startup_deadline: Instant,
 ) -> Result<SourceCodeServerRuntimeStartOutput, String> {
+    source_code_server_spawn_host_runtime(target, settings, startup_deadline)
+}
+
+fn source_code_server_spawn_host_runtime(
+    target: &SourceCodeServerRuntimeTarget,
+    settings: &SourceCodeServerRuntimeSettings,
+    startup_deadline: Instant,
+) -> Result<SourceCodeServerRuntimeStartOutput, String> {
     if matches!(
         target.endpoint,
         SourceCodeServerRuntimeEndpoint::Remote { .. }
@@ -83,6 +91,15 @@ pub(crate) fn source_code_server_spawn_runtime(
         .arg("--extensions-dir")
         .arg(&extensions_dir);
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+        command
+            .arg("--session-socket")
+            .arg(source_code_server_native_session_socket(&user_data_dir));
+    }
+
     let started_at = Instant::now();
     let child = command
         .spawn()
@@ -105,6 +122,12 @@ pub(crate) fn source_code_server_spawn_runtime(
     settings: &SourceCodeServerRuntimeSettings,
     startup_deadline: Instant,
 ) -> Result<SourceCodeServerRuntimeStartOutput, String> {
+    if windows_terminal_backend::current_preference()
+        == windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
+    {
+        return source_code_server_spawn_host_runtime(target, settings, startup_deadline);
+    }
+
     /*
     CDXC:PlatformSupport 2026-07-26:
     Windows projects and their authoritative paths live inside the selected
