@@ -1147,13 +1147,26 @@ impl GhostexGpuiApp {
                             this.pending_agents_chat_launch_intents
                                 .insert(workspace_key.clone());
                         }
-                        let opened = this.open_gpui_local_workspace_terminal(
-                            key,
-                            plan,
-                            requested_pane_id,
-                            false,
-                            cx,
-                        );
+                        let opened = if this.active_mode == TitlebarMode::Agents
+                            || this
+                                .should_keep_project_editor_open_for_local_workspace_terminal_focus(
+                                    &key,
+                                ) {
+                            this.open_gpui_local_workspace_terminal(
+                                key,
+                                plan,
+                                requested_pane_id,
+                                false,
+                                cx,
+                            )
+                        } else {
+                            this.open_gpui_local_workspace_terminal_keeping_view(
+                                key,
+                                plan,
+                                requested_pane_id,
+                                cx,
+                            )
+                        };
                         if !opened {
                             this.pending_agents_chat_launch_intents
                                 .remove(&workspace_key);
@@ -1316,6 +1329,8 @@ impl GhostexGpuiApp {
                                 GpuiWorkspaceTerminalSessionKey::Local(key.clone()),
                                 &metadata,
                                 requested_pane_id,
+                                origin == GpuiLocalWorkspaceAttachOrigin::BackgroundSelect
+                                    || this.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key),
                                 cx,
                             );
                         }

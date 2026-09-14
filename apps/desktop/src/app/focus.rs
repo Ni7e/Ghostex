@@ -140,6 +140,9 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
+    /// CDXC:FocusRouting 2026-09-14 WHY:
+    /// Publishing session selections from native responder observations caused Code's companion to alternate between the outgoing and incoming sessions through sidebar focus echoes.
+    /// Responder observations only record shell focus and the active companion slot; explicit session actions own selection and sidebar publication.
     pub(crate) fn reconcile_shell_focus_with_first_responder_target(&mut self) -> bool {
         /*
         Native CEF and terminal child views receive mouse input before their

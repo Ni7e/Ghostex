@@ -306,6 +306,14 @@ impl GhostexGpuiApp {
             self.attach_surfaced_local_workspace_terminals(&next_state, cx);
             return;
         }
+        let session_selection_changed = self
+            .sidebar_gxserver_presentation_focus_state
+            .active_project_id
+            != next_state.active_project_id
+            || self
+                .sidebar_gxserver_presentation_focus_state
+                .focused_session_id
+                != next_state.focused_session_id;
         let workspace_changed = self.reconcile_local_workspace_tabs_with_sidebar(&next_state, cx);
         self.sidebar_gxserver_presentation_focus_state = next_state;
         self.sync_gpui_engine_first_prompt_input_suppression(cx);
@@ -316,7 +324,8 @@ impl GhostexGpuiApp {
             let mode = self.active_mode;
             let focus_companion =
                 self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode);
-            if let Some(key) = self.project_editor_companion_active_terminal_key()
+            if session_selection_changed
+                && let Some(key) = self.project_editor_companion_active_terminal_key()
                 && let Some(session_id) = self.shell_session_for_workspace_terminal_key(&key)
                 && self.project_editor_companion_terminal_session_is_active_project_eligible(
                     session_id,
@@ -1609,10 +1618,7 @@ impl GhostexGpuiApp {
         &self,
         key: &GpuiWorkspaceTerminalSessionKey,
     ) -> bool {
-        if !self.active_mode.is_project_editor_mode()
-            || !self.project_editor_companion_is_visible()
-            // CDXC:SessionChat 2026-09-05 WHY: An explicit chat launch must expose the Agents composer; keeping Code or Docs open would focus its terminal companion instead.
-            || self.pending_agents_chat_launch_intents.contains(key)
+        if !self.active_mode.is_project_editor_mode() || !self.project_editor_companion_is_visible()
         {
             return false;
         }

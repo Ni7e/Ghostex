@@ -324,6 +324,9 @@ impl GhostexGpuiApp {
             .collect()
     }
 
+    /// CDXC:Workarea 2026-09-14 DECISION:
+    /// User: with two vertically split companion panes in a non-Agents view, sidebar session clicks and new sessions replace the currently active companion pane.
+    /// Reconciliation preserves the active slot recorded by pane focus instead of resetting it from the sidebar's previous selection.
     pub(crate) fn sync_project_editor_companion_terminal_selection(&mut self) -> bool {
         let previous = (
             self.project_editor_companion_terminal_session_id,
@@ -354,21 +357,17 @@ impl GhostexGpuiApp {
                 top = Some(active_session_id);
                 self.project_editor_companion_focused_terminal_slot =
                     ProjectEditorCompanionTerminalSlot::Top;
-            } else if top == Some(active_session_id) {
-                self.project_editor_companion_focused_terminal_slot =
-                    ProjectEditorCompanionTerminalSlot::Top;
-            } else if bottom == Some(active_session_id) {
-                self.project_editor_companion_focused_terminal_slot =
-                    ProjectEditorCompanionTerminalSlot::Bottom;
-            } else if bottom.is_some()
-                && self.project_editor_companion_focused_terminal_slot
-                    == ProjectEditorCompanionTerminalSlot::Bottom
-            {
-                bottom = Some(active_session_id);
-            } else {
-                top = Some(active_session_id);
-                self.project_editor_companion_focused_terminal_slot =
-                    ProjectEditorCompanionTerminalSlot::Top;
+            } else if top != Some(active_session_id) && bottom != Some(active_session_id) {
+                if bottom.is_some()
+                    && self.project_editor_companion_focused_terminal_slot
+                        == ProjectEditorCompanionTerminalSlot::Bottom
+                {
+                    bottom = Some(active_session_id);
+                } else {
+                    top = Some(active_session_id);
+                    self.project_editor_companion_focused_terminal_slot =
+                        ProjectEditorCompanionTerminalSlot::Top;
+                }
             }
         }
 

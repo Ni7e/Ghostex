@@ -159,6 +159,8 @@ impl GhostexGpuiApp {
                             ),
                             &metadata,
                             preview_pane_id,
+                            this.pending_keep_view_remote_focus
+                                .contains(&GpuiRemoteAttachSessionKey::from(&prepare_reference)),
                             cx,
                         );
                     });

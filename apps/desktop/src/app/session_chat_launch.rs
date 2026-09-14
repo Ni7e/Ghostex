@@ -32,7 +32,7 @@ impl GhostexGpuiApp {
                         let workspace_key = GpuiWorkspaceTerminalSessionKey::Local(key.clone());
                         this.pending_agents_chat_launch_intents.insert(workspace_key.clone());
                         if let Ok(metadata) = metadata {
-                            this.show_pending_agents_chat_launch(workspace_key, &metadata, this.agents_workspace.focused_pane, cx);
+                            this.show_pending_agents_chat_launch(workspace_key, &metadata, this.agents_workspace.focused_pane, true, cx);
                         }
                     });
                     background.spawn(async move {
@@ -50,7 +50,14 @@ impl GhostexGpuiApp {
                         if this.local_workspace_latest_focus_key.as_ref() != Some(&key) {
                             return;
                         }
-                        if this.open_gpui_local_workspace_terminal(key, plan, this.agents_workspace.focused_pane, false, cx) {
+                        let opened = if this.active_mode == TitlebarMode::Agents
+                            || this.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key)
+                        {
+                            this.open_gpui_local_workspace_terminal(key, plan, this.agents_workspace.focused_pane, false, cx)
+                        } else {
+                            this.open_gpui_local_workspace_terminal_keeping_view(key, plan, this.agents_workspace.focused_pane, cx)
+                        };
+                        if opened {
                             Ok(())
                         } else {
                             Err("Ghostex could not open the new agent session.".to_string())
@@ -76,6 +83,7 @@ impl GhostexGpuiApp {
         key: GpuiWorkspaceTerminalSessionKey,
         metadata: &serde_json::Value,
         requested_pane_id: WorkspacePaneId,
+        keep_view: bool,
         cx: &mut gpui::Context<Self>,
     ) {
         if !self.pending_agents_chat_launch_intents.contains(&key) {
@@ -183,9 +191,13 @@ impl GhostexGpuiApp {
             session.agent_icon = icon;
         }
         self.agents_workspace.select_tab(pane_id, session_id);
-        self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
+        if !keep_view {
+            self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
+        }
         self.activate_preferred_agents_chat_launch_intent(session_id, cx);
-        self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
+        if self.active_mode == TitlebarMode::Agents {
+            self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
+        }
         self.scroll_workspace_pane_active_tab(pane_id);
         self.update_active_mode_cef_child_visibility(cx);
         self.persist_shell_layout_state();

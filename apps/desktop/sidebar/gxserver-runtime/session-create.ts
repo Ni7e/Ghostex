@@ -645,6 +645,11 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     await this.createAgentSessionFromSidebarLaunch(message.agentId, message.groupId, message.accountId);
   },
 
+  /**
+   * CDXC:AgentLauncher 2026-09-14 DECISION:
+   * User: starting a new agent from Docs, Code, Browser, or any other non-Agents view must keep that view selected.
+   * Both local and remote launches use keepView through native attachment so startup completion preserves the view too.
+   */
   async createAgentSession(
     this: GpuiSidebarRuntime,
     agentId: string,
@@ -715,7 +720,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
                 sessionId: createdSessionId,
               },
               { agentId, groupId, type: 'runSidebarAgent' },
-              { preferredInterface: 'chat' }
+              { keepView: true, preferredInterface: 'chat' }
             );
           } else {
             await this.startRemoteAgentSessionAndSendPrompt(
@@ -827,7 +832,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
       this.focusLocalWorkspaceSession(
         normalizeNonEmptyString(response.session?.projectId) ?? projectId,
         createdSessionId,
-        preferredAgentInterface === 'chat' ? { preferredInterface: 'chat' } : undefined
+        { keepView: true, preferredInterface: preferredAgentInterface }
       );
     }
   },
