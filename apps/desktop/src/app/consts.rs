@@ -1195,7 +1195,9 @@ pub(crate) const WORKSPACE_SPLIT_SEPARATOR_THICKNESS: f32 = 1.0;
 
 pub(crate) const WORKSPACE_BOTTOM_ROW_TOP_RATIO: f32 = 0.72;
 
-pub(crate) const PANE_RESIZE_MINIMUM_WIDTH: f32 = 220.0;
+/// CDXC:CommandPane 2026-09-14 DECISION:
+/// User: chat view companion sidepanes and agent panes in general have a minimum width of 388px.
+pub(crate) const PANE_RESIZE_MINIMUM_WIDTH: f32 = 388.0;
 
 pub(crate) const PANE_RESIZE_MINIMUM_HEIGHT: f32 = 160.0;
 
@@ -1214,10 +1216,10 @@ pub(crate) const COMMAND_PANE_TAB_BAR_HEIGHT: f32 = 26.0;
 pub(crate) const COMMAND_PANE_STRIP_HEIGHT: f32 = 26.0;
 
 /*
-CDXC:CommandPane 2026-09-03:
-The collapsed strip's left inset equals the expanded leaf's 1px side edge plus its 2px group border, so tabs sit at the same x whether the panel is minimized or not. The edge width is the part of that inset painted as the left border line.
+CDXC:CommandPane 2026-09-14 WHY:
+The collapsed strip matches the expanded leaf's 1px side edge without the former 2px group inset, so minimizing does not shift the tabs.
 */
-pub(crate) const COMMAND_PANE_COLLAPSED_STRIP_LEFT_MARGIN: f32 = 3.0;
+pub(crate) const COMMAND_PANE_COLLAPSED_STRIP_LEFT_MARGIN: f32 = 1.0;
 
 pub(crate) const COMMAND_PANE_COLLAPSED_STRIP_LEFT_EDGE_WIDTH: f32 = 1.0;
 
