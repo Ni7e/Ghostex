@@ -30,6 +30,8 @@ use crate::app::window::*;
 use crate::*;
 
 impl GhostexGpuiApp {
+    /// CDXC:Titlebar 2026-09-14 DECISION:
+    /// User: clicking another dropdown's trigger closes the current dropdown and opens the clicked dropdown in the same click.
     pub(crate) fn set_gpui_titlebar_popup_open(
         &mut self,
         kind: GpuiTitlebarPopupKind,

@@ -401,13 +401,17 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn restore_account_usage_keyboard_focus(&self) {
+    /// CDXC:FocusRouting 2026-09-14 WHY:
+    /// Restoring chat focus when Usage closes queues a responder event that can arrive after another dropdown opens and dismiss it as an outside click. Mark only the restoration as programmatic so real outside clicks still dismiss dropdowns.
+    pub(crate) fn restore_account_usage_keyboard_focus(&mut self) {
         #[cfg(target_os = "macos")]
         {
             unsafe extern "C" {
                 fn GhostexGpuiEndUsageKeyboardFocus(view: *mut std::ffi::c_void);
             }
+            self.begin_programmatic_focus();
             unsafe { GhostexGpuiEndUsageKeyboardFocus(self.parent_ns_view) };
+            self.end_programmatic_focus();
         }
     }
 
