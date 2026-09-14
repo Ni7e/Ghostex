@@ -445,9 +445,10 @@ an explicitly saved WSL choice is preserved. PowerShell uses Windows folders and
 installed Windows agent CLIs without requiring WSL. Switching environments opens a
 restart dialog: choose **Restart now** to apply the change or **Later** to keep
 working until the next app restart. Projects and running sessions remain in their
-original environment. Native
-sessions stay alive when the app closes or gxserver restarts. The Code view
-still requires the WSL environment.
+original environment. Native sessions stay alive when the app closes or gxserver
+restarts. The Code view uses the same environment: native Windows folders in
+PowerShell mode and Linux folders in WSL mode. The Windows app includes the native
+editor.
 Keys: `windowsTerminalBackend`, `windowsWslDistribution`.
 
 Terminals are embedded Ghostty surfaces. Font, theme, cursor, padding,
