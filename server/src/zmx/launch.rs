@@ -494,8 +494,32 @@ fn run_zsh_script_blocking(
         ZmxShellProfileMode::Login => shell.script_args(script),
         ZmxShellProfileMode::Profileless => shell.profileless_script_args(script),
     };
-    let mut child = Command::new(&shell.executable)
-        .args(shell_args)
+    #[cfg(windows)]
+    let (mut process, native_environment) = match super::scripts_windows::process(script)? {
+        Some(invocation) => invocation,
+        None => {
+            let mut command = Command::new(&shell.executable);
+            command.args(shell_args);
+            (command, std::collections::HashMap::new())
+        }
+    };
+    #[cfg(not(windows))]
+    let mut process = {
+        let mut command = Command::new(&shell.executable);
+        command.args(shell_args);
+        command
+    };
+    #[cfg(windows)]
+    {
+        // CDXC:PlatformSupport 2026-09-14 WHY:
+        // Session polling is background work. Without CREATE_NO_WINDOW, Windows Terminal opens a new window for every PowerShell probe.
+        use std::os::windows::process::CommandExt;
+        process.creation_flags(0x0800_0000);
+    }
+    let mut environment = build_gxserver_zmx_child_environment();
+    #[cfg(windows)]
+    environment.extend(native_environment);
+    let mut child = process
         /*
         CDXC:ServerDaemon 2026-07-18:
         Command::envs does not remove inherited variables that are absent from
@@ -504,7 +528,7 @@ fn run_zsh_script_blocking(
         interactive zmx terminals, then install the complete sanitized copy.
         */
         .env_clear()
-        .envs(build_gxserver_zmx_child_environment())
+        .envs(environment)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -497,8 +497,7 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'sessionChatTheme',
           options: SESSION_CHAT_THEME_OPTIONS,
-          subtitle:
-            'Follow the app theme by default, or override chat with Light, Dark, or System.',
+          subtitle: 'Follow the app theme by default, or override chat with Light, Dark, or System.',
           title: 'Chat theme',
         },
         {
@@ -651,6 +650,12 @@ export function getSettingsSearchSectionDefinitions() {
       settings: [
         ...(IS_WINDOWS_HOST
           ? [
+              {
+                key: 'windowsTerminalBackend',
+                title: 'Windows Environment',
+                subtitle: 'PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.',
+                options: [{ label: 'PowerShell (native Windows)', value: 'powershell' }, { label: 'WSL (Linux)', value: 'wsl' }],
+              },
               {
                 key: 'windowsWslDistribution',
                 subtitle:

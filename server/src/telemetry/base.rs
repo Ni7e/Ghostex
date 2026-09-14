@@ -97,7 +97,7 @@ fn read_raw_os_version() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn read_raw_os_version() -> Option<String> {
-    let output = std::process::Command::new("cmd")
+    let output = crate::platform::process::background_command("cmd")
         .args(["/C", "ver"])
         .output()
         .ok()?;

@@ -182,6 +182,19 @@ fn get_bd_tool_status_for_candidates(candidates: &[ToolCandidate]) -> ToolCapabi
 }
 
 fn bundled_tool_candidates(tool: &str) -> Vec<ToolCandidate> {
+    #[cfg(windows)]
+    if tool == "zmx" {
+        return std::env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.parent().map(|parent| ToolCandidate {
+                    executable_path: parent.join("ghostex-session-host.exe"),
+                    source: ToolSource::GxserverBundle,
+                })
+            })
+            .into_iter()
+            .collect();
+    }
     let gxserver_root = default_gxserver_root();
     let repo_root = gxserver_root
         .parent()

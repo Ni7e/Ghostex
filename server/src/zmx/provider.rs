@@ -625,10 +625,19 @@ pub fn read_zmx_session_process_identities(
 pub fn read_zmx_existing_session_names() -> Result<HashSet<String>, ZmxEndpointError> {
     let zmx = require_zmx()?;
     let result = run_zmx_probe_command(
-        format!(
-            "unset ZMX_SESSION ZMX_SESSION_PREFIX\nexec {} list --short",
-            shell_quote(&zmx.executable_path),
-        ),
+        {
+            #[cfg(windows)]
+            {
+                super::scripts_windows::list_command(&zmx.executable_path, true)
+            }
+            #[cfg(not(windows))]
+            {
+                format!(
+                    "unset ZMX_SESSION ZMX_SESSION_PREFIX\nexec {} list --short",
+                    shell_quote(&zmx.executable_path)
+                )
+            }
+        },
         ZmxCommandOptions {
             stdout_limit_bytes: Some(GXSERVER_ZMX_PROCESS_SNAPSHOT_STDOUT_LIMIT_BYTES),
             timeout_ms: Some(ZMX_LIFECYCLE_COMMAND_TIMEOUT_MS),
@@ -669,6 +678,9 @@ pub fn parse_zmx_session_process_identities(
 }
 
 fn build_zmx_process_snapshot_command(zmx_executable_path: &str) -> String {
+    #[cfg(windows)]
+    return super::scripts_windows::process_snapshot_command(zmx_executable_path);
+    #[cfg(not(windows))]
     /*
     CDXC:SessionIdentity 2026-06-21-18:25:
     Rust must copy TypeScript gxserver's live zmx process identity scan so sidebar rows are repaired from actual agent executables after cutover. Capture only bounded process metadata in memory, never persistent logs, and keep parsing centralized in server instead of client fallbacks.

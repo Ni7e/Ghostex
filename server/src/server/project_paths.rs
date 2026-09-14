@@ -402,7 +402,7 @@ pub(crate) fn resolve_git_root_for_existing_directory(
     home_dir: &Path,
 ) -> std::result::Result<Option<String>, ProjectPathHttpError> {
     let cwd = normalize_existing_directory_path(input, "path", home_dir)?;
-    let output = match StdCommand::new("git")
+    let output = match crate::platform::process::background_command("git")
         .args(["-C", cwd.as_str(), "rev-parse", "--show-toplevel"])
         .output()
     {

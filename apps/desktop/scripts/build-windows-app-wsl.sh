@@ -259,6 +259,8 @@ printf '%s\r\n' \
 	"\"$WINDOWS_RUSTUP_WIN\" target add $RUST_TARGET" \
 	'if errorlevel 1 exit /b %errorlevel%' \
 	"\"$WINDOWS_CARGO_WIN\" build --release --bin ghostex-gpui-cef-bootstrap --bin ghostex-gpui --bin ghostex-gpui-cef-helper --target $RUST_TARGET" \
+	'if errorlevel 1 exit /b %errorlevel%' \
+	"\"$WINDOWS_CARGO_WIN\" build --release --manifest-path \"$REPO_ROOT_WIN\\server\\Cargo.toml\" --target $RUST_TARGET --bin gxserver --bin ghostex --bin ghostex-session-host" \
 	'exit /b %errorlevel%' \
 	>"$WINDOWS_BUILD_BATCH"
 report_build_phase "Building the native Windows GPUI shell..."
@@ -339,14 +341,15 @@ EOF
 		'if errorlevel 1 exit /b %errorlevel%' \
 		"\"$WINDOWS_RUSTUP_WIN\" target add $WSL_RUST_TARGET" \
 		'if errorlevel 1 exit /b %errorlevel%' \
-		"\"$WINDOWS_CARGO_WIN\" build --release --manifest-path \"$REPO_ROOT_WIN\\server\\Cargo.toml\" --target $WSL_RUST_TARGET --bin gxserver" \
+		"\"$WINDOWS_CARGO_WIN\" build --release --manifest-path \"$REPO_ROOT_WIN\\server\\Cargo.toml\" --target $WSL_RUST_TARGET --bin gxserver --bin ghostex" \
 		'exit /b %errorlevel%' \
 		>"$build_batch"
 
 	"$CMD_EXE" /d /c call "$build_batch_win" 2>&1 | cat
 
 	WSL_GXSERVER_CURRENT_BIN="$WSL_GXSERVER_CARGO_OUTPUT_ROOT/$WSL_RUST_TARGET/release/gxserver"
-	if [[ ! -x "$WSL_GXSERVER_CURRENT_BIN" ]]; then
+	WSL_GHOSTEX_CURRENT_BIN="$WSL_GXSERVER_CARGO_OUTPUT_ROOT/$WSL_RUST_TARGET/release/ghostex"
+	if [[ ! -x "$WSL_GXSERVER_CURRENT_BIN" || ! -x "$WSL_GHOSTEX_CURRENT_BIN" ]]; then
 		echo "The current-source WSL gxserver build is missing: $WSL_GXSERVER_CURRENT_BIN" >&2
 		exit 1
 	fi
@@ -402,6 +405,16 @@ fi
 # making WSL's p9 client perform every individual CEF/Vite file operation.
 report_build_phase "Staging the Windows app bundle with native file copies..."
 mkdir -p "$APP_DIR"
+# CDXC:PlatformSupport 2026-09-14 WHY:
+# Persistent native sessions keep their host executable mapped after the app exits.
+# Move the old runtime aside before mirroring the stage, matching the PowerShell builder.
+if [[ -d "$APP_DIR/resources/native" ]]; then
+	RETIRED_NATIVE_ROOT="$GPUI_DIR/build/windows/retired-native-runtimes"
+	mkdir -p "$RETIRED_NATIVE_ROOT"
+	RETIRED_NATIVE_DIR="$(mktemp -d "$RETIRED_NATIVE_ROOT/runtime.XXXXXX")"
+	rmdir "$RETIRED_NATIVE_DIR"
+	mv "$APP_DIR/resources/native" "$RETIRED_NATIVE_DIR"
+fi
 EMPTY_STAGE_DIR="$(mktemp -d "$GPUI_DIR/build/.windows-empty-stage.XXXXXX")"
 empty_stage_cleanup_command="$(printf 'rmdir -- %q 2>/dev/null || true' "$EMPTY_STAGE_DIR")"
 trap "$empty_stage_cleanup_command" EXIT
@@ -417,6 +430,13 @@ else
 	cp "$RUST_RELEASE_DIR/ghostex-gpui.exe" "$APP_DIR/Ghostex.exe"
 fi
 cp "$RUST_RELEASE_DIR/ghostex-gpui-cef-helper.exe" "$APP_DIR/"
+mkdir -p "$APP_DIR/resources/native"
+for native_binary in gxserver.exe ghostex.exe ghostex-session-host.exe; do
+	cp "$RUST_RELEASE_DIR/$native_binary" "$APP_DIR/resources/native/$native_binary"
+done
+# Keep this seal identical to build-windows-app.ps1; gxserver reads the identity one directory above its native binaries.
+NATIVE_FINGERPRINT="sha256:$(for native_binary in gxserver.exe ghostex.exe ghostex-session-host.exe; do sha256sum "$APP_DIR/resources/native/$native_binary" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
+printf '{"buildIdentity":"gxserver:0.1.0:%s","fingerprint":"%s","packageVersion":"0.1.0"}\n' "$NATIVE_FINGERPRINT" "$NATIVE_FINGERPRINT" >"$APP_DIR/resources/build-identity.json"
 LOCALES_DIR=""
 for locale_candidate in "$CEF_RELEASE/locales" "$CEF_RESOURCES/locales"; do
 	if [[ -d "$locale_candidate" ]]; then
@@ -534,8 +554,10 @@ stage_current_wsl_runtime_archive() {
 		exit 1
 	fi
 	cp "$WSL_GXSERVER_CURRENT_BIN" "$package_dir/bin/gxserver"
+	cp "$WSL_GHOSTEX_CURRENT_BIN" "$package_dir/bin/ghostex"
 	cp "$WSL_ZMX_CURRENT_BIN" "$package_dir/bin/zmx"
 	chmod 755 "$package_dir/bin/gxserver"
+	chmod 755 "$package_dir/bin/ghostex"
 	chmod 755 "$package_dir/bin/zmx"
 
 	# The package identity participates in gxserver's restart decision. Keeping
@@ -547,7 +569,7 @@ stage_current_wsl_runtime_archive() {
 	current_fingerprint="sha256:$(
 		{
 			printf '%s\0' "$base_identity"
-			sha256sum "$package_dir/bin/gxserver" "$package_dir/bin/zmx"
+			sha256sum "$package_dir/bin/gxserver" "$package_dir/bin/ghostex" "$package_dir/bin/zmx"
 		} | sha256sum | awk '{print $1}'
 	)"
 	source_revision="$(git -C "$REPO_ROOT" rev-parse HEAD)"

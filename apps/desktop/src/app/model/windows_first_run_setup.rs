@@ -25,6 +25,7 @@ pub(crate) enum GpuiWindowsFirstRunSetupState {
 pub(crate) enum GpuiWindowsFirstRunSetupAction {
     Retry,
     OpenWslGuide,
+    NativePowerShell,
     ChooseDistribution(String),
     ClearDistribution,
 }

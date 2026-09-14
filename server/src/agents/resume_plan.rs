@@ -1,6 +1,10 @@
 use serde_json::{Map, Value};
 
+#[cfg(windows)]
+mod windows;
 use super::*;
+#[cfg(windows)]
+pub(crate) use windows::*;
 
 pub(crate) fn build_agent_resume_plan(
     project: &Value,
@@ -33,6 +37,13 @@ pub(crate) fn build_agent_resume_plan(
             } else {
                 "--resume"
             };
+            #[cfg(windows)]
+            let command = format!(
+                "$env:{variable}={}; {command} {selector} {}",
+                quote_shell_arg(home),
+                quote_shell_arg(id)
+            );
+            #[cfg(not(windows))]
             let command = format!(
                 "env {variable}={} {command} {selector} {}",
                 quote_shell_arg(home),
@@ -352,13 +363,14 @@ pub(crate) fn build_agent_resume_command(
                 quote_shell_double_arg(&reference)
             )
         }),
-        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" => exact_reference
-            .map(|reference| {
+        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" | "zcode" => {
+            exact_reference.map(|reference| {
                 format!(
                     "{agent_command} --resume {}",
                     quote_shell_double_arg(&reference)
                 )
-            }),
+            })
+        }
         "grok" => exact_reference
             .map(|reference| format!("{agent_command} -r {}", quote_shell_double_arg(&reference))),
         "kiro" => exact_reference.map(|reference| {
@@ -491,13 +503,14 @@ pub(crate) fn build_agent_resume_copy_command(input: &AgentResumeInput) -> Optio
                 quote_shell_double_arg(&reference)
             )
         }),
-        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" => exact_reference
-            .map(|reference| {
+        "codebuddy" | "copilot" | "droid" | "gemini" | "hermes-agent" | "qoder" | "zcode" => {
+            exact_reference.map(|reference| {
                 format!(
                     "{agent_command} --resume {}",
                     quote_shell_double_arg(&reference)
                 )
-            }),
+            })
+        }
         "grok" => exact_reference
             .map(|reference| format!("{agent_command} -r {}", quote_shell_double_arg(&reference))),
         "kiro" => exact_reference.map(|reference| {
@@ -617,9 +630,8 @@ pub(crate) fn restorable_agent_id(value: Option<&str>) -> Option<&str> {
     match value {
         "amp" | "antigravity" | "campfire" | "claude" | "codebuddy" | "codex" | "command-code"
         | "copilot" | "cursor" | "devin" | "droid" | "gemini" | "grok" | "hermes-agent"
-        | "kimi" | "kiro" | "omp" | "openclaude" | "opencode" | "pi" | "qoder" | "rovodev" => {
-            Some(value)
-        }
+        | "kimi" | "kiro" | "omp" | "openclaude" | "opencode" | "pi" | "qoder" | "rovodev"
+        | "zcode" => Some(value),
         _ => None,
     }
 }
@@ -918,6 +930,7 @@ pub(crate) fn build_rovodev_resume_command(agent_command: &str, session_referenc
     }
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_claude_resume_lookup_command(
     agent_command: &str,
     input: &AgentResumeInput,
@@ -950,6 +963,7 @@ pub(crate) fn build_claude_resume_lookup_command(
     .join(" ")
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_cursor_resume_lookup_command(
     agent_command: &str,
     project_path: &str,
@@ -991,6 +1005,7 @@ pub(crate) fn build_opencode_resume_command(
     )
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_codex_validated_resume_command(
     agent_command: &str,
     session_reference: &str,
@@ -1018,6 +1033,7 @@ pub(crate) fn build_codex_validated_resume_command(
     .join(" ")
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_codex_resume_lookup_command(agent_command: &str, resume_title: &str) -> String {
     [
         "CODEX_RESUME_SESSION_ID=\"$(".to_string(),
@@ -1056,6 +1072,9 @@ pub(crate) fn build_resume_lookup_command() -> String {
         .map(|path| path.to_string_lossy().to_string())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "gxserver".to_string());
+    #[cfg(windows)]
+    return format!("& {} resume-lookup", quote_shell_arg(&executable));
+    #[cfg(not(windows))]
     format!("{} resume-lookup", quote_shell_arg(&executable))
 }
 

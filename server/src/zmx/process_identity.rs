@@ -640,7 +640,7 @@ fn split_process_command_prefix(command: &str, max_tokens: usize) -> Vec<String>
             escaped = false;
             continue;
         }
-        if char == '\\' {
+        if char == '\\' && !cfg!(windows) {
             escaped = true;
             continue;
         }
@@ -676,7 +676,7 @@ fn split_process_command_prefix(command: &str, max_tokens: usize) -> Vec<String>
 fn normalize_process_executable_name(token: Option<&str>) -> Option<String> {
     let normalized = normalize_process_token(token)?;
     let basename = normalized
-        .rsplit('/')
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or(normalized.as_str())
         .to_string();

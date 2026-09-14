@@ -1145,7 +1145,13 @@ pub(crate) fn current_plugin_marker(marker: &str) -> String {
 }
 
 pub(crate) fn command_for_agent(definition: &HookDefinition, notify_hook_path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        return super::windows::command(definition.agent_id, notify_hook_path);
+    }
+    #[cfg(not(windows))]
     let notify_hook_path = path_string(notify_hook_path);
+    #[cfg(not(windows))]
     match command_agent(definition.agent_id) {
         Some(agent) => format!(
             "GHOSTEX_AGENT={} {}",

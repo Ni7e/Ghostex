@@ -185,6 +185,12 @@ pub(crate) fn started_provider_state_patch(
     zmx_executable_path: &str,
 ) -> Result<Map<String, Value>, DomainStateError> {
     let mut provider_state = provider_state_patch(session, probe)?;
+    #[cfg(windows)]
+    {
+        provider_state.insert("terminalBackend".into(), json!("nativeWindows"));
+        provider_state.insert("nativeSessionProtocol".into(), json!(1));
+        return Ok(provider_state);
+    }
     provider_state.remove(LEGACY_ZMX_BINARY_STAMP_KEY);
     match current_zmx_wire_generation(zmx_executable_path) {
         Some(wire_generation) => {

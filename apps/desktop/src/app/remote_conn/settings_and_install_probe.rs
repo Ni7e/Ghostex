@@ -100,6 +100,11 @@ impl GhostexGpuiApp {
         }
         #[cfg(target_os = "windows")]
         {
+            self.prompt_windows_environment_restart_after_settings_save(
+                &previous_settings_object,
+                write_result.snapshot.object(),
+                cx,
+            );
             let next_windows_wsl_distribution = write_result
                 .snapshot
                 .object()

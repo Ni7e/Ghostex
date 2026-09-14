@@ -99,6 +99,15 @@ pub(crate) fn promote_draft_on_first_activity(
     runtime_settings: &mut Map<String, Value>,
     next_last_active_at: Option<&str>,
 ) -> bool {
+    // CDXC:Drafts 2026-09-14 WHY:
+    // Native Windows Codex can paint a working title before creating its first conversation, after the startup suppression window. Promoting that empty draft removes Chat eligibility and sends the return-to-chat button to hook Settings.
+    // Its explicit prompt hook and Chat send already promote on real input; passive activity must not consume the draft.
+    #[cfg(windows)]
+    if crate::session_chat_follower::session_chat_agent_for_session(session).as_deref()
+        == Some("codex")
+    {
+        return false;
+    }
     if read_text_value(session, "lastActiveAt").is_some() {
         return false;
     }

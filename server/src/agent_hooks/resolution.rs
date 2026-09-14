@@ -280,7 +280,8 @@ pub(crate) fn is_ghostex_owned_hook_command(value: &Value, command: &str) -> boo
 
 pub(crate) fn text_contains_ghostex_owned_hook_command(text: &str) -> bool {
     let normalized = text.to_ascii_lowercase();
-    normalized.contains("agent-shell-notify")
+    normalized.contains("agent-hook-notify-native")
+        || normalized.contains("agent-shell-notify")
         || normalized.contains(".ghostex/hooks")
         || normalized.contains(".ghostexterm")
         || normalized.contains("ghostex_notify_hook")

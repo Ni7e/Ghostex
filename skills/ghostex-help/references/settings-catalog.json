@@ -5657,6 +5657,30 @@
       "agentWritable": true
     },
     {
+      "key": "windowsTerminalBackend",
+      "title": "Windows Environment",
+      "subtitle": "Windows only. PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "terminal",
+      "groupTitle": "Terminal",
+      "section": "terminal",
+      "sectionTitle": "Terminal",
+      "type": "enum",
+      "default": "powershell",
+      "options": [
+        {
+          "label": "PowerShell (native Windows)",
+          "value": "powershell"
+        },
+        {
+          "label": "WSL (Linux)",
+          "value": "wsl"
+        }
+      ],
+      "agentWritable": true
+    },
+    {
       "key": "windowsWslDistribution",
       "title": "WSL distribution",
       "subtitle": "Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.",

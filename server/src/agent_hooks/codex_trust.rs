@@ -212,6 +212,20 @@ fn codex_hook_key_source(hooks_path: &Path, hook_paths: &HookPaths) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| "hooks.json".to_string());
+    #[cfg(windows)]
+    {
+        // CDXC:AgentHooks 2026-09-14 WHY:
+        // Codex normalizes Windows separators in its trust key; mixed slash paths made all nine installed hooks appear untrusted.
+        let normalized = fs::canonicalize(&resolved_home)
+            .unwrap_or(resolved_home)
+            .join(file_name);
+        let path = path_string(&normalized).replace('/', "\\");
+        return path
+            .strip_prefix(r"\\?\UNC\")
+            .map(|path| format!(r"\\{path}"))
+            .unwrap_or_else(|| path.strip_prefix(r"\\?\").unwrap_or(&path).to_string());
+    }
+    #[cfg(not(windows))]
     path_string(&resolved_home.join(file_name))
 }
 

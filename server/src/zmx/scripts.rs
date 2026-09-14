@@ -37,6 +37,7 @@ pub(crate) struct ZmxShellProviderCommandInput {
     pub(crate) zmx_executable_path: String,
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_attach_command(input: ZmxAttachCommandInput) -> String {
     /*
     CDXC:Zmx 2026-07-15:
@@ -118,6 +119,7 @@ exec "$zmx_bin" attach --require-existing $zmx_prompt_editor_attach_args "$zmx_s
     shell.command_string(&script, false)
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_started_zmx_attach_command(input: ZmxAttachCommandInput) -> String {
     /*
     createWorkspaceTerminal has just started this exact provider under a
@@ -186,6 +188,7 @@ exec "$zmx_bin" attach --require-existing $zmx_prompt_editor_attach_args "$zmx_s
     shell.command_string(&script, false)
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_kill_command(session_name: &str, zmx_executable_path: &str) -> String {
     format!(
         r#"
@@ -205,6 +208,7 @@ exec "$zmx_bin" kill "$zmx_session" --force
     .to_string()
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_history_command(session_name: &str, zmx_executable_path: &str) -> String {
     format!(
         r#"
@@ -227,6 +231,7 @@ exec "$zmx_bin" history "$zmx_session"
 /// Bounded history, with the old full-history request only when the daemon
 /// explicitly reports that it predates scoped capture (CLI exit status 3).
 #[cfg(not(unix))]
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_screen_capture_command(
     session_name: &str,
     zmx_executable_path: &str,
@@ -259,6 +264,7 @@ exit "$zmx_status"
 
 /// `zmx grid <session>`: the daemon grid plus every attached client and
 /// whether each one is hidden, as JSON.
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_grid_command(session_name: &str, zmx_executable_path: &str) -> String {
     format!(
         r#"
@@ -278,6 +284,7 @@ exec "$zmx_bin" grid "$zmx_session"
     .to_string()
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_send_command(session_name: &str, zmx_executable_path: &str) -> String {
     format!(
         r#"
@@ -297,6 +304,7 @@ exec "$zmx_bin" send "$zmx_session"
     .to_string()
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_run_command(input: ZmxRunCommandInput) -> String {
     let startup_command =
         with_atuin_ignored_shell_history_prefix(input.startup_text.trim_end_matches(['\r', '\n']));
@@ -328,6 +336,7 @@ pub(crate) fn build_zmx_run_command(input: ZmxRunCommandInput) -> String {
     )
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_shell_provider_command(input: ZmxShellProviderCommandInput) -> String {
     let provider_shell_command = format!(
         "{}\n{}",
@@ -429,6 +438,7 @@ exec "$zmx_bin" run "$zmx_session" -d --initial-command {} {} "{}"
     .to_string()
 }
 
+#[cfg(not(windows))]
 pub(crate) fn build_zmx_exists_command(session_name: &str, zmx_executable_path: &str) -> String {
     format!(
         r#"

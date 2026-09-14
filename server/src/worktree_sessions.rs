@@ -400,7 +400,7 @@ pub fn run_worktree_git(cwd: &str, args: &[&str], timeout: Duration) -> Option<S
     if cwd.trim().is_empty() || !Path::new(cwd).is_dir() {
         return None;
     }
-    let mut command = Command::new("git");
+    let mut command = crate::platform::process::background_command("git");
     command
         .args(args)
         .current_dir(cwd)

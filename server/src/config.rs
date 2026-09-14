@@ -110,7 +110,11 @@ pub fn read_selected_local_api_port() -> Result<u16> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     else {
-        return Ok(GXSERVER_LOCAL_API_PORT);
+        return Ok(if cfg!(windows) {
+            58_746
+        } else {
+            GXSERVER_LOCAL_API_PORT
+        });
     };
     let port = raw_port.parse::<u16>().map_err(|_| {
         anyhow!("{GXSERVER_DEV_LOCAL_API_PORT_ENV} must be an integer from 1 to 65535.")

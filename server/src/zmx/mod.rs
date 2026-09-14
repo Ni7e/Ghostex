@@ -10,6 +10,10 @@ pub mod process_identity;
 pub mod provider;
 pub mod screen_capture;
 pub mod scripts;
+#[cfg(windows)]
+pub(crate) mod scripts_windows;
+#[cfg(windows)]
+pub(crate) use scripts_windows::*;
 pub mod session_glue;
 #[cfg(test)]
 mod tests;

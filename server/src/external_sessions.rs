@@ -1,11 +1,12 @@
-//! CDXC:Sessions 2026-09-08 DECISION:
-//! User: detect Claude and Codex conversations from outside Ghostex on first use and let users continue them from Quick Access Sessions.
+//! CDXC:Sessions 2026-09-14 DECISION:
+//! User: import ZCode conversations as well as Claude and Codex conversations from outside Ghostex, and let users continue them from Quick Access Sessions.
+//! This extends the 2026-09-08 Claude and Codex decision to ZCode.
 
 use crate::{
     domain::{DomainRepository, DomainStateError},
     paths::GxserverPaths,
 };
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -229,7 +230,12 @@ fn scan(
             }
         }
     }
-    Ok(conversations.into_values().flatten().collect())
+    let mut result: Vec<_> = conversations.into_values().flatten().collect();
+    result.extend(
+        read_zcode_conversations(&home.join(".zcode"))
+            .map_err(|failure| error(format!("ZCode: {failure}")))?,
+    );
+    Ok(result)
 }
 
 fn read_codex_titles(path: &Path) -> io::Result<Option<HashMap<String, String>>> {
@@ -243,6 +249,96 @@ fn read_codex_titles(path: &Path) -> io::Result<Option<HashMap<String, String>>>
         }
     }
     Ok(Some(titles))
+}
+
+/// CDXC:Sessions 2026-09-14 WHY:
+/// ZCode's CLI store includes headless conversations absent from its desktop task index; the index only supplies lifecycle exclusions.
+/// Read SQLite on each discovery instead of using the transcript-file cache: WAL commits can leave the main database's size and mtime unchanged.
+fn read_zcode_conversations(agent_home: &Path) -> io::Result<Vec<Conversation>> {
+    let db_path = agent_home.join("cli").join("db").join("db.sqlite");
+    let Some(connection) = open_optional_zcode_database(&db_path)? else {
+        return Ok(Vec::new());
+    };
+    let excluded = read_zcode_excluded_ids(&agent_home.join("v2").join("tasks-index.sqlite"))?;
+    let mut statement = connection
+        .prepare(
+            "SELECT id, directory, title, time_updated FROM session \
+             WHERE task_type = 'interactive' AND parent_id IS NULL \
+             AND time_archived IS NULL AND id NOT GLOB 'sess_subagent*'",
+        )
+        .map_err(io::Error::other)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .map_err(io::Error::other)?;
+    let mut conversations = Vec::new();
+    for row in rows {
+        let (id, cwd, title, time_updated) = row.map_err(io::Error::other)?;
+        if excluded.contains(&id)
+            || id.trim().is_empty()
+            || id.chars().any(char::is_control)
+            || !Path::new(&cwd).is_absolute()
+        {
+            continue;
+        }
+        let Some(updated) = chrono::DateTime::from_timestamp_millis(time_updated) else {
+            continue;
+        };
+        let title = title.unwrap_or_default();
+        let title = title.trim();
+        let display_title = if title.is_empty() {
+            format!(
+                "ZCode conversation {}",
+                id.chars().take(18).collect::<String>()
+            )
+        } else {
+            title.chars().take(180).collect()
+        };
+        conversations.push(Conversation {
+            agent: "zcode".to_string(),
+            id,
+            cwd,
+            title: display_title,
+            path: db_path.clone(),
+            agent_home: agent_home.to_path_buf(),
+            updated: updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        });
+    }
+    Ok(conversations)
+}
+
+fn open_optional_zcode_database(path: &Path) -> io::Result<Option<Connection>> {
+    match fs::metadata(path) {
+        Err(failure) if failure.kind() == io::ErrorKind::NotFound => return Ok(None),
+        result => {
+            result?;
+        }
+    }
+    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map(Some)
+        .map_err(|failure| io::Error::other(format!("{}: {failure}", path.display())))
+}
+
+/// CDXC:Sessions 2026-09-14 WHY:
+/// Only an absent desktop index means no exclusions; ignoring query or row errors can permanently import running or deleted conversations.
+fn read_zcode_excluded_ids(index_path: &Path) -> io::Result<HashSet<String>> {
+    let Some(connection) = open_optional_zcode_database(index_path)? else {
+        return Ok(HashSet::new());
+    };
+    let mut statement = connection.prepare(
+        "SELECT task_id FROM tasks WHERE deleted = 1 OR archived = 1 OR task_status = 'running'",
+    ).map_err(io::Error::other)?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(io::Error::other)?;
+    rows.collect::<Result<HashSet<_>, _>>()
+        .map_err(io::Error::other)
 }
 
 fn collect_files(root: &Path, depth: usize, files: &mut Vec<PathBuf>) {

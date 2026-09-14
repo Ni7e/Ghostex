@@ -232,12 +232,24 @@ fn spawn_terminal(
             pixel_height: 0,
         })
         .map_err(|error| format!("Unable to open terminal PTY: {error}"))?;
+    #[cfg(not(windows))]
     let shell = env::var("SHELL")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "/bin/zsh".to_string());
-    let mut command = CommandBuilder::new(shell);
-    command.args(["-lc", metadata.attach_command.as_str()]);
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = CommandBuilder::new(shell);
+        command.args(["-lc", metadata.attach_command.as_str()]);
+        command
+    };
+    #[cfg(windows)]
+    let mut command = {
+        let shell = crate::platform::shell::command_shell();
+        let mut command = CommandBuilder::new(&shell.executable);
+        command.args(shell.interactive_script_args(&metadata.attach_command));
+        command
+    };
     command.cwd(metadata.cwd);
     command.env("TERM", "xterm-256color");
     let reader = pair

@@ -441,17 +441,16 @@ pub(crate) fn is_agent_status_boundary_char(ch: char) -> bool {
 }
 
 pub(crate) fn is_windows_default_powershell_title(title: &str) -> bool {
-    let lower = title.to_ascii_lowercase();
-    let bytes = lower.as_bytes();
-    if bytes.len() < 2 || !bytes[0].is_ascii_lowercase() {
-        return false;
-    }
-    let rest = &lower[1..];
-    let prefix = ":\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe";
-    let Some(suffix) = rest.strip_prefix(prefix) else {
-        return false;
-    };
-    suffix.is_empty() || (suffix.starts_with(char::is_whitespace) && suffix.trim() == ".")
+    let normalized = title.trim().to_ascii_lowercase().replace('/', "\\");
+    let path = normalized
+        .strip_suffix(" .")
+        .unwrap_or(&normalized)
+        .trim_end();
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1..3] == *b":\\"
+        && (path.ends_with("\\powershell.exe") || path.ends_with("\\pwsh.exe"))
 }
 
 pub(crate) fn is_agent_command_noise_title(title: &str) -> bool {
@@ -504,6 +503,7 @@ pub(crate) fn is_agent_command_executable_name(value: &str) -> bool {
             | "opencode"
             | "pi"
             | "qodercli"
+            | "zcode"
     )
 }
 

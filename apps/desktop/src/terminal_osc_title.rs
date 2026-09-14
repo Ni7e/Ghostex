@@ -319,18 +319,17 @@ fn is_agent_status_word_title(title: &str) -> bool {
             .any(|word| core.eq_ignore_ascii_case(word))
 }
 
-fn is_windows_default_powershell_title(collapsed_lower: &str) -> bool {
-    let mut chars = collapsed_lower.chars();
-    if !chars.next().is_some_and(|c| c.is_ascii_lowercase()) {
-        return false;
-    }
-    let rest = chars.as_str();
-    let Some(rest) =
-        rest.strip_prefix(":\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe")
-    else {
-        return false;
-    };
-    rest.is_empty() || rest.trim_start() == "." && rest.starts_with(char::is_whitespace)
+fn is_windows_default_powershell_title(title: &str) -> bool {
+    let normalized = title.trim().to_ascii_lowercase().replace('/', "\\");
+    let path = normalized
+        .strip_suffix(" .")
+        .unwrap_or(&normalized)
+        .trim_end();
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1..3] == *b":\\"
+        && (path.ends_with("\\powershell.exe") || path.ends_with("\\pwsh.exe"))
 }
 
 fn is_ignored_placeholder_session_title(title: &str) -> bool {

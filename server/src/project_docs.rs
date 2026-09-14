@@ -1630,7 +1630,7 @@ fn modified_at(metadata: &fs::Metadata) -> Option<String> {
 }
 
 fn run_git(arguments: &[&str], cwd: &Path) -> Option<(i32, Vec<u8>)> {
-    let output = Command::new("git")
+    let output = crate::platform::process::background_command("git")
         .args(arguments)
         .current_dir(cwd)
         .stdin(Stdio::null())

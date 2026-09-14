@@ -1930,14 +1930,6 @@ impl GhostexGpuiApp {
         command_title: Option<String>,
         cx: &mut gpui::Context<Self>,
     ) {
-        #[cfg(target_os = "windows")]
-        if matches!(
-            windows_terminal_backend::resolve_current(),
-            Ok(windows_terminal_backend::ResolvedWindowsTerminalBackend::PowerShell)
-        ) {
-            self.start_command_terminal_powershell_for_slot(slot_id, startup_text, cx);
-            return;
-        }
         /*
         CDXC:RemoteMachines 2026-08-29:
         A remote Action's command tab owns a session on another machine, so it

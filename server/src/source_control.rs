@@ -457,7 +457,7 @@ async fn lookup_repository(
         .await
         .map_err(|detail| {
             SourceControlError::dependency_unavailable(format!(
-                "{} is not available on this machine. {detail}",
+                "{} repository lookup failed. {detail} Try Lookup again.",
                 provider.label()
             ))
         })?;
@@ -608,7 +608,12 @@ async fn run_probe(
         .kill_on_drop(true)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .stderr(std::process::Stdio::piped())
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("GH_NO_UPDATE_NOTIFIER", "1")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
     let child = command
         .spawn()
         .map_err(|_| format!("`{executable}` was not found on the server PATH."))?;

@@ -58,6 +58,7 @@ pub(crate) fn default_agent_command(agent_id: &str) -> Option<&'static str> {
         "pi" => Some("pi"),
         "qoder" => Some("qodercli"),
         "rovodev" => Some("acli rovodev run"),
+        "zcode" => Some("zcode"),
         _ => None,
     }
 }
@@ -218,6 +219,9 @@ pub(crate) fn read_session_target(session: &Value) -> Option<(String, String)> {
 }
 
 pub(crate) fn quote_shell_double_arg(value: &str) -> String {
+    #[cfg(windows)]
+    return format!("'{}'", value.replace('\'', "''"));
+    #[cfg(not(windows))]
     format!(
         "\"{}\"",
         value
@@ -229,6 +233,9 @@ pub(crate) fn quote_shell_double_arg(value: &str) -> String {
 }
 
 pub(crate) fn quote_shell_arg(value: &str) -> String {
+    #[cfg(windows)]
+    return format!("'{}'", value.replace('\'', "''"));
+    #[cfg(not(windows))]
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
@@ -237,6 +244,18 @@ pub(crate) fn wrap_restored_terminal_resume_command(
     display_command: &str,
     fallback_command: Option<&str>,
 ) -> String {
+    #[cfg(windows)]
+    {
+        let mut script = format!(
+            "Write-Host 'Restoring session...'; Write-Host {}; & {{ {} }}",
+            quote_shell_arg(display_command),
+            command
+        );
+        if let Some(fallback) = fallback_command.filter(|fallback| *fallback != command) {
+            script.push_str(&format!("; if (-not $?) {{ & {{ {} }} }}", fallback));
+        }
+        return script;
+    }
     let mut lines = vec![
         format!("printf '%s\\n' {}", quote_shell_arg("Restoring session...")),
         format!("printf '> %s\\n\\n' {}", quote_shell_arg(display_command)),

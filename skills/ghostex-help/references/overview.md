@@ -39,7 +39,7 @@ Run `ghostex guide <chapter>` for the details:
 - **Project**: a folder (or git worktree) in the sidebar. Projects can be
   grouped, reordered, and given per-project agents, actions, and defaults.
 - **Session**: one terminal pane, usually running one agent conversation.
-  Sessions persist across app restarts (zmx keeps the process alive), can be
+  Sessions persist across app restarts (the terminal host keeps the process alive), can be
   slept to free RAM and woken later, pinned, tagged, renamed, forked, and
   resumed from history.
 - **Session Chat**: the GUI rendering of an agent session, with a composer,

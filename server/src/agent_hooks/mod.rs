@@ -12,6 +12,8 @@ pub mod resolution;
 pub mod statusline;
 #[cfg(test)]
 mod tests;
+#[cfg(windows)]
+pub(crate) mod windows;
 
 pub use api::{
     install_agent_hooks, read_agent_hook_status, repair_installed_agent_hook_paths,

@@ -725,6 +725,13 @@ fn run_command_bounded(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    // CDXC:PlatformSupport 2026-09-14 WHY:
+    // Native Windows Git status polling otherwise opens Windows Terminal for each captured background probe.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
     configure_command_process_group(&mut command);
     let mut child = command.spawn().ok()?;
     let mut stdout = child.stdout.take()?;

@@ -73,7 +73,7 @@ pub fn interactive_session_picker_command(args: &[String]) -> CliResult<()> {
 }
 
 pub fn build_session_attach_command(session: &Value) -> Option<String> {
-    if should_create_missing_zmx_session_with_resume(session) {
+    if !cfg!(windows) && should_create_missing_zmx_session_with_resume(session) {
         return Some(build_zmx_attach_or_resume_command(session));
     }
     let attach_command = session.get("attachCommand");
