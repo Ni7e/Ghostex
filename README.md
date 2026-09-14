@@ -252,6 +252,14 @@ See how many agents are running with just a glance at your menu bar. Click to ju
 - Sync session titles and status into the UI.
 - Run multiple panes and multiple groups per project with split and tab layouts.
 
+## Contributing
+
+Ghostex is moving quickly, and help is welcome on platform ports, missing agent CLI integrations, docs, testing, and feature polish.
+
+Join the Discord: https://discord.gg/df7b3G92CS
+
+Please check out: https://github.com/maddada/Ghostex/tree/main/CONTRIBUTING.md
+
 ## Credits
 
 Ghostex builds on open source work from these projects and communities:
