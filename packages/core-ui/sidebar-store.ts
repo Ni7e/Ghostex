@@ -49,6 +49,7 @@ type SidebarStoreDataState = {
   gitFileDiffDraft: SidebarGitFileDiffDraft | undefined;
   groupOrder: string[];
   groupsById: Record<string, SidebarGroupRecord>;
+  hasReceivedSnapshot: boolean;
   hud: SidebarHudState;
   latestAgentOrderSyncResult: SidebarOrderSyncResultMessage | undefined;
   latestCommandOrderSyncResult: SidebarOrderSyncResultMessage | undefined;
@@ -109,6 +110,7 @@ export function createInitialSidebarStoreDataState(): SidebarStoreDataState {
     gitFileDiffDraft: undefined,
     groupOrder: [],
     groupsById: {},
+    hasReceivedSnapshot: false,
     hud: {
       /**
        * CDXC:Sessions 2026-04-28-05:18
@@ -351,6 +353,7 @@ function applySidebarMessageState(
     ),
     groupOrder: normalizedGroups.groupOrder,
     groupsById: normalizedGroups.groupsById,
+    hasReceivedSnapshot: true,
     hud: nextHud,
     localHiddenSessionIds: localFirstFiltered.localHiddenSessionIds,
     localSessionSleepingOverrides: localSleepApplied.localSessionSleepingOverrides,

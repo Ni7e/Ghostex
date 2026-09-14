@@ -1,6 +1,7 @@
 import { useSystemColorScheme } from './use-system-color-scheme';
 import { resolveSidebarTheme } from '@/packages/shared/session-grid-contract';
 import { ImportSessionsCard, useImportSessionsIntro } from './sidebar-app/import-sessions-card';
+import { SidebarProjectsLoading } from './sidebar-app/projects-loading';
 import { monitorAccountSetup } from './accounts/setup-monitor';
 import { Cursor, KeyboardSensor, PointerSensor } from '@dnd-kit/dom';
 import { DragDropProvider } from '@dnd-kit/react';
@@ -570,6 +571,7 @@ export function SidebarApp({
   );
   const gitCommitDraft = useSidebarStore((state) => state.gitCommitDraft);
   const gitFileDiffDraft = useSidebarStore((state) => state.gitFileDiffDraft);
+  const hasReceivedSnapshot = useSidebarStore((state) => state.hasReceivedSnapshot);
   const authoritativeSessionIdsByGroup = useSidebarStore((state) => state.sessionIdsByGroup);
   const [remoteMachineRuntimeStatuses, setRemoteMachineRuntimeStatuses] = useState<RemoteMachineRuntimeStatuses>({});
   const [remoteMachineStatusMessages, setRemoteMachineStatusMessages] = useState<RemoteMachineStatusMessages>({});
@@ -607,7 +609,7 @@ export function SidebarApp({
     /*
      * CDXC:StateSync 2026-06-16-09:35:
      * When gxserver is off or missing during startup, the sidebar must not show
-     * the raw synthetic status project row. Keep the Projects body blank while
+     * the raw synthetic status project row. Keep the Projects skeleton visible while
      * startup can still recover, then after 20 seconds show the two-line restart
      * guidance using the exact reference-sidebar empty-state typography shared
      * with "No projects."
@@ -3006,7 +3008,9 @@ export function SidebarApp({
         'Restart Ghostex to try again.'
       )}
     </div>
-  ) : hasGxserverUnavailablePlaceholder ? null : (
+  ) : !hasReceivedSnapshot || hasGxserverUnavailablePlaceholder ? (
+    <SidebarProjectsLoading />
+  ) : (
     <div className='reference-sidebar-empty-state'>
       {shouldShowFirstProjectEmptyState ? (
         <>
