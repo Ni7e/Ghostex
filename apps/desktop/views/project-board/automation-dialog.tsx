@@ -162,6 +162,7 @@ export function AutomationDialog({
           <AutomationSection title='Timing'>
             <SegmentedControl
               aria-label='Schedule type'
+              variant='raised'
               className='project-automation-segmented'
               onValueChange={(value) =>
                 setAutomationDraft((current) => ({
@@ -329,6 +330,7 @@ export function AutomationDialog({
           <AutomationSection title='Execution'>
             <SegmentedControl
               aria-label='Execution mode'
+              variant='raised'
               className='project-automation-segmented'
               onValueChange={(value) =>
                 setAutomationDraft((current) => ({

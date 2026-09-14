@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useEffect, useMemo } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { GxserverStashedPrompt, GxserverStashedPromptTag } from '../shared/gxserver-protocol';
 import { createDefaultSidebarCommandButtons } from '../shared/sidebar-commands';
 import type {
@@ -195,7 +195,10 @@ function dispatchStoryMessage(data: unknown): void {
   }, 0);
 }
 
+const QuickAccessStoryNavigation = createContext<(modal: string) => void>(() => undefined);
+
 function useQuickAccessStoryHost(respondToRequests = true): WebviewApi {
+  const onOpenModal = useContext(QuickAccessStoryNavigation);
   useEffect(() => {
     const previousWebkit = window.webkit;
     document.body.classList.add('app-modal-host-body');
@@ -204,7 +207,11 @@ function useQuickAccessStoryHost(respondToRequests = true): WebviewApi {
       messageHandlers: {
         ...previousWebkit?.messageHandlers,
         ghostexAppModalHost: {
-          postMessage: () => undefined,
+          postMessage: (message) => {
+            if (message && typeof message === 'object' && 'modal' in message && typeof message.modal === 'string') {
+              onOpenModal(message.modal);
+            }
+          },
         },
       },
     };
@@ -212,7 +219,7 @@ function useQuickAccessStoryHost(respondToRequests = true): WebviewApi {
       document.body.classList.remove('app-modal-host-body');
       window.webkit = previousWebkit;
     };
-  }, []);
+  }, [onOpenModal]);
 
   return useMemo(
     () => ({
@@ -260,7 +267,7 @@ function useQuickAccessStoryHost(respondToRequests = true): WebviewApi {
   );
 }
 
-function CommandPaneStory() {
+function CommandsStory() {
   const vscode = useQuickAccessStoryHost();
   return (
     <CommandPalette
@@ -272,7 +279,7 @@ function CommandPaneStory() {
   );
 }
 
-function CommandPaneLoadingStory() {
+function CommandsLoadingStory() {
   const vscode = useQuickAccessStoryHost(false);
   return (
     <CommandPalette
@@ -381,8 +388,31 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const CommandPane: Story = { render: () => <CommandPaneStory /> };
-export const CommandPaneLoading: Story = { render: () => <CommandPaneLoadingStory /> };
+function InteractiveQuickAccessStory() {
+  const [modal, setModal] = useState('commandPalette');
+  return (
+    <QuickAccessStoryNavigation.Provider value={setModal}>
+      {modal === 'recentProjects' ? (
+        <RecentProjectsStory />
+      ) : modal === 'previousSessions' ? (
+        <RecentSessionsStory />
+      ) : modal === 'stashedPrompts' ? (
+        <SavedPromptsStory />
+      ) : (
+        <CommandsStory />
+      )}
+    </QuickAccessStoryNavigation.Provider>
+  );
+}
+
+export const Interactive: Story = { render: () => <InteractiveQuickAccessStory /> };
+export const Light: Story = {
+  globals: { modalTheme: 'light' },
+  render: () => <InteractiveQuickAccessStory />,
+};
+
+export const Commands: Story = { render: () => <CommandsStory /> };
+export const CommandsLoading: Story = { render: () => <CommandsLoadingStory /> };
 export const RecentProjects: Story = { render: () => <RecentProjectsStory /> };
 export const Sessions: Story = { render: () => <RecentSessionsStory /> };
 export const SessionsTagFilterMenu: Story = { render: () => <RecentSessionsTagFilterStory /> };

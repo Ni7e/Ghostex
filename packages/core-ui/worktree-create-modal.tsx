@@ -458,6 +458,7 @@ export function WorktreeCreateModal({
                */}
               <SegmentedControl
                 aria-label='Worktree mode'
+                variant='raised'
                 className='worktree-create-mode-toggle'
                 onValueChange={(nextMode) => setMode(nextMode as WorktreeCreateMode)}
                 stretch

@@ -980,6 +980,7 @@ export function PreviousSessionsModal({
               <SegmentedControl
                 aria-label={`Filter sessions by scope (${formatSidebarHotkeyLabel(SESSIONS_SCOPE_TOGGLE_HOTKEY)} cycles All, Closed, External)`}
                 className='quick-access-session-scope-segmented'
+                variant='raised'
                 value={sessionScope}
                 onValueChange={selectSessionsScope}
               >

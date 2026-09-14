@@ -616,7 +616,7 @@ body.app-modal-host-body {
 }
 
 /* CDXC:Theming 2026-09-09 DECISION:
- * User: use #b4b8bf for text in Command Pane, Projects, Sessions, and Saved Prompts.
+ * User: use #b4b8bf for text in Commands, Projects, Sessions, and Saved Prompts.
  */
 .quick-access-surface {
   --foreground: #b4b8bf;
@@ -772,7 +772,7 @@ body.app-modal-host-body {
 }
 
 /*
- * Every Quick Access tab uses Command Pane's typography and color system.
+ * Every Quick Access tab uses Commands's typography and color system.
  * Previous Sessions keeps its richer session markup for restore/delete and
  * metadata behavior, but its visible row is deliberately the same 14px,
  * 36px-high command item when rendered in this modal.
@@ -866,7 +866,7 @@ body.app-modal-host-body {
  CDXC:SavedPrompts 2026-08-08:
  Saved Prompts is the fourth Ghostex Quick Access page. Its tabs, search,
  group heading, typography, padding, and selected background all come from the
- same Quick Access primitives as Command Pane. Saved Prompt rows use two lines
+ same Quick Access primitives as Commands. Saved Prompt rows use two lines
  so prompt text never competes horizontally with its project and time.
 */
 .ghostex-stashed-prompts-command {
@@ -4408,70 +4408,6 @@ body.app-modal-host-body {
   align-items: flex-end;
 }
 
-/*
- * CDXC:AppModal 2026-06-23-04:30:
- * Agents Hub uses the app-modal tab rail styled after the titlebar mode
- * switcher (Agents/Source/Browser/Kanban/Manage): a flat row of equal-width
- * tabs with thin separators and a subtle highlight box behind the active tab.
- * The active tab brightens its label color instead of bolding it.
- *
- * CDXC:AppModal 2026-06-23-04:45:
- * Each tab now carries a full 4-direction #252525 outline matching the macOS
- * titlebar mode switcher, instead of the earlier theme-mixed left-only
- * separators. Top/bottom/left live on every trigger and the last child adds the
- * right edge so internal separators stay a single 1px line. Inactive tabs read
- * as slightly dimmed white; hover brightens the label to full --foreground with
- * no background fill, so the highlight box stays exclusive to the active tab
- * (data-active wins over :hover by source order at equal specificity).
- *
- * CDXC:AppModal 2026-06-24-04:25:
- * Agents Hub tabs need a visible 1px #252525 border around the rail itself,
- * with trigger-side borders limited to internal dividers so the outside edge
- * stays continuous and never renders as doubled 2px seams.
- *
- * CDXC:Settings 2026-06-24-22:16:
- * Settings no longer uses this top tab rail; Settings page navigation lives in
- * the left sidebar instead.
- */
-.app-modal-tab-rail[data-slot='tabs-list'] {
-  background: transparent !important;
-  border: 1px solid #252525 !important;
-  border-radius: 0 !important;
-  display: grid;
-  gap: 0;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
-  height: 2.125rem;
-  padding: 0 !important;
-  width: 100%;
-}
-
-.app-modal-tab-rail [data-slot='tabs-trigger'] {
-  border: 0 !important;
-  border-radius: 0 !important;
-  color: color-mix(in srgb, var(--foreground) 75%, transparent) !important;
-  font-weight: 500 !important;
-  height: 100%;
-  min-width: 0;
-  transition: color 120ms ease;
-  width: 100%;
-}
-
-.app-modal-tab-rail [data-slot='tabs-trigger'] + [data-slot='tabs-trigger'] {
-  border-left: 1px solid #252525 !important;
-}
-
-.app-modal-tab-rail [data-slot='tabs-trigger']:hover {
-  background: transparent !important;
-  color: var(--foreground) !important;
-}
-
-.app-modal-tab-rail [data-slot='tabs-trigger'][data-active] {
-  background: color-mix(in srgb, var(--foreground) 12%, transparent) !important;
-  color: var(--foreground) !important;
-  font-weight: 500 !important;
-}
-
 .ghostex-settings-shadcn .settings-modal-search-row {
   /*
    * CDXC:Settings 2026-06-19-11:15:
@@ -5130,7 +5066,7 @@ body.app-modal-host-body {
 /*
  * CDXC:AppModal 2026-08-24 — Ghostex Quick Access
  *
- * Quick Access is one window frame shared by four sibling pages (Command Pane,
+ * Quick Access is one window frame shared by four sibling pages (Commands,
  * Recent Projects, Sessions, Saved Prompts), so its redesign is one block that
  * every page inherits through `.quick-access-surface` rather than four forks.
  * It adopts the same Codex language as Settings:
@@ -5195,7 +5131,7 @@ body.app-modal-host-body {
  * CDXC:AppModal 2026-08-24 (round 2):
  * In the native Quick Access child window the window itself is the frame, so
  * the surface must not paint its own inset box — that read as a stray
- * "background behind the whole area" on Command Pane and Saved Prompts. The
+ * "background behind the whole area" on Commands and Saved Prompts. The
  * in-page (web) dialog path above keeps the bordered surface because there the
  * dialog floats over app content.
  */
@@ -5207,56 +5143,24 @@ body.app-modal-host-body {
 
 /* Tab header -------------------------------------------------------------- */
 
-/*
- * CDXC:AppModal 2026-08-24 (round 5):
- * Every React modal tab rail is the Agents Hub strip: ONE bordered container
- * with an 8px radius and clipped corners, flat 32px segments divided by a
- * single hairline, a centered `label + kbd` pair, no focus ring, and a raised
- * white fill with full foreground text on the active tab. Never accent.
- */
+/* Quick Access uses the shared raised rail in both appearances. */
 .quick-access-surface .quick-access-tabs {
-  background: transparent;
-  border: 1px solid var(--settings-hairline);
-  border-radius: var(--settings-radius-control);
-  /* The rail sits in a flex column; without this it shrinks and the clipped
-     strip hides its own segments. */
+  --raised-tab-text: light-dark(#525252, #b4b8bf);
+  --raised-tab-active-text: light-dark(#262626, #b4b8bf);
+  /* Keep the fixed-height rail from shrinking above a long results list. */
   flex: 0 0 auto;
-  gap: 0;
   margin: 6px 6px 2px;
-  overflow: hidden;
   width: auto;
 }
 
 .quick-access-surface .quick-access-tab {
-  border-radius: 0;
-  color: color-mix(in srgb, var(--foreground) 72%, transparent);
-  font-size: 13px;
   gap: 8px;
-  height: var(--settings-control-height, 2rem);
   justify-content: center;
   line-height: 1;
-  padding: 0 10px;
-}
-
-.quick-access-surface .quick-access-tab + .quick-access-tab {
-  border-left: 1px solid var(--settings-hairline);
-}
-
-.quick-access-surface .quick-access-tab:hover,
-.quick-access-surface .quick-access-tab:focus-visible {
-  background: color-mix(in srgb, #ffffff 5%, transparent);
-  color: var(--foreground);
-  outline: none;
-}
-
-.quick-access-surface .quick-access-tab[data-active='true'] {
-  background: color-mix(in srgb, #ffffff 9%, transparent);
-  color: var(--foreground);
-  font-weight: 400;
 }
 
 .quick-access-surface .quick-access-tab kbd {
-  color: color-mix(in srgb, var(--foreground) 42%, transparent);
+  color: light-dark(#626262, #92969d);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.02em;
@@ -5264,7 +5168,7 @@ body.app-modal-host-body {
 }
 
 .quick-access-surface .quick-access-tab[data-active='true'] kbd {
-  color: color-mix(in srgb, var(--foreground) 58%, transparent);
+  color: light-dark(#404040, #b4b8bf);
 }
 
 /*
@@ -5334,6 +5238,18 @@ body.app-modal-host-body {
 .quick-access-surface [data-slot='command-item'][data-selected='true'],
 .quick-access-surface [data-slot='command-item']:hover {
   background: var(--settings-raised);
+}
+
+/* CDXC:AppModal 2026-09-14 DECISION:
+ * User: Quick Access command icons and hotkeys keep their resting colors when a row is hovered or focused, in both light and dark mode.
+ * Override the shared Command primitive's selected foreground only inside the Commands list.
+ */
+.quick-access-surface .ghostex-command-palette-list [data-slot='command-item'] > svg {
+  color: var(--quick-access-item-color);
+}
+
+.quick-access-surface .ghostex-command-palette-list [data-slot='command-shortcut'] {
+  color: var(--muted-foreground);
 }
 
 .quick-access-surface .recent-projects-row {

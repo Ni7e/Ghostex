@@ -5,6 +5,7 @@ import { Toggle as TogglePrimitive } from '@base-ui/react/toggle';
 import { ToggleGroup as ToggleGroupPrimitive } from '@base-ui/react/toggle-group';
 
 import { cn } from '../utils';
+import './raised-tab-rail.css';
 
 /*
  * CDXC:DesignSystem 2026-08-24:
@@ -13,8 +14,7 @@ import { cn } from '../utils';
  * segments are flat, share one hairline, and only the outer corners are
  * rounded — with the selected segment carrying a highlighted fill.
  *
- * It owns the geometry under private data-slots so segments share their
- * borders and only the container supplies outside corners.
+ * The raised variant shares its inset track and selected-tab styling with TabsList.
  *
  * Any new "pick exactly one of N" strip should use this instead of a row of
  * Buttons or a raw ToggleGroup.
@@ -45,12 +45,14 @@ function SegmentedControl({
   onValueChange,
   size = 'default',
   stretch = false,
+  variant = 'default',
   value,
   ...props
 }: Omit<ToggleGroupPrimitive.Props, 'defaultValue' | 'onValueChange' | 'value'> & {
   /** Stretch the segments to fill the row instead of sizing to their labels. */
   stretch?: boolean;
   size?: SegmentedControlSize;
+  variant?: 'default' | 'raised';
   value: string;
   onValueChange: (value: string) => void;
 }) {
@@ -59,8 +61,10 @@ function SegmentedControl({
     <ToggleGroupPrimitive
       data-slot='segmented-control'
       data-size={size}
+      data-variant={variant}
       className={cn(
         segmentedControlClass,
+        variant === 'raised' && 'raised-tab-rail',
         size === 'sm' ? 'h-7' : 'h-8',
         stretch && 'w-full [&>[data-slot=segmented-control-item]]:flex-1',
         className

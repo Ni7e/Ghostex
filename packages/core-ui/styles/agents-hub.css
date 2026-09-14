@@ -113,59 +113,14 @@
   overflow: hidden;
 }
 
+/* The shared raised rail owns appearance; the Hub owns its full-width placement. */
 .agents-hub-dialog .agents-hub-tabs-list[data-slot='tabs-list'] {
-  /*
-   * CDXC:AgentLauncher 2026-08-24:
-   * The Hub keeps the shared .app-modal-tab-rail class for the modal tab
-   * contract, but the Codex look replaces the boxed 4-up rail with ONE joined
-   * strip, the same shape as the shared SegmentedControl and Quick Access:
-   * a single bordered container, flat 32px segments divided by hairlines, only
-   * the outer corners rounded, and a raised fill with FULL-WHITE label on the
-   * active tab. No modal tab may tint its active label with the accent color.
-   */
-  background: transparent !important;
-  border: 1px solid var(--agents-hub-line) !important;
-  border-radius: var(--agents-hub-radius-control) !important;
+  display: grid;
   flex: 0 0 auto;
-  display: grid !important;
-  gap: 0 !important;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  height: auto !important;
+  height: 40px;
   margin: 0 0.125rem 0.375rem;
-  overflow: hidden;
-  padding: 0 !important;
-  width: calc(100% - 0.25rem) !important;
-}
-
-.agents-hub-dialog .agents-hub-tabs-list [data-slot='tabs-trigger'] {
-  border: 0 !important;
-  border-radius: 0 !important;
-  color: color-mix(in srgb, var(--foreground) 72%, transparent) !important;
-  font-size: 0.8125rem;
-  font-weight: 400 !important;
-  gap: 0.5rem;
-  height: 2rem;
-  justify-content: center;
-  min-width: 0;
-  padding: 0 0.625rem !important;
-  transition:
-    background-color 120ms ease,
-    color 120ms ease;
-}
-
-/*
- * The divider is a pseudo-element, not a border: the shadcn Tabs trigger ships
- * `border-transparent!` from Tailwind's utilities layer, and a LAYERED
- * !important beats an unlayered one, so a border-color set here is ignored.
- */
-.agents-hub-dialog .agents-hub-tabs-list [data-slot='tabs-trigger'] + [data-slot='tabs-trigger']::before {
-  background: var(--agents-hub-line);
-  bottom: 0;
-  content: '';
-  left: -1px;
-  position: absolute;
-  top: 0;
-  width: 1px;
+  width: calc(100% - 0.25rem);
 }
 
 .agents-hub-tab-label {
@@ -184,31 +139,8 @@
   letter-spacing: 0.02em;
 }
 
-/*
- * CDXC:AgentLauncher 2026-08-24 (round 3):
- * No focus ring on the tab strip. shadcn's trigger ships
- * `focus-visible:ring-[3px]` plus a 1px outline, which drew a detached rounded
- * box around whichever tab was last clicked; the raised fill already shows
- * which tab is selected.
- */
-.agents-hub-dialog .agents-hub-tabs-list [data-slot='tabs-trigger']:is(:focus, :focus-visible) {
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-.agents-hub-dialog .agents-hub-tabs-list [data-slot='tabs-trigger']:hover {
-  background: color-mix(in srgb, #ffffff 5%, transparent) !important;
-  color: var(--foreground) !important;
-}
-
-.agents-hub-dialog .agents-hub-tabs-list [data-slot='tabs-trigger'][data-active] {
-  background: color-mix(in srgb, #ffffff 9%, transparent) !important;
-  color: var(--foreground) !important;
-  font-weight: 400 !important;
-}
-
 .agents-hub-dialog .agents-hub-tabs-list [data-slot='tabs-trigger'][data-active] .agents-hub-tab-hotkey {
-  color: color-mix(in srgb, var(--foreground) 58%, transparent);
+  color: light-dark(#404040, #c5c5c5);
 }
 
 .agents-hub-tab-content {

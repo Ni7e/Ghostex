@@ -338,7 +338,7 @@ function AgentsHubSurface({
 
   return (
     <Tabs className='agents-hub-tabs' onValueChange={(value) => setActiveTab(value as AgentsHubTab)} value={activeTab}>
-      <TabsList className='agents-hub-tabs-list app-modal-tab-rail'>
+      <TabsList className='agents-hub-tabs-list app-modal-tab-rail' variant='raised'>
         {(Object.keys(tabLabels) as AgentsHubTab[]).map((tab) => (
           <TabsTrigger key={tab} value={tab}>
             <span className='agents-hub-tab-label'>{tabLabels[tab]}</span>

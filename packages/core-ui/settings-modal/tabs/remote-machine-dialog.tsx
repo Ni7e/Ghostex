@@ -169,6 +169,7 @@ function RemoteMachineDialogContent({
         {isNew ? (
           <SegmentedControl
             aria-label='How to add the machine'
+            variant='raised'
             className='settings-remote-machine-add-mode'
             onValueChange={(value) => setTransport(value === 'easyConnect' ? 'easyConnect' : 'ssh')}
             size='sm'

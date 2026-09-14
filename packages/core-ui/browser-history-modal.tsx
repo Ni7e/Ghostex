@@ -196,7 +196,12 @@ export function BrowserHistoryModal({ target, onClose }: { target: BrowserHistor
               setQuery={setQuery}
             />
             <div className='quick-access-filter-toolbar'>
-              <SegmentedControl aria-label='History project scope' value={scope} onValueChange={setScope}>
+              <SegmentedControl
+                variant='raised'
+                aria-label='History project scope'
+                value={scope}
+                onValueChange={setScope}
+              >
                 <SegmentedControlItem value='all'>All Projects</SegmentedControlItem>
                 <SegmentedControlItem value='current'>Current Project</SegmentedControlItem>
               </SegmentedControl>

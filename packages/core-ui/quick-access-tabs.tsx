@@ -8,11 +8,12 @@ import {
 import { openQuickAccess, type QuickAccessPage } from './app-modal-host-bridge';
 import { formatSidebarHotkeyLabel } from './hotkey-label';
 import { useSidebarStore } from './sidebar-store';
+import '../components/ui/raised-tab-rail.css';
 
 export type QuickAccessTab = QuickAccessPage;
 
 const QUICK_ACCESS_TABS = [
-  { hotkey: 'cmd+1', id: 'commands', label: 'Command Pane' },
+  { hotkey: 'cmd+1', id: 'commands', label: 'Commands' },
   { hotkey: 'cmd+2', id: 'recentProjects', label: 'Projects' },
   { hotkey: 'cmd+3', id: 'recentSessions', label: 'Sessions' },
   { hotkey: 'cmd+4', id: 'savedPrompts', label: 'Saved Prompts' },
@@ -54,12 +55,18 @@ export function QuickAccessHeader({ activeTab }: { activeTab: QuickAccessTab }) 
   }, [normalizedHotkeys]);
 
   return (
-    <nav aria-label='Ghostex Quick Access sections' className='quick-access-tabs'>
+    <nav
+      aria-label='Ghostex Quick Access sections'
+      className='quick-access-tabs raised-tab-rail'
+      data-slot='tab-rail'
+      data-variant='raised'
+    >
       {QUICK_ACCESS_TABS.map((tab) => (
         <button
           aria-current={tab.id === activeTab ? 'page' : undefined}
           className='quick-access-tab'
           data-active={String(tab.id === activeTab)}
+          data-slot='tab-rail-item'
           key={tab.id}
           onClick={() => openQuickAccess(tab.id)}
           type='button'

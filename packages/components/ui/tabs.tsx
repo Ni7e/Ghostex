@@ -2,6 +2,7 @@ import { Tabs as TabsPrimitive } from '@base-ui/react/tabs';
 import { cva, type VariantProps } from 'class-variance-authority';
 
 import { cn } from '../utils';
+import './raised-tab-rail.css';
 
 function Tabs({ className, orientation = 'horizontal', ...props }: TabsPrimitive.Root.Props) {
   return (
@@ -20,6 +21,7 @@ const tabsListVariants = cva(
     variants: {
       variant: {
         default: 'bg-muted',
+        raised: 'raised-tab-rail',
         line: 'gap-1 bg-transparent',
       },
     },

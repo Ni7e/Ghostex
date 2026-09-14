@@ -1401,6 +1401,7 @@ function StashedPromptFiltersToolbar({
       */}
       <SegmentedControl
         aria-label='Switch between saved prompts, recovered drafts, and sent messages'
+        variant='raised'
         size='sm'
         value={view}
         onValueChange={(nextValue) => {

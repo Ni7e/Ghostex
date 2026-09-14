@@ -167,6 +167,7 @@ export function EasyConnectCard({
             <div className='settings-remote-connect-sections'>
               <SegmentedControl
                 aria-label='Device to connect'
+                variant='raised'
                 onValueChange={setConnectionDevice}
                 stretch
                 value={connectionDevice}
