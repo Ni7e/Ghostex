@@ -6,6 +6,10 @@ const agentsHubModalSource = readFileSync(new URL('./agents-hub-modal.tsx', impo
 const skillsPanelSource = readFileSync(new URL('./bundled-agent-skills-panel.tsx', import.meta.url), 'utf8');
 const settingsModalStylesSource = readFileSync(new URL('./styles/modals.css', import.meta.url), 'utf8');
 const sidebarStylesSource = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+const raisedTabRailStylesSource = readFileSync(
+  new URL('../components/ui/raised-tab-rail.css', import.meta.url),
+  'utf8'
+);
 const sharedSidebarContractSource = readFileSync(
   new URL('../shared/session-grid-contract-sidebar.ts', import.meta.url),
   'utf8'
@@ -80,29 +84,33 @@ function sourceFrom(source: string, start: string): string {
 }
 
 describe('settings modal source', () => {
-  test('keeps Agents Hub tab rail visibly bordered while Settings uses sidebar navigation', () => {
+  test('keeps the Agents Hub tab rail on the shared raised rail while Settings uses sidebar navigation', () => {
     /*
-     * CDXC:AppModal 2026-06-24-04:25:
-     * Agents Hub top-level tabs use the app-modal tab style, and that style
-     * must keep a visible 1px #252525 outside border plus single-pixel internal
-     * dividers.
+     * CDXC:DesignSystem 2026-09-14 SEE-ALSO:
+     * packages/components/ui/raised-tab-rail.css records the decision to give
+     * Agents Hub and the other modal rails Quick Access's rounded track and
+     * raised selected tab, superseding the boxed #252525 app-modal rail.
      *
      * CDXC:Settings 2026-06-24-22:16:
      * Settings must not render the app-modal top tab rail anymore; Settings
      * page navigation belongs in the left sidebar.
      */
-    const tabRailStyles = sourceBetween(
-      sidebarStylesSource,
-      ".app-modal-tab-rail[data-slot='tabs-list'] {",
-      ".app-modal-tab-rail [data-slot='tabs-trigger']:hover"
+    const trackStyles = sourceBetween(
+      raisedTabRailStylesSource,
+      ".raised-tab-rail[data-variant='raised'][data-slot] {",
+      ".raised-tab-rail[data-variant='raised'][data-slot='tab-rail']"
     );
-    expect(tabRailStyles).toContain('border: 1px solid #252525 !important;');
-    expect(tabRailStyles).toContain('border: 0 !important;');
-    expect(tabRailStyles).toContain(".app-modal-tab-rail [data-slot='tabs-trigger'] + [data-slot='tabs-trigger']");
-    expect(tabRailStyles).toContain('border-left: 1px solid #252525 !important;');
+    expect(trackStyles).toContain('background: light-dark(#ededed, #202020);');
+    expect(trackStyles).toContain('border: 1px solid light-dark(rgb(0 0 0 / 14%), rgb(255 255 255 / 14%));');
+    expect(trackStyles).toContain('border-radius: 8px;');
+    expect(raisedTabRailStylesSource).toContain("[data-slot='tabs-trigger'][data-active]");
+    expect(raisedTabRailStylesSource).toContain('background: light-dark(#ffffff, #363636);');
+    expect(sidebarStylesSource).not.toContain(".app-modal-tab-rail[data-slot='tabs-list'] {");
     expect(settingsModalSource).not.toContain("<TabsList className='app-modal-tab-rail'>");
     expect(settingsModalSource).not.toContain('settings-modal-tabs-scroll');
-    expect(agentsHubModalSource).toContain("<TabsList className='agents-hub-tabs-list app-modal-tab-rail'>");
+    expect(agentsHubModalSource).toContain(
+      "<TabsList className='agents-hub-tabs-list app-modal-tab-rail' variant='raised'>"
+    );
   });
 
   test('keeps Settings page navigation and Show Advanced inside the sidebar', () => {
