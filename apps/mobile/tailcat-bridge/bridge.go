@@ -45,6 +45,8 @@ type forward struct {
 	listener   net.Listener
 	client     *tailcat.Client
 	closed     chan struct{}
+	ctx        context.Context
+	cancel     context.CancelFunc
 
 	// lastDialErr is the most recent per-connection dial failure, cleared on the
 	// next successful dial. It has its own mutex so a dial never waits behind a
@@ -100,7 +102,7 @@ func StartForward(id, token string, remotePort int) (int, error) {
 	// one is a single relay round-trip, so validating on every call is cheap
 	// and keeps "Test connection" honest.
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), reachabilityTimeout)
+	ctx, cancel := context.WithTimeout(f.ctx, reachabilityTimeout)
 	defer cancel()
 	if _, err := f.client.Ping(ctx); err != nil {
 		log.Printf("tailcat[%s]: peer unreachable after %v: %v", id, elapsed(start), err)
@@ -187,6 +189,7 @@ func ensureForward(id, token string, remotePort int) (*forward, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	f := &forward{
 		id:         id,
 		token:      token,
@@ -197,6 +200,8 @@ func ensureForward(id, token string, remotePort int) (*forward, int, error) {
 			Logf:   forwardLogf(id),
 		},
 		closed: make(chan struct{}),
+		ctx:    ctx,
+		cancel: cancel,
 	}
 	forwards[id] = f
 	go acceptLoop(f)
@@ -227,9 +232,12 @@ func stopLocked(id string) {
 		return
 	}
 	delete(forwards, id)
+	f.cancel()
 	close(f.closed)
 	_ = f.listener.Close()
-	_ = f.client.Close()
+	// CDXC:RemotePairing 2026-09-14 WHY:
+	// A dead tunnel's WireGuard teardown must not hold the registry lock and block reconnects to every computer.
+	go f.client.Close()
 }
 
 func elapsed(start time.Time) time.Duration {
@@ -250,7 +258,7 @@ func serveConn(f *forward, local net.Conn) {
 	// The first dial on a fresh client performs DERP rendezvous and can take
 	// several seconds; later dials reuse the established tunnel and are fast.
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	ctx, cancel := context.WithTimeout(f.ctx, dialTimeout)
 	defer cancel()
 	remote, err := f.client.DialTCPPort(ctx, uint16(f.remotePort))
 	if err != nil {
