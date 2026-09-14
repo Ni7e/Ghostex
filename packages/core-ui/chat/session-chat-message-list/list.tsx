@@ -8,9 +8,7 @@
 // "messages are missing".
 //
 // TanStack owns measured row positions and keyed history prepends. The chat
-// controller retains explicit streaming holds and navigation. The viewport is
-// flipped to RTL (content back to LTR) so the scrollbar renders on the left
-// edge of the conversation.
+// controller retains explicit streaming holds and navigation.
 
 import { cn } from '@/packages/components/utils';
 import { IconChevronRight } from '@tabler/icons-react';
@@ -26,6 +24,7 @@ import {
   MessageScrollerViewport,
   useSessionChatVirtualScroller,
 } from '../session-chat-virtual-scroller';
+import { SessionChatScrollbar } from '../session-chat-scrollbar';
 import { useSessionChatVirtualTranscript } from '../use-session-chat-virtual-transcript';
 import { transcriptRowElements } from '../session-chat-transcript-mode';
 import { Separator } from '../../../components/ui/separator';
@@ -97,7 +96,7 @@ export function scrollToBottomHotkeyLabel(): string {
 }
 
 /** Terminal-pane parity: the conversation scrollbar fades out this long after
- * the last scroll (chat.css keys on the data-user-scrolling attribute). */
+ * the last scroll (session-chat-scrollbar.css keys on data-user-scrolling). */
 const SCROLLBAR_FADE_MS = 2000;
 
 export interface SessionChatMessageListProps extends SessionChatStartupSendActions {
@@ -843,7 +842,7 @@ export function SessionChatMessageList({
   // Auto-load older history before the reader reaches the top; the virtualizer's
   // keyed prepend compensation keeps the visible rows in place when the earlier
   // page lands. Every scroll also stamps the viewport so the scrollbar shows
-  // while scrolling and fades out afterwards (chat.css).
+  // while scrolling and fades out afterwards (session-chat-scrollbar.css).
   const handleScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>): void => {
       const viewport = event.currentTarget;
@@ -1034,11 +1033,10 @@ export function SessionChatMessageList({
           <ScrollToLatestSend pendingMessageId={pendingMessageId} restored={Boolean(restoredScroll)} />
           <MessageScroller className={cn('flex-1', summaryTurns.length >= 2 && 'ghostex-chat-has-minimap')}>
             <SessionChatMinimap onNavigate={navigateHistory} turns={summaryTurns} />
-            {/* RTL viewport + LTR content puts the scrollbar on the left edge. */}
             {/* outline-none: Chromium makes scrollers keyboard-focusable and paints
             its default focus ring on them; a transcript is not a control. */}
             <MessageScrollerViewport
-              className='outline-none [direction:rtl]'
+              className='outline-none'
               onClickCapture={(event) => {
                 if (
                   event.target instanceof Element &&
@@ -1082,7 +1080,7 @@ export function SessionChatMessageList({
               onScroll={handleScroll}
               ref={viewportRef}
             >
-              <MessageScrollerContent className='mx-auto w-full max-w-3xl [direction:ltr]' ref={contentRef}>
+              <MessageScrollerContent className='mx-auto w-full max-w-3xl' ref={contentRef}>
                 {summaryMode
                   ? virtualTranscript.virtualItems.map((virtualItem) => {
                       const turn = summaryTurns[virtualItem.index]!;
@@ -1184,6 +1182,15 @@ export function SessionChatMessageList({
                     })}
               </MessageScrollerContent>
             </MessageScrollerViewport>
+            <SessionChatScrollbar
+              viewportRef={viewportRef}
+              contentRef={contentRef}
+              onNavigate={() => {
+                cancelScrollMomentum();
+                resumeFileScrolling();
+                navigateHistory();
+              }}
+            />
             {/* CDXC:SessionChat 2026-09-11 DECISION:
               User: the scroll-to-bottom pill shows the configured shortcut so the
               end is reachable from the keyboard at any time; keep it small, no icon,

@@ -29,7 +29,7 @@ export function MessageScrollerViewport({ className, ...props }: ComponentProps<
       aria-label='Messages'
       tabIndex={0}
       className={cn(
-        'size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content',
+        'size-full min-h-0 min-w-0 scroll-fade-b overflow-y-auto overscroll-contain contain-content',
         className
       )}
       style={{ overflowAnchor: 'none' }}
