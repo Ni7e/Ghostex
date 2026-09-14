@@ -56,6 +56,10 @@ impl GhostexGpuiApp {
         let Some(key) = self.session_chat_runtime_key(generation) else {
             return;
         };
+        if message["method"] == "presentation" {
+            self.cache_session_chat_presentation(key, &message["params"]["state"]);
+            return;
+        }
         let Some(method) = message["method"].as_str().filter(|method| {
             matches!(
                 *method,

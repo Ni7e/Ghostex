@@ -362,6 +362,7 @@ pub(crate) struct SessionChatActivation {
     pub(crate) generation: String,
     pub(crate) bootstrap: Option<SidebarGxserverBootstrap>,
     pub(crate) initial_snapshot: Option<serde_json::Value>,
+    pub(crate) initial_presentation: Option<serde_json::Value>,
 }
 
 pub enum BrowserPageMetadataEvent {
@@ -707,6 +708,7 @@ pub(crate) fn send_session_chat_activation_process_message(
     generation: &str,
     bootstrap: Option<SidebarGxserverBootstrap>,
     initial_snapshot: Option<serde_json::Value>,
+    initial_presentation: Option<serde_json::Value>,
 ) {
     if !is_gpui_first_party_cef_entry_url(url, "chat.html")
         || !trusted_gxserver_frame_matches(frame, &sidebar_page_entry_identity(url))
@@ -723,6 +725,7 @@ pub(crate) fn send_session_chat_activation_process_message(
     };
     let activation = serde_json::json!({
         "url": url, "generation": generation, "initialSnapshot": initial_snapshot,
+        "initialPresentation": initial_presentation,
         "bootstrap": bootstrap.map(|bootstrap| serde_json::json!({
             "baseUrl": bootstrap.base_url, "authToken": bootstrap.auth_token,
             "protocolVersion": bootstrap.protocol_version, "clientId": bootstrap.client_id,

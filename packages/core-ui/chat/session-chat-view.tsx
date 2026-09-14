@@ -1,10 +1,13 @@
 import { AccountSwitchCard } from '../accounts/account-switch-card';
 import { useAccountSwitchStatus } from '../accounts/use-account-switch-status';
 import type { SessionChatDraftHandoff } from '@/packages/shared/session-chat-queue';
-import { SessionChatPresentationProvider } from './session-chat-presentation-provider';
+import {
+  SessionChatPresentationProvider,
+  sessionChatPreservesAgentLineBreaks,
+} from './session-chat-presentation-provider';
 import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
 import type { AccountsTransport } from '@/packages/shared/agent-accounts';
-import { useAccounts } from '@/packages/core-ui/accounts/use-accounts';
+import { useAccounts, type AccountsSnapshotCache } from '@/packages/core-ui/accounts/use-accounts';
 import { SessionAccountsPanel } from '@/packages/core-ui/accounts/session-panel';
 // SessionChatView — root layout (upstream chat spec §11.1 port): message list
 // over an interactive-card slot over the composer. The question card replaces
@@ -12,7 +15,7 @@ import { SessionAccountsPanel } from '@/packages/core-ui/accounts/session-panel'
 // else is derived by useSessionChat.
 
 import { IconBlockquote, IconBrowser, IconCopy, IconExternalLink } from '@tabler/icons-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, RefObject } from 'react';
 import {
   ContextMenu,
@@ -507,14 +510,17 @@ export function SessionChatView({
   cycle: the transcript hook is SEEDED with this agent's command catalog, and
   the hook is what produces the read state. The entry is stamped with the
   transport it was read through, so a different session never inherits it — the
-  view falls straight back to the new host label until that session's own read
+  view uses that session's retained identity or its host label until its read
   lands.
   */
   const [readAgentEntry, setReadAgentEntry] = useState<{
     agent: string | null;
     transport: SessionChatTransport;
   } | null>(null);
-  const agentLabelFromRead = readAgentEntry?.transport === transport ? readAgentEntry.agent : null;
+  const agentLabelFromRead =
+    readAgentEntry?.transport === transport
+      ? readAgentEntry.agent
+      : (transport.presentation?.getSnapshot().agent ?? null);
   const resolvedAgentLabel = agentLabelFromRead ?? agentLabel ?? null;
   const slashCommands = useMemo(() => sessionChatSlashCommandsForAgent(resolvedAgentLabel), [resolvedAgentLabel]);
   // The option pills type commands the "/" picker does not offer (/effort,
@@ -665,7 +671,27 @@ export function SessionChatView({
       }
     };
   }, [clearDraftAgentSwitchTimers, refreshAfterDraftSwitch, transport]);
-  const accountState = useAccounts(accountsTransport, true, accountsEnabled, false, chat.sessionAgentId);
+  const retainedAccounts = useMemo<AccountsSnapshotCache | undefined>(() => {
+    const presentation = transport.presentation;
+    if (!presentation) return undefined;
+    return {
+      getSnapshot(sessionAgentId) {
+        const cached = presentation.getSnapshot().accounts;
+        return cached?.sessionAgentId === sessionAgentId && cached.data.session?.provider === accountProvider
+          ? cached.data
+          : undefined;
+      },
+      update: (data, sessionAgentId) => presentation.update({ accounts: { data, sessionAgentId } }),
+    };
+  }, [transport.presentation, accountProvider]);
+  const accountState = useAccounts(
+    accountsTransport,
+    true,
+    accountsEnabled,
+    false,
+    chat.sessionAgentId,
+    retainedAccounts
+  );
   const accountSwitch = useAccountSwitchStatus(chat.accountSwitch, sessionKey);
   const accountSwitchRefreshKey = chat.accountSwitch ? `${chat.accountSwitch.id}:${chat.accountSwitch.phase}` : null;
   useEffect(() => {
@@ -792,7 +818,7 @@ export function SessionChatView({
   */
   const applyDetectedOptions = sessionOptions.applyDetected;
   const detectedOptions = chat.selectedOptions;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!detectedOptions) {
       return;
     }
@@ -1590,6 +1616,7 @@ export function SessionChatView({
   return (
     <SessionChatPresentationProvider
       fileEditPreviews={fileEditPreviews}
+      preserveAgentLineBreaks={sessionChatPreservesAgentLineBreaks(readStateAgent ?? agentLabel ?? chat.sessionAgentId)}
       simpleMode={simpleMode}
       onSimpleModeChange={onSimpleModeChange}
     >
@@ -1862,7 +1889,7 @@ export function SessionChatView({
                             composerEnabled && !questionActive && chat.status !== 'error' && chat.status !== 'loading'
                           }
                           working={chat.sessionWorking}
-                          onSend={chat.send}
+                          onSend={(questionId, text) => chat.answerPrompt({ kind: 'asyncQuestion', questionId, text })}
                           onDismiss={(questionId) => chat.answerPrompt({ kind: 'dismissAsyncQuestion', questionId })}
                         />
                         <SessionChatInteractiveCard
@@ -2021,6 +2048,8 @@ export function SessionChatView({
                             skillHeading={`${draftAgentRow?.name ?? displayAgentName(resolvedAgentLabel) ?? 'Agent'} skills`}
                           />
                           <SessionChatStatusLine
+                            key={sessionKey}
+                            presentation={transport.presentation}
                             hasConfiguredItems={hasConfiguredStatusLineItems}
                             items={starredContextDetails}
                           />

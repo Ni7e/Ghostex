@@ -105,6 +105,8 @@ export interface SessionChatPageActivation {
   url: string;
   generation: string;
   initialSnapshot?: import('@/packages/shared/session-chat').GxserverReadSessionChatResult;
+  initialPresentation?:
+    import('@/packages/core-ui/chat/session-chat-presentation-cache').SessionChatPresentationState | null;
   bootstrap?: ChatGxserverBootstrap | null;
 }
 export function chatBridgeNamespace(): ChatBridgeNamespace {
@@ -1088,6 +1090,7 @@ setting is off.
     {
       generation: activation.generation,
       initialSnapshot: activation.initialSnapshot,
+      initialPresentation: activation.initialPresentation ?? undefined,
       send: (payload) =>
         postSessionChatHostAction('runtimeRequest', { ...payload, clientId: sessionChatDraftClientId() }),
     }

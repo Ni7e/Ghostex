@@ -1,6 +1,10 @@
 import type { PendingDraft } from '@/packages/core-ui/chat/session-chat-draft-outbox';
 import { GXSERVER_PROTOCOL_VERSION } from '@/packages/shared/gxserver-protocol';
 import { mergeSessionChatMessagesWith } from '@/packages/core-ui/chat/session-chat-merge';
+import {
+  createSessionChatPresentationStore,
+  type SessionChatPresentationState,
+} from '@/packages/core-ui/chat/session-chat-presentation-cache';
 import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
 import type { GxserverReadSessionChatResult, GxserverSessionChatEvent } from '@/packages/shared/session-chat';
 import { foldSessionChatAppend, foldSessionChatState } from './session-chat-runtime/fold';
@@ -24,6 +28,7 @@ type Message = {
 interface Host {
   generation: string;
   initialSnapshot?: GxserverReadSessionChatResult;
+  initialPresentation?: SessionChatPresentationState;
   send: (payload: Record<string, unknown>) => void;
 }
 const endpoints = new Map<string, SessionChatRuntimeEndpoint>();
@@ -86,6 +91,9 @@ export function retainSessionChatTransport(
   const send = (method: string, params?: Record<string, unknown>, requestId?: string): void => {
     if (!disposed) host.send({ method, params, requestId });
   };
+  const presentation = createSessionChatPresentationStore(host.initialPresentation, (state) =>
+    send('presentation', { state })
+  );
   const subscribe = (): void =>
     send('subscribe', { limit: Math.max(120, ...[...listeners].map((listener) => listener.currentLimit?.() ?? 0)) });
   const rejectPending = (reason: string): void => {
@@ -314,8 +322,10 @@ export function retainSessionChatTransport(
   });
   return {
     ...raw,
+    presentation,
     getCachedSnapshot: () => snapshot,
-    seed: (params) => (snapshot ? Promise.resolve(snapshot) : request('seed', params)),
+    // The native snapshot is only a synchronous preview; the shared owner supplies the authoritative seed.
+    seed: (params) => request('seed', params),
     read: (params) => request('read', params),
     reconnect: () => {
       send('reconnect');

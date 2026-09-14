@@ -448,6 +448,8 @@ pub struct GhostexGpuiApp {
     pub(crate) session_chat_broker_epoch: Option<String>,
     pub(crate) session_chat_shared_snapshots:
         Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
+    pub(crate) session_chat_presentations:
+        Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
     pub(crate) reusable_chat_renderers: Vec<(
         Entity<CefSurface>,
         u64,

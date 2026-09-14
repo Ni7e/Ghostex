@@ -266,6 +266,7 @@ impl GhostexGpuiApp {
                 session_chat_broker_endpoints: HashMap::new(),
                 session_chat_broker_epoch: None,
                 session_chat_shared_snapshots: Vec::new(),
+                session_chat_presentations: Vec::new(),
                 reusable_chat_renderers: Vec::new(),
                 account_switch_progress: HashMap::new(),
                 agents_chat_surface_hidden_since: HashMap::new(),

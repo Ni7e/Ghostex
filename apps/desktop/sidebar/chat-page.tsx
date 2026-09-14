@@ -243,7 +243,7 @@ export function createGpuiSessionChatPage({
         })
         .catch(() => {});
     }, [bootstrap, remoteMachineId]);
-    const [sessionTitle, setSessionTitle] = useState('');
+    const [sessionTitle, setSessionTitle] = useState(() => transport.presentation?.getSnapshot().sessionTitle ?? '');
     const [workingDirectory, setWorkingDirectory] = useState('');
     const hostLinks = useMemo(
       () => ({ ...GPUI_SESSION_CHAT_HOST_LINKS, workingDirectory }),
@@ -402,7 +402,9 @@ export function createGpuiSessionChatPage({
           if (!project || !session) {
             throw new Error(`Session ${sessionId} was not found in project ${projectId}.`);
           }
-          setSessionTitle(session.displayTitle ?? session.primaryTitle ?? session.title);
+          const title = session.displayTitle ?? session.primaryTitle ?? session.title;
+          transport.presentation?.update({ sessionTitle: title });
+          setSessionTitle(title);
           setWorkingDirectory(session.cwd || project.path || '');
           const chatBarExtensions = extensionResult.extensions
             .filter(isChatBarExtension)
@@ -438,7 +440,7 @@ export function createGpuiSessionChatPage({
       return () => {
         active = false;
       };
-    }, [bootstrap, projectId, publishExtensions, sessionId, sessionKey, startExtension]);
+    }, [bootstrap, projectId, publishExtensions, sessionId, sessionKey, startExtension, transport]);
 
     const persistPanelState = useCallback(
       (next: GhostexChatBarPanelSessionState): void => {

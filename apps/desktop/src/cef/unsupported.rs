@@ -276,6 +276,7 @@ impl CefBrowser {
         _generation: &str,
         _bootstrap: SidebarGxserverBootstrap,
         _initial_snapshot: Option<serde_json::Value>,
+        _initial_presentation: Option<serde_json::Value>,
     ) {
     }
 

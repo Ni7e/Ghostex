@@ -9,6 +9,7 @@ import { createAppToastRequest } from '../../shared/app-toast-contract';
 import { postAppModalHostMessage } from '../app-modal-host-bridge';
 import { AppTooltip } from '../app-tooltip';
 import type { SessionChatContextDetailItem } from './session-chat-context-details';
+import type { SessionChatPresentationStore } from './session-chat-presentation-cache';
 
 function copyStatusLineItem(copy: { text: string; label: string }): void {
   void navigator.clipboard.writeText(copy.text).then(() => {
@@ -21,33 +22,33 @@ function copyStatusLineItem(copy: { text: string; label: string }): void {
 }
 
 /** CDXC:AgentProviders 2026-09-10 DECISION: Hide emails also applies to the chat status line, context meter details, and Context details dialog previews, including hover text. */
-/** CDXC:AgentProviders 2026-09-12 DECISION:
- * User: keep the status line transparent for its first three seconds while usage loads, reserve its space when starred rows are configured, then fade it in when ready so the composer does not jump.
+/** CDXC:AgentProviders 2026-09-14 DECISION:
+ * User: show a previously loaded chat's status line immediately when returning; keep the three-second wait and reserved space only for its initial load.
+ * This supersedes repeating the 2026-09-12 initial fade on every chat activation.
  */
 export function SessionChatStatusLine({
   hasConfiguredItems = false,
   items,
+  presentation,
 }: {
   hasConfiguredItems?: boolean;
   items: readonly SessionChatContextDetailItem[];
+  presentation?: SessionChatPresentationStore | undefined;
 }) {
-  const [initialDelayElapsed, setInitialDelayElapsed] = useState(false);
-  const [visible, setVisible] = useState(false);
+  const [initialDelayElapsed, setInitialDelayElapsed] = useState(
+    () => presentation?.getSnapshot().statusLineReady === true
+  );
+  const visible = initialDelayElapsed && items.length > 0;
 
   useEffect(() => {
+    if (presentation?.getSnapshot().statusLineReady) return;
     const timeout = window.setTimeout(() => setInitialDelayElapsed(true), 3000);
     return () => window.clearTimeout(timeout);
-  }, []);
+  }, [presentation]);
 
   useEffect(() => {
-    if (!initialDelayElapsed || items.length === 0) {
-      setVisible(false);
-      return;
-    }
-    setVisible(false);
-    const frame = window.requestAnimationFrame(() => setVisible(true));
-    return () => window.cancelAnimationFrame(frame);
-  }, [initialDelayElapsed, items.length]);
+    if (visible) presentation?.update({ statusLineReady: true });
+  }, [visible, presentation]);
 
   const shouldReserveSpace = hasConfiguredItems || items.length > 0;
   if (initialDelayElapsed && !shouldReserveSpace) {

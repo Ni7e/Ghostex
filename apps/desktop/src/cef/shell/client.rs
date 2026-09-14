@@ -403,7 +403,7 @@ wrap_load_handler! {
                 self.zoom.refresh(browser, true);
             }
             if let Some(activation) = self.activation.borrow().as_ref() {
-                send_session_chat_activation_process_message(frame, &activation.url, &activation.generation, activation.bootstrap.clone(), activation.initial_snapshot.clone());
+                send_session_chat_activation_process_message(frame, &activation.url, &activation.generation, activation.bootstrap.clone(), activation.initial_snapshot.clone(), activation.initial_presentation.clone());
                 return;
             }
             send_session_chat_gxserver_bootstrap_process_message(

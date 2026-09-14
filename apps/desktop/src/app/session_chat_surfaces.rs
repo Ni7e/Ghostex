@@ -909,6 +909,8 @@ impl GhostexGpuiApp {
         page_state.account_key = self.workspace_terminal_key_for_shell_session(session_id);
         let initial_snapshot =
             self.cached_session_chat_runtime_snapshot(page_state.account_key.as_ref());
+        let initial_presentation =
+            self.cached_session_chat_presentation(page_state.account_key.as_ref());
         let generation = page_state.generation.to_string();
         let url = append_url_query_params(
             url,
@@ -935,7 +937,13 @@ impl GhostexGpuiApp {
                 .insert(session_id, surface.clone());
             surface.update(cx, |surface, _| {
                 surface.set_session_chat_pane_focused(false, true);
-                surface.activate_session_chat(&url, &generation, bootstrap, initial_snapshot);
+                surface.activate_session_chat(
+                    &url,
+                    &generation,
+                    bootstrap,
+                    initial_snapshot,
+                    initial_presentation,
+                );
             });
             self.watch_session_chat_activation(activation_generation, cx);
             self.record_session_chat_lifecycle(
@@ -1013,7 +1021,13 @@ impl GhostexGpuiApp {
             }
         };
         surface.update(cx, |surface, _| {
-            surface.activate_session_chat(&url, &generation, bootstrap, initial_snapshot)
+            surface.activate_session_chat(
+                &url,
+                &generation,
+                bootstrap,
+                initial_snapshot,
+                initial_presentation,
+            )
         });
         self.agents_chat_page_states.insert(session_id, page_state);
         self.agents_chat_surfaces
@@ -1068,6 +1082,9 @@ impl GhostexGpuiApp {
             self.session_chat_composer_empty_reports.remove(&session_id);
             self.agents_chat_surface_hidden_since.remove(&session_id);
             if let Some(state) = self.agents_chat_page_states.remove(&session_id) {
+                if let Some(key) = state.account_key.as_ref() {
+                    self.forget_session_chat_presentation(key);
+                }
                 self.release_session_chat_runtime_subscription(state.generation, cx);
             }
             if let Some(surface) = self.agents_chat_surfaces.remove(&session_id) {
@@ -1252,6 +1269,7 @@ impl GhostexGpuiApp {
         );
         if let Some(key) = self.workspace_terminal_key_for_shell_session(session_id) {
             self.account_switch_progress.remove(&key);
+            self.forget_session_chat_presentation(&key);
         }
         self.agents_chat_mode_sessions.remove(&session_id);
         self.session_chat_composer_ready_sessions
@@ -1259,6 +1277,9 @@ impl GhostexGpuiApp {
         self.session_chat_composer_empty_reports.remove(&session_id);
         self.agents_chat_surface_hidden_since.remove(&session_id);
         if let Some(state) = self.agents_chat_page_states.remove(&session_id) {
+            if let Some(key) = state.account_key.as_ref() {
+                self.forget_session_chat_presentation(key);
+            }
             self.release_session_chat_runtime_subscription(state.generation, cx);
         }
         self.drop_pending_keyboard_handoff_for_session(session_id);

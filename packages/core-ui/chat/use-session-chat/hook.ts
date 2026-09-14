@@ -45,6 +45,7 @@ import {
   SESSION_CHAT_PAGE,
   sessionChatPageHasMore,
 } from '../session-chat-pagination';
+import type { SessionChatPresentationState } from '../session-chat-presentation-cache';
 import {
   SESSION_CHAT_PENDING_SEND_LIMIT,
   appendSessionChatCommandMarker,
@@ -131,6 +132,12 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   } = options;
   const diagnosticLogRef = useRef(diagnosticLog);
   diagnosticLogRef.current = diagnosticLog;
+  const retainedPresentation = useMemo(() => transport.presentation?.getSnapshot(), [transport]);
+  const identityRef = useRef<Pick<SessionChatPresentationState, 'agent' | 'agentSessionId' | 'sessionAgentId'>>({
+    agent: retainedPresentation?.agent,
+    agentSessionId: retainedPresentation?.agentSessionId,
+    sessionAgentId: retainedPresentation?.sessionAgentId,
+  });
 
   const [transcript, setTranscript] = useState<readonly SessionChatMessage[]>(
     () => transport.getCachedSnapshot?.()?.messages ?? []
@@ -140,8 +147,10 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   );
   const [lifecycle, setLifecycle] = useState<SessionChatTurnLifecycle | null>(null);
   const [prompt, setPrompt] = useState<SessionChatInteractivePrompt | null>(null);
-  const [agent, setAgent] = useState<string | null>(null);
-  const [agentSessionId, setAgentSessionId] = useState<string | null>(null);
+  const [agent, setAgent] = useState<string | null>(() => retainedPresentation?.agent ?? null);
+  const [agentSessionId, setAgentSessionId] = useState<string | null>(
+    () => retainedPresentation?.agentSessionId ?? null
+  );
   /*
   CDXC:Drafts 2026-08-28: read-result-only state (see the doc on
   UseSessionChatResult.availableAgents). Both are set from a read and from
@@ -150,7 +159,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   */
   const [availableAgents, setAvailableAgents] = useState<readonly SessionChatAvailableAgent[] | null>(null);
   const [switchableAgents, setSwitchableAgents] = useState<readonly SessionChatAvailableAgent[] | null>(null);
-  const [sessionAgentId, setSessionAgentId] = useState<string | null>(null);
+  const [sessionAgentId, setSessionAgentId] = useState<string | null>(
+    () => retainedPresentation?.sessionAgentId ?? null
+  );
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
@@ -166,15 +177,19 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   const [sessionActivityWorking, setSessionActivityWorking] = useState(false);
   // Detected model/effort: carried by read results and by
   // snapshot/replaced/state frames. Absent ⇒ unchanged (older daemons omit it).
-  const [selectedOptions, setSelectedOptions] = useState<SessionChatDetectedOptions | null>(null);
+  const [selectedOptions, setSelectedOptions] = useState<SessionChatDetectedOptions | null>(
+    () => retainedPresentation?.selectedOptions ?? null
+  );
+  const selectedOptionsRef = useRef(selectedOptions);
   /**
    * CDXC:AgentScreenDetection 2026-09-08 WHY:
    * Option captures have their own timestamps; a transcript snapshot winning the seed-read race must not discard terminal evidence.
    * The option store orders each field by source, then capture time; an older reply carrying stronger evidence must reach that store too.
    */
-  const applySelectedOptions = useCallback((detected: SessionChatDetectedOptions | undefined): void => {
-    if (!detected) return;
-    setSelectedOptions((current) => {
+  const applySelectedOptions = useCallback(
+    (detected: SessionChatDetectedOptions | undefined): void => {
+      if (!detected) return;
+      const current = selectedOptionsRef.current;
       const strongerEvidence = (['model', 'effort', 'mode'] as const).some(
         (field) =>
           sessionChatOptionEvidencePriority(detected[field]?.source) >
@@ -190,15 +205,16 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       const codexStatus = nextOptions.codexStatus ?? detected.codexStatus ?? current?.codexStatus;
       const claudeStatus = nextOptions.claudeStatus ?? detected.claudeStatus ?? current?.claudeStatus;
       const contextUsage = nextOptions.contextUsage ?? detected.contextUsage ?? current?.contextUsage;
-      if (!codexStatus && !claudeStatus && !contextUsage) return nextOptions;
-      return {
-        ...nextOptions,
-        codexStatus,
-        claudeStatus,
-        contextUsage,
-      };
-    });
-  }, []);
+      const next =
+        !codexStatus && !claudeStatus && !contextUsage
+          ? nextOptions
+          : { ...nextOptions, codexStatus, claudeStatus, contextUsage };
+      selectedOptionsRef.current = next;
+      setSelectedOptions(next);
+      transport.presentation?.update({ selectedOptions: next });
+    },
+    [transport]
+  );
   const selectedOptionsDetectedAt = selectedOptions?.detectedAt ?? null;
   const selectedOptionsFast = selectedOptions?.fast === true;
   useEffect(() => {
@@ -309,6 +325,49 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   that never sends it simply leaves the pills in their pre-probe state.
   */
   const [screenProbed, setScreenProbed] = useState(false);
+  /**
+   * CDXC:AgentProviders 2026-09-14 WHY:
+   * Invalidate retained usage before folding a replacement agent's options, so an options-only reply cannot inherit the previous provider's usage.
+   * Learning an identity for the first time does not invalidate evidence already received from that same conversation.
+   */
+  const applyAgentIdentity = useCallback(
+    (patch: Pick<SessionChatPresentationState, 'agent' | 'agentSessionId' | 'sessionAgentId'>): void => {
+      const previous = identityRef.current;
+      const accountChanged = (['agent', 'sessionAgentId'] as const).some(
+        (field) => previous[field] != null && patch[field] != null && previous[field] !== patch[field]
+      );
+      const changed =
+        accountChanged ||
+        (previous.agentSessionId != null &&
+          patch.agentSessionId != null &&
+          previous.agentSessionId !== patch.agentSessionId);
+      if (changed) {
+        selectedOptionsRef.current = null;
+        setSelectedOptions(null);
+        setScreenProbed(false);
+      }
+      const next = { ...previous };
+      if (patch.agent !== undefined) {
+        next.agent = patch.agent;
+        setAgent(patch.agent);
+      }
+      if (patch.agentSessionId !== undefined) {
+        next.agentSessionId = patch.agentSessionId;
+        setAgentSessionId(patch.agentSessionId);
+      }
+      if (patch.sessionAgentId !== undefined) {
+        next.sessionAgentId = patch.sessionAgentId;
+        setSessionAgentId(patch.sessionAgentId);
+      }
+      identityRef.current = next;
+      transport.presentation?.update({
+        ...next,
+        ...(changed ? { selectedOptions: undefined } : {}),
+        ...(accountChanged ? { accounts: undefined } : {}),
+      });
+    },
+    [transport]
+  );
   /*
   Ghostex prompt queue. `null` means NO frame has carried a `queue` field yet,
   which is the "old daemon / not supported" state and hides every queue
@@ -382,14 +441,6 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   const autoReconnectsRef = useRef(0);
   /** Transport that last seeded the view state; gates the session-identity wipe. */
   const seededTransportRef = useRef<SessionChatTransport | null>(null);
-  /*
-  CDXC:Drafts 2026-08-28:
-  The launch agent id the last read carried, so a read can tell "this draft is
-  now running a different agent CLI" from "this is the first read". A ref, not
-  the state above, because the comparison happens inside the fold itself.
-  */
-  const sessionAgentIdRef = useRef<string | null>(null);
-
   const reconnect = useCallback((): void => {
     diagnosticLogRef.current?.('sessionChat.reconnect');
     transport.reconnect?.();
@@ -532,7 +583,8 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         /** Synced composer draft; omitted ⇒ unchanged, never cleared. */
         draft?: SessionChatDraft;
       },
-      source: string
+      source: string,
+      restorePresentation = true
     ): void => {
       diagnosticLogRef.current?.('sessionChat.authoritative', {
         epoch: result.epoch,
@@ -557,11 +609,10 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         setSessionActivityWorking(result.working);
       }
       setPrompt(result.prompt ?? null);
-      if (result.agent !== undefined) {
-        setAgent(result.agent);
+      if (restorePresentation) {
+        applyAgentIdentity({ agent: result.agent, agentSessionId: result.agentSessionId });
+        applySelectedOptions(result.selectedOptions);
       }
-      setAgentSessionId(result.agentSessionId ?? null);
-      applySelectedOptions(result.selectedOptions);
       setTerminalNotice(result.terminalNotice ?? null);
       applyTerminalActivity(result.terminalActivity);
       setAgentFleet(result.agentFleet ?? null);
@@ -581,7 +632,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       loadEarlierEpochRef.current = null;
       setLoadingEarlier(false);
     },
-    [applyQueueCarriage, applySelectedOptions, applyTerminalActivity]
+    [applyAgentIdentity, applyQueueCarriage, applySelectedOptions, applyTerminalActivity]
   );
 
   /*
@@ -596,35 +647,18 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       availableAgents?: SessionChatAvailableAgent[];
       sessionAgentId?: string;
       switchableAgents?: SessionChatAvailableAgent[];
+      agent?: string;
+      agentSessionId?: string;
     }): void => {
-      const nextSessionAgentId = result.sessionAgentId ?? null;
-      const previousSessionAgentId = sessionAgentIdRef.current;
-      sessionAgentIdRef.current = nextSessionAgentId;
+      applyAgentIdentity({
+        agent: result.agent,
+        agentSessionId: result.agentSessionId,
+        sessionAgentId: result.sessionAgentId ?? null,
+      });
       setAvailableAgents(result.availableAgents ?? null);
       setSwitchableAgents(result.switchableAgents?.length ? result.switchableAgents : null);
-      setSessionAgentId(nextSessionAgentId);
-      /*
-      CDXC:Drafts 2026-08-28:
-      A draft that came back running a DIFFERENT agent CLI has no detected
-      options any more: the model, effort and mode this chat is holding belong
-      to the CLI that was just replaced. Both are dropped here rather than left
-      to be overwritten, because the new agent may name none of them — and the
-      probe latch has to go with them, or the pill would present the previous
-      agent's model as a settled answer instead of showing that the new one has
-      not been read yet. Applied only on an id-to-id change: the first read of a
-      session (null → id) is this chat learning its own identity, and it runs
-      right after `applyAuthoritative` has folded that same read's detection.
-      */
-      if (
-        previousSessionAgentId !== null &&
-        nextSessionAgentId !== null &&
-        previousSessionAgentId !== nextSessionAgentId
-      ) {
-        setSelectedOptions(null);
-        setScreenProbed(false);
-      }
     },
-    []
+    [applyAgentIdentity]
   );
 
   const requestResync = useCallback((): void => {
@@ -668,8 +702,8 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         // the cursor at the read's older seq would make every following
         // append look like a gap and resync forever.
         frameState.seq = outrun ? observed.seq : result.seq;
-        applyAuthoritative(result, 'resyncRead');
         applyDraftAgentCarriage(result);
+        applyAuthoritative(result, 'resyncRead');
         if (outrun) {
           scheduleResyncFollowUp();
         } else {
@@ -718,7 +752,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         requestResync();
       }, RESYNC_FOLLOW_UP_DELAY_MS);
     }
-  }, [applyAuthoritative, transport]);
+  }, [applyAuthoritative, applyDraftAgentCarriage, transport]);
 
   useLayoutEffect(() => {
     closedRef.current = false;
@@ -757,13 +791,20 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       sessionChanged,
     });
     if (sessionChanged) {
+      const presentation = transport.presentation?.getSnapshot();
+      identityRef.current = {
+        agent: presentation?.agent,
+        agentSessionId: presentation?.agentSessionId,
+        sessionAgentId: presentation?.sessionAgentId,
+      };
       limitRef.current = initialLimit;
       setServerWorking(false);
       setTranscript([]);
       setServerStatus('loading');
       setLifecycle(null);
       setPrompt(null);
-      setAgentSessionId(null);
+      setAgent(presentation?.agent ?? null);
+      setAgentSessionId(presentation?.agentSessionId ?? null);
       setError(null);
       setHasMore(false);
       setPending([]);
@@ -777,8 +818,10 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       setTerminalTool(null);
       setAppCommands([]);
       setReturnedPrompt(null);
-      // A different session's detection must never leak into this one.
-      setSelectedOptions(null);
+      // Restore only this session's small presentation cache, even when its
+      // transcript exceeded the host's retention limit.
+      selectedOptionsRef.current = presentation?.selectedOptions ?? null;
+      setSelectedOptions(selectedOptionsRef.current);
       // Its "we have looked" latch is per-session too: a new session has not
       // been probed yet, whatever the previous one had proven.
       setScreenProbed(false);
@@ -792,10 +835,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       // never tick a row (or offer a switch) for this one.
       setAvailableAgents(null);
       setSwitchableAgents(null);
-      setSessionAgentId(null);
-      // Another session's agent id must not read as an agent SWITCH on this
-      // one's first read (which would wipe the detection that read carried).
-      sessionAgentIdRef.current = null;
+      setSessionAgentId(presentation?.sessionAgentId ?? null);
     }
 
     // Retained data is folded before paint so a session switch never paints
@@ -805,8 +845,21 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       frameState.epoch = cachedSnapshot.epoch;
       frameState.seq = cachedSnapshot.seq;
       limitRef.current = Math.max(initialLimit, cachedSnapshot.messages.length);
-      applyAuthoritative(cachedSnapshot, 'cachedSnapshot');
-      applyDraftAgentCarriage(cachedSnapshot);
+      const presentationIdentity = identityRef.current;
+      const matchingIdentity = (['agent', 'agentSessionId', 'sessionAgentId'] as const).every(
+        (field) =>
+          presentationIdentity[field] == null ||
+          cachedSnapshot[field] == null ||
+          presentationIdentity[field] === cachedSnapshot[field]
+      );
+      if (matchingIdentity) {
+        applyDraftAgentCarriage({
+          ...cachedSnapshot,
+          agentSessionId: cachedSnapshot.agentSessionId ?? presentationIdentity.agentSessionId ?? undefined,
+          sessionAgentId: cachedSnapshot.sessionAgentId ?? presentationIdentity.sessionAgentId ?? undefined,
+        });
+      }
+      applyAuthoritative(cachedSnapshot, 'cachedSnapshot', matchingIdentity);
     }
 
     const acceptSequencedFrame = (event: { epoch: number; seq: number }): 'apply' | 'drop' | 'resync' => {
@@ -842,7 +895,6 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         frameState.epoch = event.epoch;
         frameState.seq = event.seq;
         frameState.frameArrived = true;
-        applyAuthoritative(event, event.type);
         /*
         Ordinary daemon frames do not own these read-only fields. The mobile
         SSH host synthesizes snapshots from reads and deliberately owns them,
@@ -851,6 +903,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         if ('availableAgents' in event || 'sessionAgentId' in event || 'switchableAgents' in event) {
           applyDraftAgentCarriage(event);
         }
+        applyAuthoritative(event, event.type);
         return;
       }
       const verdict = acceptSequencedFrame(event);
@@ -911,6 +964,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         setLifecycle(event.lifecycle);
       }
       setPrompt(event.prompt ?? null);
+      applyAgentIdentity({ agentSessionId: event.agentSessionId });
       applySelectedOptions(event.selectedOptions);
       setTerminalNotice(event.terminalNotice ?? null);
       applyTerminalActivity(event.terminalActivity);
@@ -926,9 +980,6 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         setScreenProbed(true);
       }
       applyQueueCarriage(event);
-      if (event.agentSessionId !== undefined) {
-        setAgentSessionId(event.agentSessionId);
-      }
     };
 
     // The window follows what is on screen: limitRef grows with the live list,
@@ -978,21 +1029,18 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
               requestResync();
               return;
             }
+            applyDraftAgentCarriage(result);
             applySelectedOptions(result.selectedOptions);
             if (result.screenProbed) {
               setScreenProbed(true);
             }
-            if (result.agent !== undefined) {
-              setAgent(result.agent);
-            }
-            applyDraftAgentCarriage(result);
             return;
           }
           lastFrameAtRef.current = Date.now();
           frameState.epoch = result.epoch;
           frameState.seq = result.seq;
-          applyAuthoritative(result, 'seedRead');
           applyDraftAgentCarriage(result);
+          applyAuthoritative(result, 'seedRead');
           if (result.status === 'starting' && Date.now() - startedAt < NOTFOUND_RETRY_WINDOW_MS) {
             scheduleRetry(seedRead);
           }
@@ -1079,6 +1127,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       unsubscribe();
     };
   }, [
+    applyAgentIdentity,
     applyAuthoritative,
     applyDraftAgentCarriage,
     applyQueueCarriage,

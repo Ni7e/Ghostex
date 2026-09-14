@@ -1,6 +1,7 @@
 import type { SessionChatDraft } from '@/packages/shared/session-chat-queue';
 import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
 import type { AccountsTransport } from '@/packages/shared/agent-accounts';
+import type { SessionChatPresentationStore } from './session-chat-presentation-cache';
 // Session Chat transport contract.
 // Hosts (ghostex-web, gpui CEF, mobile web views) inject an implementation so
 // the shared chat components never talk to gxserver directly. The transport is
@@ -31,6 +32,8 @@ import type {
 
 export interface SessionChatTransport {
   accounts?: AccountsTransport;
+  /** Per-session bottom-bar state retained by hosts that release inactive chat pages. */
+  presentation?: SessionChatPresentationStore;
   /** Retained host state for synchronous hydration when this view is mounted again. */
   getCachedSnapshot?(): GxserverReadSessionChatResult | undefined;
   /** Initial hydration may reuse retained data; read() always requests authoritative state. */

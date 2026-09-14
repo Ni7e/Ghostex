@@ -716,6 +716,7 @@ impl CefBrowser {
         generation: &str,
         bootstrap: SidebarGxserverBootstrap,
         initial_snapshot: Option<serde_json::Value>,
+        initial_presentation: Option<serde_json::Value>,
     ) {
         if !is_gpui_first_party_cef_entry_url(url, "chat.html")
             || self.trusted_gxserver_entry_identity.as_deref()
@@ -730,6 +731,7 @@ impl CefBrowser {
             generation: generation.to_string(),
             bootstrap: Some(bootstrap.clone()),
             initial_snapshot: initial_snapshot.clone(),
+            initial_presentation: initial_presentation.clone(),
         });
         let browser = self.browser.borrow();
         let Some(mut frame) = browser.main_frame() else {
@@ -741,6 +743,7 @@ impl CefBrowser {
             generation,
             Some(bootstrap),
             initial_snapshot,
+            initial_presentation,
         );
     }
 
