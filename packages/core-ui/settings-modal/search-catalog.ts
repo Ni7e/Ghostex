@@ -491,7 +491,7 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'sidebarTheme',
           options: SIDEBAR_THEME_SETTING_OPTIONS,
-          subtitle: 'Light, Dark Gray, or follow the system appearance.',
+          subtitle: 'Follow the system appearance by default, or choose Light or Dark Gray.',
           title: 'App theme',
         },
         {
@@ -511,30 +511,30 @@ export function getSettingsSearchSectionDefinitions() {
           options: GHOSTTY_THEME_SETTING_OPTIONS.filter(
             (option) => option.value !== '__ghostex_ghostty_theme_unmanaged__'
           ),
-          subtitle: 'Palette and background used by Ghostex terminals in light mode.',
+          subtitle: 'Uses your configured Ghostty light theme, or GitHub Light when no theme is configured.',
           title: 'Terminal light palette',
         },
         {
           key: 'terminalGhosttyTheme',
           options: GHOSTTY_THEME_SETTING_OPTIONS,
-          subtitle: 'Theme used in dark mode, with your existing Ghostty config and background.',
+          subtitle: 'Uses your configured Ghostty dark theme, or GitHub Dark when no theme is configured.',
           title: 'Terminal dark palette',
         },
         {
           key: 'customSidebarTitlebarBackgroundDarknessPercent',
-          subtitle: 'Contrast level for the sidebar and titlebar background.',
-          title: 'Background Contrast',
+          subtitle: 'Contrast level for the sidebar and titlebar background in dark mode. Light mode stays light gray.',
+          title: 'Dark theme background contrast',
         },
         {
           key: 'customSidebarTitlebarBackgroundTintColor',
-          subtitle: 'Subtle tint color for the sidebar and titlebar background.',
-          title: 'Background Tint',
+          subtitle: 'Subtle tint color for the sidebar and titlebar background in dark mode. Light mode stays light gray.',
+          title: 'Dark theme background tint',
         },
         {
           key: 'accentColor',
           subtitle:
-            'Highlight color for accent text, status highlights, and advanced-setting markers. This color is used minimally in the app.',
-          title: 'Accent Color',
+            'Highlight color for accent text, status highlights, and advanced-setting markers in dark mode.',
+          title: 'Dark theme accent color',
         },
         {
           key: 'showActivePaneOutline',

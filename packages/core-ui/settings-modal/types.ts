@@ -556,12 +556,9 @@ export const DIAGNOSTIC_LOGGING_GROUPS: readonly ['macOS', 'GPUI', 'gxserver'] =
  * browsing rows. Search still reveals them, and Show Advanced keeps them
  * directly below the preset selector for inspecting a preset's effects.
  *
- * CDXC:Theming 2026-06-16-08:58:
- * Theming controls should remain visible without Show Advanced. Do not mark Theme, Background Contrast, or Background Tint as advanced rows.
- *
- * CDXC:Theming 2026-08-30:
- * Accent Color is an advanced Theming row. Search still finds it; Show
- * Advanced keeps it under Background Tint.
+ * CDXC:Theming 2026-09-14 DECISION:
+ * User: make background contrast, background tint and accent color Advanced settings and prefix their labels with "Dark theme" so it is clear they do not affect light mode.
+ * This supersedes keeping contrast and tint visible without Show Advanced; search still reveals all three.
  *
  * CDXC:Settings 2026-06-16-09:20:
  * Empty-sidebar double-click creation remains a low-frequency interaction preference and should hide behind Show Advanced. The menu-bar indicator is preset-owned and stays beside the sidebar preset controls.
@@ -602,6 +599,8 @@ export const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   'projectSessionListCollapsedCount',
   'createSessionOnSidebarDoubleClick',
   'renameSessionOnDoubleClick',
+  'customSidebarTitlebarBackgroundDarknessPercent',
+  'customSidebarTitlebarBackgroundTintColor',
   'accentColor',
   'showActivePaneOutline',
   'workspaceActivePaneBorderColor',

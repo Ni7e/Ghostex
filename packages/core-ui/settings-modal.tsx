@@ -56,7 +56,7 @@ import {
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
   GHOSTTY_SCROLLBAR_OPTIONS,
-  GHOSTTY_THEME_SETTING_OPTIONS,
+  getGhosttyThemeSettingOptions,
   KEEP_AWAKE_DURATION_OPTIONS,
   MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT,
   MIN_TERMINAL_PANE_PADDING_PX,
@@ -1213,11 +1213,11 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.theming, 'terminalGhosttyLightTheme') ? (
                               <SelectField
                                 label='Terminal light palette'
-                                description='Palette and background used by Ghostex terminals in light mode.'
+                                description='Uses your configured Ghostty light theme, or GitHub Light when no theme is configured.'
                                 contentClassName='max-h-80'
                                 {...getSettingModificationProps('terminalGhosttyLightTheme')}
                                 onChange={(value) => updateDraft('terminalGhosttyLightTheme', value)}
-                                options={GHOSTTY_THEME_SETTING_OPTIONS.filter(
+                                options={getGhosttyThemeSettingOptions(draft.terminalGhosttyLightTheme).filter(
                                   (option) => option.value !== GHOSTTY_THEME_UNMANAGED_VALUE
                                 )}
                                 showScrollButtons={false}
@@ -1227,7 +1227,7 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.theming, 'terminalGhosttyTheme') ? (
                               <SelectField
                                 contentClassName='max-h-80'
-                                description='Theme used in dark mode, with your existing Ghostty config and background.'
+                                description='Uses your configured Ghostty dark theme, or GitHub Dark when no theme is configured.'
                                 label='Terminal dark palette'
                                 {...getSettingModificationProps('terminalGhosttyTheme')}
                                 onChange={(value) =>
@@ -1236,7 +1236,7 @@ export function SettingsModal({
                                     value === GHOSTTY_THEME_UNMANAGED_VALUE ? '' : value
                                   )
                                 }
-                                options={GHOSTTY_THEME_SETTING_OPTIONS}
+                                options={getGhosttyThemeSettingOptions(draft.terminalGhosttyTheme)}
                                 showScrollButtons={false}
                                 value={draft.terminalGhosttyTheme || GHOSTTY_THEME_UNMANAGED_VALUE}
                               />
@@ -1247,7 +1247,7 @@ export function SettingsModal({
                             ) ? (
                               <SliderNumberField
                                 description='Dark mode: 85 is softer gray; 100 is black. Text and icons adjust automatically.'
-                                label='Background Contrast'
+                                label='Dark theme background contrast'
                                 {...getSettingModificationProps('customSidebarTitlebarBackgroundDarknessPercent')}
                                 max={MAX_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
                                 min={MIN_CUSTOM_SIDEBAR_TITLEBAR_BACKGROUND_DARKNESS_PERCENT}
@@ -1264,7 +1264,7 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.theming, 'customSidebarTitlebarBackgroundTintColor') ? (
                               <WebColorPickerField
                                 description='Applies a subtle hue to the sidebar and titlebar background in dark mode.'
-                                label='Background Tint'
+                                label='Dark theme background tint'
                                 {...getSettingModificationProps('customSidebarTitlebarBackgroundTintColor')}
                                 onChange={(value) =>
                                   updateDraftDebounced('customSidebarTitlebarBackgroundTintColor', value)
@@ -1285,8 +1285,8 @@ export function SettingsModal({
                 */}
                             {mainSettingVisible(settingsSearch.theming, 'accentColor') ? (
                               <WebColorPickerField
-                                description='Highlight color for accent text, status highlights, and advanced-setting markers. This color is used minimally in the app.'
-                                label='Accent Color'
+                                description='Highlight color for accent text, status highlights, and advanced-setting markers in dark mode.'
+                                label='Dark theme accent color'
                                 {...getSettingModificationProps('accentColor')}
                                 onChange={(value) => updateDraftDebounced('accentColor', value)}
                                 onCommit={(value) => updateDraft('accentColor', value)}

@@ -401,9 +401,9 @@ export const Theming: Story = {
     const body = within(canvasElement.ownerDocument.body);
 
     await step('jump the General page to the Theming section', async () => {
-      await userEvent.click(await body.findByRole('button', { name: 'Appearance' }));
+      await userEvent.click(await body.findByRole('button', { name: /^Theme$/ }));
       await waitFor(() => {
-        expect(body.getByText('Background Contrast')).toBeTruthy();
+        expect(body.getByText('Dark theme background contrast')).toBeTruthy();
       });
     });
   },
