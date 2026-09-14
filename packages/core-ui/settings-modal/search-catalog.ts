@@ -653,7 +653,7 @@ export function getSettingsSearchSectionDefinitions() {
               {
                 key: 'windowsTerminalBackend',
                 title: 'Windows Environment',
-                subtitle: 'Native Windows projects and agents in PowerShell, or Linux projects in WSL. Restart Ghostex to apply.',
+                subtitle: 'PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.',
                 options: [{ label: 'PowerShell (native Windows)', value: 'powershell' }, { label: 'WSL (Linux)', value: 'wsl' }],
               },
               {

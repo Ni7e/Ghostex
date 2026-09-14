@@ -74,10 +74,10 @@ pub(crate) fn current_preference() -> WindowsTerminalBackendPreference {
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_string)
                 });
-            if configured.as_deref() == Some("powershell") {
-                WindowsTerminalBackendPreference::PowerShell
-            } else {
+            if configured.as_deref() == Some("wsl") {
                 WindowsTerminalBackendPreference::Wsl
+            } else {
+                WindowsTerminalBackendPreference::PowerShell
             }
         })
     }

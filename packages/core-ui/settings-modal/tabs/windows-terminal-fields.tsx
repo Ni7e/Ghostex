@@ -17,7 +17,7 @@ export function WindowsTerminalFields({
     {visible('windowsTerminalBackend') ? (
       <SelectField
         label='Windows Environment'
-        description='PowerShell runs native Windows projects and agents without WSL. WSL uses your Linux projects. Restart Ghostex after changing environments; existing sessions stay in their original environment.'
+        description='PowerShell is the default and runs native Windows projects and agents without WSL. WSL uses your Linux projects. Changing environments prompts you to restart Ghostex; existing sessions stay in their original environment.'
         options={[{ label: 'PowerShell (native Windows)', value: 'powershell' }, { label: 'WSL (Linux)', value: 'wsl' }]}
         value={settings.windowsTerminalBackend}
         onChange={(value) => onBackend(value === 'powershell' ? 'powershell' : 'wsl')}

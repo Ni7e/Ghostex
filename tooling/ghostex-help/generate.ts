@@ -382,7 +382,7 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     section: 'terminal',
     sectionTitle: 'Terminal',
     title: 'Windows Environment',
-    subtitle: 'Windows only. Native Windows projects and agents in PowerShell, or Linux projects in WSL. Restart Ghostex to apply.',
+    subtitle: 'Windows only. PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.',
     options: [
       { label: 'PowerShell (native Windows)', value: 'powershell' },
       { label: 'WSL (Linux)', value: 'wsl' },

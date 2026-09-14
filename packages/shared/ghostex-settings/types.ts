@@ -626,7 +626,7 @@ export type ghostexSettings = {
   terminalCursorStyleBlink: boolean;
   /**
    * Windows selects native PowerShell projects or a WSL2 workspace.
-   * Existing installs keep their WSL environment until explicitly switched.
+   * PowerShell is the default; an explicitly saved WSL selection is preserved.
    */
   windowsTerminalBackend: 'wsl' | 'powershell';
   windowsWslDistribution: string;
