@@ -377,13 +377,22 @@ fn omp_terminal_record_resolves_exact_transcript_identity() {
     fs::create_dir_all(&terminal_records).expect("terminal records");
     fs::write(
         terminal_records.join("ttys006"),
-        format!("/repo\n{}\nfresh\n", transcript_path.display()),
+        format!(
+            "{}\n{}\nfresh\n",
+            temp.path().display(),
+            transcript_path.display()
+        ),
     )
     .expect("terminal record");
 
-    let identity =
-        read_omp_terminal_session_identity_from_agent_dir(&agent_dir, "ttys006", temp.path())
-            .expect("OMP transcript identity");
+    let identity = read_omp_terminal_session_identity_from_agent_dir(
+        &agent_dir,
+        "ttys006",
+        temp.path(),
+        temp.path(),
+        std::time::UNIX_EPOCH,
+    )
+    .expect("OMP transcript identity");
     assert_eq!(identity.0, "019fd39d-a9c3-7000-b87f-5ac5c34a9778");
     assert_eq!(identity.1, transcript_path.to_string_lossy());
 }

@@ -608,15 +608,16 @@ pub fn read_zmx_session_process_identities(
         {
             continue;
         }
-        let Some((agent_session_id, agent_session_path)) =
-            read_omp_terminal_session_identity(home_dir, identity.terminal_name.as_deref())
-        else {
+        let Some((agent_session_id, agent_session_path)) = read_omp_terminal_session_identity(
+            home_dir,
+            identity.terminal_name.as_deref(),
+            identity.process_id,
+        ) else {
             continue;
         };
-        identity.agent_session_id.get_or_insert(agent_session_id);
-        identity
-            .agent_session_path
-            .get_or_insert(agent_session_path);
+        // The validated live record also follows /new and in-app session switches after a resume.
+        identity.agent_session_id = Some(agent_session_id);
+        identity.agent_session_path = Some(agent_session_path);
     }
     Ok(identities)
 }

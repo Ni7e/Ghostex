@@ -631,6 +631,7 @@ pub(crate) fn get_exact_agent_session_reference(
     match agent_id {
         "codex" => get_codex_session_reference(input),
         "cursor" => get_cursor_session_reference(input),
+        "omp" => get_omp_session_reference(input),
         "pi" => get_pi_session_reference(input),
         _ => input.agent_session_id.clone(),
     }
@@ -661,6 +662,73 @@ pub(crate) fn get_pi_session_reference(input: &AgentResumeInput) -> Option<Strin
         .agent_session_path
         .clone()
         .or_else(|| input.agent_session_id.clone())
+}
+
+/// CDXC:SessionIdentity 2026-09-14 WHY:
+/// Older live scans could stamp a recycled TTY's foreign OMP transcript into a new session. Refuse that stored identity at wake time so restarting does not turn the bad observation into a real cross-project resume.
+fn get_omp_session_reference(input: &AgentResumeInput) -> Option<String> {
+    let id = input.agent_session_id.as_deref()?;
+    if let Some(path) = input.agent_session_path.as_deref() {
+        let path = crate::resume_lookup::expand_home(path);
+        let head =
+            crate::session_chat_paths::read_transcript_head_complete_lines(&path, 64 * 1024)?;
+        let mut lines = head.lines();
+        let mut header: Value = serde_json::from_str(lines.next()?).ok()?;
+        // OMP can reserve its first row for an auto-generated title before the session header.
+        if header.get("type").and_then(Value::as_str) == Some("title") {
+            header = serde_json::from_str(lines.next()?).ok()?;
+        }
+        if header.get("type")?.as_str()? != "session" || header.get("id")?.as_str()? != id {
+            return None;
+        }
+        let cwd = std::path::Path::new(header.get("cwd")?.as_str()?);
+        let project = std::path::Path::new(input.project_path.as_deref()?);
+        if cwd != project
+            && std::fs::canonicalize(cwd).ok()? != std::fs::canonicalize(project).ok()?
+        {
+            return None;
+        }
+    }
+    Some(id.to_string())
+}
+
+#[cfg(test)]
+mod omp_resume_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn omp_resume_rejects_foreign_cwd_and_mismatched_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("session.jsonl");
+        let project = json!({"path": temp.path(), "customAgents": [], "launchSettings": {}});
+        let session = json!({"agentId": "omp", "runtimeSettings": {
+            "agentCommand": "omp", "agentSessionId": "omp-id", "agentSessionPath": path,
+        }});
+        let settings = normalize_agent_settings(None);
+        for (id, cwd, valid) in [
+            ("omp-id", "/another-project", false),
+            ("another-id", temp.path().to_str().unwrap(), false),
+            ("omp-id", temp.path().to_str().unwrap(), true),
+        ] {
+            std::fs::write(
+                &path,
+                format!(
+                    "{{\"type\":\"title\",\"title\":\"OMP test\"}}\n{}\n",
+                    json!({"type": "session", "id": id, "cwd": cwd})
+                ),
+            )
+            .unwrap();
+            let plan = build_agent_resume_plan(&project, &session, &settings);
+            assert_eq!(plan.get("primaryCommand").is_some(), valid);
+            assert_eq!(plan.get("copyCommand").is_some(), valid);
+            if valid {
+                assert_eq!(plan["primaryCommand"], "omp --session \"omp-id\"");
+            } else {
+                assert_eq!(plan["startupTextDisposition"], "none");
+            }
+        }
+    }
 }
 
 pub(crate) fn get_cursor_session_reference(input: &AgentResumeInput) -> Option<String> {

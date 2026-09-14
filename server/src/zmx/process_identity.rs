@@ -377,43 +377,69 @@ pub(crate) fn codex_session_id_from_transcript_path(path: &Path) -> Option<Strin
     normalize_codex_session_id(&stem[stem.len() - 36..])
 }
 
-/*
-CDXC:SessionIdentity 2026-08-06:
-OMP owns an exact terminal-to-transcript record under
-`agent/terminal-sessions/<tty>`. A fresh OMP process has no `--session` argv,
-so its TTY record is the authoritative provider identity source for the live
-zmx process scan. Read only that exact record and require its existing JSONL
-target; never guess from transcript recency or another session in the cwd.
-*/
+/// CDXC:SessionIdentity 2026-09-14 WHY:
+/// OMP leaves `agent/terminal-sessions/<tty>` behind after exit, so a new process on a recycled TTY can inherit another project's identity before OMP rewrites the record.
+/// Only accept the exact record written during this process's lifetime with its current cwd; never guess from transcript recency or another session in the cwd.
 pub(crate) fn read_omp_terminal_session_identity(
     home_dir: &Path,
     terminal_name: Option<&str>,
+    process_id: Option<i64>,
 ) -> Option<(String, String)> {
     let terminal_name = normalize_process_terminal_name(terminal_name?)?;
+    let (cwd, started_at) = super::process_context::process_context(process_id?)?;
     let agent_dir = omp_agent_directory(home_dir);
-    read_omp_terminal_session_identity_from_agent_dir(&agent_dir, &terminal_name, home_dir)
+    read_omp_terminal_session_identity_from_agent_dir(
+        &agent_dir,
+        &terminal_name,
+        home_dir,
+        &cwd,
+        started_at,
+    )
 }
 
 pub(crate) fn read_omp_terminal_session_identity_from_agent_dir(
     agent_dir: &Path,
     terminal_name: &str,
     home_dir: &Path,
+    process_cwd: &Path,
+    process_started_at: std::time::SystemTime,
 ) -> Option<(String, String)> {
     let record_path = agent_dir.join("terminal-sessions").join(terminal_name);
-    let metadata = fs::metadata(&record_path).ok()?;
-    if !metadata.is_file() || metadata.len() > 16 * 1024 {
+    use std::io::Read;
+    let mut file = fs::File::open(&record_path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file()
+        || metadata.len() > 16 * 1024
+        || metadata.modified().ok()? < process_started_at
+    {
         return None;
     }
-    let record = fs::read_to_string(record_path).ok()?;
-    let transcript_path = record
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| expand_home_path(line, home_dir))
-        .find(|path| {
-            path.extension().and_then(|extension| extension.to_str()) == Some("jsonl")
-                && path.is_file()
-        })?;
+    let mut record = String::new();
+    (&mut file)
+        .take(16 * 1024 + 1)
+        .read_to_string(&mut record)
+        .ok()?;
+    let after = file.metadata().ok()?;
+    if record.len() > 16 * 1024
+        || metadata.modified().ok()? != after.modified().ok()?
+        || metadata.len() != after.len()
+    {
+        return None;
+    }
+    let mut lines = record.lines();
+    let cwd = expand_home_path(lines.next()?.trim(), home_dir);
+    if fs::canonicalize(cwd).ok()? != fs::canonicalize(process_cwd).ok()? {
+        return None;
+    }
+    let transcript_path = expand_home_path(lines.next()?.trim(), home_dir);
+    if transcript_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        != Some("jsonl")
+        || !transcript_path.is_file()
+    {
+        return None;
+    }
     let stem = transcript_path.file_stem()?.to_str()?.trim();
     let agent_session_id = stem.rsplit_once('_').map(|(_, id)| id).unwrap_or(stem);
     if agent_session_id.is_empty() || agent_session_id.chars().count() > 256 {
@@ -464,6 +490,13 @@ fn infer_agent_id_from_process_executable(
 ) -> Option<String> {
     let executable_name =
         normalize_process_executable_name(tokens.get(executable_index).map(String::as_str))?;
+    if executable_name == "cli"
+        && tokens
+            .get(executable_index)?
+            .ends_with("/@oh-my-pi/pi-coding-agent/dist/cli.js")
+    {
+        return Some("omp".to_string());
+    }
     if executable_name == "acli"
         && normalize_process_token(tokens.get(executable_index + 1).map(String::as_str)).as_deref()
             == Some("rovodev")

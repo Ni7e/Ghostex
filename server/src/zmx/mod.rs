@@ -2,7 +2,10 @@ pub mod endpoint;
 pub mod env;
 mod grok_startup;
 pub mod launch;
+#[cfg(test)]
+mod omp_identity_tests;
 pub mod probe_cache;
+mod process_context;
 pub mod process_identity;
 pub mod provider;
 pub mod screen_capture;
