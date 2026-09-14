@@ -431,10 +431,6 @@ pub(crate) fn workspace_tab_close_active_color() -> Hsla {
     chrome_color(0xffffff, 0x000000).opacity(0.76).into()
 }
 
-pub(crate) fn workspace_tab_close_inactive_color() -> Hsla {
-    chrome_color(0xffffff, 0x000000).opacity(0.46).into()
-}
-
 pub(crate) fn workspace_tab_close_hover_color() -> Hsla {
     tab_bar_button_hover_color()
 }

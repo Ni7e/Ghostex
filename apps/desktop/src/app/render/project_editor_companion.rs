@@ -42,6 +42,8 @@ impl GhostexGpuiApp {
     /// CDXC:Workarea 2026-09-09 WHY:
     /// The floating window already applies the saved width ratio, so its lone pane must grow to fill the host (1.0).
     /// Reapplying the docked ratio inside that window narrowed the content and left a large black strip beside it.
+    /// CDXC:Workarea 2026-09-14 DECISION:
+    /// User: reduce the companion sidepane title area height by 1px.
     pub(crate) fn render_project_editor_companion_pane(
         &self,
         mode: TitlebarMode,
@@ -49,7 +51,6 @@ impl GhostexGpuiApp {
         window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let is_focused = self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode);
         let has_terminal_split = self
             .project_editor_companion_secondary_terminal_session_id
             .is_some();
@@ -98,7 +99,7 @@ impl GhostexGpuiApp {
                         mode.element_slug()
                     ))
                     .flex_shrink_0()
-                    .h(px(WORKSPACE_TAB_BAR_HEIGHT))
+                    .h(px(WORKSPACE_TAB_BAR_HEIGHT - 1.0))
                     .w_full()
                     .items_center()
                     .border_b_1()
@@ -123,9 +124,7 @@ impl GhostexGpuiApp {
                                     .text_ellipsis()
                                     .child(companion_title),
                             )
-                            .child(self.render_project_editor_companion_split_button(
-                                mode, is_focused, cx,
-                            )),
+                            .child(self.render_project_editor_companion_split_button(mode, cx)),
                     ),
             )
             .child(self.render_project_editor_companion_terminal_body(mode, window, cx))
@@ -604,10 +603,12 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
+    /// CDXC:Workarea 2026-09-14 WHY:
+    /// Browser takes focus on entry, which dimmed this shared split control while other views kept it bright.
+    /// Keep its icon color independent of pane focus so switching views does not change the affordance.
     pub(crate) fn render_project_editor_companion_split_button(
         &self,
         mode: TitlebarMode,
-        is_focused: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let is_split = self.project_editor_shell.left_companion_split_enabled
@@ -637,11 +638,7 @@ impl GhostexGpuiApp {
             .justify_center()
             .border_l_1()
             .border_color(chrome_color(0x252525, 0xd4d4d4))
-            .text_color(if is_focused {
-                workspace_tab_close_active_color()
-            } else {
-                workspace_tab_close_inactive_color()
-            })
+            .text_color(workspace_tab_close_active_color())
             .cursor_default()
             .hover(|this| this.bg(workspace_tab_close_hover_color()))
             .on_mouse_down(
@@ -659,11 +656,7 @@ impl GhostexGpuiApp {
             .child(titlebar_svg_icon(
                 icon,
                 13.0,
-                if is_focused {
-                    workspace_tab_close_active_color()
-                } else {
-                    workspace_tab_close_inactive_color()
-                },
+                workspace_tab_close_active_color(),
             ))
             .into_any_element()
     }

@@ -257,21 +257,10 @@ impl GhostexGpuiApp {
                 .child(self.render_project_editor_companion_pane(mode, companion_ratio, window, cx))
                 .child(self.render_project_editor_companion_divider(mode, cx))
                 .child(
-                    div()
-                        .on_children_prepainted(move |child_bounds, _window, cx| {
-                            let _ = surface_view.update(cx, |this, _cx| {
-                                this.record_project_editor_surface_layout_bounds(
-                                    mode,
-                                    &child_bounds,
-                                );
-                            });
-                        })
-                        .id(format!(
-                            "ghostex-gpui-project-editor-surface-slot-{}",
-                            mode_slug
-                        ))
-                        .flex()
-                        .flex_col()
+                    // CDXC:Workarea 2026-09-14 WHY:
+                    // Browser owns its borders inside its leaves; other views own a surface border.
+                    // Keep those borders inside the flex allocation so switching views cannot change the companion width.
+                    v_flex()
                         .flex_grow(1.0 - companion_ratio)
                         .flex_shrink_1()
                         .flex_basis(relative(0.0))
@@ -279,14 +268,36 @@ impl GhostexGpuiApp {
                         .min_w(px(WORKSPACE_MIN_WIDTH))
                         .min_h_0()
                         .overflow_hidden()
-                        .when(mode != TitlebarMode::Browser, |this| {
-                            this.border_1()
-                                .border_color(workspace_pane_border_color_for_state(
-                                    surface_border_state,
+                        .child(
+                            div()
+                                .on_children_prepainted(move |child_bounds, _window, cx| {
+                                    let _ = surface_view.update(cx, |this, _cx| {
+                                        this.record_project_editor_surface_layout_bounds(
+                                            mode,
+                                            &child_bounds,
+                                        );
+                                    });
+                                })
+                                .id(format!(
+                                    "ghostex-gpui-project-editor-surface-slot-{}",
+                                    mode_slug
                                 ))
-                        })
-                        .child(self.render_project_editor_surface(mode, window, cx))
-                        .window_corner_pane(),
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .w_full()
+                                .h_full()
+                                .min_w_0()
+                                .min_h_0()
+                                .overflow_hidden()
+                                .when(mode != TitlebarMode::Browser, |this| {
+                                    this.border_1().border_color(
+                                        workspace_pane_border_color_for_state(surface_border_state),
+                                    )
+                                })
+                                .child(self.render_project_editor_surface(mode, window, cx))
+                                .window_corner_pane(),
+                        ),
                 )
                 .into_any_element()
         } else {
