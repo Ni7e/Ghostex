@@ -31,6 +31,10 @@ immediately, before the transcript can confirm anything.
 #[path = "session_chat_rewind_codex.rs"]
 mod codex;
 
+#[cfg(test)]
+#[path = "session_chat_rewind_tests.rs"]
+mod tests;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -95,8 +99,8 @@ const CLAUDE_REWIND_QUOTE: char = '\u{2502}';
 /// Claude's truncation ellipsis on a long prompt row.
 const CLAUDE_REWIND_ELLIPSIS: char = '\u{2026}';
 
-/// Poll cadence for every screen wait, matching the composer and paste waits.
-const REWIND_POLL_MS: u64 = 150;
+/// Poll cadence for verified screen progress during rewind.
+const REWIND_POLL_MS: u64 = 40;
 /// Ceiling on ONE step: opening the dialog, one highlight move, one menu move,
 /// or the teardown after the final Enter.
 const REWIND_STEP_TIMEOUT_MS: u64 = 6_000;
@@ -104,10 +108,6 @@ const REWIND_STEP_TIMEOUT_MS: u64 = 6_000;
 /// the TUI in separate stdin chunks (the same chunk-separation rule the clear
 /// burst follows in session_chat_send.rs).
 const REWIND_COMMAND_SETTLE_MS: u64 = 300;
-/// Extra Up presses allowed past the counted position before the drive gives
-/// up. The count comes from the transcript and the highlight comes from the
-/// TUI; a small disagreement is walked off, a large one is a refusal.
-const REWIND_EXTRA_PRESSES: usize = 3;
 /// Ceiling on Down presses inside the confirmation menu. The longest measured
 /// menu has five options and starts on the first.
 const REWIND_MENU_MAX_PRESSES: usize = 8;
@@ -222,11 +222,33 @@ fn rewind_stage_region<'a>(lines: &'a [String], subtitle: &str) -> Option<&'a [S
         .then_some(region)
 }
 
-/// Text of the highlighted row, i.e. the one the `❯` marker owns.
-fn highlighted_row(region: &[String]) -> Option<String> {
-    region.iter().find_map(|line| {
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ClaudePromptSelection {
+    row: usize,
+    hidden_above: usize,
+    text: String,
+}
+
+/// CDXC:SessionChat 2026-09-14 WHY:
+/// Identical prompts and prompts with the same truncated preview still occupy different positions.
+/// Claude keeps the cursor on one screen row while scrolling, so include its hidden-row count as well as the cursor row to prove each Up press landed.
+fn highlighted_row(region: &[String]) -> Option<ClaudePromptSelection> {
+    let hidden_above = region
+        .iter()
+        .find_map(|line| {
+            line.strip_prefix("↑ ")?
+                .strip_suffix(" more above")?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0);
+    region.iter().enumerate().find_map(|(row, line)| {
         let rest = line.strip_prefix(CLAUDE_REWIND_CURSOR)?;
-        Some(rest.trim().to_string())
+        Some(ClaudePromptSelection {
+            row,
+            hidden_above,
+            text: rest.trim().to_string(),
+        })
     })
 }
 
@@ -329,6 +351,7 @@ struct ClaudeTranscriptRow {
     prompt_text: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ClaudeRewindTarget {
     /// `uuid` of the row the caller named.
     message_id: String,
@@ -482,6 +505,7 @@ fn resolve_rewind_target(
 #[derive(Clone, Debug)]
 struct RewindPlan {
     codex: Option<codex::CodexRewindPlan>,
+    claude_target: Option<(PathBuf, ClaudeRewindTarget)>,
     /// First line of the target prompt, space-collapsed.
     target_first_line: String,
     /// Claude: Up presses from `(current)`, including one to leave it.
@@ -723,6 +747,22 @@ impl RewindDriver<'_> {
             self.cancel_dialog().await;
             return Err(error);
         }
+        if let Some((path, target)) = &plan.claude_target {
+            // CDXC:SessionChat 2026-09-14 WHY:
+            // Publish the new branch before releasing the send worker, or the next queued prompt can be included in the cutoff and disappear from Chat.
+            let cutoff_offset = std::fs::metadata(path).map_err(|error| DomainStateError {
+                code: "rewindCleanupFailed",
+                message: format!("The conversation was rewound, but its transcript could not be synchronized: {error}"),
+            })?.len();
+            set_session_chat_pending_rewind(
+                path,
+                SessionChatPendingRewind {
+                    leaf_id: target.leaf_id.clone(),
+                    cutoff_offset,
+                    set_at_ms: chrono::Utc::now().timestamp_millis(),
+                },
+            );
+        }
         crate::session_chat_send::clear_session_chat_composer(
             self.project_id,
             self.session_id,
@@ -748,6 +788,13 @@ impl RewindDriver<'_> {
     }
 
     async fn drive(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
+        if let Some((path, target)) = &plan.claude_target {
+            if resolve_rewind_target(path, &target.message_id)? != *target {
+                return Err(agent_busy(
+                    "The conversation changed while the rewind was queued. Try again.",
+                ));
+            }
+        }
         /*
         The composer check is repeated HERE, not just in the handler, because
         the handler ran before this job reached the front of the session's send
@@ -835,10 +882,8 @@ impl RewindDriver<'_> {
         Ok(())
     }
 
-    /// Walk the prompt list up to the target row. The counted number of presses
-    /// is spent first, then the highlighted row must show the target prompt;
-    /// a few extra presses are allowed for a list Claude counts differently,
-    /// and anything past that is a refusal.
+    /// Verify every move to the counted position, then verify its prompt text.
+    /// Searching past that position could select another occurrence of a repeated prompt.
     async fn select_prompt(&self, plan: &RewindPlan) -> std::result::Result<(), DomainStateError> {
         let mut last_row = self
             .wait_for("list", |screen| {
@@ -846,8 +891,13 @@ impl RewindDriver<'_> {
                     .and_then(highlighted_row)
             })
             .await?;
-        let limit = plan.presses.saturating_add(REWIND_EXTRA_PRESSES);
-        for press in 1..=limit {
+        if last_row.text != "(current)" {
+            return Err(dialog_mismatch(
+                "prompt list",
+                "the picker did not start at the current conversation.",
+            ));
+        }
+        for _ in 0..plan.presses {
             self.write(CLAUDE_REWIND_LIST_UP).await?;
             let (row, moved) = self
                 .wait_for_move(
@@ -858,22 +908,22 @@ impl RewindDriver<'_> {
                 )
                 .await?;
             last_row = row;
-            if press >= plan.presses && row_matches_prompt(&last_row, &plan.target_first_line) {
-                return Ok(());
-            }
             if !moved {
                 return Err(dialog_mismatch(
                     "prompt list",
                     &format!(
-                        "the list stopped on \"{last_row}\" without ever showing the message that was asked for."
+                        "the list stopped on \"{}\" before reaching the message that was asked for.", last_row.text
                     ),
                 ));
             }
         }
+        if row_matches_prompt(&last_row.text, &plan.target_first_line) {
+            return Ok(());
+        }
         Err(dialog_mismatch(
             "prompt list",
             &format!(
-                "the highlighted prompt was \"{last_row}\" after {limit} moves, not the message that was asked for."
+                "the highlighted prompt was \"{}\" after {} moves, not the message that was asked for.", last_row.text, plan.presses
             ),
         ))
     }
@@ -1084,6 +1134,7 @@ async fn rewind_session_chat(
     };
     let job_id = register_rewind_job(RewindPlan {
         codex: None,
+        claude_target: Some((transcript_path, rewind_target.clone())),
         target_first_line: rewind_target.first_line.clone(),
         presses: rewind_target.prompts_after.saturating_add(1),
     });
@@ -1116,23 +1167,6 @@ async fn rewind_session_chat(
         (Ok(()), Some(Ok(()))) => {}
     }
 
-    /*
-    The TUI has accepted the rewind, and the transcript still shows every row
-    the conversation just left behind. Recording the leaf here is what lets the
-    chat readers hide them on the very next read instead of waiting for the
-    next prompt to prove the branch.
-    */
-    let cutoff_offset = std::fs::metadata(&transcript_path)
-        .map(|metadata| metadata.len())
-        .unwrap_or_default();
-    set_session_chat_pending_rewind(
-        &transcript_path,
-        SessionChatPendingRewind {
-            leaf_id: rewind_target.leaf_id.clone(),
-            cutoff_offset,
-            set_at_ms: chrono::Utc::now().timestamp_millis(),
-        },
-    );
     crate::session_chat_follower::request_session_chat_resnapshot(
         state,
         &target.project_id,
@@ -1146,7 +1180,6 @@ async fn rewind_session_chat(
             "sessionId": target.session_id,
             "targetMessageId": rewind_target.message_id,
             "leafId": rewind_target.leaf_id,
-            "cutoffOffset": cutoff_offset,
         }),
         None,
     );

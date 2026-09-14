@@ -134,6 +134,7 @@ pub(super) async fn rewind(
     let _guard = RewindInFlightGuard::claim(&target.project_id, &target.session_id)
         .ok_or_else(|| agent_busy("A rewind is already running for this session."))?;
     let job_id = register_rewind_job(RewindPlan {
+        claude_target: None,
         target_first_line: first_line,
         presses,
         codex: Some(CodexRewindPlan {
@@ -212,14 +213,17 @@ fn picker_open(screen: &str) -> bool {
 
 /// Extract only characters painted with SGR reverse-video. A prompt marker in
 /// ordinary history cannot be confused with the selected prompt.
-fn selected_prompt(screen: &str) -> Option<(usize, String)> {
+fn selected_prompt(screen: &str) -> Option<PromptSelection> {
     if !picker_open(screen) {
         return None;
     }
     let mut reversed = false;
-    let mut selected = String::new();
+    let mut selected = Vec::new();
     let mut first_row = None;
-    for (row, line) in screen.lines().enumerate() {
+    let lines: Vec<&str> = screen.lines().collect();
+    let end = content_end(&lines)?;
+    let mut last_highlighted = None;
+    for (row, line) in lines[..end].iter().enumerate() {
         let mut chars = line.chars().peekable();
         let mut text = String::new();
         while let Some(ch) = chars.next() {
@@ -243,49 +247,117 @@ fn selected_prompt(screen: &str) -> Option<(usize, String)> {
                 }
             } else if reversed {
                 text.push(ch);
+                last_highlighted = Some(row);
             }
         }
         let text = text.trim();
         if !text.is_empty() {
             first_row.get_or_insert(row);
-            if !selected.is_empty() {
-                selected.push('\n');
-            }
-            selected.push_str(text);
+            selected.push(collapse_spaces(text));
         }
     }
     let prompt = selected
+        .first()?
         .strip_prefix('›')
-        .or_else(|| selected.strip_prefix('»'))?
+        .or_else(|| selected.first()?.strip_prefix('»'))?
         .trim();
-    Some((first_row?, collapse_spaces(prompt)))
+    selected[0] = prompt.to_string();
+    Some(PromptSelection {
+        row: first_row?,
+        lines: selected,
+        clipped: last_highlighted == end.checked_sub(1)
+            && crate::session_chat_options::strip_ansi_sgr(lines[end]).starts_with("──"),
+        viewport: crate::session_chat_options::strip_ansi_sgr(lines[end])
+            .trim()
+            .to_string(),
+    })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PromptSelection {
+    row: usize,
+    lines: Vec<String>,
+    clipped: bool,
+    viewport: String,
+}
+
+/// CDXC:SessionChat 2026-09-14 WHY:
+/// Codex wraps long tokens and clips long prompts at the pager footer; blank lines are still part of the highlighted prompt.
+/// Compare each visible line to the transcript, permitting an unfinished suffix only when the highlight reaches the viewport edge.
+/// The pager position also distinguishes repeated prompts that scroll to the same screen row; branch adoption still verifies the retained transcript IDs and text exactly.
+impl PromptSelection {
+    fn matches(&self, expected: &str) -> bool {
+        let expected = collapse_spaces(expected);
+        if expected.is_empty() {
+            return false;
+        }
+        let mut rest = expected.as_str();
+        for line in &self.lines {
+            let Some(next) = rest.strip_prefix(line.as_str()) else {
+                return false;
+            };
+            rest = next.trim_start();
+        }
+        rest.is_empty() || self.clipped
+    }
+}
+
+fn content_end(lines: &[&str]) -> Option<usize> {
+    let footer = lines.iter().rposition(|line| {
+        let line = crate::session_chat_options::strip_ansi_sgr(line);
+        line.trim_start().starts_with("q close ") || line.trim_start().starts_with("q to quit ")
+    })?;
+    Some(
+        lines[..footer]
+            .iter()
+            .rposition(|line| crate::session_chat_options::strip_ansi_sgr(line).starts_with("──"))
+            .unwrap_or(footer),
+    )
 }
 
 /// Opening the picker always selects the newest prompt. Codex 0.153.4 can
 /// omit reverse video on that first paint after a fork, although Left/Right
 /// paints it correctly. Verify the newest visible prompt on open; use the
 /// actual highlight for every subsequent navigation step.
-fn initial_prompt(screen: &str) -> Option<(usize, String)> {
+fn initial_prompt(screen: &str) -> Option<PromptSelection> {
     if !picker_open(screen) {
         return None;
     }
+    if let Some(selected) = selected_prompt(screen) {
+        return Some(selected);
+    }
+    let raw: Vec<&str> = screen.lines().collect();
+    let end = content_end(&raw)?;
     let lines: Vec<String> = screen
         .lines()
-        .map(|line| collapse_spaces(&crate::session_chat_options::strip_ansi_sgr(line)))
+        .take(end)
+        .map(crate::session_chat_options::strip_ansi_sgr)
         .collect();
     let row = lines
         .iter()
         .rposition(|line| line.starts_with('›') || line.starts_with('»'))?;
     let first = lines[row].trim_start_matches(['›', '»']).trim();
-    let mut text = first.to_string();
+    let mut selected = vec![collapse_spaces(first)];
+    let mut clipped = true;
     for line in &lines[row + 1..] {
-        if line.is_empty() {
+        // User continuation lines are indented; assistant/history markers
+        // start at column zero, including after an empty user line.
+        if line.starts_with(['•', '›', '»']) {
+            clipped = false;
             break;
         }
-        text.push(' ');
-        text.push_str(line);
+        selected.push(collapse_spaces(line));
     }
-    Some((row, collapse_spaces(&text)))
+    Some(PromptSelection {
+        row,
+        lines: selected,
+        clipped: clipped
+            && lines.last().is_some_and(|line| !line.trim().is_empty())
+            && crate::session_chat_options::strip_ansi_sgr(raw[end]).starts_with("──"),
+        viewport: crate::session_chat_options::strip_ansi_sgr(raw[end])
+            .trim()
+            .to_string(),
+    })
 }
 
 async fn capture_vt(driver: &RewindDriver<'_>) -> Option<String> {
@@ -303,9 +375,9 @@ async fn capture_vt(driver: &RewindDriver<'_>) -> Option<String> {
 /// Wait for the expected prompt and for history loading to finish; a changed screen position alone cannot prove a Left press completed.
 async fn selection(
     driver: &RewindDriver<'_>,
-    previous: Option<&(usize, String)>,
+    previous: Option<&PromptSelection>,
     expected: &str,
-) -> Result<(usize, String), DomainStateError> {
+) -> Result<PromptSelection, DomainStateError> {
     let deadline = std::time::Instant::now() + Duration::from_secs(6);
     let expected = collapse_spaces(expected);
     let mut mismatched = false;
@@ -324,7 +396,7 @@ async fn selection(
                 selected_prompt(&screen)
             };
             if let Some(selected) = selected {
-                mismatched = selected.1 != expected;
+                mismatched = !selected.matches(&expected);
                 if !loading && !mismatched && previous != Some(&selected) {
                     return Ok(selected);
                 }
@@ -633,10 +705,10 @@ mod tests {
     #[test]
     fn highlighted_prompt_requires_reverse_video_and_edit_footer() {
         let screen = "› ordinary history\n\x1b[7m› selected first line\x1b[0m\n\x1b[7m  selected second line\x1b[0m\nq close   esc / ← to edit prev   → to edit next   enter to edit message\x1b[0m\x1b[23;73H";
-        assert_eq!(
-            selected_prompt(screen),
-            Some((1, "selected first line selected second line".into()))
-        );
+        let selected = selected_prompt(screen).unwrap();
+        assert_eq!(selected.row, 1);
+        assert!(selected.matches("selected first line\nselected second line"));
+        assert!(!selected.matches("selected first line\nselected second line extra"));
         assert_eq!(selected_prompt("\x1b[7m› selected\x1b[0m"), None);
         assert_eq!(selected_prompt(&screen.replace("\x1b[7m", "")), None);
     }
@@ -644,15 +716,47 @@ mod tests {
     #[test]
     fn initial_selection_is_the_latest_prompt_even_without_highlight_paint() {
         let screen = "› first prompt\n\n• first answer\n\n› latest prompt\nwrapped line\n\n• latest answer\nq to quit   esc/← to edit prev   → to edit next   enter to edit message";
+        let selected = initial_prompt(screen).unwrap();
+        assert_eq!(selected.row, 4);
+        assert!(selected.matches("latest prompt wrapped line"));
         assert_eq!(
-            initial_prompt(screen),
-            Some((4, "latest prompt wrapped line".into()))
-        );
-        assert_eq!(
-            initial_prompt(&screen.replace("› latest", "\u{1b}[0m\u{1b}[1m› \u{1b}[0mlatest")),
-            Some((4, "latest prompt wrapped line".into()))
+            initial_prompt(&screen.replace("› latest", "\u{1b}[0m\u{1b}[1m› \u{1b}[0mlatest"))
+                .unwrap(),
+            selected
         );
         assert_eq!(initial_prompt("› composer draft"), None);
+    }
+
+    #[test]
+    fn blank_lines_and_wrapped_tokens_keep_the_full_prompt_verifiable() {
+        let screen = "\x1b[7m› first\x1b[0m\n\x1b[7m  \x1b[0m\n\x1b[7m  café 中文 🙂 abcdef\x1b[0m\n\x1b[7m  ghijkl\x1b[0m\n\n• answer\n── 100% ─\nq close   esc/← to edit prev   → to edit next   enter to edit message";
+        let expected = "first\n\ncafé 中文 🙂 abcdefghijkl";
+        let selected = initial_prompt(screen).unwrap();
+        assert!(selected.matches(expected));
+        assert!(!selected.matches("first"));
+        assert!(!selected.matches(&format!("{expected} more")));
+        assert!(initial_prompt(&screen.replace("\x1b[7m", ""))
+            .unwrap()
+            .matches(expected));
+    }
+
+    #[test]
+    fn only_viewport_clipping_allows_a_partial_prompt() {
+        let screen = "\x1b[7m› first\x1b[0m\n\x1b[7m  \x1b[0m\n\x1b[7m  second\x1b[0m\n── 84% ─\nq close   esc/← to edit prev   → to edit next   enter to edit message";
+        let selected = initial_prompt(screen).unwrap();
+        assert!(selected.matches("first\n\nsecond\nthird"));
+        assert!(!selected.matches("first\n\ndifferent\nthird"));
+        assert!(!initial_prompt(&screen.replace("── 84%", "\n── 84%"))
+            .unwrap()
+            .matches("first second third"));
+        assert_ne!(
+            selected_prompt(screen),
+            selected_prompt(&screen.replace("84%", "72%"))
+        );
+        assert_eq!(
+            selected_prompt(screen),
+            selected_prompt(&screen.replace("\nq close", "\n q close"))
+        );
     }
 
     #[test]
@@ -746,6 +850,7 @@ mod tests {
             };
             let plan = RewindPlan {
                 codex: None,
+                claude_target: None,
                 target_first_line: prompt_first_line(&codex.prompts[presses].1),
                 presses,
             };
