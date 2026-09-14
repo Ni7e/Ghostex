@@ -22,7 +22,6 @@ import {
   MessageScrollerItem,
   SessionChatVirtualScrollerContext,
   MessageScrollerViewport,
-  useSessionChatVirtualScroller,
 } from '../session-chat-virtual-scroller';
 import { SessionChatScrollbar } from '../session-chat-scrollbar';
 import { useSessionChatVirtualTranscript } from '../use-session-chat-virtual-transcript';
@@ -557,33 +556,6 @@ function CompletedWorkBody({
   );
 }
 
-/**
- * A local send must bring the newest row back into view even when the reader
- * had scrolled up, without asking message-scroller to anchor that row to the
- * top of the viewport (top anchoring pads the transcript with a spacer and
- * leaves a scrollable empty gap above the composer).
- */
-function ScrollToLatestSend({
-  pendingMessageId,
-  restored,
-}: {
-  pendingMessageId: string | null;
-  restored: boolean;
-}): null {
-  const { scrollToEnd } = useSessionChatVirtualScroller();
-  const handledRef = useRef<string | null>(restored ? pendingMessageId : null);
-
-  useEffect(() => {
-    if (pendingMessageId === null || handledRef.current === pendingMessageId) {
-      return;
-    }
-    handledRef.current = pendingMessageId;
-    scrollToEnd({ behavior: 'smooth' });
-  }, [pendingMessageId, scrollToEnd]);
-
-  return null;
-}
-
 export function SessionChatMessageList({
   sessionKey,
   earlierPageCursor,
@@ -915,12 +887,6 @@ export function SessionChatMessageList({
     return null;
   }, [rendered]);
 
-  const previousPendingMessageIdRef = useRef(restoredScroll ? pendingMessageId : null);
-  useEffect(() => {
-    if (pendingMessageId !== null && previousPendingMessageIdRef.current !== pendingMessageId) resumeFileScrolling();
-    previousPendingMessageIdRef.current = pendingMessageId;
-  }, [pendingMessageId, resumeFileScrolling]);
-
   const virtualRows = useMemo(
     () =>
       summaryMode
@@ -950,6 +916,23 @@ export function SessionChatMessageList({
     ],
   });
   virtualScrollToEndRef.current = virtualTranscript.scrollToEnd;
+
+  /** CDXC:SessionChat 2026-09-14 DECISION:
+   * User: after sending from the bottom, scroll to the bottom once the message appears so the Scroll to bottom button does not appear.
+   * Restore follow intent before scrolling and use an immediate scroll: intermediate smooth-scroll events could disable following while the new row was still being measured.
+   */
+  const previousPendingMessageIdRef = useRef(restoredScroll ? pendingMessageId : null);
+  useLayoutEffect(() => {
+    const previous = previousPendingMessageIdRef.current;
+    previousPendingMessageIdRef.current = pendingMessageId;
+    if (pendingMessageId === null || previous === pendingMessageId) return;
+    resumeFileScrolling();
+    shouldFollowBottomRef.current = true;
+    viewportRef.current?.setAttribute(FOLLOW_BOTTOM_ATTRIBUTE, 'true');
+    refreshScrollPolicy((revision) => revision + 1);
+    virtualTranscript.scrollToEnd({ behavior: 'auto' });
+    cancelScrollMomentum();
+  }, [cancelScrollMomentum, pendingMessageId, resumeFileScrolling, virtualTranscript.scrollToEnd]);
 
   useSessionChatScrollRestoration({
     snapshot: restoredScroll,
@@ -1030,7 +1013,6 @@ export function SessionChatMessageList({
     <SessionChatInteractionProvider state={interactionState}>
       <SessionChatFileChangeInteractionContext value={reportFileInteraction}>
         <SessionChatVirtualScrollerContext value={virtualTranscript}>
-          <ScrollToLatestSend pendingMessageId={pendingMessageId} restored={Boolean(restoredScroll)} />
           <MessageScroller className={cn('flex-1', summaryTurns.length >= 2 && 'ghostex-chat-has-minimap')}>
             <SessionChatMinimap onNavigate={navigateHistory} turns={summaryTurns} />
             {/* outline-none: Chromium makes scrollers keyboard-focusable and paints
