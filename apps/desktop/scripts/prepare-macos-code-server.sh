@@ -305,10 +305,6 @@ ensure_code_server_payload() {
 		echo "code-server VS Code submodule is missing. Run: git -C \"$CODE_SERVER_ROOT\" submodule update --init lib/vscode" >&2
 		exit 1
 	fi
-	if [[ ! -d "$CODE_SERVER_ROOT/lib/vscode/node_modules" ]]; then
-		echo "code-server VS Code node_modules are missing. Run: npm --prefix \"$CODE_SERVER_ROOT/lib/vscode\" install" >&2
-		exit 1
-	fi
 	vscode_ripgrep_bin="$(code_server_vscode_ripgrep_bin "$vscode_release_root")"
 	node_identity="$("$CODE_SERVER_NODE_BIN" -p 'process.version + ":" + process.versions.modules')"
 	npm_version="$("$CODE_SERVER_NPM_BIN" --version 2>/dev/null || true)"
@@ -319,6 +315,16 @@ ensure_code_server_payload() {
 	# CDXC:CodeEditor 2026-06-09-17:06: Embedded VS Code search depends on @vscode/ripgrep/bin/rg. Rebuild the generated REH web payload when code-server packaging inputs change, server-main.js is missing, or ripgrep is missing/wrong-arch so `bun run start` and release builds cannot reuse a stale payload that opens but fails search.
 	if ! cache_matches "$payload_cache_key" "$payload_digest" "$vscode_release_root/out/server-main.js" "$vscode_ripgrep_bin" ||
 		! binary_supports_macos_arch "$vscode_ripgrep_bin" "$GHOSTEX_MACOS_ARCH"; then
+		(
+			cd "$CODE_SERVER_ROOT/lib/vscode"
+			# CDXC:CodeEditor 2026-09-14 WHY:
+			# A submodule update can leave node_modules from the previous VS Code revision, failing gulp on newly required packages.
+			# VS Code's install state covers its root, build, remote, and extension dependencies as well as the Node version.
+			if ! "$CODE_SERVER_NODE_BIN" --input-type=module -e 'import { isUpToDate } from "./build/npm/installStateHash.ts"; process.exit(isUpToDate() ? 0 : 1)'; then
+				echo "Installing VS Code dependencies from the current lockfiles..."
+				env PATH="$CODE_SERVER_NODE_DIR:$PATH" "$CODE_SERVER_NPM_BIN" ci --no-audit --no-fund
+			fi
+		)
 		(
 			cd "$CODE_SERVER_ROOT"
 			env \
