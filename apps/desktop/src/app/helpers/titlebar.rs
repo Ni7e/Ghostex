@@ -1432,7 +1432,7 @@ pub(crate) fn sidebar_uses_light_theme(
         .and_then(serde_json::Value::as_str)
     {
         Some("plain-light") => true,
-        Some("system") => gpui_system_uses_light_appearance(),
+        Some("system") | None => gpui_system_uses_light_appearance(),
         _ => false,
     }
 }
@@ -1745,11 +1745,14 @@ pub(crate) fn sidebar_titlebar_background_for_darkness(darkness_percent: f64, ti
 /// the slider key is missing) plus the tint choice produce the chrome
 /// background; the stored `customSidebarTitlebarBackgroundColor` hex itself is
 /// never the applied color.
+/// CDXC:Theming 2026-09-14 DECISION:
+/// User: use #f4f4f5 for the sidebar and titlebar backgrounds in light mode, superseding full white while still ignoring the dark-theme color controls.
+/// SEE-ALSO: packages/core-ui/styles/theme.css.
 pub(crate) fn resolved_custom_sidebar_titlebar_background(
     object: &serde_json::Map<String, serde_json::Value>,
 ) -> u32 {
     if sidebar_uses_light_theme(object) {
-        return 0xf3f3f3;
+        return 0xf4f4f5;
     }
     let legacy_background =
         gpui_settings_hex_rgb(object.get("customSidebarTitlebarBackgroundColor"));

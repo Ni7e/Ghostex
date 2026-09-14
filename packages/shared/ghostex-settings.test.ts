@@ -991,17 +991,14 @@ describe('normalizeghostexSettings', () => {
     ]);
   });
 
-  test('defaults sidebar theme to Dark Gray and offers Light and System', () => {
+  test('defaults sidebar theme to System and preserves saved themes', () => {
     /**
-     * CDXC:Theming 2026-09-13 DECISION:
-     * User: add Light and System while keeping dark mode exactly as it is,
-     * including the default. New installs still resolve to Dark 2 (labelled
-     * Dark Gray), legacy Auto, old plain, and retired presets keep migrating to
-     * it, and only the explicit Light and System values pass through.
+     * CDXC:Theming 2026-09-14 SEE-ALSO:
+     * session-grid-contract-session.ts records the System default decision and preserves legacy preset migration.
      */
-    expect(DEFAULT_ghostex_SETTINGS.sidebarTheme).toBe('dark-2');
+    expect(DEFAULT_ghostex_SETTINGS.sidebarTheme).toBe('system');
     expect(normalizeghostexSettings({})).toMatchObject({
-      sidebarTheme: 'dark-2',
+      sidebarTheme: 'system',
     });
     expect(normalizeghostexSettings({ sidebarTheme: 'auto' })).toMatchObject({
       sidebarTheme: 'dark-2',
@@ -1469,7 +1466,7 @@ describe('normalizeghostexSettings', () => {
       terminalGhosttyTheme: 'GitHub Dark Default',
     });
     expect(normalizeghostexSettings({ terminalGhosttyTheme: 'Not A Bundled Theme' })).toMatchObject({
-      terminalGhosttyTheme: '',
+      terminalGhosttyTheme: 'Not A Bundled Theme',
     });
   });
 

@@ -257,11 +257,12 @@ export function clampAgentManagerZoomPercent(value: number | undefined): number 
 }
 
 /**
- * CDXC:Theming 2026-09-13 DECISION:
- * User: add Light and System while keeping dark mode exactly as it is, including the default and saved contrast/tint.
- * Legacy Auto and retired presets keep their existing Dark Gray migration; following the OS requires selecting System explicitly.
+ * CDXC:Theming 2026-09-14 DECISION:
+ * User: App theme defaults to System; this supersedes the Dark Gray default while retaining saved themes and contrast/tint.
+ * Legacy Auto and retired presets keep their existing Dark Gray migration.
  */
 export function clampSidebarThemeSetting(value: string | undefined): SidebarThemeSetting {
+  if (value === undefined) return 'system';
   return value === 'plain-light' || value === 'system' ? value : 'dark-2';
 }
 

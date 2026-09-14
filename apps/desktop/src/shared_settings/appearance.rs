@@ -12,7 +12,7 @@ pub fn effective_content_color_scheme(
         Some("system") => "system",
         _ => match settings.get("sidebarTheme").and_then(Value::as_str) {
             Some("plain-light") => "light",
-            Some("system") => "system",
+            Some("system") | None => "system",
             _ => "dark",
         },
     }
