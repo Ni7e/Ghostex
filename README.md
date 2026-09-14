@@ -258,7 +258,7 @@ Ghostex is moving quickly, and help is welcome on platform ports, missing agent 
 
 Join the Discord: https://discord.gg/df7b3G92CS
 
-Please check out: https://github.com/maddada/Ghostex/tree/main/CONTRIBUTING.md
+Please check out: [CONTRIBUTING.md](https://github.com/maddada/Ghostex/tree/main/CONTRIBUTING.md)
 
 ## Credits
 
