@@ -4,10 +4,10 @@
 # packaging half reads:
 #   all      (default) the whole release, exactly as before; local and
 #            single-shot callers keep using this.
-#   compile  GPUI reference checkout, sidebar bundle, cargo build. Reads no
+#   compile  GPUI and wmx reference checkout, sidebar bundle, cargo build. Reads no
 #            runtime artifact. Leaves its results in apps/desktop/target and
 #            apps/desktop/dist and exits.
-#   package  everything after the compile: stage the app directory from the
+#   package  build the native editor, then stage the app directory from the
 #            compiled binaries, seal components, verify, sign, vpk pack,
 #            bundle the launcher, write manifest.json. Requires a completed
 #            `compile` on the same checkout.
@@ -50,6 +50,8 @@ if ($RunPackage) {
 if ($RunCompile) {
     & bash (Join-Path $ScriptDir "prepare-references.sh")
     if ($LASTEXITCODE -ne 0) { throw "GPUI reference preparation failed" }
+    & git -C $RepoRoot submodule update --init --depth=1 -- .dependencies/wmx
+    if ($LASTEXITCODE -ne 0) { throw "wmx reference preparation failed" }
 }
 
 $env:GHOSTEX_WINDOWS_ARCH = $Arch

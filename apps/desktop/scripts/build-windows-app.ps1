@@ -63,9 +63,6 @@ if ($BuildPhase -ne "stage") {
         Pop-Location
     }
 
-    # Native Windows Code uses its own Windows editor payload; WSL keeps its Linux component.
-    & (Join-Path $ScriptDir "build-windows-code-server.ps1")
-
     # 2) Rust binaries (bootstrap, main app, CEF helper, and installer launcher). Requires MSVC toolchain, cmake,
     # and ninja (cef-dll-sys builds libcef_dll_wrapper), plus Zig 0.16.x for
     # libghostty-vt (GHOSTEX_ZIG override honored by apps/desktop/build.rs).
@@ -98,6 +95,10 @@ if ($BuildPhase -eq "compile") {
     Write-Host "Compiled $AppName ($ReleaseArch); staging deferred to the stage phase"
     exit 0
 }
+
+# CDXC:Release 2026-09-14 WHY:
+# The native editor payload is consumed only by staging. Building it during compile made both Windows Rust cache jobs fail on the editor's pinned Node requirement before reaching cargo.
+& (Join-Path $ScriptDir "build-windows-code-server.ps1")
 
 # 3) Locate the extracted CEF distribution. cef-dll-sys may export either a
 # flat Windows payload or the upstream Release/ + Resources/ layout.
@@ -345,7 +346,7 @@ if ($OnDemandComponents -or ($WslCodeServerArchive -and (Test-Path $WslCodeServe
 $NativeCodeRoot = Join-Path $GpuiDir "build/native-code-server"
 if (!(Test-Path (Join-Path $NativeCodeRoot "lib/node.exe")) -or
     !(Test-Path (Join-Path $NativeCodeRoot "lib/vscode/out/server-main.js"))) {
-    throw "The native Windows editor is missing. Run the compile phase before staging."
+    throw "The native Windows editor build did not produce the required staging payload."
 }
 Copy-Item $NativeCodeRoot (Join-Path $AppDir "code-server") -Recurse -Force
 Write-Host "Staged $AppDir"
