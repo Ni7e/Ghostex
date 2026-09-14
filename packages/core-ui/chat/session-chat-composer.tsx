@@ -2399,7 +2399,8 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const showStopButton = (isWorking || stopButtonCoolingDown) && !hasSendableDraft;
     const inputPlaceholder =
       placeholder ?? (sendOnEnter ? DESKTOP_SESSION_CHAT_PLACEHOLDER : MOBILE_SESSION_CHAT_PLACEHOLDER);
-    const visiblePlaceholder = collapsed ? inputPlaceholder.replace(/\s*\n\s*/g, ' ') : inputPlaceholder;
+    /** CDXC:SessionChat 2026-09-14 DECISION: User: an empty, collapsed composer shows only the first line of its placeholder. */
+    const visiblePlaceholder = collapsed ? inputPlaceholder.split(/\r?\n/, 1)[0] : inputPlaceholder;
     const composerInput = useLexical ? (
       <SessionChatLexicalInput
         sessionKey={sessionKey}
@@ -2967,7 +2968,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                 {showStopButton ? (
                   <Button
                     aria-label='Stop the agent'
-                    className='size-6'
+                    className='ghostex-chat-stop-button size-6'
                     disabled={stopButtonCoolingDown}
                     onClick={handleStopClick}
                     size='icon'

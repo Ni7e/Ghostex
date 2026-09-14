@@ -39,3 +39,17 @@
 .ghostex-chat-composer[data-scroll-collapsed='true'] .ghostex-chat-composer-footer-actions-compact {
   display: none;
 }
+
+/* CDXC:SessionChat 2026-09-14 DECISION:
+   User: keep the mode toggle from hiding and showing as scrolling collapses and expands the composer.
+   Measure toolbar overflow against the expanded footer in both states so scrolling cannot change which buttons fit. */
+.ghostex-chat-composer[data-scroll-collapsed='true'] > .ghostex-chat-composer-footer[data-composer-measuring] {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.ghostex-chat-composer[data-scroll-collapsed='true']
+  .ghostex-chat-composer-footer[data-composer-measuring]
+  .ghostex-chat-composer-footer-options {
+  display: flex;
+}
