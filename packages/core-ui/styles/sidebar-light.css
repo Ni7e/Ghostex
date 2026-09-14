@@ -68,12 +68,19 @@ body[data-sidebar-theme='plain-light'] .session-pinned-floating-button {
 }
 
 /* CDXC:Sessions 2026-09-14 DECISION:
- * User: darken sidebar tag icons in light mode because their colors are too light.
+ * User: darken sidebar tag icons in light mode, but use #f6c944 for the favorite star because the darkened star was too dark.
+ * This supersedes applying the brightness reduction to favorites.
  * Apply the same adjustment to row and picker glyphs, including custom tag colors.
  */
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
   :is(.session-tag-agent-icon, .session-tag-colored-icon) {
   filter: brightness(0.6);
+}
+
+body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
+  :is(.session-tag-agent-icon, .session-tag-colored-icon)[data-session-tag='favorite'] {
+  color: #f6c944;
+  filter: none;
 }
 
 body[data-sidebar-theme='plain-light'] .sidebar-import-sessions-card {
