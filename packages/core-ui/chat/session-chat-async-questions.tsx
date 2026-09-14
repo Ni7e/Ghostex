@@ -4,7 +4,7 @@ import { Button } from '@/packages/components/ui/button';
 import type { SessionChatMessage } from '@/packages/shared/session-chat';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
 import { SessionQuestionIndicator } from '../session-question-indicator';
-import { pendingSessionChatAsyncQuestions, sessionChatAsyncAnswerPrefix } from './session-chat-async-questions-state';
+import { pendingSessionChatAsyncQuestions } from './session-chat-async-questions-state';
 import './session-chat-async-questions.css';
 
 interface AnswerDraft {
@@ -28,7 +28,7 @@ export function SessionChatAsyncQuestions({
   messages: readonly SessionChatMessage[];
   canSend: boolean;
   working: boolean;
-  onSend: (text: string) => Promise<void>;
+  onSend: (questionId: string, text: string) => Promise<void>;
   onDismiss: (questionId: string) => Promise<void>;
   sessionKey?: string;
 }) {
@@ -82,7 +82,7 @@ export function SessionChatAsyncQuestions({
     setSubmitting(true);
     setError(null);
     try {
-      await onSend(`${sessionChatAsyncAnswerPrefix(question.title)}${answer.trim()}`);
+      await onSend(question.key, answer.trim());
       retire(question.key);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not send your answer. Please try again.');
@@ -127,7 +127,8 @@ export function SessionChatAsyncQuestions({
       >
         <SessionQuestionIndicator working={working} />
         <span className='font-medium'>Question{pending.length > 1 ? 's' : ''} from Codex</span>
-        <span className='min-w-0 flex-1 text-muted-foreground'>{working ? 'Still working' : 'Reply when ready'}</span>
+        {/* CDXC:SessionChat 2026-09-14 DECISION: User: remove the idle "Reply when ready" label from the Codex questions card. */}
+        <span className='min-w-0 flex-1 text-muted-foreground'>{working ? 'Still working' : null}</span>
         <span className='text-muted-foreground'>
           {index + 1}/{pending.length}
         </span>

@@ -774,6 +774,7 @@ pub fn has_ask_answer(selections: &[SessionChatQuestionSelection]) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionChatSendStep {
+    DriveCodexAsyncQuestion(crate::session_chat_codex_async_answer::AsyncAnswer),
     /// Stop this interrupt job if Escape would open Codex's message-editing pager.
     GuardCodexInterrupt,
     /// Recheck the transcript pager and cross-client visibility at the front of the queue.
@@ -1475,6 +1476,24 @@ async fn run_session_chat_send_worker(
                 observer(&step);
             }
             match step {
+                SessionChatSendStep::DriveCodexAsyncQuestion(answer) => {
+                    if let Err(message) = crate::session_chat_codex_async_answer::run(
+                        &project_id,
+                        &session_id,
+                        &zmx_name,
+                        &source,
+                        &answer,
+                        &|| job_generation != generation.load(Ordering::SeqCst),
+                    )
+                    .await
+                    {
+                        outcome = Err(SessionChatSendError::new(
+                            SessionChatSendFailure::Write,
+                            message,
+                        ));
+                        break;
+                    }
+                }
                 SessionChatSendStep::WaitForAccountReady {
                     agent,
                     expected_identity,
@@ -3139,7 +3158,7 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
         .get("kind")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if kind == "dismissAsyncQuestion" {
+    if matches!(kind, "asyncQuestion" | "dismissAsyncQuestion") {
         let Some(question_id) = params
             .get("questionId")
             .and_then(Value::as_str)
@@ -3154,6 +3173,82 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
                 },
             );
         };
+        if session_chat_agent_for_session(&target.session).as_deref() != Some("codex") {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "invalidParams",
+                    message: "Only Codex supports asynchronous questions.".into(),
+                },
+            );
+        }
+        let answer_text = if kind == "asyncQuestion" {
+            let Some(text) = params
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|text| {
+                    !text.is_empty()
+                        && text.len() <= 32_768
+                        && !text
+                            .chars()
+                            .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+                })
+            else {
+                return domain_error_response(
+                    endpoint_path,
+                    request_id,
+                    DomainStateError {
+                        code: "invalidParams",
+                        message: "A non-empty question answer is required (up to 32 KB).".into(),
+                    },
+                );
+            };
+            Some(text.to_string())
+        } else {
+            None
+        };
+        let session = target.session.clone();
+        let id = question_id.to_string();
+        let answer = tokio::task::spawn_blocking(move || {
+            crate::session_chat_codex_async_answer::resolve(&session, &id, answer_text)
+        })
+        .await;
+        let answer = match answer {
+            Ok(Ok(answer)) => answer,
+            result => {
+                return domain_error_response(
+                    endpoint_path,
+                    request_id,
+                    DomainStateError {
+                        code: "invalidParams",
+                        message: match result {
+                            Ok(Err(message)) => message,
+                            _ => "Could not read Codex's question.".into(),
+                        },
+                    },
+                )
+            }
+        };
+        if let Err(error) = execute_session_chat_send(
+            &target.project_id,
+            &target.session_id,
+            &target.zmx_name,
+            "asyncQuestion",
+            vec![SessionChatSendStep::DriveCodexAsyncQuestion(answer)],
+        )
+        .await
+        {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "agentBusy",
+                    message: error.message,
+                },
+            );
+        }
         return match crate::session_chat_async_questions::dismiss(
             state,
             &target.project_id,

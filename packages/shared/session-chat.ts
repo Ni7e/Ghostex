@@ -1025,7 +1025,7 @@ export interface GxserverReadSessionChatImageResult {
 export interface GxserverAnswerSessionChatPromptParams {
   projectId: string;
   sessionId: string;
-  kind: 'question' | 'approval' | 'terminalChoice' | 'terminalDialog' | 'dismissAsyncQuestion';
+  kind: 'question' | 'approval' | 'terminalChoice' | 'terminalDialog' | 'asyncQuestion' | 'dismissAsyncQuestion';
   questionId?: string;
   dialogId?: string;
   dialogAction?: string;

@@ -6,7 +6,7 @@ import { Button } from '@/packages/components/ui/button';
 import type { GxserverSessionChatEvent, SessionChatMessage } from '@/packages/shared/session-chat';
 import { SessionChatView } from './session-chat-view';
 import type { SessionChatTransport } from './session-chat-transport';
-import { pendingSessionChatAsyncQuestions } from './session-chat-async-questions-state';
+import { pendingSessionChatAsyncQuestions, sessionChatAsyncAnswerPrefix } from './session-chat-async-questions-state';
 import { SortableSessionCard } from '../sortable-session-card';
 import { useSidebarStore } from '../sidebar-store';
 import type { SidebarSessionItem } from '@/packages/shared/session-grid-contract';
@@ -46,6 +46,30 @@ function createPreviewTransport(onPendingChange: (count: number) => void, workin
       blocks: [{ type: 'text', text: 'I am continuing with keyboard navigation while you choose.' }],
     },
   ];
+  const appendUser = async (text: string) => {
+    const message: SessionChatMessage = {
+      id: `reply-${++seq}`,
+      role: 'user',
+      source: 'transcript',
+      timestamp: Date.now(),
+      blocks: [{ type: 'text', text }],
+    };
+    messages.push(message);
+    onPendingChange(
+      pendingSessionChatAsyncQuestions(messages).filter((question) => !dismissed.has(question.key)).length
+    );
+    for (const onEvent of listeners)
+      onEvent({
+        type: 'sessionChatAppended',
+        protocolVersion: 1,
+        serverId: 'storybook',
+        projectId: 'storybook',
+        sessionId: 'async-questions',
+        epoch: 1,
+        seq,
+        messages: [message],
+      });
+  };
   return {
     read: async () => ({
       messages: [...messages],
@@ -63,35 +87,19 @@ function createPreviewTransport(onPendingChange: (count: number) => void, workin
       listeners.add(onEvent);
       return () => listeners.delete(onEvent);
     },
-    send: async (text) => {
-      const message: SessionChatMessage = {
-        id: `reply-${++seq}`,
-        role: 'user',
-        source: 'transcript',
-        timestamp: Date.now(),
-        blocks: [{ type: 'text', text }],
-      };
-      messages.push(message);
-      onPendingChange(
-        pendingSessionChatAsyncQuestions(messages).filter((question) => !dismissed.has(question.key)).length
-      );
-      for (const onEvent of listeners)
-        onEvent({
-          type: 'sessionChatAppended',
-          protocolVersion: 1,
-          serverId: 'storybook',
-          projectId: 'storybook',
-          sessionId: 'async-questions',
-          epoch: 1,
-          seq,
-          messages: [message],
-        });
-    },
+    send: appendUser,
     answerPrompt: async (params) => {
-      if (params.kind === 'dismissAsyncQuestion' && params.questionId) {
-        dismissed.add(params.questionId);
+      const question = pendingSessionChatAsyncQuestions(messages).find(
+        (candidate) => candidate.key === params.questionId && !dismissed.has(candidate.key)
+      );
+      if (!question) throw new Error('This question is no longer pending in the terminal.');
+      if (params.kind === 'asyncQuestion') {
+        if (!params.text?.trim()) throw new Error('Enter an answer before sending.');
+        await appendUser(sessionChatAsyncAnswerPrefix(question.title) + params.text);
+      } else if (params.kind === 'dismissAsyncQuestion') {
+        dismissed.add(question.key);
         onPendingChange(
-          pendingSessionChatAsyncQuestions(messages).filter((question) => !dismissed.has(question.key)).length
+          pendingSessionChatAsyncQuestions(messages).filter((candidate) => !dismissed.has(candidate.key)).length
         );
       }
     },

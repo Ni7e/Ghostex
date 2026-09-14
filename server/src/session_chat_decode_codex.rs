@@ -329,8 +329,8 @@ fn codex_event_message(
             if blocks.is_empty() {
                 return None;
             }
-            // CDXC:SessionChat 2026-09-12 WHY:
-            // Async questions complete their tool call immediately; only the AgentMessage item carries the question UI, and answering sends an ordinary user message while the turn keeps working.
+            // CDXC:SessionChat 2026-09-14 WHY:
+            // Async questions complete their tool call immediately; only the AgentMessage item carries the question UI. Submit through Codex's question editor so it retires the card before delivering the framed user message.
             let async_questions = if item_type == Some("AgentMessage") {
                 item.get("questions")
                     .and_then(|value| {
