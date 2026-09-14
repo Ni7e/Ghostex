@@ -1,5 +1,58 @@
 # Changelog
 
+## 9.5.0 - 2026-09-14
+
+- New Features
+
+  - Light mode, everywhere. Settings > General > Theme puts App theme first: Dark Gray, Light, or System, which follows your computer. The sidebar, titlebar and its popups, Settings, modals, Docs, Kanban, Automate, the Browser chrome, tooltips and native dialogs all follow it, and open windows change with the system instead of waiting for a restart. Chat and terminals follow the app theme by default and can each override it with Light, Dark or System. Dark Gray stays the default, and its saved contrast and tint come back unchanged if you switch away and back.
+  - Windows can run without WSL. Settings > General > Terminal > Windows Environment now offers native PowerShell projects and Windows agent CLIs, and that is the default. Native sessions persist, survive closing the app or restarting gxserver, and get their own agent hooks and resume commands. Switching environments asks whether to restart now or later, and existing projects and sessions stay in the environment they started in. The Code view still needs WSL.
+  - Simple mode, in More actions or Settings > Chat, calms every chat at once: tool groups without a message collapse to a count, tool rows drop their command previews, and file edits collapse to "Edited 3 files". Expand any row for the usual detail.
+  - Chat remembers where you were. Cmd+P opens Recent Sessions to jump between chats across projects, and Cmd+Ctrl+[ and Cmd+Ctrl+] walk back and forward through the ones you visited. Coming back restores your reading position, which tool cards were expanded, the composer cursor, and the account badge, context usage and status line while their values refresh. Older messages load as you scroll back into the conversation.
+  - Your ZCode conversations show up in Quick Access next to Claude's and Codex's. Opening one resumes it in a terminal with `zcode --resume`, as long as the ZCode CLI is installed on that computer. Deleted, archived, running and subagent conversations are left out.
+  - Web Preview on the phone. From a connected computer's menu, type an address or a port like `3000`, or pick a listening port from the list, grouped into Web pages, Development tools, Services and Other ports, searchable by page title, process or port, with titles, HTTP status and favicons where the page answers. Localhost links from chat, terminals and browser actions open there instead of in the phone's browser.
+  - The mobile app picks Codex models and effort straight from the chat box, including before the first message of a new draft, and waits to apply them until the agent can take them. Long-press a session to park or unpark it, with a Parked section per project.
+  - Right-click a view's titlebar button (Code, Browser, Kanban, Automate, Docs) for Reload and Sleep. Reload refreshes that view, and Sleep unloads it while keeping its place; for Code it stops the editor server too. Selecting the view again wakes it.
+  - Default chat zoom, in Settings > Chat, scales the whole desktop chat interface from 70% to 200% in 5% steps: messages, controls and the prompt composer together.
+  - The composer gets out of the way: scrolling up collapses it, returning to the bottom expands it, and the same toolbar buttons stay visible either way.
+
+- Major Improvements
+
+  - Chat is much lighter on resources. Renderers are reused instead of rebuilt, conversations keep their state when you leave them, the transcript runtime is shared between chats, and account and status chrome survives a renderer being released. Switching between chats is quick even with many of them open.
+  - On macOS and Linux, Ghostex can let go of terminal viewers you are not looking at and reattach them when you come back. The agent keeps running the whole time; this never sleeps a session.
+  - The embedded Code view is on code-server 4.136.2 with a newer VS Code, with each web view's lifecycle now isolated so reloading or sleeping one does not disturb the others. Installed and WSL Node checks moved to Node 24.
+  - Codex questions asked mid-turn can be answered through the terminal editor, so an answer lands even while the agent keeps working.
+  - Compaction is clear in both agents: `/compact` shows a card above the input, with Claude's reported progress or a looping bar for Codex, and anything you send or queue during it waits quietly instead of warning about delivery.
+  - The live tool card at the bottom of chat shows the current work only until the same tool appears in the conversation, and clears when the turn ends, you stop the agent, or the agent asks for input. Finished searches and commands stay in that turn's work details.
+  - Assistant messages that called tools expand them underneath, from a click on the text or the chevron beside it, and keep their full text and formatting when collapsed.
+  - Parked sessions are always listed most recently active first, on desktop, mobile and web, even when your other sessions use manual ordering.
+
+- Minor Improvements
+
+  - As the chat narrows, toolbar buttons move into More actions one at a time (Summary mode, Session note, Stash prompt, Attach, Maximize, then Terminal View) so the context ring and effort controls stay clear, and come back as space opens up.
+  - Click the Subagents header to minimize the card to its header or open it again. It starts minimized in Simple mode, and your choice is remembered per session.
+  - The transcript scrollbar is a thin 5px overlay that fades out when you stop scrolling.
+  - Extra-high effort is labelled xHigh.
+  - Pi, OMP, Hermes and Antigravity keep single newlines in what you send.
+  - The working-and-waiting dot is pink now, and a session's Last Active label steps aside when it would overlap.
+  - Clicking another titlebar dropdown's button closes the open one and opens the new one in the same click.
+  - Selecting a session, focusing its terminal or pressing Escape now also marks its notification read, including one you had pushed to the back of the unread queue.
+  - Sign-in notices in chat offer Switch account beside Open terminal, like usage-limit notices already did.
+  - The Spaces editor and the Notifications popup are smaller, and the custom tag row puts its delete button first.
+  - Three new CLI commands back the mobile features: `ghostex park-session`, `ghostex select-session-chat-model`, and `ghostex ports --json --web`.
+  - Ghostex Help and Computer Use no longer invoke themselves implicitly; ask for them by name. The Beads Kanban titlebar tab is just Kanban.
+
+- Stabilization
+
+  - Queued Codex notices stay up until the send is actually delivered.
+  - Opening a session that already has a terminal tab reuses it without stealing focus.
+  - The Commands pane keeps what you typed in Action across a restore and an app restart.
+  - Windows: a sidebar divider no longer keeps its hover state after the pointer leaves, drafts survive switching between chat and terminal, and a stale native server is replaced without stopping the agents on it.
+  - A recycled TTY can no longer hand an OMP session the wrong identity.
+  - Codex composer detection tells a real input box from a menu or a setup screen, so sends do not go to the wrong place.
+  - The hooks permission prompt grows with its window instead of clipping.
+  - A draft recovery you dismissed stays dismissed.
+  - Light chat uses the shared Codex logo, and copying Context details between Claude and Codex is hidden for now while it is reworked.
+
 ## 9.4.0 - 2026-09-12
 
 - New Features
