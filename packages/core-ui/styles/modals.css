@@ -5226,6 +5226,15 @@ and error text instead of the muted description tone.
 }
 
 /*
+ * CDXC:AgentHooks 2026-09-14 WHY:
+ * The fixed-window cap clipped the hooks prompt to its initial 360px frame before the native host measured it, leaving the actions below a scrollbar.
+ * Measure the full content so the native window fits the benefits, note, and buttons on open.
+ */
+.app-modal-host-native-window-body[data-app-modal-fit-height='true'] .gx-app-modal.agent-hooks-required-modal {
+  max-height: none;
+}
+
+/*
  * Any modal textarea that sits in normal flow scrolls instead of growing. The
  * modals whose textarea is meant to fill the window (Commit message, Saved
  * Prompt editor) keep their own sizing, and so does the read-only View 1st
