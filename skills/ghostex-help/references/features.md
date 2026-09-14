@@ -87,8 +87,15 @@ projects" to make a Space switch change only the sidebar filter
 to the one that owns a session you open from outside it, for example through
 Back/Forward, Search by Prompt, a notification, or Previous Sessions; otherwise
 the Space row only marks that Space with a dot.
-Switching projects by any route keeps the project's last view; only clicking a
-session inside the project you are already in switches to Agents.
+Switching projects by any route keeps the project's last view. Clicking a session
+inside the current project opens it in the visible companion pane, or switches
+to Agents if the companion is hidden.
+Starting a new agent from the sidebar launcher or New Thread picker keeps your
+current view open, including Code, Browser, Kanban, Automate, and Docs. Select
+Agents when you want to open the new agent there.
+With two vertically split companion panes, click inside the top or bottom pane
+to make it active. Selecting another session in the sidebar or creating a new
+session replaces that active pane's session and leaves the other pane in place.
 
 - Side and width: the sidebar sits left or right (`sidebarSide`, or
   `ghostex move-sidebar`); drag the divider to resize, double-click it to
@@ -102,6 +109,8 @@ session inside the project you are already in switches to Agents.
   While collapsed, hovering the 10px edge on the sidebar's side reveals it as
   a floating panel; in a wide view with the companion hidden, the lower half
   of that edge reveals the companion instead.
+- Pane width: agent panes and chat companion sidepanes have a minimum resize
+  width of 388px.
 - Presets: Settings > General > Sidebar > Preset switches groups of card
   details at once; the individual rows below it are marked Advanced.
 - Session cards: agent icon, favicon, last-active time, git stats, colored
@@ -212,6 +221,9 @@ Manual Generate Name and `/rename` in chat remain available for Claude and Codex
   while an icon-and-title ghost follows the pointer; the insertion line marks
   where the session moves when you drop it.
 - Recent Sessions (Cmd+P) opens Quick Access to jump between sessions.
+  Its four tabs are Commands, Projects, Sessions, and Saved Prompts; Cmd+1
+  through Cmd+4 switch between them. Cmd+Shift+P opens Commands directly to
+  search app commands, pane actions, and project actions.
   Previous Sessions in More Options lists past conversations from every agent
   CLI with resume and fork. The History icon immediately to the
   right of Add Worktree on a project header opens Quick Access > Sessions with
@@ -246,7 +258,7 @@ Cmd+Ctrl+[ and Cmd+Ctrl+] to go back and forward through visited sessions.
 Recently visited chats show their loaded messages while catching up with the
 agent. On desktop, returning to a recently visited chat also restores its account
 badge, context usage, and status line while their values refresh. The status
-line's initial wait runs only before it has first appeared for that chat.
+line appears as soon as its values are available, including on the first visit.
 Each chat remembers your reading position, expanded tool cards, and
 composer cursor. Older messages load as needed when returning to a place in
 the conversation's history. Shortcuts: `openSessionSearchPalette`,
@@ -254,7 +266,8 @@ the conversation's history. Shortcuts: `openSessionSearchPalette`,
 
 Star items in Context details to show them in the status line under the chat
 box. Items without a value are hidden until their data is available again;
-your starred selections stay saved.
+your starred selections stay saved. Wrapped rows are centered and balanced where
+space allows, with separators only between items on the same row.
 
 Codex can ask questions while it keeps working. These appear above the composer,
 so you can keep writing your next message. Choose a suggested answer or write
@@ -360,8 +373,10 @@ chat toolbar has room. In a narrow chat, find it under More actions instead.
 The button highlights when Summary mode is on; its tooltip shows the shortcut.
 As space gets tighter, toolbar buttons move into More actions one at a time:
 Summary mode, Session note, Stash prompt, Attach, Maximize, then Terminal View.
-This keeps the context ring and effort controls clear. Buttons return as space
-opens up; More actions and Send or Stop stay visible.
+If the context ring and effort still do not fit beside the model, they move
+together into Model settings at the top of More actions. Controls return as
+space opens up; More actions and Send or Stop stay visible.
+Click effort or the context meter to open it; hovering does not open either control.
 
 Unsent chat drafts are saved automatically. Switching between Chat and Terminal
 keeps a saved copy while the text moves, and a late transfer preserves anything
@@ -464,9 +479,11 @@ lists them in Resources.
 
 Terminals follow the app theme by default. Settings > General > Theme groups
 App theme, Chat theme, and Terminal theme together at the top of Settings.
-Terminal theme can override the app with Light, Dark, or System. Terminal light
-palette starts with GitHub Light Default; Terminal dark palette keeps the existing
-Ghostty theme and background. Already-open terminals update when the app or system
+Terminal theme can override the app with Light, Dark, or System. The palette
+selectors show your existing Ghostty theme names, including separate light and
+dark selections when configured. A single Ghostty theme is used for both appearances
+unless you select a separate light palette. Without a configured theme, the defaults
+are GitHub Light and GitHub Dark. Already-open terminals update when the app or system
 appearance changes. The appearance override and light palette apply to Ghostex only.
 
 Terminal links (`ghostex://terminal`) without a folder open in the active local
@@ -690,8 +707,12 @@ Theme, background contrast and tint, accent color, active pane outline, and
 the app icon live under Settings > General > Theme, the first section.
 App theme offers Dark Gray, Light, and System. Chat and terminal default to
 Follow app, with optional Light, Dark, or System overrides in the same section.
-System follows the operating system appearance. Dark Gray remains the app default,
-and its saved contrast and tint return unchanged when switching back from Light. Keep Awake (Power)
+System is the app default and follows the operating system appearance. Existing
+saved app themes are preserved; dark contrast and tint return unchanged when switching back from Light.
+In light mode, the sidebar and titlebar have solid light-gray (#f4f4f5) backgrounds. Enable Show
+Advanced to find Dark theme background contrast, Dark theme background tint, and
+Dark theme accent color; these controls do not recolor light-mode chrome.
+Keep Awake (Power)
 prevents sleep while agents work.
 Advanced holds Enable Experimental Features and the Debugging rows (Show debug
 UI controls gates diagnostic disk logging; leave these to the user).

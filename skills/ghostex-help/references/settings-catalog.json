@@ -5,7 +5,7 @@
     {
       "key": "sidebarTheme",
       "title": "App theme",
-      "subtitle": "Light, Dark Gray, or follow the system appearance.",
+      "subtitle": "Follow the system appearance by default, or choose Light or Dark Gray.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -13,7 +13,7 @@
       "section": "theming",
       "sectionTitle": "Theme",
       "type": "enum",
-      "default": "dark-2",
+      "default": "system",
       "options": [
         {
           "label": "Dark Gray",
@@ -97,7 +97,7 @@
     {
       "key": "terminalGhosttyLightTheme",
       "title": "Terminal light palette",
-      "subtitle": "Palette and background used by Ghostex terminals in light mode.",
+      "subtitle": "Uses your configured Ghostty light theme, or GitHub Light when no theme is configured.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -752,7 +752,7 @@
           "value": "GitHub Light Colorblind"
         },
         {
-          "label": "GitHub Light Default",
+          "label": "GitHub Light",
           "value": "GitHub Light Default"
         },
         {
@@ -2057,7 +2057,7 @@
     {
       "key": "terminalGhosttyTheme",
       "title": "Terminal dark palette",
-      "subtitle": "Theme used in dark mode, with your existing Ghostty config and background.",
+      "subtitle": "Uses your configured Ghostty dark theme, or GitHub Dark when no theme is configured.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -2716,7 +2716,7 @@
           "value": "GitHub Light Colorblind"
         },
         {
-          "label": "GitHub Light Default",
+          "label": "GitHub Light",
           "value": "GitHub Light Default"
         },
         {
@@ -4020,8 +4020,8 @@
     },
     {
       "key": "customSidebarTitlebarBackgroundDarknessPercent",
-      "title": "Background Contrast",
-      "subtitle": "Contrast level for the sidebar and titlebar background.",
+      "title": "Dark theme background contrast",
+      "subtitle": "Contrast level for the sidebar and titlebar background in dark mode. Light mode stays light gray.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -4032,12 +4032,13 @@
       "default": 96,
       "min": 85,
       "max": 100,
+      "advanced": true,
       "agentWritable": true
     },
     {
       "key": "customSidebarTitlebarBackgroundTintColor",
-      "title": "Background Tint",
-      "subtitle": "Subtle tint color for the sidebar and titlebar background.",
+      "title": "Dark theme background tint",
+      "subtitle": "Subtle tint color for the sidebar and titlebar background in dark mode. Light mode stays light gray.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -4046,12 +4047,13 @@
       "sectionTitle": "Theme",
       "type": "string",
       "default": "#808080",
+      "advanced": true,
       "agentWritable": true
     },
     {
       "key": "accentColor",
-      "title": "Accent Color",
-      "subtitle": "Highlight color for accent text, status highlights, and advanced-setting markers. This color is used minimally in the app.",
+      "title": "Dark theme accent color",
+      "subtitle": "Highlight color for accent text, status highlights, and advanced-setting markers in dark mode.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
