@@ -16,8 +16,11 @@ shortcuts can be assigned in Settings > Hotkeys. Views other than Agents are ext
 they load on demand, sleep when idle (Auto Sleep), and can be hidden or
 reordered in Settings > Extensions > Titlebar views.
 The full view tabs stay centered in the titlebar. When space is tight, they
-become a dropdown on the left immediately after Next (Forward), before the
-companion toggle and project name. Hovering a view shows its positional shortcut.
+become a dropdown on the left after the Notifications bell that follows Next
+(Forward), before the project name. Hovering a view shows its positional shortcut.
+**Hide sidebar** toggles the sidebar. In views with a companion pane, the matching
+**Hide companion** / **Show companion** button sits immediately beside it and uses
+the same outlined chat bubble with text lines whether the companion is visible or hidden.
 
 Right-click Code, Browser, Kanban, Automate, Docs, or another web-based view's
 titlebar button for **Reload** and **Sleep**, followed by **Extensions**. Reload
@@ -38,7 +41,10 @@ without closing Ghostex.
 - **Browser**: embedded Chromium tabs with profiles, splits, annotations,
   DevTools, and agent control through the `$ghostex-embedded-browser-use`
   skill. Web links from terminals, chat, and detected dev servers open here or
-  in the system browser depending on Open links in.
+  in the system browser depending on Open links in. Annotate the current page
+  with Agentation in the Browser toolbar; GitHub pages disallow that tool.
+  HTML files in Docs use the same Agentation overlay via Annotate. Markdown
+  files use Docs selection comments instead (see Docs below).
 - **Kanban**: the project board backed by the Beads `bd` CLI (see Project
   board).
 - **Automate**: scheduled and triggered agent runs (see Automations).
@@ -46,18 +52,20 @@ without closing Ghostex.
   folders, with a markdown editor and an annotation system that sends notes
   back to the agent. Select text in a Markdown file to comment on it, mark it
   Looks good, Clarify, or Needs tests, or delete it (press D), and add a global
-  comment from the header. Send (or Cmd+Enter) delivers the new notes as
+  comment from the header. In the comment box, Add (or Cmd+Enter, Ctrl+Enter
+  on Windows and Linux) adds the note to the list; the same chord outside the
+  box is Send. Send (or Cmd+Enter) delivers the new notes as
   numbered feedback with line numbers to the session last clicked in the
   sidebar for the active project: into its chat composer when the chat is
   showing, or into the agent's terminal when its input box is available. The
   button names that session before you press it. When no agent session is
   selected, the agent's input box is busy, or Ghostex cannot tell for that
   agent, the feedback is copied to the clipboard instead and a toast says so.
-  Sent notes stay visible with a Sent mark and are only sent again after you
-  edit them; the Review menu offers Resend all, Finish review (which archives
-  the sent notes), Undo finish, and the Archive where a note can be restored.
-  With notes in several files, the Review menu sends the new notes across all
-  files as one message. In a chat, the Reply by Annotating button beside an
+  Sending leaves Docs on screen. Sent notes stay visible with a Sent mark;
+  Send offers the new notes first and, once everything has been sent, sends
+  all of them again, and the Review menu offers Resend all. With notes in
+  several files, the Review menu sends the new notes across all files as one
+  message. Notes stay until you clear them with Clear. In a chat, the Reply by Annotating button beside an
   agent reply (between Copy message and Save to md) opens that reply in Docs so
   it can be annotated the same way, with the feedback going back to that
   session. Folders appear as they load, and search fills in while
@@ -128,10 +136,13 @@ session replaces that active pane's session and leaves the other pane in place.
   width of 388px.
 - Presets: Settings > General > Sidebar > Preset switches groups of card
   details at once; the individual rows below it are marked Advanced.
+- Timed Delayed Send: right-click an agent with a timed send scheduled, choose
+  **Postpone by**, then **10 minutes**, **30 minutes**, **1 hour**, **2 hours**,
+  or **5 hours**. The duration is added to its existing send time.
 - Session cards: agent icon, favicon, last-active time, git stats, colored
   icons, and rename-on-double-click are all toggles.
 - Session hover buttons (click to toggle, drag to reorder), under General >
-  Session Cards, is a strip
+  Session Cards (shown with Show Advanced), is a strip
   of icons: Rename, Pin, Note, Snooze, Close After Done, Tag, Park, Sleep,
   Close, and a chevron. Click an icon to turn that hover button on or off;
   drag icons to reorder them. Buttons to the right of the chevron always show
@@ -143,21 +154,35 @@ session replaces that active pane's session and leaves the other pane in place.
   chevron, Close, so a hovered card shows a chevron and Close until you open
   it. Hover an icon on a card to see its name; buttons flip
   to the reverse action on an active row (Unpin, Wake, Unsnooze, Unpark,
-  Cancel Close After Done). An enabled button is left out of the session's
-  right-click menu (and its Advanced submenu), so turning Close off puts
-  Close back in the menu. Browser tabs ignore the strip and always show Sleep
-  and Close. Setting: `sessionCardHoverButtons` (a list of `{ id, enabled }`
-  with ids `rename`, `pin`, `note`, `snooze`, `closeAfterDone`, `tag`,
-  `park`, `sleep`, `close`, `chevron`).
+  Cancel Close After Done). The enabled buttons also lead the session's
+  right-click menu, top to bottom in the card's right-to-left order (Sleep,
+  Park, Tag as by default), with the other actions after them. Close is the
+  exception: while it is on the card it is never in the menu, and turning it
+  off puts Close back as the menu's last row. Hover buttons also in context
+  menu (on by default) controls the rest; turn it off and every enabled
+  button leaves the menu (and its Advanced submenu).
+  Browser tabs ignore the strip and always show Sleep and Close. Both rows
+  live under General > Session Cards and need Show Advanced. Settings:
+  `sessionCardHoverButtons` (a list of `{ id, enabled }` with ids `rename`,
+  `pin`, `note`, `snooze`, `closeAfterDone`, `tag`, `park`, `sleep`,
+  `close`, `chevron`) and `showSessionCardHoverButtonsInContextMenu`.
 - Long projects: a project with more sessions than Compact Session Rows (13
   by default, up to 50) starts in Compact mode and shows only that many rows
   plus a "Show all N sessions" row. Rows inside a collapsed Pinned, Browser,
-  Parked, or Snoozed section do not count. Click that row, or the chevron on
+  Drafts, Parked, or Snoozed section do not count. Click that row, or the chevron on
   the project header, to switch the project to Full mode, which shows every
   row; the chevron switches it back to Compact. Each project remembers its
   mode. The sidebar is the only scroller, and a project's header stays pinned
   at the top while you scroll through its rows. Setting:
   `projectSessionListCollapsedCount`.
+- New sessions appear at the top of Sessions for 10 minutes. After that,
+  a session with unsent text that has not received its first message moves
+  into Drafts, below Pinned and above Sessions. Drafts starts collapsed;
+  expand it to continue a draft. Choose Pin to move a draft into Pinned
+  without sending or changing its text. Unpin returns it to Drafts after
+  the 10-minute window, or to Sessions while still new. Sending its first
+  message returns an unpinned draft to Sessions; pinned drafts stay in
+  Pinned. Empty sessions remain in Sessions. No setting is required.
 - Parking is enabled by default. Right-click a session and choose Park, or
   select several sessions and choose Park selected, to move them into the
   collapsible Parked section at the bottom. Use Unpark or Unpark selected to
@@ -234,8 +259,8 @@ through the agent's own rename command so it survives reopening the conversation
 
 - Sleeping frees RAM; Auto Sleep does it after idle minutes; Resources in the
   titlebar sleeps many at once and shows CPU and RAM per session.
-  Sleeping sidebar sessions keep their normal title color and show a slightly
-  blue last-active time on the right. Use `ghostex sleep|wake <selector>` to
+  Sleeping sidebar sessions keep their normal title color and show a dimmer
+  last-active time on the right; awake sessions show a stronger timestamp. Use `ghostex sleep|wake <selector>` to
   sleep or wake a session.
 - Drag pinned sessions to reorder them within their project. Rows stay in place
   while an icon-and-title ghost follows the pointer; the insertion line marks
@@ -273,6 +298,12 @@ Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
 agent stops, transcript with thinking, tool, and edit cards, subagent
 transcripts, question and approval cards, rewind, and a note per session.
+Type `/` in the chat box to browse the agent's built-in commands. In Cursor
+chats, `/compact` summarizes the conversation to reduce context, just like
+`/summarize`.
+In Claude Code and Codex chats, start a message with `!` to run a shell command
+in that agent's session, for example `! pwd`. The command and its output appear
+in the chat.
 ZCode supports chat messages, thinking, tool results, attachments, and imported
 conversation history. Install its hooks in Settings > Agents to connect new
 conversations and keep activity in sync. ZCode runs in the same terminal, so
@@ -280,6 +311,8 @@ you can switch to Terminal for its setup, model menus, and permission prompts.
 Scrolling up collapses the composer; returning to the bottom expands it.
 An empty collapsed composer shows only the first placeholder line, and scrolling
 keeps the same toolbar buttons visible.
+Hex colors in messages, inline code, and tables have a small rounded color swatch
+beside the value on desktop, mobile, and web. Copying keeps the original text.
 
 Use Cmd+P (Recent Sessions) to jump between chats across projects, or
 Cmd+Ctrl+[ and Cmd+Ctrl+] to go back and forward through visited sessions.
@@ -306,6 +339,12 @@ stays visible until you answer or skip, even while that chat is focused; if the
 agent finishes first, the pink attention dot remains.
 Use the arrows to move between questions, collapse the panel to answer later,
 or Skip a question without interrupting the agent.
+Unsent answers and selected options in question cards are saved on this computer
+as you edit, so switching sessions or reopening Chat keeps them with their question.
+Sending an answer or explicitly dismissing its question clears that saved answer;
+a failed send keeps it available to retry.
+Paste images into an answer to add numbered image references and the same
+clickable thumbnails as the composer. The references stay with the saved answer.
 
 Press Ctrl+Shift+Down to scroll the focused chat to the bottom, including while
 typing. The Scroll to bottom button shows your current shortcut on desktop and web;
@@ -319,6 +358,9 @@ the Quick picker. Model, effort, and mode choices wait until the agent can apply
 them. The connected computer needs a Ghostex version with
 `ghostex select-session-chat-model <selector> --model <model> --effort <effort> --defer --json`;
 the same command accepts `--mode <mode>` and `--fast-mode on|off`.
+Claude's default-effort pricing notice also appears in chat with its original
+explanation and choices, so you can keep the current effort or switch to the
+recommended effort there without opening Terminal.
 Codex rewind continues in a new conversation before the selected prompt and
 returns that prompt for editing. If the chat cannot reconnect after the rewind,
 choose Retry synchronization in the dialog to reconnect without rewinding again
@@ -441,14 +483,18 @@ with it. When the rule finds no account, new sessions use the current CLI login.
 Sign-in and usage-limit notices in Claude and Codex chats offer Switch account
 beside Open terminal, so you can choose another account directly from those notices.
 In the chat's More actions menu, click Switch Account to open its submenu;
-hovering over it does not open it.
+hovering over it does not open it. Open submenus stay open when you move the
+pointer across other menu items, so you can move into them without rushing.
 Switching a running Claude or Codex session to another account, from More
 actions > Switch Account, a terminal notice, or automatically when its account hits a usage limit,
 exits the CLI inside its own terminal and resumes the same conversation there,
-so the terminal tab and the chat stay open. A card in the middle of Session Chat
-shows the current and selected accounts, their usage percentages (including
-Claude's Fable limit), and the switch progress. It stays until the switch
-finishes, briefly confirms success, or shows a failure with Retry switch.
+so the terminal tab and the chat stay open. A card in the middle of Session Chat,
+over a dimmed conversation, shows the current and selected accounts, their usage
+percentages (including Claude's Fable limit), and the switch progress. It stays
+until the new account is confirmed and the conversation is ready on it, then
+briefly confirms success, or shows a failure with Retry switch. On phones and
+narrow chat panes the card uses a compact layout with one row of usage pills per
+account and a short vertical step list.
 A manual switch waits for your next
 message without sending anything. An automatic switch sends a "." to continue
 the interrupted work once the new account is ready. Configured recovery after
@@ -661,9 +707,10 @@ finishes, an attention state on the session card, OS notifications on macOS,
 menu bar badges with running and done counts (click one to jump to the
 session), terminal bell detection, and push notifications on the mobile app.
 The optional status pet in the sidebar mirrors session state.
-Every copy to the clipboard, from a terminal, a chat message, a copy button,
-or a menu, also plays a short copy sound; turn it off with the Copy Sound
-switch under Settings > Notifications > Sounds (`copySound`).
+Copy Sound is off by default. Enable it under Settings > Notifications > Sounds
+to hear a short sound when copying from a terminal, a chat message, the chat
+composer (including its right-click Copy menu), a copy button, or a menu
+(`copySound`).
 
 The Notifications bell sits in the titlebar right after the Next button and
 shows how many notifications are unread. Click it to open the Notifications
@@ -759,6 +806,15 @@ docs directory), `hideProjectHeaderDiffStats`,
   (titlebar question mark) opens sample questions; picking one opens a
   Ghostex Help chat with the question staged so the user can edit it and
   press Enter.
+- Welcome to Ghostex is the onboarding that opens the first time Ghostex
+  runs. Its five panels cover: the agents found on this computer, with
+  Install buttons for Claude Code, Codex and Cursor Agent, an Install guide
+  that installs any other supported agent, the Ghostex helper (agent hooks)
+  and Computer Use; which views to show (Browser and Docs are on by default
+  on a first run) and the browser skill; phone pairing and notifications;
+  and the first project folder with the default agent and session view.
+  "I already know Ghostex" on the first panel skips the rest. Reopen it any
+  time from Tips > Setup or Quick Access > Commands > Setup.
 
 ## Appearance and app
 
@@ -790,9 +846,10 @@ Related settings: `sidebarTheme`, `customSidebarTitlebarBackgroundDarknessPercen
 - "Make Claude control Codex": see Agents, actions, and orchestration.
 - "Match the terminal width to the chat": `ghostex settings set
 terminalViewWidthMode match-chat`.
-- "Make the sidebar narrower": `ghostex settings set sidebarDefaultWidthPx 220`
-  and tell the user to double-click the sidebar divider to apply the default
-  width (dragging sets the live width).
+- "How do I annotate a Browser page or Markdown file": Browser pages use
+  Agentation in the Browser toolbar (see Views, Browser). Markdown files use
+  Docs: select text to comment or mark Looks good, Clarify, or Needs tests,
+  then Send to the last-clicked session (see Views, Docs).
 - "Use Ghostex from my phone or another computer": see Remote machines, web,
   and mobile, then `ghostex settings open --tab remote`.
 - "Run an agent on a schedule": see Automations; open the Automate view or

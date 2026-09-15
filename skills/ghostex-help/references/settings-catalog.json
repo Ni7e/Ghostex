@@ -4720,7 +4720,23 @@
           "id": "close"
         }
       ],
+      "advanced": true,
       "agentWritable": false
+    },
+    {
+      "key": "showSessionCardHoverButtonsInContextMenu",
+      "title": "Hover buttons also in context menu",
+      "subtitle": "Keep the enabled hover buttons at the top of the session right-click menu too, in their right-to-left order on the card. Close is never listed while it is on the card. Turn off to leave every button out of the menu once it is on the card.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sessionCards",
+      "sectionTitle": "Session Cards",
+      "type": "boolean",
+      "default": true,
+      "advanced": true,
+      "agentWritable": true
     },
     {
       "key": "sidebarSessionTagListItems",
@@ -6719,7 +6735,7 @@
     {
       "key": "copySound",
       "title": "Copy Sound",
-      "subtitle": "Play a short sound whenever you copy something to the clipboard.",
+      "subtitle": "Play a short sound when copying to the clipboard, including text from the chat composer.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "notifications",
@@ -6727,7 +6743,7 @@
       "section": "sounds",
       "sectionTitle": "Sounds",
       "type": "boolean",
-      "default": true,
+      "default": false,
       "agentWritable": true
     },
     {
