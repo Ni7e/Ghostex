@@ -22,15 +22,12 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import {
-  cloneElement,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
-  type FocusEventHandler,
   type MouseEvent as ReactMouseEvent,
-  type MouseEventHandler,
   type ReactElement,
   type ReactNode,
   type RefObject,
@@ -54,9 +51,10 @@ import {
   areSidebarTooltipsSuppressed,
   SIDEBAR_TOOLTIP_DISMISS_EVENT,
   SIDEBAR_TOOLTIP_SUPPRESSION_CHANGED_EVENT,
+  TooltipProvider,
 } from './app-tooltip';
 import { formatRelativeTime } from './relative-time';
-import { useSidebarTooltipDelayMs } from './tooltip-delay';
+import { useSidebarItemTooltipDelayMs, useSidebarTooltipDelayMs } from './tooltip-delay';
 import { useRelativeTimeTick } from './use-relative-time-tick';
 
 const SESSION_TOOLTIP_VIEWPORT_MARGIN_PX = 8;
@@ -316,7 +314,7 @@ export function SessionCardContent({
               {hoverActions.map((action) => {
                 const { icon, label } = describeSessionCardHoverAction(action, hoverActionState);
                 return (
-                  <AppTooltip content={label} key={action}>
+                  <SessionCardButtonTooltip content={label} key={action}>
                     <button
                       aria-label={`${label} session`}
                       className='session-card-hover-action'
@@ -330,7 +328,7 @@ export function SessionCardContent({
                     >
                       {icon}
                     </button>
-                  </AppTooltip>
+                  </SessionCardButtonTooltip>
                 );
               })}
             </div>
@@ -339,6 +337,20 @@ export function SessionCardContent({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * CDXC:Tooltips 2026-09-15 DECISION:
+ * User: the small buttons inside a session card must not show their tooltip instantly; they wait as long as the card's own title tooltip does.
+ * Each button gets its own single-member delay group with no grouping timeout, because in the sidebar-wide group the next button's label opens instantly once any tooltip in the sidebar is showing.
+ */
+function SessionCardButtonTooltip({ children, content }: { children: ReactElement; content: ReactNode }) {
+  const sidebarItemTooltipDelayMs = useSidebarItemTooltipDelayMs();
+  return (
+    <TooltipProvider delay={sidebarItemTooltipDelayMs} timeout={0}>
+      <AppTooltip content={content}>{children}</AppTooltip>
+    </TooltipProvider>
   );
 }
 
@@ -1408,7 +1420,7 @@ function CloseAfterDoneSidebarIcon({
 }) {
   const tooltip = remainingLabel ? `Close After Done in ${remainingLabel}` : 'Close After Done armed';
   return (
-    <AppTooltip content={tooltip}>
+    <SessionCardButtonTooltip content={tooltip}>
       <button
         aria-label={tooltip}
         className={className}
@@ -1420,7 +1432,7 @@ function CloseAfterDoneSidebarIcon({
       >
         <IconClock aria-hidden='true' size={16} stroke={1.9} />
       </button>
-    </AppTooltip>
+    </SessionCardButtonTooltip>
   );
 }
 
@@ -1578,12 +1590,7 @@ function stripAgentTooltipText(
 }
 
 type OverflowTooltipTextProps = {
-  children: ReactElement<{
-    onBlur?: FocusEventHandler<HTMLElement>;
-    onFocus?: FocusEventHandler<HTMLElement>;
-    onMouseEnter?: MouseEventHandler<HTMLElement>;
-    onMouseLeave?: MouseEventHandler<HTMLElement>;
-  }>;
+  children: ReactElement;
   delayMs?: number;
   textRef?: RefObject<HTMLDivElement | null>;
   text: string;
@@ -1597,6 +1604,40 @@ type SessionTooltipPosition = {
   width: number;
 };
 
+type SessionTooltipOpenReason = 'hover' | 'focus';
+
+/**
+ * CDXC:Tooltips 2026-09-15 DECISION:
+ * User: a control inside a session card that owns its own tooltip (the hover action strip, the timer icons) shows only its own label; the card's title tooltip must not appear next to it.
+ * Every shared tooltip trigger carries this slot attribute, so the card tells "over a nested tooltip owner" apart from "over the card body" without each control registering itself.
+ */
+const NESTED_TOOLTIP_OWNER_SELECTOR = '[data-slot="tooltip-trigger"]';
+
+function findNestedTooltipOwner(rootElement: Element, target: EventTarget | null): Element | undefined {
+  const targetNode = target instanceof Node ? target : undefined;
+  const targetElement = targetNode instanceof Element ? targetNode : (targetNode?.parentElement ?? undefined);
+  if (!targetElement || !rootElement.contains(targetElement)) {
+    return undefined;
+  }
+
+  const owner = targetElement.closest(NESTED_TOOLTIP_OWNER_SELECTOR);
+  if (!owner || owner === rootElement || !rootElement.contains(owner)) {
+    return undefined;
+  }
+
+  return owner;
+}
+
+/**
+ * CDXC:Tooltips 2026-09-15 WHY:
+ * The AppKit observer writes this flag and then runs the dismiss script, and both reach the renderer on a different channel than mouse input.
+ * A fast exit from the sidebar could therefore be dismissed before the mousemove that entered the row started the open timer, which left the title tooltip open over a terminal pane with the pointer long gone.
+ * Hover opens re-check the flag when the timer fires so they never land while the pointer is outside the sidebar; focus opens ignore it so keyboard navigation keeps working with the mouse parked elsewhere.
+ */
+function isNativePointerOutsideSidebar(): boolean {
+  return typeof document !== 'undefined' && document.body?.dataset.nativePointerInside === 'false';
+}
+
 export function OverflowTooltipText({
   children,
   delayMs,
@@ -1609,11 +1650,18 @@ export function OverflowTooltipText({
   const effectiveDelayMs = delayMs ?? configuredDelayMs;
   const [isOpen, setIsOpen] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState<SessionTooltipPosition>();
+  const isOpenRef = useRef(false);
+  const openReasonRef = useRef<SessionTooltipOpenReason | undefined>(undefined);
   const openTimeoutIdRef = useRef<number | undefined>(undefined);
+  const pointerInsideRef = useRef(false);
+  const pointerOverNestedOwnerRef = useRef(false);
+  const suppressedUntilPointerLeaveRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const tooltipPopupRef = useRef<HTMLDivElement>(null);
   const tooltipIdRef = useRef(Symbol('overflowTooltip'));
   const tooltipContent = tooltip ?? text;
+  const latestRef = useRef({ effectiveDelayMs, textRef, tooltipContent, tooltipWhen });
+  latestRef.current = { effectiveDelayMs, textRef, tooltipContent, tooltipWhen };
 
   const clearOpenTimeout = () => {
     if (openTimeoutIdRef.current === undefined) {
@@ -1626,16 +1674,18 @@ export function OverflowTooltipText({
 
   const closeTooltip = () => {
     clearOpenTimeout();
+    openReasonRef.current = undefined;
     if (activeOverflowTooltipId === tooltipIdRef.current) {
       activeOverflowTooltipId = undefined;
       activeOverflowTooltipClose = undefined;
     }
+    isOpenRef.current = false;
     setIsOpen(false);
     setTooltipPosition(undefined);
   };
 
   const hasOverflow = () => {
-    const element = textRef?.current;
+    const element = latestRef.current.textRef?.current;
     if (!element) {
       return false;
     }
@@ -1647,21 +1697,37 @@ export function OverflowTooltipText({
     return element.scrollHeight > element.clientHeight;
   };
 
-  const openTooltip = () => {
-    clearOpenTimeout();
-    if (areSidebarTooltipsSuppressed()) {
-      setIsOpen(false);
+  const requestOpen = (reason: SessionTooltipOpenReason) => {
+    if (isOpenRef.current || openTimeoutIdRef.current !== undefined) {
       return;
     }
-    const shouldOpen = tooltipWhen === 'always' ? Boolean(tooltip ?? text) : hasOverflow();
+    if (areSidebarTooltipsSuppressed()) {
+      return;
+    }
+    if (reason === 'hover' && suppressedUntilPointerLeaveRef.current) {
+      return;
+    }
+    const { effectiveDelayMs: openDelayMs, tooltipContent: content, tooltipWhen: openWhen } = latestRef.current;
+    const shouldOpen = openWhen === 'always' ? Boolean(content) : hasOverflow();
     if (!shouldOpen) {
-      setIsOpen(false);
       return;
     }
 
+    openReasonRef.current = reason;
     openTimeoutIdRef.current = window.setTimeout(() => {
+      openTimeoutIdRef.current = undefined;
       if (areSidebarTooltipsSuppressed()) {
-        closeTooltip();
+        openReasonRef.current = undefined;
+        return;
+      }
+      if (
+        reason === 'hover' &&
+        (!pointerInsideRef.current ||
+          pointerOverNestedOwnerRef.current ||
+          suppressedUntilPointerLeaveRef.current ||
+          isNativePointerOutsideSidebar())
+      ) {
+        openReasonRef.current = undefined;
         return;
       }
       if (activeOverflowTooltipId !== tooltipIdRef.current) {
@@ -1670,21 +1736,91 @@ export function OverflowTooltipText({
 
       activeOverflowTooltipId = tooltipIdRef.current;
       activeOverflowTooltipClose = closeTooltip;
+      isOpenRef.current = true;
       setIsOpen(true);
-      openTimeoutIdRef.current = undefined;
-    }, effectiveDelayMs);
+    }, openDelayMs);
   };
 
+  /*
+   * CDXC:Tooltips 2026-09-15 WHY:
+   * The open and close signals are native DOM listeners on the shell, not React handlers cloned onto the child, for two reasons.
+   * React's synthetic enter/leave and focus events follow the React tree, so a portaled context menu or tag submenu rendered by the card counted as "still inside" and the title tooltip stayed open (or opened late) over the menu.
+   * A DOM mouseleave also never fires when the pointer moves from the title onto a nested button, so the hover strip's own label appeared next to the still-open title tooltip; mouseover, which bubbles, reports every such crossing.
+   * A pointer press closes the tooltip and keeps it closed until the pointer leaves the card: clicking a row hands focus to the terminal while the pointer rests on the row, and the tooltip used to sit there until the next mouse movement out of the sidebar.
+   */
   useEffect(() => {
-    const handleSidebarTooltipDismiss = () => closeTooltip();
+    const shell = shellRef.current;
+    if (!shell) {
+      return undefined;
+    }
+
+    const resetPointerState = () => {
+      pointerInsideRef.current = false;
+      pointerOverNestedOwnerRef.current = false;
+      suppressedUntilPointerLeaveRef.current = false;
+    };
+    const handleMouseOver = (event: MouseEvent) => {
+      const wasInside = pointerInsideRef.current;
+      const wasOverNestedOwner = pointerOverNestedOwnerRef.current;
+      const isOverNestedOwner = findNestedTooltipOwner(shell, event.target) !== undefined;
+      pointerInsideRef.current = true;
+      pointerOverNestedOwnerRef.current = isOverNestedOwner;
+      if (isOverNestedOwner) {
+        if (!wasOverNestedOwner) {
+          closeTooltip();
+        }
+        return;
+      }
+      if (!wasInside || wasOverNestedOwner) {
+        requestOpen('hover');
+      }
+    };
+    const handleMouseLeave = () => {
+      resetPointerState();
+      closeTooltip();
+    };
+    const handlePointerDown = () => {
+      suppressedUntilPointerLeaveRef.current = true;
+      closeTooltip();
+    };
+    const handleFocusIn = (event: FocusEvent) => {
+      if (pointerInsideRef.current || findNestedTooltipOwner(shell, event.target)) {
+        return;
+      }
+      requestOpen('focus');
+    };
+    const handleFocusOut = (event: FocusEvent) => {
+      if (openReasonRef.current !== 'focus') {
+        return;
+      }
+      if (event.relatedTarget instanceof Node && shell.contains(event.relatedTarget)) {
+        return;
+      }
+      closeTooltip();
+    };
+    const handleSidebarTooltipDismiss = () => {
+      resetPointerState();
+      closeTooltip();
+    };
     const handleSidebarTooltipSuppressionChanged = () => {
       if (areSidebarTooltipsSuppressed()) {
         closeTooltip();
       }
     };
+
+    shell.addEventListener('mouseover', handleMouseOver);
+    shell.addEventListener('mouseleave', handleMouseLeave);
+    shell.addEventListener('pointerdown', handlePointerDown);
+    shell.addEventListener('focusin', handleFocusIn);
+    shell.addEventListener('focusout', handleFocusOut);
     window.addEventListener(SIDEBAR_TOOLTIP_DISMISS_EVENT, handleSidebarTooltipDismiss);
     window.addEventListener(SIDEBAR_TOOLTIP_SUPPRESSION_CHANGED_EVENT, handleSidebarTooltipSuppressionChanged);
     return () => {
+      shell.removeEventListener('mouseover', handleMouseOver);
+      shell.removeEventListener('mouseleave', handleMouseLeave);
+      shell.removeEventListener('pointerdown', handlePointerDown);
+      shell.removeEventListener('focusin', handleFocusIn);
+      shell.removeEventListener('focusout', handleFocusOut);
       window.removeEventListener(SIDEBAR_TOOLTIP_DISMISS_EVENT, handleSidebarTooltipDismiss);
       window.removeEventListener(SIDEBAR_TOOLTIP_SUPPRESSION_CHANGED_EVENT, handleSidebarTooltipSuppressionChanged);
       clearOpenTimeout();
@@ -1751,13 +1887,6 @@ export function OverflowTooltipText({
     };
   }, [isOpen, textRef, tooltipContent]);
 
-  const trigger = cloneElement(children, {
-    onBlur: chainEventHandlers(children.props.onBlur, closeTooltip),
-    onFocus: chainEventHandlers(children.props.onFocus, openTooltip),
-    onMouseEnter: chainEventHandlers(children.props.onMouseEnter, openTooltip),
-    onMouseLeave: chainEventHandlers(children.props.onMouseLeave, closeTooltip),
-  });
-
   /*
    * CDXC:Tooltips 2026-05-20-11:05:
    * Session-card title tooltips must render below the row without overlapping
@@ -1799,7 +1928,7 @@ export function OverflowTooltipText({
    */
   return (
     <div className='session-local-tooltip-shell' ref={shellRef}>
-      {trigger}
+      {children}
       {isOpen && tooltipContent
         ? createPortal(
             <div
@@ -1843,14 +1972,4 @@ function renderSessionLocalTooltipContent(content: string): ReactNode {
       {line}
     </span>
   ));
-}
-
-function chainEventHandlers<Event>(
-  originalHandler: ((event: Event) => void) | undefined,
-  nextHandler: (event: Event) => void
-): (event: Event) => void {
-  return (event) => {
-    originalHandler?.(event);
-    nextHandler(event);
-  };
 }
