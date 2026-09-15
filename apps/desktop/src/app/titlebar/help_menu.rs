@@ -51,10 +51,12 @@ pub(crate) const GPUI_TITLEBAR_HELP_QUESTIONS: &[GpuiTitlebarHelpQuestion] = &[
         label: "Match terminal width to chat",
         question: "Make the terminal width match the chat width.",
     },
+    // CDXC:Onboarding 2026-09-15 DECISION:
+    // User: replace the Help sample "Make the sidebar narrower" (the leftover of "Sidebar on the right, narrower") with annotating Browser pages and Markdown files, not "notes".
     GpuiTitlebarHelpQuestion {
-        icon_path: "titlebar/layout-sidebar.svg",
-        label: "Narrower sidebar",
-        question: "Make the sidebar narrower.",
+        icon_path: "titlebar/pencil.svg",
+        label: "Annotate Browser pages and Markdown",
+        question: "How do I annotate a Browser page or Markdown file?",
     },
     GpuiTitlebarHelpQuestion {
         icon_path: "titlebar/world.svg",
