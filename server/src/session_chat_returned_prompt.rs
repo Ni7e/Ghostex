@@ -421,7 +421,11 @@ fn composer_holds_sent_text(composer_text: &str, sent_text: &str) -> bool {
     if composer.is_empty() {
         return false;
     }
-    if composer.starts_with(RETURNED_PROMPT_PASTED_PLACEHOLDER) {
+    if composer
+        .strip_prefix('!')
+        .unwrap_or(&composer)
+        .starts_with(RETURNED_PROMPT_PASTED_PLACEHOLDER)
+    {
         return true;
     }
     let sent = normalize_screen_text(sent_text);

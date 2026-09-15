@@ -2,10 +2,15 @@ use std::ops::Range;
 
 use super::{is_horizontal_rule, is_titled_horizontal_rule, strip_ansi_sgr};
 
+/// CDXC:SessionChat 2026-09-15 DECISION:
+/// User: support sending ! shell commands from Chat for Claude agents, like Codex.
+/// Claude replaces its normal prompt glyph with !, so readiness and draft readers must accept both inside the input frame.
+pub(super) const CLAUDE_COMPOSER_MARKERS: &[char] = &['❯', '!'];
+
 /// CDXC:SessionChat 2026-09-08 WHY:
 /// Rewind restores wrapped drafts in both Claude and Codex. Claude's former three-row signature rejected those drafts before Send could clear them.
 /// Readiness, rewind and replacement must agree on the whole input region, including empty and continued rows.
-pub(super) fn rule_input_region(lines: &[String], marker: char) -> Option<Range<usize>> {
+pub(super) fn rule_input_region(lines: &[String], markers: &[char]) -> Option<Range<usize>> {
     let foot = lines.iter().rposition(|line| is_horizontal_rule(line))?;
     let head = lines[..foot]
         .iter()
@@ -13,7 +18,7 @@ pub(super) fn rule_input_region(lines: &[String], marker: char) -> Option<Range<
     let start = (head + 1..foot).find(|&i| !lines[i].trim().is_empty())?;
     lines[start]
         .trim_start()
-        .starts_with(marker)
+        .starts_with(markers)
         .then_some(start..foot)
 }
 
@@ -103,8 +108,9 @@ pub(super) fn cursor_input_region(lines: &[String]) -> Option<Range<usize>> {
 
 pub fn claude_composer_draft(screen: &str) -> Option<String> {
     let lines: Vec<_> = screen.lines().map(strip_ansi_sgr).collect();
-    let region = rule_input_region(&lines, '❯')?;
-    let text = lines[region.start].trim_start().strip_prefix('❯')?;
+    let region = rule_input_region(&lines, CLAUDE_COMPOSER_MARKERS)?;
+    let first = lines[region.start].trim_start();
+    let text = first.strip_prefix('❯').unwrap_or(first);
     Some(
         std::iter::once(text.trim())
             .chain(
@@ -124,12 +130,16 @@ pub fn claude_composer_draft(screen: &str) -> Option<String> {
 pub struct SessionChatComposerInput {
     pub text: String,
     pub rows: usize,
+    /// An empty shell editor still needs to return to normal mode before replacement.
+    pub shell_mode: bool,
     placeholder: bool,
 }
 
 impl SessionChatComposerInput {
     pub fn is_empty(&self) -> bool {
-        self.text.trim().is_empty() || self.placeholder
+        self.text.trim().is_empty()
+            || self.placeholder
+            || (self.shell_mode && self.text.trim() == "!")
     }
 }
 
@@ -430,6 +440,7 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
             SessionChatComposerInput {
                 text,
                 rows: 1,
+                shell_mode: false,
                 placeholder,
             }
         });
@@ -473,12 +484,13 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
         return Some(SessionChatComposerInput {
             text,
             rows: region.len(),
+            shell_mode: false,
             placeholder: false,
         });
     }
     let region = match agent {
-        "claude" | "openclaude" => rule_input_region(&plain, '❯')?,
-        "antigravity" => rule_input_region(&plain, '>')?,
+        "claude" | "openclaude" => rule_input_region(&plain, CLAUDE_COMPOSER_MARKERS)?,
+        "antigravity" => rule_input_region(&plain, &['>'])?,
         "cursor" => cursor_input_region(&plain)?,
         "hermes-agent" => hermes_input_region(&plain)?,
         // CDXC:AgentScreenDetection 2026-09-11 DECISION:
@@ -494,6 +506,7 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
             !ch.is_whitespace()
         }
     })?;
+    let shell_mode = matches!(agent, "claude" | "openclaude") && first.chars[marker].0 == '!';
     let body: Vec<_> = first.chars[marker + 1..]
         .iter()
         .chain(
@@ -503,8 +516,10 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
         )
         .filter(|(ch, _)| !ch.is_whitespace())
         .collect();
+    // The shell marker is part of the logical draft, including for paste and returned-prompt comparisons.
+    let text_start = if shell_mode { marker } else { marker + 1 };
     let text = std::iter::once(
-        first.chars[marker + 1..]
+        first.chars[text_start..]
             .iter()
             .map(|(ch, _)| *ch)
             .collect::<String>(),
@@ -530,6 +545,7 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
     let mut input = SessionChatComposerInput {
         text,
         rows: region.len(),
+        shell_mode,
         placeholder,
     };
     if agent == "codex" {

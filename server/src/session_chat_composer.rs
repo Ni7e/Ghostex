@@ -194,7 +194,7 @@ enum ComposerSignature {
     /// bottom rule sits a statusline of user-chosen height — which is why the
     /// composer is found by the sandwich and never by counting rows up from the
     /// bottom.
-    RuleSandwich { marker: char },
+    RuleSandwich { markers: &'static [char] },
     /// hermes's rule sandwich. Same frame, but the marker line carries the
     /// active profile name when one is selected: `hermes -p harry` prompts
     /// with `harry ❯`, the default profile with a bare `❯` (its
@@ -257,14 +257,18 @@ got to them:
 /// Return the measured composer chrome signature for a normalized agent id.
 fn composer_signature(agent: &str) -> Option<ComposerSignature> {
     Some(match agent {
-        // `❯` between two full-width rules, statusline below.
-        "claude" | "openclaude" => ComposerSignature::RuleSandwich { marker: '\u{276f}' },
+        // `❯` or shell-mode `!` between two full-width rules, statusline below.
+        "claude" | "openclaude" => ComposerSignature::RuleSandwich {
+            markers: input::CLAUDE_COMPOSER_MARKERS,
+        },
         // Identical shape to claude's, measured independently.
-        "copilot" => ComposerSignature::RuleSandwich { marker: '\u{276f}' },
+        "copilot" => ComposerSignature::RuleSandwich {
+            markers: &['\u{276f}'],
+        },
         // `>` between two full-width rules, statusline below (`? for
         // shortcuts` idle, `esc to cancel` while working). Measured
         // 2026-09-02, Antigravity CLI 1.1.24.
-        "antigravity" => ComposerSignature::RuleSandwich { marker: '>' },
+        "antigravity" => ComposerSignature::RuleSandwich { markers: &['>'] },
         // `❯` (or `<profile> ❯`) between two full-width rules, statusline
         // above the top rule (measured 2026-08-29, Hermes Agent v0.20.4;
         // profile prefix confirmed against v0.20.5 source on 2026-08-30).
@@ -398,9 +402,9 @@ CDXC:SessionChat 2026-09-04 WHY:
 The text Claude Code's input box holds, read off the same rule sandwich the
 readiness signature matches: the lowest full-width rule is the composer's
 foot, the titled rule above it is its head, and the rows between them are the
-input, the first one behind the `❯` marker. A wrapped draft continues on the
-following rows, so they are joined with single spaces. `None` for an empty box
-(a lone marker, or Claude's grey placeholder is not distinguishable from text
+input, the first one behind the `❯` marker or including the shell-mode `!`.
+A wrapped draft continues on the following rows, so they are joined with single spaces.
+`None` for an empty normal box (a lone `❯`, or Claude's grey placeholder is not distinguishable from text
 here and is left to the caller's comparison) and for any screen without the
 sandwich. Used by the returned-prompt detector, which compares this against
 the message it just sent.
@@ -601,8 +605,8 @@ fn signature_matches(signature: ComposerSignature, lines: &[String]) -> bool {
         // In both sandwiches the BOTTOM rule stays strict (it is always solid
         // and spans the pane) and only the top rule is allowed to be the
         // titled kind.
-        ComposerSignature::RuleSandwich { marker } => {
-            input::rule_input_region(lines, marker).is_some()
+        ComposerSignature::RuleSandwich { markers } => {
+            input::rule_input_region(lines, markers).is_some()
         }
         ComposerSignature::ProfiledRuleSandwich { marker } => {
             (0..lines.len().saturating_sub(2)).rev().any(|index| {

@@ -4,7 +4,7 @@ use super::{
     build_agent_tui_clear_input, capture_session_terminal_text_vt, write_session_chat_payload,
     SessionChatSendError, SessionChatSendFailure, AGENT_TUI_CLEAR_LINE_SLACK,
     SESSION_CHAT_CLEAR_INPUT_SETTLE_MS, SESSION_CHAT_COMPOSER_WAIT_TIMEOUT_MS,
-    SESSION_CHAT_SEND_CANCELLED,
+    SESSION_CHAT_INTERRUPT, SESSION_CHAT_SEND_CANCELLED,
 };
 use crate::session_chat_composer::{
     detect_session_chat_composer_readiness, session_chat_composer_input, SessionChatComposerState,
@@ -52,6 +52,7 @@ pub async fn clear_session_chat_composer(
         .unwrap_or_else(|| agent.to_string());
     let method = composer_clear_method(&agent);
     let mut interrupt_sent = false;
+    let mut shell_escape_sent = false;
     loop {
         if cancelled() {
             return Err(SessionChatSendError::not_attempted(
@@ -67,7 +68,7 @@ pub async fn clear_session_chat_composer(
                 detect_session_chat_composer_readiness(Some(&agent), &screen, notice.as_ref());
             if ready.state == SessionChatComposerState::Ready {
                 if let Some(input) = session_chat_composer_input(&agent, &screen) {
-                    if input.is_empty() {
+                    if input.is_empty() && !input.shell_mode {
                         return Ok(());
                     }
                     if cancelled() {
@@ -75,15 +76,28 @@ pub async fn clear_session_chat_composer(
                             SESSION_CHAT_SEND_CANCELLED.to_string(),
                         ));
                     }
-                    let clear = match method {
-                        Some(ComposerClearMethod::InterruptOnce) if !interrupt_sent => {
-                            interrupt_sent = true;
-                            Some("\u{3}".to_string())
+                    // CDXC:SessionChat 2026-09-15 WHY:
+                    // Claude 2.1.268 keeps shell mode after Ctrl+C clears its command. Escape on the empty shell input restores the normal prompt; another Ctrl+C can exit Claude.
+                    let clear = if input.is_empty() && input.shell_mode {
+                        if shell_escape_sent {
+                            None
+                        } else {
+                            shell_escape_sent = true;
+                            Some(SESSION_CHAT_INTERRUPT.to_string())
                         }
-                        Some(ComposerClearMethod::KillLines) => Some(build_agent_tui_clear_input(
-                            input.rows + AGENT_TUI_CLEAR_LINE_SLACK,
-                        )),
-                        _ => None,
+                    } else {
+                        match method {
+                            Some(ComposerClearMethod::InterruptOnce) if !interrupt_sent => {
+                                interrupt_sent = true;
+                                Some("\u{3}".to_string())
+                            }
+                            Some(ComposerClearMethod::KillLines) => {
+                                Some(build_agent_tui_clear_input(
+                                    input.rows + AGENT_TUI_CLEAR_LINE_SLACK,
+                                ))
+                            }
+                            _ => None,
+                        }
                     };
                     if let Some(clear) = clear {
                         write_session_chat_payload(
