@@ -9,7 +9,7 @@
 // literal prose to the model (the 2026-08-23 sweep removed Codex's /undo,
 // /approvals and /agent, and Claude's /review, /vim, /cost, /bashes,
 // /output-style, /pr-comments and /todos on exactly those grounds). Aliases
-// are deliberately omitted where the canonical name is listed — Claude's
+// are generally omitted where the canonical name is listed: Claude's
 // /bashes and /cost are now aliases of /tasks and /usage.
 //
 // KEEPING THE CODEX LIST CURRENT MATTERS MORE THAN THE OTHERS. Claude Code
@@ -235,6 +235,8 @@ const CURSOR_SLASH_COMMANDS: readonly SessionChatSlashCommand[] = [
   { name: 'clear', description: 'Start a new chat session' },
   { name: 'resume', description: 'Resume a previous chat' },
   { name: 'fork', description: 'Fork this chat into a new session' },
+  /** CDXC:SessionChat 2026-09-15 DECISION: User: offer Cursor's /compact in chat; Cursor already handles it as an alias for /summarize. */
+  { name: 'compact', description: 'Summarize the conversation to reduce context (alias for /summarize)' },
   { name: 'summarize', description: 'Summarize the conversation to reduce context' },
   { name: 'rewind', description: 'Jump back to a previous message' },
   { name: 'vim', description: 'Toggle Vim keys' },
