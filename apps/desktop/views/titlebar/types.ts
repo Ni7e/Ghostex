@@ -10,7 +10,6 @@ import type { SidebarTheme, TerminalSessionPersistenceProvider } from '@/package
 import type {
   DiagnosticLoggingSettings,
   KeepAwakeDurationMinutes,
-  SidebarSide,
   WebLinkOpenTarget,
 } from '@/packages/shared/ghostex-settings';
 import type { ghostexHotkeySettings } from '@/packages/shared/ghostex-hotkeys';
@@ -192,7 +191,6 @@ export type TitlebarProjectState = {
   customSidebarTitlebarForegroundColor: string;
   customSidebarTitlebarBackgroundColor: string;
   sidebarCollapsed: boolean;
-  sidebarSide: SidebarSide;
   sidebarActions: TitlebarSidebarActionsSettings;
   hotkeys: ghostexHotkeySettings;
   showProjectEditorDiffFileCount: boolean;

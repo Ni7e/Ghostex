@@ -16,7 +16,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { useSandboxStore } from '../state/store';
-import { BookGlyph, HistoryGlyph, InfoCircleGlyph, StarGlyph, ToolGlyph, WarningGlyph } from './icons';
+import { BookGlyph, HistoryGlyph, InfoCircleGlyph, ToolGlyph, WarningGlyph } from './icons';
 import { SANDBOX_TIPS } from './tips-content';
 import './tips-panel.css';
 
@@ -57,10 +57,6 @@ export function TipsPanel({ anchorRef }: { anchorRef: React.RefObject<HTMLElemen
           <button className='sbx-tips-action' type='button'>
             <BookGlyph />
             <span>Docs</span>
-          </button>
-          <button className='sbx-tips-action' type='button'>
-            <StarGlyph />
-            <span>Video</span>
           </button>
           <button className='sbx-tips-action' type='button'>
             <ToolGlyph />

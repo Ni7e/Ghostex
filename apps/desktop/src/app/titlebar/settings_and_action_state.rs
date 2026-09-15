@@ -83,18 +83,16 @@ impl GhostexGpuiApp {
     ) {
         match action_index {
             0 => self.open_gpui_browser_action_url(GHOSTEX_DOCS_URL.to_string(), window, cx),
-            1 => self.open_gpui_app_modal_from_titlebar(
-                GpuiAppModalKind::WatchGhostexVideo,
-                window,
-                cx,
-            ),
             // CDXC:Onboarding 2026-09-12 DECISION:
             // User: "i want setup button in the tips dropdown to open this new one instead of the old one";
             // the old FirstLaunchSetup modal stays in the tree ("might come back to it") and still owns the
             // automatic first run. SEE-ALSO: delayed_send.rs for the CEF titlebar-host twin of this button.
-            2 => self.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Onboarding, window, cx),
-            3 => self.open_gpui_browser_action_url(GHOSTEX_CHANGELOG_URL.to_string(), window, cx),
-            4 => self.open_gpui_settings_integrations_from_titlebar(None, window, cx),
+            // CDXC:Onboarding 2026-09-15 DECISION:
+            // User: hide all buttons that talk about video for Ghostex. The old Video header
+            // action is gone, so Setup and Updates shifted down one index.
+            1 => self.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Onboarding, window, cx),
+            2 => self.open_gpui_browser_action_url(GHOSTEX_CHANGELOG_URL.to_string(), window, cx),
+            3 => self.open_gpui_settings_integrations_from_titlebar(None, window, cx),
             _ => {}
         }
     }

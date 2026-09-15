@@ -142,13 +142,17 @@ export const TITLEBAR_STYLES = `
      * The rightmost Tips header action should sit flush with the panel edge, the idle buttons should have no fill, and every action should share the widest button's width with only 15px of side padding.
      *
      * CDXC:Onboarding 2026-06-30-04:28:
-     * The visible Tips action labels should stay compact: Video opens the tutorial video, and Updates opens the releases changelog. Short labels keep the equal-width action columns from widening the dropdown header.
+     * The visible Tips action labels should stay compact: Docs, Setup, and Updates.
+     * Short labels keep the equal-width action columns from widening the dropdown header.
+     *
+     * CDXC:Onboarding 2026-09-15 DECISION:
+     * User: hide all buttons that talk about video for Ghostex. The header has three actions.
      */
     align-self: stretch;
     align-items: stretch;
     display: grid;
     gap: 0;
-    grid-template-columns: repeat(4, minmax(max-content, 1fr));
+    grid-template-columns: repeat(3, minmax(max-content, 1fr));
     margin-left: auto;
     width: max-content;
   }

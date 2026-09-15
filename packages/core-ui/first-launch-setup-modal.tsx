@@ -8,7 +8,6 @@ import {
   IconBrowser,
   IconBrandAndroid,
   IconBrandOpenai,
-  IconBrandYoutube,
   IconCircleCheck,
   IconCircleCheckFilled,
   IconCode,
@@ -26,7 +25,6 @@ import {
   IconMessageCircle,
   IconMoon,
   IconPencil,
-  IconPlayerPlay,
   IconRefresh,
   IconSettings,
   IconSparkles,
@@ -190,7 +188,6 @@ const FIRST_LAUNCH_SIDEBAR_PRESETS = FIRST_LAUNCH_SIDEBAR_PRESET_ORDER.flatMap((
  */
 const FIRST_LAUNCH_ANDROID_APK_URL = GHOSTEX_ANDROID_APK_URL;
 const FIRST_LAUNCH_DISCORD_URL = GHOSTEX_DISCORD_URL;
-const FIRST_LAUNCH_TUTORIAL_VIDEO_WATCH_URL = 'https://www.youtube.com/watch?v=APdP-j5n4Mw';
 const FIRST_LAUNCH_RELEASES_URL = 'https://github.com/maddada/ghostex/releases';
 
 const FIRST_LAUNCH_CLI_MOBILE_BENEFITS: readonly FirstLaunchMobileBenefit[] = [
@@ -1470,19 +1467,11 @@ function FirstLaunchWelcomePage({ vscode }: { vscode?: WebviewApi }) {
           </article>
         ))}
       </div>
-      <div className='first-launch-onb-row first-launch-onb-video-row'>
-        <span className='first-launch-onb-video-thumb'>
-          <IconPlayerPlay aria-hidden='true' size={18} />
-        </span>
-        <span className='first-launch-onb-row-main'>
-          <strong>Prefer watching? Check out the 6-minute Intro and Guide</strong>
-          <span>A quick walkthrough of terminals, agents, and the workflows you just read about.</span>
-        </span>
-        <Button onClick={() => openFirstLaunchExternalUrl(vscode, FIRST_LAUNCH_TUTORIAL_VIDEO_WATCH_URL)} type='button'>
-          Watch on YouTube
-          <IconBrandYoutube aria-hidden='true' data-icon='inline-end' />
-        </Button>
-      </div>
+      {/*
+       * CDXC:Onboarding 2026-09-15 DECISION:
+       * User: hide all buttons that talk about video for Ghostex. The welcome
+       * page no longer offers the YouTube walkthrough row.
+       */}
     </section>
   );
 }

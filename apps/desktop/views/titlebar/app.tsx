@@ -1,4 +1,3 @@
-import { IconLayoutSidebar, IconLayoutSidebarRight } from '@tabler/icons-react';
 import {
   useCallback,
   useEffect,
@@ -160,14 +159,6 @@ export function App() {
   const [keepAwakeWorkingSessionGraceUntilMs, setKeepAwakeWorkingSessionGraceUntilMs] = useState<number | undefined>();
   const previousKeepAwakeWorkingSessionCountRef = useRef(projectState.keepAwake.workingSessionCount);
   const [resourceProcesses, setResourceProcesses] = useState<ResourceProcess[]>([]);
-  /*
-   * CDXC:Sidebar 2026-06-20-17:10:
-   * The macOS titlebar Toggle Sidebar control should be a plain Tabler sidebar
-   * glyph instead of the former blue traffic-light dot. Mirror the configured
-   * sidebar placement so left sidebars use IconLayoutSidebar and right sidebars
-   * use IconLayoutSidebarRight.
-   */
-  const SidebarCollapseIcon = projectState.sidebarSide === 'right' ? IconLayoutSidebarRight : IconLayoutSidebar;
   const keepAwakeFeatureEnabled = projectState.keepAwake.featureEnabled === true;
   const [resourceServers, setResourceServers] = useState<ResourceListeningServer[]>([]);
   /*
@@ -274,29 +265,19 @@ export function App() {
     postTitlebarSidebarCommand({ type: 'requestAgentHookStatus' });
     postTitlebarSidebarCommand({ type: 'requestGhostexCliStatus' });
   }, []);
-  const openHighlightedFeaturesFromTips = useCallback(() => {
-    /*
-     * CDXC:Onboarding 2026-06-16-08:17:
-     * The Tips & Tricks header should send users to the replayable highlighted
-     * features modal instead of exposing a bulk "Read all" action.
-     *
-     * CDXC:Onboarding 2026-06-18-05:31:
-     * The Tips modal Video button should open the tutorial video modal. Leave the
-     * old Highlighted Features modal unused instead of deleting its implementation.
-     */
-    postTitlebarSidebarCommand({ type: 'openGhostexTutorialVideo' });
-  }, []);
   const viewGhostexGuideFromTips = useCallback(() => {
     /*
      * CDXC:Onboarding 2026-06-16-10:04:
-     * The Tips & Tricks header should send users to Video with a filled star
-     * action and to the setup guide through a Setup action. Keep the
-     * sidebar-owned workspace welcome bridge as the guide entry point because
-     * that surface owns setup and onboarding repair.
+     * The Tips & Tricks header should send users to the setup guide through a
+     * Setup action. Keep the sidebar-owned workspace welcome bridge as the guide
+     * entry point because that surface owns setup and onboarding repair.
      *
      * CDXC:Onboarding 2026-06-18-04:53:
      * The setup action label should be the shorter "Setup" copy so the header
-     * can also fit Docs, Video, and Updates without truncating action text.
+     * can also fit Docs and Updates without truncating action text.
+     *
+     * CDXC:Onboarding 2026-09-15 DECISION:
+     * User: hide all buttons that talk about video for Ghostex.
      */
     postTitlebarSidebarCommand({ type: 'openWorkspaceWelcome' });
   }, []);
@@ -1954,7 +1935,6 @@ export function App() {
           onMarkTipRead={markTipRead}
           onOpenChangelog={openChangelogFromTips}
           onOpenDocs={openDocsFromTips}
-          onOpenHighlightedFeatures={openHighlightedFeaturesFromTips}
           onOpenNoticeSettings={handleNoticeAction}
           onOpenTipAction={openTipAction}
           onQuitResources={quitResourceBundles}
@@ -1997,7 +1977,6 @@ export function TitlebarDropdownPanelSurface({
   onMarkTipRead,
   onOpenChangelog,
   onOpenDocs,
-  onOpenHighlightedFeatures,
   onOpenNoticeSettings,
   onOpenTipAction,
   onQuitResources,
@@ -2032,7 +2011,6 @@ export function TitlebarDropdownPanelSurface({
   onMarkTipRead: (tipId: string) => void;
   onOpenChangelog: () => void;
   onOpenDocs: () => void;
-  onOpenHighlightedFeatures: () => void;
   onOpenNoticeSettings: (notice: TitlebarNotice) => void;
   onOpenTipAction: (tip: TitlebarTip) => void;
   onQuitResources: (bundles: ResourceProcessBundle[]) => void;
@@ -2085,7 +2063,6 @@ export function TitlebarDropdownPanelSurface({
             onMarkRead={onMarkTipRead}
             onOpenChangelog={() => closeAfter(onOpenChangelog)}
             onOpenDocs={() => closeAfter(onOpenDocs)}
-            onOpenHighlightedFeatures={() => closeAfter(onOpenHighlightedFeatures)}
             onOpenNoticeSettings={(notice) => closeAfter(() => onOpenNoticeSettings(notice))}
             onOpenTipAction={(tip) => closeAfter(() => onOpenTipAction(tip))}
             onViewGhostexGuide={() => closeAfter(onViewGhostexGuide)}

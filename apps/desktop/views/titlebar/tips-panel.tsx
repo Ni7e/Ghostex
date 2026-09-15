@@ -9,7 +9,6 @@ import {
   IconLayoutSidebarLeftExpand,
   IconMoon,
   IconSearch,
-  IconStarFilled,
   IconTool,
   IconWorld,
 } from '@tabler/icons-react';
@@ -21,7 +20,6 @@ export function TitlebarTipsMenu({
   onMarkRead,
   onOpenChangelog,
   onOpenDocs,
-  onOpenHighlightedFeatures,
   onOpenNoticeSettings,
   onOpenTipAction,
   onViewGhostexGuide,
@@ -32,7 +30,6 @@ export function TitlebarTipsMenu({
   onMarkRead: (tipId: string) => void;
   onOpenChangelog: () => void;
   onOpenDocs: () => void;
-  onOpenHighlightedFeatures: () => void;
   onOpenNoticeSettings: (notice: TitlebarNotice) => void;
   onOpenTipAction: (tip: TitlebarTip) => void;
   onViewGhostexGuide: () => void;
@@ -50,15 +47,6 @@ export function TitlebarTipsMenu({
           <button aria-label='Open Docs' className='titlebar-tips-action-button' onClick={onOpenDocs} type='button'>
             <IconBook2 aria-hidden='true' size={14} stroke={1.9} />
             <span>Docs</span>
-          </button>
-          <button
-            aria-label='Open Video'
-            className='titlebar-tips-action-button'
-            onClick={onOpenHighlightedFeatures}
-            type='button'
-          >
-            <IconStarFilled aria-hidden='true' size={14} />
-            <span>Video</span>
           </button>
           <button aria-label='Setup' className='titlebar-tips-action-button' onClick={onViewGhostexGuide} type='button'>
             <IconTool aria-hidden='true' size={14} stroke={1.9} />

@@ -74,7 +74,6 @@ export function mergeTitlebarProjectState(
     ),
     customSidebarTitlebarBackgroundColor,
     sidebarActions: state.sidebarActions ?? current.sidebarActions,
-    sidebarSide: state.sidebarSide ?? current.sidebarSide,
     toggleSidebarHotkeyLabel: state.toggleSidebarHotkeyLabel ?? current.toggleSidebarHotkeyLabel,
     workspaceOpenTargets: state.workspaceOpenTargets ?? current.workspaceOpenTargets,
     isFocusModeActive: state.isFocusModeActive ?? current.isFocusModeActive,
@@ -315,7 +314,6 @@ export function createInitialProjectState(bootstrap: Record<string, unknown>): T
     ),
     customSidebarTitlebarBackgroundColor: settings.customSidebarTitlebarBackgroundColor,
     sidebarCollapsed: bootstrap.sidebarCollapsed === true,
-    sidebarSide: bootstrap.sidebarSide === 'right' ? 'right' : settings.sidebarSide,
     sidebarActions: {
       commands: [],
     },

@@ -229,7 +229,6 @@ impl GhostexGpuiApp {
         );
         for (action_index, (label, icon_path)) in [
             ("Docs", "titlebar/book.svg"),
-            ("Video", "titlebar/sparkles.svg"),
             ("Setup", "titlebar/tool.svg"),
             ("Updates", "titlebar/history.svg"),
         ]
@@ -254,7 +253,7 @@ impl GhostexGpuiApp {
         if shared_settings::shared_sidebar_settings_snapshot().debugging_mode() {
             menu = titlebar_popup_git_section(menu.separator(), "Notices");
             menu = menu.menu_element(
-                Box::new(RunGpuiTitlebarTipsHeaderAction { action_index: 4 }),
+                Box::new(RunGpuiTitlebarTipsHeaderAction { action_index: 3 }),
                 move |_, _| titlebar_popup_tip_row(
                     "titlebar/bug.svg",
                     "Debug mode is on".to_string(),

@@ -16,36 +16,32 @@ function sourceBetween(source: string, start: string, end: string): string {
 }
 
 describe('native titlebar Tips & Tricks source', () => {
-  test('uses video, setup, and updates actions', () => {
+  test('uses setup, docs, and updates actions', () => {
     /*
      * CDXC:Onboarding 2026-06-16-19:42:
      * The Tips & Tricks header should not expose a bulk Read all button.
-     * It should instead open the tutorial video with a filled star, Setup with guide wording, and release updates as an in-project browser session while individual tips keep their per-row read controls.
+     * It should instead open Setup with guide wording, and release updates as an in-project browser session while individual tips keep their per-row read controls.
      *
      * CDXC:Onboarding 2026-06-18-04:53:
      * The header should use the shorter Tips text, add Docs as an in-project
      * browser action, and shorten the setup label to Setup.
      *
-     * CDXC:Onboarding 2026-06-18-05:31:
-     * The Video button should open the tutorial video modal while leaving
-     * the old Highlighted Features modal unused.
-     *
-     * CDXC:Onboarding 2026-06-30-04:28:
-     * The header should label the tutorial-video action Video and the changelog action Updates so the widest equal-width header button is shorter.
+     * CDXC:Onboarding 2026-09-15 DECISION:
+     * User: hide all buttons that talk about video for Ghostex.
      */
     const menuSource = sourceBetween(tipsPanelSource, 'function TitlebarTipsMenu', 'function TitlebarTipsSection');
 
     expect(menuSource).toContain('Docs');
     expect(menuSource).toContain('<span>Tips</span>');
-    expect(menuSource).toContain('Video');
+    expect(menuSource).not.toContain('Video');
     expect(menuSource).toContain('Setup');
     expect(menuSource).toContain('Updates');
-    expect(menuSource).toContain('IconStarFilled');
+    expect(menuSource).not.toContain('IconStarFilled');
     expect(menuSource).toContain('IconBook2');
     expect(menuSource).toContain('IconTool');
     expect(menuSource).toContain('IconHistory');
     expect(menuSource).toContain('onOpenDocs');
-    expect(menuSource).toContain('onOpenHighlightedFeatures');
+    expect(menuSource).not.toContain('onOpenHighlightedFeatures');
     expect(menuSource).toContain('onViewGhostexGuide');
     expect(menuSource).toContain('onOpenChangelog');
     expect(menuSource).not.toContain('<span>Tips & Tricks</span>');
@@ -60,7 +56,7 @@ describe('native titlebar Tips & Tricks source', () => {
     expect(menuSource).not.toContain('Run Setup Flow');
     expect(menuSource).not.toContain('titlebar-tips-summary');
     expect(appSource).toContain("type: 'openBrowserPane', url: GHOSTEX_DOCS_URL");
-    expect(appSource).toContain("type: 'openGhostexTutorialVideo'");
+    expect(appSource).not.toContain("type: 'openGhostexTutorialVideo'");
     expect(appSource).toContain("type: 'openWorkspaceWelcome'");
     expect(appSource).toContain("type: 'openBrowserPane', url: GHOSTEX_CHANGELOG_URL");
     expect(constantsSource).toContain('https://github.com/maddada/ghostex/releases');
@@ -96,7 +92,7 @@ describe('native titlebar Tips & Tricks source', () => {
     expect(actionsStyles).toContain('align-self: stretch;');
     expect(actionsStyles).toContain('align-items: stretch;');
     expect(actionsStyles).toContain('gap: 0;');
-    expect(actionsStyles).toContain('grid-template-columns: repeat(4, minmax(max-content, 1fr));');
+    expect(actionsStyles).toContain('grid-template-columns: repeat(3, minmax(max-content, 1fr));');
     expect(actionsStyles).toContain('width: max-content;');
     expect(actionsStyles).not.toContain('width: 420px;');
     expect(actionButtonStyles).toContain('background: transparent;');

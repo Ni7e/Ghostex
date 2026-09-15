@@ -2,9 +2,10 @@ use super::*;
 
 impl GpuiTitlebarReadingPanel {
     fn render_tips_header(&self, cx: &mut gpui::Context<Self>) -> AnyElement {
+        // CDXC:Onboarding 2026-09-15 DECISION:
+        // User: hide all buttons that talk about video for Ghostex.
         let actions = [
             ("Docs", "titlebar/book.svg"),
-            ("Video", "titlebar/star-filled.svg"),
             ("Setup", "titlebar/tool.svg"),
             ("Updates", "titlebar/history.svg"),
         ];

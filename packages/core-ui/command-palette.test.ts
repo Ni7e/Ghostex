@@ -635,16 +635,16 @@ describe('command palette source contracts', () => {
     /*
      * CDXC:CommandPalette 2026-06-18-03:32:
      * Cmd+Shift+P should open global app surfaces directly from command mode,
-     * including Previous Sessions plus the Features, Setup, and
-     * Changelog actions from the Tips header.
+     * including Previous Sessions plus the Setup and Changelog actions from
+     * the Tips header.
      *
      * CDXC:CommandPalette 2026-06-18-04:53:
      * The setup command should render as Setup while search metadata keeps
      * Ghostex setup and onboarding discoverable.
      *
-     * CDXC:Onboarding 2026-06-18-04:49:
-     * Command mode should include the dedicated tutorial video entry so users
-     * can open the one-video walkthrough without replacing the Features tour.
+     * CDXC:Onboarding 2026-09-15 DECISION:
+     * User: hide all buttons that talk about video for Ghostex. Command mode
+     * no longer includes Features or Tutorial Video rows.
      *
      * CDXC:CommandPalette 2026-06-18-03:46:
      * Main-window buttons Add Project, Search by Text, Quick Terminal, Quick
@@ -673,8 +673,8 @@ describe('command palette source contracts', () => {
     expect(commandPaletteSource).toContain("'sleepFocusedSession'");
     expect(commandPaletteSource).toContain("'wakeFocusedSession'");
     expect(commandPaletteSource).toContain("'closeFocusedSession'");
-    expect(commandPaletteSource).toContain('Features');
-    expect(commandPaletteSource).toContain('Tutorial Video');
+    expect(commandPaletteSource).not.toContain("title: 'Features'");
+    expect(commandPaletteSource).not.toContain('Tutorial Video');
     expect(commandPaletteSource).toContain("title: 'Setup'");
     expect(commandPaletteSource).toContain('Changelog');
     expect(commandPaletteSource).toContain('Add Project');
@@ -707,7 +707,7 @@ describe('command palette source contracts', () => {
     expect(commandPaletteSource).toContain("message: { type: 'openBrowserChat' }");
     expect(commandPaletteSource).toContain("message: { type: 'openAutomationsPage' }");
     expect(commandPaletteSource).toContain("message: { type: 'openCurrentProjectInFinder' }");
-    expect(commandPaletteSource).toContain("message: { type: 'openGhostexTutorialVideo' }");
+    expect(commandPaletteSource).not.toContain("message: { type: 'openGhostexTutorialVideo' }");
     expect(commandPaletteSource).toContain("message: { type: 'openWorkspaceWelcome' }");
     expect(commandPaletteSource).toContain("message: { type: 'openBrowserPane', url: GHOSTEX_CHANGELOG_URL }");
     expect(commandPaletteSource).toContain("type: 'openCurrentProjectInTarget'");

@@ -30,7 +30,6 @@ import {
   IconSearch,
   IconSettings,
   IconSettingsAutomation,
-  IconStars,
   IconTerminal2,
   IconWindowMaximize,
   IconX,
@@ -164,20 +163,17 @@ type SidebarMessagePaletteCommandId =
   | 'automations'
   | 'changelog'
   | 'extensions'
-  | 'features'
   | 'openCurrentProjectInFinder'
   | 'quickBrowserTab'
   | 'quickTerminal'
   | 'searchByText'
-  | 'setupGhostex'
-  | 'tutorialVideo';
+  | 'setupGhostex';
 
 type PaletteSidebarMessage =
   | Extract<SidebarToExtensionMessage, { type: 'createChat' }>
   | Extract<SidebarToExtensionMessage, { type: 'openBrowserChat' }>
   | Extract<SidebarToExtensionMessage, { type: 'openBrowserPane' }>
   | Extract<SidebarToExtensionMessage, { type: 'openCurrentProjectInFinder' }>
-  | Extract<SidebarToExtensionMessage, { type: 'openGhostexTutorialVideo' }>
   | Extract<SidebarToExtensionMessage, { type: 'openHighlightedFeatures' }>
   | Extract<SidebarToExtensionMessage, { type: 'openWorkspaceWelcome' }>
   | Extract<SidebarToExtensionMessage, { type: 'pickWorkspaceFolder' }>
@@ -325,31 +321,11 @@ const SIDEBAR_MESSAGE_PALETTE_COMMANDS = [
     searchText: 'Open Current Project in Finder open folder workspace',
     title: 'Open Current Project in Finder',
   },
-  {
-    commandId: 'features',
-    hotkey: '',
-    kind: 'sidebarMessage',
-    message: { type: 'openGhostexTutorialVideo' },
-    /*
-     * CDXC:Onboarding 2026-06-18-05:31:
-     * The command-palette Features row should open the tutorial video modal so
-     * the old Highlighted Features modal remains unused.
-     *
-     * CDXC:Onboarding 2026-06-18-05:49:
-     * The tutorial video now uses Loom and the Ghostty-focused title, so search
-     * metadata should match the current walkthrough terms.
-     */
-    searchText: 'Features Ghostty Loom tutorial video walkthrough modal',
-    title: 'Features',
-  },
-  {
-    commandId: 'tutorialVideo',
-    hotkey: '',
-    kind: 'sidebarMessage',
-    message: { type: 'openGhostexTutorialVideo' },
-    searchText: 'Ghostty Loom tutorial video walkthrough how to use watch 1.5x',
-    title: 'Tutorial Video',
-  },
+  /*
+   * CDXC:Onboarding 2026-09-15 DECISION:
+   * User: hide all buttons that talk about video for Ghostex. Command-palette
+   * rows that opened the walkthrough are omitted.
+   */
   {
     commandId: 'setupGhostex',
     hotkey: '',
@@ -1008,9 +984,6 @@ function BuiltInCommandIcon({ command }: { command: BuiltInPaletteCommand }) {
   if (action.kind === 'openHotkeys') {
     return <IconKeyboard aria-hidden='true' />;
   }
-  if (action.kind === 'moveSidebar') {
-    return <IconLayoutSidebarRightExpand aria-hidden='true' />;
-  }
   if (action.kind === 'toggleSidebarCollapsed') {
     return <IconLayoutSidebar aria-hidden='true' />;
   }
@@ -1075,12 +1048,6 @@ function SidebarMessageCommandIcon({ commandId }: { commandId: SidebarMessagePal
   }
   if (commandId === 'openCurrentProjectInFinder') {
     return <IconFolderOpen aria-hidden='true' />;
-  }
-  if (commandId === 'features') {
-    return <IconStars aria-hidden='true' />;
-  }
-  if (commandId === 'tutorialVideo') {
-    return <IconPlayerPlay aria-hidden='true' />;
   }
   if (commandId === 'setupGhostex') {
     return <IconChecklist aria-hidden='true' />;
