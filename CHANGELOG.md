@@ -59,7 +59,7 @@
   - Closing Ghostex no longer leaves an orphaned editor server holding its port.
   - The workspace no longer flashes "Source is unavailable" or "No running terminal" while it restores at startup.
   - Tips you have already read stay read when settings are saved from elsewhere.
-  - Session card title tooltips no longer pop up over the buttons inside the card or after the pointer has left the sidebar.
+  - Session card title tooltips no longer pop up over the buttons inside the card or after the pointer has left the sidebar, and no tooltip opens on top of an open sidebar right-click menu.
   - Tall dialogs are measured without losing their height cap, so their actions no longer get clipped on Windows.
   - Terminal panes hand over leadership correctly for control keys, Alt combinations and plain arrow, Home and End presses.
 
