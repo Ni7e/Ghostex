@@ -10,6 +10,7 @@ import {
   validateMajorMinorReleaseNotes,
 } from './release-ghostex.mjs';
 import { RELEASE_BUILD_SCRIPTS, runReleaseBuildScripts } from './release-preflight-build-scripts.mjs';
+import { checkPatches } from './release-gpui/check-patches-apply.mjs';
 import { formatToolingImportViolation, scanToolingImports } from './release-preflight-tooling-imports.mjs';
 import {
   SPARKLE_KEY_SOURCE,
@@ -95,7 +96,14 @@ Options:
   --skip-tests               Skip bun run release:test.
   --skip-typecheck           Skip bun run typecheck.
   --skip-build-scripts       Skip running the release JS build scripts locally.
+  --rebuild-generated        Run the release build scripts first and keep their
+                             regenerated tracked outputs (mobile chat bundle,
+                             sidebar CSS) on disk for you to commit, instead of
+                             failing when they are stale.
   --skip-credentials         Skip gh/signing/notary credential probes.
+  --allow-existing-release   Recovery after a partial staged publish: the tag and
+                             release may already exist (they are amended, not
+                             recreated), so those two checks warn instead of fail.
   --allow-concurrent-sessions
                              Release even though another agent session is
                              actively working in this worktree.
@@ -112,9 +120,11 @@ bun run release:actions -- <version>.
 function parseArgs(argv) {
   const options = {
     allowConcurrentSessions: false,
+    allowExistingRelease: false,
     cargo: false,
     freezeSeconds: 45,
     releaseBranch: 'main',
+    rebuildGenerated: false,
     skipBuildScripts: false,
     skipCredentials: false,
     skipFreeze: false,
@@ -135,8 +145,12 @@ function parseArgs(argv) {
       options.skipTypecheck = true;
     } else if (arg === '--skip-build-scripts') {
       options.skipBuildScripts = true;
+    } else if (arg === '--rebuild-generated') {
+      options.rebuildGenerated = true;
     } else if (arg === '--skip-credentials') {
       options.skipCredentials = true;
+    } else if (arg === '--allow-existing-release') {
+      options.allowExistingRelease = true;
     } else if (arg === '--allow-concurrent-sessions') {
       options.allowConcurrentSessions = true;
     } else if (arg === '--skip-freeze') {
@@ -274,7 +288,10 @@ async function checkTagMissing(options) {
   const localTag = await capture(`git tag --list 'v${options.version}'`);
   const remoteTag = await capture(`git ls-remote --tags origin 'refs/tags/v${options.version}'`, { timeoutMs: 60_000 });
   if (localTag || remoteTag) {
-    return fail(`Tag v${options.version} already exists ${localTag ? 'locally' : 'on origin'}.`);
+    const detail = `Tag v${options.version} already exists ${localTag ? 'locally' : 'on origin'}.`;
+    return options.allowExistingRelease
+      ? warn(`${detail} Recovery redispatch: its stages amend the live release.`)
+      : fail(detail);
   }
   return pass('absent');
 }
@@ -285,7 +302,8 @@ async function checkReleaseMissing(options) {
     { timeoutMs: 60_000 }
   );
   if (result.code === 0) {
-    return fail(`GitHub release v${options.version} already exists.`);
+    const detail = `GitHub release v${options.version} already exists.`;
+    return options.allowExistingRelease ? warn(`${detail} Recovery redispatch: its stages amend it.`) : fail(detail);
   }
   return pass('absent');
 }
@@ -398,6 +416,23 @@ async function checkSecretScan() {
  owned by the assertion-freshness meta-check below; this check still fails, but
  it says the gate is unverified rather than claiming the gate regressed.
 */
+/*
+ 9.5.1 lost a dispatch because the code-server ripgrep patch stopped applying
+ after a submodule bump and nothing before dispatch checked it.
+*/
+async function checkPatchesApply() {
+  const results = checkPatches({ only: ['code-server'] });
+  const broken = results.filter((result) => result.status === 'broken');
+  if (broken.length > 0) {
+    return fail(broken.map((result) => `${result.patch}: ${shortOutput(result.detail, 4)}`).join('; '));
+  }
+  const unavailable = results.filter((result) => result.status === 'unavailable');
+  if (unavailable.length > 0) {
+    return warn(`${unavailable.map((result) => result.patch).join(', ')}: submodule not checked out locally`);
+  }
+  return pass(`${results.length} release patch(es) apply to their submodule pins`);
+}
+
 async function checkRemoteLinuxPackages() {
   const evaluation = await evaluateWorkflowGates();
   if (evaluation.regressions.length > 0) {
@@ -677,6 +712,33 @@ async function main() {
   const startedAt = Date.now();
   console.log(`Ghostex fast release preflight for ${options.version} (build ${releaseBuildVersion(options.version)})`);
 
+  /*
+   The stale-generated-bundle finding recurred on every recent release (9.3.0,
+   9.4.0, 9.5.1): the operator ran preflight, learned the mobile bundle was
+   stale, rebuilt it by hand, committed, and ran preflight again. With
+   --rebuild-generated the rebuild happens first and the outputs stay on disk,
+   so one preflight round tells the operator exactly what to commit.
+  */
+  if (options.rebuildGenerated) {
+    console.log('==> Regenerating tracked build outputs before the checks...');
+    const { failure, results } = await runReleaseBuildScripts({ keepOutputs: true });
+    if (failure) {
+      console.error(`Release build script FAILED: ${failure.command}\n${failure.detail}`);
+      process.exitCode = 1;
+      return;
+    }
+    const regenerated = results.flatMap((result) => result.regenerated ?? []);
+    if (regenerated.length > 0) {
+      console.error(
+        `Regenerated ${regenerated.length} tracked file(s); commit them (mobile bundles inside apps/mobile/app, then bump the submodule pointer) and rerun preflight:\n  ${regenerated.join('\n  ')}`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    console.log('Generated outputs are already current.');
+    options.skipBuildScripts = true;
+  }
+
   const fastChecks = [
     { fn: () => checkBranch(options), name: 'branch' },
     { fn: () => checkWorktreeClean(), name: 'worktree-clean' },
@@ -690,6 +752,7 @@ async function main() {
     { fn: () => checkConcurrentSessions(options), name: 'concurrent-sessions' },
     { fn: () => checkSecretScan(), name: 'secret-scan' },
     { fn: () => checkRemoteLinuxPackages(), name: 'remote-linux-packages' },
+    { fn: () => checkPatchesApply(), name: 'patches-apply' },
     { fn: () => checkAssertionFreshness(), name: 'assertion-freshness' },
     { fn: () => checkSparkleKey(), name: 'sparkle-key' },
   ];
