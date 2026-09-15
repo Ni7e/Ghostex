@@ -8,6 +8,81 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <link>https://github.com/maddada/Ghostex/releases</link>
         <description>Sparkle appcast for Ghostex macOS releases.</description>
         <item>
+            <title>9.6.0</title>
+            <pubDate>Tue, 15 Sep 2026 10:29:20 +0000</pubDate>
+            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v9.6.0</sparkle:fullReleaseNotesLink>
+            <sparkle:version>90600</sparkle:version>
+            <sparkle:shortVersionString>9.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Ghostex 9.6.0
+
+## 9.6.0 - 2026-09-15
+
+- New Features
+
+  - Your phone and your Mac can now drive a Windows computer. Install Ghostex on Windows, turn on SSH, and add the Windows address with your Windows username; the connection uses whichever Windows Environment that machine is set to, either native PowerShell with Windows folders or your selected WSL distribution with Linux folders. Native PowerShell projects need Windows agent CLIs installed, and after changing the environment and restarting Windows Ghostex you reconnect the phone or desktop to pick it up.
+  - Install and update agent CLIs from Settings > Agents. Expand an agent row to install or update it, see its installed version and the command output, or open its install docs. Ghostex picks an updater for installations it recognizes and asks you which one to use when it cannot tell; mise is offered for the CLIs that support it and is the default when available. Commands run on the selected computer and keep running if you close Settings.
+  - Welcome to Ghostex greets you the first time the app runs. Five panels cover the agents already on your computer with one-click installs for Claude Code, Codex and Cursor Agent, which views to show, phone pairing and notifications, and your first project folder with its default agent. "I already know Ghostex" skips the rest, and you can reopen the whole thing from Tips > Setup or Quick Access > Commands > Setup.
+  - ZCode joins the agents Ghostex speaks natively, with chat messages, thinking, tool results, attachments and imported conversation history. Install its hooks in Settings > Agents to connect new conversations, and switch to Terminal for its setup, model menus and permission prompts. Campfire has been removed.
+  - Unsent sessions collect in a Drafts section. A new session leads Sessions for ten minutes; after that, one that still has unsent text and has never received a message drops into Drafts, below Pinned and collapsed by default. Pin a draft to move it to Pinned without sending, and sending its first message returns it to Sessions.
+  - Push a scheduled send later without rescheduling it. Right-click an agent with a timed Delayed Send, choose Postpone by, and add 10 minutes, 30 minutes, 1 hour, 2 hours or 5 hours to its existing send time. Session Automations can also wait for one specific agent on the same computer to stay idle for ten seconds before pressing Enter.
+  - Start a chat message with `!` to run a shell command inside a Claude Code or Codex session, for example `! pwd`, with the command and its output shown in the conversation.
+  - Question cards now use the real chat composer. Paste images to get numbered references and the same clickable thumbnails the composer shows, and anything you type is saved on your computer as you edit, so switching sessions or reopening Chat keeps your half-written answer with its question.
+  - Handoff and Export are one page with two clear choices. Handoff writes the file and starts the follow-up session in a single click, and Export swaps the options for the saved path when it is done.
+  - Annotate a Markdown file or an agent's reply and send the notes straight to an agent. Select text in Docs to comment or mark it Looks good, Clarify or Needs tests, then Send to deliver numbered feedback with line numbers into the session you last clicked, either its chat box or its terminal. Reply by Annotating, beside an agent reply, opens that reply in Docs for the same treatment, and Docs stays on screen while the feedback goes out.
+  - Long conversations open faster and stay browsable. Older history arrives with completed turns already collapsed so you can scroll through prompts and answers without wading through tool logs, and expanding a turn or its files loads that detail on demand.
+  - The buttons a session card shows on hover now also lead its right-click menu, in the card's own order, so the actions you chose are in both places. Close is the exception while it is on the card, and a new switch under General > Session Cards turns the whole behavior off.
+  - Ghostex is in the official Homebrew cask, so `brew install ghostex` works without adding a tap first.
+
+- Major Improvements
+
+  - The account switch card stays up until the new account is actually confirmed and the conversation is ready on it, then briefly says so or offers Retry switch when it fails. It shows both accounts with their usage percentages over a dimmed conversation, and uses a compact one-row-per-account layout on phones and narrow chat panes.
+  - Scrollbars look the same everywhere. A thin 5px track floats over the content, appears when you are near it, and reserves no gutter, across the sidebar, chat, dialogs, menus, Docs, Find, the terminal and the embedded Code editor.
+  - A brand new Claude chat shows its model and effort straight away instead of waiting up to thirty seconds for its history to resolve, and changing the effort no longer replays a model command that is already applied.
+  - The Install Hooks prompt is a friendly page with the agent's own logo and color and four cards explaining what hooks give you, rather than a bare warning.
+  - The phone reconnects on its own. With Auto reconnect on, it checks the connection when you return to the app or its network changes and brings interrupted agent terminals back; a red cloud or Reconnect starts a fresh connection when you want one.
+
+- Minor Improvements
+
+  - Hide companion sits immediately beside Hide sidebar in the titlebar and uses one clear chat-bubble icon whether the companion is showing or not.
+  - Open submenus stay open while the pointer crosses other menu rows, so you can move into them without rushing.
+  - Hex colors in messages, inline code and tables get a small rounded swatch beside the value on desktop, mobile and web, and copying still gives you the plain text.
+  - Cursor chats offer `/compact` alongside `/summarize`.
+  - Claude's default-effort pricing notice appears in chat with its original explanation and choices, so you can answer it without opening Terminal.
+  - The sessions sidebar stays on the left, and Cmd+B still collapses it.
+  - Sleeping sessions keep their normal title color with a dimmer last-active time, while awake sessions show a stronger one.
+  - Subagent transcripts have rounded corners and have dropped a header line that no longer said anything.
+  - Diff cards open against the session's own working directory, so their files resolve in worktrees and subfolders.
+  - A short copy sound can play whenever you copy from a terminal, a chat message, the chat composer, a copy button or a menu. It is off by default and lives under Settings > Notifications > Sounds.
+  - Native modal windows keep square corners that match the current theme.
+  - Forking a session names it after the original and saves that name through the agent's own rename, so it survives reopening the conversation.
+  - Light mode sidebars have darker session titles and timestamps and noticeably clearer icons.
+  - A prompt with no project shows a blank project label in Find instead of the words "No project".
+
+- Stabilization
+
+  - Codex questions asked mid-turn stay answerable after the turn ends.
+  - One dead remote tunnel can no longer stall reconnects to every other computer.
+  - Claude keeps its brand color on light notification tiles.
+  - Rewinding to a prompt that appears twice now lands on the one you picked.
+  - Sending from follow mode snaps to the bottom instead of flashing the Scroll to bottom button.
+  - The favorite star stays bright in light mode, and session hover actions stay put next to a running countdown.
+  - Companion width and the split control keep their size and color when the Browser takes focus, and the command pane's Expand no longer jumps when the pane minimizes.
+  - Local commands such as `/usage` no longer leave a pending bubble behind, and the chat composer's top fade clears once the text stops overflowing.
+  - Chat no longer gets stuck showing "Compacting" after a pasted terminal capture.
+  - Sessions started from a custom profile pick up confirmed renames instead of staying pending.
+  - A manually launched Codex opens in chat before its first hook arrives, and opening a file from chat works in projects reached through a symlink.
+  - Closing Ghostex no longer leaves an orphaned editor server holding its port.
+  - The workspace no longer flashes "Source is unavailable" or "No running terminal" while it restores at startup.
+  - Tips you have already read stay read when settings are saved from elsewhere.
+  - Session card title tooltips no longer pop up over the buttons inside the card or after the pointer has left the sidebar, and no tooltip opens on top of an open sidebar right-click menu.
+  - Tall dialogs are measured without losing their height cap, so their actions no longer get clipped on Windows.
+  - Terminal panes hand over leadership correctly for control keys, Alt combinations and plain arrow, Home and End presses.
+]]></description>
+            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v9.6.0/ghostex-9.6.0-arm64.dmg" length="125763048" type="application/octet-stream" sparkle:edSignature="WTKdV217o7dAqpcKVS8spvl7SxriYLW2uOYA7n35f8lVaAd7AOVgOUNr5eU58xTFREldChMVutQk8FZwPSLqAg=="/>
+        </item>
+        <item>
             <title>9.5.1</title>
             <pubDate>Mon, 14 Sep 2026 06:03:51 +0000</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v9.5.1</sparkle:fullReleaseNotesLink>
@@ -326,69 +401,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <enclosure url="https://github.com/maddada/Ghostex/releases/download/v9.1.0/ghostex-9.1.0-arm64.dmg" length="127322444" type="application/octet-stream" sparkle:edSignature="OM3UNQ3LxvXHxhBqqNgwdJA14NxZr6ZPtuPjcKevQBXnIXr429vsRFw2xZvElhofUH8lZYrBfx5SFANVfJVyCQ=="/>
         </item>
         <item>
-            <title>9.0.0</title>
-            <pubDate>Tue, 08 Sep 2026 06:43:18 +0000</pubDate>
-            <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v9.0.0</sparkle:fullReleaseNotesLink>
-            <sparkle:version>90000</sparkle:version>
-            <sparkle:shortVersionString>9.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Ghostex 9.0.0
-
-## 9.0.0 - 2026-09-08
-
-- New Features
-
-  - Sign in to your Claude and Codex accounts from inside Ghostex: start a login, confirm the email, reconnect one that stopped working, and swap which slot an account sits in, without opening a terminal.
-  - Star an account to keep it in the titlebar, where a small badge opens a panel showing how much of each limit you have used, how quickly you are using it, and when it resets.
-  - Ghostex now finds Claude and Codex conversations you started outside the app and offers to import them, so your existing work sits alongside your Ghostex sessions.
-  - Open a subagent's own transcript from the task card that started it, and page back through its history without leaving the chat.
-  - Recall prompts you recently sent straight from the chat box, including ones a delayed send delivered while you were away.
-  - Grok joins the agents you can chat with.
-  - Drag a project or a group onto a Space to move it there, and drag the Spaces themselves to reorder them.
-  - Codex sessions now report their token use, limit windows, credits, and request timing, and you choose which of those rows to show and in what order.
-  - Choose whether web pages in Ghostex's browser follow your system appearance or stay light or dark.
-  - Swipe with two fingers on the trackpad to move Back and Forward through the sessions and views you visited.
-  - Open a table from a chat message full screen.
-
-- Major Improvements
-
-  - The chat box is a new, much lighter editor. Reference pills, find and replace, go to line, soft wrap, and full keyboard editing all stay, and chats no longer download a large code editor to show you a text box.
-  - The model and effort picker is now its own window, so you can call it up from terminal view as well as chat, and your choice is retried automatically when the agent is busy.
-  - The Resources panel lists every project on its own instead of bundling them into "Other projects", and you can close a session straight from the panel.
-  - However you activate a session, Ghostex now reveals it in the sidebar: it switches Space, expands the project and group, and scrolls the session into view.
-
-- Minor Improvements
-
-  - The app's default chrome color is a neutral dark instead of the icy tint; colors you picked yourself are untouched.
-  - Draft sessions sit at the top of the list, newest first, marked with a pencil.
-  - Hand the draft you typed in chat over to the terminal view.
-  - Long dropdown lists can be searched instead of scrolled.
-  - The chat box now glides out of the way as you scroll the conversation and back when you stop.
-  - More keyboard editing in the chat box, including deleting to the start or end of a line.
-  - Queued prompts show the shortcut that edits them.
-  - Agent dialogs such as /usage always offer their exit button, so leaving one never means switching to the terminal.
-  - The message history marks beside a conversation are larger and easier to hit.
-  - The browser pane menu now opens as a titlebar popup like the other menus.
-  - Turn off the terminal model picker shortcut if you would rather the terminal keep that key.
-  - Chat images no longer show a zoom cursor.
-  - Session menu labels are capitalized the same way everywhere.
-  - The web app gets the same new chat box and reveals activated sessions too.
-
-- Stabilization
-
-  - Agent finished and stopped notifications no longer show up twice in a row.
-  - Codex's local commands now show their full output, thanks to banozz.
-  - A rewind that works but cannot tidy the terminal keeps your draft and tells you, instead of dropping it.
-  - Closing the last browser tab takes you back to Agents rather than leaving an empty browser.
-  - The menu bar dropdown stays open when you switch to another app.
-  - The active model is detected more reliably when the terminal and the picker disagree.
-  - Double-clicking a prompt in Find resumes it even when the list scrolls under your cursor.
-  - A project or group belongs to only one Space now, so it no longer appears twice in the sidebar or on your phone.
-]]></description>
-            <enclosure url="https://github.com/maddada/Ghostex/releases/download/v9.0.0/ghostex-9.0.0-arm64.dmg" length="126484188" type="application/octet-stream" sparkle:edSignature="jX3U0Yla/B+MVocslljvo1DiLGcCk6PR1jxXAvAPxO+EWfPMBg5QLwJrsdcwPFM/3J3nomrVgOHWtNPwTKn0AQ=="/>
-        </item>
-        <item>
             <title>3.26.1</title>
             <pubDate>Mon, 01 Jun 2026 18:43:20 +0400</pubDate>
             <sparkle:fullReleaseNotesLink>https://github.com/maddada/Ghostex/releases/tag/v3.26.1</sparkle:fullReleaseNotesLink>
@@ -400,6 +412,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: f/y2uophsFFcsBIrmFFjiMD9dxxYOfCDX8Ev7ZF6mCBrrGgNepZDAYAk2H81C8tdfJC4hS0RFCaMaIyzvWHgDQ==
-length: 42123
+edSignature: vYiBJvIpnB32kmc14UMbVrifp+in0f6ZFf8YtlvwNHfQMSa74PXrjM0Z+Jpig0jp+mUD++1S++l7fmjAptpQAg==
+length: 47026
 -->
