@@ -139,6 +139,14 @@ pub(crate) fn command_exists(command: &str, home_dir: &Path) -> bool {
 /// Same check, but re-probed now and written back to the cache. Install acts on
 /// the answer, so it must not skip a provider whose CLI appeared inside the
 /// cache window.
+pub(crate) fn resolve_cli_command(command: &str, home_dir: &Path) -> Option<String> {
+    refresh_resolved_command_path(command, home_dir)
+}
+
+pub(crate) fn refresh_cli_environment(home_dir: &Path) {
+    super::probe_cache::invalidate_login_shell_path(home_dir);
+}
+
 pub(crate) fn command_exists_uncached(command: &str, home_dir: &Path) -> bool {
     refresh_resolved_command_path(command, home_dir).is_some()
 }
@@ -171,7 +179,10 @@ pub(super) fn resolve_command_path(command: &str, home_dir: &Path) -> Option<Str
         .map(ToString::to_string)
 }
 
-fn normalize_gxserver_process_path(current_path: Option<&str>, home_dir: &Path) -> String {
+pub(crate) fn normalize_gxserver_process_path(
+    current_path: Option<&str>,
+    home_dir: &Path,
+) -> String {
     let mut entries = Vec::new();
     entries.extend(login_shell_path_entries(home_dir));
     entries.extend(split_path(current_path));
@@ -241,7 +252,10 @@ fn apply_hook_command_environment(command: &mut Command, home_dir: &Path) {
     }
 }
 
-fn run_command_stdout_with_timeout(mut command: Command, timeout: Duration) -> Option<String> {
+pub(crate) fn run_command_stdout_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+) -> Option<String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

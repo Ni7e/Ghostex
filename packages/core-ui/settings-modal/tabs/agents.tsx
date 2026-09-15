@@ -1,3 +1,6 @@
+import { AgentCliControls } from '../../agent-cli/controls';
+import { useAgentCliConnections } from '../../agent-cli/transport';
+import type { AgentCliConnection } from '@/packages/shared/agent-cli-maintenance';
 import { DragDropProvider, type DragDropEventHandlers } from '@dnd-kit/react';
 import { isSortableOperation, useSortable } from '@dnd-kit/react/sortable';
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -167,6 +170,11 @@ export function AgentsSettingsTab({
   vscode?: WebviewApi;
 }) {
   const agents = useSidebarStore((state) => state.hud.agents);
+  const cliConnections = useAgentCliConnections();
+  const [cliConnectionId, setCliConnectionId] = useState<string>();
+  const cliConnection = cliConnectionId
+    ? cliConnections.find((connection) => connection.id === cliConnectionId)
+    : cliConnections[0];
   const agentApprovalsControlId = useId();
   const agentHooksAvailableForUninstall = hasRemovableAgentHooks(agentHookStatus);
   const [editorState, setEditorState] = useState<SettingsAgentEditorState>();
@@ -468,6 +476,15 @@ export function AgentsSettingsTab({
                  * hook shows its own install button while collapsed, and each
                  * row expands to the full hook detail for that agent.
                  */}
+                {cliConnections.length > 1 ? (
+                  <SelectField
+                    label='Install agent CLIs on'
+                    description='Install and update CLIs on this computer.'
+                    options={cliConnections.map((connection) => ({ label: connection.label, value: connection.id }))}
+                    value={cliConnection?.id ?? ''}
+                    onChange={setCliConnectionId}
+                  />
+                ) : null}
                 <div className='flex flex-col gap-2'>
                   <div className='flex min-w-0 items-start gap-2'>
                     <AppTooltip
@@ -567,11 +584,17 @@ export function AgentsSettingsTab({
                          * icon mapping session creation uses. Custom launchers
                          * without a default agent have no hook to manage.
                          */
-                        const hookAgentId = getDefaultSidebarAgentByIcon(agent.icon)?.agentId;
+                        const defaultAgentId = getDefaultSidebarAgentByIcon(agent.icon)?.agentId;
+                        const hookAgentId = AGENT_HOOK_SUPPORTED_DEFAULT_AGENTS.find(
+                          (entry) => entry.agentId === defaultAgentId
+                        )?.agentId;
                         return (
                           <SettingsAgentRow
                             acceptAllMode={agent.acceptAllMode ?? 'inherit'}
                             agent={agent}
+                            cliConnection={cliConnection}
+                            onCliInstalled={onRequestAgentHookStatus}
+                            vscode={vscode}
                             hookStatus={hookAgentId ? hookStatusByAgentId.get(hookAgentId) : undefined}
                             index={index}
                             isExpanded={expandedAgentIds.includes(agent.agentId)}
@@ -788,6 +811,9 @@ export function getAgentHookStatusClassName(
  * install/uninstall and edit/remove actions.
  */
 export function SettingsAgentRow({
+  cliConnection,
+  onCliInstalled,
+  vscode,
   acceptAllMode,
   agent,
   hookStatus,
@@ -806,6 +832,9 @@ export function SettingsAgentRow({
   preferredInterfaceOverride,
   supportsHooks,
 }: {
+  cliConnection?: AgentCliConnection;
+  onCliInstalled?: () => void;
+  vscode?: WebviewApi;
   acceptAllMode: AgentAcceptAllMode;
   agent: SidebarAgentButton;
   hookStatus?: SidebarAgentHookStatusItem;
@@ -936,6 +965,13 @@ export function SettingsAgentRow({
       </div>
       {isExpanded ? (
         <div className='settings-list-panel border-t border-border/70' id={panelId}>
+          <AgentCliControls
+            key={cliConnection?.id ?? 'disconnected'}
+            agentId={getDefaultSidebarAgentByIcon(agent.icon)?.agentId ?? agent.agentId}
+            connection={cliConnection}
+            onInstalled={onCliInstalled}
+            vscode={vscode}
+          />
           {supportsHooks ? (
             <SettingsListItem
               detail={

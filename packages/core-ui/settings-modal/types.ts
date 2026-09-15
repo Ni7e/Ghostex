@@ -228,7 +228,6 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
     'hideProjectHeaderDiffStats',
     'showProjectEditorDiffFileCount',
     'hideMenuBarSessionStatusIndicators',
-    'sidebarSide',
     'sidebarCollapseAnimationDurationMs',
     'sidebarTooltipDelayMs',
     'sidebarDefaultWidthPx',
@@ -320,6 +319,7 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
     'showMacOSAttentionNotifications',
     'attentionNotificationActions',
     'actionCompletionSound',
+    'copySound',
   ],
   system: [
     'autoSleepCodeEditorIdleMinutes',
@@ -415,6 +415,7 @@ export const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
     'showMacOSAttentionNotifications',
     'attentionNotificationActions',
     'actionCompletionSound',
+    'copySound',
   ],
   beta: ['showBetaFeatures'],
 } satisfies Record<MainSettingsScrollTargetId, readonly string[]>;
@@ -673,4 +674,6 @@ export type HotkeySettingsSectionDefinition = {
   title: string;
 };
 
-export const AGENT_HOOK_SUPPORTED_DEFAULT_AGENTS = DEFAULT_SIDEBAR_AGENTS;
+export const AGENT_HOOK_SUPPORTED_DEFAULT_AGENTS = DEFAULT_SIDEBAR_AGENTS.filter(
+  (agent) => !('supportsHooks' in agent) || agent.supportsHooks !== false
+);

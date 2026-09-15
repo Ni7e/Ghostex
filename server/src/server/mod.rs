@@ -177,6 +177,7 @@ use crate::{
 };
 
 pub(crate) mod accounts_http;
+pub(crate) mod agent_cli_http;
 pub mod agent_http;
 pub mod agent_prompt_search_http;
 pub mod background_tasks;
@@ -341,7 +342,6 @@ const RENDERER_COMMAND_ACTIONS: &[&str] = &[
     "focusSession",
     "fullReloadSession",
     "moveProject",
-    "moveSidebar",
     "openBrowser",
     "openBrowserPane",
     "openPaths",
@@ -2259,6 +2259,9 @@ async fn route_http(
             &body_json,
             |_, db, params, server_id| list_session_fork_branches(db, server_id, params),
         ),
+        "/api/agentCliMaintenance" => {
+            agent_cli_http::handle(&state, endpoint.path, request_id, &body_json).await
+        }
         "/api/agentAccounts" => {
             accounts_http::handle_accounts_http(&state, endpoint.path, request_id, &body_json).await
         }

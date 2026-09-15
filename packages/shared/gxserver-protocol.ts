@@ -133,7 +133,6 @@ export const GXSERVER_RENDERER_COMMAND_ACTIONS = [
   'focusSession',
   'fullReloadSession',
   'moveProject',
-  'moveSidebar',
   'openBrowser',
   'openBrowserPane',
   'openPaths',
@@ -195,6 +194,7 @@ export type GxserverEndpointPath =
    * conversation under that agent's command.
    */
   | '/api/switchSessionAgent'
+  | '/api/agentCliMaintenance'
   | '/api/agentAccounts'
   | '/api/readAgentLaunchPlan'
   | '/api/readAgentResumePlan'

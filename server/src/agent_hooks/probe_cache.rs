@@ -127,3 +127,12 @@ fn probe_and_store_command_path(
     }
     resolved
 }
+
+/// Installers can add PATH entries to shell profiles while gxserver stays running.
+pub(super) fn invalidate_login_shell_path(home_dir: &Path) {
+    if let Some(cache) = LOGIN_SHELL_PATH_ENTRIES_CACHE.get() {
+        if let Ok(mut entries) = cache.lock() {
+            entries.remove(home_dir);
+        }
+    }
+}

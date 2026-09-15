@@ -365,7 +365,8 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
               label: agent.name,
               value: agent.name,
             })),
-            subtitle: 'Add, reorder, edit, or delete agent launchers used to start new sessions.',
+            subtitle:
+              'Add, reorder, edit, or delete agent launchers. Expand a row to install or update its CLI, check its version, and open installation docs.',
             title: 'Add Agent',
           },
           {
