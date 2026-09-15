@@ -7,7 +7,6 @@ unsafe extern "C" {
         root: *mut c_void,
         popup: *mut c_void,
         enabled: bool,
-        on_right: bool,
         width: f64,
         titlebar_height: f64,
     ) -> bool;
@@ -31,7 +30,6 @@ impl CompanionReveal {
             GhostexGpuiCompanionRevealUpdate(
                 std::ptr::null_mut(),
                 self.native_view,
-                false,
                 false,
                 0.0,
                 0.0,
@@ -69,11 +67,7 @@ impl Render for FloatingCompanionWindow {
             }
             app.sync_session_chat_pane_focus(window, cx, false);
             let width = app.floating_companion_width();
-            let offset = if app.sidebar_side == GpuiSidebarSide::Right {
-                0.0
-            } else {
-                window.bounds().size.width.as_f32() - width
-            };
+            let offset = window.bounds().size.width.as_f32() - width;
             div()
                 .size_full()
                 .overflow_hidden()
@@ -227,7 +221,6 @@ impl GhostexGpuiApp {
                 self.parent_ns_view,
                 reveal.native_view,
                 enabled,
-                self.sidebar_side == GpuiSidebarSide::Right,
                 self.floating_companion_width() as f64,
                 TITLEBAR_HEIGHT as f64,
             )
@@ -266,7 +259,6 @@ impl GhostexGpuiApp {
             GhostexGpuiCompanionRevealUpdate(
                 self.parent_ns_view,
                 reveal.native_view,
-                false,
                 false,
                 0.0,
                 0.0,

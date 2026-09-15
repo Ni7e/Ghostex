@@ -192,6 +192,11 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   showUntrackedProjectDiffWhenNoTrackedChanges: false,
   completionSound: DEFAULT_COMPLETION_SOUND,
   /**
+   * CDXC:Clipboard 2026-09-15 DECISION:
+   * User: "I want this copy sound to actually play everywhere in the app when we copy something." On by default; this switch is the only gate the copy sound has.
+   */
+  copySound: true,
+  /**
    * CDXC:Notifications 2026-07-01-01:13:
    * Plain terminal BEL events include ordinary shell feedback such as zsh
    * completion misses. Keep terminal-bell attention notifications opt-in so
@@ -375,16 +380,6 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * until the user picks a different view for that agent in Settings > Agents.
    */
   preferredAgentInterfaceOverrides: {},
-  /**
-   * CDXC:Sidebar 2026-05-06-17:32
-   * Sidebar side is a first-class setting so users can choose left or right
-   * placement from Settings instead of relying on sidebar placement shortcuts.
-   *
-   * CDXC:Sidebar 2026-06-12-02:23:
-   * Cmd+B is reserved for complete sidebar collapse, so sidebar side placement
-   * should remain an explicit setting or user-assigned command.
-   */
-  sidebarSide: 'left',
   sidebarCollapseAnimationDurationMs: DEFAULT_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
   sidebarTooltipDelayMs: DEFAULT_SIDEBAR_TOOLTIP_DELAY_MS,
   /**

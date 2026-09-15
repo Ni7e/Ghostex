@@ -345,31 +345,6 @@ pub(crate) fn read_sidebar_default_width_setting() -> Option<f32> {
         .map(|width| width.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
 }
 
-pub(crate) fn gpui_sidebar_side_from_shared_settings(
-    settings: &shared_settings::SharedSidebarSettingsSnapshot,
-) -> GpuiSidebarSide {
-    /*
-    CDXC:Sidebar 2026-06-26-23:35:
-    GPUI reads the typed shared `sidebarSide` snapshot as the startup placement source. Missing or malformed values are normalized by the shared settings boundary to native's left-side default without adding a second durable setting.
-    */
-    match settings.sidebar_side() {
-        shared_settings::SharedSidebarSide::Left => GpuiSidebarSide::Left,
-        shared_settings::SharedSidebarSide::Right => GpuiSidebarSide::Right,
-    }
-}
-
-pub(crate) fn write_gpui_sidebar_side_to_shared_settings(side: GpuiSidebarSide) {
-    /*
-    CDXC:Sidebar 2026-06-26-23:35:
-    GPUI persists Move Sidebar through the typed shared settings writer so only `sidebarSide` changes and sidebar width, collapsed state, and unrelated settings remain untouched.
-    */
-    let shared_side = match side {
-        GpuiSidebarSide::Left => shared_settings::SharedSidebarSide::Left,
-        GpuiSidebarSide::Right => shared_settings::SharedSidebarSide::Right,
-    };
-    let _ = shared_settings::write_shared_sidebar_side(shared_side);
-}
-
 pub(crate) fn persist_sidebar_width_setting(width: f32) {
     /*
     CDXC:Telemetry 2026-06-23-13:18:

@@ -40,7 +40,6 @@ describe('normalizeghostexHotkeySettings', () => {
      * without a default shortcut.
      */
     expect(DEFAULT_ghostex_HOTKEYS.toggleSidebarCollapsed).toBe('cmd+b');
-    expect(DEFAULT_ghostex_HOTKEYS.moveSidebar).toBe('');
     expect(DEFAULT_ghostex_HOTKEYS.focusPreviousSession).toBe('cmd+shift+tab');
     expect(DEFAULT_ghostex_HOTKEYS.focusNextSession).toBe('cmd+tab');
     expect(DEFAULT_ghostex_HOTKEYS.focusPreviousGroup).toBe('cmd+[');
@@ -178,7 +177,6 @@ describe('normalizeghostexHotkeySettings', () => {
         focusPreviousSession: 'cmd+[',
         focusRight: 'cmd+right',
         createSession: 'cmd+n',
-        moveSidebar: 'cmd+b',
         openCommandPalette: 'cmd+k',
         openBrowserPane: 'ctrl+shift+b',
       })
@@ -190,7 +188,6 @@ describe('normalizeghostexHotkeySettings', () => {
       focusPreviousGroup: 'cmd+[',
       focusPreviousSession: 'cmd+shift+tab',
       focusRight: 'cmd+alt+right',
-      moveSidebar: '',
       openBrowserPane: 'cmd+n',
       openCommandPalette: 'cmd+shift+p',
       openHotkeys: 'cmd+.',

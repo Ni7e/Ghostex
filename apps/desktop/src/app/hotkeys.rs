@@ -241,7 +241,6 @@ pub(crate) const GPUI_DEFAULT_GHOSTEX_HOTKEYS: &[(&str, &str)] = &[
     ("openHotkeys", "cmd+."),
     ("toggleSidebarCollapsed", "cmd+b"),
     ("toggleCompanionPane", "cmd+alt+b"),
-    ("moveSidebar", ""),
     ("renameActiveSession", "cmd+r"),
     ("openBrowserPane", "cmd+n"),
     ("switchAgentsView", ""),

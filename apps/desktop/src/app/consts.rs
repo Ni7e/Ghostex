@@ -579,8 +579,6 @@ pub(crate) const TITLEBAR_ICON_LAYOUT_SPLIT_VERTICAL: &str = "titlebar/layout-sp
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_SINGLE_PANE: &str = "titlebar/layout-single-pane.svg";
 
-pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR_RIGHT: &str = "titlebar/layout-sidebar-right.svg";
-
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) const TITLEBAR_ICON_WINDOW_MINIMIZE: &str = "titlebar/window-minimize.svg";
 

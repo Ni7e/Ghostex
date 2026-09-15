@@ -16,7 +16,6 @@ export type ghostexHotkeyActionId =
   | 'openBrowserPane'
   | 'openSettings'
   | 'openHotkeys'
-  | 'moveSidebar'
   | 'openCommandsPanel'
   | 'openExtensions'
   | 'openGhostexHelp'
@@ -105,7 +104,6 @@ export type ghostexHotkeyAction =
   | { id: ghostexHotkeyActionId; kind: 'jumpToProject'; projectIndex: number }
   | { direction: 'back' | 'forward'; id: ghostexHotkeyActionId; kind: 'navigateHistory' }
   | { command: 'open' | 'jumpToLatestUnread' | 'deferAndJumpNext'; id: ghostexHotkeyActionId; kind: 'notificationFeed' }
-  | { id: ghostexHotkeyActionId; kind: 'moveSidebar' }
   | { id: ghostexHotkeyActionId; kind: 'openCommandPalette' }
   | { id: ghostexHotkeyActionId; kind: 'openSessionSearchPalette' }
   | { id: ghostexHotkeyActionId; kind: 'openNewThreadPalette' }
@@ -283,18 +281,6 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     description: 'Collapse or expand the project companion pane.',
     id: 'toggleCompanionPane',
     title: 'Toggle Companion Pane',
-  },
-  {
-    action: { id: 'moveSidebar', kind: 'moveSidebar' },
-    /**
-     * CDXC:Sidebar 2026-06-12-02:23:
-     * Sidebar side switching remains configurable, but it must be unassigned by default now that Cmd+B is the complete sidebar collapse toggle.
-     */
-    defaultKey: '',
-    description: 'Move the sidebar to the other side.',
-    id: 'moveSidebar',
-    retiredDefaultKeys: ['cmd+b'],
-    title: 'Move Sidebar',
   },
   {
     action: { id: 'renameActiveSession', kind: 'renameActiveSession' },

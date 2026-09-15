@@ -71,11 +71,6 @@ export function useSidebarActions({
     );
   };
 
-  const moveSidebar = () => {
-    dismissAppModalForSidebarNavigation('SettingsDismissal:moveSidebar');
-    vscode.postMessage({ type: 'moveSidebarToOtherSide' });
-  };
-
   const toggleSidebarCollapsed = () => {
     dismissAppModalForSidebarNavigation('SettingsDismissal:toggleSidebar');
     /**
@@ -161,7 +156,6 @@ export function useSidebarActions({
 
   return {
     createReferenceAgentChat,
-    moveSidebar,
     openAddProjectModal,
     openConfigureAgentsModal,
     openPreviousSessions,

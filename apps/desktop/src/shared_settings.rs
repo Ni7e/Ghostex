@@ -150,10 +150,10 @@ static GHOSTEX_STORAGE_PATHS: OnceLock<ghostex_paths::GhostexPaths> = OnceLock::
 
 /*
 CDXC:Settings 2026-06-24-10:50:
-GPUI must read and persist the shared sidebar settings JSON through the central XDG/GHOSTEX_HOME path resolver. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` and `sidebarSide` without introducing a second settings store.
+GPUI must read and persist the shared sidebar settings JSON through the central XDG/GHOSTEX_HOME path resolver. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` without introducing a second settings store.
 
 CDXC:Settings 2026-06-24-10:50:
-Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, sidebarDefaultWidthPx, sidebarSide, project-editor auto-sleep fields, legacy external-IDE command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
+Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, sidebarDefaultWidthPx, project-editor auto-sleep fields, legacy external-IDE command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
 
 CDXC:Settings 2026-06-24-10:50:
 GPUI `updateSettings` handling needs a production write path: accept only JSON object payloads, create the shared state directory, write through an adjacent temp file then rename, skip byte-identical writes, and maintain a monotonic in-memory revision/hash/snapshot signal without logging paths, project names, URLs, commands, environment values, tokens, stdout/stderr, or user-owned content.
@@ -187,19 +187,6 @@ pub enum SharedSettingsAutoSleepTarget {
     ProjectEditor,
 }
 
-/*
-CDXC:Sidebar 2026-06-26-23:35:
-GPUI sidebar layout must use the same persisted `sidebarSide` value as macOS and SidebarApp `moveSidebar`: only `left` and `right` are accepted, and missing or malformed values render as left.
-
-CDXC:Sidebar 2026-06-26-23:35:
-Keep sidebar side in the shared native-sidebar settings object instead of creating a GPUI-only store. Writer helpers must update only `sidebarSide` through the shared object write path so unrelated Settings fields survive native side changes.
-*/
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SharedSidebarSide {
-    Left,
-    Right,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SharedSidebarVisibilityMemory {
     Shared,
@@ -227,29 +214,6 @@ impl SharedChatFileOpenView {
             Some("code") => Self::Code,
             _ => Self::Docs,
         }
-    }
-}
-
-impl SharedSidebarSide {
-    pub fn from_settings_value(value: Option<&str>) -> Self {
-        match value {
-            Some("right") => Self::Right,
-            _ => Self::Left,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Left => "left",
-            Self::Right => "right",
-        }
-    }
-
-    pub fn write_to_settings_object(self, object: &mut Map<String, Value>) {
-        object.insert(
-            "sidebarSide".to_string(),
-            Value::String(self.as_str().to_string()),
-        );
     }
 }
 
@@ -758,12 +722,6 @@ impl SharedSidebarSettingsSnapshot {
         self.object
             .get("sidebarDefaultWidthPx")
             .and_then(json_value_to_f32)
-    }
-
-    pub fn sidebar_side(&self) -> SharedSidebarSide {
-        SharedSidebarSide::from_settings_value(
-            self.object.get("sidebarSide").and_then(Value::as_str),
-        )
     }
 
     pub fn sidebar_visibility_memory(&self) -> SharedSidebarVisibilityMemory {
@@ -1559,15 +1517,6 @@ impl SharedSidebarSettingsService {
         })
     }
 
-    pub fn write_sidebar_side(
-        &mut self,
-        side: SharedSidebarSide,
-    ) -> Result<SharedSidebarSettingsWriteResult, SharedSidebarSettingsWriteError> {
-        let mut object = self.read_snapshot().object().clone();
-        side.write_to_settings_object(&mut object);
-        self.write_json_object(object)
-    }
-
     fn apply_observed_settings(
         &mut self,
         object: Map<String, Value>,
@@ -1626,16 +1575,6 @@ pub fn write_shared_sidebar_settings_object(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     service.write_json_object(object)
-}
-
-#[allow(dead_code)]
-pub fn write_shared_sidebar_side(
-    side: SharedSidebarSide,
-) -> Result<SharedSidebarSettingsWriteResult, SharedSidebarSettingsWriteError> {
-    let mut service = shared_sidebar_settings_service()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    service.write_sidebar_side(side)
 }
 
 fn shared_sidebar_settings_service() -> &'static Mutex<SharedSidebarSettingsService> {

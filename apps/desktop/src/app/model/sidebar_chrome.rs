@@ -11,23 +11,6 @@ pub(crate) struct SidebarDragState {
     pub(crate) start_width: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum GpuiSidebarSide {
-    Left,
-    Right,
-}
-
-impl GpuiSidebarSide {
-    #[allow(dead_code)] // no caller: sidebar side comes from the persisted shell state, not a settings string
-    pub(crate) fn from_settings_value(value: &str) -> Option<Self> {
-        match value {
-            "left" => Some(Self::Left),
-            "right" => Some(Self::Right),
-            _ => None,
-        }
-    }
-}
-
 /*
 CDXC:CommandPane 2026-08-16:
 Command pane placement is placement-only shell state sourced from shared
@@ -42,13 +25,6 @@ pub(crate) enum GpuiCommandPaneSide {
     Right,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum GpuiSidebarBodyChromePart {
-    Sidebar,
-    Divider,
-    Workspace,
-}
-
 pub(crate) fn gpui_next_sidebar_collapsed_state(collapsed: bool) -> bool {
     !collapsed
 }
@@ -57,68 +33,9 @@ pub(crate) fn gpui_sidebar_chrome_visible(sidebar_collapsed: bool) -> bool {
     !sidebar_collapsed
 }
 
-pub(crate) fn gpui_next_sidebar_side(side: GpuiSidebarSide) -> GpuiSidebarSide {
-    /*
-    CDXC:Sidebar 2026-06-26-23:35:
-    GPUI sidebar placement is a two-state shell model that mirrors native `sidebarSide`. Moving the sidebar flips only left/right placement; width and collapsed state remain separate user preferences.
-    */
-    match side {
-        GpuiSidebarSide::Left => GpuiSidebarSide::Right,
-        GpuiSidebarSide::Right => GpuiSidebarSide::Left,
-    }
-}
-
-#[allow(dead_code)] // no caller: the body row is laid out inline in the root render() in app/render/root.rs; kept as the CDXC:Sidebar ordering contract
-pub(crate) fn gpui_sidebar_body_chrome_order(
-    side: GpuiSidebarSide,
-    sidebar_collapsed: bool,
-) -> Vec<GpuiSidebarBodyChromePart> {
-    /*
-    CDXC:Sidebar 2026-06-26-23:35:
-    The GPUI body row uses normal non-overlapping siblings for sidebar placement parity. Expanded left renders sidebar/divider/workspace, expanded right renders workspace/divider/sidebar, and collapsed mode removes sidebar chrome without mutating the saved width.
-    */
-    if !gpui_sidebar_chrome_visible(sidebar_collapsed) {
-        return vec![GpuiSidebarBodyChromePart::Workspace];
-    }
-    match side {
-        GpuiSidebarSide::Left => vec![
-            GpuiSidebarBodyChromePart::Sidebar,
-            GpuiSidebarBodyChromePart::Divider,
-            GpuiSidebarBodyChromePart::Workspace,
-        ],
-        GpuiSidebarSide::Right => vec![
-            GpuiSidebarBodyChromePart::Workspace,
-            GpuiSidebarBodyChromePart::Divider,
-            GpuiSidebarBodyChromePart::Sidebar,
-        ],
-    }
-}
-
-pub(crate) fn gpui_sidebar_resize_delta(
-    side: GpuiSidebarSide,
-    current_x: f32,
-    start_x: f32,
-) -> f32 {
-    /*
-    CDXC:Sidebar 2026-06-26-23:35:
-    Right-side sidebar resizing reverses the horizontal delta because the visible divider sits on the workspace edge. Dragging that divider left grows the sidebar, matching native AppKit layout math.
-    */
-    match side {
-        GpuiSidebarSide::Left => current_x - start_x,
-        GpuiSidebarSide::Right => start_x - current_x,
-    }
-}
-
-pub(crate) fn gpui_sidebar_divider_x_bounds(
-    side: GpuiSidebarSide,
-    window_width: f32,
-    sidebar_width: f32,
-) -> (f32, f32) {
-    match side {
-        GpuiSidebarSide::Left => (sidebar_width, sidebar_width + SIDEBAR_DIVIDER_WIDTH),
-        GpuiSidebarSide::Right => {
-            let start = window_width - sidebar_width - SIDEBAR_DIVIDER_WIDTH;
-            (start, start + SIDEBAR_DIVIDER_WIDTH)
-        }
-    }
+/// CDXC:Sidebar 2026-09-15 DECISION:
+/// User: the sessions sidebar always sits on the left; the right-side placement (`sidebarSide`, Move Sidebar, `ghostex move-sidebar`) was removed as too hard to maintain.
+/// The divider therefore always follows the sidebar's right edge.
+pub(crate) fn gpui_sidebar_divider_x_bounds(sidebar_width: f32) -> (f32, f32) {
+    (sidebar_width, sidebar_width + SIDEBAR_DIVIDER_WIDTH)
 }

@@ -1862,9 +1862,6 @@ export type SidebarToExtensionMessage =
       workspaceId: string;
     }
   | {
-      type: 'moveSidebarToOtherSide';
-    }
-  | {
       /**
        * CDXC:Sidebar 2026-06-12-02:23:
        * Cmd+B and command-palette execution need a native chrome command that

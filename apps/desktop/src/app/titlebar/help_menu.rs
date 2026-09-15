@@ -52,9 +52,9 @@ pub(crate) const GPUI_TITLEBAR_HELP_QUESTIONS: &[GpuiTitlebarHelpQuestion] = &[
         question: "Make the terminal width match the chat width.",
     },
     GpuiTitlebarHelpQuestion {
-        icon_path: "titlebar/layout-sidebar-right.svg",
-        label: "Sidebar on the right, narrower",
-        question: "Move the sidebar to the right side and make it narrower.",
+        icon_path: "titlebar/layout-sidebar.svg",
+        label: "Narrower sidebar",
+        question: "Make the sidebar narrower.",
     },
     GpuiTitlebarHelpQuestion {
         icon_path: "titlebar/world.svg",

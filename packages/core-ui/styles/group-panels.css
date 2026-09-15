@@ -775,11 +775,6 @@ body.native-sidebar-body .sidebar-reference-layout[data-reference-sidebar='true'
   padding-right: 6px;
 }
 
-body.native-sidebar-body .sidebar-reference-layout[data-reference-sidebar='true'][data-sidebar-side='right'] {
-  border-left: 1px solid var(--reference-sidebar-edge-color, #252525);
-  border-right: none;
-}
-
 .sidebar-reference-layout[data-reference-sidebar='true'],
 .sidebar-reference-layout[data-reference-sidebar='true'] :not(.sidebar-space-session-status-count) {
   font-weight: 300 !important;

@@ -32,7 +32,6 @@ export type WebLinkOpenTarget = 'internal-browser' | 'system-default-browser';
 export type ChatFileOpenView = 'docs' | 'code';
 export type DefaultEditorCommand =
   'code' | 'code-insiders' | 'zed' | 'zeditor' | 'cursor' | 'windsurf' | 'codium' | 'subl' | 'other';
-export type SidebarSide = 'left' | 'right';
 export type CommandsPanelSide = 'bottom' | 'right';
 export type SidebarProjectGroupStyle = 'quiet' | 'header' | 'branched';
 export type SidebarSpaceSwitchBehavior = 'restore' | 'keep';
@@ -356,6 +355,8 @@ export type ghostexSettings = {
   showProjectEditorDiffFileCount: boolean;
   showUntrackedProjectDiffWhenNoTrackedChanges: boolean;
   completionSound: CompletionSoundPreference;
+  /** Play the short copy sound whenever something is copied to the clipboard. */
+  copySound: boolean;
   showNotificationOnTerminalBell: boolean;
   createSessionOnSidebarDoubleClick: boolean;
   /**
@@ -498,7 +499,6 @@ export type ghostexSettings = {
    * view the user never chose.
    */
   preferredAgentInterfaceOverrides: Readonly<Record<string, PreferredAgentInterface>>;
-  sidebarSide: SidebarSide;
   /** Duration for sidebar section, group, and project disclosure animations. */
   sidebarCollapseAnimationDurationMs: number;
   /** Delay before sidebar hover tooltips appear. */

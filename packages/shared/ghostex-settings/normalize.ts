@@ -63,7 +63,6 @@ import {
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
   type SidebarSettingsPresetId,
-  type SidebarSide,
   type TerminalBackgroundImageFit,
   type TerminalCursorStyle,
   type TerminalViewWidthMode,
@@ -347,6 +346,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       DEFAULT_ghostex_SETTINGS.showUntrackedProjectDiffWhenNoTrackedChanges
     ),
     completionSound: normalizeCompletionSoundPreference(source),
+    copySound: readBoolean(source, 'copySound', DEFAULT_ghostex_SETTINGS.copySound),
     showNotificationOnTerminalBell: readBoolean(
       source,
       'showNotificationOnTerminalBell',
@@ -581,13 +581,6 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     preferredAgentInterfaceOverrides: normalizePreferredAgentInterfaceOverrides(
       source['preferredAgentInterfaceOverrides']
     ),
-    /**
-     * CDXC:Sidebar 2026-05-06-17:32
-     * Persist only the supported AppKit chrome sides. Unknown values normalize
-     * to the default left placement so the native layout never receives an
-     * unsupported sidebar position.
-     */
-    sidebarSide: normalizeSidebarSide(readString(source, 'sidebarSide', DEFAULT_ghostex_SETTINGS.sidebarSide)),
     sidebarCollapseAnimationDurationMs: clampSidebarCollapseAnimationDurationMs(
       readNumber(
         source,
@@ -1127,10 +1120,6 @@ export function getDefaultEditorCommandForSettings(settings: ghostexSettings): s
   return settings.defaultEditorCommand === 'other'
     ? customCommand || DEFAULT_ghostex_SETTINGS.defaultEditorCommand
     : settings.defaultEditorCommand;
-}
-
-function normalizeSidebarSide(value: string | undefined): SidebarSide {
-  return value === 'right' ? 'right' : DEFAULT_ghostex_SETTINGS.sidebarSide;
 }
 
 function normalizeCommandsPanelSide(value: string | undefined): CommandsPanelSide {

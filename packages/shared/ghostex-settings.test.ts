@@ -35,7 +35,6 @@ import {
   SIDEBAR_SETTINGS_PRESET_SETTINGS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
-  SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   WEB_LINK_OPEN_TARGET_OPTIONS,
 } from './ghostex-settings';
@@ -924,30 +923,6 @@ describe('normalizeghostexSettings', () => {
       codeServerLinkVscodeUserConfig: true,
       codeServerUseVscodeInsidersUserConfig: true,
     });
-  });
-
-  test('keeps sidebar side as a selectable left or right setting', () => {
-    /**
-     * CDXC:Sidebar 2026-05-06-17:32
-     * Sidebar placement is persisted with the rest of Settings so users can
-     * choose right-side chrome from the top Sidebar setting or an explicit
-     * move-sidebar command, while invalid
-     * values still normalize to the left-side default AppKit layout.
-     */
-    expect(DEFAULT_ghostex_SETTINGS.sidebarSide).toBe('left');
-    expect(normalizeghostexSettings({})).toMatchObject({
-      sidebarSide: 'left',
-    });
-    expect(normalizeghostexSettings({ sidebarSide: 'right' })).toMatchObject({
-      sidebarSide: 'right',
-    });
-    expect(normalizeghostexSettings({ sidebarSide: 'bottom' })).toMatchObject({
-      sidebarSide: 'left',
-    });
-    expect(SIDEBAR_SIDE_OPTIONS).toEqual([
-      { label: 'Left', value: 'left' },
-      { label: 'Right', value: 'right' },
-    ]);
   });
 
   test('keeps command pane side as a selectable bottom or right setting', () => {

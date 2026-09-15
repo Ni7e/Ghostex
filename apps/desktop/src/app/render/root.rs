@@ -201,7 +201,7 @@ impl Render for GhostexGpuiApp {
         The main workspace column must own the full height available below the titlebar. The body row top-aligns its full-height workspace column and uses a black shell background so GPUI's h_flex center alignment or any late child surface cannot expose a white window fill above or below the workspace.
 
         CDXC:Sidebar 2026-06-26-23:35:
-        Sidebar side parity is implemented as normal sibling order, never overlays or hit-test rerouting: expanded left is sidebar/divider/workspace, expanded right is workspace/divider/sidebar, and collapsed mode removes sidebar/divider while preserving the saved expanded width.
+        Sidebar layout is normal sibling order, never overlays or hit-test rerouting: expanded is sidebar/divider/workspace, and collapsed mode removes sidebar/divider while preserving the saved expanded width.
         */
         self.sidebar_width =
             clamp_sidebar_width(self.sidebar_width, current_sidebar_max_width(window));
@@ -217,7 +217,6 @@ impl Render for GhostexGpuiApp {
         self.sync_session_chat_pane_focus(window, cx, false);
         self.refresh_zmx_persistence_focused_terminal_if_changed(cx);
         let sidebar_chrome_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
-        let sidebar_on_left = self.sidebar_side == GpuiSidebarSide::Left;
         let titlebar_popup_dismissal_active =
             self.titlebar_popup_menu.is_some() || self.titlebar_extension_popup.is_some();
 
@@ -717,6 +716,7 @@ impl Render for GhostexGpuiApp {
                         return;
                     };
                     cx.write_to_clipboard(ClipboardItem::new_string(branch));
+                    gpui_play_copy_sound();
                 }),
             )
             .on_action(
@@ -1142,7 +1142,7 @@ impl Render for GhostexGpuiApp {
                     .items_start()
                     .overflow_hidden()
                     .bg(sidebar_divider_background_color())
-                    .when(sidebar_chrome_visible && sidebar_on_left, |this| {
+                    .when(sidebar_chrome_visible, |this| {
                         this.child(
                             /*
                             CDXC:Sidebar 2026-06-26-10:04:
@@ -1158,7 +1158,7 @@ impl Render for GhostexGpuiApp {
                                 }),
                         )
                     })
-                    .when(sidebar_chrome_visible && sidebar_on_left, |this| {
+                    .when(sidebar_chrome_visible, |this| {
                         this.child(self.render_sidebar_resize_divider(cx))
                     })
                     .child(
@@ -1171,22 +1171,7 @@ impl Render for GhostexGpuiApp {
                             .overflow_hidden()
                             .bg(workspace_background_color())
                             .child(self.render_workspace_with_command_pane(window, cx)),
-                    )
-                    .when(sidebar_chrome_visible && !sidebar_on_left, |this| {
-                        this.child(self.render_sidebar_resize_divider(cx))
-                    })
-                    .when(sidebar_chrome_visible && !sidebar_on_left, |this| {
-                        this.child(
-                            div()
-                                .w(px(self.sidebar_width))
-                                .h_full()
-                                .border_t_1()
-                                .border_color(titlebar_button_border_color())
-                                .when_some(self.sidebar.clone(), |this, sidebar| {
-                                    this.child(sidebar)
-                                }),
-                        )
-                    }),
+                    ),
             )
             .child(self.render_gpui_status_pet_presentation(cx))
             /*

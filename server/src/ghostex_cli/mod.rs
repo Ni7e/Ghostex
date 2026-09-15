@@ -311,7 +311,6 @@ fn is_known_command(name: &str) -> bool {
         "install-help-skill",
         "settings",
         "toggle-sidebar",
-        "move-sidebar",
         "assert-card",
         "wait-for",
         "screenshot",
@@ -786,7 +785,6 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "install-help-skill" => skills::install_help_skill_command(args),
         "settings" => settings::settings_command(args),
         "toggle-sidebar" => run_bridge_action("toggleSidebarCollapsed", Parser::None, plain, args),
-        "move-sidebar" => run_bridge_action("moveSidebar", Parser::None, plain, args),
         "assert-card" => {
             run_bridge_action("assertSidebarCard", Parser::AssertCard, assert_ok, args)
         }

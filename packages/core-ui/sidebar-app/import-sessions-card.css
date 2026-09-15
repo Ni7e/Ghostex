@@ -44,7 +44,3 @@ body.native-sidebar-body .sidebar-import-sessions-card {
   margin-right: calc(6px - var(--reference-sidebar-page-inset-right));
 }
 
-body.native-sidebar-body [data-sidebar-side='right'] .sidebar-import-sessions-card {
-  margin-left: calc(6px - var(--reference-sidebar-page-inset-left));
-  margin-right: calc(7px - var(--reference-sidebar-page-inset-right));
-}

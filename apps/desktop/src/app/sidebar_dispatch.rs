@@ -1966,7 +1966,6 @@ impl GhostexGpuiApp {
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let line_on_right = self.sidebar_side == GpuiSidebarSide::Left;
         div()
             .id("ghostex-gpui-sidebar-resize-divider")
             .relative()
@@ -1999,8 +1998,7 @@ impl GhostexGpuiApp {
                     .w(px(SIDEBAR_DIVIDER_LINE_WIDTH))
                     .cursor_ew_resize()
                     .bg(sidebar_divider_line_color())
-                    .when(line_on_right, |this| this.left_0())
-                    .when(!line_on_right, |this| this.right_0()),
+                    .left_0(),
             )
             .when(self.sidebar_divider_hover_visible, |this| {
                 this.child(
@@ -2011,8 +2009,7 @@ impl GhostexGpuiApp {
                         .w(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
                         .cursor_ew_resize()
                         .bg(sidebar_divider_hover_line_color())
-                        .when(line_on_right, |this| this.right_0())
-                        .when(!line_on_right, |this| this.left_0())
+                        .right_0()
                         .with_animation(
                             "ghostex-gpui-sidebar-resize-divider-hover-line",
                             Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
@@ -2094,11 +2091,7 @@ impl GhostexGpuiApp {
         }
         let x = position.x.as_f32();
         let y = position.y.as_f32();
-        let (start_x, end_x) = gpui_sidebar_divider_x_bounds(
-            self.sidebar_side,
-            window.bounds().size.width.as_f32(),
-            self.sidebar_width,
-        );
+        let (start_x, end_x) = gpui_sidebar_divider_x_bounds(self.sidebar_width);
 
         y >= TITLEBAR_HEIGHT && x >= start_x && x <= end_x
     }
@@ -2144,8 +2137,7 @@ impl GhostexGpuiApp {
         cx.stop_propagation();
 
         let max_width = current_sidebar_max_width(window);
-        let delta =
-            gpui_sidebar_resize_delta(self.sidebar_side, event.position.x.as_f32(), drag.start_x);
+        let delta = event.position.x.as_f32() - drag.start_x;
         let next_width = clamp_sidebar_width(drag.start_width + delta, max_width);
         if (next_width - self.sidebar_width).abs() >= 0.5 {
             self.sidebar_width = next_width;
@@ -2206,17 +2198,6 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
-    pub(crate) fn move_gpui_sidebar_to_other_side(&mut self, cx: &mut gpui::Context<Self>) {
-        /*
-        CDXC:Sidebar 2026-06-26-23:35:
-        `moveSidebar` changes only GPUI sidebar placement and persists the shared `sidebarSide` value. Cancel divider drag/hover state at the move boundary so the visible divider cannot keep stale geometry from the old side.
-        */
-        self.sidebar_side = gpui_next_sidebar_side(self.sidebar_side);
-        self.cancel_sidebar_divider_interaction_state();
-        write_gpui_sidebar_side_to_shared_settings(self.sidebar_side);
-        cx.notify();
-    }
-
     pub(crate) fn update_sidebar_cef_surface_visibility(&mut self, cx: &mut gpui::Context<Self>) {
         self.update_sidebar_reveal(false, false, cx);
     }
@@ -2252,7 +2233,6 @@ impl GhostexGpuiApp {
                         self.parent_ns_view,
                         self.sidebar_collapsed,
                         self.sidebar_width,
-                        self.sidebar_side == GpuiSidebarSide::Right,
                         self.active_mode.is_project_editor_mode()
                             && !self.project_editor_shell.left_companion_visible,
                         requested,
@@ -2292,22 +2272,6 @@ impl GhostexGpuiApp {
             }
         })
         .detach();
-    }
-
-    pub(crate) fn apply_gpui_sidebar_side_from_saved_settings(
-        &mut self,
-        settings_snapshot: &shared_settings::SharedSidebarSettingsSnapshot,
-    ) {
-        // The Settings dropdown persists sidebarSide through the patch path;
-        // a save whose side differs from the live placement applies the same
-        // flip as the moveSidebar command instead of waiting for relaunch.
-        // The already-saved snapshot is the source, so nothing is re-written.
-        let saved_side = gpui_sidebar_side_from_shared_settings(settings_snapshot);
-        if saved_side == self.sidebar_side {
-            return;
-        }
-        self.sidebar_side = saved_side;
-        self.cancel_sidebar_divider_interaction_state();
     }
 
     pub(crate) fn apply_gpui_command_pane_side_from_saved_settings(

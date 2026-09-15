@@ -16,7 +16,6 @@ import {
   type SidebarProjectGroupStyle,
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
-  type SidebarSide,
   type WebLinkOpenTarget,
 } from './types';
 
@@ -83,14 +82,6 @@ export const DEFAULT_EDITOR_COMMAND_OPTIONS: ReadonlyArray<{
   { label: 'VSCodium (codium)', value: 'codium' },
   { label: 'Sublime Text (subl)', value: 'subl' },
   { label: 'Other', value: 'other' },
-];
-
-export const SIDEBAR_SIDE_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: SidebarSide;
-}> = [
-  { label: 'Left', value: 'left' },
-  { label: 'Right', value: 'right' },
 ];
 
 export const COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS: ReadonlyArray<{

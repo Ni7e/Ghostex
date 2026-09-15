@@ -66,7 +66,6 @@ import {
   MIN_SESSION_CHAT_ZOOM_PERCENT,
   PROMPT_EDITOR_BACKEND_OPTIONS,
   type PromptEditorBackend,
-  SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   SESSION_CHAT_THEME_OPTIONS,
   SIDEBAR_SPACE_SWITCH_BEHAVIOR_OPTIONS,
@@ -96,7 +95,6 @@ import {
   type KeepAwakeDurationMinutes,
   type SettingsModalNavigationState,
   type CommandsPanelSide,
-  type SidebarSide,
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
   type TerminalBackgroundImageFit,
@@ -1487,19 +1485,6 @@ export function SettingsModal({
                                 onChange={(checked) => updateDraft('hideMenuBarSessionStatusIndicators', !checked)}
                               />
                             ) : null}
-                            {/* CDXC:Sidebar 2026-05-06-17:32: Sidebar side remains
-                  near the top of Sidebar settings so users can move the
-                  sidebar to the right side without discovering the hotkey. */}
-                            {mainSettingVisible(settingsSearch.sidebar, 'sidebarSide') ? (
-                              <SelectField
-                                description='Choose which side of the screen holds the sidebar.'
-                                label='Side'
-                                {...getSettingModificationProps('sidebarSide')}
-                                onChange={(value) => updateDraft('sidebarSide', value as SidebarSide)}
-                                options={SIDEBAR_SIDE_OPTIONS}
-                                value={draft.sidebarSide}
-                              />
-                            ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'sidebarDefaultWidthPx') ? (
                               <>
                                 {/*
@@ -2063,13 +2048,15 @@ export function SettingsModal({
                                 />
                               </>
                             ) : null}
-                            {IS_WINDOWS_HOST ? <WindowsTerminalFields
-                              settings={draft}
-                              visible={(key) => mainSettingVisible(settingsSearch.terminal, key)}
-                              onBackend={(value) => updateDraft('windowsTerminalBackend', value)}
-                              onDistribution={(value) => updateDraft('windowsWslDistribution', value)}
-                              modification={getSettingModificationProps}
-                            /> : null}
+                            {IS_WINDOWS_HOST ? (
+                              <WindowsTerminalFields
+                                settings={draft}
+                                visible={(key) => mainSettingVisible(settingsSearch.terminal, key)}
+                                onBackend={(value) => updateDraft('windowsTerminalBackend', value)}
+                                onDistribution={(value) => updateDraft('windowsWslDistribution', value)}
+                                modification={getSettingModificationProps}
+                              />
+                            ) : null}
                             {mainSettingVisible(settingsSearch.terminal, 'workspaceBackgroundColor') ? (
                               <ColorField
                                 description='Color shown behind terminal panes.'
@@ -2770,6 +2757,15 @@ export function SettingsModal({
                                 onChange={(value) => value !== 'off' && updateDraft('actionCompletionSound', value)}
                                 onPlay={onPlayCompletionSound}
                                 value={draft.actionCompletionSound}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.sounds, 'copySound') ? (
+                              <ToggleField
+                                checked={draft.copySound}
+                                description='Play a short sound whenever you copy something to the clipboard.'
+                                label='Copy Sound'
+                                {...getSettingModificationProps('copySound')}
+                                onChange={(checked) => updateDraft('copySound', checked)}
                               />
                             ) : null}
                             {/* CDXC:Notifications 2026-05-11-01:14:

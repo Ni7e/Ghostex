@@ -21,7 +21,6 @@ import {
   SESSION_CHAT_THEME_OPTIONS,
   SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
-  SIDEBAR_SIDE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   SIDEBAR_SPACES_ENABLED_OPTIONS,
   SIDEBAR_SPACE_SWITCH_BEHAVIOR_OPTIONS,
@@ -395,12 +394,6 @@ export function getSettingsSearchSectionDefinitions() {
           title: 'Show Menu Bar Session Indicators',
         },
         {
-          key: 'sidebarSide',
-          options: SIDEBAR_SIDE_OPTIONS,
-          subtitle: 'Choose which side of the screen holds the sidebar.',
-          title: 'Side',
-        },
-        {
           key: 'sidebarCollapseAnimationDurationMs',
           subtitle:
             'Set how quickly sidebar sections, groups, and projects expand or collapse. Set to 0 for no animation.',
@@ -642,6 +635,11 @@ export function getSettingsSearchSectionDefinitions() {
           options: COMPLETION_SOUND_OPTIONS,
           subtitle: 'Sound for action completions.',
           title: 'Action Completion Sound',
+        },
+        {
+          key: 'copySound',
+          subtitle: 'Play a short sound whenever you copy something to the clipboard.',
+          title: 'Copy Sound',
         },
       ],
     },

@@ -336,10 +336,7 @@ impl GhostexGpuiApp {
         mirrored with a trailing divider, and remains inside the 9px titlebar
         inset instead of extending past the window edge.
         */
-        let icon = match self.sidebar_side {
-            GpuiSidebarSide::Left => TITLEBAR_ICON_LAYOUT_SIDEBAR,
-            GpuiSidebarSide::Right => TITLEBAR_ICON_LAYOUT_SIDEBAR_RIGHT,
-        };
+        let icon = TITLEBAR_ICON_LAYOUT_SIDEBAR;
         let button = div()
             .id("ghostex-gpui-sidebar-collapse")
             .relative()

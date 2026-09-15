@@ -341,6 +341,9 @@ pub struct GhostexGpuiApp {
     state or logs.
     */
     pub(crate) pending_docs_file_open: Option<String>,
+    /// An agent reply waiting to open in the Docs review (JSON payload for
+    /// `window.ghostexOpenDocsReview`), parked like `pending_docs_file_open`.
+    pub(crate) pending_docs_review_open: Option<String>,
     /*
     Bounded filesystem authority for the one external or out-of-tree document
     explicitly opened from chat. The Docs bridge and HTML resource loader share
@@ -844,11 +847,6 @@ pub struct GhostexGpuiApp {
     pub(crate) gpui_pet_overlay_animation_started_at: Instant,
     pub(crate) gpui_pet_overlay_animation_ticker_active: bool,
     pub(crate) gpui_pet_overlay_reduce_motion_enabled: bool,
-    /*
-    CDXC:Sidebar 2026-06-26-23:35:
-    Sidebar side is placement-only shell state sourced from shared Settings. Keep it independent from `sidebar_width` and `sidebar_collapsed` so Move Sidebar can mirror native without resizing, expanding, or hiding the sidebar.
-    */
-    pub(crate) sidebar_side: GpuiSidebarSide,
     pub(crate) command_pane_side: GpuiCommandPaneSide,
     pub(crate) sidebar_width: f32,
     pub(crate) sidebar_collapsed: bool,

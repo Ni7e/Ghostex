@@ -471,7 +471,6 @@ pub fn send_gxserver_cli_action(action: &str, payload: &Value, flags: &Flags) ->
         | "focusGroup"
         | "fullReloadSession"
         | "moveProject"
-        | "moveSidebar"
         | "openBrowser"
         | "openBrowserPane"
         | "openPaths"
@@ -1305,6 +1304,13 @@ fn parse_agent_prompt_launch(flags: &Flags) -> CliResult<Value> {
 
 fn parse_session_chat_read(rest: &[String], flags: &Flags) -> Value {
     let mut map = parse_session_selector(rest, flags);
+    set_or_remove(&mut map, "historyMode", flag_json(flags, "historyMode"));
+    if flags.contains("preserveNewest") {
+        map.insert(
+            "preserveNewest".to_string(),
+            Value::Bool(flags.truthy("preserveNewest")),
+        );
+    }
     if flags.contains("limit") {
         map.insert("limit".to_string(), flag_number_value(flags, "limit"));
     }

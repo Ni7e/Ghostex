@@ -220,6 +220,7 @@ import type {
   SidebarProjectCollectionRenderItem,
   SidebarSectionSessionSummary,
 } from './sidebar-app/types';
+import { playCopySound } from './copy-sound';
 
 export type SidebarAppProps = {
   enableProjectCollections?: boolean;
@@ -2848,11 +2849,6 @@ export function SidebarApp({
       return;
     }
 
-    if (action.kind === 'moveSidebar') {
-      moveSidebar();
-      return;
-    }
-
     if (action.kind === 'toggleSidebarCollapsed') {
       toggleSidebarCollapsed();
       return;
@@ -3795,7 +3791,6 @@ export function SidebarApp({
 
   const {
     createReferenceAgentChat,
-    moveSidebar,
     openAddProjectModal,
     openConfigureAgentsModal,
     openPreviousSessions,
@@ -3950,7 +3945,6 @@ export function SidebarApp({
           data-project-group-style={effectiveSettings.sidebarProjectGroupStyle}
           data-reference-sidebar='true'
           data-sidebar-machine-tabs={String(remoteMachines.length > 0)}
-          data-sidebar-side={effectiveSettings.sidebarSide}
           ref={setReferenceLayoutElement}
           style={
             {
@@ -4612,6 +4606,7 @@ export function SidebarApp({
                   aria-label={`Copy build stamp ${buildStamp}`}
                   className='copy-cursor'
                   onClick={() => {
+                    playCopySound();
                     void navigator.clipboard.writeText(buildStamp).catch(() => {});
                   }}
                   style={DEBUG_BUILD_STAMP_STYLE}

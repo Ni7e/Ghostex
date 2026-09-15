@@ -50,7 +50,6 @@ impl GhostexGpuiApp {
             load_gpui_gxserver_presentation_focus_state();
         let sidebar_gxserver_bootstrap =
             gpui_sidebar_gxserver_bootstrap(None, &sidebar_gxserver_presentation_focus_state, None);
-        let sidebar_side = gpui_sidebar_side_from_shared_settings(&shared_settings_snapshot);
         let command_pane_side =
             gpui_command_pane_side_from_shared_settings(&shared_settings_snapshot);
         let sidebar_width = read_sidebar_width_setting()
@@ -225,6 +224,7 @@ impl GhostexGpuiApp {
                 source_code_server_runtime: SourceCodeServerRuntimeOwner::new(),
                 pending_source_file_open: None,
                 pending_docs_file_open: None,
+                pending_docs_review_open: None,
                 session_chat_docs_file_authorization: Arc::new(Mutex::new(None)),
                 startup_restore_wake_pending,
                 remote_workspace_attach_pending: HashSet::new(),
@@ -444,7 +444,6 @@ impl GhostexGpuiApp {
                 gpui_pet_overlay_animation_started_at: Instant::now(),
                 gpui_pet_overlay_animation_ticker_active: false,
                 gpui_pet_overlay_reduce_motion_enabled,
-                sidebar_side,
                 command_pane_side,
                 sidebar_width,
                 sidebar_collapsed: restored_sidebar_collapsed,

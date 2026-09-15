@@ -7,8 +7,8 @@ void GhostexGpuiCEFClearActiveNativeView(void);
 void GhostexGpuiCEFRefreshSidebarPointerInside(void);
 
 // CDXC:Sidebar 2026-09-09 DECISION:
-// User: the collapsed sessions sidebar should slide in fluidly from its configured side on hover and use the same animation in reverse when the pointer leaves.
-// User: narrow the reveal region from 30px to 10px at the configured sidebar edge to avoid triggering it too easily.
+// User: the collapsed sessions sidebar should slide in fluidly from the left edge on hover and use the same animation in reverse when the pointer leaves.
+// User: narrow the reveal region from 30px to 10px at the sidebar edge to avoid triggering it too easily.
 // User: while the companion is hidden, the top half reveals Sessions and the bottom half reveals the companion floating, with the same animation and dismissal; neither hover docks a pane.
 // User: Reveal Active Session opens the floating sidebar without changing its saved collapsed state; if it is not hovered within five seconds, animate it closed.
 // The existing CEF view moves into a native child panel. Pointer observation does not intercept or reroute page input.
@@ -30,7 +30,6 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
 @property(nonatomic) NSTimeInterval outsideSince;
 @property(nonatomic) BOOL attached;
 @property(nonatomic) BOOL companion;
-@property(nonatomic) BOOL onRight;
 @property(nonatomic) BOOL companionTriggerLatched;
 @property(nonatomic) NSTimeInterval requestedRevealDeadline;
 @property(nonatomic) NSRect targetFrame;
@@ -50,13 +49,11 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
   NSRect frame = self.targetFrame;
   CGFloat fullWidth = frame.size.width;
   frame.size.width = MAX(1, fullWidth * self.revealProgress);
-  if (self.onRight) frame.origin.x = NSMaxX(self.targetFrame) - frame.size.width;
   if (!NSEqualRects(self.panel.frame, frame)) [self.panel setFrame:frame display:NO];
   if (self.companion) return;
   // Keep Chromium's viewport full-sized while the child window clips the
   // entering page. Resizing the page itself would reflow every session row.
-  NSRect sidebarFrame = NSMakeRect(self.onRight ? 0 : frame.size.width - fullWidth,
-                                  0, fullWidth, frame.size.height);
+  NSRect sidebarFrame = NSMakeRect(frame.size.width - fullWidth, 0, fullWidth, frame.size.height);
   if (!NSEqualRects(self.sidebar.frame, sidebarFrame)) self.sidebar.frame = sidebarFrame;
   GhostexGpuiCEFRefreshSidebarPointerInside();
 }
@@ -137,7 +134,7 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
 static const void *GhostexGpuiSidebarRevealKey = &GhostexGpuiSidebarRevealKey;
 
 bool GhostexGpuiSidebarRevealUpdate(void *sidebarPtr, void *rootPtr,
-                                  bool enabled, double width, double titlebarHeight, bool onRight,
+                                  bool enabled, double width, double titlebarHeight,
                                   bool companionHidden, bool requested, bool keepUnderPointer,
                                   bool *expandCompanion) {
   *expandCompanion = false;
@@ -171,7 +168,6 @@ bool GhostexGpuiSidebarRevealUpdate(void *sidebarPtr, void *rootPtr,
   NSPoint pointer = NSEvent.mouseLocation;
   NSRect edge = body;
   edge.size.width = MIN(10, body.size.width);
-  if (onRight) edge.origin.x = NSMaxX(body) - edge.size.width;
   BOOL overEdge = NSPointInRect(pointer, edge);
   if (!overEdge) state.companionTriggerLatched = NO;
   if (!state && !overEdge && !requested && !keepUnderPointer) return false;
@@ -195,7 +191,6 @@ bool GhostexGpuiSidebarRevealUpdate(void *sidebarPtr, void *rootPtr,
     state.panel.contentView.layer.masksToBounds = YES;
     objc_setAssociatedObject(sidebar, GhostexGpuiSidebarRevealKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
   }
-  if (state.attached && state.onRight != onRight) [state hide];
   if (requested) {
     state.companionTriggerLatched = NO;
     state.requestedRevealDeadline = NSProcessInfo.processInfo.systemUptime + 5;
@@ -212,9 +207,7 @@ bool GhostexGpuiSidebarRevealUpdate(void *sidebarPtr, void *rootPtr,
   }
   NSRect panelFrame = body;
   panelFrame.size.width = MIN(width, body.size.width);
-  if (onRight) panelFrame.origin.x = NSMaxX(body) - panelFrame.size.width;
   state.targetFrame = panelFrame;
-  state.onRight = onRight;
   if (!state.attached) {
     // CDXC:Sidebar 2026-09-12 DECISION:
     // User: a project or view switch that hides the docked sidebar must not pull it out from under the pointer.
@@ -307,7 +300,7 @@ void GhostexGpuiSidebarRevealDispose(void *sidebarPtr) {
 // A GPUI companion owns a separate window because its header, split controls,
 // terminals, and chat pages all need their normal window-local layout and input.
 bool GhostexGpuiCompanionRevealUpdate(void *rootPtr, void *popupPtr, bool enabled,
-                                     bool onRight, double width, double titlebarHeight) {
+                                     double width, double titlebarHeight) {
   NSView *root = (__bridge NSView *)rootPtr;
   NSView *popup = (__bridge NSView *)popupPtr;
   NSWindow *parent = root.window;
@@ -330,7 +323,6 @@ bool GhostexGpuiCompanionRevealUpdate(void *rootPtr, void *popupPtr, bool enable
   body = [parent convertRectToScreen:[root convertRect:body toView:nil]];
   NSRect frame = body;
   frame.size.width = MIN(width, body.size.width);
-  if (onRight) frame.origin.x = NSMaxX(body) - frame.size.width;
   if (!state) {
     state = [GhostexGpuiSidebarReveal new];
     state.companion = YES;
@@ -343,12 +335,10 @@ bool GhostexGpuiCompanionRevealUpdate(void *rootPtr, void *popupPtr, bool enable
     [parent addChildWindow:state.panel ordered:NSWindowAbove];
     state.attached = YES;
     state.targetFrame = frame;
-    state.onRight = onRight;
     objc_setAssociatedObject(popup, GhostexGpuiSidebarRevealKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [state animateIn];
   } else {
     state.targetFrame = frame;
-    state.onRight = onRight;
     [state layoutReveal];
   }
   NSPoint pointer = NSEvent.mouseLocation;

@@ -2139,9 +2139,6 @@ impl GhostexGpuiApp {
                 CDXC:Sidebar 2026-06-26-10:04:
                 `toggleSidebarCollapsed` is shell chrome, not a modal command. Route it before app-modal fallback so the command-palette row and Cmd+B hide or restore the GPUI sidebar and divider while preserving the expanded sidebar width.
 
-                CDXC:Sidebar 2026-06-26-23:35:
-                `moveSidebar` is also shell chrome, not an app-modal command. Route it beside collapse handling so the shared command-palette row flips GPUI's normal-layout sidebar side and persists `sidebarSide` without opening fallback UI.
-
                 CDXC:CommandPalette 2026-06-26-23:20:
                 Numbered session-slot rows are delegated to SidebarApp as nativeHotkey messages because rendered sidebar slot order is the only safe owner for `focusSessionSlot1..9`. Previous/next session remains GPUI tab-cycle routing, and jump-to-project ids must not enter this bounce path because SidebarApp forwards those back to native.
 
@@ -2209,10 +2206,6 @@ impl GhostexGpuiApp {
                 }
                 if action_id == "toggleCompanionPane" {
                     self.toggle_project_editor_companion_from_hotkey(window, cx);
-                    return;
-                }
-                if action_id == "moveSidebar" {
-                    self.move_gpui_sidebar_to_other_side(cx);
                     return;
                 }
                 if action_id == "openExtensions" {
@@ -3049,6 +3042,7 @@ impl GhostexGpuiApp {
                     the selected prompt.
                     */
                     cx.write_to_clipboard(ClipboardItem::new_string(content));
+                    gpui_play_copy_sound();
                     self.dispatch_gpui_app_modal_toast(
                         "info",
                         "Prompt copied to clipboard",
