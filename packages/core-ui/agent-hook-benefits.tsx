@@ -1,6 +1,7 @@
 import { IconCircleCheck, IconHistory, IconMessageCircle, IconPencil } from '@tabler/icons-react';
 
-const AGENT_HOOK_BENEFITS = [
+/** Shared by the first-launch Connect page and the per-agent Install Hooks modal. */
+export const AGENT_HOOK_BENEFITS = [
   {
     icon: IconCircleCheck,
     text: 'See agent progress and get notified when you’re needed.',

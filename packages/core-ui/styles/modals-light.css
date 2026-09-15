@@ -180,8 +180,21 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
   background: #525252;
 }
 
-body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .agent-hooks-required-note {
-  color: #8a5c16;
+/* The Install Hooks hero renders white-logo agents (Codex, Copilot, ZCode) in the light foreground on every light theme, not only plain-light. */
+body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .export-transcript-result-heading svg {
+  color: #15803d;
+}
+
+body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .agent-hooks-required-modal {
+  --ghostex-codex-logo: var(--foreground);
+  --ghostex-light-icon-color: var(--foreground);
+  --ghostex-zcode-logo: var(--foreground);
+}
+
+body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
+  .agent-hooks-required-modal
+  .agent-hooks-required-logo-tile {
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--agent-hooks-brand) 9%, transparent);
 }
 
 body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .gx-app-modal .space-editor-color-swatch {
@@ -323,7 +336,8 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
     input[role='searchbox']
   ):is(:focus, :focus-visible),
 :is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
-  .session-search-input-shell:focus-within input.session-search-input,
+  .session-search-input-shell:focus-within
+  input.session-search-input,
 :is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
   :is(
     [data-slot='command-input-wrapper'] [data-slot='input-group'],

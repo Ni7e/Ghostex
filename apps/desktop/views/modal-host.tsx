@@ -1,4 +1,5 @@
 import { useDesktopDelayedSendAgents } from './delayed-send-agents';
+import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import type { DelayedSendAgentReference } from '@/packages/shared/delayed-send';
 import { createRoot } from 'react-dom/client';
 import { notifyAccountsConnectionsChanged } from '@/packages/core-ui/accounts/transport';
@@ -203,10 +204,27 @@ function measureOneShotNativeFitHeight(modal: AppModalKind): number | undefined 
   if (!(element instanceof HTMLElement)) {
     return undefined;
   }
-  const rect = element.getBoundingClientRect();
-  const topOffset = ONE_SHOT_NATIVE_FIT_HEIGHT_TOP_OFFSET_MODALS.has(modal) ? Math.max(0, rect.top) : 0;
-  const height = Math.ceil(Math.max(rect.height, element.offsetHeight) + topOffset);
-  return Number.isFinite(height) && height > 0 ? height : undefined;
+  /**
+   * CDXC:AppModal 2026-09-15 WHY:
+   * Measure the intrinsic shell before the native window fits it, then immediately restore its viewport cap.
+   * Leaving max-height disabled to get this measurement clips tall dialogs on Windows instead of letting their actions scroll into view.
+   * Inner lists and text editors keep their own bounds during measurement.
+   */
+  const maxHeight = element.style.getPropertyValue('max-height');
+  const maxHeightPriority = element.style.getPropertyPriority('max-height');
+  try {
+    element.style.setProperty('max-height', 'none', 'important');
+    const rect = element.getBoundingClientRect();
+    const topOffset = ONE_SHOT_NATIVE_FIT_HEIGHT_TOP_OFFSET_MODALS.has(modal) ? Math.max(0, rect.top) : 0;
+    const height = Math.ceil(Math.max(rect.height, element.offsetHeight) + topOffset);
+    return Number.isFinite(height) && height > 0 ? height : undefined;
+  } finally {
+    if (maxHeight) {
+      element.style.setProperty('max-height', maxHeight, maxHeightPriority);
+    } else {
+      element.style.removeProperty('max-height');
+    }
+  }
 }
 
 type AgentsHubCatalogMessage = Extract<ExtensionToSidebarMessage, { type: 'agentsHubCatalog' }>;
@@ -1221,6 +1239,7 @@ function isRemoteFilesystemBrowseResult(value: unknown): value is RemoteFilesyst
 }
 
 function AppModalHost() {
+  useAppScrollbars();
   const {
     activeModal,
     activeModalRequestId,
@@ -1897,6 +1916,7 @@ function AppModalHost() {
       />
       <AgentHooksRequiredModal
         agentName={agentHooksRequired?.agentName ?? 'this agent'}
+        hookAgentId={agentHooksRequired?.hookAgentId}
         isOpen={activeModal === 'agentHooksRequired' && agentHooksRequired !== undefined}
         onClose={closeModal}
         onInstall={() => {
