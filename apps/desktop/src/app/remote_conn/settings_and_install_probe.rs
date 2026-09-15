@@ -28,6 +28,20 @@ impl GhostexGpuiApp {
             .unwrap_or_default()
             .to_string();
         let mut settings_object = settings_object.clone();
+        // CDXC:Onboarding 2026-09-15 WHY:
+        // The native Tips popup saves read IDs directly, while React's normalized settings omit this key or carry an older copy.
+        // Preserve the latest native value so a later sidebar or Settings save cannot make read tips unread again.
+        match previous_settings_object.get(GPUI_TITLEBAR_TIPS_READ_IDS_SETTINGS_KEY) {
+            Some(read_ids) => {
+                settings_object.insert(
+                    GPUI_TITLEBAR_TIPS_READ_IDS_SETTINGS_KEY.to_string(),
+                    read_ids.clone(),
+                );
+            }
+            None => {
+                settings_object.remove(GPUI_TITLEBAR_TIPS_READ_IDS_SETTINGS_KEY);
+            }
+        }
         // Only explicit remote-machine UI and sidebar ordering saves may replace the
         // saved machine list; broad Settings saves keep the stored value. Mirrors
         // canSettingsUpdateSourceChangeRemoteMachines in packages/shared/ghostex-settings.ts.
