@@ -26,6 +26,7 @@
     "release:verify": "node tooling/release-final-verify.mjs",
     "release:verify:resumable": "node tooling/release-resumable.mjs verify",
     "release:watch": "node tooling/release-gpui/watch-run.mjs",
+    "release:cache-janitor": "node tooling/release-gpui/cache-janitor.mjs",
     "release:component": "node tooling/release-gpui/publish-component.mjs",
     "release:plan": "node tooling/release-gpui/plan-cli.mjs",
     "release:classify": "node tooling/release-gpui/failure-classification.mjs",
