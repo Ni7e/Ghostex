@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ClipboardEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from 'react';
+import { playCopySound } from '../copy-sound';
 import type { SessionChatComposerInputApi } from './session-chat-composer';
 import { revealSessionChatComposerCaret } from './session-chat-composer-scroll';
 import { sessionChatBreaksKillSequence, sessionChatTerminalShortcut } from './session-chat-edit-shortcuts';
@@ -178,6 +179,24 @@ export function SessionChatPlainInput({
   };
 
   useEffect(() => () => cancelAnimationFrame(revealFrameRef.current), []);
+
+  // CDXC:SessionChat 2026-09-15 WHY: Chromium keeps the scroll-fade-y top animation frozen at its last value once the editor stops overflowing, so the first line stays faded with nothing to scroll. chat.css removes the animation while this is false; the lexical backend does the same in its visuals pass.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const measure = (): void => {
+      editor.dataset.overflowing = String(editor.scrollHeight > editor.clientHeight);
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(editor);
+    const mutations = new MutationObserver(measure);
+    mutations.observe(editor, { characterData: true, childList: true, subtree: true });
+    measure();
+    return () => {
+      resize.disconnect();
+      mutations.disconnect();
+    };
+  }, []);
 
   const readSelection = (): typeof selectionRef.current => {
     const editor = editorRef.current;
@@ -394,6 +413,7 @@ export function SessionChatPlainInput({
     const current = canonicalEditorText(editor);
     event.clipboardData.setData('text/plain', current.slice(selection.start, selection.end));
     event.preventDefault();
+    playCopySound();
     if (!cut) {
       return;
     }
