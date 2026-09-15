@@ -266,6 +266,7 @@ if (targetsWindows) {
   installAndLaunchLinuxApp(appPath);
 }
 finishStartStep();
+console.log(formatLastRunTimestamp(new Date()));
 
 function startBuildInBackground(label, scriptName) {
   /* CDXC:Build 2026-09-05 WHY:
@@ -569,6 +570,21 @@ function formatDuration(durationMs) {
     return `${(durationMs / 1000).toFixed(1)}s`;
   }
   return `${Math.round(durationMs / 1000)}s`;
+}
+
+function formatLastRunTimestamp(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  let hours = date.getHours();
+  const meridiem = hours >= 12 ? 'pm' : 'am';
+  hours = hours % 12;
+  if (hours === 0) {
+    hours = 12;
+  }
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${String(hours).padStart(2, '0')}:${minutes}:${seconds} ${meridiem}`;
 }
 
 function reexecUnderLocalStartLock() {
