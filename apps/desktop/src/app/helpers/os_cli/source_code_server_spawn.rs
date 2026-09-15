@@ -8,6 +8,15 @@ use anyhow::Result;
 use crate::app::helpers::*;
 use crate::*;
 
+/// CDXC:CodeEditor 2026-09-15 WHY:
+/// An editor orphaned by an app crash kept port 3777 occupied, so every subsequent Code launch failed.
+/// Keep its stdin pipe owned by the Rust Child and shut down through code-server's SIGTERM handler when that pipe closes, including when a pending launch is dropped or the app exits without running destructors.
+const SOURCE_CODE_SERVER_OWNED_ENTRY: &str = r#"
+process.stdin.on('end', () => process.kill(process.pid, 'SIGTERM'));
+process.stdin.resume();
+require(process.argv[1]);
+"#;
+
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn source_code_server_spawn_runtime(
     target: &SourceCodeServerRuntimeTarget,
@@ -58,8 +67,11 @@ fn source_code_server_spawn_host_runtime(
 
     let mut command = Command::new(&node_path);
     command
+        .arg("--eval")
+        .arg(SOURCE_CODE_SERVER_OWNED_ENTRY)
+        .arg("--")
         .arg(&entrypoint)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .current_dir(&target.project_path)
