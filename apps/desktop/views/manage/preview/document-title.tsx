@@ -44,7 +44,9 @@ export function ManageDocumentTitle({ title, icon }: { title: string; icon: Reac
             type='button'
           >
             {icon}
-            <span>{title}</span>
+            <span>
+              <bdi>{title}</bdi>
+            </span>
           </button>
         }
       />

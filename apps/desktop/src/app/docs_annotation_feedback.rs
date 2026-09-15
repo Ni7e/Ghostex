@@ -4,6 +4,7 @@
 //! CDXC:Docs 2026-09-15 DECISION:
 //! User: "just send for the chat that's currently last active in the currently active project basically so the user can change that agent session by just clicking in the sidebar", "add the annotations either to the chat or the agent cli depending on what's currently active in that agent session", and "if we're not sure anyways we can just show a toast that we copied the annotations to the clipboard" with the copy sound, both for agents whose input box cannot be detected and when detection says the box is not available.
 //! The text is added to the composer or pasted into the terminal without pressing Enter, the same way Add to Session Context works, so the user can read it and add to it before sending.
+//! User: sending must not switch the app to the Agents view ("why does submitting switch to the agents view forcefully? Please disable that behavior"); Docs is a side pane, so the notes land in the session's chat or terminal while Docs stays on screen, and only the target tab is selected in its pane.
 //! SEE-ALSO: apps/desktop/views/manage/manage-app.tsx (`sendAnnotationFeedback`), apps/desktop/views/manage/annotation-feedback.ts (the text), server/src/session_chat_composer.rs (`read_session_terminal_tail`, the input-box verdict).
 
 use std::time::Duration;
@@ -230,6 +231,7 @@ impl GhostexGpuiApp {
                             && this.insert_manage_file_context_into_agents_session(
                                 current.shell_session_id,
                                 &content,
+                                false,
                                 cx,
                             ) =>
                     {
@@ -273,7 +275,6 @@ impl GhostexGpuiApp {
         let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) else {
             return false;
         };
-        self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
         self.agents_workspace.select_tab(pane_id, session_id);
         self.scroll_workspace_pane_active_tab(pane_id);
         self.deliver_session_chat_composer_insert(session_id, content.to_string(), cx);

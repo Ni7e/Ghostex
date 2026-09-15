@@ -274,7 +274,6 @@ export function normalizeStoredAnnotation(value: unknown): ManageAnnotation | un
   const labelId = normalizeQuickLabelId(value.labelId);
   const updatedAt = normalizeStoredTimestamp(value.updatedAt);
   const sentAt = normalizeStoredTimestamp(value.sentAt);
-  const archivedAt = normalizeStoredTimestamp(value.archivedAt);
   return {
     attachments,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
@@ -286,20 +285,11 @@ export function normalizeStoredAnnotation(value: unknown): ManageAnnotation | un
     type,
     ...(updatedAt ? { updatedAt } : {}),
     ...(sentAt ? { sentAt } : {}),
-    ...(archivedAt ? { archivedAt } : {}),
   };
 }
 
 export function normalizeStoredTimestamp(value: unknown): string | undefined {
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : undefined;
-}
-
-export function isManageAnnotationActive(annotation: ManageAnnotation): boolean {
-  return !annotation.archivedAt;
-}
-
-export function isManageAnnotationArchived(annotation: ManageAnnotation): boolean {
-  return Boolean(annotation.archivedAt);
 }
 
 /** Never sent, or edited after its last send. Coverage follows each note's own last send, not the last batch. */
@@ -315,42 +305,27 @@ export function isManageAnnotationPending(annotation: ManageAnnotation): boolean
   return Number.isFinite(edited) && edited > sent;
 }
 
-export function activeManageAnnotations(annotations: readonly ManageAnnotation[]): ManageAnnotation[] {
-  return annotations.filter(isManageAnnotationActive);
-}
-
-export function archivedManageAnnotations(annotations: readonly ManageAnnotation[]): ManageAnnotation[] {
-  return annotations.filter(isManageAnnotationArchived);
-}
-
 export function pendingManageAnnotations(annotations: readonly ManageAnnotation[]): ManageAnnotation[] {
-  return annotations.filter(
-    (annotation) => isManageAnnotationActive(annotation) && isManageAnnotationPending(annotation)
-  );
+  return annotations.filter(isManageAnnotationPending);
 }
 
 export function sentManageAnnotations(annotations: readonly ManageAnnotation[]): ManageAnnotation[] {
-  return annotations.filter(
-    (annotation) => isManageAnnotationActive(annotation) && !isManageAnnotationPending(annotation)
-  );
+  return annotations.filter((annotation) => !isManageAnnotationPending(annotation));
 }
 
-export type ManageAnnotationReviewCounts = { archived: number; pending: number; sent: number };
+export type ManageAnnotationReviewCounts = { pending: number; sent: number };
 
 export function manageAnnotationReviewCounts(annotations: readonly ManageAnnotation[]): ManageAnnotationReviewCounts {
   let pending = 0;
   let sent = 0;
-  let archived = 0;
   for (const annotation of annotations) {
-    if (annotation.archivedAt) {
-      archived += 1;
-    } else if (isManageAnnotationPending(annotation)) {
+    if (isManageAnnotationPending(annotation)) {
       pending += 1;
     } else {
       sent += 1;
     }
   }
-  return { archived, pending, sent };
+  return { pending, sent };
 }
 
 /**

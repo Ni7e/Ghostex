@@ -1,23 +1,13 @@
 import { AppTooltip } from '@/packages/core-ui/app-tooltip';
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useRef,
-  useState,
 } from 'react';
-import {
-  IconArchive,
-  IconArrowBackUp,
-  IconCheck,
-  IconFolders,
-  IconMessagePlus,
-  IconPencil,
-  IconRestore,
-  IconSend,
-  IconX,
-} from '@tabler/icons-react';
+import { IconCheck, IconFolders, IconMessagePlus, IconPencil, IconSend, IconX } from '@tabler/icons-react';
 import { Bold as MeoBoldIcon } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import {
@@ -180,7 +170,7 @@ export function ManageCommentPopover({
   onDraftNoteChange,
   onRemoveDraftAttachment,
   onSubmit,
-  submitLabel = 'Submit',
+  submitLabel = 'Add',
 }: {
   draft: ManageCommentDraft;
   onAddAttachmentFiles: (files: FileList | File[]) => void;
@@ -188,10 +178,16 @@ export function ManageCommentPopover({
   onDraftNoteChange: (note: string) => void;
   onRemoveDraftAttachment: (attachmentId: string) => void;
   onSubmit: () => void;
+  /**
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: the composer button says "Add" while annotating, not "Submit", because a note is added to the list of annotations and only the Send action submits them to the agent.
+   * The button shows the OS chord (Cmd+Enter, Ctrl+Enter on Windows and Linux) that adds the note, and stays "Save" when editing an existing note.
+   */
   submitLabel?: string;
 }) {
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const canSubmit = Boolean(draft.note.trim()) || draft.attachments.length > 0;
+  const submitChordLabel = formatSidebarHotkeyLabel('cmd+enter');
   return createPortal(
     <div className='manage-comment-popover' style={commentPopoverStyle(draft.anchor)}>
       <ManageTooltipButton
@@ -213,9 +209,16 @@ export function ManageCommentPopover({
             onCancel();
             return;
           }
-          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSubmit) {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            /*
+             * CDXC:Docs 2026-09-15 WHY:
+             * The chord must not reach the window. Adding the note closes the composer, React commits that before the native event bubbles on, and the document-level Cmd+Enter "send" listener mounts in time to receive the same keypress, which sent the notes and switched the app to the Agents view.
+             */
             event.preventDefault();
-            onSubmit();
+            event.stopPropagation();
+            if (canSubmit) {
+              onSubmit();
+            }
           }
         }}
         placeholder={draft.quote ? 'Add a comment' : 'Add a global comment'}
@@ -256,6 +259,7 @@ export function ManageCommentPopover({
         <button className='manage-comment-popover-submit' disabled={!canSubmit} onClick={onSubmit} type='button'>
           <IconMessagePlus aria-hidden='true' size={14} />
           {submitLabel}
+          <kbd aria-label={`Shortcut ${submitChordLabel}`}>{submitChordLabel}</kbd>
         </button>
       </div>
       <input
@@ -365,83 +369,21 @@ export function ManageAnnotationDropdown({
 }
 
 /**
- * The Review menu: the four actions that manage a review round, each with a
- * live count, dimmed when there is nothing for it to act on. Archive opens the
- * list of finished notes in place so one can be restored.
+ * The Review menu: the actions that send notes again or across files, each
+ * with a live count, dimmed when there is nothing for it to act on.
  */
 export function ManageReviewMenu({
-  archivedAnnotations,
-  canUndoFinish,
   counts,
   folderPending,
-  onFinishReview,
   onResendAll,
-  onRestoreAnnotation,
   onSendAcrossFiles,
-  onUndoFinish,
 }: {
-  archivedAnnotations: ManageAnnotation[];
-  canUndoFinish: boolean;
   counts: ManageAnnotationReviewCounts;
   folderPending: { count: number; fileCount: number };
-  onFinishReview: () => void;
   onResendAll: () => void;
-  onRestoreAnnotation: (annotationId: string) => void;
   onSendAcrossFiles: () => void;
-  onUndoFinish: () => void;
 }) {
-  const [showArchive, setShowArchive] = useState(false);
   const activeCount = counts.pending + counts.sent;
-  if (showArchive) {
-    return (
-      <div
-        aria-label='Archived annotations'
-        className='manage-annotation-dropdown manage-review-menu'
-        id='manage-markdown-review-menu'
-        role='dialog'
-      >
-        <header>
-          <span>Archive</span>
-          <button className='manage-review-menu-back' onClick={() => setShowArchive(false)} type='button'>
-            Back
-          </button>
-        </header>
-        <div className='manage-annotation-dropdown-list'>
-          {archivedAnnotations.length === 0 ? (
-            <div className='manage-annotation-empty'>No archived annotations</div>
-          ) : null}
-          {archivedAnnotations.map((annotation) => {
-            const note = annotationDisplayNote(annotation);
-            return (
-              <article
-                className='manage-annotation-card'
-                data-archived='true'
-                data-label-id={annotation.labelId}
-                data-type={annotation.type}
-                key={annotation.id}
-                style={{ '--manage-annotation-color': manageAnnotationColor(annotation) } as CSSProperties}
-              >
-                <div className='manage-annotation-card-header'>
-                  <span>{annotationTypeLabel(annotation)}</span>
-                  <ManageTooltipButton
-                    aria-label='Restore annotation'
-                    className='manage-annotation-restore-button manage-icon-button'
-                    onClick={() => onRestoreAnnotation(annotation.id)}
-                    tooltip='Restore'
-                    type='button'
-                  >
-                    <IconRestore aria-hidden='true' size={14} />
-                  </ManageTooltipButton>
-                </div>
-                {annotation.scope === 'selection' ? <blockquote>{annotation.quote}</blockquote> : null}
-                {note ? <p>{note}</p> : null}
-              </article>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
   const rows: Array<{
     description: string;
     disabled: boolean;
@@ -466,27 +408,6 @@ export function ManageReviewMenu({
       icon: <IconSend aria-hidden='true' size={15} />,
       label: 'Resend all',
       onSelect: onResendAll,
-    },
-    {
-      description: `archive ${counts.sent} sent`,
-      disabled: counts.sent === 0,
-      icon: <IconArchive aria-hidden='true' size={15} />,
-      label: 'Finish review',
-      onSelect: onFinishReview,
-    },
-    {
-      description: 'bring back the last finished batch',
-      disabled: !canUndoFinish,
-      icon: <IconArrowBackUp aria-hidden='true' size={15} />,
-      label: 'Undo finish',
-      onSelect: onUndoFinish,
-    },
-    {
-      description: `${counts.archived} ${counts.archived === 1 ? 'note' : 'notes'}`,
-      disabled: counts.archived === 0,
-      icon: <IconRestore aria-hidden='true' size={15} />,
-      label: 'Archive',
-      onSelect: () => setShowArchive(true),
     },
   ];
   return (

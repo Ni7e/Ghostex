@@ -12,6 +12,7 @@ import {
   IconTrash,
   IconX,
 } from '@tabler/icons-react';
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { type ProjectDocsFilePreview as ManageFilePreview } from '@/packages/shared/project-docs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MANAGE_ANNOTATION_IMAGE_MAX_BYTES, MANAGE_ANNOTATION_MAX_IMAGES, MANAGE_QUICK_LABELS } from '../constants';
@@ -47,8 +48,7 @@ import { ManageTextEditor } from './text-editor';
 import { ManageTooltipButton } from '../manage-tooltip-button';
 import { ManageDocumentTitle } from './document-title';
 import {
-  activeManageAnnotations,
-  archivedManageAnnotations,
+  type ManageAnnotationReviewCounts,
   defaultManageSelectionAnchor,
   manageAnnotationReviewCounts,
   normalizeAnnotationQuote,
@@ -61,7 +61,6 @@ import { formatFileSize, isExcalidrawPath, isHtmlPath, isMarkdownPath, languageL
 
 export function ManagePreview({
   annotations,
-  canUndoFinishReview,
   draftContent,
   error,
   folderPendingFeedback,
@@ -71,12 +70,9 @@ export function ManagePreview({
   onCloseReviewDocument,
   onDraftContentChange,
   onEditAnnotationNote,
-  onFinishReview,
   onOpenDocument,
   onReload,
-  onRestoreAnnotation,
   onSendFeedback,
-  onUndoFinishReview,
   preview,
   previewState,
   reviewDocument,
@@ -86,7 +82,6 @@ export function ManagePreview({
   sendTarget,
 }: {
   annotations: ManageAnnotation[];
-  canUndoFinishReview: boolean;
   draftContent: string;
   error?: string;
   folderPendingFeedback: { count: number; fileCount: number };
@@ -96,12 +91,9 @@ export function ManagePreview({
   onCloseReviewDocument: () => void;
   onDraftContentChange: (content: string) => void;
   onEditAnnotationNote: (annotationId: string, note: string) => void;
-  onFinishReview: () => void;
   onOpenDocument: (path: string) => void;
   onReload: () => void;
-  onRestoreAnnotation: (annotationId: string) => void;
   onSendFeedback: (request: { allFiles?: boolean; scope: 'all' | 'pending' }) => Promise<void>;
-  onUndoFinishReview: () => void;
   preview?: ManageFilePreview;
   previewState: 'idle' | 'loading' | 'ready' | 'error';
   reviewDocument?: ManageReviewDocument;
@@ -110,14 +102,6 @@ export function ManagePreview({
   sendState: ManageAnnotationSendState;
   sendTarget: ManageAnnotationSendTarget | null;
 }) {
-  /*
-   * The viewer re-syncs its decorations and the captured selection whenever
-   * the annotations array changes identity, so the filtered views must only
-   * change when the annotations do. A fresh array per render re-captured the
-   * selection on every render and the floating toolbar never got its click.
-   */
-  const activeAnnotations = useMemo(() => activeManageAnnotations(annotations), [annotations]);
-  const archivedAnnotations = useMemo(() => archivedManageAnnotations(annotations), [annotations]);
   const reviewCounts = useMemo(() => manageAnnotationReviewCounts(annotations), [annotations]);
   const [selection, setSelection] = useState<ManageCapturedSelection>();
   const [selectionToolbarMode, setSelectionToolbarMode] = useState<ManageSelectionToolbarMode>('annotations');
@@ -158,10 +142,10 @@ export function ManagePreview({
   }, [resetClearAnnotationsConfirm, selectedPath]);
 
   useEffect(() => {
-    if (activeAnnotations.length === 0) {
+    if (annotations.length === 0) {
       resetClearAnnotationsConfirm();
     }
-  }, [activeAnnotations.length, resetClearAnnotationsConfirm]);
+  }, [annotations.length, resetClearAnnotationsConfirm]);
 
   useEffect(() => {
     if (!reviewMenuOpen) {
@@ -187,18 +171,22 @@ export function ManagePreview({
     };
   }, [reviewMenuOpen]);
 
-  const sendPendingFeedback = useCallback(() => {
+  /*
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: the Send button can be pressed again and again. It sends the new notes while there are any, and once everything has been sent it sends all the notes again, instead of going dark with "Nothing new to send".
+   */
+  const sendFeedback = useCallback(() => {
     setReviewMenuOpen(false);
-    void onSendFeedback({ scope: 'pending' });
-  }, [onSendFeedback]);
+    void onSendFeedback({ scope: reviewCounts.pending > 0 ? 'pending' : 'all' });
+  }, [onSendFeedback, reviewCounts.pending]);
 
   /*
-   * Cmd/Ctrl+Enter sends the new notes from anywhere in the document, the
-   * same chord that submits a comment inside the composer. The composer keeps
-   * its own handler, so the two never fire together.
+   * Cmd/Ctrl+Enter presses Send from anywhere in the document, the same chord
+   * that adds a note inside the composer. The composer stops the chord from
+   * bubbling, so the two never fire for one keypress.
    */
   useEffect(() => {
-    if (commentDraft || activeAnnotations.length === 0) {
+    if (commentDraft || annotations.length === 0) {
       return;
     }
     function handleSendShortcut(event: KeyboardEvent) {
@@ -206,11 +194,11 @@ export function ManagePreview({
         return;
       }
       event.preventDefault();
-      sendPendingFeedback();
+      sendFeedback();
     }
     window.addEventListener('keydown', handleSendShortcut);
     return () => window.removeEventListener('keydown', handleSendShortcut);
-  }, [activeAnnotations.length, commentDraft, sendPendingFeedback]);
+  }, [annotations.length, commentDraft, sendFeedback]);
 
   useEffect(
     () => () => {
@@ -481,7 +469,7 @@ export function ManagePreview({
   }, [annotations, draftContent, preview?.displayPath, selectedPath]);
 
   const clearAllAnnotations = useCallback(() => {
-    if (activeAnnotations.length === 0) {
+    if (annotations.length === 0) {
       resetClearAnnotationsConfirm();
       return;
     }
@@ -498,8 +486,8 @@ export function ManagePreview({
     }
     resetClearAnnotationsConfirm();
     setAnnotationsDropdownOpen(false);
-    onAnnotationsChange((current) => current.filter((annotation) => Boolean(annotation.archivedAt)));
-  }, [activeAnnotations.length, clearAnnotationsConfirming, onAnnotationsChange, resetClearAnnotationsConfirm]);
+    onAnnotationsChange(() => []);
+  }, [annotations.length, clearAnnotationsConfirming, onAnnotationsChange, resetClearAnnotationsConfirm]);
 
   const openCommentForSelection = useCallback(() => {
     if (!selection) {
@@ -585,7 +573,7 @@ export function ManagePreview({
   const language = languageLabelForPath(preview.path);
   const isMarkdown = isMarkdownPath(preview.path);
   const isReview = Boolean(reviewDocument);
-  const sendLabel = manageSendButtonLabel(sendState, sendTarget, reviewCounts.pending);
+  const sendLabel = manageSendButtonLabel(sendState, sendTarget, reviewCounts);
   const isDrawing = isExcalidrawPath(preview.path);
   const isHtml = isHtmlPath(preview.path);
   const usesCompactArtifactHeader = isMarkdown || isDrawing || isHtml;
@@ -640,11 +628,11 @@ export function ManagePreview({
                 type='button'
               >
                 <IconMessages aria-hidden='true' size={14} />
-                <span className='manage-count-badge'>{activeAnnotations.length}</span>
+                <span className='manage-count-badge'>{annotations.length}</span>
               </ManageTooltipButton>
               {annotationsDropdownOpen ? (
                 <ManageAnnotationDropdown
-                  annotations={activeAnnotations}
+                  annotations={annotations}
                   onEditAnnotation={editAnnotation}
                   onRemoveAnnotation={removeAnnotation}
                 />
@@ -667,14 +655,14 @@ export function ManagePreview({
             {/*
               CDXC:Docs 2026-09-15 DECISION:
               User: feedback goes straight to the agent. The Send button names where it will land before it is pressed (the agent and session last clicked in the sidebar, and whether that lands in its chat or its terminal), and reads "Copy" when the app would put it on the clipboard instead.
-              The Review menu beside it carries Resend all, Finish review, Undo finish, and the Archive, each with a live count, following the Herdr Annotate review loop.
+              The Review menu beside it carries Resend all and, with notes in several files, Send new across all files. There is no Finish review, Undo finish, or Archive: Docs is a side pane, not a review session (this supersedes the same-day Herdr Annotate review loop).
             */}
             <ManageTooltipButton
               aria-label={sendLabel.tooltip}
               className='manage-send-feedback-button'
               data-state={sendState.kind}
-              disabled={activeAnnotations.length === 0 || sendState.kind === 'sending'}
-              onClick={sendPendingFeedback}
+              disabled={annotations.length === 0 || sendState.kind === 'sending'}
+              onClick={sendFeedback}
               tooltip={sendLabel.tooltip}
               type='button'
             >
@@ -701,26 +689,15 @@ export function ManagePreview({
               </ManageTooltipButton>
               {reviewMenuOpen ? (
                 <ManageReviewMenu
-                  archivedAnnotations={archivedAnnotations}
-                  canUndoFinish={canUndoFinishReview}
                   counts={reviewCounts}
                   folderPending={isReview ? { count: 0, fileCount: 0 } : folderPendingFeedback}
-                  onFinishReview={() => {
-                    setReviewMenuOpen(false);
-                    onFinishReview();
-                  }}
                   onResendAll={() => {
                     setReviewMenuOpen(false);
                     void onSendFeedback({ scope: 'all' });
                   }}
-                  onRestoreAnnotation={onRestoreAnnotation}
                   onSendAcrossFiles={() => {
                     setReviewMenuOpen(false);
                     void onSendFeedback({ allFiles: true, scope: 'pending' });
-                  }}
-                  onUndoFinish={() => {
-                    setReviewMenuOpen(false);
-                    onUndoFinishReview();
                   }}
                 />
               ) : null}
@@ -728,7 +705,7 @@ export function ManagePreview({
             <ManageTooltipButton
               aria-label='Copy feedback'
               className='manage-copy-feedback-button'
-              disabled={activeAnnotations.length === 0}
+              disabled={annotations.length === 0}
               onClick={() => void copyFeedback()}
               tooltip='Copy feedback'
               type='button'
@@ -744,7 +721,7 @@ export function ManagePreview({
               aria-label='Clear all annotations'
               className='manage-clear-annotations-button'
               data-confirming={String(clearAnnotationsConfirming)}
-              disabled={activeAnnotations.length === 0}
+              disabled={annotations.length === 0}
               onClick={clearAllAnnotations}
               tooltip='Clear All Annotations'
               type='button'
@@ -824,7 +801,7 @@ export function ManagePreview({
       ) : isMarkdown ? (
         <>
           <ManageMarkdownReviewViewer
-            annotations={activeAnnotations}
+            annotations={annotations}
             content={draftContent}
             documentKey={preview.path}
             gitBaseline={preview.gitBaseline}
@@ -859,7 +836,7 @@ export function ManagePreview({
               onDraftNoteChange={updateCommentDraftNote}
               onRemoveDraftAttachment={removeDraftAttachment}
               onSubmit={submitCommentDraft}
-              submitLabel={editingAnnotationId ? 'Save' : 'Submit'}
+              submitLabel={editingAnnotationId ? 'Save' : 'Add'}
             />
           ) : null}
           {annotationPreview && !selection && !commentDraft ? (
@@ -881,7 +858,7 @@ export function ManagePreview({
 export function manageSendButtonLabel(
   sendState: ManageAnnotationSendState,
   sendTarget: ManageAnnotationSendTarget | null,
-  pendingCount: number
+  counts: ManageAnnotationReviewCounts
 ): { text: string; tooltip: string } {
   switch (sendState.kind) {
     case 'sending':
@@ -905,21 +882,26 @@ export function manageSendButtonLabel(
     case 'idle':
       break;
   }
+  const resend = counts.pending === 0;
+  const count = resend ? counts.sent : counts.pending;
+  const what = resend ? `${count} again` : `${count} new`;
+  const noun = `annotation${count === 1 ? '' : 's'}`;
   if (!sendTarget) {
     return {
-      text: `Copy ${pendingCount} new`,
+      text: `Copy ${what}`,
       tooltip:
-        pendingCount === 0
-          ? 'Nothing new to send'
-          : 'No agent session is selected in the sidebar, so the new annotations will be copied to the clipboard',
+        count === 0
+          ? 'No annotations to send'
+          : `No agent session is selected in the sidebar, so the ${resend ? '' : 'new '}${noun} will be copied to the clipboard`,
     };
   }
   const surface = sendTarget.surface === 'chat' ? 'chat' : 'terminal';
+  const verb = resend ? 'Resend' : 'Send';
   return {
-    text: `Send ${pendingCount} new \u25B8 ${sendTarget.agentLabel} in ${sendTarget.sessionTitle}`,
+    text: `${verb} ${what} \u25B8 ${sendTarget.agentLabel} in ${sendTarget.sessionTitle}`,
     tooltip:
-      pendingCount === 0
-        ? 'Nothing new to send'
-        : `Add ${pendingCount} new annotation${pendingCount === 1 ? '' : 's'} to the ${surface} of ${sendTarget.agentLabel} in ${sendTarget.sessionTitle} (Cmd+Enter)`,
+      count === 0
+        ? 'No annotations to send'
+        : `${resend ? 'Add all' : 'Add'} ${count} ${resend ? '' : 'new '}${noun} ${resend ? 'again ' : ''}to the ${surface} of ${sendTarget.agentLabel} in ${sendTarget.sessionTitle} (${formatSidebarHotkeyLabel('cmd+enter')})`,
   };
 }

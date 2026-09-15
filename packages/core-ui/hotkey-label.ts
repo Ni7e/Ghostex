@@ -65,6 +65,8 @@ function formatSidebarHotkeyPart(part: string, platform: ghostexHotkeyPlatform, 
       return '←';
     case 'tab':
       return 'Tab';
+    case 'enter':
+      return 'Enter';
     default:
       if (/^f\d+$/u.test(part)) {
         return part.toUpperCase();

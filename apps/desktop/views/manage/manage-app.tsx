@@ -107,8 +107,6 @@ import {
   validateManageRenameFileName,
 } from './file-tree-utils';
 import {
-  activeManageAnnotations,
-  isManageAnnotationPending,
   manageAnnotationReviewCounts,
   manageAnnotationTimestampAfter,
   parseManageAnnotationStore,
@@ -177,11 +175,8 @@ import { type ManageAnnotationFeedbackDocument, formatManageAnnotationFeedback }
  * CDXC:Docs 2026-06-30-04:41:
  * The embedded HTML document must run page-authored JavaScript and the fixed Agentation bootstrap with its normal document origin so remote module imports and DOM overlays initialize reliably inside the loaded page. Allow scripts and same-origin for the full srcdoc output.
  *
- * CDXC:Docs 2026-06-30-04:57:
- * Embedded HTML Docs should keep page-owned layout and colors while Ghostex owns only the viewer chrome. Inject a final document-scoped scrollbar style so all page scrollbars are 4px wide with transparent tracks and corners instead of a visible background gutter.
- *
- * CDXC:Docs 2026-06-30-11:58:
- * Do not use standards `scrollbar-width: thin` for embedded HTML Docs because Chromium/WebKit can render that as a wider browser-defined scrollbar. Reset standards scrollbar properties to `auto`, then rely on the WebKit scrollbar pseudo-elements for exact 4px sizing and the required #3e444c thumb color.
+ * CDXC:Docs 2026-09-15 SEE-ALSO:
+ * Embedded HTML Docs keep page-owned layout and colors while preview/html-viewer.tsx installs the shared floating scrollbar controller from packages/components/ui/app-scrollbars.ts.
  *
  * CDXC:Docs 2026-06-28-07:58:
  * Opening an HTML Docs page should show Agentation's bottom-left control but must not auto-enter feedback mode because immediate activation steals mouse focus from users who only want to read or interact with the page.
@@ -487,7 +482,6 @@ export function ManageApp() {
   const [reviewAnnotations, setReviewAnnotations] = useState<ManageAnnotation[]>([]);
   const [annotationSendTarget, setAnnotationSendTarget] = useState<ManageAnnotationSendTarget | null>(null);
   const [annotationSendState, setAnnotationSendState] = useState<ManageAnnotationSendState>({ kind: 'idle' });
-  const lastFinishedReviewRef = useRef<{ ids: string[]; path: string } | undefined>(undefined);
   const annotationSendStateTimerRef = useRef<number | undefined>(undefined);
   const [sidebarSide, setSidebarSide] = useState<ManageSidebarSide>(() => readStoredManageSidebarSide());
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
@@ -1362,7 +1356,7 @@ export function ManageApp() {
   const annotationCountsByPath = useMemo(() => {
     const nextCounts = new Map<string, number>();
     for (const [path, annotations] of Object.entries(annotationsByPath)) {
-      const active = activeManageAnnotations(annotations).length;
+      const active = annotations.length;
       if (active > 0) {
         nextCounts.set(path, active);
       }
@@ -1501,9 +1495,7 @@ export function ManageApp() {
         } else if (allFiles) {
           const paths = Object.keys(annotationsByPath).filter((path) => {
             const annotations = annotationsByPath[path] ?? [];
-            return scope === 'all'
-              ? activeManageAnnotations(annotations).length > 0
-              : manageAnnotationReviewCounts(annotations).pending > 0;
+            return scope === 'all' ? annotations.length > 0 : manageAnnotationReviewCounts(annotations).pending > 0;
           });
           for (const path of paths.sort()) {
             const entry = entries.find((candidate) => candidate.path === path);
@@ -2471,63 +2463,6 @@ export function ManageApp() {
     [updateAnnotationsForSelectedFile]
   );
 
-  /*
-   * Finish review archives the notes the agent has already seen and leaves
-   * pending ones in place; Undo brings back exactly that batch during this
-   * session, and Restore brings back one note from the archive with its id and
-   * send history intact.
-   */
-  const finishReview = useCallback(() => {
-    if (!selectedPath) {
-      return;
-    }
-    const archivedAt = new Date().toISOString();
-    const ids: string[] = [];
-    updateAnnotationsForSelectedFile((current) =>
-      current.map((annotation) => {
-        if (annotation.archivedAt || isManageAnnotationPending(annotation)) {
-          return annotation;
-        }
-        ids.push(annotation.id);
-        return { ...annotation, archivedAt };
-      })
-    );
-    lastFinishedReviewRef.current = { ids, path: selectedPath };
-  }, [selectedPath, updateAnnotationsForSelectedFile]);
-
-  const undoFinishReview = useCallback(() => {
-    const finished = lastFinishedReviewRef.current;
-    if (!finished || finished.path !== selectedPath) {
-      return;
-    }
-    lastFinishedReviewRef.current = undefined;
-    updateAnnotationsForSelectedFile((current) =>
-      current.map((annotation) => {
-        if (!finished.ids.includes(annotation.id) || !annotation.archivedAt) {
-          return annotation;
-        }
-        const { archivedAt: _archivedAt, ...restored } = annotation;
-        return restored;
-      })
-    );
-  }, [selectedPath, updateAnnotationsForSelectedFile]);
-
-  const restoreArchivedAnnotation = useCallback(
-    (annotationId: string) => {
-      updateAnnotationsForSelectedFile((current) =>
-        current.map((annotation) => {
-          if (annotation.id !== annotationId || !annotation.archivedAt) {
-            return annotation;
-          }
-          const { archivedAt: _archivedAt, ...restored } = annotation;
-          return restored;
-        })
-      );
-    },
-    [updateAnnotationsForSelectedFile]
-  );
-  const canUndoFinishReview = lastFinishedReviewRef.current?.path === selectedPath;
-
   const HideSidebarIcon = sidebarSide === 'right' ? IconLayoutSidebarRightCollapse : IconLayoutSidebarLeftCollapse;
   /*
    * CDXC:Docs 2026-09-12 WHY:
@@ -2701,7 +2636,6 @@ export function ManageApp() {
       <section className='manage-preview'>
         <ManagePreview
           annotations={annotationsForSelectedPath}
-          canUndoFinishReview={canUndoFinishReview}
           draftContent={draftContent}
           error={error ?? indexError}
           folderPendingFeedback={folderPendingFeedback}
@@ -2711,16 +2645,13 @@ export function ManageApp() {
           onCloseReviewDocument={closeReviewDocument}
           onDraftContentChange={setDraftContent}
           onEditAnnotationNote={editAnnotationNote}
-          onFinishReview={finishReview}
           onOpenDocument={(path) => void readFile(path)}
           onReload={() => {
             if (selectedPath) {
               void readFile(selectedPath);
             }
           }}
-          onRestoreAnnotation={restoreArchivedAnnotation}
           onSendFeedback={sendAnnotationFeedback}
-          onUndoFinishReview={undoFinishReview}
           preview={preview}
           previewState={previewState}
           reviewDocument={reviewDocument}

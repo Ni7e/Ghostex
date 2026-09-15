@@ -1,10 +1,5 @@
 import { type ManageAnnotation } from './types';
-import {
-  findManageAnnotationTextMatches,
-  isManageAnnotationActive,
-  isManageAnnotationPending,
-  quickLabelText,
-} from './annotation-store';
+import { findManageAnnotationTextMatches, isManageAnnotationPending, quickLabelText } from './annotation-store';
 
 /** How much of the annotated text the feedback quotes inline; the line span anchors the rest. */
 const FEEDBACK_QUOTE_MAX_LENGTH = 160;
@@ -43,7 +38,7 @@ export function formatManageAnnotationFeedback(
   let count = 0;
   for (const document of documents) {
     const included = document.annotations.filter(
-      (annotation) => isManageAnnotationActive(annotation) && (scope === 'all' || isManageAnnotationPending(annotation))
+      (annotation) => scope === 'all' || isManageAnnotationPending(annotation)
     );
     if (included.length === 0) {
       continue;

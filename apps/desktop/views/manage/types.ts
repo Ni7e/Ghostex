@@ -44,12 +44,12 @@ export type ManageAnnotation = {
   type: ManageAnnotationType;
   /**
    * CDXC:Docs 2026-09-15 DECISION:
-   * User: match the Herdr Annotate review loop, so every note remembers when it was last edited and last delivered to the agent, and Finish review archives delivered notes instead of deleting them.
-   * A note is pending while it has never been sent or was edited after its last send; an archived note stays in the sidecar so it can be restored with its send history.
+   * User: every note remembers when it was last edited and last delivered to the agent, so Send offers the new ones first and sent notes keep a Sent mark.
+   * A note is pending while it has never been sent or was edited after its last send. There is no finish or archive step: Docs is a side pane, not a review session, so notes stay until the user clears them.
+   * (Supersedes the same-day Herdr Annotate review loop with Finish review, Undo finish, and an Archive.)
    */
   updatedAt?: string;
   sentAt?: string;
-  archivedAt?: string;
 };
 
 /** Where annotation feedback goes when the user presses Send, as reported by the app. */

@@ -940,6 +940,7 @@ export const MANAGE_STYLES = `
 
   .manage-preview-content {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr);
     height: 100%;
     min-height: 0;
@@ -960,6 +961,7 @@ export const MANAGE_STYLES = `
     height: 35px;
     max-height: 35px;
     min-height: 35px;
+    min-width: 0;
     overflow: visible;
     padding: 0 3px 0 13px;
   }
@@ -1008,7 +1010,13 @@ export const MANAGE_STYLES = `
     outline-offset: -1px;
   }
 
-  .manage-preview-title span {
+  /*
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: truncate long Docs top-bar titles from the start so the buttons on the right stay on screen.
+   * The inner bdi preserves the title's reading order while the outer RTL box places the ellipsis on the left.
+   */
+  .manage-preview-title > span {
+    direction: rtl;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1823,7 +1831,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-header-actions .manage-send-feedback-button {
-    color: light-dark(#0f766e, #5eead4);
+    color: light-dark(#0f766e, #8ed3f3);
     flex: 0 1 auto;
     gap: 5px;
     max-width: min(360px, 42vw);
@@ -1840,8 +1848,8 @@ export const MANAGE_STYLES = `
 
   .manage-preview-header-actions .manage-send-feedback-button:not(:disabled):hover,
   .manage-preview-header-actions .manage-send-feedback-button:not(:disabled):focus-visible {
-    background: rgba(45, 212, 191, 0.12);
-    color: light-dark(#0f766e, #99f6e4);
+    background: light-dark(rgba(45, 212, 191, 0.12), rgba(142, 211, 243, 0.12));
+    color: light-dark(#0f766e, #b9e4f8);
   }
 
   .manage-preview-header-actions .manage-send-feedback-button[data-state="sent"] {
@@ -1875,19 +1883,6 @@ export const MANAGE_STYLES = `
    */
   .manage-review-menu {
     width: min(320px, calc(100vw - 28px));
-  }
-
-  .manage-review-menu-back {
-    background: transparent;
-    border: 0;
-    color: var(--manage-muted);
-    cursor: pointer;
-    font: inherit;
-    padding: 0;
-  }
-
-  .manage-review-menu-back:hover {
-    color: var(--manage-text);
   }
 
   .manage-review-menu-list {
@@ -1964,8 +1959,7 @@ export const MANAGE_STYLES = `
     vertical-align: middle;
   }
 
-  .manage-annotation-card[data-sent="true"],
-  .manage-annotation-card[data-archived="true"] {
+  .manage-annotation-card[data-sent="true"] {
     opacity: 0.78;
   }
 
@@ -2073,8 +2067,7 @@ export const MANAGE_STYLES = `
 
   .manage-preview-header-actions .manage-annotation-remove-button,
   .manage-annotation-remove-button,
-  .manage-annotation-edit-button,
-  .manage-annotation-restore-button {
+  .manage-annotation-edit-button {
     background: transparent;
     border: 0;
     border-left: 0;
@@ -2105,9 +2098,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-annotation-edit-button:hover,
-  .manage-annotation-edit-button:focus-visible,
-  .manage-annotation-restore-button:hover,
-  .manage-annotation-restore-button:focus-visible {
+  .manage-annotation-edit-button:focus-visible {
     color: color-mix(in srgb, var(--manage-annotation-color) 70%, var(--manage-text));
   }
 
@@ -2378,6 +2369,16 @@ export const MANAGE_STYLES = `
     background: var(--manage-panel-raised);
     border-color: var(--manage-border);
     color: var(--manage-subtle);
+  }
+
+  .manage-comment-popover-actions .manage-comment-popover-submit kbd {
+    background: color-mix(in srgb, currentColor 14%, transparent);
+    border-radius: 4px;
+    font: inherit;
+    font-size: 11px;
+    line-height: 1;
+    margin-left: 2px;
+    padding: 3px 5px;
   }
 
   .manage-hidden-file-input {

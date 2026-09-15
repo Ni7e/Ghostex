@@ -307,7 +307,9 @@ impl GhostexGpuiApp {
                 let session_id = self
                     .manage_session_context_target_session_id()
                     .ok_or_else(|| "No active agent session is available.".to_string())?;
-                if self.insert_manage_file_context_into_agents_session(session_id, &prompt, cx) {
+                if self
+                    .insert_manage_file_context_into_agents_session(session_id, &prompt, true, cx)
+                {
                     Ok(())
                 } else {
                     Err("No active agent session is available.".to_string())
@@ -350,10 +352,14 @@ impl GhostexGpuiApp {
         })
     }
 
+    /// Pastes `prompt` into the session's terminal input. With `reveal` the app
+    /// switches to the Agents view and focuses the pane first (Add to Session
+    /// Context); without it the text lands while the current view stays put.
     pub(crate) fn insert_manage_file_context_into_agents_session(
         &mut self,
         shell_session_id: TerminalSessionId,
         prompt: &str,
+        reveal: bool,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         if prompt.is_empty()
@@ -377,9 +383,13 @@ impl GhostexGpuiApp {
             let Some(pane_id) = pane_id else {
                 return false;
             };
-            self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
+            if reveal {
+                self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
+            }
             self.agents_workspace.select_tab(pane_id, shell_session_id);
-            self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
+            if reveal {
+                self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
+            }
             self.scroll_workspace_pane_active_tab(pane_id);
         }
         self.ensure_agents_gpui_engine_terminal_view(shell_session_id, cx);
@@ -403,8 +413,16 @@ impl GhostexGpuiApp {
                     pane_id,
                     session_id: shell_session_id,
                 };
-                self.agents_terminal_ghostty_surface_matches(slot_id)
-                    && self.send_text_bytes_to_focused_agents_terminal_surface(prompt.as_bytes())
+                if reveal {
+                    self.agents_terminal_ghostty_surface_matches(slot_id)
+                        && self
+                            .send_text_bytes_to_focused_agents_terminal_surface(prompt.as_bytes())
+                } else {
+                    self.send_text_bytes_to_mounted_agents_terminal_surface(
+                        slot_id,
+                        prompt.as_bytes(),
+                    )
+                }
             } else {
                 false
             };
