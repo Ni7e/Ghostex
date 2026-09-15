@@ -107,6 +107,26 @@ function remoteTagExists(tagName) {
   return result.status === 0 && result.stdout.trim().length > 0;
 }
 
+/*
+ * 9.6.0's Linux stage got an HTTP 500 from the draft flip that had in fact
+ * succeeded, and the stage failed after the release was public. Verify the
+ * live state instead of trusting one API reply.
+ */
+function publishDraftRelease(tagName) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const edit = spawnSync('gh', ['release', 'edit', tagName, '--repo', 'maddada/Ghostex', '--draft=false'], {
+      encoding: 'utf8',
+    });
+    const live = spawnSync('gh', ['api', `repos/maddada/Ghostex/releases/tags/${tagName}`], { encoding: 'utf8' });
+    if (live.status === 0 && JSON.parse(live.stdout).draft === false) return;
+    console.log(
+      `Draft flip attempt ${attempt} of 5 did not settle${edit.status !== 0 ? `: ${(edit.stderr || '').trim()}` : ''}; retrying.`
+    );
+    spawnSync('sleep', ['5']);
+  }
+  throw new Error(`Could not publish ${tagName}: the release is still a draft after 5 attempts`);
+}
+
 function loseCreationRace(reason) {
   if (!publishStage) throw new Error(reason);
   console.log(`${reason}; another stage created the release first.`);
@@ -586,7 +606,7 @@ const releaseArgs = [
 ];
 if (process.env.GHOSTEX_RELEASE_PRERELEASE === '1') releaseArgs.push('--prerelease');
 run('gh', releaseArgs);
-run('gh', ['release', 'edit', tag, '--repo', 'maddada/Ghostex', '--draft=false']);
+publishDraftRelease(tag);
 
 // Keep the Sparkle feed as the final public mutation. Existing users cannot
 // observe an appcast entry until the matching signed DMG is already live.

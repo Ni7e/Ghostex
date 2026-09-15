@@ -209,8 +209,11 @@ jobs:
           fi
           echo "Updating the ghostex-bin AUR package to ${VERSION}."
           echo 'publish=true' >>"$GITHUB_OUTPUT"
+      # The Linux packages are already live when this runs; an AUR push that
+      # fails (key not registered, AUR down) must not turn the stage red.
       - name: Update the ghostex-bin AUR package
         if: ${{ steps.aur_gate.outputs.publish == 'true' }}
+        continue-on-error: true
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           GH_TOKEN: ${{ github.token }}
@@ -241,21 +244,39 @@ jobs:
           if [ -f "${manifest}" ]; then manifest_argument=(--manifest "${manifest}"); fi
           node tooling/release-gpui/publish-aur.mjs \
             --version "${VERSION}" "${manifest_argument[@]}" --publish
-      # CDXC:Release 2026-09-15 DECISION:
-      # User: with the `ghostex` cask accepted into Homebrew/homebrew-cask, every
-      # release must update the official cask automatically from CI, in the macOS
-      # publish stage, and `brew install ghostex` is the advertised macOS install
-      # path. The step opens the version-bump pull request against
-      # Homebrew/homebrew-cask and pushes the same bump to the legacy
-      # maddada/homebrew-tap; token scopes and the one-time setup live in
-      # tooling/release-gpui/homebrew-cask-setup.md. Never for a prerelease:
-      # Homebrew ships stable versions only.
+
+  # CDXC:Release 2026-09-15 DECISION:
+  # User: with the `ghostex` cask accepted into Homebrew/homebrew-cask, every
+  # release must update the official cask automatically from CI, in the macOS
+  # publish stage, and `brew install ghostex` is the advertised macOS install
+  # path. The legacy maddada/homebrew-tap receives the same bump. Never for a
+  # prerelease: Homebrew ships stable versions only.
+  #
+  # CDXC:Release 2026-09-15 WHY:
+  # A separate macOS job rather than steps on the ubuntu publisher, because
+  # Homebrew's pull request template asks the submitter to confirm that
+  # `brew style` and `brew audit --cask --online` pass, and its bot closes a PR
+  # whose template is missing. Both commands need brew and a cask inside a tap,
+  # so this job renders the bumped cask into a throwaway local tap, runs them
+  # for real, and only then opens the PR with those boxes ticked. It also waits
+  # for the raw appcast CDN to serve the new version, the source Homebrew's
+  # livecheck reads. macOS is already live when this runs, so the job never
+  # fails the workflow; rerun it by hand if it reports a problem.
+  homebrew:
+    needs: publish
+    if: ${{ !inputs.prerelease && (inputs.stage == '' || inputs.stage == 'macos') }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
       - name: Decide whether the Homebrew cask can be updated
         id: homebrew_gate
-        if: ${{ !inputs.prerelease && (inputs.stage == '' || inputs.stage == 'macos') }}
         env:
           # `if:` conditions cannot read `secrets`, so secret availability is
-          # resolved into a step output here and gates the step below instead.
+          # resolved into a step output here and gates the steps below instead.
           HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
@@ -283,12 +304,24 @@ jobs:
           fi
           echo "Updating the Homebrew cask to ${VERSION}."
           echo 'publish=true' >>"$GITHUB_OUTPUT"
-      # macOS is already live when this runs; an expired token or a Homebrew
-      # API hiccup must not turn the stage red. Rerun by hand from
-      # references/recovery.md ("Homebrew or verification failed").
-      - name: Update the Homebrew cask
+      - name: Render the bumped cask and run brew style and brew audit on it
         if: ${{ steps.homebrew_gate.outputs.publish == 'true' }}
-        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          TAP_DIR="$RUNNER_TEMP/homebrew-audit"
+          node tooling/release-gpui/publish-homebrew-cask.mjs \
+            --version "${VERSION}" --render "$TAP_DIR/Casks/ghostex.rb"
+          git -C "$TAP_DIR" init -q
+          git -C "$TAP_DIR" add Casks/ghostex.rb
+          git -C "$TAP_DIR" -c user.name=ghostex-release -c user.email=release@ghostex.invalid commit -qm "ghostex ${VERSION}"
+          brew tap ghostex-release/audit "$TAP_DIR"
+          brew style ghostex-release/audit/ghostex
+          brew audit --cask --online ghostex-release/audit/ghostex
+          brew untap ghostex-release/audit
+      - name: Open the Homebrew cask pull request and push the tap
+        if: ${{ steps.homebrew_gate.outputs.publish == 'true' }}
         env:
           HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -296,4 +329,4 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           node tooling/release-gpui/publish-homebrew-cask.mjs \
-            --version "${VERSION}" --publish
+            --version "${VERSION}" --publish --audited --styled

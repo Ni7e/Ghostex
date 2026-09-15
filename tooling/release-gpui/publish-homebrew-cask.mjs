@@ -32,7 +32,7 @@
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,14 +84,54 @@ export function pullRequestTitle(version) {
   return `ghostex ${assertVersion(version)}`;
 }
 
-export function pullRequestBody({ version, repo = defaultRepo }) {
+/*
+ * CDXC:Release 2026-09-15 WHY:
+ * Homebrew's bot closes any pull request whose body lacks the repository's
+ * pull request template ("perhaps because this was written by an AI") and
+ * reopens it only once the template is filled in. 9.6.0's PR was closed that
+ * way one minute after it opened. The body is therefore the template itself.
+ * Boxes are ticked honestly: the audit and style boxes only when the caller
+ * passed --audited / --styled after really running those commands (the
+ * release workflow does so on a macOS runner), and the AI box carries a
+ * disclosure that the change comes from this deterministic automation.
+ */
+export function pullRequestBody({ version, repo = defaultRepo, checks = {} }) {
+  const box = (done) => (done ? '[x]' : '[ ]');
+  const script = `https://github.com/${repo}/blob/main/tooling/release-gpui/publish-homebrew-cask.mjs`;
+  const verified = [];
+  if (checks.styled) verified.push('`brew style`');
+  if (checks.audited) verified.push('`brew audit --cask --online`');
   return [
-    `Created by the Ghostex release workflow for [v${version}](https://github.com/${repo}/releases/tag/v${version}).`,
+    `Version bump for the [Ghostex ${version}](https://github.com/${repo}/releases/tag/v${version}) release: \`version\` and \`sha256\` only, the rest of the cask is unchanged. The \`sha256\` is the digest GitHub records for \`${releaseAssetName(version)}\` and matches the release provenance record.`,
     '',
-    '- Changes `version` and `sha256` only; the rest of the cask is unchanged.',
-    `- \`sha256\` is the digest GitHub records for \`${releaseAssetName(version)}\` and matches the release provenance record.`,
+    '-----',
     '',
-    `Automation: https://github.com/${repo}/blob/main/tooling/release-gpui/publish-homebrew-cask.mjs`,
+    'After making any changes to a cask, existing or new, verify:',
+    '',
+    '- [x] The submission is for [a stable version](https://docs.brew.sh/Acceptable-Casks#stable-versions) or [documented exception](https://docs.brew.sh/Acceptable-Casks#but-there-is-no-stable-version).',
+    `- ${box(checks.audited)} \`brew audit --cask --online <cask>\` is error-free.`,
+    `- ${box(checks.styled)} \`brew style --fix <cask>\` reports no offenses.`,
+    '',
+    'Additionally, if adding a new cask:',
+    '',
+    '- [ ] Named the cask according to the [token reference](https://docs.brew.sh/Cask-Cookbook#token-reference).',
+    "- [ ] Checked the cask was not [already refused](https://github.com/search?q=repo%3AHomebrew%2Fhomebrew-cask+is%3Aclosed+is%3Aunmerged+&type=pullrequests) (add your cask's name to the end of the search field).",
+    '- [ ] `brew audit --cask --new <cask>` worked successfully.',
+    '- [ ] `HOMEBREW_NO_INSTALL_FROM_API=1 brew install --cask <cask>` worked successfully.',
+    '- [ ] `brew uninstall --cask <cask>` worked successfully.',
+    '',
+    '-----',
+    '',
+    '- [x] I did not use AI/LLM to create this PR, or I disclosed the tool/model below and reviewed its output, including [`zap` stanza](https://docs.brew.sh/Cask-Cookbook#stanza-zap) paths; I did not attribute commits to AI and will answer maintainer questions and review comments myself without AI/LLM.',
+    '',
+    `Disclosure: this pull request is opened by the Ghostex release automation (${script}), a deterministic script that rewrites the \`version\` and \`sha256\` stanzas from the published, signed release; no language model generates the change.` +
+      (verified.length > 0
+        ? ` The release workflow ran ${verified.join(' and ')} on this exact file before opening it.`
+        : '') +
+      ' The Ghostex maintainer reviews the diff and answers questions here personally.',
+    '',
+    '-----',
+    '',
   ].join('\n');
 }
 
@@ -295,6 +335,37 @@ function verifyProvenance({ repo, sha256, version }) {
   );
 }
 
+/*
+ * CDXC:Release 2026-09-15 WHY:
+ * The official cask's livecheck reads the Sparkle appcast through
+ * raw.githubusercontent.com, which caches for five minutes. 9.6.0's PR opened
+ * a minute after the appcast advanced, Homebrew CI ran livecheck inside that
+ * window, saw the previous version, and failed the PR. Wait until the raw feed
+ * really serves the new version before opening the pull request.
+ */
+export const LIVECHECK_APPCAST_URL = 'https://raw.githubusercontent.com/maddada/Ghostex/main/appcast.xml';
+
+export async function waitForLivecheckAppcast({ version, timeoutMs = 8 * 60 * 1000, intervalMs = 20 * 1000 }) {
+  const deadline = Date.now() + timeoutMs;
+  const needle = `<sparkle:shortVersionString>${version}</sparkle:shortVersionString>`;
+  for (;;) {
+    const response = await fetch(LIVECHECK_APPCAST_URL, { cache: 'no-store' }).catch(() => null);
+    const text = response && response.ok ? await response.text() : '';
+    if (text.includes(needle)) {
+      process.stdout.write(`The Sparkle appcast serves ${version} through the raw CDN; livecheck will agree.\n`);
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `The raw appcast at ${LIVECHECK_APPCAST_URL} does not serve ${version} yet; Homebrew's livecheck would fail. ` +
+          'Advance Sparkle first, or rerun once the CDN has refreshed.'
+      );
+    }
+    process.stdout.write(`Waiting for the raw appcast CDN to serve ${version} (livecheck source)...\n`);
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 async function findOpenPullRequest({ version, token }) {
   const query = `repo:${officialCask.repo} is:pr is:open ghostex in:title`;
   const search = await ghApi(`search/issues?q=${encodeURIComponent(query)}&per_page=50`, { token });
@@ -352,7 +423,7 @@ async function ensureBranch({ fork, branch, token }) {
   process.stdout.write(`Created branch ${fork}:${branch} from ${base.object.sha.slice(0, 12)}.\n`);
 }
 
-async function publishOfficialCask({ dryRun, sha256, token, version }) {
+async function publishOfficialCask({ checks, dryRun, render, sha256, token, version }) {
   const live = await readFile({ path: officialCask.path, ref: officialCask.base, repo: officialCask.repo });
   const liveVersion = caskVersion(live.content);
   if (liveVersion === version) {
@@ -371,6 +442,12 @@ async function publishOfficialCask({ dryRun, sha256, token, version }) {
   const bumped = bumpCask(live.content, { sha256, version });
   const diff = unifiedDiff(live.content, bumped, officialCask.path);
   process.stdout.write(`${officialCask.label}: ${liveVersion} -> ${version}\n${diff}`);
+  if (render) {
+    mkdirSync(path.dirname(path.resolve(render)), { recursive: true });
+    writeFileSync(render, bumped);
+    process.stdout.write(`Rendered the bumped cask to ${render} for brew style / brew audit.\n`);
+    return;
+  }
 
   const open = await findOpenPullRequest({ version, token: dryRun ? undefined : token });
   if (open) {
@@ -382,6 +459,7 @@ async function publishOfficialCask({ dryRun, sha256, token, version }) {
     return;
   }
 
+  await waitForLivecheckAppcast({ version });
   const owner = await tokenLogin(token);
   const fork = await ensureFork({ owner, token });
   await syncFork({ fork, token });
@@ -411,7 +489,7 @@ async function publishOfficialCask({ dryRun, sha256, token, version }) {
   const pull = await ghApi(`repos/${officialCask.repo}/pulls`, {
     body: {
       base: officialCask.base,
-      body: pullRequestBody({ version }),
+      body: pullRequestBody({ checks, version }),
       head: `${owner}:${branch}`,
       maintainer_can_modify: true,
       title: pullRequestTitle(version),
@@ -467,6 +545,10 @@ export function parseArguments(argv) {
       options.dryRun = true;
       continue;
     }
+    if (argument === '--audited' || argument === '--styled') {
+      options[argument.slice(2)] = true;
+      continue;
+    }
     if (!argument.startsWith('--')) throw new Error(`Unexpected argument: ${argument}`);
     const value = argv[index + 1];
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${argument}`);
@@ -485,13 +567,21 @@ async function main() {
   verifyProvenance({ repo: options.repo, sha256, version });
 
   const caskToken = process.env.HOMEBREW_GITHUB_API_TOKEN || '';
-  if (!dryRun && !caskToken) {
+  if (!dryRun && !options.render && !caskToken) {
     throw new Error(
       'HOMEBREW_GITHUB_API_TOKEN is not set. It must be a GitHub token for the account that owns the homebrew-cask ' +
         'fork, with contents and pull-request write access. See tooling/release-gpui/homebrew-cask-setup.md.'
     );
   }
-  await publishOfficialCask({ dryRun, sha256, token: caskToken, version });
+  await publishOfficialCask({
+    checks: { audited: Boolean(options.audited), styled: Boolean(options.styled) },
+    dryRun,
+    render: options.render,
+    sha256,
+    token: caskToken,
+    version,
+  });
+  if (options.render) return;
   await publishPersonalTap({
     dryRun,
     sha256,
