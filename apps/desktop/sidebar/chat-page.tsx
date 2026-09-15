@@ -244,7 +244,9 @@ export function createGpuiSessionChatPage({
         .catch(() => {});
     }, [bootstrap, remoteMachineId]);
     const [sessionTitle, setSessionTitle] = useState(() => transport.presentation?.getSnapshot().sessionTitle ?? '');
-    const [workingDirectory, setWorkingDirectory] = useState('');
+    const [workingDirectory, setWorkingDirectory] = useState(
+      () => transport.presentation?.getSnapshot().workingDirectory ?? ''
+    );
     const hostLinks = useMemo(
       () => ({ ...GPUI_SESSION_CHAT_HOST_LINKS, workingDirectory }),
       [GPUI_SESSION_CHAT_HOST_LINKS, workingDirectory]
@@ -389,23 +391,28 @@ export function createGpuiSessionChatPage({
       let active = true;
       void Promise.all([
         rpc<GhostexListExtensionsResult>(bootstrap, '/api/listExtensions', {}),
-        rpc<GxserverReadPresentationSnapshotResult>(bootstrap, '/api/readPresentationSnapshot', {}),
-      ])
-        .then(([extensionResult, presentationResult]) => {
-          if (!active) {
-            return;
-          }
-          const project = presentationResult.snapshot.projects.find((candidate) => candidate.projectId === projectId);
-          const session = presentationResult.snapshot.sessions.find(
+        rpc<GxserverReadPresentationSnapshotResult>(bootstrap, '/api/readPresentationSnapshot', {}).then((result) => {
+          const project = result.snapshot.projects.find((candidate) => candidate.projectId === projectId);
+          const session = result.snapshot.sessions.find(
             (candidate) => candidate.projectId === projectId && candidate.sessionId === sessionId
           );
           if (!project || !session) {
             throw new Error(`Session ${sessionId} was not found in project ${projectId}.`);
           }
-          const title = session.displayTitle ?? session.primaryTitle ?? session.title;
-          transport.presentation?.update({ sessionTitle: title });
-          setSessionTitle(title);
-          setWorkingDirectory(session.cwd || project.path || '');
+          if (active) {
+            const title = session.displayTitle ?? session.primaryTitle ?? session.title;
+            const directory = session.cwd || project.path || '';
+            transport.presentation?.update({ sessionTitle: title, workingDirectory: directory });
+            setSessionTitle(title);
+            setWorkingDirectory(directory);
+          }
+          return { project, session };
+        }),
+      ])
+        .then(([extensionResult, { project, session }]) => {
+          if (!active) {
+            return;
+          }
           const chatBarExtensions = extensionResult.extensions
             .filter(isChatBarExtension)
             .sort((a, b) => a.id.localeCompare(b.id));
@@ -653,6 +660,7 @@ export function createGpuiSessionChatPage({
             onChatBarBridgeRequest={handleBridgeRequest}
             onChatBarPanelStateChange={updatePanelState}
             onDelayedActions={() => postSessionChatHostAction('delayedActions')}
+            onAnnotateMessage={(markdown) => postSessionChatHostAction('annotateReply', { markdown })}
             {...(remote ? {} : { onSelectForkBranch: focusForkBranch })}
             sessionKey={draftSessionKey}
             sessionTitle={sessionTitle}

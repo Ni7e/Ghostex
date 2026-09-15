@@ -18,6 +18,7 @@ pub(crate) struct GpuiSwitchableSessionAgent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct GpuiSidebarWorkspaceTabSession {
     pub(crate) activity: AgentTerminalActivity,
+    pub(crate) working_directory: Option<String>,
     pub(crate) agent_icon: Option<&'static str>,
     pub(crate) agent_name: Option<String>,
     pub(crate) agent_session_id: Option<String>,

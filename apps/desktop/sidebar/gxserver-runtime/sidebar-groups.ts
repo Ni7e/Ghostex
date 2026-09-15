@@ -616,8 +616,18 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
         continue;
       }
       seen.add(key);
+      const presentation = remoteReference
+        ? (this.remotePresentations.get(remoteReference.machineId) ??
+          this.remoteLastSeenPresentations.get(remoteReference.machineId))
+        : this.presentation;
+      const workingDirectory =
+        session.cwd ||
+        presentation?.projects.find(
+          (project) => project.projectId === (remoteReference?.projectId ?? localReference!.projectId)
+        )?.path;
       sessions.push({
         activity: session.activity,
+        ...(workingDirectory ? { workingDirectory } : {}),
         ...(session.agentIcon ? { agentIcon: session.agentIcon } : {}),
         ...(session.agentName?.trim() ? { agentName: session.agentName.trim() } : {}),
         ...(session.agentSessionId?.trim() ? { agentSessionId: session.agentSessionId.trim() } : {}),

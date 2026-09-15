@@ -8,6 +8,7 @@ export interface SessionChatPresentationState {
   agentSessionId?: string | null;
   agent?: string;
   sessionTitle?: string;
+  workingDirectory?: string;
 }
 
 export interface SessionChatPresentationStore {

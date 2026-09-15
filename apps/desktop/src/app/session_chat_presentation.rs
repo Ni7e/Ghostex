@@ -26,6 +26,7 @@ impl GhostexGpuiApp {
                         | "agent"
                         | "statusLineReady"
                         | "sessionTitle"
+                        | "workingDirectory"
                 )
             })
         {
@@ -41,19 +42,35 @@ impl GhostexGpuiApp {
         self.session_chat_presentations.drain(..excess);
     }
 
-    pub(crate) fn cached_session_chat_presentation(
+    /// CDXC:SessionChat 2026-09-15 WHY:
+    /// Diff cards used to render absolute paths until a second presentation request supplied the working directory after every activation.
+    /// Seed it from the sidebar's existing machine/project/session projection before the first render, including when no presentation cache exists yet.
+    pub(crate) fn initial_session_chat_presentation(
         &mut self,
         key: Option<&GpuiWorkspaceTerminalSessionKey>,
     ) -> Option<serde_json::Value> {
         let key = key?;
-        let index = self
+        let mut state = self
             .session_chat_presentations
             .iter()
-            .position(|(candidate, _)| candidate == key)?;
-        let entry = self.session_chat_presentations.remove(index);
-        let state = entry.1.clone();
-        self.session_chat_presentations.push(entry);
-        Some(state)
+            .position(|(candidate, _)| candidate == key)
+            .map(|index| {
+                let entry = self.session_chat_presentations.remove(index);
+                let state = entry.1.clone();
+                self.session_chat_presentations.push(entry);
+                state
+            });
+        let working_directory = self
+            .sidebar_gxserver_presentation_focus_state
+            .active_project_tab_sessions
+            .as_deref()
+            .and_then(|sessions| sessions.iter().find(|session| &session.key == key))
+            .and_then(|session| session.working_directory.as_deref());
+        if let Some(working_directory) = working_directory {
+            state.get_or_insert_with(|| serde_json::json!({}))["workingDirectory"] =
+                serde_json::json!(working_directory);
+        }
+        state
     }
 
     pub(crate) fn forget_session_chat_presentation(

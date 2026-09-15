@@ -172,11 +172,26 @@ pub(crate) fn gxserver_workspace_tab_session_from_value(
             // CDXC:AgentProviders 2026-09-03: present-only, daemon-resolved rows.
             "switchableAgents",
             "title",
+            "workingDirectory",
         ],
     )?;
     let project_id = gxserver_workspace_focus_project_id_field(object, "projectId")?;
     let session_id = gxserver_workspace_focus_session_id_field(object, "sessionId")?;
     let title = gxserver_workspace_tab_session_title_field(object, "title")?;
+    let working_directory = match object.get("workingDirectory") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => {
+            let value = value
+                .as_str()
+                .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?;
+            if value.trim().is_empty()
+                || value.chars().count() > GPUI_PROJECT_CONTRACT_PATH_MAX_CHARS
+            {
+                return Err(GpuiGxserverPresentationFocusStateContractError::MalformedField);
+            }
+            Some(value.to_string())
+        }
+    };
     let kind = json_string_field(object, "kind")
         .and_then(AgentsWorkspaceSessionKind::from_sidebar_kind)
         .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?;
@@ -272,6 +287,7 @@ pub(crate) fn gxserver_workspace_tab_session_from_value(
     };
     Ok(GpuiSidebarWorkspaceTabSession {
         activity,
+        working_directory,
         agent_icon: gpui_sidebar_agent_icon(json_string_field(object, "agentIcon")),
         agent_name,
         agent_session_id,

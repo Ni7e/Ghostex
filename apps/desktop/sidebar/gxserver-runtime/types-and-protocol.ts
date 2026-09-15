@@ -447,6 +447,7 @@ export type GpuiWorkspaceTabSessionSelectionPayload = {
 
 export type GpuiActiveWorkspaceTabSessionPayload = {
   activity: 'idle' | 'working' | 'attention';
+  workingDirectory?: string;
   agentIcon?: string;
   agentName?: string;
   agentSessionId?: string;
