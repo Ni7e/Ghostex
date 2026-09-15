@@ -1543,6 +1543,9 @@ body.app-modal-host-body {
 }
 
 .app-modal-host-native-window-body .ghostex-settings-shadcn.settings-modal-dialog {
+  /* CDXC:Settings 2026-09-15 WHY: The native window owns the outer corners. Rounding the full-window content exposes the previous theme's backing color when appearance changes while Settings stays open. */
+  border-radius: 0;
+  border-width: 0;
   box-sizing: border-box;
   height: 100vh;
   max-height: 100vh;

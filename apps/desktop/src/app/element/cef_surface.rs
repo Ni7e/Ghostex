@@ -160,6 +160,13 @@ impl CefSurface {
         }
     }
 
+    pub(crate) fn set_background(&mut self, background: Hsla, cx: &mut gpui::Context<Self>) {
+        if self.background != background {
+            self.background = background;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn refresh_sidebar_runtime_settings(
         &mut self,
         runtime_settings: cef::SidebarRuntimeSettingsSnapshot,
@@ -376,7 +383,6 @@ impl CefSurface {
         root: *mut std::ffi::c_void,
         collapsed: bool,
         width: f32,
-        on_right: bool,
         companion_hidden: bool,
         requested: bool,
         keep_under_pointer: bool,
@@ -386,7 +392,6 @@ impl CefSurface {
             collapsed,
             width as f64,
             TITLEBAR_HEIGHT as f64,
-            on_right,
             companion_hidden,
             requested,
             keep_under_pointer,
@@ -529,7 +534,10 @@ impl Element for CefElement {
         self.browser.set_visible(true);
         self.browser.set_bounds(bounds, window.scale_factor());
         #[cfg(target_os = "macos")]
-        if let Some(native_view) = self.browser.native_view() {
+        if self.surface_id != APP_MODAL_HOST_ID
+            && let Some(native_view) = self.browser.native_view()
+        {
+            // CDXC:AppModal 2026-09-15 WHY: App-modal windows have their own AppKit corners. Applying the workspace's 18pt pane mask here rounds Settings a second time and exposes the old backing color at its edges after a live theme change, even with square CSS content.
             // Fullscreen and window-edge changes can change clipping even
             // when the browser's own cached frame is unchanged.
             super::window_corner_pane::refresh_native_window_corner_clip(native_view);

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { SettingsModal, type TailcatSettingsRpc } from './settings-modal';
@@ -179,6 +179,7 @@ function SettingsModalStory({
   cuaPermissionsGranted,
   initialSettings = modalSettings,
   initialTab = 'settings',
+  nativeWindow = false,
   projects,
   remoteRpc,
 }: {
@@ -186,10 +187,20 @@ function SettingsModalStory({
   cuaPermissionsGranted?: boolean;
   initialSettings?: ghostexSettings;
   initialTab?: 'settings' | 'integrations' | 'projects' | 'agents' | 'actions' | 'openTargets' | 'hotkeys' | 'remote';
+  nativeWindow?: boolean;
   projects?: SidebarProjectSettingsItem[];
   remoteRpc?: TailcatSettingsRpc;
 }) {
   const [settings, setSettings] = useState<ghostexSettings>(initialSettings);
+  useEffect(() => {
+    if (!nativeWindow) return;
+    const body = document.body;
+    const alreadyNative = body.classList.contains('app-modal-host-native-window-body');
+    body.classList.add('app-modal-host-native-window-body');
+    return () => {
+      if (!alreadyNative) body.classList.remove('app-modal-host-native-window-body');
+    };
+  }, [nativeWindow]);
   const [agentHookStatus, setAgentHookStatus] = useState<SidebarAgentHookStatusMessage>({
     agents: DEFAULT_SIDEBAR_AGENTS.map((agent, index) => ({
       agentId: agent.agentId,
@@ -327,6 +338,10 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const NativeWindow: Story = {
+  render: () => <SettingsModalStory nativeWindow />,
+};
 
 export const DarkGray: Story = {
   render: () => (

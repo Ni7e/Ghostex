@@ -401,10 +401,17 @@ impl GpuiAppModalHostWindow {
 }
 
 impl Render for GpuiAppModalHostWindow {
-    fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let background = app_modal_host_background();
+        // CDXC:AppModal 2026-09-15 WHY: Updating only the window root leaves the CEF host's creation-time fill on top of it, retaining the previous theme until the modal is reopened.
+        if self.current_modal.uses_react_modal_host()
+            && let Some(surface) = &self.surface
+        {
+            surface.update(cx, |surface, cx| surface.set_background(background, cx));
+        }
         div()
             .size_full()
-            .bg(app_modal_host_background())
+            .bg(background)
             .children(self.surface.clone())
     }
 }
