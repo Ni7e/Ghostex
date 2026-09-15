@@ -3,6 +3,7 @@ import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu
 
 import { cn } from '@/packages/components/utils';
 import { IconChevronRight, IconCheck } from '@tabler/icons-react';
+import { keepSubmenuOpenOnHover } from './submenu-open-change';
 
 function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
   return <ContextMenuPrimitive.Root data-slot='context-menu' {...props} />;
@@ -97,8 +98,17 @@ function ContextMenuItem({
   );
 }
 
-function ContextMenuSub({ ...props }: ContextMenuPrimitive.SubmenuRoot.Props) {
-  return <ContextMenuPrimitive.SubmenuRoot data-slot='context-menu-sub' {...props} />;
+function ContextMenuSub({ onOpenChange, ...props }: ContextMenuPrimitive.SubmenuRoot.Props) {
+  return (
+    <ContextMenuPrimitive.SubmenuRoot
+      data-slot='context-menu-sub'
+      {...props}
+      onOpenChange={(open, details) => {
+        keepSubmenuOpenOnHover(open, details);
+        if (!details.isCanceled) onOpenChange?.(open, details);
+      }}
+    />
+  );
 }
 
 function ContextMenuSubTrigger({

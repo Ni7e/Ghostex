@@ -4,6 +4,7 @@ import { Menu as MenuPrimitive } from '@base-ui/react/menu';
 import { cn } from '../utils';
 import { IconChevronRight, IconCheck } from '@tabler/icons-react';
 import { overlayTooltipBorderStyle } from './overlay-surface';
+import { keepSubmenuOpenOnHover } from './submenu-open-change';
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root data-slot='dropdown-menu' {...props} />;
@@ -99,8 +100,17 @@ function DropdownMenuItem({
   );
 }
 
-function DropdownMenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
-  return <MenuPrimitive.SubmenuRoot data-slot='dropdown-menu-sub' {...props} />;
+function DropdownMenuSub({ onOpenChange, ...props }: MenuPrimitive.SubmenuRoot.Props) {
+  return (
+    <MenuPrimitive.SubmenuRoot
+      data-slot='dropdown-menu-sub'
+      {...props}
+      onOpenChange={(open, details) => {
+        keepSubmenuOpenOnHover(open, details);
+        if (!details.isCanceled) onOpenChange?.(open, details);
+      }}
+    />
+  );
 }
 
 function DropdownMenuSubTrigger({
