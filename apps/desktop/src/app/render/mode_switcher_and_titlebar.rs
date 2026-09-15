@@ -55,6 +55,50 @@ struct GpuiLinuxTitlebarDragState {
     should_move: bool,
 }
 
+fn titlebar_panel_toggle_button(
+    id: &'static str,
+    icon: &'static str,
+    size_reduction: f32,
+) -> gpui::Stateful<gpui::Div> {
+    let button = div()
+        .id(id)
+        .relative()
+        .flex()
+        .flex_shrink_0()
+        .h(px(TITLEBAR_CONTROL_HEIGHT - size_reduction))
+        .items_center()
+        .justify_center()
+        .cursor_default()
+        .hover(|this| this.bg(titlebar_button_hover_color()));
+    #[cfg(target_os = "macos")]
+    let button = button
+        .w(px(TITLEBAR_LEADING_BUTTON_WIDTH - size_reduction))
+        .child(
+            div()
+                .flex()
+                .ml(px(TITLEBAR_SIDEBAR_COLLAPSE_ICON_LEFT_OFFSET))
+                .mt(px(TITLEBAR_SIDEBAR_COLLAPSE_ICON_TOP_OFFSET))
+                .items_center()
+                .justify_center()
+                .child(titlebar_svg_icon(
+                    icon,
+                    TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
+                    titlebar_active_text_color(),
+                )),
+        );
+    #[cfg(not(target_os = "macos"))]
+    let button = button
+        .w(px(TITLEBAR_BUTTON_WIDTH - size_reduction))
+        .border_r_1()
+        .border_color(titlebar_button_border_color())
+        .child(titlebar_svg_icon(
+            icon,
+            TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
+            titlebar_icon_color(),
+        ));
+    button
+}
+
 impl GhostexGpuiApp {
     pub(crate) fn render_titlebar(
         &self,
@@ -215,6 +259,9 @@ impl GhostexGpuiApp {
             .items_center()
             .window_control_area(WindowControlArea::Drag)
             .child(self.render_sidebar_collapse_button(cx))
+            .when(self.active_mode.is_project_editor_mode(), |this| {
+                this.child(self.render_titlebar_companion_toggle(cx))
+            })
             .when(self.update_available || self.update_downloading, |this| {
                 this.child(self.render_titlebar_update_button(cx))
             })
@@ -234,9 +281,6 @@ impl GhostexGpuiApp {
             })
             .when(show_compact_mode_dropdown, |this| {
                 this.child(self.render_compact_mode_dropdown(cx))
-            })
-            .when(self.active_mode.is_project_editor_mode(), |this| {
-                this.child(self.render_titlebar_companion_toggle(cx))
             })
             .child(
                 h_flex()
@@ -268,33 +312,34 @@ impl GhostexGpuiApp {
             )
     }
 
-    /// CDXC:Workarea 2026-09-11 DECISION:
-    /// User: the companion expand button replaces the minimized companion bar after the Notifications bell that follows Next; when views collapse, the view dropdown goes right after the bell, before this button.
-    /// This supersedes the 2026-09-10 wording that placed the dropdown and this button immediately after Next.
+    /// CDXC:Workarea 2026-09-15 DECISION:
+    /// User: put the companion toggle next to Hide sidebar, make the chat control 2px smaller in both dimensions after two 1px reductions, and use the unfilled Side tail with text chat bubble in both the visible and hidden states.
+    /// This supersedes the 2026-09-11 placement after the Notifications bell and compact view dropdown; the toggle still replaces the minimized companion bar.
     pub(crate) fn render_titlebar_companion_toggle(
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let visible = self.project_editor_shell.left_companion_visible;
-        div()
-            .id("ghostex-gpui-titlebar-companion-toggle")
-            .flex()
-            .flex_shrink_0()
-            .w(px(TITLEBAR_LEADING_BUTTON_WIDTH))
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .hover(|this| this.bg(titlebar_button_hover_color()))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.toggle_project_editor_companion_from_hotkey(window, cx);
-                }),
-            )
-            .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
+        titlebar_panel_toggle_button(
+            "ghostex-gpui-titlebar-companion-toggle",
+            if visible {
+                TITLEBAR_ICON_COMPANION_HIDE
+            } else {
+                TITLEBAR_ICON_COMPANION_SHOW
+            },
+            2.0,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+                this.toggle_project_editor_companion_from_hotkey(window, cx);
+            }),
+        )
+        .managed_tooltip_with_placement(
+            ManagedTooltipPlacement::Right,
+            move |window, cx| {
                 titlebar_tooltip(
                     if visible {
                         "Hide companion"
@@ -304,20 +349,8 @@ impl GhostexGpuiApp {
                     window,
                     cx,
                 )
-            })
-            .child(titlebar_svg_icon(
-                if visible {
-                    TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_COLLAPSE
-                } else {
-                    TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_EXPAND
-                },
-                16.0,
-                if visible {
-                    titlebar_active_text_color()
-                } else {
-                    titlebar_inactive_text_color()
-                },
-            ))
+            },
+        )
     }
 
     pub(crate) fn render_sidebar_collapse_button(
@@ -336,56 +369,24 @@ impl GhostexGpuiApp {
         mirrored with a trailing divider, and remains inside the 9px titlebar
         inset instead of extending past the window edge.
         */
-        let icon = TITLEBAR_ICON_LAYOUT_SIDEBAR;
-        let button = div()
-            .id("ghostex-gpui-sidebar-collapse")
-            .relative()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .hover(|this| this.bg(titlebar_button_hover_color()))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.toggle_gpui_sidebar_collapsed(cx);
-                }),
-            )
-            .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, |window, cx| {
-                titlebar_tooltip("Collapse Sidebar", window, cx)
-            });
+        let button = titlebar_panel_toggle_button(
+            "ghostex-gpui-sidebar-collapse",
+            TITLEBAR_ICON_LAYOUT_SIDEBAR,
+            0.0,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+                this.toggle_gpui_sidebar_collapsed(cx);
+            }),
+        )
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, |window, cx| {
+            titlebar_tooltip("Hide sidebar", window, cx)
+        });
         #[cfg(target_os = "macos")]
-        let button = button
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .w(px(TITLEBAR_LEADING_BUTTON_WIDTH))
-            .ml(px(-9.0))
-            .flex_shrink_0()
-            .child(
-                div()
-                    .flex()
-                    .ml(px(TITLEBAR_SIDEBAR_COLLAPSE_ICON_LEFT_OFFSET))
-                    .mt(px(TITLEBAR_SIDEBAR_COLLAPSE_ICON_TOP_OFFSET))
-                    .items_center()
-                    .justify_center()
-                    .child(titlebar_svg_icon(
-                        icon,
-                        TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE,
-                        titlebar_active_text_color(),
-                    )),
-            );
-        #[cfg(not(target_os = "macos"))]
-        let button = button
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .w(px(TITLEBAR_BUTTON_WIDTH))
-            .border_r_1()
-            .border_color(titlebar_button_border_color())
-            .child(titlebar_svg_icon(
-                icon,
-                TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE,
-                titlebar_icon_color(),
-            ));
+        let button = button.ml(px(-9.0));
         button
     }
 

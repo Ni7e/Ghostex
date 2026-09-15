@@ -567,8 +567,9 @@ pub(crate) const TITLEBAR_ICON_CHEVRON_DOWN: &str = "titlebar/chevron-down.svg";
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR: &str = "titlebar/layout-sidebar.svg";
 
-pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_COLLAPSE: &str =
-    "titlebar/layout-sidebar-left-collapse.svg";
+pub(crate) const TITLEBAR_ICON_COMPANION_HIDE: &str = "titlebar/companion-hide.svg";
+
+pub(crate) const TITLEBAR_ICON_COMPANION_SHOW: &str = "titlebar/companion-show.svg";
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_EXPAND: &str =
     "titlebar/layout-sidebar-left-expand.svg";
@@ -809,15 +810,23 @@ pub(crate) const APP_MODAL_HOST_MISSING_PROJECT_FOLDER_WINDOW_WIDTH: f32 = 560.0
 
 pub(crate) const APP_MODAL_HOST_MISSING_PROJECT_FOLDER_WINDOW_HEIGHT: f32 = 360.0;
 
+/**
+ * CDXC:AgentHooks 2026-09-15 DECISION:
+ * User: the missing-hooks modal must show its content and actions without scrolling in the GPUI app.
+ * Start with room for the benefits, warning, and footer instead of the missing-folder dialog's 360px frame; the one-shot content measurement fits it on open.
+ */
+pub(crate) const APP_MODAL_HOST_AGENT_HOOKS_REQUIRED_WINDOW_HEIGHT: f32 = 560.0;
+
 /*
- * CDXC:TranscriptExport 2026-08-20:
- * The export result dialog is a compact confirmation: a path, an agent select,
- * and three buttons. It opens on the Rename Session width and lets the one-shot
- * `contentHeightMeasured` fit shrink the frame to whatever it actually rendered.
+ * CDXC:TranscriptExport 2026-09-15:
+ * The desktop Handoff / Export dialog is native GPUI now
+ * (app/window/export_transcript_modal.rs) and sizes its own window from its
+ * first layout, so the modal kind's generic size table only keeps the width
+ * it shares with Rename Session and the dialog's first-frame height.
  */
 pub(crate) const APP_MODAL_HOST_EXPORT_TRANSCRIPT_RESULT_WINDOW_WIDTH: f32 = 570.0;
 
-pub(crate) const APP_MODAL_HOST_EXPORT_TRANSCRIPT_RESULT_WINDOW_HEIGHT: f32 = 420.0;
+pub(crate) const APP_MODAL_HOST_EXPORT_TRANSCRIPT_RESULT_WINDOW_HEIGHT: f32 = 520.0;
 
 /*
  * CDXC:AppModal 2026-07-26-07:20:
@@ -931,7 +940,7 @@ pub(crate) const TITLEBAR_POPUP_MENU_MAX_HEIGHT: f32 = 420.0;
 
 pub(crate) const TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT: f32 = 650.0;
 
-pub(crate) const TITLEBAR_DROPDOWN_SCROLLBAR_WIDTH: f32 = 2.0;
+pub(crate) const TITLEBAR_DROPDOWN_SCROLLBAR_WIDTH: f32 = 5.0;
 
 pub(crate) const TITLEBAR_POPUP_MENU_GAP: f32 = 6.0;
 
