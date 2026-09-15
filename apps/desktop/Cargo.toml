@@ -38,6 +38,11 @@ path = "src/bin/terminal_model_smoke.rs"
 name = "terminal-element-demo"
 path = "src/bin/terminal_element_demo.rs"
 
+# CDXC:TranscriptExport 2026-09-15: standalone preview of the native Handoff / Export dialog (see src/bin/export_transcript_modal_demo.rs) so its look can be checked against the React stories without launching Ghostex.
+[[bin]]
+name = "export-transcript-modal-demo"
+path = "src/bin/export_transcript_modal_demo.rs"
+
 [dependencies]
 anyhow = "1"
 base64 = "0.22"

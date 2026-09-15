@@ -5,6 +5,7 @@
 // qualification. If two submodules ever define the same name, drop the glob
 // for one of them here and qualify its call sites instead.
 pub(crate) mod account_usage;
+pub(crate) mod export_transcript_modal;
 pub(crate) mod extension_titlebar_panel;
 pub(crate) mod modal_host;
 pub(crate) mod new_thread_picker;
@@ -14,6 +15,7 @@ mod titlebar_notifications_panel;
 pub(crate) mod titlebar_panels;
 pub(crate) mod toast;
 
+pub(crate) use export_transcript_modal::*;
 pub(crate) use extension_titlebar_panel::*;
 pub(crate) use modal_host::*;
 pub(crate) use new_thread_picker::*;

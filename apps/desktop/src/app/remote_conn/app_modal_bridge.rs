@@ -143,6 +143,8 @@ impl GhostexGpuiApp {
                         .then(|| message.get("path").and_then(serde_json::Value::as_str))
                         .flatten()
                         .map(str::to_string);
+                    self.open_gpui_export_transcript_modal(&message, cx);
+                    return;
                 }
                 if modal == GpuiAppModalKind::GitFileDiff
                     && self.gpui_app_modal_current_modal(cx) == Some(GpuiAppModalKind::GitCommit)
@@ -451,6 +453,9 @@ impl GhostexGpuiApp {
                 }
                 if let Some(error) = message.get("error").and_then(serde_json::Value::as_str) {
                     result["error"] = serde_json::json!(error);
+                }
+                if self.receive_gpui_export_transcript_result(&result, cx) {
+                    return;
                 }
                 self.dispatch_open_gpui_app_modal_message(result, cx);
             }

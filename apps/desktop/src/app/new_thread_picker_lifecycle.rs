@@ -211,6 +211,7 @@ impl GhostexGpuiApp {
                 };
                 let changed = this.new_thread_picker_agents.as_ref() != Some(&agents);
                 this.new_thread_picker_agents = Some(agents);
+                this.push_gpui_export_transcript_modal_agents(cx);
                 if !changed && this.new_thread_picker_window.is_some() {
                     return;
                 }

@@ -537,6 +537,9 @@ pub struct GhostexGpuiApp {
     pub(crate) sidebar_timer_presentations_replayed_after_ready: bool,
     /// The sidebar page's last-used launcher agent id, published over the native host bridge for the native New Thread picker.
     pub(crate) sidebar_primary_agent_launcher_id: Option<String>,
+    /// The native Handoff / Export dialog window, if open; see app/window/export_transcript_modal.rs.
+    pub(crate) export_transcript_modal_window:
+        Option<WindowHandle<GpuiExportTranscriptModalWindow>>,
     pub(crate) new_thread_picker_window: Option<WindowHandle<Root>>,
     pub(crate) new_thread_picker: Option<Entity<GpuiNewThreadPickerWindow>>,
     pub(crate) new_thread_picker_visible: bool,

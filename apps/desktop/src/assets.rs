@@ -6,6 +6,7 @@ use std::borrow::Cow;
 #[derive(RustEmbed)]
 #[folder = "assets"]
 #[include = "titlebar/**/*.svg"]
+#[include = "modals/**/*.svg"]
 struct GhostexEmbeddedAssets;
 
 #[derive(RustEmbed)]
@@ -20,7 +21,7 @@ impl AssetSource for GhostexAssets {
         if path.is_empty() {
             return Ok(None);
         }
-        if path.starts_with("titlebar/") {
+        if path.starts_with("titlebar/") || path.starts_with("modals/") {
             return GhostexEmbeddedAssets::get(path)
                 .map(|asset| Some(asset.data))
                 .ok_or_else(|| anyhow!("could not find embedded Ghostex asset at path {path:?}"));

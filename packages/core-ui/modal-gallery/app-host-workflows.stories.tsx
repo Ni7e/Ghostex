@@ -170,6 +170,7 @@ export const ExportTranscriptDone: Story = {
       <ExportTranscriptModal
         agents={AGENTS}
         defaultAgentId='codex'
+        initialMode='export'
         isOpen
         onClose={noop}
         onExport={noop}
