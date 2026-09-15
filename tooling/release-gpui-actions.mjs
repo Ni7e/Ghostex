@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 import { resolvePublishRecoveryInputs } from './release-gpui/publish-provenance.mjs';
+import { PUBLISH_STAGE_NAMES } from './release-gpui/publish-stage.mjs';
 import { isAllowedReleaseWorkflowName } from './release-gpui/provenance.mjs';
 
 const repo = 'maddada/Ghostex';
@@ -49,6 +50,8 @@ Release options:
   --prerelease
   --windows-signing <auto|required|off>  Default: auto
   --source-run-id <id>                   Required by publish
+  --stage <name>                         publish only: one stage of a staged release
+                                         (macos, android, linux, windows-x64, windows-arm64)
   --dry-run
 
 Planning options (scope flags express intent; the plan decides build/reuse/skip):
@@ -84,6 +87,7 @@ function parseArgs(argv) {
     macos: !amendDefaults,
     prerelease: false,
     sourceRunId: '',
+    stage: '',
     updateSparkle: true,
     windowsArm64: !amendDefaults,
     windowsSigning: 'auto',
@@ -187,9 +191,16 @@ function parseArgs(argv) {
     } else if (arg === '--source-run-id') {
       options.sourceRunId = rest[index + 1] ?? '';
       index += 1;
+    } else if (arg === '--stage') {
+      options.stage = rest[index + 1] ?? '';
+      index += 1;
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
+  }
+  if (options.stage && command !== 'publish') throw new Error('--stage is only valid with publish');
+  if (options.stage && !PUBLISH_STAGE_NAMES.includes(options.stage)) {
+    throw new Error(`--stage must be one of ${PUBLISH_STAGE_NAMES.join(', ')}`);
   }
   if (!['auto', 'required', 'off'].includes(options.windowsSigning)) {
     throw new Error('--windows-signing must be auto, required, or off');
@@ -240,6 +251,30 @@ function validateScope(options, command) {
   }
   if ((options.windowsArm64 || options.gxserverWslWindowsArm64) && !options.gxserverLinuxArm64) {
     throw new Error('Enabled ARM64 packages require gxserver Linux ARM64');
+  }
+  /*
+   * Staged publishing ships a gxserver runtime only as a dependency of a
+   * package that embeds it, so a runtime with no enabled consumer would never
+   * reach the release page. Refuse the scope here rather than on the runner.
+   */
+  const x64Consumers = [
+    options.macos,
+    options.linuxDeb,
+    options.linuxRpm,
+    options.linuxTar,
+    options.windowsX64,
+    options.gxserverWslWindowsX64,
+  ];
+  if (options.gxserverLinuxX64 && !x64Consumers.some(Boolean)) {
+    throw new Error(
+      'gxserver Linux x64 is enabled but no enabled package embeds it; add --skip-gxserver-linux-x64 or enable a consumer'
+    );
+  }
+  const arm64Consumers = [options.macos, options.windowsArm64, options.gxserverWslWindowsArm64];
+  if (options.gxserverLinuxArm64 && !arm64Consumers.some(Boolean)) {
+    throw new Error(
+      'gxserver Linux ARM64 is enabled but no enabled package embeds it; add --skip-gxserver-linux-arm64 or enable a consumer'
+    );
   }
 }
 
@@ -411,8 +446,15 @@ function dispatch(workflow, fields, dryRun) {
 
 const { command, options, version } = parseArgs(process.argv.slice(2));
 validateScope(options, command);
+/*
+ * A staged release may already have created the tag when one platform failed:
+ * the recovery redispatch (`start --reuse-from-run`) then targets an existing
+ * tag on purpose, and its stages amend the live release. A plain `start`
+ * against an existing tag stays refused.
+ */
 const head = validateLocalSource(version, {
-  allowExistingTag: command === 'publish' || command === 'amend',
+  allowExistingTag:
+    command === 'publish' || command === 'amend' || (command === 'start' && Boolean(options.reuseFromRunId)),
   requireExistingTag: command === 'amend',
 });
 if ((command === 'start' || command === 'amend') && requiresGpuiReferenceContract(options)) {
@@ -564,12 +606,14 @@ if (command === 'start') {
    * ~40 KB workflow input, and no way for a hand-edited plan to describe a
    * different artifact set than the one being published.
    */
+  if (options.stage) console.log(`Publishing stage ${options.stage} only (create-or-amend against the live release).`);
   dispatch(
     'release-gpui-publish.yml',
     {
       expected_platforms: recordedPlatforms.join(','),
       prerelease: recovery.prerelease,
       source_run_id: options.sourceRunId,
+      stage: options.stage,
       update_sparkle: recovery.updateSparkle,
       version,
       windows_signed: recovery.windowsSigned,

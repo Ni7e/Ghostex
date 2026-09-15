@@ -18,6 +18,15 @@ import { validateWindowsUpdateFeed } from './windows-update-feed.mjs';
 import { renderCustomerDownloadNotes } from './customer-downloads.mjs';
 import { releaseProvenanceAssetName } from './provenance.mjs';
 import {
+  advanceMainWithAppcast,
+  appcastReferencesRelease,
+  classifyMainDrift,
+  readLiveAppcast,
+  releaseBuildNumber,
+  waitForLiveAppcast,
+} from './appcast-advance.mjs';
+import { LOST_CREATION_RACE_EXIT_CODE, resolvePublishStage } from './publish-stage.mjs';
+import {
   PRODUCT_PROVENANCE_FILE,
   assertLiveProvenanceMatches,
   assertPlanMatchesScope,
@@ -60,6 +69,22 @@ const plan = readPublishPlan({
 });
 assertPlanMatchesScope({ expectedPlatforms: [...expected], plan, version });
 
+/*
+ * CDXC:Release 2026-09-15 WHY:
+ * In a staged release (GHOSTEX_RELEASE_STAGE set) this script runs for the
+ * stage that arrives first: it creates the tag and the release with that
+ * stage's products only, and every later stage amends the release
+ * (amend-existing.mjs). `expected` stays the whole scope so the plan check
+ * above is unchanged; `publishing` is what this invocation actually uploads.
+ * When the remote tag appears under this script, another stage won the race
+ * and this one exits LOST_CREATION_RACE_EXIT_CODE so publish-staged.mjs can
+ * amend instead. See publish-stage.mjs.
+ */
+const stage = (process.env.GHOSTEX_RELEASE_STAGE ?? '').trim();
+const publishStage = stage ? resolvePublishStage({ plan, stage }) : null;
+const publishing = new Set(publishStage ? publishStage.products : expected);
+if (publishStage) console.log(`Publish stage ${stage} creates the release with ${[...publishing].join(', ')}`);
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -77,100 +102,15 @@ function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex');
 }
 
-function appcastReferencesRelease(xml, buildNumber, version) {
-  const build = String(buildNumber).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  const hasBuildElement = new RegExp(`<sparkle:version>\\s*${build}\\s*</sparkle:version>`, 'u').test(xml);
-  const hasBuildAttribute = new RegExp(`sparkle:version\\s*=\\s*["']${build}["']`, 'u').test(xml);
-  return (hasBuildElement || hasBuildAttribute) && xml.includes(`ghostex-${version}-arm64.dmg`);
+function remoteTagExists(tagName) {
+  const result = spawnSync('git', ['ls-remote', '--tags', 'origin', `refs/tags/${tagName}`], { encoding: 'utf8' });
+  return result.status === 0 && result.stdout.trim().length > 0;
 }
 
-function readLiveAppcast() {
-  const response = spawnSync('gh', ['api', 'repos/maddada/Ghostex/contents/appcast.xml?ref=main'], {
-    encoding: 'utf8',
-  });
-  if (response.status !== 0) return '';
-  const encoded = JSON.parse(response.stdout).content?.replace(/\s/gu, '') ?? '';
-  return Buffer.from(encoded, 'base64').toString('utf8');
-}
-
-function resolveRemoteMain() {
-  const remoteMain = run('git', ['ls-remote', 'origin', 'refs/heads/main'], { capture: true }).split(/\s+/)[0];
-  if (!remoteMain) throw new Error('Could not resolve origin/main');
-  return remoteMain;
-}
-
-/*
- * CDXC:Release 2026-08-30:
- * `origin/main` moves while a multi-hour build runs, because several agents
- * share this checkout. 8.3.0 lost an entire dispatch to that: all eleven
- * products had built and publication was refused because an unrelated mobile
- * submodule bump landed while the runners worked.
- *
- * Drift is only safe to absorb when it is a pure fast-forward -- the commit we
- * built is still in main's history, so nothing that went into these artifacts
- * was rewritten or rolled back. Divergence stays fatal, because then the
- * artifacts describe source that main no longer has.
- */
-function classifyMainDrift(builtCommit) {
-  const remoteMain = resolveRemoteMain();
-  if (remoteMain === builtCommit) return { kind: 'unchanged', remoteMain };
-  run('git', ['fetch', '--no-tags', 'origin', 'main']);
-  if (spawnSync('git', ['merge-base', '--is-ancestor', builtCommit, remoteMain]).status !== 0) {
-    throw new Error(
-      `origin/main diverged from the built source during the build (${builtCommit} is not an ancestor of ${remoteMain}); refusing partial publication`
-    );
-  }
-  return { kind: 'advanced', remoteMain };
-}
-
-/*
- * Build `origin/main`-plus-this-appcast without touching the runner's working
- * tree or index. Plumbing rather than cherry-pick: the final content of
- * appcast.xml is already known exactly, so there is nothing to merge and no
- * conflict to resolve, and every other path keeps whatever landed during the
- * build byte-for-byte.
- */
-function commitAppcastOnto({ appcastXml, message, parent }) {
-  const blob = run('git', ['hash-object', '-w', '--stdin'], { capture: true, input: appcastXml });
-  const indexDirectory = mkdtempSync(path.join(os.tmpdir(), 'ghostex-release-index-'));
-  const env = { ...process.env, GIT_INDEX_FILE: path.join(indexDirectory, 'index') };
-  try {
-    run('git', ['read-tree', parent], { capture: true, env });
-    run('git', ['update-index', '--add', '--cacheinfo', `100644,${blob},appcast.xml`], { capture: true, env });
-    const tree = run('git', ['write-tree'], { capture: true, env });
-    return run('git', ['commit-tree', tree, '-p', parent, '-m', message], { capture: true });
-  } finally {
-    rmSync(indexDirectory, { force: true, recursive: true });
-  }
-}
-
-/*
- * Advance the Sparkle feed on `main`. The tag is never moved to accommodate
- * drift: it keeps pointing at the exact commit that was built and signed. When
- * main has moved on, the appcast bump is replayed on top of it instead, so the
- * advance can never revert work that landed during the build.
- *
- * `main` can move again between resolving it and pushing, so a rejected push is
- * retried against the newer tip rather than treated as a failure.
- */
-function advanceMainWithAppcast({ appcastCommit, appcastXml, builtCommit, message }) {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const drift = classifyMainDrift(builtCommit);
-    if (drift.kind === 'unchanged') {
-      run('git', ['push', 'origin', `${appcastCommit}:main`]);
-      return 'fast-forward';
-    }
-    const replayed = commitAppcastOnto({ appcastXml, message, parent: drift.remoteMain });
-    const push = spawnSync('git', ['push', 'origin', `${replayed}:main`], { encoding: 'utf8', stdio: 'pipe' });
-    if (push.status === 0) {
-      console.log(
-        `origin/main advanced during the build; replayed the ${version} appcast bump onto ${drift.remoteMain.slice(0, 10)} as ${replayed.slice(0, 10)}.`
-      );
-      return 'replayed';
-    }
-    console.log(`origin/main moved again while advancing Sparkle; retrying (attempt ${attempt} of 3).`);
-  }
-  throw new Error(`Could not advance origin/main with the ${version} appcast bump after 3 attempts`);
+function loseCreationRace(reason) {
+  if (!publishStage) throw new Error(reason);
+  console.log(`${reason}; another stage created the release first.`);
+  process.exit(LOST_CREATION_RACE_EXIT_CODE);
 }
 
 const artifactContracts = new Map([
@@ -239,7 +179,8 @@ const macosFeedScope = resolveMacosFeedScope({
   plan,
   updateSparkleRequested: process.env.GHOSTEX_RELEASE_UPDATE_SPARKLE !== '0',
 });
-const updateSparkle = macosFeedScope.sparkle;
+/* In a staged release only the stage that ships the DMG may advance the feed. */
+const updateSparkle = macosFeedScope.sparkle && publishing.has('macos-arm64');
 const windowsFeedScope = resolveWindowsFeedScope({ plan });
 console.log(
   `Plan: ${plan.expectedPlatforms.join(', ')} (macOS ${macosFeedScope.macosAction}; sparkle=${
@@ -272,6 +213,8 @@ for (const artifactDirectory of readdirSync(artifactsRoot, { withFileTypes: true
   if (manifest.schemaVersion !== 1 || manifest.version !== version || !expected.has(manifest.platform)) {
     throw new Error(`Unexpected manifest ${manifestPath}: ${JSON.stringify(manifest)}`);
   }
+  // A sibling stage's build may already have finished; its artifact is that stage's to publish.
+  if (!publishing.has(manifest.platform)) continue;
   const contract = artifactContracts.get(manifest.platform);
   if (contract === undefined) throw new Error(`No release artifact contract is defined for ${manifest.platform}`);
   if (
@@ -297,10 +240,10 @@ for (const artifactDirectory of readdirSync(artifactsRoot, { withFileTypes: true
   manifests.push({ directory, ...manifest });
 }
 const received = new Set(manifests.map((manifest) => manifest.platform));
-for (const platform of expected) {
+for (const platform of publishing) {
   if (!received.has(platform)) throw new Error(`Enabled platform produced no validated manifest: ${platform}`);
 }
-if (received.size !== expected.size || manifests.length !== expected.size) {
+if (received.size !== publishing.size || manifests.length !== publishing.size) {
   throw new Error('Received duplicate or unexpected platform manifests');
 }
 
@@ -314,6 +257,7 @@ if (received.size !== expected.size || manifests.length !== expected.size) {
 const productProvenance = collectPublishProvenance({
   manifests,
   plan,
+  products: [...publishing],
   readProvenance: (directory) => {
     const file = path.join(directory, PRODUCT_PROVENANCE_FILE);
     if (!existsSync(file)) return null;
@@ -510,26 +454,30 @@ function validateLiveRelease(liveRelease, { verifyProvenanceDigest = true } = {}
   if (Boolean(liveRelease.prerelease) !== expectedPrerelease) {
     throw new Error(`Live release prerelease=${liveRelease.prerelease}; expected ${expectedPrerelease}`);
   }
-  if (liveRelease.assets?.length !== expectedAssets.size) {
+  // A staged release grows as later stages amend it, so a stage only checks its own assets.
+  if (!publishStage && liveRelease.assets?.length !== expectedAssets.size) {
     throw new Error(`Live release has ${liveRelease.assets?.length ?? 0} assets; expected ${expectedAssets.size}`);
   }
-  for (const asset of liveRelease.assets) {
-    if (asset.name === provenanceAssetName && !verifyProvenanceDigest) continue;
-    const expectedSha = expectedAssets.get(asset.name);
+  const liveByName = new Map((liveRelease.assets ?? []).map((asset) => [asset.name, asset]));
+  for (const [name, expectedSha] of expectedAssets) {
+    if (name === provenanceAssetName && !verifyProvenanceDigest) continue;
+    const asset = liveByName.get(name);
     const liveSha =
-      typeof asset.digest === 'string' && asset.digest.startsWith('sha256:')
+      typeof asset?.digest === 'string' && asset.digest.startsWith('sha256:')
         ? asset.digest.slice('sha256:'.length)
         : null;
-    if (!expectedSha || liveSha !== expectedSha) {
-      throw new Error(
-        `Live asset digest mismatch for ${asset.name}: ${liveSha ?? 'missing'} != ${expectedSha ?? 'unexpected asset'}`
-      );
+    if (liveSha !== expectedSha) {
+      throw new Error(`Live asset digest mismatch for ${name}: ${liveSha ?? 'missing'} != ${expectedSha}`);
+    }
+  }
+  if (!publishStage) {
+    for (const asset of liveRelease.assets ?? []) {
+      if (!expectedAssets.has(asset.name)) throw new Error(`Live release carries an unexpected asset: ${asset.name}`);
     }
   }
 }
 
-const [major, minor, patch] = version.split('.').map(Number);
-const buildNumber = major * 10000 + minor * 100 + patch;
+const buildNumber = releaseBuildNumber(version);
 const macos = manifests.find((manifest) => manifest.platform === 'macos-arm64');
 const generatedAppcast = macos && updateSparkle ? path.join(macos.directory, 'appcast.xml') : null;
 let generatedAppcastXml = '';
@@ -544,6 +492,9 @@ if (macos && updateSparkle) {
 const existingReleaseResult = spawnSync('gh', ['api', `repos/maddada/Ghostex/releases/tags/${tag}`], {
   encoding: 'utf8',
 });
+if (existingReleaseResult.status === 0 && publishStage) {
+  loseCreationRace(`${tag} is already published`);
+}
 if (existingReleaseResult.status === 0) {
   if (!run('git', ['tag', '-l', tag], { capture: true })) {
     throw new Error(`GitHub release ${tag} exists without a fetched local tag`);
@@ -582,6 +533,7 @@ if (existingReleaseResult.status === 0) {
       appcastXml: generatedAppcastXml,
       builtCommit: run('git', ['rev-parse', `${tagCommit}^`], { capture: true }),
       message: `chore: release ${version}`,
+      version,
     });
   }
   if (macos && updateSparkle && !appcastReferencesRelease(readLiveAppcast(), buildNumber, version)) {
@@ -593,6 +545,7 @@ if (existingReleaseResult.status === 0) {
 }
 if (run('git', ['tag', '-l', tag], { capture: true }))
   throw new Error(`Tag already exists without a public release: ${tag}`);
+if (publishStage && remoteTagExists(tag)) loseCreationRace(`${tag} already exists on origin`);
 
 if (macos && updateSparkle) {
   writeFileSync('appcast.xml', generatedAppcastXml);
@@ -604,7 +557,20 @@ if (macos && updateSparkle) {
 // every asset. Pure fast-forward drift is absorbed when Sparkle advances below.
 classifyMainDrift(sourceCommit);
 run('git', ['tag', '-a', tag, '-m', `Release ${tag}`]);
-run('git', ['push', 'origin', tag]);
+/*
+ * The tag push is the creation race's arbiter: origin rejects a second push of
+ * the same tag, so exactly one stage gets past this line as the creator.
+ */
+const tagPush = spawnSync('git', ['push', 'origin', tag], { encoding: 'utf8' });
+if (tagPush.status !== 0) {
+  process.stdout.write(tagPush.stdout ?? '');
+  process.stderr.write(tagPush.stderr ?? '');
+  if (publishStage && remoteTagExists(tag)) {
+    run('git', ['tag', '-d', tag]);
+    loseCreationRace(`${tag} appeared on origin while this stage was tagging`);
+  }
+  throw new Error(`git push origin ${tag} failed`);
+}
 const releaseArgs = [
   'release',
   'create',
@@ -630,24 +596,14 @@ if (macos && updateSparkle) {
     appcastXml: generatedAppcastXml,
     builtCommit: sourceCommit,
     message: `chore: release ${version}`,
+    version,
   });
 }
 
 const liveRelease = JSON.parse(run('gh', ['api', `repos/maddada/Ghostex/releases/tags/${tag}`], { capture: true }));
 validateLiveRelease(liveRelease);
 
-if (macos && updateSparkle) {
-  let liveAppcast = '';
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const xml = readLiveAppcast();
-    if (appcastReferencesRelease(xml, buildNumber, version)) {
-      liveAppcast = xml;
-      break;
-    }
-    spawnSync('sleep', ['5']);
-  }
-  if (!liveAppcast) throw new Error(`Live appcast did not advance to ${version} (${buildNumber})`);
-}
+if (macos && updateSparkle) waitForLiveAppcast({ buildNumber, version });
 
 console.log(`Published and live-verified ${tag} with ${uploadPaths.length} assets.`);
 console.log(renderReleaseProvenanceReport(releaseProvenance, { plan }));

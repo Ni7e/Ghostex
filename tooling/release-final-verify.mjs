@@ -250,10 +250,19 @@ async function main() {
       return SKIPPED;
     }
     const tags = await capture('git tag --points-at HEAD');
-    if (!tags.split(/\r?\n/).includes(`v${version}`)) {
-      throw new Error(`v${version} does not point at HEAD (tags at HEAD: ${tags || 'none'}).`);
+    if (tags.split(/\r?\n/).includes(`v${version}`)) return `v${version} at HEAD`;
+    /*
+     * In a staged release the tag is created by whichever stage finishes first.
+     * When that is not macOS, the tag points at the built source commit and the
+     * Sparkle appcast commit lands on top of it afterwards, so HEAD is the
+     * tag's child rather than the tag itself.
+     */
+    const parentTags = await capture('git tag --points-at HEAD~1');
+    const headSubject = await capture('git log -1 --format=%s HEAD');
+    if (parentTags.split(/\r?\n/).includes(`v${version}`) && headSubject === `chore: release ${version}`) {
+      return `v${version} at HEAD~1 (HEAD is its appcast commit)`;
     }
-    return `v${version} at HEAD`;
+    throw new Error(`v${version} does not point at HEAD (tags at HEAD: ${tags || 'none'}).`);
   });
 
   let releaseAssets = [];

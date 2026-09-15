@@ -17,6 +17,22 @@ name: Release Ghostex
 #    its tarball at packaging time. They now await it just in time
 #    (await-run-artifacts.mjs), which moves every platform's compiler errors
 #    from t≈22 min to t≈2 min and takes ~21 min off the critical path.
+#
+# CDXC:Release 2026-09-15 DECISION:
+# User: no platform waits for another. There is no single publish gate any
+# more: each platform has its own publish stage (publish_macos, publish_android,
+# publish_linux, publish_windows_x64, publish_windows_arm64) that needs only the
+# `gates` job and that platform's own build jobs. The first stage to finish
+# creates the tag and the release, every later stage amends it, and a failed
+# platform leaves the others live (tooling/release-gpui/publish-stage.mjs owns
+# the stage membership and the rationale; publish-staged.mjs decides create vs
+# amend against live state). Before this, 9.5.1 had macOS, Linux and Android
+# built at minute 45 and published none of them until Windows was fixed two
+# hours later.
+#
+# 3. `prepare` only resolves the plan (about 40 seconds on ubuntu) so every
+#    build starts immediately; the frozen install, typecheck and release tests
+#    run in the parallel `gates` job, which only the publish stages wait on.
 
 on:
   workflow_dispatch:
@@ -120,14 +136,16 @@ concurrency:
 
 jobs:
   prepare:
-    # Stays on macos-15 until `bun run release:test` is verified green on
-    # ubuntu-24.04; the move is an optimization, not a correctness requirement.
-    runs-on: macos-15
+    # Plan resolution only: no install, no typecheck, no tests. Those run in
+    # `gates` in parallel so the builds start about 90 seconds earlier.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       expected_platforms: ${{ steps.plan.outputs.expected_platforms }}
       feeds_sparkle: ${{ steps.plan.outputs.feeds_sparkle }}
       job_android: ${{ steps.plan.outputs.job_android }}
       job_code_server_arm64: ${{ steps.plan.outputs.job_code_server_arm64 }}
+      job_code_server_darwin_arm64: ${{ steps.plan.outputs.job_code_server_darwin_arm64 }}
       job_code_server_x64: ${{ steps.plan.outputs.job_code_server_x64 }}
       job_gxserver_arm64: ${{ steps.plan.outputs.job_gxserver_arm64 }}
       job_gxserver_x64: ${{ steps.plan.outputs.job_gxserver_x64 }}
@@ -156,6 +174,9 @@ jobs:
       GHOSTEX_RELEASE_GXSERVER_WSL_WINDOWS_ARM64: ${{ inputs.gxserver_wsl_windows_arm64 }}
       GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ inputs.update_sparkle }}
       GHOSTEX_RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+      # A recovery redispatch after a partial staged publish targets a tag that
+      # already exists; its stages amend the live release.
+      GHOSTEX_RELEASE_ALLOW_EXISTING_TAG: ${{ inputs.reuse_from_run_id != '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -193,21 +214,13 @@ jobs:
       - name: Check the Ghostty Zig toolchain pin against the vendored source
         if: ${{ inputs.macos || inputs.linux_deb || inputs.linux_rpm || inputs.linux_tar || inputs.windows_x64 || inputs.windows_arm64 }}
         run: node tooling/release-gpui/check-ghostty-zig-pin.mjs
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-      # The root typecheck covers packages/core-ui, whose modal-gallery stories
-      # render the web app's Find and Machines surfaces. apps/web became its own
-      # submodule, so the skipped checkout leaves those modules unresolvable.
-      - name: Restore release-test prerequisites
+      # 9.5.1 lost its first dispatch 30 seconds into both code-server jobs
+      # because the ripgrep patch no longer applied to the bumped submodule.
+      - name: Check that every release patch still applies to its submodule
+        if: ${{ inputs.macos || inputs.linux_deb || inputs.linux_rpm || inputs.linux_tar || inputs.windows_x64 || inputs.windows_arm64 }}
         run: |
           git submodule update --init --depth 1 .dependencies/code-server
-          git submodule update --init --depth 1 apps/web
-      - name: Install and typecheck
-        run: |
-          bun install --frozen-lockfile
-          bun run typecheck
-          bun run release:test
+          node tooling/release-gpui/check-patches-apply.mjs --only code-server
       - name: Resolve the change-aware release plan
         id: plan
         env:
@@ -241,6 +254,37 @@ jobs:
           path: build/release-gpui/release-plan.json
           if-no-files-found: error
           retention-days: 14
+
+  # The expensive source gates, off the critical path of every build. Only the
+  # publish stages need this job, so a failing test never wastes a build that
+  # a `--reuse-from-run` redispatch can reuse, and a passing one never delays
+  # a compile. The dispatcher already ran `release:test` locally against this
+  # exact commit; this is the remote, frozen-install repetition.
+  gates:
+    # Stays on macos-15 until `bun run release:test` is verified green on
+    # ubuntu-24.04; the runner choice is an optimization, not a requirement.
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      # The root typecheck covers packages/core-ui, whose modal-gallery stories
+      # render the web app's Find and Machines surfaces. apps/web became its own
+      # submodule, so the skipped checkout leaves those modules unresolvable.
+      - name: Restore release-test prerequisites
+        run: |
+          git submodule update --init --depth 1 .dependencies/code-server
+          git submodule update --init --depth 1 apps/web
+      - name: Install and typecheck
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run release:test
 
   # CDXC:WindowsValidationIsNotAGate 2026-09-01:
   # There is deliberately no `validate_windows` job here any more.
@@ -315,6 +359,19 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: arm64
+
+  # The macOS Code-tab component, built off the macOS job's critical path.
+  # The macOS job awaits this job's artifact just in time before staging.
+  code_server_darwin_arm64:
+    if: ${{ needs.prepare.outputs.job_code_server_darwin_arm64 != 'skip' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-code-server-macos.yml
+    with:
+      version: ${{ inputs.version }}
 
   reuse:
     if: ${{ needs.prepare.outputs.reuse_count != '0' }}
@@ -435,53 +492,156 @@ jobs:
       plan: ${{ needs.prepare.outputs.plan }}
     secrets: inherit
 
-  publish:
-    # Atomicity gate. For every product the plan resolved: an action of `build`
-    # or `reuse` must have produced a successful job, and `skip` must have
-    # produced a skipped one. A failed or cancelled job can never satisfy either
-    # branch, so an incomplete artifact set cannot reach the publisher.
+  # Stage gates keep the shape of the old atomicity gate for their own
+  # products: a `build` or `reuse` action must have produced a successful job
+  # and `skip` a skipped one, so a failed or cancelled job can never satisfy
+  # either branch. A stage whose products are all skipped by scope does not run.
+  publish_macos:
     if: >-
       ${{
         always() &&
         needs.prepare.result == 'success' &&
+        needs.gates.result == 'success' &&
+        needs.prepare.outputs.job_macos != 'skip' &&
         ((needs.prepare.outputs.job_gxserver_x64 == 'build' && needs.gxserver_x64.result == 'success') || (needs.prepare.outputs.job_gxserver_x64 != 'build' && needs.gxserver_x64.result == 'skipped')) &&
         ((needs.prepare.outputs.job_gxserver_arm64 == 'build' && needs.gxserver_arm64.result == 'success') || (needs.prepare.outputs.job_gxserver_arm64 != 'build' && needs.gxserver_arm64.result == 'skipped')) &&
-        ((needs.prepare.outputs.job_code_server_x64 != 'skip' && needs.code_server_x64.result == 'success') || (needs.prepare.outputs.job_code_server_x64 == 'skip' && needs.code_server_x64.result == 'skipped')) &&
-        ((needs.prepare.outputs.job_code_server_arm64 != 'skip' && needs.code_server_arm64.result == 'success') || (needs.prepare.outputs.job_code_server_arm64 == 'skip' && needs.code_server_arm64.result == 'skipped')) &&
         ((needs.prepare.outputs.reuse_count != '0' && needs.reuse.result == 'success') || (needs.prepare.outputs.reuse_count == '0' && needs.reuse.result == 'skipped')) &&
-        ((needs.prepare.outputs.job_macos == 'build' && needs.macos.result == 'success') || (needs.prepare.outputs.job_macos != 'build' && needs.macos.result == 'skipped')) &&
-        ((needs.prepare.outputs.job_linux_x64 == 'build' && needs.linux_x64.result == 'success') || (needs.prepare.outputs.job_linux_x64 != 'build' && needs.linux_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_macos == 'build' && needs.macos.result == 'success') || (needs.prepare.outputs.job_macos != 'build' && needs.macos.result == 'skipped'))
+      }}
+    needs:
+      - prepare
+      - gates
+      - gxserver_x64
+      - gxserver_arm64
+      - reuse
+      - macos
+    uses: ./.github/workflows/release-gpui-publish.yml
+    with:
+      version: ${{ inputs.version }}
+      stage: macos
+      expected_platforms: ${{ needs.prepare.outputs.expected_platforms }}
+      prerelease: ${{ inputs.prerelease }}
+      # Keyed on "macOS is in scope" rather than on plan.feeds.sparkle: a
+      # same-version recovery legitimately *reuses* the macOS product from a run
+      # that never published, so the appcast entry does not exist yet and
+      # Sparkle must still advance.
+      update_sparkle: ${{ inputs.update_sparkle && needs.prepare.outputs.job_macos != 'skip' }}
+      windows_signed: ${{ inputs.sign_windows }}
+      plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
+
+  publish_android:
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        needs.gates.result == 'success' &&
+        needs.prepare.outputs.job_android != 'skip' &&
+        ((needs.prepare.outputs.reuse_count != '0' && needs.reuse.result == 'success') || (needs.prepare.outputs.reuse_count == '0' && needs.reuse.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_android == 'build' && needs.android.result == 'success') || (needs.prepare.outputs.job_android != 'build' && needs.android.result == 'skipped'))
+      }}
+    needs:
+      - prepare
+      - gates
+      - reuse
+      - android
+    uses: ./.github/workflows/release-gpui-publish.yml
+    with:
+      version: ${{ inputs.version }}
+      stage: android
+      expected_platforms: ${{ needs.prepare.outputs.expected_platforms }}
+      prerelease: ${{ inputs.prerelease }}
+      update_sparkle: false
+      windows_signed: ${{ inputs.sign_windows }}
+      plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
+
+  publish_linux:
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        needs.gates.result == 'success' &&
+        needs.prepare.outputs.job_linux_x64 != 'skip' &&
+        ((needs.prepare.outputs.job_gxserver_x64 == 'build' && needs.gxserver_x64.result == 'success') || (needs.prepare.outputs.job_gxserver_x64 != 'build' && needs.gxserver_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.reuse_count != '0' && needs.reuse.result == 'success') || (needs.prepare.outputs.reuse_count == '0' && needs.reuse.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_linux_x64 == 'build' && needs.linux_x64.result == 'success') || (needs.prepare.outputs.job_linux_x64 != 'build' && needs.linux_x64.result == 'skipped'))
+      }}
+    needs:
+      - prepare
+      - gates
+      - gxserver_x64
+      - reuse
+      - linux_x64
+    uses: ./.github/workflows/release-gpui-publish.yml
+    with:
+      version: ${{ inputs.version }}
+      stage: linux
+      expected_platforms: ${{ needs.prepare.outputs.expected_platforms }}
+      prerelease: ${{ inputs.prerelease }}
+      update_sparkle: false
+      windows_signed: ${{ inputs.sign_windows }}
+      plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
+
+  # The WSL bootstrap is not a build input of the Windows package but ships
+  # beside it (companion product), so the two publish together.
+  publish_windows_x64:
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        needs.gates.result == 'success' &&
+        needs.prepare.outputs.job_windows_x64 != 'skip' &&
+        ((needs.prepare.outputs.job_gxserver_x64 == 'build' && needs.gxserver_x64.result == 'success') || (needs.prepare.outputs.job_gxserver_x64 != 'build' && needs.gxserver_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.reuse_count != '0' && needs.reuse.result == 'success') || (needs.prepare.outputs.reuse_count == '0' && needs.reuse.result == 'skipped')) &&
         ((needs.prepare.outputs.job_windows_x64 == 'build' && needs.windows_x64.result == 'success') || (needs.prepare.outputs.job_windows_x64 != 'build' && needs.windows_x64.result == 'skipped')) &&
+        ((needs.prepare.outputs.job_wsl_x64 == 'build' && needs.gxserver_wsl_windows_x64.result == 'success') || (needs.prepare.outputs.job_wsl_x64 != 'build' && needs.gxserver_wsl_windows_x64.result == 'skipped'))
+      }}
+    needs:
+      - prepare
+      - gates
+      - gxserver_x64
+      - reuse
+      - windows_x64
+      - gxserver_wsl_windows_x64
+    uses: ./.github/workflows/release-gpui-publish.yml
+    with:
+      version: ${{ inputs.version }}
+      stage: windows-x64
+      expected_platforms: ${{ needs.prepare.outputs.expected_platforms }}
+      prerelease: ${{ inputs.prerelease }}
+      update_sparkle: false
+      windows_signed: ${{ inputs.sign_windows }}
+      plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
+
+  publish_windows_arm64:
+    if: >-
+      ${{
+        always() &&
+        needs.prepare.result == 'success' &&
+        needs.gates.result == 'success' &&
+        needs.prepare.outputs.job_windows_arm64 != 'skip' &&
+        ((needs.prepare.outputs.job_gxserver_arm64 == 'build' && needs.gxserver_arm64.result == 'success') || (needs.prepare.outputs.job_gxserver_arm64 != 'build' && needs.gxserver_arm64.result == 'skipped')) &&
+        ((needs.prepare.outputs.reuse_count != '0' && needs.reuse.result == 'success') || (needs.prepare.outputs.reuse_count == '0' && needs.reuse.result == 'skipped')) &&
         ((needs.prepare.outputs.job_windows_arm64 == 'build' && needs.windows_arm64.result == 'success') || (needs.prepare.outputs.job_windows_arm64 != 'build' && needs.windows_arm64.result == 'skipped')) &&
-        ((needs.prepare.outputs.job_android == 'build' && needs.android.result == 'success') || (needs.prepare.outputs.job_android != 'build' && needs.android.result == 'skipped')) &&
-        ((needs.prepare.outputs.job_wsl_x64 == 'build' && needs.gxserver_wsl_windows_x64.result == 'success') || (needs.prepare.outputs.job_wsl_x64 != 'build' && needs.gxserver_wsl_windows_x64.result == 'skipped')) &&
         ((needs.prepare.outputs.job_wsl_arm64 == 'build' && needs.gxserver_wsl_windows_arm64.result == 'success') || (needs.prepare.outputs.job_wsl_arm64 != 'build' && needs.gxserver_wsl_windows_arm64.result == 'skipped'))
       }}
     needs:
       - prepare
-      - gxserver_x64
+      - gates
       - gxserver_arm64
-      - code_server_x64
-      - code_server_arm64
       - reuse
-      - macos
-      - linux_x64
-      - windows_x64
       - windows_arm64
-      - android
-      - gxserver_wsl_windows_x64
       - gxserver_wsl_windows_arm64
     uses: ./.github/workflows/release-gpui-publish.yml
     with:
       version: ${{ inputs.version }}
+      stage: windows-arm64
       expected_platforms: ${{ needs.prepare.outputs.expected_platforms }}
       prerelease: ${{ inputs.prerelease }}
-      # Scope-aware, but deliberately keyed on "macOS is in scope" rather than
-      # on plan.feeds.sparkle. A same-version recovery legitimately *reuses* the
-      # macOS product from a run that never published, so the appcast entry does
-      # not exist yet and Sparkle must still advance. plan.feeds.sparkle is the
-      # reporting value; this is the operational one.
-      update_sparkle: ${{ inputs.update_sparkle && needs.prepare.outputs.job_macos != 'skip' }}
+      update_sparkle: false
       windows_signed: ${{ inputs.sign_windows }}
       plan: ${{ needs.prepare.outputs.plan }}
     secrets: inherit

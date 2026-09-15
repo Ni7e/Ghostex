@@ -243,13 +243,20 @@ export function validateProductAgainstPlan({ manifest, plan, record, version }) 
  * The whole set. `readProvenance(directory)` returns the parsed record or null;
  * injecting it keeps this function pure for the fixture tests.
  */
-export function collectPublishProvenance({ manifests, plan, readProvenance, version }) {
+export function collectPublishProvenance({
+  manifests,
+  plan,
+  products = plan.expectedPlatforms,
+  readProvenance,
+  version,
+}) {
   const records = {};
   for (const manifest of manifests) {
     const record = readProvenance(manifest.directory);
     records[manifest.platform] = validateProductAgainstPlan({ manifest, plan, record, version });
   }
-  for (const product of plan.expectedPlatforms) {
+  /* A staged publish validates only its own stage's products; the full plan is covered once every stage has run. */
+  for (const product of products) {
     if (!records[product]) refuseProduct(product, 'the plan expects it but no validated provenance record arrived');
   }
   return records;

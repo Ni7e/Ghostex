@@ -6,6 +6,7 @@ import { validateOnDemandManifestV2 } from './on-demand-manifest.mjs';
 import { inspectRelease, verifyPublishedComponent } from './publish-component.mjs';
 import { validatePlan } from './plan.mjs';
 import { PRODUCT_IDS, isProductRequested, productDefinition } from './product-inputs.mjs';
+import { assertStagesCoverPlan } from './publish-stage.mjs';
 
 /*
  * CDXC:Release 2026-08-13:
@@ -92,6 +93,8 @@ function validatePlanAgainstScope(plan) {
   if (mismatches.length > 0) {
     throw new Error(`The resolved plan disagrees with the requested scope:\n- ${mismatches.join('\n- ')}`);
   }
+  /* Staged publishing: every expected product must belong to a publish stage. */
+  assertStagesCoverPlan(plan);
   const built = PRODUCT_IDS.filter((id) => plan.products[id].action === 'build');
   const reused = PRODUCT_IDS.filter((id) => plan.products[id].action === 'reuse');
   console.log(
