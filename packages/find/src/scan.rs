@@ -88,7 +88,7 @@ impl Record {
         "Untitled session"
     }
 
-    /// Last path segment of the project directory, or "No project".
+    /// Last path segment of the project directory, or "".
     pub fn project_display_name(&self) -> &str {
         project_display_name(&self.project)
     }
@@ -96,7 +96,7 @@ impl Record {
 
 pub fn project_display_name(project: &str) -> &str {
     if project.is_empty() {
-        return "No project";
+        return "";
     }
     let trimmed = project.trim_end_matches(['/', '\\']);
     let trimmed = if trimmed.is_empty() { project } else { trimmed };
@@ -2086,6 +2086,6 @@ not json
     fn project_display_name_uses_the_last_segment() {
         assert_eq!(project_display_name("/a/b/Ghostex"), "Ghostex");
         assert_eq!(project_display_name("/a/b/Ghostex/"), "Ghostex");
-        assert_eq!(project_display_name(""), "No project");
+        assert_eq!(project_display_name(""), "");
     }
 }
