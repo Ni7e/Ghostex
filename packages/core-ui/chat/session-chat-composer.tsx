@@ -1,3 +1,15 @@
+import { SessionChatAttachmentPreviews } from './session-chat-attachment-previews';
+import {
+  clipboardImageFiles,
+  IMAGE_PATH_PATTERN,
+  isImageFile,
+  linkedImageReferenceHrefs,
+  LINKED_IMAGE_REFERENCE_PATTERN,
+  nextImageReferenceIndex,
+  readFileAsDataUrl,
+  saveSessionChatImageFile,
+  type PastedImagePreview,
+} from './session-chat-image-attachments';
 import { persistDraftsForRelease, type PendingDraft } from './session-chat-draft-outbox';
 import { readSessionChatComposerSelection, saveSessionChatComposerSelection } from './session-chat-composer-parking';
 import type { SessionChatDraftHandoff } from '@/packages/shared/session-chat-queue';
@@ -86,6 +98,7 @@ import {
 import { Field, FieldError } from '../../components/ui/field';
 import { SessionChatSendBlockedToaster, showSessionChatSendBlockedToast } from './session-chat-send-blocked-toast';
 import { AppTooltip } from '../app-tooltip';
+import { playCopySound } from '../copy-sound';
 import {
   EMPTY_SESSION_CHAT_COMPOSER_HISTORY,
   type SessionChatComposerHistory,
@@ -196,6 +209,7 @@ export interface SessionChatComposerHandle {
  * the Lexical path adapts the native key event before the editor handles it.
  */
 export interface SessionChatComposerKeyEvent {
+  repeat?: boolean;
   altKey: boolean;
   code?: string;
   ctrlKey: boolean;
@@ -444,24 +458,6 @@ export interface SessionChatComposerProps {
   agentTasks?: SessionChatAgentTasks | null;
 }
 
-interface PastedImagePreview {
-  dataUrl: string;
-  id: string;
-  path: string;
-}
-
-/** Rich Prompt Editor numbering: max existing [Image #N]( in the draft, +1. */
-function nextImageReferenceIndex(text: string): number {
-  let highest = 0;
-  for (const match of text.matchAll(/\[Image #(\d+)·?\]\(/g)) {
-    const index = Number.parseInt(match[1] ?? '', 10);
-    if (Number.isFinite(index)) {
-      highest = Math.max(highest, index);
-    }
-  }
-  return highest + 1;
-}
-
 /** Numbered file references include both attachment labels and descriptive picker labels. */
 function nextFileReferenceIndex(text: string): number {
   let highest = 0;
@@ -479,12 +475,6 @@ const DESKTOP_SESSION_CHAT_PLACEHOLDER =
   'Press Enter to send a message and Tab to Queue.\nUse @ to mention a file and $ for using skills.';
 const MOBILE_SESSION_CHAT_PLACEHOLDER = 'Tap ↑ to send or hold it to queue; use @ for files and $ for skills.';
 
-const IMAGE_PATH_PATTERN = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i;
-/**
- * CDXC:SessionChat 2026-09-06 DECISION:
- * User: expanded image references with the trailing · must still show image previews in input boxes across all apps.
- */
-const LINKED_IMAGE_REFERENCE_PATTERN = /\[Image #\d+·?\]\(([^)\r\n]+)\)/g;
 const SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS = 2_000;
 
 /**
@@ -493,28 +483,6 @@ const SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS = 2_000;
  * copy, and one dropped request left the sent message on the daemon as an
  * "unsent draft" that every later app start restored into the composer.
  */
-
-function linkedImageReferenceHrefs(text: string): string[] {
-  return [...text.matchAll(LINKED_IMAGE_REFERENCE_PATTERN)].map((match) => match[1]?.trim() ?? '').filter(Boolean);
-}
-
-function isImageFile(file: File): boolean {
-  return file.type.startsWith('image/') || IMAGE_PATH_PATTERN.test(file.name);
-}
-
-function clipboardImageFiles(data: DataTransfer): File[] {
-  const files: File[] = [];
-  for (const item of Array.from(data.items)) {
-    if (item.kind !== 'file') {
-      continue;
-    }
-    const file = item.getAsFile();
-    if (file && isImageFile(file)) {
-      files.push(file);
-    }
-  }
-  return files;
-}
 
 const CLIPBOARD_IMAGE_EXTENSIONS: Readonly<Record<string, string>> = {
   'image/avif': 'avif',
@@ -562,15 +530,6 @@ async function readSessionChatSystemClipboard(): Promise<DataTransfer> {
     );
   }
   return transfer;
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error('Could not read the pasted image.'));
-    reader.readAsDataURL(file);
-  });
 }
 
 function reactKeyEventAdapter(event: KeyboardEvent<HTMLElement>): SessionChatComposerKeyEvent {
@@ -1257,12 +1216,17 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         else input.editText(command);
         return true;
       },
+      /**
+       * CDXC:Clipboard 2026-09-15 WHY:
+       * The chat pane can intercept copy before it reaches the editor, so its imperative clipboard path needs the same feedback as the editor handlers and copyContextSelection below.
+       */
       copyClipboard: (data, cut): boolean => {
         const input = getInputApi();
         if (!input) return false;
         const selection = input.getSelection();
         if (selection.start === selection.end) return false;
         data.setData('text/plain', input.getValue().slice(selection.start, selection.end));
+        playCopySound();
         expandComposer();
         input.focus();
         if (cut) input.insertText('');
@@ -1969,18 +1933,9 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         for (const file of files) {
           updatePendingImagePastes(1);
           try {
-            const dataUrl = await readFileAsDataUrl(file);
-            const base64Data = dataUrl.split(',', 2)[1] ?? '';
-            if (base64Data === '') {
-              continue;
-            }
-            const path = await onPasteImage?.({
-              base64Data,
-              ...(file.name ? { suggestedName: file.name } : {}),
-            });
-            if (path !== undefined) {
-              insertImageReference(path, dataUrl);
-            }
+            if (!onPasteImage) continue;
+            const { path, dataUrl } = await saveSessionChatImageFile(file, onPasteImage);
+            insertImageReference(path, dataUrl);
           } catch (error) {
             console.error('[session-chat] image attach failed', error);
           } finally {
@@ -2076,9 +2031,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       const start = Math.min(contextSelection.start, current.length);
       const end = Math.min(contextSelection.end, current.length);
       const selectedText = current.slice(start, end);
+      if (selectedText === '') return;
       void navigator.clipboard
         .writeText(selectedText)
         .then(() => {
+          playCopySound();
           if (!cut || input.getValue() !== current) {
             return;
           }
@@ -2760,49 +2717,12 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
               diagnosticLogRef.current?.('sessionChat.composerFocusEntered');
             }}
           >
-            {pastedImages.length > 0 || pendingImagePastes > 0 ? (
-              <div className='flex flex-wrap items-center gap-2 pb-2'>
-                {pastedImages.map((image) => (
-                  <div className='ghostex-chat-composer-image relative' key={image.id}>
-                    <button
-                      aria-label='View pasted image'
-                      className='block rounded-lg'
-                      disabled={!imageViewer}
-                      onClick={() =>
-                        imageViewer?.open({
-                          alt: 'Pasted image',
-                          url: image.dataUrl,
-                        })
-                      }
-                      type='button'
-                    >
-                      <img
-                        alt='Pasted image'
-                        className='h-12 w-12 rounded-lg border border-input object-cover'
-                        data-reference-active={activeImagePath === image.path ? 'true' : undefined}
-                        src={image.dataUrl}
-                      />
-                    </button>
-                    <button
-                      aria-label='Remove image'
-                      className='ghostex-chat-composer-image-remove absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border border-input bg-card text-muted-foreground hover:text-foreground'
-                      onClick={() => removePastedImage(image)}
-                      type='button'
-                    >
-                      <IconX aria-hidden='true' size={10} stroke={2.4} />
-                    </button>
-                  </div>
-                ))}
-                {pendingImagePastes > 0 ? (
-                  <div
-                    aria-label='Saving attachment'
-                    className='flex h-12 w-12 items-center justify-center rounded-lg border border-dashed border-input text-muted-foreground'
-                  >
-                    <IconLoader2 aria-hidden='true' className='animate-spin' size={16} stroke={2} />
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            <SessionChatAttachmentPreviews
+              images={pastedImages}
+              pending={pendingImagePastes}
+              activeImagePath={activeImagePath}
+              onRemove={removePastedImage}
+            />
             {/* Queued prompts sit directly above the input, inside this
               container. Never in the transcript — that lane belongs to the
               agent CLI's own queue (SessionChatMessage.queued). */}
