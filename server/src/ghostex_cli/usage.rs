@@ -322,7 +322,7 @@ pub fn usage() -> String {
         format_help_command("read-agent-prompt-text --key <key> --json", "Read one prompt's full text by the key a search row reported"),
         format_help_command("toggle-agent-prompt-favorite --key <key> [--favorite true|false] --json", "Star or unstar a prompt; shares gx f's favorites file"),
         format_help_command("resolve-agent-prompt-launch --key <key> [--action resume|fork] [--fork-agent id] --json", "Resolve whether opening a prompt focuses a live session or runs a command"),
-        format_help_command("read-session-chat <selector> [--subagent name-or-id] [--limit n] [--before-offset n] [--wait-ms n --fingerprint f] --json", "Read a session or subagent transcript; --wait-ms long-polls the main chat"),
+        format_help_command("read-session-chat <selector> [--subagent name-or-id] [--limit n] [--before-offset n] [--history-mode turns|detail] [--preserve-newest] [--wait-ms n --fingerprint f] --json", "Read a session or subagent transcript; --wait-ms long-polls the main chat"),
         format_help_command("switch-draft-agent <selector> --agent-id <id> --json", "Switch an unprompted draft session to another project agent"),
         format_help_command("send-session-chat-key <selector> --key <key> --json", "Queue Enter or a shifted option key behind this session's pending chat writes"),
         format_help_command("select-session-chat-model <selector> [--model <model> --effort <effort>] [--mode <mode>] [--fast-mode on|off] [--defer] --json", "Change chat model, effort or mode; --defer queues the choice until the agent is ready"),
@@ -429,7 +429,6 @@ pub fn usage() -> String {
         ),
         format_help_command("guide --help", "Show Ghostex Help skill setup"),
         format_help_command("toggle-sidebar", "Collapse or expand the sidebar"),
-        format_help_command("move-sidebar", "Move the sidebar"),
     ]
     .join("\n");
 

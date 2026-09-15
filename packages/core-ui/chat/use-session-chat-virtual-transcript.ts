@@ -91,6 +91,15 @@ export function useSessionChatVirtualTranscript({
     followOnAppend: canFollow,
     initialOffset: snapshot?.top ?? Math.max(0, rows.length * 240 - 600),
     scrollToFn: (offset, options, instance) => {
+      /** CDXC:SessionChat 2026-09-15 WHY:
+       * Row measurement adjusts scrolling before TanStack notifies React to render the new height.
+       * Grow the scrollable area first, using the same total as MessageScrollerContent, or the browser can clamp the correction at the old bottom while the virtual range moves ahead, leaving blank space until another scroll event.
+       */
+      const content = contentRef.current;
+      if (content) {
+        const height = `${instance.getTotalSize()}px`;
+        if (content.style.height !== height) content.style.height = height;
+      }
       programmaticScrollTopRef.current = Math.max(0, offset + (options.adjustments ?? 0));
       elementScroll(offset, options, instance);
     },

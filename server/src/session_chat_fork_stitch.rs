@@ -71,7 +71,7 @@ const FORK_BOUNDARY_TEXT_SHARED: &str = "Session forked from an earlier thread. 
 const FORK_BOUNDARY_TEXT_UNAVAILABLE: &str =
     "Session forked from an earlier thread. The earlier history is no longer available.";
 
-fn encode_stitched_cursor(hop: usize, offset: u64) -> u64 {
+pub(crate) fn encode_stitched_cursor(hop: usize, offset: u64) -> u64 {
     if hop == 0 {
         return offset;
     }
@@ -80,7 +80,7 @@ fn encode_stitched_cursor(hop: usize, offset: u64) -> u64 {
         + offset.min(ANCESTOR_CURSOR_OFFSET_MASK)
 }
 
-fn decode_stitched_cursor(cursor: u64) -> (usize, u64) {
+pub(crate) fn decode_stitched_cursor(cursor: u64) -> (usize, u64) {
     if cursor < ANCESTOR_CURSOR_BASE {
         return (0, cursor);
     }

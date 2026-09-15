@@ -347,6 +347,14 @@ made the chat's typeface impossible to change from CSS.
           sessionId,
         });
       },
+      readHistory(params) {
+        return rpc<GxserverReadSessionChatResult>(bootstrap, '/api/readSessionChat', {
+          ...params,
+          projectId,
+          sessionId,
+          historyMode: params.detail ? 'detail' : 'turns',
+        });
+      },
       readSkills() {
         return rpc<GxserverReadSessionChatSkillsResult>(bootstrap, '/api/readSessionChatSkills', {
           projectId,

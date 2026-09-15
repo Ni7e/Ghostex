@@ -812,6 +812,12 @@ function createMobileSessionChatTransport(): SessionChatTransport {
     readSubagent(params) {
       return bridgeCall<GxserverReadSessionChatResult>('read', { ...params });
     },
+    readHistory(params) {
+      return bridgeCall<GxserverReadSessionChatResult>('read', {
+        ...params,
+        historyMode: params.detail ? 'detail' : 'turns',
+      });
+    },
     readSkills() {
       return bridgeCall<GxserverReadSessionChatSkillsResult>('readSkills');
     },

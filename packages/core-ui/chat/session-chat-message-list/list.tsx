@@ -83,6 +83,13 @@ import {
   SESSION_CHAT_HISTORY_NAVIGATION_EVENT,
   useSessionChatScrollRestoration,
 } from '../use-session-chat-scroll-restoration';
+import {
+  DeferredWorkLoading,
+  SessionChatHistoryReaderContext,
+  useDeferredSessionChatWork,
+} from '../session-chat-deferred-work';
+import type { SessionChatTransport } from '../session-chat-transport';
+import { mergeSessionChatMessagesWith } from '../session-chat-merge';
 
 const LOAD_EARLIER_SCROLL_TOP_PX = 320;
 const AUTO_SCROLL_EDGE_THRESHOLD_PX = 10;
@@ -99,6 +106,7 @@ export function scrollToBottomHotkeyLabel(): string {
 const SCROLLBAR_FADE_MS = 2000;
 
 export interface SessionChatMessageListProps extends SessionChatStartupSendActions {
+  readHistory?: SessionChatTransport['readHistory'];
   sessionKey?: string;
   earlierPageCursor?: number;
   composerCollapsed?: boolean;
@@ -111,6 +119,8 @@ export interface SessionChatMessageListProps extends SessionChatStartupSendActio
   loadingEarlier: boolean;
   onLoadEarlier: () => void;
   onSavePrompt?: (prompt: string) => Promise<void>;
+  /** Opens an assistant reply in the host's Docs review so it can be annotated. */
+  onAnnotateMessage?: (markdown: string) => void;
   /** Saves a settled assistant response inside this session project's Docs tree. */
   saveMessageMarkdown?: SaveSessionMessageMarkdown;
   /** Reads existing project Markdown paths before generating the next file name. */
@@ -150,7 +160,7 @@ export interface SessionChatMessageListProps extends SessionChatStartupSendActio
 }
 
 interface CompletedWorkTurn {
-  final: SessionChatMessage;
+  final: SessionChatMessage | undefined;
   user: SessionChatMessage;
   work: SessionChatMessage[];
 }
@@ -303,9 +313,11 @@ function finalAssistantMessageIds(messages: readonly SessionChatMessage[], isWor
 function completedWorkRenderItems(
   messages: readonly SessionChatMessage[],
   isWorking: boolean,
-  interactedMessageIds: ReadonlySet<string>
+  interactedMessageIds: ReadonlySet<string>,
+  rawMessages: readonly SessionChatMessage[]
 ): SessionChatRenderItem[] {
   const items: SessionChatRenderItem[] = [];
+  const rawIndices = new Map(rawMessages.map((message, index) => [message.id, index]));
   const activeStart = isWorking ? activeResponseStartIndex(messages) : messages.length;
   let index = 0;
   while (index < messages.length) {
@@ -319,7 +331,11 @@ function completedWorkRenderItems(
     }
 
     let nextUserIndex = index + 1;
-    while (nextUserIndex < messages.length && messages[nextUserIndex]?.role !== 'user') {
+    while (
+      nextUserIndex < messages.length &&
+      (messages[nextUserIndex]?.role !== 'user' ||
+        (message.deferredWork && messages[nextUserIndex]?.byteOffset === undefined))
+    ) {
       nextUserIndex += 1;
     }
     const turnMessages = messages.slice(index + 1, nextUserIndex);
@@ -333,7 +349,11 @@ function completedWorkRenderItems(
     }
     const interactedInlineDiff = turnMessages.some((turnMessage) => interactedMessageIds.has(turnMessage.id));
     const interactedGroupedDiff = interactedMessageIds.has(message.id);
-    if (finalIndex < 0 || (index >= activeStart && !interactedGroupedDiff) || interactedInlineDiff) {
+    if (
+      (!message.deferredWork && finalIndex < 0) ||
+      (index >= activeStart && !interactedGroupedDiff) ||
+      interactedInlineDiff
+    ) {
       items.push({ kind: 'message', message });
       for (const turnMessage of turnMessages) {
         items.push({ kind: 'message', message: turnMessage });
@@ -343,18 +363,16 @@ function completedWorkRenderItems(
     }
 
     const final = turnMessages[finalIndex];
-    if (!final) {
-      items.push({ kind: 'message', message });
-      index += 1;
-      continue;
-    }
+    const rawStart = rawIndices.get(message.id)!;
+    const nextUser = messages[nextUserIndex];
+    const rawEnd = nextUser ? rawIndices.get(nextUser.id)! : rawMessages.length;
     items.push({ kind: 'message', message });
     items.push({
       kind: 'completed-work',
       turn: {
         final,
         user: message,
-        work: turnMessages.filter((_, turnIndex) => turnIndex !== finalIndex),
+        work: rawMessages.slice(rawStart + 1, rawEnd).filter((row) => row.id !== final?.id),
       },
     });
     index = nextUserIndex;
@@ -415,22 +433,27 @@ const CompletedWork = memo(
   },
   (previous, next) =>
     previous.onExpand === next.onExpand &&
+    previous.onAnnotate === next.onAnnotate &&
     previous.onSaveMarkdown === next.onSaveMarkdown &&
     previous.showAssistantCopy === next.showAssistantCopy &&
     previous.verboseMode === next.verboseMode &&
     sameSessionChatMessage(previous.turn.user, next.turn.user) &&
-    sameSessionChatMessage(previous.turn.final, next.turn.final) &&
+    (previous.turn.final === next.turn.final ||
+      (Boolean(previous.turn.final && next.turn.final) &&
+        sameSessionChatMessage(previous.turn.final!, next.turn.final!))) &&
     previous.turn.work.length === next.turn.work.length &&
     previous.turn.work.every((message, index) => sameSessionChatMessage(message, next.turn.work[index]!))
 );
 
 function CompletedWorkBody({
+  onAnnotate,
   onExpand,
   onSaveMarkdown,
   showAssistantCopy,
   turn,
   verboseMode,
 }: {
+  onAnnotate?: (markdown: string) => void;
   onExpand: (target: HTMLElement | null) => void;
   onSaveMarkdown?: (markdown: string) => void;
   /**
@@ -444,20 +467,41 @@ function CompletedWorkBody({
   verboseMode: boolean;
 }) {
   const [open, setOpen] = useSessionChatDisclosureState('completed-work', verboseMode);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const deferred = useDeferredSessionChatWork(turn.user.deferredWork, open || filesOpen);
+  const work = useMemo(() => {
+    const rows = deferred.messages
+      ? mergeSessionChatMessagesWith(
+          deferred.messages.filter((message) => message.id !== turn.final?.id),
+          turn.work
+        )
+      : turn.work;
+    return foldSessionChatToolMessages(
+      dropSessionChatHiddenMessages(
+        normalizeSessionChatImageTranscriptMessages(
+          normalizeSessionChatLocalCommandMessages(orderSessionChatMessages(rows))
+        )
+      ),
+      (message) => sessionChatSuppressedTurnLabel(message) !== null
+    );
+  }, [deferred.messages, turn.final?.id, turn.work]);
   const simpleMode = useContext(SessionChatSimpleModeContext);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const visibleArtifacts = turn.work.filter(isVisibleAssistantArtifact);
-  const collapsedWork = turn.work.filter((message) => !isVisibleAssistantArtifact(message));
-  const hasWork = collapsedWork.length > 0;
-  const questionExchanges = useMemo(() => hoistedQuestionExchanges(turn.work), [turn.work]);
+  const visibleArtifacts = work.filter((message) => isVisibleAssistantArtifact(message) || message.role === 'user');
+  const collapsedWork = work.filter((message) => !isVisibleAssistantArtifact(message) && message.role !== 'user');
+  const hasWork = collapsedWork.length > 0 || Boolean(turn.user.deferredWork);
+  const questionExchanges = useMemo(() => hoistedQuestionExchanges(work), [work]);
   const fileChanges = useMemo(
     () =>
-      [...turn.work, turn.final].flatMap(
+      [...work, ...(turn.final ? [turn.final] : [])].flatMap(
         (message) => splitSessionChatFileChanges(splitSessionChatBlocks(message.blocks).tools).changes
       ),
-    [turn.work, turn.final]
+    [work, turn.final]
   );
-  const changedFileCount = new Set(fileChanges.map((change) => change.path)).size;
+  const changedFileCount = new Set([
+    ...fileChanges.map((change) => change.path),
+    ...(turn.user.deferredWork?.filePaths ?? []),
+  ]).size;
 
   return (
     <div className='ghostex-chat-completed-turn'>
@@ -492,7 +536,12 @@ function CompletedWorkBody({
               />
             ) : null}
           </span>
-          <span>{workedDurationLabel(turn.user.timestamp, turn.final.timestamp)}</span>
+          <span>
+            {workedDurationLabel(
+              turn.user.timestamp,
+              turn.final?.timestamp ?? turn.user.deferredWork?.completedAt ?? null
+            )}
+          </span>
         </Button>
         <Separator />
         {hasWork && open ? (
@@ -501,22 +550,27 @@ function CompletedWorkBody({
             label='Collapse completed work'
             onCollapse={() => setOpen(false)}
           >
-            {collapsedWork.map((message) => (
-              <MessageRow
-                hideFileChanges
-                key={message.id}
-                message={message}
-                questionPairsAsRows
-                showAssistantCopy={false}
-                verboseMode={verboseMode}
-              />
-            ))}
+            {turn.user.deferredWork && !deferred.messages ? (
+              <DeferredWorkLoading error={deferred.error} retry={deferred.retry} />
+            ) : (
+              collapsedWork.map((message) => (
+                <MessageRow
+                  hideFileChanges
+                  key={message.id}
+                  message={message}
+                  questionPairsAsRows
+                  showAssistantCopy={false}
+                  verboseMode={verboseMode}
+                />
+              ))
+            )}
           </SessionChatExpansion>
         ) : null}
       </div>
       {changedFileCount > 0 ? (
         <SessionChatDisclosure
           stateKey='files-changed'
+          onOpenChange={setFilesOpen}
           label={
             simpleMode
               ? sessionChatSimpleEditLabel(changedFileCount)
@@ -524,7 +578,11 @@ function CompletedWorkBody({
           }
           onExpand={onExpand}
         >
-          <SessionChatFileChangeCards changes={fileChanges} messageId={turn.user.id} inDisclosure />
+          {turn.user.deferredWork && !deferred.messages ? (
+            <DeferredWorkLoading error={deferred.error} retry={deferred.retry} />
+          ) : (
+            <SessionChatFileChangeCards changes={fileChanges} messageId={turn.user.id} inDisclosure />
+          )}
         </SessionChatDisclosure>
       ) : null}
       {visibleArtifacts.map((message) => (
@@ -545,13 +603,16 @@ function CompletedWorkBody({
           </MessageContent>
         </Message>
       ) : null}
-      <MessageRow
-        hideFileChanges
-        message={turn.final}
-        onSaveMarkdown={onSaveMarkdown}
-        showAssistantCopy={showAssistantCopy}
-        verboseMode={verboseMode}
-      />
+      {turn.final ? (
+        <MessageRow
+          hideFileChanges
+          message={turn.final}
+          onAnnotate={onAnnotate}
+          onSaveMarkdown={onSaveMarkdown}
+          showAssistantCopy={showAssistantCopy}
+          verboseMode={verboseMode}
+        />
+      ) : null}
     </div>
   );
 }
@@ -565,8 +626,10 @@ export function SessionChatMessageList({
   hasMore,
   isWorking,
   loadingEarlier,
-  messages,
+  messages: incomingMessages,
+  readHistory,
   onLoadEarlier,
+  onAnnotateMessage,
   onSavePrompt,
   onRetryStartupSend,
   onRemoveStartupSend,
@@ -581,6 +644,12 @@ export function SessionChatMessageList({
   theme = 'dark',
   verboseMode = false,
 }: SessionChatMessageListProps) {
+  const messages = useMemo(() => {
+    if (!readHistory || !hasMore) return incomingMessages;
+    const user = incomingMessages.findIndex((message) => message.role === 'user');
+    // Keep an incomplete historical turn out of the list until its prompt arrives.
+    return user < 0 ? (isWorking ? incomingMessages : []) : incomingMessages.slice(user);
+  }, [hasMore, incomingMessages, isWorking, readHistory]);
   const interactionState = useMemo(() => sessionChatInteractionState(sessionKey), [sessionKey]);
   const restoredScroll = useRef(interactionState.scroll).current;
   const restoringScrollRef = useRef(Boolean(restoredScroll));
@@ -850,23 +919,27 @@ export function SessionChatMessageList({
     [loadEarlierIfNearTop]
   );
 
-  const rendered = useMemo(
+  const normalizedMessages = useMemo(
     () =>
-      foldSessionChatToolMessages(
-        dropSessionChatHiddenMessages(
-          normalizeSessionChatImageTranscriptMessages(
-            normalizeSessionChatLocalCommandMessages(orderSessionChatMessages(messages))
-          )
-        ),
-        // Collapsed markers must not break a tool-fold run.
-        (message) => sessionChatSuppressedTurnLabel(message) !== null
+      dropSessionChatHiddenMessages(
+        normalizeSessionChatImageTranscriptMessages(
+          normalizeSessionChatLocalCommandMessages(orderSessionChatMessages(messages))
+        )
       ),
     [messages]
   );
-
+  const rendered = useMemo(
+    () =>
+      foldSessionChatToolMessages(
+        normalizedMessages,
+        // Collapsed markers must not break a tool-fold run.
+        (message) => sessionChatSuppressedTurnLabel(message) !== null
+      ),
+    [normalizedMessages]
+  );
   const renderItems = useMemo(
-    () => completedWorkRenderItems(rendered, isWorking, interactedMessageIds),
-    [isWorking, rendered, interactedMessageIds]
+    () => completedWorkRenderItems(rendered, isWorking, interactedMessageIds, normalizedMessages),
+    [isWorking, rendered, interactedMessageIds, normalizedMessages]
   );
   const copyableAssistantMessageIds = useMemo(
     () => finalAssistantMessageIds(rendered, isWorking),
@@ -894,7 +967,7 @@ export function SessionChatMessageList({
         : renderItems.map((item) =>
             item.kind === 'message'
               ? { key: item.message.id, messageId: item.message.id }
-              : { key: `completed-work:${item.turn.user.id}`, messageId: item.turn.final.id }
+              : { key: `completed-work:${item.turn.user.id}`, messageId: item.turn.final?.id ?? item.turn.user.id }
           ),
     [renderItems, summaryMode, summaryTurns]
   );
@@ -1010,213 +1083,231 @@ export function SessionChatMessageList({
   }, [interactionState, restoredScroll, setViewportScrollTop]);
 
   return (
-    <SessionChatInteractionProvider state={interactionState}>
-      <SessionChatFileChangeInteractionContext value={reportFileInteraction}>
-        <SessionChatVirtualScrollerContext value={virtualTranscript}>
-          <MessageScroller className={cn('flex-1', summaryTurns.length >= 2 && 'ghostex-chat-has-minimap')}>
-            <SessionChatMinimap onNavigate={navigateHistory} turns={summaryTurns} />
-            {/* outline-none: Chromium makes scrollers keyboard-focusable and paints
+    <SessionChatHistoryReaderContext value={readHistory}>
+      <SessionChatInteractionProvider state={interactionState}>
+        <SessionChatFileChangeInteractionContext value={reportFileInteraction}>
+          <SessionChatVirtualScrollerContext value={virtualTranscript}>
+            <MessageScroller className={cn('flex-1', summaryTurns.length >= 2 && 'ghostex-chat-has-minimap')}>
+              {messages.length === 0 && hasMore ? (
+                <button
+                  type='button'
+                  className='p-3 text-sm text-muted-foreground'
+                  disabled={loadingEarlier}
+                  onClick={onLoadEarlier}
+                >
+                  {loadingEarlier ? 'Loading earlier turns…' : 'Load earlier turns'}
+                </button>
+              ) : null}
+              <SessionChatMinimap onNavigate={navigateHistory} turns={summaryTurns} />
+              {/* outline-none: Chromium makes scrollers keyboard-focusable and paints
             its default focus ring on them; a transcript is not a control. */}
-            <MessageScrollerViewport
-              className='outline-none'
-              onClickCapture={(event) => {
-                if (
-                  event.target instanceof Element &&
-                  event.target.closest(
-                    'button[aria-expanded], [role="button"][aria-expanded], .ghostex-chat-expansion-rail'
+              <MessageScrollerViewport
+                className='outline-none'
+                onClickCapture={(event) => {
+                  if (
+                    event.target instanceof Element &&
+                    event.target.closest(
+                      'button[aria-expanded], [role="button"][aria-expanded], .ghostex-chat-expansion-rail'
+                    )
                   )
-                )
-                  navigateHistory();
-              }}
-              onWheel={(event) => {
-                resumeFileScrolling();
-                if (event.deltaY < 0) navigateHistory();
-              }}
-              onTouchMove={() => {
-                resumeFileScrolling();
-                navigateHistory();
-              }}
-              onPointerDown={(event) => {
-                if (event.target === event.currentTarget) resumeFileScrolling();
-              }}
-              onKeyDown={(event) => {
-                if (
-                  !event.shiftKey &&
-                  !(
-                    event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')
-                  ) &&
-                  (event.key === 'Home' || event.key === 'End')
-                ) {
-                  event.preventDefault();
-                  resumeFileScrolling();
-                  if (event.key === 'End') jumpToBottom();
-                  else {
                     navigateHistory();
-                    virtualTranscript.virtualizer.scrollToOffset(0, { behavior: 'auto' });
-                  }
-                  return;
-                }
-                if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key))
+                }}
+                onWheel={(event) => {
                   resumeFileScrolling();
-              }}
-              onScroll={handleScroll}
-              ref={viewportRef}
-            >
-              <MessageScrollerContent className='mx-auto w-full max-w-3xl' ref={contentRef}>
-                {summaryMode
-                  ? virtualTranscript.virtualItems.map((virtualItem) => {
-                      const turn = summaryTurns[virtualItem.index]!;
-                      return (
-                        <MessageScrollerItem key={virtualItem.key} messageId={turn.user.id} virtualItem={virtualItem}>
-                          <MessageRow
-                            message={turn.user}
-                            onRetryStartupSend={onRetryStartupSend}
-                            onRemoveStartupSend={onRemoveStartupSend}
-                            onSavePrompt={onSavePrompt}
-                            {...(rewindToMessage && canRewind ? { onRewind: setRewindRequest } : {})}
-                            showAssistantCopy={false}
-                            verboseMode={verboseMode}
-                          />
-                          {turn.final ? (
-                            <SessionChatDisclosure
-                              stateKey={`summary-reply:${turn.user.id}`}
-                              key='agent-reply'
-                              label='Agent reply'
-                              onExpand={anchorExpandedAreaTop}
-                            >
-                              <MessageRow
-                                message={turn.final}
-                                {...(saveMessageMarkdown && listMessageMarkdownPaths
-                                  ? { onSaveMarkdown: setMarkdownToSave }
-                                  : {})}
-                                showAssistantCopy={copyableAssistantMessageIds.has(turn.final.id)}
-                                verboseMode={verboseMode}
-                              />
-                            </SessionChatDisclosure>
-                          ) : turn.active ? (
-                            <SessionChatDisclosure
-                              stateKey={`summary-work:${turn.user.id}`}
-                              key='active-work'
-                              label='Active work'
-                              onExpand={anchorExpandedAreaTop}
-                            >
-                              {turn.activeWork.map((message, index) => (
-                                <MessageRow
-                                  isStreaming={index === turn.activeWork.length - 1}
-                                  key={message.id}
-                                  message={message}
-                                  showAssistantCopy={false}
-                                  verboseMode={verboseMode}
-                                />
-                              ))}
-                            </SessionChatDisclosure>
-                          ) : null}
-                        </MessageScrollerItem>
-                      );
-                    })
-                  : virtualTranscript.virtualItems.map((virtualItem) => {
-                      const index = virtualItem.index;
-                      const item = renderItems[index]!;
-                      return (
-                        <MessageScrollerItem
-                          virtualItem={virtualItem}
-                          key={item.kind === 'message' ? item.message.id : `completed-work:${item.turn.user.id}`}
-                          messageId={item.kind === 'message' ? item.message.id : item.turn.final.id}
-                        >
-                          {item.kind === 'message' ? (
+                  if (event.deltaY < 0) navigateHistory();
+                }}
+                onTouchMove={() => {
+                  resumeFileScrolling();
+                  navigateHistory();
+                }}
+                onPointerDown={(event) => {
+                  if (event.target === event.currentTarget) resumeFileScrolling();
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    !event.shiftKey &&
+                    !(
+                      event.target instanceof Element &&
+                      event.target.closest('input, textarea, [contenteditable="true"]')
+                    ) &&
+                    (event.key === 'Home' || event.key === 'End')
+                  ) {
+                    event.preventDefault();
+                    resumeFileScrolling();
+                    if (event.key === 'End') jumpToBottom();
+                    else {
+                      navigateHistory();
+                      virtualTranscript.virtualizer.scrollToOffset(0, { behavior: 'auto' });
+                    }
+                    return;
+                  }
+                  if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key))
+                    resumeFileScrolling();
+                }}
+                onScroll={handleScroll}
+                ref={viewportRef}
+              >
+                <MessageScrollerContent className='mx-auto w-full max-w-3xl' ref={contentRef}>
+                  {summaryMode
+                    ? virtualTranscript.virtualItems.map((virtualItem) => {
+                        const turn = summaryTurns[virtualItem.index]!;
+                        return (
+                          <MessageScrollerItem key={virtualItem.key} messageId={turn.user.id} virtualItem={virtualItem}>
                             <MessageRow
-                              /*
-                               * Only the newest row can still be growing, and only while
-                               * the agent is working: transcript tailing appends to the
-                               * last message, and the synthetic streaming preview row is
-                               * always last when it exists. Earlier rows are settled, so
-                               * their code fences are safe to highlight and cache.
-                               * `completedWorkRenderItems` never folds the active
-                               * response while working, so a "completed-work" item is
-                               * settled by construction and keeps the default
-                               * `isStreaming={false}`.
-                               */
-                              isStreaming={isWorking && index === renderItems.length - 1}
-                              message={item.message}
+                              message={turn.user}
                               onRetryStartupSend={onRetryStartupSend}
                               onRemoveStartupSend={onRemoveStartupSend}
                               onSavePrompt={onSavePrompt}
                               {...(rewindToMessage && canRewind ? { onRewind: setRewindRequest } : {})}
-                              {...(saveMessageMarkdown && listMessageMarkdownPaths
-                                ? { onSaveMarkdown: setMarkdownToSave }
-                                : {})}
-                              showAssistantCopy={copyableAssistantMessageIds.has(item.message.id)}
+                              showAssistantCopy={false}
                               verboseMode={verboseMode}
                             />
-                          ) : (
-                            <CompletedWork
-                              onExpand={anchorExpandedAreaTop}
-                              {...(saveMessageMarkdown && listMessageMarkdownPaths
-                                ? { onSaveMarkdown: setMarkdownToSave }
-                                : {})}
-                              showAssistantCopy={copyableAssistantMessageIds.has(item.turn.final.id)}
-                              turn={item.turn}
-                              verboseMode={verboseMode}
-                            />
-                          )}
-                        </MessageScrollerItem>
-                      );
-                    })}
-              </MessageScrollerContent>
-            </MessageScrollerViewport>
-            <SessionChatScrollbar
-              viewportRef={viewportRef}
-              contentRef={contentRef}
-              onNavigate={() => {
-                cancelScrollMomentum();
-                resumeFileScrolling();
-                navigateHistory();
-              }}
-            />
-            {/* CDXC:SessionChat 2026-09-11 DECISION:
+                            {turn.final ? (
+                              <SessionChatDisclosure
+                                stateKey={`summary-reply:${turn.user.id}`}
+                                key='agent-reply'
+                                label='Agent reply'
+                                onExpand={anchorExpandedAreaTop}
+                              >
+                                <MessageRow
+                                  message={turn.final}
+                                  {...(onAnnotateMessage ? { onAnnotate: onAnnotateMessage } : {})}
+                                  {...(saveMessageMarkdown && listMessageMarkdownPaths
+                                    ? { onSaveMarkdown: setMarkdownToSave }
+                                    : {})}
+                                  showAssistantCopy={copyableAssistantMessageIds.has(turn.final?.id)}
+                                  verboseMode={verboseMode}
+                                />
+                              </SessionChatDisclosure>
+                            ) : turn.active ? (
+                              <SessionChatDisclosure
+                                stateKey={`summary-work:${turn.user.id}`}
+                                key='active-work'
+                                label='Active work'
+                                onExpand={anchorExpandedAreaTop}
+                              >
+                                {turn.activeWork.map((message, index) => (
+                                  <MessageRow
+                                    isStreaming={index === turn.activeWork.length - 1}
+                                    key={message.id}
+                                    message={message}
+                                    showAssistantCopy={false}
+                                    verboseMode={verboseMode}
+                                  />
+                                ))}
+                              </SessionChatDisclosure>
+                            ) : null}
+                          </MessageScrollerItem>
+                        );
+                      })
+                    : virtualTranscript.virtualItems.map((virtualItem) => {
+                        const index = virtualItem.index;
+                        const item = renderItems[index]!;
+                        return (
+                          <MessageScrollerItem
+                            virtualItem={virtualItem}
+                            key={item.kind === 'message' ? item.message.id : `completed-work:${item.turn.user.id}`}
+                            messageId={
+                              item.kind === 'message' ? item.message.id : (item.turn.final?.id ?? item.turn.user.id)
+                            }
+                          >
+                            {item.kind === 'message' ? (
+                              <MessageRow
+                                /*
+                                 * Only the newest row can still be growing, and only while
+                                 * the agent is working: transcript tailing appends to the
+                                 * last message, and the synthetic streaming preview row is
+                                 * always last when it exists. Earlier rows are settled, so
+                                 * their code fences are safe to highlight and cache.
+                                 * `completedWorkRenderItems` never folds the active
+                                 * response while working, so a "completed-work" item is
+                                 * settled by construction and keeps the default
+                                 * `isStreaming={false}`.
+                                 */
+                                isStreaming={isWorking && index === renderItems.length - 1}
+                                message={item.message}
+                                onRetryStartupSend={onRetryStartupSend}
+                                onRemoveStartupSend={onRemoveStartupSend}
+                                onSavePrompt={onSavePrompt}
+                                {...(onAnnotateMessage ? { onAnnotate: onAnnotateMessage } : {})}
+                                {...(rewindToMessage && canRewind ? { onRewind: setRewindRequest } : {})}
+                                {...(saveMessageMarkdown && listMessageMarkdownPaths
+                                  ? { onSaveMarkdown: setMarkdownToSave }
+                                  : {})}
+                                showAssistantCopy={copyableAssistantMessageIds.has(item.message.id)}
+                                verboseMode={verboseMode}
+                              />
+                            ) : (
+                              <CompletedWork
+                                onExpand={anchorExpandedAreaTop}
+                                {...(onAnnotateMessage ? { onAnnotate: onAnnotateMessage } : {})}
+                                {...(saveMessageMarkdown && listMessageMarkdownPaths
+                                  ? { onSaveMarkdown: setMarkdownToSave }
+                                  : {})}
+                                showAssistantCopy={copyableAssistantMessageIds.has(item.turn.final?.id ?? '')}
+                                turn={item.turn}
+                                verboseMode={verboseMode}
+                              />
+                            )}
+                          </MessageScrollerItem>
+                        );
+                      })}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <SessionChatScrollbar
+                viewportRef={viewportRef}
+                contentRef={contentRef}
+                onNavigate={() => {
+                  cancelScrollMomentum();
+                  resumeFileScrolling();
+                  navigateHistory();
+                }}
+              />
+              {/* CDXC:SessionChat 2026-09-11 DECISION:
               User: the scroll-to-bottom pill shows the configured shortcut so the
               end is reachable from the keyboard at any time; keep it small, no icon,
               fully circular. */}
-            <SessionChatScrollBottomButton
-              contentRef={contentRef}
-              edgeThreshold={AUTO_SCROLL_EDGE_THRESHOLD_PX}
-              onJump={jumpToBottom}
-              shortcutLabel={scrollToBottomShortcutLabel}
-              viewportRef={viewportRef}
-            />
-          </MessageScroller>
-          {saveMessageMarkdown && listMessageMarkdownPaths ? (
-            <SessionChatSaveMarkdownDialog
-              listExistingPaths={listMessageMarkdownPaths}
-              markdown={markdownToSave ?? ''}
-              onOpenChange={(open) => {
-                if (!open) {
-                  setMarkdownToSave(null);
-                }
-              }}
-              open={markdownToSave !== null}
-              save={saveMessageMarkdown}
-              sessionTitle={sessionTitle}
-              theme={theme}
-            />
-          ) : null}
-          {rewindToMessage ? (
-            <SessionChatRewindDialog
-              agent={rewindAgent}
-              onOpenChange={(open) => {
-                if (!open) {
-                  setRewindRequest(null);
-                }
-              }}
-              {...(onRewound ? { onRewound } : {})}
-              request={rewindRequest}
-              rewind={rewindToMessage}
-              theme={theme}
-            />
-          ) : null}
-        </SessionChatVirtualScrollerContext>
-      </SessionChatFileChangeInteractionContext>
-    </SessionChatInteractionProvider>
+              <SessionChatScrollBottomButton
+                contentRef={contentRef}
+                edgeThreshold={AUTO_SCROLL_EDGE_THRESHOLD_PX}
+                onJump={jumpToBottom}
+                shortcutLabel={scrollToBottomShortcutLabel}
+                viewportRef={viewportRef}
+              />
+            </MessageScroller>
+            {saveMessageMarkdown && listMessageMarkdownPaths ? (
+              <SessionChatSaveMarkdownDialog
+                listExistingPaths={listMessageMarkdownPaths}
+                markdown={markdownToSave ?? ''}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setMarkdownToSave(null);
+                  }
+                }}
+                open={markdownToSave !== null}
+                save={saveMessageMarkdown}
+                sessionTitle={sessionTitle}
+                theme={theme}
+              />
+            ) : null}
+            {rewindToMessage ? (
+              <SessionChatRewindDialog
+                agent={rewindAgent}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setRewindRequest(null);
+                  }
+                }}
+                {...(onRewound ? { onRewound } : {})}
+                request={rewindRequest}
+                rewind={rewindToMessage}
+                theme={theme}
+              />
+            ) : null}
+          </SessionChatVirtualScrollerContext>
+        </SessionChatFileChangeInteractionContext>
+      </SessionChatInteractionProvider>
+    </SessionChatHistoryReaderContext>
   );
 }
 

@@ -381,6 +381,66 @@ pub(crate) async fn handle_read_session_chat_http(
             Ok(resolution) => resolution,
             Err(error) => return domain_error_response(endpoint_path, request_id, error),
         };
+    if let Some(mode) = params.get("historyMode").and_then(Value::as_str) {
+        if !matches!(mode, "turns" | "detail") || before_offset.is_none() {
+            return domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "invalidParams",
+                    message: "History reads require historyMode turns/detail and beforeOffset."
+                        .to_string(),
+                },
+            );
+        }
+        let history_agent =
+            crate::session_chat::resolve_session_chat_transcript_agent(resolution.agent.as_deref());
+        let path = resolution.transcript_path.clone();
+        let before = before_offset.unwrap();
+        let detail = mode == "detail";
+        let preserve = params
+            .get("preserveNewest")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let history_project = project_id.clone();
+        let history_session = session_id.clone();
+        let history = tokio::task::spawn_blocking(move || match (history_agent, path) {
+            (Some(agent), Some(path)) => crate::session_chat_history::read_history(
+                agent,
+                &path,
+                before,
+                limit,
+                detail,
+                preserve,
+                &history_project,
+                &history_session,
+            ),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "The session transcript is unavailable.",
+            )),
+        })
+        .await;
+        return match history {
+            Ok(Ok(value)) => routed_json(
+                Some(endpoint_path),
+                StatusCode::OK,
+                rpc_success(request_id, value),
+            ),
+            outcome => domain_error_response(
+                endpoint_path,
+                request_id,
+                DomainStateError {
+                    code: "internalError",
+                    message: match outcome {
+                        Ok(Err(error)) => error.to_string(),
+                        Err(error) => error.to_string(),
+                        _ => unreachable!(),
+                    },
+                },
+            ),
+        };
+    }
     // Long-poll: hold while nothing observable changed, then fall through to
     // the normal read. A vanished session surfaces as the notFound error the
     // immediate read would have produced.

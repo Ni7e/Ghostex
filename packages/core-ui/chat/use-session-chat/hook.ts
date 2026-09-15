@@ -1,3 +1,4 @@
+import { invalidateDeferredSessionChatWork } from '../session-chat-deferred-work';
 import type { AccountSwitchProgress } from '@/packages/shared/agent-accounts';
 import type { SessionChatPendingModelSelection } from '@/packages/shared/session-chat';
 import type { SessionChatDraftVersion } from '@/packages/shared/session-chat-queue';
@@ -401,6 +402,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
   const frameStateRef = useRef<FrameState>({ epoch: null, frameArrived: false, seq: 0 });
   const limitRef = useRef(initialLimit);
   const beforeOffsetRef = useRef(0);
+  const historyEpochRef = useRef<number | null>(null);
+  const historyPrefixCountRef = useRef(0);
+  const boundaryAttemptRef = useRef<number | null>(null);
   const closedRef = useRef(false);
   /**
    * Bumped every time the subscription is rebuilt (session/transport change).
@@ -598,11 +602,31 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         status: result.status,
         working: result.working === true,
       });
-      replaceSessionChatMergerList(mergerRef.current, result.messages);
+      const previous = mergerRef.current;
+      const overlap = result.messages[0] && previous.indexById.get(result.messages[0].id);
+      const keepHistory =
+        historyEpochRef.current !== null && historyEpochRef.current === result.epoch && overlap !== undefined;
+      const nextMessages = keepHistory
+        ? [
+            ...previous.list.slice(0, overlap),
+            ...result.messages.map((message) => {
+              const old = previous.list[previous.indexById.get(message.id) ?? -1];
+              return old?.deferredWork ? { ...message, deferredWork: old.deferredWork } : message;
+            }),
+          ]
+        : result.messages;
+      if (!keepHistory) {
+        invalidateDeferredSessionChatWork(transport.readHistory);
+        historyEpochRef.current = null;
+        historyPrefixCountRef.current = 0;
+      }
+      replaceSessionChatMergerList(mergerRef.current, nextMessages);
       setTranscript(mergerRef.current.list);
       setLifecycle(result.lifecycle ?? null);
-      setHasMore(sessionChatPageHasMore(result));
-      beforeOffsetRef.current = result.beforeOffset;
+      if (!keepHistory) {
+        setHasMore(sessionChatPageHasMore(result));
+        beforeOffsetRef.current = result.beforeOffset;
+      }
       setServerStatus(result.status);
       setServerWorking(result.working === true || result.status === 'working');
       if (typeof result.working === 'boolean') {
@@ -632,7 +656,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       loadEarlierEpochRef.current = null;
       setLoadingEarlier(false);
     },
-    [applyAgentIdentity, applyQueueCarriage, applySelectedOptions, applyTerminalActivity]
+    [applyAgentIdentity, applyQueueCarriage, applySelectedOptions, applyTerminalActivity, transport.readHistory]
   );
 
   /*
@@ -764,6 +788,9 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     assemblerRef.current = createIncrementalSessionChatAssembler();
     appliedRef.current = [];
     beforeOffsetRef.current = 0;
+    historyEpochRef.current = null;
+    historyPrefixCountRef.current = 0;
+    boundaryAttemptRef.current = null;
     resyncInFlightRef.current = false;
     resyncSeenInFlightRef.current = null;
     resyncFollowUpsRef.current = 0;
@@ -937,7 +964,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
           // live list already holds.
           limitRef.current = Math.min(
             SESSION_CHAT_MAX_LIMIT,
-            Math.max(limitRef.current, mergerRef.current.list.length)
+            Math.max(limitRef.current, mergerRef.current.list.length - historyPrefixCountRef.current)
           );
           setTranscript(mergerRef.current.list);
         }
@@ -1329,22 +1356,36 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
 
   // --- Actions ----------------------------------------------------------------
   const loadEarlier = useCallback((): void => {
-    if (loadingEarlier || !hasMore || closedRef.current) {
+    if (loadingEarlier || loadEarlierEpochRef.current !== null || !hasMore || closedRef.current) {
       return;
     }
     setLoadingEarlier(true);
     const requestEpoch = frameStateRef.current.epoch;
+    const requestGeneration = generationRef.current;
     const requestedBeforeOffset = beforeOffsetRef.current;
     loadEarlierEpochRef.current = requestEpoch;
-    void withReadTimeout(transport.read({ beforeOffset: requestedBeforeOffset, limit: SESSION_CHAT_PAGE }))
+    const historyRead = transport.readHistory;
+    const read = historyRead
+      ? historyRead({
+          beforeOffset: requestedBeforeOffset,
+          limit: SESSION_CHAT_PAGE,
+          preserveNewest: workingRef.current && !mergerRef.current.list.some((message) => message.role === 'user'),
+        })
+      : transport.read({ beforeOffset: requestedBeforeOffset, limit: SESSION_CHAT_PAGE });
+    void withReadTimeout(read)
       .then((result) => {
-        if (closedRef.current || loadEarlierEpochRef.current !== requestEpoch) {
+        if (
+          closedRef.current ||
+          generationRef.current !== requestGeneration ||
+          loadEarlierEpochRef.current !== requestEpoch
+        ) {
           return;
         }
         if (frameStateRef.current.epoch !== requestEpoch) {
           // A replacement rebuilt the tail while this page was in flight.
           return;
         }
+        if (result.status === 'error') throw new Error(result.error ?? 'History could not be loaded.');
         const merger = mergerRef.current;
         const older = result.messages.filter((message) => {
           const at = merger.indexById.get(message.id);
@@ -1359,10 +1400,15 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         replaceSessionChatMergerList(merger, [...older, ...merger.list]);
         // Grow the read window so a later resync answers with at least the
         // history that is already on screen.
-        limitRef.current = Math.min(
-          SESSION_CHAT_MAX_LIMIT,
-          Math.max(limitRef.current + SESSION_CHAT_PAGE, merger.list.length)
-        );
+        if (historyRead) {
+          historyEpochRef.current = requestEpoch;
+          historyPrefixCountRef.current += older.length;
+        } else {
+          limitRef.current = Math.min(
+            SESSION_CHAT_MAX_LIMIT,
+            Math.max(limitRef.current + SESSION_CHAT_PAGE, merger.list.length)
+          );
+        }
         setTranscript(merger.list);
         setHasMore(sessionChatPageHasMore(result, requestedBeforeOffset));
         beforeOffsetRef.current = result.beforeOffset;
@@ -1374,12 +1420,25 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
         // the user can ask for the same page again.
       })
       .finally(() => {
-        if (!closedRef.current && loadEarlierEpochRef.current === requestEpoch) {
+        if (
+          !closedRef.current &&
+          generationRef.current === requestGeneration &&
+          loadEarlierEpochRef.current === requestEpoch
+        ) {
           setLoadingEarlier(false);
           loadEarlierEpochRef.current = null;
         }
       });
   }, [hasMore, loadingEarlier, transport]);
+
+  useEffect(() => {
+    const first = transcript[0];
+    if (!transport.readHistory || !first || first.role === 'user' || !hasMore || loadingEarlier) return;
+    const cursor = beforeOffsetRef.current;
+    if (boundaryAttemptRef.current === cursor) return;
+    boundaryAttemptRef.current = cursor;
+    loadEarlier();
+  }, [hasMore, loadEarlier, loadingEarlier, transcript, transport]);
 
   const send = useCallback(
     async (text: string, imagePaths?: string[], draftVersion?: SessionChatDraftVersion): Promise<void> => {

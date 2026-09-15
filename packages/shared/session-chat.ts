@@ -60,9 +60,11 @@ export const SESSION_CHAT_SUPPORTED_AGENTS = new Set([
   'hermes-agent',
   'pi',
   'omp',
+  'zcode',
 ]);
 
-export type SessionChatTranscriptAgent = 'antigravity' | 'claude' | 'codex' | 'cursor' | 'grok' | 'hermes' | 'pi';
+export type SessionChatTranscriptAgent =
+  'antigravity' | 'claude' | 'codex' | 'cursor' | 'grok' | 'hermes' | 'pi' | 'zcode';
 
 export function resolveSessionChatTranscriptAgent(
   agentId: string | null | undefined,
@@ -85,6 +87,7 @@ export function resolveSessionChatTranscriptAgent(
     if (normalized === 'grok' || normalized === 'grok-build') return 'grok';
     if (normalized === 'hermes' || normalized === 'hermes-agent' || normalized === 'hermes agent') return 'hermes';
     if (normalized === 'pi' || normalized === 'omp') return 'pi';
+    if (normalized === 'zcode' || normalized === 'zcode-cli') return 'zcode';
   }
   return null;
 }
@@ -176,6 +179,8 @@ export interface SessionChatAsyncQuestion {
 }
 
 export interface SessionChatMessage {
+  /** Older completed work is fetched only when its disclosure is opened. */
+  deferredWork?: SessionChatDeferredWork;
   /** Stable across re-reads: record uuid/payload id, else `${filePath}:${byteOffset16}`. */
   id: string;
   role: SessionChatRole;
@@ -219,6 +224,24 @@ export interface SessionChatMessage {
     state: 'queued' | 'sending' | 'failed';
     errorMessage?: string;
   };
+}
+
+export interface SessionChatDeferredWork {
+  completedAt: number | null;
+  beforeOffset: number;
+  startId: string;
+  endId: string;
+  messageCount: number;
+  filePaths: string[];
+}
+
+export interface SessionChatHistoryReadParams {
+  beforeOffset: number;
+  limit?: number;
+  /** Raw pages used only by an explicitly expanded work section. */
+  detail?: boolean;
+  /** The leading fragment belongs to a response that is still running. */
+  preserveNewest?: boolean;
 }
 
 export type SessionChatTurnLifecycleState = 'working' | 'completed' | 'interrupted';
@@ -574,7 +597,7 @@ export interface SessionChatTerminalActivity {
 CDXC:SessionChat 2026-08-23:
 Slash commands GHOSTEX typed into the agent without the composer:
 provider-specific first-prompt auto-title jobs and the rename modal stage
-`/rename <title>` (Pi `/name`, Hermes Agent `/title`), while non-Codex forks
+`/rename <title>` (Pi `/name`, Hermes Agent `/title`), while forks
 submit a provisional `Fork: <old title>`.
 
 Claude Code records everything it intercepts, so its transcript already carries

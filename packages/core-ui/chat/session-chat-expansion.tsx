@@ -1,5 +1,5 @@
 import { IconChevronRight } from '@tabler/icons-react';
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useSessionChatDisclosureState } from './session-chat-interaction-state';
 import { cn } from '@/packages/components/utils';
 import { Button } from '../../components/ui/button';
@@ -50,13 +50,16 @@ export function SessionChatDisclosure({
   children,
   label,
   onExpand,
+  onOpenChange,
 }: {
   children: ReactNode;
   stateKey?: string;
   label: string;
   onExpand: (target: HTMLElement | null) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useSessionChatDisclosureState(stateKey ?? label, false);
+  useEffect(() => onOpenChange?.(open), [onOpenChange, open]);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   return (

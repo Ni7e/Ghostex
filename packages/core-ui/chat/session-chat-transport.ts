@@ -31,6 +31,9 @@ import type {
 } from '../../shared/session-chat';
 
 export interface SessionChatTransport {
+  readHistory?(
+    params: import('../../shared/session-chat').SessionChatHistoryReadParams
+  ): Promise<GxserverReadSessionChatResult>;
   accounts?: AccountsTransport;
   /** Per-session bottom-bar state retained by hosts that release inactive chat pages. */
   presentation?: SessionChatPresentationStore;
