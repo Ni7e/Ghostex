@@ -17,6 +17,29 @@ pub(crate) struct AgentMetadataTitle {
     updated_at: Option<String>,
 }
 
+/// CDXC:SessionTitles 2026-09-15 WHY:
+/// Custom launch profiles keep their configured agent ID, so matching that ID against provider names skipped metadata sync and left confirmed Claude renames pending forever.
+/// Resolve the underlying launch provider only for metadata reads; the session retains its configured identity.
+fn metadata_session_identity(session: &Value) -> ResolvedIdentity {
+    let runtime_settings = object_field(session, "runtimeSettings");
+    let mut identity = resolve_session_identity(&IdentityInput {
+        agent_id: read_text_value(session, "agentId"),
+        agent_name: read_text_from_map(&runtime_settings, "agentName"),
+        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+        runtime_settings,
+        startup_text: None,
+    });
+    if identity
+        .agent_id
+        .as_deref()
+        .is_some_and(|agent_id| agent_id.starts_with("custom-"))
+    {
+        identity.agent_id = session_launch_agent_provider_id(session);
+    }
+    identity
+}
+
 /*
 CDXC:SessionTitles 2026-09-11 WHY:
 Older Ghostex versions claimed Codex title jobs while waiting for its provisional 36-character prompt prefix to become a generated name.
@@ -92,14 +115,7 @@ pub(crate) fn reconcile_agent_metadata_title(
         });
     };
     let runtime_settings = object_field(&session, "runtimeSettings");
-    let identity = resolve_session_identity(&IdentityInput {
-        agent_id: read_text_value(&session, "agentId"),
-        agent_name: read_text_from_map(&runtime_settings, "agentName"),
-        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
-        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
-        runtime_settings: runtime_settings.clone(),
-        startup_text: None,
-    });
+    let identity = metadata_session_identity(&session);
     if !is_agent_associated(&session, &identity) {
         return Ok(AgentTitleReconcileResult {
             changed: false,
@@ -327,15 +343,7 @@ pub(crate) fn agent_metadata_title_source(
     home_dir: &Path,
     session: &Value,
 ) -> Option<AgentMetadataTitleSource> {
-    let runtime_settings = object_field(session, "runtimeSettings");
-    let identity = resolve_session_identity(&IdentityInput {
-        agent_id: read_text_value(session, "agentId"),
-        agent_name: read_text_from_map(&runtime_settings, "agentName"),
-        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
-        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
-        runtime_settings,
-        startup_text: None,
-    });
+    let identity = metadata_session_identity(session);
     let agent_session_id = identity.agent_session_id.as_deref()?.trim();
     if agent_session_id.is_empty() {
         return None;
