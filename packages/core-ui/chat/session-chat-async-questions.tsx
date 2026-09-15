@@ -1,16 +1,14 @@
 import { IconChevronDown, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/packages/components/ui/button';
-import type { SessionChatMessage } from '@/packages/shared/session-chat';
+import type { SessionChatMessage, SessionChatTheme } from '@/packages/shared/session-chat';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
 import { SessionQuestionIndicator } from '../session-question-indicator';
 import { pendingSessionChatAsyncQuestions } from './session-chat-async-questions-state';
+import { useSessionChatQuestionDrafts } from './session-chat-question-drafts';
+import { SessionChatAnswerInput } from './session-chat-answer-input';
+import type { SaveSessionChatImage } from './session-chat-image-attachments';
 import './session-chat-async-questions.css';
-
-interface AnswerDraft {
-  selected: number;
-  custom: string;
-}
 
 /**
  * CDXC:SessionChat 2026-09-12 DECISION:
@@ -24,6 +22,8 @@ export function SessionChatAsyncQuestions({
   onSend,
   onDismiss,
   sessionKey,
+  onPasteImage,
+  theme,
 }: {
   messages: readonly SessionChatMessage[];
   canSend: boolean;
@@ -31,6 +31,8 @@ export function SessionChatAsyncQuestions({
   onSend: (questionId: string, text: string) => Promise<void>;
   onDismiss: (questionId: string) => Promise<void>;
   sessionKey?: string;
+  onPasteImage?: SaveSessionChatImage;
+  theme?: SessionChatTheme;
 }) {
   const storageKey = sessionKey ? `ghostex:async-questions:${sessionKey}` : null;
   const [retired, setRetired] = useState<string[]>(() => {
@@ -47,7 +49,8 @@ export function SessionChatAsyncQuestions({
     [messages, retired]
   );
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, AnswerDraft>>({});
+  const { drafts, saveDrafts, updateDraft, clearDrafts, saveError } = useSessionChatQuestionDrafts(sessionKey, 'async');
+  const [savingImages, setSavingImages] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,11 +62,12 @@ export function SessionChatAsyncQuestions({
   );
   const question = pending[index];
   if (!question) return null;
-  const draft = drafts[question.key] ?? { selected: 0, custom: '' };
-  const answer = draft.custom.trim() || question.options?.[draft.selected] || '';
-  const disabled = !canSend || submitting;
+  const draft = drafts[question.key] ?? { indices: [0], other: '' };
+  const answer = draft.other.trim() || question.options?.[draft.indices[0] ?? 0] || '';
+  const disabled = !canSend || submitting || savingImages;
 
   const retire = (key: string): void => {
+    if (drafts[key]) clearDrafts({ [key]: drafts[key] });
     setRetired((current) => {
       const next = [...current, key].slice(-1000);
       if (storageKey) {
@@ -142,36 +146,35 @@ export function SessionChatAsyncQuestions({
           {question.options?.length ? (
             <SessionChatChoiceRows
               options={question.options.map((label) => ({ label }))}
-              selected={draft.custom.trim() ? [] : [draft.selected]}
+              selected={draft.other.trim() ? [] : draft.indices}
               readOnly={disabled}
-              onSelect={(selected) =>
-                setDrafts((current) => ({ ...current, [question.key]: { selected, custom: '' } }))
-              }
+              onSelect={(selected) => saveDrafts({ ...drafts, [question.key]: { indices: [selected], other: '' } })}
             />
           ) : null}
-          <textarea
+          <SessionChatAnswerInput
             className='ghostex-chat-async-questions-answer'
-            rows={2}
+            theme={theme}
             aria-label='Your answer'
             aria-describedby={`${panelId}-question`}
             placeholder={question.options?.length ? 'Or write your own answer…' : 'Write your answer…'}
             disabled={submitting}
-            value={draft.custom}
+            value={draft.other}
+            onPasteImage={onPasteImage}
+            onPendingChange={setSavingImages}
+            onUpdate={(update) =>
+              updateDraft(question.key, (current) => ({ ...current, other: update(current.other) }))
+            }
             // CDXC:SessionChat 2026-09-12 DECISION: User: Enter sends a question answer; Shift+Enter inserts a newline.
             onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229)
+              if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229)
                 return;
               event.preventDefault();
-              event.stopPropagation();
               if (!event.repeat) void submit();
             }}
-            onChange={(event) =>
-              setDrafts((current) => ({ ...current, [question.key]: { ...draft, custom: event.target.value } }))
-            }
           />
-          {error ? (
+          {error || saveError ? (
             <p className='text-destructive' role='alert'>
-              {error}
+              {error || saveError}
             </p>
           ) : null}
           {!canSend ? (
@@ -186,7 +189,7 @@ export function SessionChatAsyncQuestions({
                   aria-label='Previous question'
                   size='icon-sm'
                   variant='ghost'
-                  disabled={submitting || index === 0}
+                  disabled={submitting || savingImages || index === 0}
                   onClick={() => {
                     setActiveKey(pending[index - 1]!.key);
                     setError(null);
@@ -198,7 +201,7 @@ export function SessionChatAsyncQuestions({
                   aria-label='Next question'
                   size='icon-sm'
                   variant='ghost'
-                  disabled={submitting || index === pending.length - 1}
+                  disabled={submitting || savingImages || index === pending.length - 1}
                   onClick={() => {
                     setActiveKey(pending[index + 1]!.key);
                     setError(null);

@@ -1,3 +1,4 @@
+import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { AccountSwitchCard } from '../accounts/account-switch-card';
 import { useAccountSwitchStatus } from '../accounts/use-account-switch-status';
 import type { SessionChatDraftHandoff } from '@/packages/shared/session-chat-queue';
@@ -496,6 +497,7 @@ export function SessionChatView({
   onSimpleModeChange,
   working,
 }: SessionChatViewProps) {
+  useAppScrollbars();
   const theme = useSessionChatTheme(themeSetting, appTheme);
   useEffect(() => {
     // Chat dropdowns are portaled outside this root. Stamp the chat-only
@@ -697,7 +699,23 @@ export function SessionChatView({
     chat.sessionAgentId,
     retainedAccounts
   );
-  const accountSwitch = useAccountSwitchStatus(chat.accountSwitch, sessionKey);
+  /*
+  CDXC:AgentProviders 2026-09-15 DECISION:
+  User: the switch card stays up until the switch is actually complete and the
+  second account is ready. "Ready" here is what this chat can verify: the
+  session account read (refreshed on every phase change below) names the
+  target account, and no queued model change is still waiting to be applied
+  to the resumed CLI. The web app and the phone build their transport without
+  an accounts request, so they cannot confirm the account and settle on
+  gxserver's success alone; gating on `accountsEnabled` there left the card up
+  forever.
+  */
+  const accountSwitchConfirmed =
+    !accountsTransport ||
+    !chat.accountSwitch?.toAccountId ||
+    accountState.data?.session?.accountId === chat.accountSwitch.toAccountId;
+  const accountSwitchReady = accountSwitchConfirmed && !chat.pendingModelSelection;
+  const accountSwitch = useAccountSwitchStatus(chat.accountSwitch, sessionKey, accountSwitchReady);
   const accountSwitchRefreshKey = chat.accountSwitch ? `${chat.accountSwitch.id}:${chat.accountSwitch.phase}` : null;
   useEffect(() => {
     if (accountSwitchRefreshKey && accountsEnabled) void accountState.request({ operation: 'session' });
@@ -1842,7 +1860,7 @@ export function SessionChatView({
                       ) : null}
                     </div>
                     {accountSwitch.visible && (
-                      <div className='gx-account-switch-overlay'>
+                      <div className='gx-account-switch-overlay' data-phase={accountSwitch.visible.phase}>
                         <div className='gx-account-switch-region'>
                           <AccountSwitchCard
                             progress={
@@ -1852,6 +1870,7 @@ export function SessionChatView({
                             }
                             accounts={accountState.data?.accounts ?? []}
                             now={accountSwitch.now}
+                            ready={accountSwitchReady}
                             retrying={accountState.busy}
                             {...(accountSwitch.visible.phase === 'failed' &&
                             accountSwitch.visible.toAccountId &&
@@ -1894,6 +1913,8 @@ export function SessionChatView({
                             : {})}
                         />
                         <SessionChatAsyncQuestions
+                          theme={theme}
+                          onPasteImage={pasteImage}
                           key={`async-questions:${sessionKey}`}
                           sessionKey={sessionKey}
                           messages={chat.messages}
@@ -1906,6 +1927,10 @@ export function SessionChatView({
                           onDismiss={(questionId) => chat.answerPrompt({ kind: 'dismissAsyncQuestion', questionId })}
                         />
                         <SessionChatInteractiveCard
+                          theme={theme}
+                          onPasteImage={pasteImage}
+                          key={`interactive-questions:${sessionKey}`}
+                          sessionKey={sessionKey}
                           canSend={canSend}
                           onAnswer={chat.answerPrompt}
                           onInterrupt={interrupt}

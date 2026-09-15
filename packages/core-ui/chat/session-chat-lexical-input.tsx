@@ -1,4 +1,5 @@
 import { readSessionChatCursor, saveSessionChatCursor } from './session-chat-interaction-state';
+import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { shortcutKeyFromKeyboardEvent } from '@/packages/shared/keyboard-shortcut-key';
 import { useLayoutEffect, useRef, useState } from 'react';
 import {
@@ -13,11 +14,13 @@ import {
   REDO_COMMAND,
   SKIP_DOM_SELECTION_TAG,
   UNDO_COMMAND,
+  type LexicalEditor,
 } from 'lexical';
 import { createEmptyHistoryState, registerHistory } from '@lexical/history';
 import { registerPlainText } from '@lexical/plain-text';
 import type { SessionChatTheme } from '@/packages/shared/session-chat';
 import { Tooltip, TooltipContent } from '../app-tooltip';
+import { playCopySound } from '../copy-sound';
 import type { SessionChatComposerInputApi, SessionChatComposerKeyEvent } from './session-chat-composer';
 import { sessionChatCaretMovement } from './session-chat-caret-navigation';
 import { revealSessionChatComposerCaret } from './session-chat-composer-scroll';
@@ -76,6 +79,9 @@ export function SessionChatLexicalInput({
   collapsed = false,
   registerApi,
   theme,
+  ariaLabel = 'Message',
+  ariaDescribedBy,
+  readOnly = false,
 }: {
   sessionKey?: string;
   initialValue: string;
@@ -88,11 +94,18 @@ export function SessionChatLexicalInput({
   collapsed?: boolean;
   registerApi: (api: ComposerEditorControls | null) => void;
   theme: SessionChatTheme;
+  ariaLabel?: string;
+  ariaDescribedBy?: string;
+  readOnly?: boolean;
 }) {
+  useAppScrollbars();
   const containerRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<ComposerEditorControls | null>(null);
+  const editorRef = useRef<LexicalEditor | null>(null);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const [initialCursor] = useState(() => readSessionChatCursor(sessionKey, initialValue));
   const initialAnchor = initialCursor?.anchor ?? initialValue.length;
   const initialFocus = initialCursor?.focus ?? initialValue.length;
@@ -117,12 +130,14 @@ export function SessionChatLexicalInput({
     const container = containerRef.current;
     if (!root || !container) return;
     const editor = createEditor({
+      editable: !readOnlyRef.current,
       namespace: 'ghostex-chat-composer',
       nodes: [SessionChatReferenceNode],
       onError: (error) => {
         throw error;
       },
     });
+    editorRef.current = editor;
     editor.setRootElement(root);
     editor.update(
       () => {
@@ -151,6 +166,8 @@ export function SessionChatLexicalInput({
       const shouldReveal = revealSelection;
       revealSelection = false;
       root.dataset.empty = valueRef.current === '' ? 'true' : 'false';
+      // CDXC:SessionChat 2026-09-15 WHY: Chromium keeps the scroll-fade-y top animation frozen at its last value once the editor stops overflowing (maximizing a scrolled composer, deleting lines), so the first line stays faded with nothing to scroll. input.css removes the animation while this is false; the same guard lives in session-chat-agent-fleet-strip.tsx and session-chat-plain-input.tsx.
+      root.dataset.overflowing = String(root.scrollHeight > root.clientHeight);
       const current = readSelection();
       editor.getEditorState().read(() => {
         for (const { node, start, end } of $composerLeaves()) {
@@ -394,6 +411,7 @@ export function SessionChatLexicalInput({
     });
 
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (readOnlyRef.current) return;
       if (event.isComposing || event.keyCode === 229 || editor.isComposing()) return;
       const key = composerKey(event);
       const shortcutKey = shortcutKeyFromKeyboardEvent(event);
@@ -408,6 +426,7 @@ export function SessionChatLexicalInput({
         isComposing: false,
         key,
         keyCode: event.keyCode,
+        repeat: event.repeat,
         preventDefault: () => {
           event.preventDefault();
           event.stopPropagation();
@@ -498,7 +517,17 @@ export function SessionChatLexicalInput({
       }
     };
 
+    /**
+     * CDXC:Clipboard 2026-09-15 DECISION:
+     * User: play the copy sound when copying text from the chat composer, with the Copy Sound setting controlling it.
+     * SEE-ALSO: session-chat-plain-input.tsx handles clipboard feedback for the plain composer.
+     */
     const clipboard = (event: ClipboardEvent): void => {
+      if (readOnlyRef.current && event.type !== 'copy') {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       terminalEditing.breakSequence();
       if (!event.clipboardData) return;
       if (event.type === 'paste') {
@@ -507,13 +536,17 @@ export function SessionChatLexicalInput({
         if (!handled && text !== '') insertText(text);
       } else {
         const { start, end } = controls.getSelection();
-        if (start !== end) event.clipboardData.setData('text/plain', controls.getValue().slice(start, end));
+        if (start !== end) {
+          event.clipboardData.setData('text/plain', controls.getValue().slice(start, end));
+          playCopySound();
+        }
         if (event.type === 'cut' && start !== end) insertText('');
       }
       event.preventDefault();
       event.stopPropagation();
     };
     const doubleClick = (event: MouseEvent): void => {
+      if (readOnlyRef.current) return;
       if (event.detail !== 2 || !(event.target instanceof Element)) return;
       const pill = event.target.closest<HTMLElement>('[data-ghostex-reference-key]');
       if (!pill || !root.contains(pill)) return;
@@ -579,10 +612,15 @@ export function SessionChatLexicalInput({
       resize.disconnect();
       window.removeEventListener('ghostex-session-chat-font-family-changed', scheduleVisuals);
       editor.setRootElement(null);
+      editorRef.current = null;
       controlsRef.current = null;
       updateVisualsRef.current = null;
     };
   }, []);
+
+  useLayoutEffect(() => {
+    editorRef.current?.setEditable(!readOnly);
+  }, [readOnly]);
 
   useLayoutEffect(() => {
     updateVisualsRef.current?.();
@@ -632,10 +670,12 @@ export function SessionChatLexicalInput({
         ref={rootRef}
         className='ghostex-chat-composer-lexical-content scroll-fade-y'
         role='textbox'
-        aria-label='Message'
+        aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
+        aria-readonly={readOnly || undefined}
         aria-multiline='true'
         aria-placeholder={placeholder}
-        contentEditable
+        contentEditable={!readOnly}
         spellCheck={false}
         autoCapitalize='off'
         autoCorrect='off'

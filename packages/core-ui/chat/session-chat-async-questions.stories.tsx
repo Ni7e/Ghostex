@@ -11,6 +11,8 @@ import { SortableSessionCard } from '../sortable-session-card';
 import { useSidebarStore } from '../sidebar-store';
 import type { SidebarSessionItem } from '@/packages/shared/session-grid-contract';
 
+const previewImages = new Map<string, string>();
+
 function createPreviewTransport(
   onPendingChange: (count: number) => void,
   working: boolean,
@@ -75,6 +77,16 @@ function createPreviewTransport(
       });
   };
   return {
+    saveImage: async ({ base64Data }) => {
+      const path = `/preview/images/${crypto.randomUUID()}.png`;
+      previewImages.set(path, base64Data);
+      return { path, bytes: atob(base64Data).length };
+    },
+    loadImage: async ({ path }) => {
+      const base64Data = previewImages.get(path);
+      if (!base64Data) throw new Error('Preview image not found.');
+      return { base64Data, mediaType: 'image/png', bytes: atob(base64Data).length };
+    },
     read: async () => ({
       messages: [...messages],
       status: working ? 'working' : 'ready',
@@ -175,6 +187,7 @@ function SidebarQuestionPreview({ count, working }: { count: number; working: bo
                 hideBrowserFaviconUntilHover: false,
                 hideSessionAgentIconUntilHover: false,
                 hoverButtons: normalizeSessionCardHoverButtons(['close']),
+                hoverButtonsInContextMenu: true,
                 renameSessionOnDoubleClick: false,
                 showDebugSessionNumbers: false,
                 showLastActiveTime: false,

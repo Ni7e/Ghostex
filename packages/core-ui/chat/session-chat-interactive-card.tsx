@@ -25,10 +25,14 @@ import type {
   GxserverAnswerSessionChatPromptParams,
   SessionChatInteractivePrompt,
   SessionChatQuestionSelection,
+  SessionChatTheme,
 } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
 import { Button } from '../../components/ui/button';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
+import { useSessionChatQuestionDrafts } from './session-chat-question-drafts';
+import { SessionChatAnswerInput } from './session-chat-answer-input';
+import type { SaveSessionChatImage } from './session-chat-image-attachments';
 
 export function sessionChatCardDismissKey(prompt: SessionChatInteractivePrompt | null): string | null {
   if (!prompt) {
@@ -44,6 +48,9 @@ const DELIVERY_FAILED_NOTICE = "Couldn't deliver the answer. Switch to Terminal 
 const READ_ONLY_NOTICE = 'Switch to Terminal to answer';
 
 export interface SessionChatInteractiveCardProps {
+  sessionKey?: string;
+  onPasteImage?: SaveSessionChatImage;
+  theme?: SessionChatTheme;
   prompt: SessionChatInteractivePrompt | null;
   canSend: boolean;
   onAnswer: (params: Omit<GxserverAnswerSessionChatPromptParams, 'projectId' | 'sessionId'>) => Promise<void>;
@@ -219,22 +226,39 @@ export function SessionChatInteractiveCard({
   onSwitchToTerminal,
   prompt,
   showShortcutLabels = true,
+  sessionKey,
+  onPasteImage,
+  theme,
 }: SessionChatInteractiveCardProps) {
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<DraftAnswer[]>([]);
   const [activeQuestion, setActiveQuestion] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [savingImages, setSavingImages] = useState(false);
   const [deliveryFailed, setDeliveryFailed] = useState(false);
   const submittingRef = useRef(false);
 
   const cardKey = sessionChatCardDismissKey(prompt);
   const promptContentKey = prompt === null ? null : JSON.stringify(prompt);
+  const {
+    drafts: savedDrafts,
+    saveDrafts,
+    updateDraft,
+    clearDrafts,
+    saveError,
+  } = useSessionChatQuestionDrafts(sessionKey, `interactive:${promptContentKey}`);
   const showing = prompt !== null && cardKey !== dismissedKey;
   const showingQuestion = showing && prompt?.kind === 'question';
   const readOnly = !canSend;
 
   const questions = prompt?.kind === 'question' ? prompt.questions : [];
+  const drafts = questions.map((_, index) => savedDrafts[index] ?? { indices: [], other: '' });
+  const setDrafts = useCallback(
+    (answers: DraftAnswer[]): void => {
+      saveDrafts(Object.fromEntries(answers.map((answer, index) => [index, answer])));
+    },
+    [saveDrafts]
+  );
   const questionIndex = Math.min(activeQuestion, Math.max(questions.length - 1, 0));
   const question = questions[questionIndex];
 
@@ -246,7 +270,7 @@ export function SessionChatInteractiveCard({
     }
   }, [prompt]);
 
-  // Fresh drafts per prompt content; cancel a stale in-flight submit gate
+  // Restore drafts per prompt content; cancel a stale in-flight submit gate
   // during commit so an old answer can't act on a new prompt.
   useLayoutEffect(() => {
     submittingRef.current = false;
@@ -254,12 +278,7 @@ export function SessionChatInteractiveCard({
     setDeliveryFailed(false);
     setActiveQuestion(0);
     setCollapsed(false);
-    if (prompt?.kind === 'question') {
-      setDrafts(prompt.questions.map(() => ({ indices: [], other: '' })));
-    } else {
-      setDrafts([]);
-    }
-  }, [canSend, promptContentKey]);
+  }, [promptContentKey, sessionKey]);
 
   useEffect(() => {
     onShowingQuestionChange?.(showingQuestion === true);
@@ -271,8 +290,11 @@ export function SessionChatInteractiveCard({
   }, [onShowingChange, showing]);
 
   const submitAnswer = useCallback(
-    (params: Omit<GxserverAnswerSessionChatPromptParams, 'projectId' | 'sessionId'>): void => {
-      if (submittingRef.current || readOnly) {
+    (
+      params: Omit<GxserverAnswerSessionChatPromptParams, 'projectId' | 'sessionId'>,
+      submittedDrafts = savedDrafts
+    ): void => {
+      if (submittingRef.current || readOnly || savingImages) {
         return;
       }
       submittingRef.current = true;
@@ -281,6 +303,7 @@ export function SessionChatInteractiveCard({
       const keyAtSubmit = cardKey;
       void onAnswer(params)
         .then(() => {
+          clearDrafts(submittedDrafts);
           setDismissedKey(keyAtSubmit);
         })
         .catch(() => {
@@ -292,7 +315,7 @@ export function SessionChatInteractiveCard({
           setSubmitting(false);
         });
     },
-    [cardKey, onAnswer, readOnly]
+    [cardKey, clearDrafts, onAnswer, readOnly, savedDrafts, savingImages]
   );
 
   const submitQuestions = useCallback(
@@ -301,14 +324,17 @@ export function SessionChatInteractiveCard({
         indices: entry.indices,
         ...(entry.other.trim() ? { other: entry.other.trim() } : {}),
       }));
-      submitAnswer({ kind: 'question', selections });
+      submitAnswer(
+        { kind: 'question', selections },
+        Object.fromEntries(answerDrafts.map((answer, index) => [index, answer]))
+      );
     },
     [submitAnswer]
   );
 
   const selectOption = useCallback(
     (optionIndex: number): void => {
-      if (!question || readOnly || submitting) {
+      if (!question || readOnly || submitting || savingImages) {
         return;
       }
       const nextDrafts = drafts.map((entry, index) => {
@@ -337,7 +363,7 @@ export function SessionChatInteractiveCard({
         setActiveQuestion(questionIndex + 1);
       }
     },
-    [drafts, question, questionIndex, questions.length, readOnly, submitQuestions, submitting]
+    [drafts, question, questionIndex, questions.length, readOnly, submitQuestions, submitting, savingImages, setDrafts]
   );
 
   // Number keys 1-9 pick the matching option while focus sits outside an
@@ -378,11 +404,14 @@ export function SessionChatInteractiveCard({
   }
 
   const dismiss = (): void => {
+    clearDrafts(savedDrafts);
     setDismissedKey(cardKey);
     onInterrupt();
   };
 
-  const notice = deliveryFailed ? (
+  const notice = saveError ? (
+    <CardNotice text={saveError} tone='destructive' />
+  ) : deliveryFailed ? (
     <CardNotice
       text={DELIVERY_FAILED_NOTICE}
       tone='destructive'
@@ -450,7 +479,7 @@ export function SessionChatInteractiveCard({
   const hasAnswer = drafts.some((entry) => entry.indices.length > 0 || entry.other.trim().length > 0);
 
   const advance = (): void => {
-    if (readOnly || submitting) {
+    if (readOnly || submitting || savingImages) {
       return;
     }
     if (isLastQuestion) {
@@ -482,7 +511,7 @@ export function SessionChatInteractiveCard({
           onToggleCollapsed={() => setCollapsed((value) => !value)}
           {...(question ? { collapsedSummary: question.question } : {})}
           {...(questions.length > 1 ? { counter: `${questionIndex + 1}/${questions.length}` } : {})}
-          {...(readOnly ? {} : { onDismiss: dismiss })}
+          {...(readOnly || savingImages ? {} : { onDismiss: dismiss })}
         />
         {question && !collapsed ? (
           <div className='px-4 pt-1 pb-3 sm:px-5'>
@@ -494,7 +523,7 @@ export function SessionChatInteractiveCard({
               <SessionChatChoiceRows
                 onSelect={selectOption}
                 options={question.options}
-                readOnly={readOnly}
+                readOnly={readOnly || submitting || savingImages}
                 selected={customAnswerActive ? [] : draft.indices}
                 showShortcuts={showShortcutLabels}
               />
@@ -506,7 +535,7 @@ export function SessionChatInteractiveCard({
         {questionIndex > 0 ? (
           <Button
             aria-label='Previous question'
-            disabled={submitting}
+            disabled={submitting || savingImages}
             onClick={() => setActiveQuestion(questionIndex - 1)}
             size='icon-sm'
             variant='ghost'
@@ -519,30 +548,30 @@ export function SessionChatInteractiveCard({
           // with allowCustom: false), so only the options are offered.
           <div aria-hidden='true' className='min-w-0 flex-1' />
         ) : (
-          <input
-            className='min-w-0 flex-1 bg-transparent text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-default'
-            disabled={readOnly}
-            onChange={(event) => {
-              const value = event.target.value;
-              setDrafts((current) =>
-                current.map((entry, index) => (index === questionIndex ? { ...entry, other: value } : entry))
-              );
-            }}
+          <SessionChatAnswerInput
+            key={`${promptContentKey}:${questionIndex}`}
+            className='w-full min-w-0 resize-none bg-transparent text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-default'
+            disabled={readOnly || submitting}
+            onPasteImage={onPasteImage}
+            onPendingChange={setSavingImages}
+            onUpdate={(update) =>
+              updateDraft(String(questionIndex), (current) => ({ ...current, other: update(current.other) }))
+            }
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
                 event.preventDefault();
-                advance();
+                if (!event.repeat) advance();
               }
             }}
             placeholder='Write a custom answer…'
-            type='text'
+            theme={theme}
             value={draft.other}
           />
         )}
         <Button
           className='min-w-24'
           data-chat-answer-control=''
-          disabled={readOnly || submitting || (isLastQuestion && !hasAnswer)}
+          disabled={readOnly || submitting || savingImages || (isLastQuestion && !hasAnswer)}
           onClick={advance}
           size='sm'
           variant='outline'

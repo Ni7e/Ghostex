@@ -1,9 +1,3 @@
-@property --ghostex-composer-scrollbar-opacity {
-  syntax: '<number>';
-  inherits: true;
-  initial-value: 0;
-}
-
 .ghostex-chat-composer-lexical {
   position: relative;
   display: flex;
@@ -18,7 +12,7 @@
 
 /* CDXC:SessionChat 2026-09-08 DECISION:
  * User: the input's right text padding must match its left padding.
- * The 7px text inset plus 5px native scrollbar balance the wrapper's 12px extension into the right padding.
+ * The 12px text inset balances the wrapper's 12px extension; the shared floating scrollbar reserves no gutter.
  */
 .ghostex-chat-composer-lexical-content {
   min-height: 72px;
@@ -31,15 +25,16 @@
   cursor: text;
   -webkit-user-select: text;
   user-select: text;
-  scrollbar-gutter: stable;
-  scrollbar-width: auto;
-  padding-right: 7px;
-  --ghostex-composer-scrollbar-opacity: 0;
-  transition: --ghostex-composer-scrollbar-opacity 350ms ease;
+  padding-right: 12px;
   tab-size: 4;
   --scroll-fade-size: min(12%, 1lh);
   --scroll-fade-reveal: 1lh;
   scroll-padding-block: 1lh;
+}
+
+/* CDXC:SessionChat 2026-09-15 WHY: A scroll timeline that goes inactive leaves the reveal-t animation holding its last progress, so the top fade survives after the content fits. The editor measures overflow into data-overflowing; without overflow there is nothing to fade, and dropping the animation restarts it cleanly when overflow returns. */
+.ghostex-chat-composer-lexical-content[data-overflowing='false'] {
+  animation: none;
 }
 
 .ghostex-chat-composer-lexical-content > p {
@@ -75,29 +70,10 @@
   white-space: pre;
   overflow-wrap: normal;
 }
-.ghostex-chat-composer-lexical-content::-webkit-scrollbar {
-  display: block;
-  width: 5px;
-}
-/* CDXC:SessionChat 2026-09-08 DECISION:
- * User: a rounded, draggable 5px #606060 scrollbar, inset before the rounded corners, visible only while scrolling and fading afterward.
- * This replaces the earlier #111 color. A real 5px track avoids the asymmetric transparent border that clipped the thumb's left rounded edge.
+/* CDXC:SessionChat 2026-09-15 DECISION:
+ * User: keep the chat input scrollbar visible only while scrolling and fading afterward, while other app scrollbars appear on hover.
+ * Shared app-scrollbars uses data-scrolling from the editor; this replaces the native scrollbar's fixed #606060 color and reserved gutter.
  */
-.ghostex-chat-composer-lexical-content[data-scrolling='true'] {
-  --ghostex-composer-scrollbar-opacity: 1;
-  transition-duration: 0s;
-}
-.ghostex-chat-composer-lexical-content::-webkit-scrollbar-thumb {
-  border-radius: 2.5px;
-  background: rgb(96 96 96 / var(--ghostex-composer-scrollbar-opacity));
-}
-.ghostex-chat-composer-lexical-content::-webkit-scrollbar-thumb:active {
-  background-color: #606060;
-}
-.ghostex-chat-composer-lexical-content::-webkit-scrollbar-track {
-  margin-block: 8px;
-  background: transparent;
-}
 .ghostex-chat-composer-lexical[data-editor-theme] span.ghostex-chat-reference-pill[data-selected='true'] {
   background: Highlight;
   color: HighlightText;
