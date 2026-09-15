@@ -1,14 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { IconDownload, IconExternalLink, IconRefresh } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
 import { SelectItem, SelectTrigger, SelectValue } from '@/packages/components/ui/select';
-import {
-  AGENT_CLI_CATALOG,
-  type AgentCliConnection,
-  type AgentCliState,
-} from '@/packages/shared/agent-cli-maintenance';
+import { AGENT_CLI_CATALOG, type AgentCliConnection } from '@/packages/shared/agent-cli-maintenance';
 import { SettingsSelect, SettingsSelectContent } from '../settings-modal/fields';
 import type { WebviewApi } from '../webview-api';
+import { defaultAgentCliInstallMethod, useAgentCliJob } from './use-agent-cli-job';
 
 export function AgentCliControls({
   agentId,
@@ -22,65 +19,25 @@ export function AgentCliControls({
   vscode?: WebviewApi;
 }) {
   const definition = AGENT_CLI_CATALOG.find((entry) => entry.agentId === agentId);
-  const [state, setState] = useState<AgentCliState>();
   const [methodId, setMethodId] = useState<string>();
-  const [error, setError] = useState<string>();
-  const [actionError, setActionError] = useState<string>();
-  const [loading, setLoading] = useState(false);
-  const [refresh, setRefresh] = useState(0);
-  const [starting, setStarting] = useState(false);
-  const completedJob = useRef<string | undefined>(undefined);
-  const onInstalledRef = useRef(onInstalled);
-  onInstalledRef.current = onInstalled;
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!definition || !connection) return;
-    let active = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = async () => {
-      setLoading(true);
-      try {
-        const next = await connection.request({ action: 'read', agentId });
-        if (!active) return;
-        setState(next);
-        setError(undefined);
-        if (next.job?.status === 'running') {
-          timer = setTimeout(() => void read(), 1500);
-        } else if (next.job?.status === 'succeeded' && completedJob.current !== next.job.id) {
-          completedJob.current = next.job.id;
-          onInstalledRef.current?.();
-        }
-      } catch (cause) {
-        if (active) setError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-    void read();
-    return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, [agentId, connection, definition, refresh]);
+  const {
+    state,
+    loading,
+    error,
+    actionError,
+    running,
+    refresh,
+    start: startJob,
+  } = useAgentCliJob({ agentId, connection, eager: Boolean(definition), onInstalled });
 
   if (!definition) return null;
-  const running = starting || state?.job?.status === 'running';
   const installed = Boolean(state?.executablePath);
   const operation = installed ? 'update' : 'install';
   const methods =
     state?.methods.filter((method) => !installed || !state.detectedMethodId || method.id === state.detectedMethodId) ??
     [];
   const selected =
-    (installed ? state?.detectedMethodId : undefined) ??
-    methodId ??
-    (!installed ? (methods.find((entry) => !entry.unavailableReason) ?? methods[0])?.id : undefined);
+    (installed ? state?.detectedMethodId : undefined) ?? methodId ?? defaultAgentCliInstallMethod(state)?.id;
   const method = methods.find((entry) => entry.id === selected);
   const status = state
     ? installed
@@ -90,24 +47,9 @@ export function AgentCliControls({
       ? 'Checking CLI…'
       : 'Not checked';
 
-  const start = async () => {
+  const start = () => {
     if (!connection || !method || running) return;
-    setStarting(true);
-    setActionError(undefined);
-    try {
-      const next = await connection.request({ action: 'start', agentId, operation, methodId: method.id });
-      if (!mounted.current) return;
-      setState(next);
-      setRefresh((value) => value + 1);
-    } catch (cause) {
-      if (mounted.current) {
-        setActionError(cause instanceof Error ? cause.message : String(cause));
-        // A timed-out start response can still have started the server-owned job.
-        setRefresh((value) => value + 1);
-      }
-    } finally {
-      if (mounted.current) setStarting(false);
-    }
+    void startJob(operation, method.id);
   };
 
   return (
@@ -142,7 +84,7 @@ export function AgentCliControls({
           <Button
             aria-label={`Refresh ${definition.binary} CLI status`}
             disabled={!connection || loading || running}
-            onClick={() => setRefresh((value) => value + 1)}
+            onClick={refresh}
             size='icon-sm'
             variant='ghost'
           >
@@ -181,7 +123,7 @@ export function AgentCliControls({
             </SettingsSelect>
             <Button
               disabled={running || loading || !connection || !method || Boolean(method.unavailableReason)}
-              onClick={() => void start()}
+              onClick={start}
               size='sm'
               variant='outline'
             >

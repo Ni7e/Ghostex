@@ -1333,6 +1333,8 @@ impl GhostexGpuiApp {
         if reset_ready_retry {
             self.app_modal_ready_retry_used = false;
         }
+        // The native Handoff / Export dialog counts as the one open app modal.
+        self.remove_gpui_export_transcript_modal_window(cx);
         support_logs::append(
             support_logs::GpuiSupportLog::AppModal,
             "gpui.appModal.lifecycle",
@@ -1354,8 +1356,8 @@ impl GhostexGpuiApp {
         window here, so the later `completeFirstLaunchSetup` message finds
         Settings as the live modal and is ignored. Count the switch itself as
         finishing setup, otherwise onboarding reappears on the next launch.
-        Scoped to the new Onboarding modal so the parked-for-now old
-        FirstLaunchSetup keeps its previous behaviour unchanged.
+        Scoped to the Onboarding modal; the old FirstLaunchSetup (kept in the
+        tree under its own id) keeps its previous behaviour unchanged.
         */
         if modal != GpuiAppModalKind::Onboarding
             && self.gpui_app_modal_current_modal(cx) == Some(GpuiAppModalKind::Onboarding)
@@ -1511,12 +1513,25 @@ impl GhostexGpuiApp {
             .and_then(|hud| hud.get("projectSettingsProjects"))
             .and_then(serde_json::Value::as_array)
             .is_some_and(|projects| !projects.is_empty());
+        let main_window_native_view = self.parent_ns_view;
         self.app_modal_window = cx
             .open_window(options, |modal_window, cx| {
                 if !modal.has_titlebar() {
                     modal_window.set_window_title("");
                 }
                 modal_window.activate_window();
+                /*
+                CDXC:Onboarding 2026-09-15 DECISION:
+                User: "the modal must stay on top of the main ghostex app and centered on top of it".
+                The onboarding host becomes an AppKit child window of the main window so it never drops behind the workspace and follows the main window when it moves.
+                Other app modals keep their independent-window behaviour.
+                */
+                if modal == GpuiAppModalKind::Onboarding {
+                    attach_gpui_app_modal_window_to_main_window(
+                        modal_window,
+                        main_window_native_view,
+                    );
+                }
                 if matches!(
                     modal,
                     GpuiAppModalKind::FirstLaunchSetup | GpuiAppModalKind::Onboarding
@@ -1717,22 +1732,19 @@ impl GhostexGpuiApp {
     ) {
         let sidebar_state_message =
             self.with_gpui_command_pane_sidebar_indicators(base_sidebar_state);
-        // CDXC:Onboarding 2026-09-12 DECISION:
-        // User: "lots of changes on the onboarding so let's keep the old one for now", so the automatic
-        // first run still opens the old FirstLaunchSetup modal while the new five-panel Onboarding modal
-        // (packages/core-ui/onboarding) is being iterated on. The Tips dropdown's "Setup" button is the
-        // deliberate exception and opens the new one (see titlebar/settings_and_action_state.rs and
-        // delayed_send.rs). When first run switches over too, open `Onboarding` here with
-        // `"firstRun": true` added to the open message: the user decided only the first run ever applies
-        // Browser + Docs as the enabled views, never a reopen from Tips > Setup.
-        let modal = GpuiAppModalKind::FirstLaunchSetup;
-        self.open_gpui_app_modal_window(
-            modal,
-            modal.open_message(),
-            sidebar_state_message,
-            None,
-            cx,
-        );
+        // CDXC:Onboarding 2026-09-15 DECISION:
+        // User: "i want to switch to using the new modal when a new user starts the app instead of the
+        // old one", so the automatic first run opens the five-panel Onboarding modal
+        // (packages/core-ui/onboarding), the same one the Tips dropdown's "Setup" button and the Quick
+        // Access "Setup" command open (titlebar/settings_and_action_state.rs, delayed_send.rs). Only this
+        // path adds `"firstRun": true` to the open message: the user decided only the first run ever
+        // applies Browser + Docs as the enabled views, never a reopen from Tips > Setup. The old
+        // FirstLaunchSetup modal stays in the tree, reachable by its `firstLaunchSetup` id ("keep the old
+        // one there might come back to it"), and nothing opens it by default.
+        let modal = GpuiAppModalKind::Onboarding;
+        let mut open_message = modal.open_message();
+        open_message["firstRun"] = serde_json::Value::Bool(true);
+        self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, None, cx);
     }
 
     pub(crate) fn close_gpui_app_modal_window_and_restore_command_focus(

@@ -243,6 +243,7 @@ export function FinishedPanel({ props, flow, setFlow, go, toast }: PanelProps) {
       )}
       {followUp === 'guide' && (
         <InstallGuidePopup
+          agents={props.agents}
           toast={toast}
           onClose={() => {
             setFollowUp(null);

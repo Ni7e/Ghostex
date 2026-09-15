@@ -232,6 +232,32 @@ pub(crate) fn remove_gpui_app_toast_popup_window_chrome(
 ) {
 }
 
+/// Makes the app-modal window an AppKit child of the main window (CDXC:Onboarding 2026-09-15 in GpuiAppToastWindowChrome.m).
+#[cfg(target_os = "macos")]
+pub(crate) fn attach_gpui_app_modal_window_to_main_window(
+    window: &mut Window,
+    main_window_native_view: *mut std::ffi::c_void,
+) {
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    if let RawWindowHandle::AppKit(handle) = handle.as_raw() {
+        unsafe {
+            GhostexGpuiAttachAppModalWindowToMainWindow(
+                handle.ns_view.as_ptr(),
+                main_window_native_view,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn attach_gpui_app_modal_window_to_main_window(
+    _window: &mut Window,
+    _main_window_native_view: *mut std::ffi::c_void,
+) {
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn prepare_gpui_titlebar_popup_window_chrome(window: &mut Window) {
     let Ok(handle) = window.window_handle() else {

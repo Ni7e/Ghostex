@@ -246,6 +246,10 @@ unsafe extern "C" {
         main_native_view: *mut std::ffi::c_void,
     );
     pub(crate) fn GhostexGpuiPrepareTitlebarPopupWindow(native_view: *mut std::ffi::c_void);
+    pub(crate) fn GhostexGpuiAttachAppModalWindowToMainWindow(
+        modal_native_view: *mut std::ffi::c_void,
+        main_native_view: *mut std::ffi::c_void,
+    );
 }
 
 #[cfg(target_os = "macos")]

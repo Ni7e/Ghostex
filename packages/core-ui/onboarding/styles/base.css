@@ -201,6 +201,21 @@
 .gx-onboarding .back:disabled {
   opacity: 0.35;
 }
+/* The panel's forward action (see FootActions in primitives.tsx): same row as Back, right-aligned to the copy column. */
+.gx-onboarding .foot-actions {
+  position: absolute;
+  top: 848px;
+  height: 48px;
+  gap: 24px;
+  z-index: 20;
+}
+.gx-onboarding .foot-actions .cta {
+  height: 46px;
+  padding: 0 22px;
+}
+.gx-onboarding .foot-actions .ghost {
+  font-size: 16px;
+}
 .gx-onboarding .dots {
   position: absolute;
   top: 27px;
@@ -209,6 +224,7 @@
   display: flex;
   gap: 4px;
   z-index: 40;
+  transition: left 0.6s cubic-bezier(0.3, 0.7, 0.2, 1);
 }
 .gx-onboarding .dots button {
   padding: 9px 5px;
@@ -485,12 +501,6 @@
 .gx-onboarding .cta:hover:not(:disabled) svg {
   transform: translateX(3px);
 }
-.gx-onboarding .vbar {
-  width: 1px;
-  height: 18px;
-  background: rgba(255, 255, 255, 0.35);
-  margin: 0 18px 0 22px;
-}
 .gx-onboarding .ghost {
   font-size: 15.5px;
   color: #d6dbe5;
@@ -701,6 +711,31 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The Install guide lists every catalog agent, so the list scrolls inside the popup and its controls stay compact. */
+.gx-onboarding .install-list {
+  max-height: 430px;
+  overflow: auto;
+  scrollbar-width: thin;
+  padding-right: 4px;
+}
+.gx-onboarding .install-row .install-err {
+  flex: 1;
+  font-size: 12px;
+  color: #ff6b62;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gx-onboarding .install-row .install-btn {
+  height: 30px;
+  padding: 0 11px 0 9px;
+  font-size: 13px;
+}
+.gx-onboarding .install-row .detpill {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
 .gx-onboarding .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -822,9 +857,6 @@
 }
 .gx-onboarding .sub.center {
   text-align: center;
-}
-.gx-onboarding .actions.center {
-  justify-content: center;
 }
 .gx-onboarding .ibox.lg {
   width: 44px;

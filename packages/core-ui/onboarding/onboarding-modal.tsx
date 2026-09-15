@@ -21,6 +21,7 @@ import {
   VEIL_LEFT,
   VEIL_SATURATION,
   box,
+  footRightX,
 } from './stage';
 import './onboarding.css';
 
@@ -37,6 +38,8 @@ const PANELS: readonly ((props: PanelProps) => React.JSX.Element)[] = [
   GetStartedPanel,
 ];
 const TOAST_MS = 2400;
+/** Gap between the copy/preview divider and the progress dots. */
+const DOTS_INSET = 40;
 
 function clampPanel(panel: number): number {
   return Math.max(1, Math.min(PANEL_COUNT, Math.round(panel) || 1));
@@ -138,7 +141,7 @@ export function OnboardingModal(props: OnboardingModalComponentProps) {
   const Panel = PANELS[panel - 1];
   const dividerX = PANEL_DIVIDER_X[panel - 1];
   const lockupX = PANEL_LOCKUP_X[panel - 1];
-  const footRight = dividerX - 35;
+  const footRight = footRightX(panel);
   const showFinished = flow.finished && panel === PANEL_COUNT;
   const panelProps: PanelProps = { props, flow, setFlow, go, toast: showToast };
 
@@ -176,9 +179,19 @@ export function OnboardingModal(props: OnboardingModalComponentProps) {
          * CDXC:Onboarding 2026-09-12 DECISION:
          * User: "please remove the stepper dots at the bottom to the top center", and "please make there only 1 next
          * button on each page, i dont like how we have a cta then a next button". The dots are the stage's own header
-         * element now, and each panel's CTA is the only way forward; the footer keeps Back alone.
+         * element now, and each panel's single forward action sits at the footer's right edge (FootActions).
+         *
+         * CDXC:Onboarding 2026-09-15 DECISION:
+         * User: "remove the back button from the first page". The footer's Back only renders from panel 2 on.
+         * User: "make the 5 progress dots appear on the top left of the right half of the modal". They sit just
+         * right of the divider; the full-width last panel has no right half, so there they stay centred.
          */}
-        <div className='dots' role='tablist' aria-label='Panels'>
+        <div
+          className='dots'
+          role='tablist'
+          aria-label='Panels'
+          style={dividerX < STAGE_WIDTH ? { left: dividerX + DOTS_INSET, transform: 'none' } : undefined}
+        >
           {PANELS.map((_, index) => (
             <button
               key={index}
@@ -196,10 +209,12 @@ export function OnboardingModal(props: OnboardingModalComponentProps) {
           {showFinished ? <FinishedPanel {...panelProps} /> : <Panel {...panelProps} />}
         </div>
         <div className='foot' style={{ left: lockupX, width: footRight - lockupX }}>
-          <button type='button' className='back' disabled={panel === 1} onClick={() => go(panel - 1)}>
-            <Icon n='arrowL' size={18} />
-            Back
-          </button>
+          {panel > 1 && (
+            <button type='button' className='back' onClick={() => go(panel - 1)}>
+              <Icon n='arrowL' size={18} />
+              Back
+            </button>
+          )}
         </div>
         {toast && (
           <div

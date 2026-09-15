@@ -28,8 +28,8 @@ pub(crate) enum GpuiAppModalKind {
     ConfigureActions,
     OpenTargets,
     FirstLaunchSetup,
-    /// CDXC:Onboarding 2026-09-11 SEE-ALSO:
-    /// `onboarding` is the new five-panel modal, parked until it is finished: first run and Tips > Setup still open `firstLaunchSetup` (user decision, see modals.rs `open_gpui_first_launch_setup_with_sidebar_state`).
+    /// CDXC:Onboarding 2026-09-15 SEE-ALSO:
+    /// `onboarding` is the five-panel modal that the automatic first run, Tips > Setup and Quick Access > Setup open (user decision, see modals.rs `open_gpui_first_launch_setup_with_sidebar_state`); `firstLaunchSetup` is the older modal, kept under its own id and opened by nothing by default.
     /// Every guard that treats `FirstLaunchSetup` as "setup in progress" (no-projects close guard, completion on close, `completeFirstLaunchSetup`) must match both; the React side is `isFirstLaunchSetupModalKind` in apps/desktop/views/modal-host.tsx and the component contract is packages/core-ui/onboarding/contract.ts.
     Onboarding,
     WatchGhostexVideo,
@@ -217,7 +217,7 @@ impl GpuiAppModalKind {
             ),
             Self::AgentHooksRequired => size(
                 px(APP_MODAL_HOST_RENAME_SESSION_WINDOW_WIDTH),
-                px(APP_MODAL_HOST_MISSING_PROJECT_FOLDER_WINDOW_HEIGHT),
+                px(APP_MODAL_HOST_AGENT_HOOKS_REQUIRED_WINDOW_HEIGHT),
             ),
             /*
             CDXC:AppModal 2026-07-26-07:20:
@@ -364,8 +364,16 @@ impl GpuiAppModalKind {
 
     /// CDXC:Settings 2026-09-07 WHY:
     /// Configure Agents and the other Settings entry points expose Accounts and Extensions too; omitting their server connection made Accounts incorrectly ask the local user to connect a computer.
+    /// CDXC:Onboarding 2026-09-15 WHY:
+    /// The Agents panel installs missing agent CLIs through gxserver's `/api/agentCliMaintenance` (the same transport as
+    /// Settings > Agents), which reads `window.ghostexGpui.gxserverBootstrap`. Without the bootstrap the panel silently
+    /// downgrades every Install button to "Install guide", so Onboarding must be in this allowlist.
     pub(crate) fn needs_gxserver_bootstrap(self) -> bool {
-        self.is_settings_modal_entry() || matches!(self, Self::FindPrompts | Self::RemoteSetup)
+        self.is_settings_modal_entry()
+            || matches!(
+                self,
+                Self::FindPrompts | Self::RemoteSetup | Self::Onboarding
+            )
     }
 
     pub(crate) fn requires_sidebar_state(self) -> bool {

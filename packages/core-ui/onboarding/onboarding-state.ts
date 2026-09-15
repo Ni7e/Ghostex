@@ -1,4 +1,5 @@
 import type { ghostexSettings } from '@/packages/shared/ghostex-settings';
+import { getDefaultSidebarAgentById } from '@/packages/shared/sidebar-agents';
 import type { OnboardingDetectedAgent, OnboardingModalProps, OnboardingViewKey } from './contract';
 
 /** README section listing every supported agent CLI; the Install guide popup and the finished screen open it. */
@@ -14,9 +15,6 @@ export type OnboardingFlowState = {
   installQueued: boolean;
   /** Agent id or `'terminal'` for the first session; undefined until the user picks one. */
   startWith?: string;
-  /** Local progress of the Mobile panel's step list (which rows the user acted on). */
-  mobileInstallOpened: boolean;
-  mobilePairingOpened: boolean;
   /**
    * CDXC:Onboarding 2026-09-11 WHY:
    * "Pair this computer" used to open Settings -> Remote at once, which replaces the onboarding window and
@@ -34,8 +32,6 @@ export const INITIAL_FLOW_STATE: OnboardingFlowState = {
   integrationOn: true,
   hooksRequested: false,
   installQueued: false,
-  mobileInstallOpened: false,
-  mobilePairingOpened: false,
   phoneQueued: false,
   finished: false,
 };
@@ -88,6 +84,29 @@ export function withViewsOn(
     next[VIEW_HIDDEN_KEY[key as OnboardingViewKey]] = !on;
   }
   return next as ghostexSettings;
+}
+
+/**
+ * CDXC:Onboarding 2026-09-15 DECISION:
+ * User: "consider we're testing the case where the user doesn't have codex and claude clis installed ... i want the
+ * user to be able to install them from the first time flow so everything flows smoothly." These three always have a
+ * row on the Agents panel; a missing one shows an Install button that runs the same gxserver CLI job Settings >
+ * Agents uses (packages/core-ui/agent-cli). Every other catalog agent installs from the Install guide popup.
+ */
+export const ONBOARDING_PRIMARY_AGENTS: readonly (readonly [agentId: string, name: string])[] = [
+  ['claude', 'Claude Code'],
+  ['codex', 'Codex CLI'],
+  ['cursor', 'Cursor Agent'],
+];
+
+/** Display name for any catalog agent: the host's detection name when it reported one, else the sidebar catalog. */
+export function catalogAgentName(agents: readonly OnboardingDetectedAgent[], agentId: string): string {
+  return (
+    agents.find((agent) => agent.agentId === agentId)?.name ??
+    ONBOARDING_PRIMARY_AGENTS.find(([id]) => id === agentId)?.[1] ??
+    getDefaultSidebarAgentById(agentId)?.name ??
+    agentId
+  );
 }
 
 export function installedAgents(agents: readonly OnboardingDetectedAgent[]): OnboardingDetectedAgent[] {

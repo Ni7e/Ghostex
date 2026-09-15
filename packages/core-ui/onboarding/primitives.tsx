@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, ty
 import { AGENT_LOGO_COLORS, getBrandAgentLogoStyle } from '../agent-logos';
 import { getSidebarAgentIconById } from '@/packages/shared/sidebar-agents';
 import ghostexLogoUrl from './assets/ghostex-logo.png';
-import { box, useOutsideClick } from './stage';
+import { STAGE_WIDTH, box, footRightX, useOutsideClick } from './stage';
 
 const ICON_PATHS = {
   terminal: '<path d="M5 7l5 5-5 5M12.5 18h6.5"/>',
@@ -377,6 +377,20 @@ export function Cta({
       {children}
       {arrow && <Icon n='arrowR' size={18} />}
     </button>
+  );
+}
+
+/**
+ * CDXC:Onboarding 2026-09-15 DECISION:
+ * User: "please move the Next button to be bottom right of the left half of the modal for all pages". Every panel
+ * renders its single forward action (and an optional ghost secondary before it) in this slot, which sits on the
+ * footer row at the copy column's right edge, opposite the shell's Back button.
+ */
+export function FootActions({ panel, children }: { panel: number; children: ReactNode }) {
+  return (
+    <div className='actions foot-actions' style={{ right: STAGE_WIDTH - footRightX(panel) }}>
+      {children}
+    </div>
   );
 }
 

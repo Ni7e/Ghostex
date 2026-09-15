@@ -6,11 +6,12 @@ import type {
 import type { SidebarTheme } from '@/packages/shared/session-grid-contract-core';
 
 /**
- * CDXC:Onboarding 2026-09-11 DECISION:
- * This is the new five-panel onboarding ported from the B4 "Extensions" prototype at
- * github.com/banozz0/ghostex-onboarding-prototypes. User: "lots of changes on the onboarding so let's keep the old one
- * for now": first run and the Tips "Setup" button open the older FirstLaunchSetupModal until this one is finished;
- * this modal is reachable only by its `onboarding` modal id (openAppModal) meanwhile.
+ * CDXC:Onboarding 2026-09-15 DECISION:
+ * This is the five-panel onboarding ported from the B4 "Extensions" prototype at
+ * github.com/banozz0/ghostex-onboarding-prototypes. User: "i want to switch to using the new modal when a new user
+ * starts the app instead of the old one", so the automatic first run, the Tips "Setup" button and the Quick Access
+ * "Setup" command all open this modal (id `onboarding`). The older FirstLaunchSetupModal stays in the tree under its
+ * own `firstLaunchSetup` id ("keep the old one there might come back to it"); nothing opens it by default.
  * This file is the props contract between the React port (`onboarding-modal.tsx` and its panels) and the
  * modal-host adapter that feeds it real app state; both sides build against it, so change it deliberately.
  */

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { PanelProps } from '../onboarding-state';
 import { AgentsTogetherDemo, ChatTerminalDemo, DesktopMobileDemo } from '../previews/welcome-demos';
-import { Cta, Eyebrow, Heading, Icon, Sub, type IconName } from '../primitives';
+import { Cta, Eyebrow, FootActions, Heading, Icon, Sub, type IconName } from '../primitives';
 import { box } from '../stage';
 
 type WelcomeTab = 'together' | 'chat' | 'mobile';
@@ -17,7 +17,7 @@ const TABS: readonly { id: WelcomeTab; icon: IconName; title: string; detail: st
   { id: 'mobile', icon: 'phone', title: 'Desktop + mobile', detail: 'Always-on sessions, pick up anywhere.' },
 ];
 
-export function WelcomePanel({ props, go }: PanelProps) {
+export function WelcomePanel({ go }: PanelProps) {
   const [tab, setTab] = useState<WelcomeTab>('together');
   const [hovered, setHovered] = useState<WelcomeTab | null>(null);
   return (
@@ -52,15 +52,12 @@ export function WelcomePanel({ props, go }: PanelProps) {
           </button>
         ))}
       </div>
-      <div className='actions' style={{ position: 'absolute', left: 46, top: 700 }}>
-        <Cta filled style={{ height: 44, padding: '0 20px' }} onClick={() => go(2)}>
-          Set up your Ghostex workspace
+      {/* CDXC:Onboarding 2026-09-15 DECISION: User: "remove the I already know ghostex button"; Next is the only action. */}
+      <FootActions panel={1}>
+        <Cta filled onClick={() => go(2)}>
+          Next
         </Cta>
-        <span className='vbar' />
-        <button type='button' className='ghost' onClick={props.onClose}>
-          I already know Ghostex
-        </button>
-      </div>
+      </FootActions>
       {tab === 'together' && <AgentsTogetherDemo key='together' />}
       {tab === 'chat' && <ChatTerminalDemo key='chat' />}
       {tab === 'mobile' && <DesktopMobileDemo key='mobile' />}

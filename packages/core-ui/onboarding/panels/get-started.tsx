@@ -6,7 +6,7 @@ import {
   installedAgents,
   type PanelProps,
 } from '../onboarding-state';
-import { Cta, Eyebrow, Heading, Icon, Spinner, Sub } from '../primitives';
+import { Cta, Eyebrow, FootActions, Heading, Icon, Spinner, Sub } from '../primitives';
 import { box } from '../stage';
 
 const SESSION_VIEWS: readonly (readonly [PreferredAgentInterface, string, string])[] = [
@@ -121,14 +121,11 @@ export function GetStartedPanel({ props, flow, setFlow }: PanelProps) {
           <span className='ss'>{detail}</span>
         </button>
       ))}
-      <div className='actions center' style={{ position: 'absolute', left: 486, top: 692, width: 700 }}>
-        <Cta
-          filled
-          style={{ height: 53, padding: '0 22px', fontSize: 17 }}
-          onClick={openGhostex}
-          disabled={!canOpen || opening}
-          arrow={!opening}
-        >
+      <FootActions panel={5}>
+        <button type='button' className='ghost' onClick={advancedLater} disabled={opening}>
+          Advanced settings later
+        </button>
+        <Cta filled onClick={openGhostex} disabled={!canOpen || opening} arrow={!opening}>
           {opening ? (
             <>
               <Spinner /> Opening…
@@ -137,17 +134,8 @@ export function GetStartedPanel({ props, flow, setFlow }: PanelProps) {
             'Open Ghostex'
           )}
         </Cta>
-        <button
-          type='button'
-          className='ghost'
-          style={{ marginLeft: 22, fontSize: 17 }}
-          onClick={advancedLater}
-          disabled={opening}
-        >
-          Advanced settings later
-        </button>
-      </div>
-      <Sub x={486} y={772} w={700} size={15} center>
+      </FootActions>
+      <Sub x={486} y={700} w={700} size={15} center>
         {openError ? (
           <span style={{ color: '#ff6b62' }} role='alert'>
             {openError}

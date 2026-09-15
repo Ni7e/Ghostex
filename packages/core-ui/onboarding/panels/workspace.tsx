@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { OnboardingViewKey } from '../contract';
 import { isViewOn, withViewsOn, type PanelProps, VIEW_KEYS } from '../onboarding-state';
 import { WorkspaceWindow, type WorkspaceTab } from '../previews/workspace-window';
-import { Cta, Eyebrow, Heading, Icon, Sub, Toggle, buttonProps, type IconName } from '../primitives';
+import { Cta, Eyebrow, FootActions, Heading, Icon, Sub, Toggle, buttonProps, type IconName } from '../primitives';
 import { box } from '../stage';
 
 const VIEW_ROWS: readonly { id: OnboardingViewKey; icon: IconName; title: string; detail: string }[] = [
@@ -121,13 +121,11 @@ export function WorkspacePanel({ props, go, toast }: PanelProps) {
           <Toggle on={views[row.id]} onClick={() => setView(row.id, !views[row.id])} label={row.title} />
         </div>
       ))}
-      <Cta
-        filled
-        style={{ position: 'absolute', left: 60, top: 758, height: 46, padding: '0 22px' }}
-        onClick={() => go(4)}
-      >
-        Continue
-      </Cta>
+      <FootActions panel={3}>
+        <Cta filled onClick={() => go(4)}>
+          Next
+        </Cta>
+      </FootActions>
       <WorkspaceWindow
         views={views}
         drive={drive}

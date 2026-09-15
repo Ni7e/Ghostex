@@ -107,6 +107,53 @@ void GhostexGpuiAttachToastPopupToMainWindow(void *toastNativeView,
   }
 }
 
+/*
+ CDXC:Onboarding 2026-09-15 DECISION:
+ User: "the modal must stay on top of the main ghostex app and centered on top
+ of it". gpui opens the onboarding host as an independent NSWindow, so clicking
+ the workspace behind it raised the main window over the modal. Attaching it as
+ an AppKit child window (ordered above, at the parent's level) keeps it above the
+ main window no matter which one is key, and moves it with the main window so it
+ stays centered where the launcher placed it. The window-will-close observer
+ detaches it first: a child window closed while still attached lingers in the
+ parent's childWindows list and can be ordered back in with the parent.
+ */
+void GhostexGpuiAttachAppModalWindowToMainWindow(void *modalNativeView,
+                                                 void *mainNativeView) {
+  @autoreleasepool {
+    if (modalNativeView == NULL || mainNativeView == NULL) {
+      return;
+    }
+
+    NSWindow *modalWindow = ((__bridge NSView *)modalNativeView).window;
+    NSWindow *mainWindow = ((__bridge NSView *)mainNativeView).window;
+    if (modalWindow == nil || mainWindow == nil || modalWindow == mainWindow) {
+      return;
+    }
+
+    modalWindow.level = mainWindow.level;
+    if (modalWindow.parentWindow != mainWindow) {
+      [mainWindow addChildWindow:modalWindow ordered:NSWindowAbove];
+    }
+    __block id observer = [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSWindowWillCloseNotification
+                    object:modalWindow
+                     queue:nil
+                usingBlock:^(NSNotification *note) {
+                  NSWindow *closing = note.object;
+                  NSWindow *parent = closing.parentWindow;
+                  if (parent != nil) {
+                    [parent removeChildWindow:closing];
+                  }
+                  if (observer != nil) {
+                    [[NSNotificationCenter defaultCenter] removeObserver:observer];
+                    observer = nil;
+                  }
+                }];
+    [modalWindow makeKeyAndOrderFront:nil];
+  }
+}
+
 void GhostexGpuiPrepareTitlebarPopupWindow(void *nativeView) {
   @autoreleasepool {
     if (nativeView == NULL) {

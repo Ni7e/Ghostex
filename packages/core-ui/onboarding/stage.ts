@@ -8,6 +8,15 @@ export const PANEL_DIVIDER_X: readonly number[] = [759, 796, 727, 756, STAGE_WID
 /** x of the Ghostex lockup and the footer, per panel (`h5` in the prototype). */
 export const PANEL_LOCKUP_X: readonly number[] = [46, 48, 60, 46, 44];
 export const VEIL_LEFT = Math.min(...PANEL_DIVIDER_X);
+/** Footer row: the Back button and the panel's forward action share this top edge and height. */
+export const FOOT_TOP = 848;
+export const FOOT_HEIGHT = 48;
+/** Distance from the copy/preview divider to the footer's right edge. */
+export const FOOT_RIGHT_INSET = 35;
+/** x of the footer's right edge for a panel: the divider minus the inset, or the stage edge on the full-width panel. */
+export function footRightX(panel: number): number {
+  return PANEL_DIVIDER_X[panel - 1] - FOOT_RIGHT_INSET;
+}
 /**
  * CDXC:Onboarding 2026-09-12 DECISION:
  * User: "the bg behind the right side graphics is too blue please make it less saturated colors for the bg
