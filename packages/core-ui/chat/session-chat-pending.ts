@@ -182,11 +182,23 @@ export function messagesAfterPendingBoundary(
 
 // --- Counting modes over user messages ---------------------------------------
 
+function userMessageCommand(message: SessionChatMessage): ReturnType<typeof parseSessionChatCommandEnvelope> {
+  return parseSessionChatCommandEnvelope(
+    message.blocks
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n')
+  );
+}
+
 function userMessageContentKey(message: SessionChatMessage): string {
-  const text = message.blocks
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
+  const command = userMessageCommand(message);
+  const text = command
+    ? `${command.name} ${command.args}`
+    : message.blocks
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n');
   const imagePaths = message.blocks
     .filter((block) => block.type === 'image-ref')
     .map((block) => block.path ?? block.url ?? '')
@@ -207,13 +219,19 @@ export function matchingSessionChatUserContentCounts(messages: readonly SessionC
   return counts;
 }
 
-/** Only user texts that have a LATER NON-USER turn. */
+/** User texts with a later non-user turn, or an acknowledged local command. */
 export function advancedSessionChatUserContentCounts(messages: readonly SessionChatMessage[]): Map<string, number> {
   const counts = new Map<string, number>();
   let waiting: string[] = [];
   for (const message of messages) {
     if (message.role === 'user') {
-      waiting.push(userMessageContentKey(message));
+      const key = userMessageContentKey(message);
+      if (userMessageCommand(message)) {
+        // Local commands finish without an assistant reply to advance the turn.
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      } else {
+        waiting.push(key);
+      }
       continue;
     }
     for (const key of waiting) {
@@ -387,7 +405,8 @@ function filterPendingSends(
  * Prune rule (drop the echo): keep the echo through the user-only transcript
  * phase — prune only once an assistant/other turn has landed after the
  * matching user text. Otherwise a first turn flashes the empty state before
- * the assistant reply arrives.
+ * the assistant reply arrives. A local command acknowledgment retires its
+ * echo immediately because it does not need an assistant reply.
  */
 export function pruneSessionChatPendingSends(
   pending: readonly SessionChatPendingSend[],

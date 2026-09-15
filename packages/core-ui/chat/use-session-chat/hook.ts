@@ -1191,6 +1191,18 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
 
   const boundaried = useMemo(() => applySessionChatCommandMarkerBoundaries(surfaced, markers), [markers, surfaced]);
 
+  /**
+   * CDXC:SessionChat 2026-09-15 WHY:
+   * Startup sends hydrate as pending bubbles even for /usage. Its command acknowledgment can arrive before any transcript exists, and it never needs an assistant reply, so pending reconciliation must include the server's live local-command records.
+   */
+  const pendingTranscript = useMemo(
+    () => [
+      ...boundaried,
+      ...sessionChatAppCommandsAsMessages(appCommands.filter((command) => command.localCommand), boundaried),
+    ],
+    [appCommands, boundaried]
+  );
+
   /*
    * Counted off the RAW authoritative list, the same one `send` snapshots
    * from: assembly folds turns together and a `/clear` boundary hides them
@@ -1205,20 +1217,20 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
       if (current.length === 0) {
         return current;
       }
-      const next = pruneSessionChatPendingSends(current, boundaried);
+      const next = pruneSessionChatPendingSends(current, pendingTranscript);
       return next === current ? current : next;
     });
-  }, [boundaried]);
+  }, [pendingTranscript]);
 
   // Keep hydrated sends until the transcript replaces them, including the gap
   // between terminal delivery and the agent flushing its transcript to disk.
   useEffect(() => {
     if (queuePrompts === null) return;
     setPending((current) => {
-      const next = pruneSessionChatPendingSends(sessionChatPendingWithStartupSends(current, queuePrompts), boundaried);
+      const next = pruneSessionChatPendingSends(sessionChatPendingWithStartupSends(current, queuePrompts), pendingTranscript);
       return next.length === current.length && next.every((entry, index) => entry === current[index]) ? current : next;
     });
-  }, [queuePrompts, boundaried]);
+  }, [queuePrompts, pendingTranscript]);
 
   // --- Working / status derivation -------------------------------------------
   // Three independent starts: the `working` flag on read results/snapshots,
@@ -1284,7 +1296,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     const transcript = reconcileSessionChatLocalCommandOutput(boundaried, appCommands);
     const startupPending = sessionChatPendingWithStartupSends(pending, queuePrompts ?? []);
     const pendingMessages = sessionChatPendingSendsAsMessages(
-      visibleSessionChatPendingSends(startupPending, boundaried)
+      visibleSessionChatPendingSends(startupPending, pendingTranscript)
     );
     const authoritativeText = new Set(
       boundaried
@@ -1337,6 +1349,7 @@ export function useSessionChat(options: UseSessionChatOptions): UseSessionChatRe
     compactionRecords,
     markers,
     pending,
+    pendingTranscript,
     queuePrompts,
     previewText,
     terminalStatusMessages,
