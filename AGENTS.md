@@ -7,7 +7,7 @@
 
 ### Always provide clickable artifact links
 
-- Whenever you create or update an HTML file, Markdown file, or Storybook story, include a direct clickable Markdown link in your final response so the user can open it immediately.
+- Whenever you create or update an HTML file, Markdown file, Storybook story, image, then include a direct clickable Markdown link in your final response so the user can open it immediately.
 - Use `[descriptive label](target)` Markdown syntax, never a bare URL, plain path, or a link inside backticks. Use absolute paths for local HTML and Markdown files.
 - For Storybook, link directly to the rendered story on the running Storybook server, not only to its source file or navigation instructions. Verify that the server is reachable and the story exists before handing over the link. If it cannot be served, clearly explain that and provide the source link.
 
@@ -89,23 +89,6 @@ git config -f .git/modules/zmx/config core.worktree ../../../.dependencies/zmx
 
 Verify: `git -C .dependencies/code-server rev-parse HEAD` prints `390f119a145e…`, and `git submodule status .dependencies/code-server` shows a leading space (not `-` or `+`).
 
-### Active apps vs deprecated apps
-
-Only three Ghostex apps are active development targets:
-
-1. **Desktop app** — `apps/desktop/` (Rust/GPUI shell + CEF React views). This is _the_ desktop app. `bun run start`, `bun run build`, and every `release:*` script in `package.json` target it.
-2. **Web app**: `apps/web/` is the `https://github.com/maddada/ghostex-web` submodule (static browser build of the shared workspace/Agents UI, talks to gxserver). Initialize it with `git submodule update --init -- apps/web`. Commit and push web changes inside that repository first, then commit its updated pointer in Ghostex. It still builds against Ghostex's shared packages and root Bun dependencies.
-3. **Mobile app** — `apps/mobile/` (React Native/Expo submodule in `apps/mobile/app`, ships Android).
-
-Deprecated. Never route new features, refactors, parity work, or bug fixes to these:
-
-- **macOS Swift/AppKit app** — removed on 2026-08-20. The Swift sources and their WKWebView sidebar host are gone; do not restore them, re-add a macOS Swift target, or treat the old app's behavior as the spec for new work.
-- **Native iOS app** and **Termux-fork Android app** — already removed from this checkout; they live under `/Users/madda/dev/_active/ghostex-deprecated/` and must never be restored as active release inputs.
-
-Everything under `apps/`, `packages/`, and `server/` is active. `.dependencies/` is external-origin code: some of it we edit (ghostty, zmx, code-server), and some of it is a pure build input (zed, cef-rs, gpui-component).
-
-- **`ghostex-tui` terminal app (`.dependencies/tui2`)** — deleted on 2026-08-23, together with `gx tui`, its build/staging plumbing, and `bin/ghostex-tui` in the macOS and remote Linux packages. Do not restore the vendored tree or re-add a `tui` CLI verb; the replacement is a herdr plugin, specified in `docs/2026-08-23/tui2-herdr-plugin/TUI2-AS-HERDR-PLUGIN.md`.
-
 ### Extensions system
 
 Ghostex extensions are separately shipped, hash-verified packages that can add full views, chat-bar panels, terminal panes, titlebar popups, and app modals. The gxserver registry, store, catalog, static serving, command lifecycle, and CLI live in `server/src/extensions/`. Desktop hosting, bridge context, launch routing, and runtime snapshots live in `apps/desktop/src/app/extensions/`. The Store and Installed UI lives in `packages/core-ui/extensions-modal/`, and the shared wire contract is `packages/shared/ghostex-extensions.ts`.
@@ -146,7 +129,7 @@ Search these app-owned areas first by task:
 - Server, remote protocol, hooks, authentication, remote setup: `server/src/`, `packages/shared/`, `tooling/`. The server crate is heavily modularized: `server/src/server/` (HTTP/WS core in `mod.rs` plus per-concern submodules), `server/src/agents/`, the flat `server/src/session_chat_*.rs` family, `server/src/domain/`, `server/src/zmx/`, `server/src/typed_operations/`, `server/src/portless/`, and `server/src/agent_hooks/`. Crate name is `gxserver`; it builds the `gxserver` and `ghostex` binaries.
 - Extensions: start with `server/src/extensions/` for registry, install, serving, lifecycle, API, and CLI behavior; `apps/desktop/src/app/extensions/` for desktop hosting, bridge context, and launch routing; `packages/core-ui/extensions-modal/` for Store and Installed UI; and `packages/shared/ghostex-extensions.ts` for the shared contract. Search `/Users/madda/dev/_active/Ghostex-extensions` only for extension manifests, authoring/publishing tooling, or example-extension code.
 - zmx behavior: `.dependencies/zmx/src/` + `.dependencies/zmx/test/`. This is the deliberate exception to the `.dependencies/**` exclusion — Ghostex edits it. The canonical contract for the Ghostex private OSCs (`ZMX_REFRESH`, `ZMX_VISIBLE=<rows>,<cols>`, `ZMX_CHAT=<rows>,<cols>`, `ZMX_HIDDEN=<rows>,<cols>`) is `appendClientInputMessages` in `.dependencies/zmx/src/loop.zig`; the four emitters — `apps/desktop/src/terminal_model.rs`, `server/src/terminal_ws.rs`, `apps/web/src/terminal/session-terminal.tsx`, `apps/mobile/app/src/terminal/zmxDisplay.ts` — must keep byte-identical sequences and a 200-column constant equal to `RESTING_GRID_COLS` in `.dependencies/zmx/src/ipc.zig`.
-- Prompt-history search (`gx f`, the Find surface): `packages/find/` for the engine, `server/src/agent_prompt_search.rs` for the API, `packages/core-ui/find/` for the shared UI.
+- Prompt-history search (`ghostex f`, the Find surface): `packages/find/` for the engine, `server/src/agent_prompt_search.rs` for the API, `packages/core-ui/find/` for the shared UI.
 - Mobile app work: `apps/mobile/` is the only active mobile app and releases Android through the React Native/Expo project in `apps/mobile/app` (a git submodule). Its embedded chat and find pages are `apps/mobile/views/chat/` and `apps/mobile/views/find/`, bundled by `bun run build:mobile-chat` / `bun run build:mobile-find`. The retired native iOS and Termux-fork Android repositories live under `/Users/madda/dev/_active/ghostex-deprecated/` and must not be restored as active release inputs.
 - Assets, sounds, icons, and release tooling: `media/`, `apps/desktop/assets/`, `packages/core-ui/assets/`, `tooling/`, and `tooling/release-gpui/`.
 
@@ -165,12 +148,12 @@ Add `apps/desktop/views` to that list only when the task is about the desktop mo
 
 ### Prompt-history search: it is Rust; the old Zig Zehn source is gone
 
-`gx f` used to spawn a bundled Zig binary built from the `zehn` submodule. It does not any more. Prompt-history search is the `packages/find/` Rust crate (crate name `ghostex-find`), compiled into gxserver and the `ghostex` CLI, so:
+`ghostex f` used to spawn a bundled Zig binary built from the `zehn` submodule. It does not any more. Prompt-history search is the `packages/find/` Rust crate (crate name `ghostex-find`), compiled into gxserver and the `ghostex` CLI, so:
 
-- `gx f` runs the picker **in-process**. There is no `bin/zehn` to stage, no `GHOSTEX_ZEHN_BIN`, and no `ZEHN_ZIG`. (Releases do still require Zig 0.16 — for ghostty and zmx, not for zehn — and 0.16 is now the repo's _only_ Zig toolchain.)
+- `ghostex f` runs the picker **in-process**. There is no `bin/zehn` to stage, no `GHOSTEX_ZEHN_BIN`, and no `ZEHN_ZIG`. (Releases do still require Zig 0.16 — for ghostty and zmx, not for zehn — and 0.16 is now the repo's _only_ Zig toolchain.)
 - The old Zig `zehn` submodule was removed after the Rust port replaced it. Never restore it, build it, bundle it, or treat it as the spec for new work — change `packages/find/` instead.
 - Two hotkeys moved in **both** the terminal picker and the GUI so the surfaces share one key map: agents is `^g` (was `^t`) and projects is `^j` (was `^r`), because browsers reserve Ctrl+T and Ctrl+R and will not hand them to a page.
-- The GUI (`packages/core-ui/find/`) and `gx f` share the same scanner, matcher, Codex cache, and favorites file, so a prompt starred in one is starred in the other. Anything that would make them rank or star differently is a bug.
+- The GUI (`packages/core-ui/find/`) and `ghostex f` share the same scanner, matcher, Codex cache, and favorites file, so a prompt starred in one is starred in the other. Anything that would make them rank or star differently is a bug.
 
 ### Windows session parity: wmx
 
@@ -195,7 +178,7 @@ What this means when you edit zmx:
 - **A bump restarts every live session on the next `bun run start`.** Say so in your report, check `ghostex sessions` for `running` entries as in the commit rules below, and let the user pick a quiet moment to install. Sessions whose agent is idle lose nothing but a resume; sessions mid-task lose background work.
 - **Never skip the stamp or bypass the pass** with an env switch, a build flag, or by leaving `wire_generation` out of `zmx version`. A binary that does not print the line makes gxserver log `zmxWireGenerationUnreadable` and cycle nothing, which turns the next real wire break into blank panes.
 - Verify with `zmx version` from `.dependencies/zmx/zig-out/bin/zmx` and run `zig build test` inside `.dependencies/zmx` before shipping the binary. On macOS the plain Zig build can fail inside libc++ with an `INFINITY` error from the current SDK; `prepare-macos-runtime.sh` builds through an SDK overlay and an `xcrun` shim to work around it, so build the way it does rather than patching the SDK.
-- `gx server stop` stops only the control plane and leaves daemons running; `gx server stop-all` kills every tracked zmx session. Neither is a substitute for the wire-cycle pass and neither should be used to "test" a zmx change on a machine with live agents.
+- `ghostex server stop` stops only the control plane and leaves daemons running; `ghostex server stop-all` kills every tracked zmx session. Neither is a substitute for the wire-cycle pass and neither should be used to "test" a zmx change on a machine with live agents.
 
 ### CDXC comments: why the code exists, and what the user decided
 
@@ -355,25 +338,6 @@ When asked to mock up a UI or a flow, build it as static HTML, not as Storybook 
 - **Verify by rendering.** Screenshot the pages with headless Chrome before reporting, and fix clipping, overflow and collapsed flex children.
 - Mockups are documentation: they do not touch product code, and the folder is committed like any other `docs/` folder.
 
-### Project board beads workflow
-
-When working from a Ghostex Project board ticket, use the `bd` CLI installed in the environment running that project—macOS, Linux, or the selected WSL distribution—and move the bead through the project swimlanes instead of leaving it in `open`/Todo. Ghostex's Kanban runtime uses this same system binary, so do not depend on a separate `gx bd` wrapper or a bundled Ghostex copy. Ghostex does not bundle, download, or symlink `bd` on any platform (the packaged copy and the remote/WSL `~/.local/bin/bd` symlink were removed on 2026-09-03), so a missing `bd` is always a machine-install task, never a Ghostex asset repair. If `bd` is missing or a board command fails, ask the user to install or update to the latest Beads release in that same environment before continuing.
-
-- Put your session on the card: `gx board associate <id>` — run this first, with no other arguments, whenever you are asked to work a bead. It links the session you are running in to the card, which is otherwise only linked when the work was dispatched from the card's own "Start work" button, so a hand-prompted agent leaves the card looking unworked. It creates no session and is safe to repeat; `gx board start-work` is the opposite command (it dispatches a card to a _new_ worker) and must not be run for a bead you are working yourself.
-- Park for later: `bd update <id> --status backlog`
-- Claim work: `bd update <id> --status in_progress`
-- Ready for test: `bd update <id> --status test`
-- Ready for review: `bd update <id> --status review`
-- Done: `bd close <id>`
-
-After each turn where you made progress on the bead, add a comment so humans can follow the ticket without reading the full agent transcript:
-
-- `bd comment <id> "<summary>"`
-- Focus on user-facing requirements delivered and high-level technical approach.
-- Do not list specific files or line numbers.
-
-The Project board "Start work" action copies a prompt that includes these commands and the comment guidance.
-
 ### Destructive git/file operations safety rule
 
 Never interpret "revert your changes" or "revert what you did" as permission to reset, restore, clean, delete, or otherwise discard the whole worktree. Other agents and the user may have unrelated uncommitted or untracked work in the same repo.
@@ -450,5 +414,11 @@ Never format `.dependencies/**`, `node_modules/**`, `apps/web/**` or `apps/mobil
 
 ### Don't switch the repo to another branch ever
 
-- We run multiple agents at a time on 1 worktree so agents should never switch the branch this folder is on away from main
-- If you need to do work that requires switching to a new branch then please create a temp worktree and do the needed work there.
+- We run multiple agents at a time on 1 worktree so agents should never switch the branch this folder is on away from main unless explicitly requested to do so by the user.
+- If you need to do work that requires switching to a new branch then please create a temp "copy on write" folder copy and do the needed work there.
+
+### Ghostex app debugging: build the code being diagnosed
+
+- Ordinary authorization to inspect or operate Ghostex applies only to the instance the user already has running. Do not launch, restart, replace, or open another copy unless the user explicitly requests it.
+- Outside that explicit skill workflow, never use `cua-driver launch_app`, Computer Use launch/open actions, macOS `open`, `bun run start`, or another app-start operation merely to discover or attach to Ghostex. If no instance is running, ask before launching anything.
+- If more than one Ghostex process or app copy is present, do not guess. Identify the newly rebuilt or user-selected instance from process and window state; ask the user when it remains ambiguous.
