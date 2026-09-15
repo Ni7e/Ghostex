@@ -15,7 +15,7 @@ body[data-sidebar-theme='plain-light'] .sidebar-reference-layout[data-reference-
  * This supersedes the 2026-09-13 decision to preserve the CSS border's width.
  */
 body.native-sidebar-body[data-sidebar-theme='plain-light']
-  .sidebar-reference-layout[data-reference-sidebar='true'][data-sidebar-side] {
+  .sidebar-reference-layout[data-reference-sidebar='true'] {
   border-left-width: 0;
   border-right-width: 0;
 }
@@ -48,14 +48,6 @@ body[data-sidebar-theme='plain-light']
   .session:is([data-visible='true'], [data-focused='true'])
   .session-alias-heading {
   color: #262626;
-}
-
-body[data-sidebar-theme='plain-light']
-  .sidebar-reference-layout[data-reference-sidebar='true']
-  .session[data-sleeping='true']
-  .session-alias-heading {
-  color: #717171;
-  opacity: 0.72;
 }
 
 body[data-sidebar-theme='plain-light']
@@ -113,6 +105,12 @@ body[data-sidebar-theme='plain-light']
     [data-agent-icon='grok-build'],
     [data-agent-icon='mastra']
   ) {
+  filter: brightness(0);
+}
+
+body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
+  .sidebar-reference-layout
+  :is(.session-floating-agent-icon, .session-header-agent-icon)[data-agent-icon='zcode'] {
   filter: brightness(0);
 }
 
