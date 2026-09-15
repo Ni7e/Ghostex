@@ -98,6 +98,9 @@ if ($BuildPhase -eq "compile") {
 
 # CDXC:Release 2026-09-14 WHY:
 # The native editor payload is consumed only by staging. Building it during compile made both Windows Rust cache jobs fail on the editor's pinned Node requirement before reaching cargo.
+# CDXC:Release 2026-09-16 WHY:
+# The release workflow hands the verified native editor component archive to the script through GHOSTEX_WINDOWS_NATIVE_CODE_SERVER_ARCHIVE.
+# Without it the script reuses the published component when the code-server tree is clean and builds from source otherwise, so local builds keep working without CI.
 & (Join-Path $ScriptDir "build-windows-code-server.ps1")
 
 # 3) Locate the extracted CEF distribution. cef-dll-sys may export either a
@@ -349,4 +352,13 @@ if (!(Test-Path (Join-Path $NativeCodeRoot "lib/node.exe")) -or
     throw "The native Windows editor build did not produce the required staging payload."
 }
 Copy-Item $NativeCodeRoot (Join-Path $AppDir "code-server") -Recurse -Force
+# CDXC:Release 2026-09-16 WHY:
+# The native editor payload is an immutable, version-free component reused across releases, so the app version and commit are stamped on the staged copy here, not at build time.
+# A reused payload therefore reports the current release exactly like a freshly built one.
+$StagedPackagePath = Join-Path $AppDir "code-server/package.json"
+$StagedPackage = Get-Content $StagedPackagePath -Raw | ConvertFrom-Json
+$StagedPackage.version = $ReleaseVersion
+# The wrapper reports the code-server revision it was built from; the gitlink resolves even when the submodule is not initialized.
+$StagedPackage | Add-Member -NotePropertyName commit -NotePropertyValue ((& git -C $RepoRoot rev-parse "HEAD:.dependencies/code-server").Trim()) -Force
+[IO.File]::WriteAllText($StagedPackagePath, ($StagedPackage | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
 Write-Host "Staged $AppDir"

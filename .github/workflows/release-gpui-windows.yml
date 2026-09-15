@@ -17,6 +17,17 @@ name: GPUI release - Windows
 # a pure function of the checkout, and codeServerComponentNames() stays the
 # single source of the artifact name (risk R9).
 #
+# CDXC:Release 2026-09-16 WHY:
+# The native Windows editor is no longer compiled inside the packaging phase
+# (28 min on x64, 50 min on ARM64 in 9.6.0). release-gpui-code-server-windows.yml
+# builds or reuses it as the immutable windows-native-<arch> asset of the
+# code-server component tag; this job awaits that artifact just in time, right
+# before the packaging phase, downloads it, and hands it to
+# build-windows-code-server.ps1 as GHOSTEX_WINDOWS_NATIVE_CODE_SERVER_ARCHIVE,
+# which verifies and unpacks it instead of building. The editor build tools are
+# only prepared for a standalone dispatch, where the script falls through to the
+# source build when nothing is published yet.
+#
 # Zig dependency prefetching is deliberately Linux/macOS only: ZIG_GLOBAL_CACHE_DIR
 # must be a native Windows path, which the bash prefetch helper cannot produce.
 # Windows gets the same protection from the restored Zig package cache.
@@ -136,40 +147,21 @@ jobs:
         with:
           node-version-file: .dependencies/code-server/.node-version
           architecture: ${{ inputs.arch }}
-      - name: Prepare native editor build tools
+      # A release run consumes the native editor component built by
+      # code_server_windows_<arch>; only a standalone dispatch may need to build
+      # the editor from source here, so only it prepares the editor toolchain.
+      - name: Prepare native editor build tools for a standalone dispatch
+        if: ${{ ! inputs.runtime_artifacts_ready }}
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          foreach ($tool in @('python', 'jq', 'git-lfs')) {
-            Get-Command $tool -ErrorAction Stop | Out-Null
-          }
-          "PYTHON=$((Get-Command python).Source)" >> $env:GITHUB_ENV
-          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-          $vs = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-          if (!$vs) { throw 'The native editor requires Visual Studio C++ build tools.' }
-          $component = if ('${{ inputs.arch }}' -eq 'arm64') {
-            'Microsoft.VisualStudio.Component.VC.Runtimes.ARM64.Spectre'
-          } else {
-            'Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre'
-          }
-          $installed = & $vswhere -latest -products '*' -requires $component -property installationPath
-          if (!$installed -or $installed.Trim() -ne $vs) {
-            $installer = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/setup.exe"
-            $install = Start-Process $installer -Wait -PassThru -ArgumentList @('modify', '--installPath', ('"' + $vs + '"'), '--add', $component, '--quiet', '--norestart')
-            if ($install.ExitCode -notin @(0, 3010)) { throw "Spectre libraries installation failed: $($install.ExitCode)" }
-          }
-          "npm_config_msvs_version=$vs" >> $env:GITHUB_ENV
-          # CDXC:CodeEditor 2026-09-14 WHY:
-          # The release runners ship Visual Studio 2026, and VS Code's preinstall probe only recognizes the 2019 and 2022 install layouts,
-          # so it rejected the toolchain and the native editor build failed before it started. Point its documented override at the
-          # installation vswhere already resolved above.
-          "vs2022_install=$vs" >> $env:GITHUB_ENV
-          git -C .dependencies/code-server submodule update --init --depth=1 -- lib/vscode
-          if ($LASTEXITCODE -ne 0) { throw 'Could not initialize the pinned VS Code sources.' }
+        run: tooling/release-gpui/prepare-windows-editor-tools.ps1 -Arch '${{ inputs.arch }}'
       - name: Resolve immutable code-server component identity
         id: code_server_identity
         shell: bash
         run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform "linux-${{ inputs.arch }}" --github-output >> "$GITHUB_OUTPUT"
+      - name: Resolve the native editor component artifact name
+        id: code_server_native
+        shell: bash
+        run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform "windows-native-${{ inputs.arch }}" --github-output >> "$GITHUB_OUTPUT"
       - name: Resolve dependency cache keys
         id: cache_keys
         shell: bash
@@ -382,6 +374,7 @@ jobs:
           GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\gxserver-linux-${{ inputs.arch }}.tar.gz
           GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
           GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\${{ steps.code_server_identity.outputs.archive_name }}
+          GHOSTEX_WINDOWS_NATIVE_CODE_SERVER_ARCHIVE: ${{ inputs.runtime_artifacts_ready && format('{0}\build\runtime-artifacts\native-editor-{1}\{2}', github.workspace, inputs.arch, steps.code_server_native.outputs.archive_name) || '' }}
           GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: '900'
         run: |
           & $env:GHOSTEX_WINDOWS_WATCHDOG -Phase compile -Version '${{ inputs.version }}' -Arch '${{ inputs.arch }}'
@@ -430,6 +423,35 @@ jobs:
             --archive "build/runtime-artifacts/${{ inputs.arch }}/${{ steps.code_server_identity.outputs.archive_name }}" \
             --version '${{ steps.code_server_identity.outputs.component_version }}' \
             --platform "linux-${{ inputs.arch }}"
+      # The native editor component is published by its own job and is only
+      # read by the packaging phase, so it is awaited here, after the compile.
+      # A cold editor build takes about 28 minutes on x64 and 50 on ARM64 after
+      # its own runner setup, and both jobs start together, so the window is
+      # longer than the runtime artifacts above and longer still on ARM64; it
+      # still fits the job budget with the compile and packaging phases.
+      - name: Await the native editor component of this run
+        if: ${{ inputs.runtime_artifacts_ready }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tooling/release-gpui/await-run-artifacts.mjs \
+            --names "${{ steps.code_server_native.outputs.artifact_name }}" \
+            --producer-pattern '^(code_server_windows_${{ inputs.arch }})' \
+            --timeout-minutes ${{ inputs.arch == 'arm64' && 90 || 60 }}
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: ${{ steps.code_server_native.outputs.artifact_name }}
+          path: build/runtime-artifacts/native-editor-${{ inputs.arch }}
+      - name: Validate the native editor component archive
+        if: ${{ inputs.runtime_artifacts_ready }}
+        shell: bash
+        run: |
+          node tooling/release-gpui/verify-windows-native-code-server-archive.mjs \
+            --archive "build/runtime-artifacts/native-editor-${{ inputs.arch }}/${{ steps.code_server_native.outputs.archive_name }}" \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform "windows-native-${{ inputs.arch }}"
       # Phase 2 of windows.ps1: stage the app directory from the compiled
       # binaries, seal the CEF / code-server components, verify the staged
       # tree, sign the binaries, vpk pack, bundle and sign the launcher, and
@@ -446,6 +468,7 @@ jobs:
           GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\gxserver-linux-${{ inputs.arch }}.tar.gz
           GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
           GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\${{ steps.code_server_identity.outputs.archive_name }}
+          GHOSTEX_WINDOWS_NATIVE_CODE_SERVER_ARCHIVE: ${{ inputs.runtime_artifacts_ready && format('{0}\build\runtime-artifacts\native-editor-{1}\{2}', github.workspace, inputs.arch, steps.code_server_native.outputs.archive_name) || '' }}
           GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: '900'
         run: |
           & $env:GHOSTEX_WINDOWS_WATCHDOG -Phase package -Version '${{ inputs.version }}' -Arch '${{ inputs.arch }}'

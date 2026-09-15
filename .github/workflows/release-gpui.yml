@@ -146,6 +146,8 @@ jobs:
       job_android: ${{ steps.plan.outputs.job_android }}
       job_code_server_arm64: ${{ steps.plan.outputs.job_code_server_arm64 }}
       job_code_server_darwin_arm64: ${{ steps.plan.outputs.job_code_server_darwin_arm64 }}
+      job_code_server_windows_arm64: ${{ steps.plan.outputs.job_code_server_windows_arm64 }}
+      job_code_server_windows_x64: ${{ steps.plan.outputs.job_code_server_windows_x64 }}
       job_code_server_x64: ${{ steps.plan.outputs.job_code_server_x64 }}
       job_gxserver_arm64: ${{ steps.plan.outputs.job_gxserver_arm64 }}
       job_gxserver_x64: ${{ steps.plan.outputs.job_gxserver_x64 }}
@@ -375,6 +377,33 @@ jobs:
     with:
       version: ${{ inputs.version }}
 
+  # The native Windows editor component (VS Code REH for win32), one job per
+  # architecture, built off the Windows jobs' critical path. Each Windows job
+  # awaits its architecture's artifact just in time before packaging.
+  code_server_windows_x64:
+    if: ${{ needs.prepare.outputs.job_code_server_windows_x64 != 'skip' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-code-server-windows.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: x64
+
+  code_server_windows_arm64:
+    if: ${{ needs.prepare.outputs.job_code_server_windows_arm64 != 'skip' }}
+    needs: prepare
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-gpui-code-server-windows.yml
+    with:
+      version: ${{ inputs.version }}
+      arch: arm64
+
   reuse:
     if: ${{ needs.prepare.outputs.reuse_count != '0' }}
     needs: prepare
@@ -445,10 +474,10 @@ jobs:
 
   windows_x64:
     if: ${{ needs.prepare.outputs.job_windows_x64 == 'build' }}
-    # `prepare` only. The gxserver tarball and the code-server component are
-    # real data dependencies, but they are awaited just in time inside the job
-    # (await-run-artifacts.mjs), after ~7 minutes of runner setup, so they are
-    # not a `needs:` edge and do not delay the job's start.
+    # `prepare` only. The gxserver tarball, the code-server component, and the
+    # native editor component are real data dependencies, but they are awaited
+    # just in time inside the job (await-run-artifacts.mjs), after the Rust
+    # compile, so they are not a `needs:` edge and do not delay the job's start.
     needs: prepare
     permissions:
       attestations: write

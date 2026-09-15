@@ -332,24 +332,29 @@ const COMPOSED_NODES = {
      * `<12-hex code-server HEAD>-p2-<payload fingerprint>`. Both halves are
      * determined by the code-server gitlink and the identity revision, so the
      * gitlink plus the identity-revision inputs is an exact, offline stand-in.
-     * The three identity-revision inputs below change the produced archive
-     * without changing the upstream payload, so they must invalidate the build.
+     * The identity-revision inputs below change the produced archive without
+     * changing the upstream payload, so they must invalidate the build.
      */
     composedFrom: [],
     id: 'code-server',
     identityRevisionPathspecs: [
       { pathspec: 'tooling/release-gpui/patches/code-server-ripgrep-target-validation.patch' },
       { pathspec: '.github/workflows/release-gpui-code-server.yml' },
+      { pathspec: '.github/workflows/release-gpui-code-server-windows.yml' },
       /* Lives inside the code-server gitlink, so it never appears in this tree. */
       { pathspec: '.dependencies/code-server/.node-version', allowMissing: true },
     ],
     kind: 'component',
     pathspecs: [
       { pathspec: '.dependencies/code-server' },
+      /* The native Windows editor recipe is part of the component identity (CODE_SERVER_RECIPE_INPUTS). */
+      { pathspec: 'apps/desktop/scripts/build-windows-code-server.ps1' },
       { pathspec: 'tooling/release-gpui/code-server-component-identity.mjs' },
       { pathspec: 'tooling/release-gpui/patches/code-server-ripgrep-target-validation.patch' },
       { pathspec: 'tooling/release-gpui/verify-code-server-archive.mjs' },
+      { pathspec: 'tooling/release-gpui/verify-windows-native-code-server-archive.mjs' },
       { pathspec: '.github/workflows/release-gpui-code-server.yml' },
+      { pathspec: '.github/workflows/release-gpui-code-server-windows.yml' },
     ],
     values: { identityRevision: CODE_SERVER_IDENTITY_REVISION, node: TOOLCHAIN.node },
     versionStamped: false,
@@ -577,7 +582,11 @@ export function componentPlatformRequirements(productId) {
   }
   if (productId === 'windows-x64' || productId === 'windows-arm64') {
     const arch = productId.slice('windows-'.length);
-    return { cef: [`windows-${arch}`], 'code-server': [`linux-${arch}`, `windows-${arch}`] };
+    /* windows-<arch> is the WSL wrapper the app installs on demand; windows-native-<arch> is the bundled editor. */
+    return {
+      cef: [`windows-${arch}`],
+      'code-server': [`linux-${arch}`, `windows-${arch}`, `windows-native-${arch}`],
+    };
   }
   return {};
 }
