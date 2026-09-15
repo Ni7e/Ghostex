@@ -84,7 +84,11 @@ impl GhostexGpuiApp {
     fn gpui_projected_tab_session_is_chat_eligible(
         session: &GpuiSidebarWorkspaceTabSession,
     ) -> bool {
+        // CDXC:SessionChat 2026-09-15 WHY:
+        // A manually launched Codex can defer its first hook/session identity until the first prompt (reproduced with native Windows Codex 0.154).
+        // The live terminal already accepts that prompt, so chat must be able to open before a transcript exists, just as it does for sidebar-created drafts.
         session.is_draft
+            || (session.presentation_state.is_running() && session.agent_icon == Some("codex"))
             || session
                 .agent_session_id
                 .as_deref()

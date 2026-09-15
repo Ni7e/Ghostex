@@ -27,8 +27,8 @@ pub(crate) struct GpuiSidebarWorkspaceTabSession {
     /*
     CDXC:Drafts 2026-08-28:
     The session is a draft: created from the sidebar, its agent CLI running,
-    but no first prompt sent. It is the one session shape that is chat-eligible
-    without an `agent_session_id`.
+    but no first prompt sent. Drafts are chat-eligible without an
+    `agent_session_id`; a manually launched live Codex can also await its first hook.
     */
     pub(crate) is_draft: bool,
     pub(crate) is_generating_first_prompt_title: bool,
