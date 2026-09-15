@@ -11,7 +11,11 @@ import { SortableSessionCard } from '../sortable-session-card';
 import { useSidebarStore } from '../sidebar-store';
 import type { SidebarSessionItem } from '@/packages/shared/session-grid-contract';
 
-function createPreviewTransport(onPendingChange: (count: number) => void, working: boolean): SessionChatTransport {
+function createPreviewTransport(
+  onPendingChange: (count: number) => void,
+  working: boolean,
+  completed: boolean
+): SessionChatTransport {
   const listeners = new Set<(event: GxserverSessionChatEvent) => void>();
   let seq = 1;
   const dismissed = new Set<string>();
@@ -75,6 +79,9 @@ function createPreviewTransport(onPendingChange: (count: number) => void, workin
       messages: [...messages],
       status: working ? 'working' : 'ready',
       working,
+      ...(completed
+        ? { lifecycle: { state: 'completed' as const, turnId: 'question-turn', timestamp: Date.now() } }
+        : {}),
       agent: 'codex',
       agentSessionId: 'storybook-async-questions',
       screenProbed: true,
@@ -188,17 +195,22 @@ function AsyncQuestionsStory({
   paneWidth,
   paneHeight,
   working,
+  completed = false,
 }: {
   theme: 'dark' | 'light';
   paneWidth: number;
   paneHeight: number;
   working: boolean;
+  completed?: boolean;
 }) {
   const [revision, setRevision] = useState(0);
   const [identity] = useState(() => crypto.randomUUID());
   const [pendingCount, setPendingCount] = useState(3);
-  const transport = useMemo(() => createPreviewTransport(setPendingCount, working), [revision, working]);
-  useLayoutEffect(() => setPendingCount(3), [revision, working]);
+  const transport = useMemo(
+    () => createPreviewTransport(setPendingCount, working, completed),
+    [revision, working, completed]
+  );
+  useLayoutEffect(() => setPendingCount(3), [revision, working, completed]);
   return (
     <div style={{ minHeight: '100vh', padding: 20, background: '#161616' }}>
       <div style={{ width: paneWidth, maxWidth: '100%', margin: '0 auto', display: 'grid', gap: 12 }}>
@@ -208,8 +220,8 @@ function AsyncQuestionsStory({
         <SidebarQuestionPreview count={pendingCount} working={working} />
         <div style={{ height: paneHeight, minHeight: 0, overflow: 'hidden', border: '1px solid #444' }}>
           <SessionChatView
-            key={`${revision}:${working}`}
-            sessionKey={`storybook-async:${identity}:${revision}:${working}`}
+            key={`${revision}:${working}:${completed}`}
+            sessionKey={`storybook-async:${identity}:${revision}:${working}:${completed}`}
             sessionTitle='Codex questions while working'
             agentLabel='codex'
             inputBackend='lexical'
@@ -237,6 +249,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Working: Story = {};
+export const CompletedBeforeActivityUpdate: Story = { args: { working: true, completed: true } };
 export const Light: Story = { args: { theme: 'light' } };
 export const ShortPane: Story = { args: { paneWidth: 390, paneHeight: 500 } };
 export const FinishedWithQuestions: Story = { args: { working: false } };

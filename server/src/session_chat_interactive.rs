@@ -199,6 +199,14 @@ pub fn parse_session_chat_questions(
     tool_name: Option<&str>,
     input: &Value,
 ) -> Option<Vec<SessionChatQuestion>> {
+    // CDXC:SessionChat 2026-09-15 WHY: Codex records function-call arguments as a JSON string. Reading only objects hid regular request_user_input cards when no hook supplied the prompt.
+    let decoded;
+    let input = if let Value::String(raw) = input {
+        decoded = serde_json::from_str::<Value>(raw).ok()?;
+        &decoded
+    } else {
+        input
+    };
     let record = input.as_object()?;
     let is_cursor_ask_question = tool_name
         .is_some_and(|tool_name| normalize_session_chat_tool_name(tool_name) == "askquestion");

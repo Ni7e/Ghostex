@@ -684,6 +684,39 @@ mod tests {
         let quiet = scan_transcript_prompt_state(&[result]);
         assert!(!quiet.answered());
         assert!(quiet.pending().is_none());
+
+        let codex_call = decode_codex_transcript_line(
+            &json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "namespace": "functions",
+                    "name": "request_user_input",
+                    "call_id": "regular-question",
+                    "arguments": input.to_string(),
+                },
+            })
+            .to_string(),
+            "codex-question",
+        )
+        .expect("regular Codex call decodes");
+        assert!(codex_call.async_questions.is_none());
+        let mut codex_state = scan_transcript_prompt_state(&[codex_call]);
+        let codex_prompt = resolve_session_chat_prompt(None, &codex_state)
+            .expect("string arguments produce a regular question card without hooks");
+        assert!(matches!(
+            codex_prompt,
+            SessionChatInteractivePrompt::Question { ref questions, .. }
+                if questions[0].question == "Which approach?"
+                    && questions[0].tool_name.as_deref() == Some("request_user_input")
+                    && questions[0].options.len() == 2
+        ));
+        let codex_result = decode_codex_transcript_line(
+            r#"{"type":"response_item","payload":{"type":"function_call_output","call_id":"regular-question","output":"{\"answers\":{\"approach\":{\"answers\":[\"Fast\"]}}}"}}"#,
+            "codex-answer",
+        ).expect("regular Codex result decodes");
+        codex_state.advance(&[codex_result]);
+        assert!(resolve_session_chat_prompt(Some(codex_prompt), &codex_state).is_none());
     }
 
     #[test]
@@ -1733,6 +1766,10 @@ mod tests {
         assert!(parsed[1].options.is_empty());
         assert!(parse_session_chat_questions(None, &json!({"questions": []})).is_none());
         assert!(parse_session_chat_questions(None, &json!({"notQuestions": true})).is_none());
+        assert!(
+            parse_session_chat_questions(Some("request_user_input"), &json!("{broken")).is_none()
+        );
+        assert!(parse_session_chat_questions(Some("request_user_input"), &json!("null")).is_none());
     }
 
     fn write_temp_transcript(lines: &[&str]) -> PathBuf {

@@ -94,6 +94,7 @@ import { useSessionChat } from './use-session-chat';
 import { useSessionChatWorkingHold } from './use-session-chat-working-hold';
 import { useSessionChatComposerInset } from './use-session-chat-composer-inset';
 import { SessionChatLoadingState } from './session-chat-loading-state';
+import { playCopySound } from '../copy-sound';
 
 const INTERACTIVE_TARGET_SELECTOR = [
   'a[href]',
@@ -257,6 +258,8 @@ export interface SessionChatViewProps {
   hostSessionNoteBridge?: SessionChatHostSessionNoteBridge;
   /** Open delayed actions for this session in the host-owned modal. */
   onDelayedActions?: () => void;
+  /** Opens an assistant reply in the host's Docs review so it can be annotated (desktop only). */
+  onAnnotateMessage?: (markdown: string) => void;
   /*
   CDXC:SessionFork 2026-08-28:
   Navigates the host to another branch of this conversation, picked in the
@@ -426,6 +429,7 @@ function TranscriptSelectionToolbar({
         className='flex items-center gap-1.5 px-3 py-1.5 text-sm'
         onPointerDown={(event) => {
           event.preventDefault();
+          playCopySound();
           document.execCommand('copy');
           window.getSelection()?.removeAllRanges();
         }}
@@ -465,6 +469,7 @@ export function SessionChatView({
   hotkeys,
   hostComposerBridge,
   hostSessionNoteBridge,
+  onAnnotateMessage,
   hostLinks,
   inputBackend = 'lexical',
   nativeSelectionMenus = false,
@@ -1561,6 +1566,7 @@ export function SessionChatView({
     if (transcriptFilePath === null) {
       return;
     }
+    playCopySound();
     void navigator.clipboard.writeText(transcriptFilePath).catch((error: unknown) => {
       console.error('[session-chat] file path clipboard write failed', error);
     });
@@ -1570,6 +1576,7 @@ export function SessionChatView({
     if (transcriptWebUrl === null) {
       return;
     }
+    playCopySound();
     void navigator.clipboard.writeText(transcriptWebUrl).catch((error: unknown) => {
       console.error('[session-chat] URL clipboard write failed', error);
     });
@@ -1579,6 +1586,7 @@ export function SessionChatView({
     if (transcriptSelection === '') {
       return;
     }
+    playCopySound();
     void navigator.clipboard.writeText(transcriptSelection).catch((error: unknown) => {
       console.error('[session-chat] transcript clipboard write failed', error);
     });
@@ -1695,7 +1703,9 @@ export function SessionChatView({
                               onRetryStartupSend={chat.queue.retryPrompt}
                               onRemoveStartupSend={chat.queue.removePrompt}
                               onLoadEarlier={chat.loadEarlier}
+                              readHistory={transport.readHistory}
                               {...(hostComposerBridge?.stashPrompt ? { onSavePrompt: saveTranscriptPrompt } : {})}
+                              {...(onAnnotateMessage ? { onAnnotateMessage } : {})}
                               {...(listMessageMarkdownPaths ? { listMessageMarkdownPaths } : {})}
                               {...(rewindToMessage
                                 ? { canRewind, onRewound: holdRewoundPromptInComposer, rewindToMessage, rewindAgent }
@@ -1740,7 +1750,9 @@ export function SessionChatView({
                                 onRetryStartupSend={chat.queue.retryPrompt}
                                 onRemoveStartupSend={chat.queue.removePrompt}
                                 onLoadEarlier={chat.loadEarlier}
+                                readHistory={transport.readHistory}
                                 {...(hostComposerBridge?.stashPrompt ? { onSavePrompt: saveTranscriptPrompt } : {})}
+                                {...(onAnnotateMessage ? { onAnnotateMessage } : {})}
                                 {...(listMessageMarkdownPaths ? { listMessageMarkdownPaths } : {})}
                                 {...(rewindToMessage
                                   ? { canRewind, onRewound: holdRewoundPromptInComposer, rewindToMessage, rewindAgent }
@@ -1888,7 +1900,8 @@ export function SessionChatView({
                           canSend={
                             composerEnabled && !questionActive && chat.status !== 'error' && chat.status !== 'loading'
                           }
-                          working={chat.sessionWorking}
+                          // CDXC:SessionChat 2026-09-15 WHY: A question can outlive its Codex turn. Honor task completion here so a delayed host activity update cannot label an idle question "Still working".
+                          working={chat.working}
                           onSend={(questionId, text) => chat.answerPrompt({ kind: 'asyncQuestion', questionId, text })}
                           onDismiss={(questionId) => chat.answerPrompt({ kind: 'dismissAsyncQuestion', questionId })}
                         />

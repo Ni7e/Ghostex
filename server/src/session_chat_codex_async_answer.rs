@@ -165,9 +165,14 @@ fn editor(screen: &str) -> Option<Editor> {
         .collect();
     let mut position = 1;
     let mut count = 1;
-    if let Some((left, right)) = body.first().and_then(|row| row.split_once(" of ")) {
-        position = left.parse().ok()?;
-        count = right.parse().ok()?;
+    // CDXC:SessionChat 2026-09-15 WHY: Codex omits the counter for a single question. "rest of compaction" in its title was mistaken for that counter and made Enter fail before the answer was sent.
+    if let Some((current, total)) = body.first().and_then(|row| {
+        let (left, right) = row.split_once(" of ")?;
+        let (current, total) = (left.parse::<usize>().ok()?, right.parse::<usize>().ok()?);
+        (current > 0 && total > 1 && current <= total).then_some((current, total))
+    }) {
+        position = current;
+        count = total;
         body.remove(0);
     }
     // Hints can wrap independently of question and answer rows.
@@ -480,6 +485,26 @@ mod tests {
         let e = editor(&screen).unwrap();
         assert!(matches_question(&e, "Which very long layout?"));
         assert!(!matches_question(&e, "Which very long layout? Compact"));
+    }
+
+    #[test]
+    fn single_idle_question_containing_of_is_not_a_progress_counter() {
+        let title = "Did the chat percentage stay at 66% for the rest of compaction, or did it catch up when you switched back from the terminal?";
+        let screen = format!("• Queued follow-up inputs\n\n  {title}\n\n  Type your answer\n\n  enter submit   ctrl + ] skip   ⌥ + ↓ main prompt");
+        let e = editor(&screen).expect("single question editor remains answerable");
+        assert_eq!((e.position, e.count), (1, 1));
+        assert!(matches_question(&e, title));
+        assert_eq!(
+            question_input(&e, title).unwrap().trim(),
+            "Type your answer"
+        );
+
+        let staged = screen.replace("Type your answer", "yes catches up when i switch back");
+        let e = editor(&staged).expect("staged single answer remains detectable");
+        assert_eq!(
+            question_input(&e, title).unwrap().trim(),
+            "yes catches up when i switch back"
+        );
     }
 
     #[test]
