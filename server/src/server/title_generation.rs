@@ -139,6 +139,9 @@ pub(crate) struct ForkInitialRenameTarget {
     title: String,
 }
 
+/// CDXC:SessionFork 2026-09-15 DECISION:
+/// User: Fork must persist `Fork: <original name>` through the agent's own rename command.
+/// This supersedes the Codex exception that left its provider thread unnamed for first-turn auto-titling.
 pub(crate) fn fork_initial_rename_target(
     endpoint_path: &str,
     result: &Value,
@@ -154,14 +157,6 @@ pub(crate) fn fork_initial_rename_target(
         .and_then(Value::as_str)
         .or_else(|| session.get("agentId").and_then(Value::as_str))?
         .trim();
-    /*
-    Codex 0.150 names an unnamed fork from its first user turn. Do not install
-    Ghostex's provisional `/rename Fork: ...` first, because that makes the
-    provider thread non-empty and suppresses Codex's own automatic title.
-    */
-    if normalize_agent_name(Some(agent_name)).as_deref() == Some("codex") {
-        return None;
-    }
     Some(ForkInitialRenameTarget {
         agent_name: agent_name.to_string(),
         project_id: read_session_text(session, "projectId")?,
@@ -176,8 +171,7 @@ pub(crate) fn schedule_fork_initial_rename(state: AppState, target: ForkInitialR
     Fork provider startup already owns the resumed CLI process. Wait for its
     composer, then submit the provisional `Fork: <old title>` through zmx's
     separate text/Enter path. Pi uses `/name`, Hermes Agent uses `/title`, and
-    Claude uses `/rename`; Codex keeps the fork unnamed so its own first-turn
-    title generation can name it.
+    Claude and Codex use `/rename` to persist the name in the agent's metadata.
     If the user has already sent the fork's first prompt, its generated-title
     job wins and this provisional rename is skipped.
 
@@ -1011,7 +1005,8 @@ pub(crate) async fn handle_generate_session_title_http(
         format support that, so other agents keep requiring pasted text.
         */
         if text.is_empty() {
-            let session_agent = normalize_agent_name(first_prompt_agent_name(&session).as_deref());
+            let session_agent =
+                crate::session_chat_follower::session_chat_agent_for_session(&session);
             if !crate::agent_transcripts::agent_supports_session_history_title_source(
                 session_agent.as_deref(),
             ) {
@@ -1634,8 +1629,10 @@ pub(crate) fn is_first_prompt_meta_prompt(prompt: &str) -> bool {
         .any(|prefix| prompt.starts_with(prefix))
 }
 
+/// CDXC:SessionTitles 2026-09-15 WHY:
+/// History lookup needs the transcript family, including custom Claude profiles, using the same resolver as chat without changing the session identity helper shared by other callers.
 pub(crate) fn session_history_title_source(session: &Value) -> Option<String> {
-    let agent = normalize_agent_name(first_prompt_agent_name(session).as_deref())?;
+    let agent = crate::session_chat_follower::session_chat_agent_for_session(session)?;
     if !crate::agent_transcripts::agent_supports_session_history_title_source(Some(agent.as_str()))
     {
         return None;

@@ -5,7 +5,7 @@ Slash commands GHOSTEX types into the agent, not the user.
 Several flows write a command straight into the session's pty without the chat
 composer ever being involved: provider-specific first-prompt auto-title jobs,
 the rename modal's "Generate Name" stage `/rename <title>` (Pi `/name`, Hermes
-Agent `/title`), and non-Codex forks submit a provisional `Fork: <old title>`
+Agent `/title`), and forks submit a provisional `Fork: <old title>`
 the same way. Chat is a transcript projection, so what it shows afterwards
 depends entirely on whether the CLI happens to record the command:
 

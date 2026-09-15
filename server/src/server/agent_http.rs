@@ -251,22 +251,20 @@ pub(crate) fn dispatch_agent_http_blocking(
                 requested_agent_title_command_submission(&endpoint_path, &params, &result)
             {
                 /*
-                CDXC:RemoteMachines 2026-08-12:
-                A remote GPUI has no local Ghostty surface for this session.
-                When its bounded native bridge opts in, submit the rename from
-                the owning gxserver through zmx's separate text/Enter path.
-                Local GPUI renames omit the flag and retain their native-surface
-                Enter path.
+                CDXC:SessionTitles 2026-09-15 WHY:
+                Both local chat view and remote sessions can lack a mounted terminal in the requesting app.
+                Submit from the owning gxserver through the session input queue so renaming does not depend on the visible view.
+                This extends the existing remote-only submission path to local rename requests.
                 */
                 let mut send_params = Map::new();
                 send_params.insert("projectId".to_string(), json!(project_id));
                 send_params.insert("sessionId".to_string(), json!(session_id));
                 send_params.insert(
                     "diagnosticInputSource".to_string(),
-                    json!("remote-session-rename-command"),
+                    json!("session-rename-command"),
                 );
                 send_params.insert("submit".to_string(), Value::Bool(true));
-                send_params.insert("text".to_string(), Value::String(command));
+                send_params.insert("text".to_string(), Value::String(command.clone()));
                 /*
                 CDXC:Drafts 2026-08-28:
                 `request_session_rename` already armed the draft's suppression
@@ -287,6 +285,11 @@ pub(crate) fn dispatch_agent_http_blocking(
                 ) {
                     return zmx_error_response(endpoint_path, request_id, error);
                 }
+                crate::session_chat_app_command::record_session_chat_app_command(
+                    &project_id,
+                    &session_id,
+                    &command,
+                );
             }
             if session_chat_state_changed {
                 if let Some(session) = result.get("session") {

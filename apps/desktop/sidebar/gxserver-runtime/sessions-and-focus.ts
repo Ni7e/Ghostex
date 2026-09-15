@@ -55,6 +55,8 @@ import type {
 } from '@/packages/shared/gxserver-protocol';
 import type { SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
 import type { SidebarSessionTag } from '@/packages/shared/session-tags';
+import { getDefaultSidebarAgentByIcon, getDefaultSidebarAgentById } from '@/packages/shared/sidebar-agents';
+import { isSessionTitleGenerationAgent } from '@/packages/shared/ghostex-settings/session-title-generation';
 
 /*
 CDXC:RepoStructure 2026-08-22:
@@ -951,42 +953,61 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
       */
       const generationAgent = this.resolveSidebarAgent(message.agentId ?? '');
       const generationCommand = generationAgent?.command?.trim();
-      await this.client.rpc('/api/generateSessionTitle', {
-        ...(message.agentId ? { agentId: message.agentId } : {}),
-        ...(generationCommand ? { command: generationCommand } : {}),
-        projectId: reference.projectId,
-        sessionId: reference.sessionId,
-        text: message.title,
-      });
+      /**
+       * CDXC:SessionTitles 2026-09-15 WHY:
+       * The picker returns a launcher configuration id, but title generation needs its CLI family. Passing a custom Claude id previously selected Codex flags and ran `claude --yolo exec ...`, which exits immediately.
+       * Keep the selected configuration's command so its account and arguments survive the family resolution.
+       */
+      const generationFamily =
+        getDefaultSidebarAgentById(generationAgent?.agentId)?.agentId ??
+        getDefaultSidebarAgentByIcon(generationAgent?.icon)?.agentId;
+      try {
+        if (message.agentId && (!generationCommand || !isSessionTitleGenerationAgent(generationFamily))) {
+          throw new Error('Choose a configured agent that supports name generation.');
+        }
+        await this.client.rpc('/api/generateSessionTitle', {
+          ...(generationFamily ? { agentId: generationFamily } : {}),
+          ...(generationCommand ? { command: generationCommand } : {}),
+          projectId: reference.projectId,
+          sessionId: reference.sessionId,
+          text: message.title,
+        });
+      } catch (error) {
+        this.postSidebarActionToast('error', 'Could not generate session name', {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
       return;
     }
-    const result = await this.client.rpc<GxserverSessionRenameRequestResult>('/api/requestSessionRename', {
-      agentName: message.agentId,
-      projectId: reference.projectId,
-      reason: 'gpui-sidebar',
-      sessionId: reference.sessionId,
-      title: message.title,
-      titleSource: 'user',
-    });
-    /*
-    CDXC:Sessions 2026-08-18:
-    Session cards render `displayTitle`, so patching only `title` moved the
-    row's alias without changing the text on the card. Apply gxserver's own
-    title projection instead — the same fields presentation publishes — so the
-    card, its tooltip, and the alias stay one consistent title. Agent sessions
-    keep the previous title here until the Agent CLI confirms the rename; the
-    confirmed title lands through the normal presentation delta.
-    */
-    this.patchPresentationSession(reference.projectId, reference.sessionId, result.projection);
-    /*
-    CDXC:Sessions 2026-07-28:
-    gxserver keeps agent-session renames pending until the Agent CLI itself is
-    renamed, and it answers `shouldSendAgentRenameCommand` so the client stages
-    `/rename <title>` (Pi uses `/name`; Hermes Agent uses `/title`) into the
-    mapped terminal — the same contract macOS follows.
-    */
-    if (result.shouldSendAgentRenameCommand) {
-      this.postLocalWorkspaceTerminalRenameCommand(reference.projectId, reference.sessionId, message.title);
+    /**
+     * CDXC:SessionTitles 2026-09-15 WHY:
+     * Chat view can have no mounted terminal to receive the native rename bridge, so local renames must use gxserver's queued command submission just like remote sessions.
+     * This replaces the client-side terminal staging path and keeps the current view open while the agent confirms its title through normal metadata sync.
+     */
+    try {
+      const result = await this.client.rpc<GxserverSessionRenameRequestResult>('/api/requestSessionRename', {
+        agentName: message.agentId,
+        projectId: reference.projectId,
+        reason: 'gpui-sidebar',
+        sessionId: reference.sessionId,
+        submitAgentRenameCommand: true,
+        title: message.title,
+        titleSource: 'user',
+      });
+      /*
+      CDXC:Sessions 2026-08-18:
+      Session cards render `displayTitle`, so patching only `title` moved the
+      row's alias without changing the text on the card. Apply gxserver's own
+      title projection instead, the same fields presentation publishes, so the
+      card, its tooltip, and the alias stay one consistent title. Agent sessions
+      keep the previous title here until the Agent CLI confirms the rename; the
+      confirmed title lands through the normal presentation delta.
+      */
+      this.patchPresentationSession(reference.projectId, reference.sessionId, result.projection);
+    } catch (error) {
+      this.postSidebarActionToast('error', 'Could not rename session', {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   },
 
