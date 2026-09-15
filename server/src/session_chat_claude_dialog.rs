@@ -16,6 +16,9 @@ use crate::session_chat_terminal_dialog::{TerminalDialog, TerminalDialogRow};
 /// Claude's panel boundary survives nested menus and clipped footers; a later composer means the panel is historical.
 /// SEE-ALSO: packages/core-ui/chat/session-chat-terminal-dialog.tsx.
 pub fn detect_claude_dialog(text: &str) -> Option<TerminalDialog> {
+    if let Some(dialog) = crate::session_chat_claude_effort_notice::detect_effort_notice(text) {
+        return Some(dialog);
+    }
     let lines: Vec<String> = text
         .lines()
         .map(|line| {
