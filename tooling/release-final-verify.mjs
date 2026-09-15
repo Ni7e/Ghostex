@@ -18,11 +18,15 @@ import { validateWindowsUpdateFeed, windowsUpdateArtifactNames } from './release
 import { releaseProvenanceAssetName, validateReleaseProvenance } from './release-gpui/provenance.mjs';
 import { customerDownloadEntries, renderIosAvailabilityNotes } from './release-gpui/customer-downloads.mjs';
 import {
+  RELEASE_PLAN_ARTIFACT_DIRECTORY,
+  RELEASE_PLAN_ARTIFACT_FILE,
   crossReleaseReuseOrigins,
   productOriginLabel,
   renderReleaseProvenanceReport,
+  verifyPlannedProductCoverage,
   verifyReleaseProvenanceAgainstAssets,
 } from './release-gpui/publish-provenance.mjs';
+import { validatePlan } from './release-gpui/plan.mjs';
 
 /*
  CDXC:Release 2026-07-02-14:10:
@@ -46,6 +50,9 @@ Usage:
 Options:
   --dmg <path>       Reuse an already-downloaded DMG (for example Homebrew's
                      fetch cache) instead of downloading the live asset again.
+  --run-id <id>      Release run whose release-plan artifact states the
+                     dispatched scope, used only when the live provenance
+                     record carries no per-product plan.
   --skip-repo        Skip local repo checks (clean worktree, tag at HEAD).
   --skip-brew        Skip all Homebrew checks.
   --skip-brew-fetch  Run brew info/cat but skip the large forced DMG fetch.
@@ -61,6 +68,7 @@ Options:
 function parseArgs(argv) {
   const options = {
     dmg: null,
+    runId: null,
     skipAndroid: false,
     skipBrew: false,
     skipBrewFetch: false,
@@ -79,6 +87,12 @@ function parseArgs(argv) {
       options.dmg = argv[index + 1];
       if (!options.dmg) {
         throw new Error('--dmg requires a path.');
+      }
+      index += 1;
+    } else if (arg === '--run-id') {
+      options.runId = argv[index + 1];
+      if (!options.runId || !/^\d+$/u.test(options.runId)) {
+        throw new Error('--run-id requires a numeric Actions run id.');
       }
       index += 1;
     } else if (arg === '--skip-repo') {
@@ -373,6 +387,59 @@ async function main() {
     return (
       `${counts.built} built, ${counts.reused} reused (${origins.length} cross-release origin(s) byte-matched), ` +
       `${releaseAssets.length} assets recorded`
+    );
+  });
+
+  /*
+   CDXC:Release 2026-09-16 WHY:
+   The 9.6.0 verify passed while all eight Windows ARM64 assets were still
+   missing. The provenance check above walks the products the merged record
+   already contains, and a staged release writes that record stage by stage, so
+   a stage that has not published yet (or died) is simply absent from it and
+   nothing compared the release against the scope the run was dispatched with.
+   This check walks the recorded plan instead: every product the plan resolved
+   as build or reuse must have all of its required assets live and a product
+   record; a product skipped by flag is reported as skipped. The plan travels in
+   the provenance asset; only a record without one needs --run-id to read the
+   run's release-plan artifact.
+  */
+  await check('planned-products-live', async () => {
+    let plan = releaseProvenance?.plan?.products ? releaseProvenance.plan : null;
+    let source = `the plan recorded in ${releaseProvenanceAssetName(version)}`;
+    if (!plan && options.runId) {
+      const temporary = await mkdtemp(path.join(tmpdir(), `ghostex-release-plan-${version}-`));
+      await capture(
+        `env -u GH_TOKEN -u GITHUB_TOKEN gh run download ${shellQuote(options.runId)} --repo ${shellQuote(githubRepo)} ` +
+          `--name ${shellQuote(RELEASE_PLAN_ARTIFACT_DIRECTORY)} --dir ${shellQuote(temporary)}`
+      );
+      plan = validatePlan(JSON.parse(await readFile(path.join(temporary, RELEASE_PLAN_ARTIFACT_FILE), 'utf8')));
+      if (plan.version !== version) throw new Error(`Run ${options.runId} planned ${plan.version}, not ${version}.`);
+      source = `the ${RELEASE_PLAN_ARTIFACT_DIRECTORY} artifact of run ${options.runId}`;
+    }
+    if (!plan) {
+      if (!releaseProvenance) {
+        return {
+          warn: 'Expected difference: no provenance record and no --run-id, so the dispatched scope is unknown.',
+        };
+      }
+      throw new Error(
+        `${releaseProvenanceAssetName(version)} carries no per-product plan; pass --run-id <release run id> ` +
+          `so the dispatched scope can be read from that run's ${RELEASE_PLAN_ARTIFACT_DIRECTORY} artifact.`
+      );
+    }
+    const coverage = verifyPlannedProductCoverage({
+      liveAssetNames: releaseAssets.map((asset) => asset.name),
+      plan,
+      releaseProvenance,
+      version,
+    });
+    if (coverage.failures.length > 0) throw new Error(coverage.failures.join(' | '));
+    const built = coverage.covered.filter((entry) => entry.action === 'build').length;
+    const reused = coverage.covered.length - built;
+    const skipped = coverage.skippedByFlag.map((entry) => entry.product);
+    return (
+      `${coverage.covered.length} planned product(s) live (${built} built, ${reused} reused)` +
+      `${skipped.length > 0 ? `, skipped by flag: ${skipped.join(', ')}` : ''} per ${source}`
     );
   });
 
