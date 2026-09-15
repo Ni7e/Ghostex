@@ -12,7 +12,13 @@ import './account-switch-preview.css';
 type Phase = 'switching' | 'resuming' | 'continuing' | 'success' | 'failed' | 'complete';
 type Mode = 'automatic' | 'manual';
 type Provider = 'claude' | 'codex';
-type PreviewProps = { initialPhase: Phase; initialMode: Mode; provider: Provider; narrow: boolean };
+type PreviewProps = {
+  initialPhase: Phase;
+  initialMode: Mode;
+  provider: Provider;
+  narrow: boolean;
+  theme: 'dark' | 'light';
+};
 const phaseText: Record<Phase, string> = {
   switching: 'Switching account',
   resuming: 'Resuming conversation',
@@ -33,7 +39,7 @@ function AgentMark({ provider, account }: { provider: Provider; account?: string
   );
 }
 
-function AccountSwitchPreview({ initialPhase, initialMode, provider, narrow }: PreviewProps) {
+function AccountSwitchPreview({ initialPhase, initialMode, provider, narrow, theme }: PreviewProps) {
   const [phase, setPhase] = useState(initialPhase);
   const [mode, setMode] = useState(initialMode);
   const [playing, setPlaying] = useState(false);
@@ -85,7 +91,7 @@ function AccountSwitchPreview({ initialPhase, initialMode, provider, narrow }: P
   };
 
   return (
-    <main className='as-preview ghostex-session-chat-scope dark' data-chat-theme='dark' data-narrow={narrow}>
+    <main className={`as-preview ghostex-session-chat-scope ${theme}`} data-chat-theme={theme} data-narrow={narrow}>
       <header className='as-preview-controls'>
         <span className='as-preview-label'>
           Account switching <span>Design preview</span>
@@ -297,7 +303,7 @@ const meta = {
   title: 'Chat/Account switching',
   component: AccountSwitchPreview,
   parameters: { layout: 'fullscreen' },
-  args: { initialPhase: 'switching', initialMode: 'automatic', provider: 'claude', narrow: false },
+  args: { initialPhase: 'switching', initialMode: 'automatic', provider: 'claude', narrow: false, theme: 'dark' },
   argTypes: {
     initialPhase: {
       control: 'select',
@@ -306,9 +312,13 @@ const meta = {
     initialMode: { control: 'inline-radio', options: ['automatic', 'manual'] },
     provider: { control: 'inline-radio', options: ['claude', 'codex'] },
     narrow: { control: 'boolean' },
+    theme: { control: 'inline-radio', options: ['dark', 'light'] },
   },
   render: (args) => (
-    <AccountSwitchPreview key={`${args.initialMode}-${args.initialPhase}-${args.provider}-${args.narrow}`} {...args} />
+    <AccountSwitchPreview
+      key={`${args.initialMode}-${args.initialPhase}-${args.provider}-${args.narrow}-${args.theme}`}
+      {...args}
+    />
   ),
 } satisfies Meta<typeof AccountSwitchPreview>;
 export default meta;
@@ -325,3 +335,8 @@ export const ManualSuccess: Story = {
 export const SwitchFailed: Story = { name: '07 Switch failed', args: { initialPhase: 'failed' } };
 export const CodexSwitch: Story = { name: '08 Codex switch', args: { provider: 'codex' } };
 export const NarrowPane: Story = { name: '09 Narrow pane', args: { narrow: true } };
+export const LightSwitch: Story = { name: '10 Light theme', args: { theme: 'light' } };
+export const LightSuccess: Story = {
+  name: '11 Light theme success',
+  args: { theme: 'light', initialMode: 'manual', initialPhase: 'success' },
+};

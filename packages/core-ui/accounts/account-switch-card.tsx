@@ -88,29 +88,38 @@ function Account({
  * No heading spinner, repeated status above the composer, View terminal button, draft reassurance, or bottom bar.
  * Show plain provider logos in this card, without the account's two-character indicator inside them.
  * Identify each account by its real email on one line, respecting Hide emails, rather than account names or the preview's former invented aliases.
+ *
+ * `ready` is the chat's confirmation that the second account is bound and usable (see use-account-switch-status.ts). A `success` phase without it keeps the last step active and the "Switching" heading, so the card never announces completion before the account is ready.
  */
 export function AccountSwitchCard({
   progress,
   accounts,
   onRetry,
   retrying = false,
+  ready = true,
   now = Date.now(),
 }: {
   progress: AccountSwitchProgress;
   accounts: readonly AgentAccount[];
   onRetry?: () => void;
   retrying?: boolean;
+  ready?: boolean;
   now?: number;
 }) {
   const text = useAccountText();
   const { phase, source, provider } = progress;
-  const settled = phase === 'success';
-  const verified = progress.accountReady === true || settled || phase === 'continuing';
+  const settled = phase === 'success' && ready;
+  const finishing = phase === 'success' && !ready;
+  const verified = progress.accountReady === true || phase === 'success' || phase === 'continuing';
   const providerName = provider === 'claude' ? 'Claude' : 'Codex';
   if (phase === 'cancelled') return null;
   const labels = ['Switch account', 'Resume conversation', ...(source === 'automatic' ? ['Continue Session'] : [])];
   return (
-    <section className='gx-account-switch-card' data-phase={phase} aria-label='Account switch status'>
+    <section
+      className='gx-account-switch-card'
+      data-phase={finishing ? 'finishing' : phase}
+      aria-label='Account switch status'
+    >
       <div className='gx-account-switch-card-heading'>
         <div role='status' aria-live='polite'>
           <h2>
@@ -131,9 +140,11 @@ export function AccountSwitchCard({
                 ? source === 'automatic'
                   ? 'Your task is continuing on the new account.'
                   : 'Ready whenever you are. Send your next message.'
-                : source === 'automatic'
-                  ? 'Usage limit reached. Continuing on an available account.'
-                  : 'Your conversation will be ready for your next message.'}
+                : finishing
+                  ? 'Loading your conversation on the new account.'
+                  : source === 'automatic'
+                    ? 'Usage limit reached. Continuing on an available account.'
+                    : 'Your conversation will be ready for your next message.'}
           </p>
         </div>
       </div>
@@ -175,7 +186,7 @@ export function AccountSwitchCard({
       ) : (
         <ol className='gx-account-switch-progress' aria-label='Switch progress'>
           {labels.map((label, index) => {
-            const current = phase === 'switching' ? 0 : phase === 'resuming' ? 1 : 2;
+            const current = phase === 'switching' ? 0 : phase === 'resuming' ? 1 : finishing ? labels.length - 1 : 2;
             const done = settled || index < current;
             const active = !done && index === current;
             return (

@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AccountSwitchProgress } from '@/packages/shared/agent-accounts';
 
-/** Only the brief success acknowledgement uses a timer; every in-flight step comes from gxserver. */
-export function useAccountSwitchStatus(progress: AccountSwitchProgress | null, sessionKey: string | undefined) {
+/**
+ * CDXC:AgentProviders 2026-09-15 DECISION:
+ * User: the account-switch card must not go away until the switch is actually complete and the second account is ready.
+ * gxserver's `success` phase only proves the new CLI process is up, so the chat keeps the card, blocks sends, and shows the last step as active until the caller reports `ready`: the session's account read names the target account and no queued model change is still pending.
+ * Only the brief success acknowledgement uses a timer, and it starts once `ready` holds; every in-flight step comes from gxserver.
+ */
+export function useAccountSwitchStatus(
+  progress: AccountSwitchProgress | null,
+  sessionKey: string | undefined,
+  ready = true
+) {
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
   const observed = useRef<string | null>(null);
@@ -22,9 +31,10 @@ export function useAccountSwitchStatus(progress: AccountSwitchProgress | null, s
       setDismissed(progress.id);
       return;
     }
+    if (!ready) return;
     const timer = window.setTimeout(() => setDismissed(progress.id), 1800);
     return () => window.clearTimeout(timer);
-  }, [progress?.id, progress?.phase, progress?.updatedAt]);
+  }, [progress?.id, progress?.phase, progress?.updatedAt, ready]);
   const visible =
     progress &&
     progress.phase !== 'cancelled' &&
@@ -40,5 +50,9 @@ export function useAccountSwitchStatus(progress: AccountSwitchProgress | null, s
     const timer = window.setInterval(() => setNow(Date.now()), 30000);
     return () => window.clearInterval(timer);
   }, [visible?.id]);
-  return { visible, now, busy: !!progress && ['switching', 'resuming', 'continuing'].includes(progress.phase) };
+  const busy =
+    !!progress &&
+    (['switching', 'resuming', 'continuing'].includes(progress.phase) ||
+      (progress.phase === 'success' && !ready && visible !== null));
+  return { visible, now, busy };
 }
