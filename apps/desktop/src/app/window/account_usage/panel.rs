@@ -411,7 +411,11 @@ impl Render for AccountUsagePanel {
                     .track_scroll(&self.scroll)
                     .child(main),
             )
-            .child(Scrollbar::vertical(&self.scroll).scrollbar_show(ScrollbarShow::Scrolling))
+            .child(
+                Scrollbar::vertical(&self.scroll)
+                    .thickness(px(5.))
+                    .scrollbar_show(ScrollbarShow::Hover),
+            )
             .child(
                 gpui::canvas(
                     |_, _, _| (),

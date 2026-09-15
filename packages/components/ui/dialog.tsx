@@ -4,6 +4,7 @@ import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import { cn } from '../utils';
 import { Button } from './button';
 import { IconX } from '@tabler/icons-react';
+import { useAppScrollbars } from './app-scrollbars';
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot='dialog' {...props} />;
@@ -56,6 +57,7 @@ function DialogContent({
   onOpenAutoFocus?: (event: { preventDefault: () => void }) => void;
   showCloseButton?: boolean;
 }) {
+  useAppScrollbars();
   React.useEffect(() => {
     onOpenAutoFocus?.({ preventDefault: () => undefined });
   }, [onOpenAutoFocus]);

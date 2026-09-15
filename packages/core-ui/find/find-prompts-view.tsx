@@ -1,3 +1,4 @@
+import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 /*
 CDXC:PromptSearch 2026-08-20:
 The Find surface — a GUI for `gx f`. Item placement follows the terminal picker
@@ -79,6 +80,7 @@ function buildViewRows(rows: readonly FindPromptRow[], windowOffset: number, gro
 }
 
 export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: FindPromptsViewProps) {
+  useAppScrollbars();
   const find = useFindPrompts({ acceptAll, transport });
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);

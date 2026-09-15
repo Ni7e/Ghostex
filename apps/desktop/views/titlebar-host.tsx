@@ -1,3 +1,4 @@
+import { retainAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { createRoot } from 'react-dom/client';
 import '@/packages/core-ui/styles.css';
 import { App } from './titlebar/app';
@@ -39,3 +40,6 @@ if (titlebarRootElement && initialTitlebarDropdownPanelKind) {
 if (titlebarRootElement && titlebarRootElement.dataset.ghostexTitlebar !== 'false') {
   createRoot(titlebarRootElement).render(<App />);
 }
+
+const releaseScrollbars = retainAppScrollbars();
+window.addEventListener('pagehide', releaseScrollbars, { once: true });

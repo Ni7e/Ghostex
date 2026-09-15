@@ -1,3 +1,4 @@
+import { retainAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import '@fontsource-variable/inter';
 import { createRoot } from 'react-dom/client';
 import { TooltipProvider } from '@/packages/core-ui/app-tooltip';
@@ -13,3 +14,6 @@ createRoot(document.getElementById('root')!).render(
     <ManageApp />
   </TooltipProvider>
 );
+
+const releaseScrollbars = retainAppScrollbars();
+window.addEventListener('pagehide', releaseScrollbars, { once: true });

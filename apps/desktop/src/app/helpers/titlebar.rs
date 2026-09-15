@@ -1529,6 +1529,12 @@ pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
     theme.popover_foreground = titlebar_text_color();
     theme.border = titlebar_popup_menu_border_color();
     theme.radius = px(2.0);
+    theme.scrollbar = gpui::transparent_black();
+    let mut thumb = titlebar_active_text_color();
+    thumb.a = 0.28;
+    theme.tokens.scrollbar_thumb = thumb.into();
+    thumb.a = 0.42;
+    theme.tokens.scrollbar_thumb_hover = thumb.into();
 }
 
 pub(crate) fn titlebar_popup_menu_disabled_text_color() -> Hsla {

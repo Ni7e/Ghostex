@@ -1,4 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import { installAppScrollbars } from '@/packages/components/ui/app-scrollbars';
+import scrollbarStyles from '@/packages/components/ui/app-scrollbars.css?inline';
 import { ManageWebKitWindow } from '../types';
 import { isHtmlPath } from '../file-tree-utils';
 
@@ -19,6 +21,8 @@ export function ManageHtmlRenderViewer({
   documentKey: string;
   onOpenDocument: (path: string) => void;
 }) {
+  const scrollbars = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => () => scrollbars.current?.(), []);
   const resourceBaseUrl = manageHtmlResourceBaseUrl(documentKey);
   const renderedHtml = useMemo(
     () =>
@@ -64,6 +68,12 @@ export function ManageHtmlRenderViewer({
         if (!renderedDocument) {
           return;
         }
+        renderedDocument.documentElement.style.setProperty(
+          '--foreground',
+          renderedDocument.defaultView!.getComputedStyle(renderedDocument.body).color
+        );
+        scrollbars.current?.();
+        scrollbars.current = installAppScrollbars(renderedDocument.defaultView as Window & typeof globalThis);
         renderedDocument.addEventListener(
           'click',
           (clickEvent) => {
@@ -221,56 +231,12 @@ export function injectManageHtmlViewerChromeStyles(documentValue: Document): voi
    * The rendered artifact document owns its page CSS, but Docs owns the embedded scrollbar chrome. Append the style after author CSS so the iframe never shows wide default scrollbars or an opaque track/corner behind them.
    *
    * CDXC:Docs 2026-06-30-11:58:
-   * Use document tagging plus WebKit scrollbar pseudo-elements for exact 4px embedded scrollbars. Standards `scrollbar-width: thin` is intentionally avoided because it produced a wider rendered scrollbar than the Docs requirement.
+   * The rendered document installs the same floating scrollbar controller as the app, using its own text color. Native scrollbar geometry would reserve a gutter.
    */
   documentValue.documentElement.setAttribute('data-ghostex-manage-html-viewer', 'true');
   const style = documentValue.createElement('style');
   style.setAttribute('data-ghostex-manage-html-chrome', 'true');
-  style.textContent = `
-html[data-ghostex-manage-html-viewer],
-html[data-ghostex-manage-html-viewer] body,
-html[data-ghostex-manage-html-viewer] * {
-  scrollbar-color: auto !important;
-  scrollbar-width: auto !important;
-}
-
-html[data-ghostex-manage-html-viewer]::-webkit-scrollbar,
-html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar,
-html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar {
-  background: transparent !important;
-  height: 4px !important;
-  width: 4px !important;
-}
-
-html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-track,
-html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-track,
-html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-track,
-html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-track-piece,
-html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-track-piece,
-html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-track-piece {
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-
-html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-thumb,
-html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-thumb,
-html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-thumb {
-  background-color: #3e444c !important;
-  border: 0 !important;
-  border-radius: 999px !important;
-}
-
-html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-button,
-html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-button,
-html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-button,
-html[data-ghostex-manage-html-viewer]::-webkit-scrollbar-corner,
-html[data-ghostex-manage-html-viewer] body::-webkit-scrollbar-corner,
-html[data-ghostex-manage-html-viewer] *::-webkit-scrollbar-corner {
-  background: transparent !important;
-  border: 0 !important;
-}
-`.trim();
+  style.textContent = scrollbarStyles;
   (documentValue.head || documentValue.documentElement).appendChild(style);
 }
 

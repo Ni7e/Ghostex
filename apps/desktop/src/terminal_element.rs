@@ -97,10 +97,9 @@ gpui::actions!(
 );
 
 pub(crate) const TERMINAL_KEY_CONTEXT: &str = "GhostexGpuiTerminal";
-const TERMINAL_SCROLLBAR_HIDE_DELAY: Duration = Duration::from_secs(2);
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
-const TERMINAL_SCROLLBAR_THICKNESS: f32 = 2.0;
-const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 18.0;
+const TERMINAL_SCROLLBAR_THICKNESS: f32 = 5.0;
+const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 24.0;
 const TERMINAL_SCROLL_BUTTON_SIZE: f32 = 28.125;
 /// Edge inset for the terminal's remaining overlay chrome: scroll-to-top and
 /// scroll-to-bottom sit 13px in from the bottom-right pane edge.
@@ -531,7 +530,6 @@ struct MarkedTextLayout {
 struct ScrollbarLayout {
     slot: Bounds<Pixels>,
     knob: Bounds<Pixels>,
-    slot_color: Hsla,
     knob_color: Hsla,
 }
 
@@ -610,9 +608,8 @@ pub struct TerminalView {
     left_button_down: bool,
     /// Fractional wheel rows not yet dispatched (trackpad smoothness).
     wheel_accum: f32,
-    /// Runtime scrollbar reveal state for local scrollback gestures.
+    /// Runtime scrollbar reveal state for hovering or dragging the terminal.
     scrollbar_visible: bool,
-    scrollbar_hide_generation: u64,
     scrollbar_drag_offset: Option<f32>,
     terminal_bounds: Option<Bounds<Pixels>>,
     scroll_button_visibility: TerminalScrollButtonVisibility,
@@ -740,7 +737,6 @@ impl TerminalView {
             left_button_down: false,
             wheel_accum: 0.,
             scrollbar_visible: false,
-            scrollbar_hide_generation: 0,
             scrollbar_drag_offset: None,
             terminal_bounds: None,
             scroll_button_visibility: TerminalScrollButtonVisibility::default(),
@@ -1219,25 +1215,6 @@ impl TerminalView {
         }
         self.refresh_snapshot();
         cx.notify();
-    }
-
-    fn reveal_scrollbar_for_user_scroll(&mut self, cx: &mut Context<Self>) {
-        self.scrollbar_hide_generation = self.scrollbar_hide_generation.wrapping_add(1);
-        let generation = self.scrollbar_hide_generation;
-        self.scrollbar_visible = true;
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(TERMINAL_SCROLLBAR_HIDE_DELAY)
-                .await;
-
-            let _ = this.update(cx, |view, cx| {
-                if view.scrollbar_hide_generation == generation {
-                    view.scrollbar_visible = false;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
     }
 
     fn handle_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
@@ -1917,6 +1894,11 @@ impl TerminalView {
         hovered: bool,
         cx: &mut Context<Self>,
     ) {
+        let visible = hovered || self.scrollbar_drag_offset.is_some();
+        if self.scrollbar_visible != visible {
+            self.scrollbar_visible = visible;
+            cx.notify();
+        }
         if let Some(grab_offset) = self.scrollbar_drag_offset
             && event.pressed_button == Some(MouseButton::Left)
         {
@@ -1952,7 +1934,7 @@ impl TerminalView {
                 };
                 if delta != 0 {
                     self.model.scroll_viewport(VtScrollViewport::Delta(delta));
-                    self.reveal_scrollbar_for_user_scroll(cx);
+
                     self.refresh_snapshot();
                 }
             }
@@ -2098,6 +2080,7 @@ impl TerminalView {
             self.settings.scrollbar_visible && self.scrollbar_visible,
             self.frame.as_ref()?.scrollbar,
             self.terminal_bounds?,
+            rgb_to_hsla(self.frame.as_ref()?.foreground),
         )
     }
 
@@ -2200,7 +2183,7 @@ impl TerminalView {
                 // Viewport delta: up (positive wheel) is negative rows.
                 self.model
                     .scroll_viewport(VtScrollViewport::Delta(-(steps as isize)));
-                self.reveal_scrollbar_for_user_scroll(cx);
+
                 self.refresh_snapshot();
                 cx.notify();
             }
@@ -2320,12 +2303,9 @@ impl TerminalView {
             self.row_cache.fill(None);
         }
 
-        let scrollbar_width = if self.settings.scrollbar_visible {
-            px(TERMINAL_SCROLLBAR_THICKNESS)
-        } else {
-            px(0.0)
-        };
-        let content_width = (bounds.size.width - scrollbar_width).max(metrics.cell_width);
+        // CDXC:DesignSystem 2026-09-15 DECISION:
+        // User: terminal scrollbars share the floating 5px hover-only app style; the thumb must not reserve terminal columns.
+        let content_width = bounds.size.width.max(metrics.cell_width);
         let cols = ((content_width / metrics.cell_width) as u16).max(1);
         let rows = ((bounds.size.height / metrics.line_height) as u16).max(1);
         let scale = window.scale_factor();
@@ -2434,6 +2414,7 @@ impl TerminalView {
                 self.settings.scrollbar_visible && self.scrollbar_visible,
                 frame.scrollbar,
                 bounds,
+                rgb_to_hsla(frame.foreground),
             ),
         }
     }
@@ -3367,8 +3348,14 @@ impl Element for TerminalElement {
             }
 
             if let Some(scrollbar) = &layout.scrollbar {
-                window.paint_quad(fill(scrollbar.slot, scrollbar.slot_color));
-                window.paint_quad(fill(scrollbar.knob, scrollbar.knob_color));
+                window.paint_quad(gpui::quad(
+                    scrollbar.knob,
+                    px(2.5),
+                    scrollbar.knob_color,
+                    px(0.),
+                    gpui::transparent_black(),
+                    BorderStyle::Solid,
+                ));
             }
         });
     }
@@ -4358,15 +4345,16 @@ fn layout_scrollbar(
     visible: bool,
     scrollbar: VtScrollbar,
     bounds: Bounds<Pixels>,
+    mut foreground: Hsla,
 ) -> Option<ScrollbarLayout> {
     if !visible || scrollbar.total <= scrollbar.len || bounds.size.height <= px(0.) {
         return None;
     }
 
     let thickness = px(TERMINAL_SCROLLBAR_THICKNESS);
-    let slot_height = bounds.size.height;
+    let slot_height = (bounds.size.height - px(4.)).max(px(0.));
     let slot = Bounds::new(
-        point(bounds.right() - thickness, bounds.top()),
+        point(bounds.right() - thickness - px(2.), bounds.top() + px(2.)),
         size(thickness, slot_height),
     );
     let knob_height = (slot_height * (scrollbar.len as f32 / scrollbar.total as f32))
@@ -4381,23 +4369,11 @@ fn layout_scrollbar(
     let knob_y = slot.origin.y + (slot_height - knob_height) * offset_fraction;
     let knob = Bounds::new(point(slot.origin.x, knob_y), size(thickness, knob_height));
 
+    foreground.a = 0.28;
     Some(ScrollbarLayout {
         slot,
         knob,
-        slot_color: Rgba {
-            r: 0.08,
-            g: 0.08,
-            b: 0.08,
-            a: 0.18,
-        }
-        .into(),
-        knob_color: Rgba {
-            r: 0.92,
-            g: 0.92,
-            b: 0.92,
-            a: 0.48,
-        }
-        .into(),
+        knob_color: foreground,
     })
 }
 

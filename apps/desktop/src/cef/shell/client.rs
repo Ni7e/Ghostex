@@ -247,7 +247,8 @@ wrap_client! {
 
 wrap_load_handler! {
     pub(crate) struct GhostexGpuiBrowserPageLoadHandler {
-        page_metadata_handler: BrowserPageMetadataHandler,
+        page_metadata_handler: Option<BrowserPageMetadataHandler>,
+        code_editor_origin: Option<String>,
     }
 
     impl LoadHandler {
@@ -258,11 +259,32 @@ wrap_load_handler! {
             can_go_back: c_int,
             can_go_forward: c_int,
         ) {
-            (self.page_metadata_handler)(BrowserPageMetadataEvent::LoadingStateChanged {
-                is_loading: is_loading != 0,
-                can_go_back: can_go_back != 0,
-                can_go_forward: can_go_forward != 0,
-            });
+            if let Some(handler) = &self.page_metadata_handler {
+                handler(BrowserPageMetadataEvent::LoadingStateChanged {
+                    is_loading: is_loading != 0,
+                    can_go_back: can_go_back != 0,
+                    can_go_forward: can_go_forward != 0,
+                });
+            }
+        }
+
+        fn on_load_end(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            frame: Option<&mut Frame>,
+            _http_status_code: c_int,
+        ) {
+            let (Some(frame), Some(origin)) = (frame, self.code_editor_origin.as_deref()) else {
+                return;
+            };
+            if frame.is_main() == 0 || !cef_origins_match(&CefString::from(&frame.url()).to_string(), origin) {
+                return;
+            }
+            // CDXC:DesignSystem 2026-09-15 SEE-ALSO:
+            // Code runs in a separate document, so share Monaco's floating 5px hover styling with app-scrollbars.css through the same stylesheet.
+            let css = serde_json::to_string(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/components/ui/monaco-scrollbars.css"))).expect("static CSS is serializable");
+            let script = format!("(() => {{ document.documentElement.classList.add('gx-code-scrollbars'); if (document.getElementById('gx-code-scrollbars')) return; const style = document.createElement('style'); style.id = 'gx-code-scrollbars'; style.textContent = {css}; document.head.append(style); }})()");
+            frame.execute_java_script(Some(&CefString::from(script.as_str())), Some(&CefString::from(BROWSER_APP_OWNED_SCRIPT_URL)), 1);
         }
     }
 }

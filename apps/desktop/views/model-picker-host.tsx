@@ -1,3 +1,4 @@
+import { retainAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { createRoot } from 'react-dom/client';
 import { useEffect, useRef, useState } from 'react';
 import { postAppModalHostMessage } from '@/packages/core-ui/app-modal-host-bridge';
@@ -204,3 +205,6 @@ function ModelPickerHost() {
 }
 
 createRoot(document.getElementById('root')!).render(<ModelPickerHost />);
+
+const releaseScrollbars = retainAppScrollbars();
+window.addEventListener('pagehide', releaseScrollbars, { once: true });

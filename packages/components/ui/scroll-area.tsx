@@ -1,9 +1,11 @@
+import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import * as React from 'react';
 import { ScrollArea as ScrollAreaPrimitive } from '@base-ui/react/scroll-area';
 
 import { cn } from '../utils';
 
 function ScrollArea({ className, children, ...props }: ScrollAreaPrimitive.Root.Props) {
+  useAppScrollbars();
   return (
     <ScrollAreaPrimitive.Root data-slot='scroll-area' className={cn('relative', className)} {...props}>
       {/*

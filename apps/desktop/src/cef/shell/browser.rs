@@ -282,7 +282,12 @@ impl CefBrowser {
                 manage_docs_resource_base_url,
             ))
         } else {
-            page_metadata_handler.map(GhostexGpuiBrowserPageLoadHandler::new)
+            (page_metadata_handler.is_some() || trusted_clipboard_origin.is_some()).then(|| {
+                GhostexGpuiBrowserPageLoadHandler::new(
+                    page_metadata_handler,
+                    trusted_clipboard_origin.clone(),
+                )
+            })
         };
         // Session Chat pages resolve local drops to real absolute paths
         // published by the shell at drag-enter (Chromium hides them from the

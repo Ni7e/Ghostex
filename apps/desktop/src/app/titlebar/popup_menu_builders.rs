@@ -40,7 +40,7 @@ pub(crate) fn titlebar_popup_menu_with_scroll_behavior(
         .scrollable(scrollable);
     if scrollable {
         menu.scrollbar_thickness(px(TITLEBAR_DROPDOWN_SCROLLBAR_WIDTH))
-            .scrollbar_show(ScrollbarShow::Scrolling)
+            .scrollbar_show(ScrollbarShow::Hover)
     } else {
         menu
     }

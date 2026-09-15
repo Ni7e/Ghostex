@@ -1,3 +1,4 @@
+import { retainAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { createRoot } from 'react-dom/client';
 import '@/packages/core-ui/styles/shadcn.generated.css';
 import { ProjectBoardApp } from './project-board/project-board-app';
@@ -21,3 +22,6 @@ document.addEventListener(
 );
 
 createRoot(document.getElementById('root')!).render(<ProjectBoardApp />);
+
+const releaseScrollbars = retainAppScrollbars();
+window.addEventListener('pagehide', releaseScrollbars, { once: true });

@@ -704,11 +704,11 @@ function EditorPane({
            * Agents Hub's inline Monaco editor must use the same thin rail as the Hub file-list sidebar so editor scrollbars do not look heavier than adjacent modal chrome.
            *
            * CDXC:AgentLauncher 2026-06-04-19:48:
-           * The inline editor scrollbar should be 7px wide so the code editor matches the requested lighter macOS treatment.
+           * The inline editor uses the shared 5px app scrollbar geometry.
            */
           scrollbar: {
-            horizontalScrollbarSize: 7,
-            verticalScrollbarSize: 7,
+            horizontalScrollbarSize: 5,
+            verticalScrollbarSize: 5,
           },
           theme: editorTheme(),
           value: initialFile.content,
