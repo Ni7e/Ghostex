@@ -100,6 +100,7 @@ impl DelayedSendRuntime {
         match endpoint_path {
             "/api/scheduleDelayedSend" => self.schedule(params),
             "/api/cancelDelayedSend" => self.cancel(params),
+            "/api/postponeDelayedSend" => self.postpone(params),
             "/api/readDelayedSends" => self.read(params),
             _ => Err(DomainStateError::not_found(format!(
                 "{endpoint_path} is not a gxserver delayed-send endpoint."
@@ -198,6 +199,49 @@ impl DelayedSendRuntime {
             ],
         )
         .map_err(sql_error)?;
+        self.publish_session_change(&db, &project_id, &session_id)?;
+        Ok(json!({
+            "delayedSend": read_delayed_send_projection(&db, &project_id, &session_id, Utc::now())?,
+            "projectId": project_id,
+            "sessionId": session_id,
+        }))
+    }
+
+    fn postpone(&self, params: &Map<String, Value>) -> Result<Value, DomainStateError> {
+        let delay_ms = params
+            .get("delayMs")
+            .and_then(Value::as_u64)
+            .filter(|delay| {
+                (DELAYED_SEND_MIN_DELAY_MS..=DELAYED_SEND_MAX_DELAY_MS).contains(delay)
+                    && delay % DELAYED_SEND_MIN_DELAY_MS == 0
+            })
+            .ok_or_else(|| {
+                DomainStateError::bad_request(
+                    "Choose a whole number of minutes between 1 minute and 24 days.",
+                )
+            })?;
+        let mut db = open_gxserver_database(&self.paths).map_err(internal_error)?;
+        let transaction = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
+        let repository = DomainRepository::new(&transaction, self.server_id.as_str());
+        let (project_id, session_id) = require_target(&repository, params)?;
+        let deadline: Option<String> = transaction.query_row(
+            "SELECT deadlineAt FROM delayed_sends WHERE projectId = ?1 AND sessionId = ?2 AND trigger = 'timer' AND state = 'armed'",
+            params![project_id, session_id],
+            |row| row.get(0),
+        ).optional().map_err(sql_error)?;
+        let deadline = deadline
+            .as_deref()
+            .and_then(parse_timestamp)
+            .ok_or_else(|| DomainStateError::bad_request("No timed Delayed Send is active."))?;
+        let deadline_at = (deadline + chrono::Duration::milliseconds(delay_ms as i64))
+            .to_rfc3339_opts(SecondsFormat::Millis, true);
+        transaction.execute(
+            "UPDATE delayed_sends SET deadlineAt = ?3, updatedAt = ?4 WHERE projectId = ?1 AND sessionId = ?2",
+            params![project_id, session_id, deadline_at, now_iso()],
+        ).map_err(sql_error)?;
+        transaction.commit().map_err(sql_error)?;
         self.publish_session_change(&db, &project_id, &session_id)?;
         Ok(json!({
             "delayedSend": read_delayed_send_projection(&db, &project_id, &session_id, Utc::now())?,
@@ -420,14 +464,23 @@ impl DelayedSendRuntime {
         chat_sender_factory: &SessionChatQueueSenderFactory,
         chat_publisher_factory: &SessionChatQueuePublisherFactory,
     ) -> Result<(), DomainStateError> {
+        // CDXC:DelayedSend 2026-09-15 WHY:
+        // A postpone can replace the deadline after this tick reads it. Claim only the deadline this tick observed so the old timer cannot fire early.
         let claimed = db
             .execute(
                 r#"
                 UPDATE delayed_sends
                 SET state = 'firing', updatedAt = ?3
                 WHERE projectId = ?1 AND sessionId = ?2 AND state = 'armed'
+                  AND trigger = ?4 AND deadlineAt IS ?5
                 "#,
-                params![record.project_id, record.session_id, now_iso()],
+                params![
+                    record.project_id,
+                    record.session_id,
+                    now_iso(),
+                    record.trigger,
+                    record.deadline_at
+                ],
             )
             .map_err(sql_error)?
             > 0;

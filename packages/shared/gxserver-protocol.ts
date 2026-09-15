@@ -236,6 +236,7 @@ export type GxserverEndpointPath =
   | '/api/updateCustomSessionTags'
   | '/api/scheduleDelayedSend'
   | '/api/cancelDelayedSend'
+  | '/api/postponeDelayedSend'
   | '/api/readDelayedSends'
   | '/api/readAutomationState'
   | '/api/saveAutomation'

@@ -38,6 +38,7 @@ export interface GpuiSidebarRuntimeCloseAfterDoneMethods {
   scheduleRemoteDelayedSend(
     message: Extract<SidebarToExtensionMessage, { type: 'scheduleDelayedSend' }>
   ): Promise<void>;
+  postponeDelayedSend(sessionId: string, delayMs: number): Promise<void>;
   cancelRemoteDelayedSend(sessionId: string): Promise<void>;
   toggleCloseAfterDone(sessionId: string): void;
   findPresentationSessionRowForSidebarSessionId(sessionId: string): GxserverPresentationSession | undefined;
@@ -120,6 +121,40 @@ export const gpuiSidebarRuntimeCloseAfterDoneMethods = {
       this.postSidebarActionToast('info', 'Delayed Send scheduled', { description });
     } catch (error) {
       this.postRemoteToast('error', 'Delayed Send unavailable', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+
+  async postponeDelayedSend(this: GpuiSidebarRuntime, sessionId: string, delayMs: number): Promise<void> {
+    /**
+     * CDXC:DelayedSend 2026-09-15 WHY:
+     * The card posts directly to this runtime, unlike the native scheduling modal. A remote-only handler silently dropped local postponements, leaving both the saved deadline and sidebar countdown unchanged.
+     */
+    const remote = parseGpuiRemotePresentationSessionId(sessionId);
+    const reference = remote ?? parseGxserverPresentationProjectSessionId(sessionId);
+    try {
+      if (!reference) {
+        throw new Error('The selected agent session is unavailable.');
+      }
+      const params = {
+        projectId: reference.projectId,
+        sessionId: reference.sessionId,
+        delayMs,
+      };
+      if (remote) {
+        await this.requestRemoteGxserver(remote.machineId, '/api/postponeDelayedSend', params);
+      } else {
+        if (!this.client) {
+          throw new Error('The local gxserver is disconnected.');
+        }
+        await this.client.rpc('/api/postponeDelayedSend', params);
+      }
+      this.postSidebarActionToast('info', 'Delayed Send postponed', {
+        description: `Added ${formatGpuiDelayedSendDelay(delayMs)} to the scheduled send time.`,
+      });
+    } catch (error) {
+      this.postSidebarActionToast('error', 'Delayed Send could not be postponed', {
         description: error instanceof Error ? error.message : String(error),
       });
     }

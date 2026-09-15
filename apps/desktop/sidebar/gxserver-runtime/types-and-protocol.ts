@@ -142,6 +142,7 @@ export type GpuiSidebarHostMessage =
           | 'renameSession'
           | 'runSidebarAgent'
           | 'scheduleDelayedSend'
+          | 'postponeDelayedSend'
           | 'setSessionNote'
           | 'toggleCloseAfterDone'
           | 'updateCustomSessionTags';

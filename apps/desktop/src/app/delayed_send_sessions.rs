@@ -6,6 +6,59 @@ use crate::app::helpers::*;
 use crate::*;
 
 impl GhostexGpuiApp {
+    pub(crate) fn handle_gpui_postpone_delayed_send_command(
+        &mut self,
+        command: &serde_json::Map<String, Value>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if command
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .and_then(gpui_remote_attach_session_reference_from_project_id)
+            .is_some()
+        {
+            self.dispatch_gpui_sidebar_host_message(Value::Object(command.clone()), cx);
+            return;
+        }
+        let Some(session_id) = self.gpui_agents_delayed_send_session_id_from_command(command)
+        else {
+            return;
+        };
+        let Some(key) = self.local_workspace_key_for_shell_session(session_id) else {
+            return;
+        };
+        let params = json!({
+            "projectId": key.project_id,
+            "sessionId": key.session_id,
+            "delayMs": command.get("delayMs"),
+        });
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let result = background
+                .spawn(async move {
+                    gpui_gxserver_rpc_result(
+                        "/api/postponeDelayedSend",
+                        &params,
+                        Duration::from_secs(5),
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(_) => {
+                    this.refresh_sidebar_agents_delayed_sends_if_changed(cx);
+                    this.dispatch_gpui_app_modal_toast("info", "Delayed Send postponed", "", cx);
+                }
+                Err(error) => this.dispatch_gpui_app_modal_toast(
+                    "warning",
+                    "Delayed Send could not be postponed",
+                    &error.to_string(),
+                    cx,
+                ),
+            });
+        })
+        .detach();
+    }
+
     /// CDXC:DelayedSend 2026-09-14 WHY:
     /// The modal's settings hydrate has no session groups. Read the receiving session's daemon so the awake picker also works from native hotkeys and remote panes.
     pub(crate) fn request_delayed_send_agents(

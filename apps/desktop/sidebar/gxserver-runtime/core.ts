@@ -629,6 +629,7 @@ export class GpuiSidebarRuntime {
         message.type === 'renameSession' ||
         message.type === 'scheduleDelayedSend' ||
         message.type === 'cancelDelayedSend' ||
+        message.type === 'postponeDelayedSend' ||
         message.type === 'confirmAgentHookLaunch' ||
         message.type === 'createSession' ||
         message.type === 'openBrowserPaneInGroup' ||
@@ -1308,6 +1309,9 @@ export class GpuiSidebarRuntime {
       case 'scheduleDelayedSend':
         await this.scheduleRemoteDelayedSend(message);
         return;
+      case 'postponeDelayedSend':
+        await this.postponeDelayedSend(message.sessionId, message.delayMs);
+        return;
       case 'cancelDelayedSend':
         await this.cancelRemoteDelayedSend(message.sessionId);
         return;
@@ -1499,11 +1503,12 @@ export class GpuiSidebarRuntime {
         this.openAppModal('settings');
         return;
       /*
-       * CDXC:Onboarding 2026-09-12 DECISION:
+       * CDXC:Onboarding 2026-09-15 DECISION:
        * User: "i want setup button in the tips dropdown to open this new one instead of the old one". The
        * Tips "Setup" button and the Quick Access "Setup" command share this one `openWorkspaceWelcome`
-       * message, so it opens the new Onboarding modal on every host that handles it. The old
-       * FirstLaunchSetup modal stays in the tree and still owns the automatic first run.
+       * message, so it opens the Onboarding modal on every host that handles it; the automatic first run
+       * opens the same modal (with `firstRun`) from apps/desktop/src/app/modals.rs. The old
+       * FirstLaunchSetup modal stays in the tree under its own id and nothing opens it by default.
        * SEE-ALSO: apps/desktop/src/app/delayed_send.rs handles the same message natively.
        */
       case 'openWorkspaceWelcome':

@@ -411,8 +411,8 @@ export type SidebarSessionItem = {
    * prompt yet, copied straight through from
    * `GxserverPresentationSession.isDraft`. PRESENT-ONLY (never `false`), which
    * is also what a daemon that predates drafts publishes, so absence means
-   * "not a draft". Drafts lead the Sessions subsection, newest by creation, with a
-   * pencil glyph instead of the agent logo and a dimmed title; the drafted text
+   * "not a draft". After the 10-minute new-session grace period, drafts with
+   * composer text belong in Drafts. They use a pencil glyph and a dimmed title; the drafted text
    * already arrives as `displayTitle`, derived server-side.
    */
   isDraft?: true;
@@ -2562,6 +2562,11 @@ export type SidebarToExtensionMessage =
        */
       sessionId: string;
       type: 'cancelDelayedSend';
+    }
+  | {
+      delayMs: number;
+      sessionId: string;
+      type: 'postponeDelayedSend';
     }
   | {
       /**

@@ -2045,7 +2045,10 @@ async fn route_http(
         | "/api/markAutomationRunRead" => {
             handle_automation_http(&state, endpoint.path, request_id, &body_json).await
         }
-        "/api/scheduleDelayedSend" | "/api/cancelDelayedSend" | "/api/readDelayedSends" => {
+        "/api/scheduleDelayedSend"
+        | "/api/cancelDelayedSend"
+        | "/api/postponeDelayedSend"
+        | "/api/readDelayedSends" => {
             handle_delayed_send_http(&state, endpoint.path, request_id, &body_json)
         }
         "/api/savePinnedPrompt" => handle_domain_http(

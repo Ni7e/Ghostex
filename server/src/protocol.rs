@@ -439,6 +439,7 @@ pub fn endpoint_for(path: &str) -> Option<EndpointDescriptor> {
         | "/api/updateCustomSessionTags"
         | "/api/scheduleDelayedSend"
         | "/api/cancelDelayedSend"
+        | "/api/postponeDelayedSend"
         | "/api/readDelayedSends"
         | "/api/readAutomationState"
         | "/api/saveAutomation"

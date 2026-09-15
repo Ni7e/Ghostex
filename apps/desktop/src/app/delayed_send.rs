@@ -2079,10 +2079,11 @@ impl GhostexGpuiApp {
                 }
                 self.open_gpui_browser_action_url(url, window, cx);
             }
-            // CDXC:Onboarding 2026-09-12 DECISION:
-            // The Tips dropdown's "Setup" button opens the new Onboarding modal; the old FirstLaunchSetup
-            // stays in the tree and still owns the automatic first run. This is the CEF titlebar-host twin
-            // of the native Tips header action in titlebar/settings_and_action_state.rs; both must match.
+            // CDXC:Onboarding 2026-09-15 DECISION:
+            // The Tips dropdown's "Setup" button opens the Onboarding modal, the same one the automatic
+            // first run opens (modals.rs); the old FirstLaunchSetup stays in the tree under its own id and
+            // nothing opens it by default. This is the CEF titlebar-host twin of the native Tips header
+            // action in titlebar/settings_and_action_state.rs; both must match.
             "openWorkspaceWelcome" => {
                 self.set_gpui_titlebar_tips_panel_open(false, window, cx);
                 self.open_gpui_app_modal_from_titlebar(GpuiAppModalKind::Onboarding, window, cx);
@@ -2413,6 +2414,9 @@ impl GhostexGpuiApp {
             }
             "scheduleDelayedSend" => {
                 self.handle_gpui_schedule_delayed_send_command(command, cx);
+            }
+            "postponeDelayedSend" => {
+                self.handle_gpui_postpone_delayed_send_command(command, cx);
             }
             "cancelDelayedSend" => {
                 self.handle_gpui_cancel_delayed_send_command(command, cx);

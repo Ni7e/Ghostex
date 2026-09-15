@@ -32,6 +32,7 @@ pub(crate) fn gpui_remote_sidebar_request_path_allowed(path: &str) -> bool {
             | "/api/forkSession"
             | "/api/scheduleDelayedSend"
             | "/api/cancelDelayedSend"
+            | "/api/postponeDelayedSend"
             | "/api/sleepSession"
             | "/api/wakeSession"
             | "/api/killSession"
@@ -143,6 +144,13 @@ pub(crate) fn gpui_remote_sidebar_request_params(
         | "/api/mergeWorktreeIntoMain" => gpui_remote_sidebar_project_id_params(params),
         "/api/scheduleDelayedSend" => gpui_remote_sidebar_delayed_send_params(params, false),
         "/api/cancelDelayedSend" => gpui_remote_sidebar_delayed_send_params(params, true),
+        "/api/postponeDelayedSend" => {
+            let delay_ms = params.get("delayMs")?.as_u64()?;
+            gpui_command_delayed_send_duration_from_millis(delay_ms)?;
+            let mut shaped = gpui_remote_sidebar_delayed_send_params(params, true)?;
+            shaped["delayMs"] = serde_json::json!(delay_ms);
+            Some(shaped)
+        }
         "/api/startSessionProvider" => gpui_remote_sidebar_session_lifecycle_params(params, None),
         "/api/sendSessionMessage" => gpui_remote_sidebar_send_session_message_params(params),
         "/api/settleSession"
@@ -854,7 +862,7 @@ pub(crate) fn gpui_remote_sidebar_response_payload(
         "/api/readAgentHookStatus" | "/api/installAgentHooks" => {
             gpui_remote_sidebar_agent_hook_status_response_payload(result)
         }
-        "/api/scheduleDelayedSend" => serde_json::json!({}),
+        "/api/scheduleDelayedSend" | "/api/postponeDelayedSend" => serde_json::json!({}),
         "/api/cancelDelayedSend" => serde_json::json!({
             "changed": result
                 .get("changed")
