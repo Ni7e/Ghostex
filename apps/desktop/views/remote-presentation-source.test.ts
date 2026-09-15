@@ -67,8 +67,8 @@ describe('remote presentation sidebar source', () => {
     expect(sortableSessionCardSource).not.toContain('RemoteSessionContextMenu');
     const menuActionsSource = sourceBetween(
       sortableSessionCardSource,
-      'const primaryActions: SessionContextMenuAction[] = [];',
-      'const destructiveActions: SessionContextMenuAction[] = [];'
+      'const sessionActionRows: Record<SessionCardHoverAction, () => SessionContextMenuAction | null> = {',
+      'const destructiveActions: SessionContextMenuAction[] ='
     );
     for (const label of [
       'Rename',
