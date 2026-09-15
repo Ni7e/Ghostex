@@ -44,7 +44,23 @@ without closing Ghostex.
 - **Automate**: scheduled and triggered agent runs (see Automations).
 - **Docs**: Markdown, HTML, and Excalidraw files from the project's docs
   folders, with a markdown editor and an annotation system that sends notes
-  back to the agent. Folders appear as they load, and search fills in while
+  back to the agent. Select text in a Markdown file to comment on it, mark it
+  Looks good, Clarify, or Needs tests, or delete it (press D), and add a global
+  comment from the header. Send (or Cmd+Enter) delivers the new notes as
+  numbered feedback with line numbers to the session last clicked in the
+  sidebar for the active project: into its chat composer when the chat is
+  showing, or into the agent's terminal when its input box is available. The
+  button names that session before you press it. When no agent session is
+  selected, the agent's input box is busy, or Ghostex cannot tell for that
+  agent, the feedback is copied to the clipboard instead and a toast says so.
+  Sent notes stay visible with a Sent mark and are only sent again after you
+  edit them; the Review menu offers Resend all, Finish review (which archives
+  the sent notes), Undo finish, and the Archive where a note can be restored.
+  With notes in several files, the Review menu sends the new notes across all
+  files as one message. In a chat, the Reply by Annotating button beside an
+  agent reply (between Copy message and Save to md) opens that reply in Docs so
+  it can be annotated the same way, with the feedback going back to that
+  session. Folders appear as they load, and search fills in while
   Updating files is shown. Expand a folder to load it sooner; a loading or error
   marker means its contents have not been confirmed yet. Use Refresh in the Docs
   sidebar menu to check for changes immediately. The button at the sidebar's
@@ -97,9 +113,8 @@ With two vertically split companion panes, click inside the top or bottom pane
 to make it active. Selecting another session in the sidebar or creating a new
 session replaces that active pane's session and leaves the other pane in place.
 
-- Side and width: the sidebar sits left or right (`sidebarSide`, or
-  `ghostex move-sidebar`); drag the divider to resize, double-click it to
-  restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
+- Width: the sidebar sits on the left; drag the divider to resize,
+  double-click it to restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
 - Pane memory: the companion and Commands panes are remembered for Agents and,
   separately, for the wide views (Browser, Code, Docs, Kanban, Automate), the
   same for every project, so switching projects never moves them. The sidebar
@@ -214,9 +229,14 @@ custom tag by name. Claude and Codex name their own sessions; Ghostex
 syncs those names without running a first-prompt title job or blocking terminal
 input. Pi and OMP use the Title Generation Agent for first-prompt names.
 Manual Generate Name and `/rename` in chat remain available for Claude and Codex.
+Fork starts the new session as `Fork: <original name>` and saves that name
+through the agent's own rename command so it survives reopening the conversation.
 
 - Sleeping frees RAM; Auto Sleep does it after idle minutes; Resources in the
   titlebar sleeps many at once and shows CPU and RAM per session.
+  Sleeping sidebar sessions keep their normal title color and show a slightly
+  blue last-active time on the right. Use `ghostex sleep|wake <selector>` to
+  sleep or wake a session.
 - Drag pinned sessions to reorder them within their project. Rows stay in place
   while an icon-and-title ghost follows the pointer; the insertion line marks
   where the session moves when you drop it.
@@ -238,7 +258,7 @@ Manual Generate Name and `/rename` in chat remain available for Claude and Codex
   prompts stay on top. Ctrl+G is agents, Ctrl+J is projects inside the picker.
 - Delayed Actions opens Session Automations. Send Enter can run after a delay,
   when this agent finishes, when all agents in the project finish, or **When a
-  specific agent finishes**. Choose the specific agent from the Awake sessions
+  specific agent finishes**. Choose the specific agent from the Agent sessions
   on the same computer; sleeping sessions are excluded. Ghostex waits until the
   selected agent has remained idle for 10 seconds and restarts that wait if it
   resumes work. Close After Done closes a pane once its command exits.
@@ -253,6 +273,10 @@ Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
 agent stops, transcript with thinking, tool, and edit cards, subagent
 transcripts, question and approval cards, rewind, and a note per session.
+ZCode supports chat messages, thinking, tool results, attachments, and imported
+conversation history. Install its hooks in Settings > Agents to connect new
+conversations and keep activity in sync. ZCode runs in the same terminal, so
+you can switch to Terminal for its setup, model menus, and permission prompts.
 Scrolling up collapses the composer; returning to the bottom expands it.
 An empty collapsed composer shows only the first placeholder line, and scrolling
 keeps the same toolbar buttons visible.
@@ -348,7 +372,10 @@ links and code controls keep their own actions. Verbose mode opens these tools
 by default (`sessionChatVerboseMode`). File writes and code
 edits appear outside the tool groups while the agent works. When a turn shows
 "Worked for", all its file changes are grouped in a collapsed "N files changed"
-section directly below it. The count includes each file once, even if it was
+section directly below it. Older history loads with completed turns already
+collapsed, so you can scroll through prompts and answers without passing through
+their tool logs first. Expanding older work or its files loads those details on
+demand; the original history remains available. The count includes each file once, even if it was
 edited repeatedly. Expand the section to see the files along an activity rail,
 with added lines in green and removed lines in red. Each file defaults to one
 collapsed row with its path and green/red change counts. Enable Show file edit
@@ -503,7 +530,19 @@ Related settings: `terminalFontFamily`, `terminalFontSize`,
 
 Agents are the launch buttons per project: Claude Code, Codex, Gemini CLI,
 OpenCode, Pi, and more are built in, and custom commands can be added in
-Settings > Agents. Agent Hooks let gxserver watch agent status, questions, and
+Settings > Agents. Expand an agent row to install or update its CLI, see its
+installed version and command output, or open its Install docs link. Ghostex
+selects an updater for recognized installations; choose the original installation
+method when it cannot be detected. mise is offered for supported CLIs and is the
+default install choice when available. Existing mise tools, including custom
+backends, update through mise with their version pins bumped to the latest
+release; older versions remain available for running sessions. For example,
+ZCode can also be installed with `mise use --global 'npm:zcode-app-cli[prerelease=true]@latest'`.
+Install and update commands run on the
+selected computer and keep running if Settings closes. Start a new session to use the installed version. ZCode launches with `zcode`; install
+and update it with `npm install -g zcode-app-cli@latest`, as documented at
+[the ZCode installation docs](https://github.com/kingsword09/zcode-cli).
+Agent Hooks let gxserver watch agent status, questions, and
 completions for chat and notifications. Agent approvals ("accept all") is a
 per-machine default with per-project overrides. Actions (Settings > Actions)
 are saved terminal commands or browser URLs shown on project headers and in
@@ -622,6 +661,9 @@ finishes, an attention state on the session card, OS notifications on macOS,
 menu bar badges with running and done counts (click one to jump to the
 session), terminal bell detection, and push notifications on the mobile app.
 The optional status pet in the sidebar mirrors session state.
+Every copy to the clipboard, from a terminal, a chat message, a copy button,
+or a menu, also plays a short copy sound; turn it off with the Copy Sound
+switch under Settings > Notifications > Sounds (`copySound`).
 
 The Notifications bell sits in the titlebar right after the Next button and
 shows how many notifications are unread. Click it to open the Notifications
@@ -638,7 +680,7 @@ you previously moved to the back of the unread queue.
 Scripts and agent hooks can post their own rows with
 `ghostex notify --title <text> [--body <text>]`.
 
-Related settings: `completionSound`, `actionCompletionSound`,
+Related settings: `completionSound`, `actionCompletionSound`, `copySound`,
 `showMacOSAttentionNotifications`, `showNotificationOnTerminalBell`,
 `hideMenuBarSessionStatusIndicators`, `petOverlayEnabled`,
 `notificationsTitlebarButtonHidden`.
@@ -748,8 +790,7 @@ Related settings: `sidebarTheme`, `customSidebarTitlebarBackgroundDarknessPercen
 - "Make Claude control Codex": see Agents, actions, and orchestration.
 - "Match the terminal width to the chat": `ghostex settings set
 terminalViewWidthMode match-chat`.
-- "Move the sidebar to the right and make it narrower": `ghostex settings set
-sidebarSide right`, then `ghostex settings set sidebarDefaultWidthPx 220`
+- "Make the sidebar narrower": `ghostex settings set sidebarDefaultWidthPx 220`
   and tell the user to double-click the sidebar divider to apply the default
   width (dragging sets the live width).
 - "Use Ghostex from my phone or another computer": see Remote machines, web,

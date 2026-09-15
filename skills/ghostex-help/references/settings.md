@@ -48,7 +48,6 @@ How to use this file:
 - **Hide project git stats** `hideProjectHeaderDiffStats` (boolean, default false) [advanced]: Hide +added/-removed line counts in sidebar project rows.
 - **Show changed-file count** `showProjectEditorDiffFileCount` (boolean, default false) [advanced]: Show changed-file counts in sidebar project row git stats.
 - **Show Menu Bar Session Indicators** `hideMenuBarSessionStatusIndicators` (boolean, default false): Show the menu bar session status badges.
-- **Side** `sidebarSide` (one of left | right; default left): Choose which side of the screen holds the sidebar. Option labels: left = Left, right = Right.
 - **Collapse animation speed** `sidebarCollapseAnimationDurationMs` (number 0 to 1000 step 100 default 400): Set how quickly sidebar sections, groups, and projects expand or collapse. Set to 0 for no animation.
 - **Tooltip Delay** `sidebarTooltipDelayMs` (number 0 to 2000 step 100 default 600): Set how long sidebar hover labels wait before appearing. Set to 0 to show them immediately.
 - **Default Width** `sidebarDefaultWidthPx` (number 150 to 520 default 275) [advanced]: Width restored when double-clicking the sidebar resize handle.
@@ -175,6 +174,7 @@ How to use this file:
 - **macOS Attention Notifications** `showMacOSAttentionNotifications` (boolean, default true): Show a macOS banner when a session needs attention.
 - **Agent Completion Alert Test** `attentionNotificationActions` (Settings UI row without a settings key; use `ghostex settings open`) [advanced]: Test the current completion alert settings or open macOS Notification Settings.
 - **Action Completion Sound** `actionCompletionSound` (one of ping | pingdouble | glass | glimmer | shamisen | shamisenreverb | arcade | arcadeboost | confirmation-001 | confirmation-002 | confirmation-003 | confirmation-004 | notification-pop | success-chime | high-up | high-down | low-three-tone | tone-1 | three-tone-1 | three-tone-2 | two-tone-1 | two-tone-2 | power-up-5 | power-up-6 | power-up-8 | coin-collect | phaser-up-5 | zap-two-tone | voiceover-pack-male-mission-completed | voiceover-pack-female-mission-completed | voiceover-pack-male-you-win | voiceover-pack-female-congratulations | flawless-victory; default shamisen): Sound for action completions. Option labels: ping = Ping, pingdouble = Ping Double, glass = Glass, glimmer = Glimmer, shamisen = Shamisen, shamisenreverb = Shamisen Reverb, arcade = Arcade, arcadeboost = Arcade Boost, confirmation-001 = Confirmation 001, confirmation-002 = Confirmation 002, confirmation-003 = Confirmation 003, confirmation-004 = Confirmation 004, notification-pop = Notification Pop, success-chime = Success Chime, high-up = High Up, high-down = High Down, low-three-tone = Low Three Tone, tone-1 = Tone 1, three-tone-1 = Three Tone 1, three-tone-2 = Three Tone 2, two-tone-1 = Two Tone 1, two-tone-2 = Two Tone 2, power-up-5 = Power Up 5, power-up-6 = Power Up 6, power-up-8 = Power Up 8, coin-collect = Coin Collect, phaser-up-5 = Phaser Up 5, zap-two-tone = Zap Two Tone, voiceover-pack-male-mission-completed = Mission Completed (Male), voiceover-pack-female-mission-completed = Mission Completed (Female), voiceover-pack-male-you-win = You Win (Male), voiceover-pack-female-congratulations = Congratulations (Female), flawless-victory = Flawless Victory.
+- **Copy Sound** `copySound` (boolean, default true): Play a short sound whenever you copy something to the clipboard.
 ### Advanced
 
 #### Experimental
@@ -252,7 +252,7 @@ How to use this file:
 - **Custom Title Command** `customSessionTitleGenerationCommand` (text, default (empty)): Custom command run with the title prompt on stdin when Title Generation Agent is custom. It should print only the title.
 ### Agents
 
-- **Add Agent** `addAgent` (Settings UI row without a settings key; use `ghostex settings open`): Add, reorder, edit, or delete agent launchers used to start new sessions.
+- **Add Agent** `addAgent` (Settings UI row without a settings key; use `ghostex settings open`): Add, reorder, edit, or delete agent launchers. Expand a row to install or update its CLI, check its version, and open installation docs.
 - **Agent Hooks** `agentResumeHooks` (Settings UI row without a settings key; use `ghostex settings open`): Agent resume hooks let Ghostex capture each agent's native session id and resume the exact conversation after sleep, reload, or app restart. Install a single agent's hook from its row, or install and remove every Ghostex-owned hook with Install All and Uninstall All.
 - **Default view per agent** `preferredAgentInterfaceOverrides` (structured value; change it in Settings, not with `ghostex settings set`): Agents that support Ghostex's Chat View are marked with a chat bubble and can open in Chat or Terminal regardless of the global Default Agent View. Inherit keeps following that global setting.
 ## Integrations (tab `integrations`)

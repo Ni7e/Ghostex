@@ -4407,30 +4407,6 @@
       "agentWritable": true
     },
     {
-      "key": "sidebarSide",
-      "title": "Side",
-      "subtitle": "Choose which side of the screen holds the sidebar.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "enum",
-      "default": "left",
-      "options": [
-        {
-          "label": "Left",
-          "value": "left"
-        },
-        {
-          "label": "Right",
-          "value": "right"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
       "key": "sidebarCollapseAnimationDurationMs",
       "title": "Collapse animation speed",
       "subtitle": "Set how quickly sidebar sections, groups, and projects expand or collapse. Set to 0 for no animation.",
@@ -6741,6 +6717,20 @@
       "agentWritable": true
     },
     {
+      "key": "copySound",
+      "title": "Copy Sound",
+      "subtitle": "Play a short sound whenever you copy something to the clipboard.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "notifications",
+      "groupTitle": "Notifications",
+      "section": "sounds",
+      "sectionTitle": "Sounds",
+      "type": "boolean",
+      "default": true,
+      "agentWritable": true
+    },
+    {
       "key": "showBetaFeatures",
       "title": "Enable Experimental Features",
       "subtitle": "Show experimental surfaces: OS Integration settings, Browser color scheme, and Keep Awake.",
@@ -7248,7 +7238,6 @@
         "openHotkeys": "cmd+.",
         "toggleSidebarCollapsed": "cmd+b",
         "toggleCompanionPane": "cmd+alt+b",
-        "moveSidebar": "",
         "renameActiveSession": "cmd+r",
         "openBrowserPane": "cmd+n",
         "switchAgentsView": "",
@@ -7727,7 +7716,7 @@
     {
       "key": "addAgent",
       "title": "Add Agent",
-      "subtitle": "Add, reorder, edit, or delete agent launchers used to start new sessions.",
+      "subtitle": "Add, reorder, edit, or delete agent launchers. Expand a row to install or update its CLI, check its version, and open installation docs.",
       "tab": "agents",
       "tabTitle": "Agents",
       "section": "agentList",
@@ -7807,10 +7796,6 @@
           "value": "Kimi Code"
         },
         {
-          "label": "Campfire",
-          "value": "Campfire"
-        },
-        {
           "label": "OpenClaude",
           "value": "OpenClaude"
         },
@@ -7825,6 +7810,10 @@
         {
           "label": "Mastra Code",
           "value": "Mastra Code"
+        },
+        {
+          "label": "ZCode",
+          "value": "ZCode"
         }
       ],
       "agentWritable": false
@@ -7912,10 +7901,6 @@
           "value": "Kimi Code"
         },
         {
-          "label": "Campfire",
-          "value": "Campfire"
-        },
-        {
           "label": "OpenClaude",
           "value": "OpenClaude"
         },
@@ -7930,6 +7915,10 @@
         {
           "label": "Mastra Code",
           "value": "Mastra Code"
+        },
+        {
+          "label": "ZCode",
+          "value": "ZCode"
         }
       ],
       "agentWritable": false
@@ -9300,12 +9289,6 @@
       "title": "Toggle Companion Pane",
       "description": "Collapse or expand the project companion pane.",
       "defaultKey": "cmd+alt+b"
-    },
-    {
-      "id": "moveSidebar",
-      "title": "Move Sidebar",
-      "description": "Move the sidebar to the other side.",
-      "defaultKey": ""
     },
     {
       "id": "renameActiveSession",

@@ -18,7 +18,6 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Hotkeys | `cmd+.` |  | Open app hotkeys. | `openHotkeys` |
 | Toggle Sidebar | `cmd+b` |  | Collapse or expand the sidebar. | `toggleSidebarCollapsed` |
 | Toggle Companion Pane | `cmd+alt+b` |  | Collapse or expand the project companion pane. | `toggleCompanionPane` |
-| Move Sidebar | unassigned |  | Move the sidebar to the other side. | `moveSidebar` |
 | Rename Active Session | `cmd+r` |  | Rename the focused session. | `renameActiveSession` |
 | Open Browser Pane | `cmd+n` |  | Open a browser tab beside the focused tab. | `openBrowserPane` |
 | Switch to Agents | unassigned |  | Switch to Agents view. | `switchAgentsView` |
