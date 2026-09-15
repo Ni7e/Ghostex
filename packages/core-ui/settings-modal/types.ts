@@ -244,6 +244,7 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
     'unparkAfterSendingMessage',
     'renameSessionOnDoubleClick',
     'sessionCardHoverButtons',
+    'showSessionCardHoverButtonsInContextMenu',
     'sidebarSessionTagListItems',
   ],
   /*
@@ -364,7 +365,7 @@ export const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
   // CDXC:Icons 2026-06-25-21:50: App Icon owns the persisted Dock icon source id selection.
   appIcon: ['appIconSourceId'],
   sidebarTags: ['sidebarSessionTagListItems'],
-  sessionCards: ['sessionCardHoverButtons'],
+  sessionCards: ['sessionCardHoverButtons', 'showSessionCardHoverButtonsInContextMenu'],
   debugging: ['debuggingMode', ...DEBUGGING_MODE_DEPENDENT_SETTING_KEYS],
   terminalBehavior: [
     'terminalScrollbackLimitMb',
@@ -589,6 +590,12 @@ export const DIAGNOSTIC_LOGGING_GROUPS: readonly ['macOS', 'GPUI', 'gxserver'] =
  *
  */
 export const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
+  /*
+   * CDXC:Settings 2026-09-15 DECISION:
+   * User: the whole Session Cards section (the hover-button strip and its context-menu toggle) is advanced, so it only appears with Show Advanced.
+   */
+  'sessionCardHoverButtons',
+  'showSessionCardHoverButtonsInContextMenu',
   'sidebarVisibilityMemory',
   'showProjectIcons',
   'hideSessionAgentIconUntilHover',

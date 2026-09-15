@@ -161,6 +161,18 @@ const sessionCardSensors = [
   KeyboardSensor,
 ];
 
+/**
+ * CDXC:DelayedSend 2026-09-15 DECISION:
+ * User: agents with a timed Delayed Send show "Postpone by" in their right-click menu, with 10 minutes, 30 minutes, 1 hour, 2 hours, and 5 hours.
+ */
+const DELAYED_SEND_POSTPONE_PRESETS = [
+  { label: '10 minutes', delayMs: 10 * 60_000 },
+  { label: '30 minutes', delayMs: 30 * 60_000 },
+  { label: '1 hour', delayMs: 60 * 60_000 },
+  { label: '2 hours', delayMs: 120 * 60_000 },
+  { label: '5 hours', delayMs: 300 * 60_000 },
+] as const;
+
 type ContextMenuPosition = {
   x: number;
   y: number;
@@ -172,7 +184,7 @@ type SessionContextMenuAction = {
   key: string;
   label: string;
   onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
-  submenu?: 'advanced' | 'session-tags' | 'snooze' | 'switch-account';
+  submenu?: 'advanced' | 'session-tags' | 'snooze' | 'switch-account' | 'postpone';
 };
 
 /**
@@ -199,8 +211,10 @@ export type SortableSessionCardSharedSettings = {
   enableSessionParking: boolean;
   hideBrowserFaviconUntilHover: boolean;
   hideSessionAgentIconUntilHover: boolean;
-  /** The hover-button strip, chevron included, in display order; each enabled action is hidden from the context menu. */
+  /** The hover-button strip, chevron included, in display order. */
   hoverButtons: readonly SessionCardHoverButtonItem[];
+  /** Mirror the enabled hover buttons at the top of the context menu; off hides them from the menu instead. */
+  hoverButtonsInContextMenu: boolean;
   renameSessionOnDoubleClick: boolean;
   showDebugSessionNumbers: boolean;
   showLastActiveTime: boolean;
@@ -766,6 +780,7 @@ export function SortableSessionCard({
     hideSessionAgentIconUntilHover,
     hideBrowserFaviconUntilHover,
     hoverButtons: hoverButtonItems,
+    hoverButtonsInContextMenu,
     renameSessionOnDoubleClick,
     showDebugSessionNumbers,
     showLastActiveTime,
@@ -786,6 +801,7 @@ export function SortableSessionCard({
    */
   const [pendingShelve, setPendingShelve] = useState<PendingShelve>();
   const [contextMenuVariant, setContextMenuVariant] = useState<ContextMenuVariant>('actions');
+  const [postponeSubmenuPosition, setPostponeSubmenuPosition] = useState<ContextMenuPosition>();
   const [snoozeSubmenuPosition, setSnoozeSubmenuPosition] = useState<ContextMenuPosition>();
   useEffect(() => {
     if (!contextMenuPosition || (!tagSubmenuPosition && contextMenuVariant !== 'tags')) {
@@ -796,6 +812,7 @@ export function SortableSessionCard({
     if (!contextMenuPosition) {
       setContextMenuVariant('actions');
       setSnoozeSubmenuPosition(undefined);
+      setPostponeSubmenuPosition(undefined);
     }
   }, [contextMenuPosition]);
   const [advancedSubmenuPosition, setAdvancedSubmenuPosition] = useState<ContextMenuPosition>();
@@ -844,6 +861,12 @@ export function SortableSessionCard({
     showSessionCommandCopyActions,
     showSessionDetailsCopyAction,
   });
+  const canPostponeDelayedSend =
+    canDelayedSend &&
+    Boolean(session.delayedSendDeadlineAt) &&
+    !session.sendWhenAgentStopsActive &&
+    !session.sendWhenAllProjectSessionsStopActive &&
+    !session.sendWhenSpecificAgentFinishes;
   const isSnoozed = isSidebarSessionSnoozed(session);
   const canSnoozeSession = canPinSession && !isBrowserSession;
   const canParkSession = enableSessionParking && canPinSession && !isBrowserSession;
@@ -879,7 +902,7 @@ export function SortableSessionCard({
     }
     return hoverActionsExpanded ? [...before, 'collapse', ...after] : ['expand', ...after];
   })();
-  /** A button enabled in the strip is left out of the context menu, per the hover-actions decision. */
+  /** A button on the card never keeps its ordinary menu row: it either mirrors into the top group or leaves the menu. */
   const isHoverAction = (action: SessionCardHoverAction) =>
     isBrowserSession ? action === 'sleep' || action === 'close' : enabledHoverActions.includes(action);
   const postSessionDragDebugLog = useEffectEvent((event: string, details: Record<string, unknown>) => {
@@ -1360,21 +1383,46 @@ export function SortableSessionCard({
       canSleepSidebarSession(useSidebarStore.getState().sessionsById[candidateSessionId])
     );
 
+  /**
+   * CDXC:Sessions 2026-09-15 DECISION:
+   * User: the hover buttons also show inside the context menu by default, leading the everyday rows in the card's right-to-left order, with no divider before the remaining rows. With the setting off, an enabled hover button leaves the menu (the 2026-09-12 rule).
+   * Close is the exception: the user does not want it listed once it is on the card, so it never mirrors and only appears (as the bottom red row) when it is not a hover button. Close After Done keeps its Advanced row rather than mirroring.
+   */
+  const contextMenuHoverActions: readonly SessionCardHoverAction[] = !hoverButtonsInContextMenu
+    ? []
+    : isBrowserSession
+      ? canSleepSession
+        ? ['sleep']
+        : []
+      : [...enabledHoverActions]
+          .reverse()
+          .filter(
+            (action) =>
+              action !== 'close' &&
+              action !== 'closeAfterDone' &&
+              hoverActionAvailability[action] &&
+              (action !== 'tag' || sessionTagSubmenuItemCount > 0)
+          );
+  const showCloseAfterDoneMenuRow =
+    canCloseAfterDone && (!isHoverAction('closeAfterDone') || hoverButtonsInContextMenu);
+
   const getContextMenuCountsForSessionIdsBelow = (nextSessionIdsBelow: readonly string[]) => {
     const nextSleepableSessionIdsBelow = getSleepableSessionIds(nextSessionIdsBelow);
     const nextBelowActionCount =
       nextSessionIdsBelow.length > 0 ? 1 + Number(nextSleepableSessionIdsBelow.length > 0) : 0;
     const nextPrimaryCount =
+      contextMenuHoverActions.length +
       Number(canRenameSession && !isHoverAction('rename')) +
       Number(canSleepSession && !isHoverAction('sleep')) +
       Number(canPinSession && !isHoverAction('pin')) +
       Number(canParkSession && !isHoverAction('park')) +
       Number(canSnoozeSession && !isHoverAction('snooze')) +
       Number(canOpenSessionNote && !isHoverAction('note')) +
-      Number(canTagSession && sessionTagSubmenuItemCount > 0 && !isHoverAction('tag'));
+      Number(canTagSession && sessionTagSubmenuItemCount > 0 && !isHoverAction('tag')) +
+      Number(canPostponeDelayedSend);
     const nextAdvancedNestedCount =
       Number(canDelayedSend) +
-      Number(canCloseAfterDone && !isHoverAction('closeAfterDone')) +
+      Number(showCloseAfterDoneMenuRow) +
       Number(canFullReloadSession) +
       Number(canForkSession) +
       Number(canExportTranscript) +
@@ -1444,6 +1492,7 @@ export function SortableSessionCard({
     setAdvancedSubmenuPosition(undefined);
     setSwitchAccountSubmenuPosition(undefined);
     setSnoozeSubmenuPosition(undefined);
+    setPostponeSubmenuPosition(undefined);
     setContextMenuVariant('actions');
     setContextMenuSessionIdsBelow(nextSessionIdsBelow);
     setContextMenuSleepableSessionIdsBelow(nextSleepableSessionIdsBelow);
@@ -2055,6 +2104,7 @@ export function SortableSessionCard({
     setAdvancedSubmenuPosition(undefined);
     setSwitchAccountSubmenuPosition(undefined);
     setSnoozeSubmenuPosition(undefined);
+    setPostponeSubmenuPosition(undefined);
     const bounds = event.currentTarget.getBoundingClientRect();
     const submenuWidth = 204;
     const submenuHeight = getTagMenuHeight(Boolean(nextPendingShelve));
@@ -2101,6 +2151,7 @@ export function SortableSessionCard({
   const requestSnoozeUntil = (snoozedUntil: string) => {
     setContextMenuPosition(undefined);
     setSnoozeSubmenuPosition(undefined);
+    setPostponeSubmenuPosition(undefined);
     vscode.postMessage({ sessionId: session.sessionId, snoozedUntil, type: 'snoozeSession' });
   };
 
@@ -2131,10 +2182,33 @@ export function SortableSessionCard({
       return;
     }
     setSnoozeSubmenuPosition(undefined);
+    setPostponeSubmenuPosition(undefined);
     openSessionTagSubmenu(event, nextPendingShelve);
   };
 
+  const openPostponeSubmenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (postponeSubmenuPosition) {
+      setPostponeSubmenuPosition(undefined);
+      return;
+    }
+    setTagSubmenuPosition(undefined);
+    setAdvancedSubmenuPosition(undefined);
+    setSwitchAccountSubmenuPosition(undefined);
+    setSnoozeSubmenuPosition(undefined);
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const submenuHeight =
+      CONTEXT_MENU_VERTICAL_PADDING_PX + DELAYED_SEND_POSTPONE_PRESETS.length * CONTEXT_MENU_ITEM_HEIGHT_PX;
+    setPostponeSubmenuPosition({
+      x: getCenteredSidebarMenuX(204),
+      y: Math.max(
+        CONTEXT_MENU_MARGIN_PX,
+        Math.min(bounds.bottom + 4, window.innerHeight - submenuHeight - CONTEXT_MENU_MARGIN_PX)
+      ),
+    });
+  };
+
   const openSnoozeSubmenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    setPostponeSubmenuPosition(undefined);
     if (snoozeSubmenuPosition) {
       setSnoozeSubmenuPosition(undefined);
       return;
@@ -2166,6 +2240,7 @@ export function SortableSessionCard({
     setAdvancedSubmenuPosition(undefined);
     setSwitchAccountSubmenuPosition(undefined);
     setSnoozeSubmenuPosition(undefined);
+    setPostponeSubmenuPosition(undefined);
     setContextMenuSessionIdsBelow(EMPTY_SESSION_IDS);
     setContextMenuSleepableSessionIdsBelow(EMPTY_SESSION_IDS);
     setContextMenuSelectedSessionIds(EMPTY_SESSION_IDS);
@@ -2329,82 +2404,150 @@ export function SortableSessionCard({
     });
   }
 
-  const primaryActions: SessionContextMenuAction[] = [];
-  if (canRenameSession && !isHoverAction('rename')) {
-    primaryActions.push({
-      icon: <IconPencil aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
-      key: 'rename',
-      label: 'Rename',
-      onClick: requestRename,
+  const closeRow: SessionContextMenuAction = {
+    danger: true,
+    icon: <IconX aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
+    /**
+     * CDXC:Sessions 2026-05-11-00:45
+     * User-facing session removal language is Close. Keep the
+     * destructive action behavior unchanged while making terminal and
+     * browser context menus use the same visible verb.
+     *
+     * CDXC:ContextMenus 2026-06-10-13:58:
+     * The Close menu item is hidden by default and appears only when the
+     * Session Cards setting opts into destructive close actions in menus.
+     * Superseded 2026-09-12: the row appears exactly when Close is not one of the hover buttons, whatever the mirror setting says.
+     */
+    key: 'close',
+    label: 'Close',
+    onClick: () => requestClose('context-menu'),
+  };
+  /** One menu row per hover-strip action, or null when the session cannot take that action. */
+  const sessionActionRows: Record<SessionCardHoverAction, () => SessionContextMenuAction | null> = {
+    close: () => closeRow,
+    closeAfterDone: () =>
+      canCloseAfterDone
+        ? {
+            /*
+             * CDXC:Sessions 2026-06-15-21:00:
+             * Close After Done stays next to Delayed Send. The menu glyph inherits the
+             * normal context-menu icon tint. Only the armed session-card status clock
+             * uses pastel red.
+             */
+            icon: <IconClock aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
+            key: 'close-after-done',
+            label: 'Close After Done',
+            onClick: requestToggleCloseAfterDone,
+          }
+        : null,
+    note: () =>
+      canOpenSessionNote
+        ? {
+            icon: <IconNote aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
+            key: 'session-note',
+            label: 'Note',
+            onClick: requestOpenSessionNote,
+          }
+        : null,
+    park: () => {
+      if (!canParkSession) {
+        return null;
+      }
+      const singleParkOpensTagMenu = !session.isParked && parkOpensTagMenu && canTagSession;
+      return {
+        icon: <IconArchive aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
+        key: 'park',
+        label: session.isParked ? 'Unpark' : 'Park',
+        onClick: singleParkOpensTagMenu
+          ? (event) => openSessionTagSubmenu(event, { clearSelection: false, sessionIds: [session.sessionId] })
+          : () => requestSetParked(!session.isParked),
+        ...(singleParkOpensTagMenu ? { submenu: 'session-tags' as const } : {}),
+      };
+    },
+    pin: () =>
+      canPinSession
+        ? {
+            icon: session.isPinned ? (
+              <IconPinnedOff aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
+            ) : (
+              <IconPinned aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
+            ),
+            /**
+             * CDXC:Sessions 2026-05-28-12:04:
+             * Pinning is a live sidebar-order control, not Favorite. Expose it as its
+             * own context-menu action so users can pin any project session without
+             * changing previous-session favorites or auto-sleep favorite rules.
+             */
+            key: 'pin',
+            label: session.isPinned ? 'Unpin' : 'Pin',
+            onClick: () => requestSetPinned(!session.isPinned),
+          }
+        : null,
+    rename: () =>
+      canRenameSession
+        ? {
+            icon: <IconPencil aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
+            key: 'rename',
+            label: 'Rename',
+            onClick: requestRename,
+          }
+        : null,
+    sleep: () =>
+      canSleepSession
+        ? {
+            icon:
+              lifecycleState === 'sleeping' ? (
+                <IconPlayerPlay aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
+              ) : (
+                <IconMoon aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
+              ),
+            key: 'sleep',
+            label: lifecycleState === 'sleeping' ? 'Wake' : 'Sleep',
+            onClick: () => requestSetSleeping(lifecycleState === 'running'),
+          }
+        : null,
+    snooze: () =>
+      canSnoozeSession
+        ? {
+            icon: <IconAlarm aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
+            key: 'snooze',
+            label: isSnoozed ? 'Unsnooze' : 'Snooze',
+            onClick: isSnoozed ? requestUnsnooze : openSnoozeSubmenu,
+            ...(isSnoozed ? {} : { submenu: 'snooze' as const }),
+          }
+        : null,
+    tag: () =>
+      canTagSession && sessionTagSubmenuItemCount > 0
+        ? {
+            icon: <IconTag aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
+            key: 'tag-as',
+            label: 'Tag as',
+            onClick: openSessionTagSubmenu,
+            submenu: 'session-tags',
+          }
+        : null,
+  };
+  const collectSessionActionRows = (actions: readonly SessionCardHoverAction[]) =>
+    actions.flatMap((action) => {
+      const row = sessionActionRows[action]();
+      return row ? [row] : [];
     });
-  }
-  if (canSleepSession && !isHoverAction('sleep')) {
+
+  /** The card's hover buttons lead, top to bottom in the card's right-to-left order; the rows not on the card follow in their usual order. */
+  const primaryActions = collectSessionActionRows([
+    ...contextMenuHoverActions,
+    ...(['rename', 'sleep', 'pin', 'park', 'snooze', 'note', 'tag'] as const).filter(
+      (action) => !isHoverAction(action)
+    ),
+  ]);
+
+  if (canPostponeDelayedSend) {
     primaryActions.push({
-      icon:
-        lifecycleState === 'sleeping' ? (
-          <IconPlayerPlay aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
-        ) : (
-          <IconMoon aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
-        ),
-      key: 'sleep',
-      label: lifecycleState === 'sleeping' ? 'Wake' : 'Sleep',
-      onClick: () => requestSetSleeping(lifecycleState === 'running'),
-    });
-  }
-  if (canPinSession && !isHoverAction('pin')) {
-    primaryActions.push({
-      icon: session.isPinned ? (
-        <IconPinnedOff aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
-      ) : (
-        <IconPinned aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
-      ),
-      /**
-       * CDXC:Sessions 2026-05-28-12:04:
-       * Pinning is a live sidebar-order control, not Favorite. Expose it as its
-       * own context-menu action so users can pin any project session without
-       * changing previous-session favorites or auto-sleep favorite rules.
-       */
-      key: 'pin',
-      label: session.isPinned ? 'Unpin' : 'Pin',
-      onClick: () => requestSetPinned(!session.isPinned),
-    });
-  }
-  if (canParkSession && !isHoverAction('park')) {
-    const singleParkOpensTagMenu = !session.isParked && parkOpensTagMenu && canTagSession;
-    primaryActions.push({
-      icon: <IconArchive aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
-      key: 'park',
-      label: session.isParked ? 'Unpark' : 'Park',
-      onClick: singleParkOpensTagMenu
-        ? (event) => openSessionTagSubmenu(event, { clearSelection: false, sessionIds: [session.sessionId] })
-        : () => requestSetParked(!session.isParked),
-      ...(singleParkOpensTagMenu ? { submenu: 'session-tags' as const } : {}),
-    });
-  }
-  if (canSnoozeSession && !isHoverAction('snooze')) {
-    primaryActions.push({
-      icon: <IconAlarm aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
-      key: 'snooze',
-      label: isSnoozed ? 'Unsnooze' : 'Snooze',
-      onClick: isSnoozed ? requestUnsnooze : openSnoozeSubmenu,
-      ...(isSnoozed ? {} : { submenu: 'snooze' as const }),
-    });
-  }
-  if (canOpenSessionNote && !isHoverAction('note')) {
-    primaryActions.push({
-      icon: <IconNote aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
-      key: 'session-note',
-      label: 'Note',
-      onClick: requestOpenSessionNote,
-    });
-  }
-  if (canTagSession && sessionTagSubmenuItemCount > 0 && !isHoverAction('tag')) {
-    primaryActions.push({
-      icon: <IconTag aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
-      key: 'tag-as',
-      label: 'Tag as',
-      onClick: openSessionTagSubmenu,
-      submenu: 'session-tags',
+      icon: <IconClock aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
+      key: 'postpone-delayed-send',
+      label: 'Postpone by',
+      onClick: openPostponeSubmenu,
+      submenu: 'postpone',
     });
   }
 
@@ -2417,19 +2560,8 @@ export function SortableSessionCard({
       onClick: requestDelayedSend,
     });
   }
-  if (canCloseAfterDone && !isHoverAction('closeAfterDone')) {
-    /*
-     * CDXC:Sessions 2026-06-15-21:00:
-     * Close After Done stays next to Delayed Send. The menu glyph inherits the
-     * normal context-menu icon tint. Only the armed session-card status clock
-     * uses pastel red.
-     */
-    advancedSessionActions.push({
-      icon: <IconClock aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
-      key: 'close-after-done',
-      label: 'Close After Done',
-      onClick: requestToggleCloseAfterDone,
-    });
+  if (showCloseAfterDoneMenuRow) {
+    advancedSessionActions.push(...collectSessionActionRows(['closeAfterDone']));
   }
   if (canForkSession) {
     advancedSessionActions.push({
@@ -2585,6 +2717,7 @@ export function SortableSessionCard({
   ].filter((section) => section.actions.length > 0);
 
   const openAdvancedSubmenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    setPostponeSubmenuPosition(undefined);
     if (advancedSubmenuPosition) {
       setAdvancedSubmenuPosition(undefined);
       setSwitchAccountSubmenuPosition(undefined);
@@ -2621,31 +2754,12 @@ export function SortableSessionCard({
     });
   }
 
-  const destructiveActions: SessionContextMenuAction[] = [];
-  if (!isHoverAction('close')) {
-    destructiveActions.push({
-      danger: true,
-      icon: <IconX aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
-      /**
-       * CDXC:Sessions 2026-05-11-00:45
-       * User-facing session removal language is Close. Keep the
-       * destructive action behavior unchanged while making terminal and
-       * browser context menus use the same visible verb.
-       *
-       * CDXC:ContextMenus 2026-06-10-13:58:
-       * The Close menu item is hidden by default and appears only when the
-       * Session Cards setting opts into destructive close actions in menus.
-       * Superseded 2026-09-12: the row appears exactly when Close is not one of the hover buttons.
-       */
-      key: 'close',
-      label: 'Close',
-      onClick: () => requestClose('context-menu'),
-    });
-  }
+  const destructiveActions: SessionContextMenuAction[] = isHoverAction('close') ? [] : [closeRow];
   /*
    * CDXC:ContextMenus 2026-08-26:
    * The root menu is unlabeled: Rename/Sleep/Pin/Park/Note/Tag as are the
-   * everyday rows, Advanced is the only nested parent, and Close names itself.
+   * everyday rows (the card's hover buttons lead them since 2026-09-15),
+   * Advanced is the only nested parent, and Close names itself.
    * Group headings live inside Advanced (Session / Copy / Below). The bulk menu
    * stays unlabeled because every one of its rows already ends in "selected".
    */
@@ -3320,7 +3434,9 @@ export function SortableSessionCard({
                               ? Boolean(advancedSubmenuPosition)
                               : action.submenu === 'snooze'
                                 ? Boolean(snoozeSubmenuPosition)
-                                : undefined
+                                : action.submenu === 'postpone'
+                                  ? Boolean(postponeSubmenuPosition)
+                                  : undefined
                         }
                         aria-haspopup={action.submenu ? 'menu' : undefined}
                         role='menuitem'
@@ -3364,6 +3480,43 @@ export function SortableSessionCard({
               }}
             >
               {tagMenuContent}
+            </div>,
+            document.body
+          )
+        : null}
+      {contextMenuPosition && postponeSubmenuPosition && canPostponeDelayedSend && !isProjectSessionListMoreRow
+        ? createPortal(
+            <div
+              aria-label='Postpone by'
+              className='session-context-menu session-tag-submenu'
+              data-empty-space-blocking='true'
+              onClick={(event) => event.stopPropagation()}
+              role='menu'
+              style={{
+                left: `${postponeSubmenuPosition.x}px`,
+                top: `${postponeSubmenuPosition.y}px`,
+                zIndex: 'var(--sidebar-context-menu-submenu-z-index, 301)',
+              }}
+            >
+              {DELAYED_SEND_POSTPONE_PRESETS.map((preset) => (
+                <button
+                  key={preset.delayMs}
+                  className='session-context-menu-item'
+                  role='menuitem'
+                  type='button'
+                  onClick={() => {
+                    setContextMenuPosition(undefined);
+                    setPostponeSubmenuPosition(undefined);
+                    vscode.postMessage({
+                      type: 'postponeDelayedSend',
+                      sessionId: session.sessionId,
+                      delayMs: preset.delayMs,
+                    });
+                  }}
+                >
+                  {preset.label}
+                </button>
+              ))}
             </div>,
             document.body
           )

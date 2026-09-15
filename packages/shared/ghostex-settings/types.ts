@@ -412,10 +412,14 @@ export type ghostexSettings = {
   /**
    * CDXC:Sessions 2026-09-12 DECISION:
    * User: the buttons a session card reveals on hover are an ordered strip chosen in Settings, with the chevron as one of its draggable items: buttons right of the chevron always show, buttons left of it hide until the chevron is clicked, and each project remembers whether it is revealed across restarts.
-   * An enabled button is hidden from the session's main context menu whichever side of the chevron it is on.
    * Replaces the `showCloseButtonOnSessionCards` toggle and the "Show Close option in context menu" setting; the first is migrated into this list, the second is dropped because the list now decides where Close lives.
    */
   sessionCardHoverButtons: readonly SessionCardHoverButtonItem[];
+  /**
+   * CDXC:Sessions 2026-09-15 DECISION:
+   * User: the enabled hover buttons also appear in the session context menu by default, leading the everyday rows in the card's right-to-left order. Close is the exception and never appears in the menu while it is on the card. Turning this off restores the 2026-09-12 rule where every enabled hover button leaves the context menu.
+   */
+  showSessionCardHoverButtonsInContextMenu: boolean;
   hideLastActiveTimeOnSessionCards: boolean;
   hideAccountEmails: boolean;
   /**

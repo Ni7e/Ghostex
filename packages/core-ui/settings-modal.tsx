@@ -1690,7 +1690,7 @@ export function SettingsModal({
                           <SettingsSection sectionRef={sessionCardsSectionRef} title='Session Cards'>
                             {mainSettingVisible(settingsSearch.sessionCards, 'sessionCardHoverButtons') ? (
                               <SessionCardHoverActionsField
-                                description='Buttons a session card shows when you hover it. Click an icon to turn it on or off; drag icons to reorder them. Buttons to the right of the chevron always show, buttons to its left hide until the chevron is clicked. By default the strip is Tag, Park, Sleep, chevron, Close. An enabled button leaves the session context menu.'
+                                description='Buttons a session card shows when you hover it. Click an icon to turn it on or off; drag icons to reorder them. Buttons to the right of the chevron always show, buttons to its left hide until the chevron is clicked. By default the strip is Tag, Park, Sleep, chevron, Close.'
                                 label='Session hover buttons (click to toggle, drag to reorder)'
                                 {...getSettingModificationProps('sessionCardHoverButtons')}
                                 isModified={
@@ -1701,6 +1701,18 @@ export function SettingsModal({
                                 }
                                 onChange={(items) => updateDraft('sessionCardHoverButtons', items)}
                                 value={draft.sessionCardHoverButtons}
+                              />
+                            ) : null}
+                            {mainSettingVisible(
+                              settingsSearch.sessionCards,
+                              'showSessionCardHoverButtonsInContextMenu'
+                            ) ? (
+                              <ToggleField
+                                checked={draft.showSessionCardHoverButtonsInContextMenu}
+                                description='Keep the enabled hover buttons at the top of the session right-click menu too, in their right-to-left order on the card. Close is never listed while it is on the card. Turn off to leave every button out of the menu once it is on the card.'
+                                label='Hover buttons also in context menu'
+                                {...getSettingModificationProps('showSessionCardHoverButtonsInContextMenu')}
+                                onChange={(checked) => updateDraft('showSessionCardHoverButtonsInContextMenu', checked)}
                               />
                             ) : null}
                           </SettingsSection>
@@ -2762,7 +2774,7 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.sounds, 'copySound') ? (
                               <ToggleField
                                 checked={draft.copySound}
-                                description='Play a short sound whenever you copy something to the clipboard.'
+                                description='Play a short sound when copying to the clipboard, including text from the chat composer.'
                                 label='Copy Sound'
                                 {...getSettingModificationProps('copySound')}
                                 onChange={(checked) => updateDraft('copySound', checked)}

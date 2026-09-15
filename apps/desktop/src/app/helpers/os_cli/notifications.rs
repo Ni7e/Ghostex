@@ -229,7 +229,7 @@ pub(crate) fn gpui_play_copy_sound() {
         .object()
         .get("copySound")
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
+        .unwrap_or(false);
     if !enabled {
         return;
     }

@@ -405,6 +405,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       DEFAULT_ghostex_SETTINGS.hideBrowserFaviconUntilHover
     ),
     sessionCardHoverButtons: normalizeSessionCardHoverButtonsSetting(source),
+    showSessionCardHoverButtonsInContextMenu: readBoolean(
+      source,
+      'showSessionCardHoverButtonsInContextMenu',
+      DEFAULT_ghostex_SETTINGS.showSessionCardHoverButtonsInContextMenu
+    ),
     hideAccountEmails: readBoolean(source, 'hideAccountEmails', DEFAULT_ghostex_SETTINGS.hideAccountEmails),
     /**
      * CDXC:Sessions 2026-05-15-08:57

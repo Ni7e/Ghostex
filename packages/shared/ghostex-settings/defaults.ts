@@ -193,9 +193,9 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   completionSound: DEFAULT_COMPLETION_SOUND,
   /**
    * CDXC:Clipboard 2026-09-15 DECISION:
-   * User: "I want this copy sound to actually play everywhere in the app when we copy something." On by default; this switch is the only gate the copy sound has.
+   * User: play the copy sound everywhere in the app when copying, but "make it disabled by default for now". This supersedes the earlier enabled default; this switch is the only gate the copy sound has.
    */
-  copySound: true,
+  copySound: false,
   /**
    * CDXC:Notifications 2026-07-01-01:13:
    * Plain terminal BEL events include ordinary shell feedback such as zsh
@@ -262,6 +262,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * still turn the hover chrome off from Settings when they want quieter cards.
    */
   sessionCardHoverButtons: DEFAULT_SESSION_CARD_HOVER_BUTTONS,
+  showSessionCardHoverButtonsInContextMenu: true,
   /**
    * CDXC:Sessions 2026-06-13-15:42
    * Recommended is the default sidebar style and hides session-card Last Active

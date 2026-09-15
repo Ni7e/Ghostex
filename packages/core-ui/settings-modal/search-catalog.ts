@@ -269,6 +269,12 @@ export function getSettingsSearchSectionDefinitions() {
             'Buttons a session card shows when you hover it. Click an icon to turn it on or off; drag icons to reorder them. Buttons to the right of the chevron always show, buttons to its left hide until the chevron is clicked. By default the strip is Tag, Park, Sleep, chevron, Close.',
           title: 'Session hover buttons (click to toggle, drag to reorder)',
         },
+        {
+          key: 'showSessionCardHoverButtonsInContextMenu',
+          subtitle:
+            'Keep the enabled hover buttons at the top of the session right-click menu too, in their right-to-left order on the card. Close is never listed while it is on the card. Turn off to leave every button out of the menu once it is on the card.',
+          title: 'Hover buttons also in context menu',
+        },
       ],
     },
     statusIndicators: {
@@ -638,7 +644,7 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'copySound',
-          subtitle: 'Play a short sound whenever you copy something to the clipboard.',
+          subtitle: 'Play a short sound when copying to the clipboard, including text from the chat composer.',
           title: 'Copy Sound',
         },
       ],
