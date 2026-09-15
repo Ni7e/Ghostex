@@ -38,7 +38,7 @@ function SubagentTranscript({
   );
   return (
     <SessionChatSubagentContext.Provider value={context}>
-      <div className='flex items-center gap-3 border-b border-border px-4 py-3'>
+      <div className='flex shrink-0 items-center gap-3 border-b border-border px-4 py-3'>
         {onBack ? (
           <Button aria-label='Back to previous subagent' size='icon-sm' variant='ghost' onClick={onBack}>
             <IconArrowLeft />
@@ -55,7 +55,7 @@ function SubagentTranscript({
             </DialogTitle>
           </AppTooltip>
           <DialogDescription className='mt-1 text-xs'>
-            {target.task ?? 'Subagent transcript · Updates while open'}
+            {target.task ?? 'Subagent transcript'}
           </DialogDescription>
         </div>
         <Button aria-label='Close subagent transcript' size='icon-sm' variant='ghost' onClick={onClose}>
@@ -98,6 +98,8 @@ function SubagentTranscript({
  * User: clicking a subagent's name in the chat transcript shows that subagent's transcript in a popup with a backdrop over the main chat.
  * CDXC:SessionChat 2026-09-09 DECISION:
  * User: subagent transcripts default to the same normal display as main chat, with verbose and summarized modes off.
+ * CDXC:SessionChat 2026-09-15 DECISION:
+ * User: the subagent transcript modal has slightly rounded corners and omits "Updates while open" from its header.
  */
 export function SessionChatSubagentViewer({
   children,
