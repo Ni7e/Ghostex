@@ -1,3 +1,4 @@
+import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { useSystemColorScheme } from './use-system-color-scheme';
 import { resolveSidebarTheme } from '@/packages/shared/session-grid-contract';
 import { ImportSessionsCard, useImportSessionsIntro } from './sidebar-app/import-sessions-card';
@@ -24,6 +25,20 @@ import {
 } from '../shared/session-grid-contract';
 import { normalizeWorkspaceThemeColor } from '../shared/workspace-project-appearance';
 import { playCompletionSound, prepareCompletionSoundPlayback } from './completion-sound-player';
+
+/**
+ * CDXC:Notifications 2026-09-15 WHY:
+ * Inside the desktop app the completion sound is played natively (the sidebar runtime posts it to Rust, which runs
+ * afplay), so the page must not touch Chromium audio at all. It used to: it created a Web Audio context on the first
+ * pointer or key press to beat the autoplay policy, and played the sound again itself. On macOS, Chromium's audio
+ * service asks TCC for the *microphone* the first time a page starts any audio output (verified in the Tart VM with
+ * Chrome: both `new AudioContext()` and `HTMLAudioElement.play()` prompt), so first-run users got "Ghostex would like
+ * to access the microphone" on their first click, in the middle of onboarding. Browser hosts (the web app) keep the
+ * in-page player.
+ */
+function runsInsideGhostexDesktop(): boolean {
+  return typeof window !== 'undefined' && 'ghostexGpui' in window;
+}
 import { GitCommitModal } from './git-commit-modal';
 import { SidebarPreviousSessionsSearchGroup } from './sidebar-session-search-overlay';
 import { readSidebarHiddenItems, writeSidebarHiddenItems } from './sidebar-hidden-items';
@@ -91,6 +106,7 @@ import { AppTooltip, setSidebarTooltipsSuppressedForDrag, useDismissSidebarToolt
 import { useScrollGlowState } from './use-scroll-glow-state';
 import type { WebviewApi } from './webview-api';
 import { createDisplaySessionLayout } from '../shared/active-sessions-sort';
+import { useSessionListClock } from './sidebar-app/use-session-list-clock';
 import { filterDefaultNamedSessionSearchItems, filterPreviousSessions } from './previous-session-search';
 import { type SidebarSessionTagFilter } from './session-tag-ui';
 import { getEnabledVisibleSidebarSessionTagFilters, normalizeSidebarSessionTagListItems } from '../shared/session-tags';
@@ -310,6 +326,7 @@ export function SidebarApp({
   vscode,
   windowScopeId: rawWindowScopeId = DEFAULT_SIDEBAR_WINDOW_SCOPE_ID,
 }: SidebarAppProps) {
+  useAppScrollbars();
   useEffect(monitorAccountSetup, []);
   useDismissSidebarTooltipsOnScroll();
   const [windowScopeId] = useState(() => normalizeSidebarWindowScopeId(rawWindowScopeId));
@@ -990,9 +1007,11 @@ export function SidebarApp({
         }, COMPLETION_FLASH_DURATION_MS);
         completionFlashTimeoutBySessionIdRef.current.set(sessionId, timeout);
       }
-      void playCompletionSound(event.data.sound, (soundEvent, details) => {
-        postSidebarDebugLog('native.agent.detection', soundEvent, details);
-      });
+      if (!runsInsideGhostexDesktop()) {
+        void playCompletionSound(event.data.sound, (soundEvent, details) => {
+          postSidebarDebugLog('native.agent.detection', soundEvent, details);
+        });
+      }
       return;
     }
 
@@ -1415,6 +1434,7 @@ export function SidebarApp({
     sessionGroupsPanelRef.current.inert = isSidebarInteractionBlocked;
   }, [isSidebarInteractionBlocked]);
 
+  const sessionListNowMs = useSessionListClock(sessionsById);
   const isManualActiveSessionsSort = activeSessionsSortMode === 'manual';
   /**
    * CDXC:Sidebar 2026-05-13-08:11
@@ -1426,6 +1446,7 @@ export function SidebarApp({
     () =>
       createDisplaySessionLayout({
         enableSessionParking: effectiveSettings.enableSessionParking,
+        nowMs: sessionListNowMs,
         sessionIdsByGroup: createWorkspaceSessionIdsByGroup(workspaceGroupIds, authoritativeSessionIdsByGroup),
         sessionsById,
         sortMode: activeSessionsSortMode,
@@ -1435,6 +1456,7 @@ export function SidebarApp({
       activeSessionsSortMode,
       authoritativeSessionIdsByGroup,
       effectiveSettings.enableSessionParking,
+      sessionListNowMs,
       sessionsById,
       workspaceGroupIds,
     ]
@@ -3465,6 +3487,9 @@ export function SidebarApp({
   ]);
 
   const unlockCompletionSoundPlayback = useEffectEvent(() => {
+    if (runsInsideGhostexDesktop()) {
+      return;
+    }
     void prepareCompletionSoundPlayback((soundEvent, details) => {
       postSidebarDebugLog('native.agent.detection', soundEvent, details);
     });
@@ -3913,6 +3938,7 @@ export function SidebarApp({
           )
         }
         onSessionSelectionChange={handleSidebarSessionSelectionChange}
+        sessionListNowMs={sessionListNowMs}
         orderedSessionIds={displayedWorkspaceSessionIdsByGroup[groupId] ?? []}
         pinnedSessionDropIndicator={pinnedSessionDropIndicator}
         projectCollectionId={projectId ? projectCollectionIdByProjectId.get(projectId) : undefined}
@@ -4317,6 +4343,7 @@ export function SidebarApp({
                                         )
                                       }
                                       onSessionSelectionChange={handleSidebarSessionSelectionChange}
+                                      sessionListNowMs={sessionListNowMs}
                                       orderedSessionIds={displayedWorkspaceSessionIdsByGroup[groupId] ?? []}
                                       enableProjectSessionListToggle={!isSessionSearchFiltering}
                                       projectHeaderActions='all'

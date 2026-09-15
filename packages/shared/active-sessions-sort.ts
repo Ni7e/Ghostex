@@ -1,10 +1,12 @@
 import type { SidebarActiveSessionsSortMode, SidebarSessionItem } from './session-grid-contract-sidebar';
 import { isSidebarSessionSnoozed } from './session-snooze';
+import { isNewSidebarSession, isSidebarDraftSectionSession } from './session-drafts';
 
 export type SessionIdsByGroup = Record<string, string[]>;
 
 export type CreateDisplaySessionLayoutOptions = {
   enableSessionParking?: boolean;
+  nowMs?: number;
   sessionIdsByGroup: SessionIdsByGroup;
   sessionsById: Record<string, SidebarSessionItem>;
   sortMode: SidebarActiveSessionsSortMode;
@@ -13,6 +15,7 @@ export type CreateDisplaySessionLayoutOptions = {
 
 export function createDisplaySessionLayout({
   enableSessionParking = false,
+  nowMs = Date.now(),
   sessionIdsByGroup,
   sessionsById,
   sortMode,
@@ -26,6 +29,7 @@ export function createDisplaySessionLayout({
       groupId,
       orderProjectSessionsForDisplay(sessionIdsByGroup[groupId] ?? [], sessionsById, {
         enableSessionParking,
+        nowMs,
       }),
     ])
   );
@@ -47,6 +51,7 @@ export function createDisplaySessionLayout({
       groupId,
       orderProjectSessionsForDisplay(sessionIdsByGroup[groupId] ?? [], sessionsById, {
         enableSessionParking,
+        nowMs,
         sortUnpinnedByLastActivity: true,
       }),
     ])
@@ -64,15 +69,13 @@ export function getDisplaySessionIdsInOrder(options: CreateDisplaySessionLayoutO
 }
 
 /**
- * CDXC:Sessions 2026-09-09 DECISION:
- * User: drafts belong at the top of the project's "Sessions" subsection, newest first, below the pinned subsection, on React Native, web and GPUI.
- * This corrects the earlier placement above the project's subsections; browser, pinned and parked membership takes precedence, including in manual mode.
- * SEE-ALSO: apps/mobile/app/src/contract/grouping.ts, server/src/ghostex_cli/sessions.rs.
+ * CDXC:Drafts 2026-09-15 SEE-ALSO:
+ * packages/shared/session-drafts.ts owns the new-session grace period and Drafts membership.
  */
 function orderProjectSessionsForDisplay(
   sessionIds: readonly string[],
   sessionsById: Record<string, SidebarSessionItem>,
-  options: { enableSessionParking?: boolean; sortUnpinnedByLastActivity?: boolean } = {}
+  options: { enableSessionParking?: boolean; sortUnpinnedByLastActivity?: boolean; nowMs?: number } = {}
 ): string[] {
   /**
    * CDXC:Sessions 2026-05-28-12:04:
@@ -101,24 +104,27 @@ function orderProjectSessionsForDisplay(
 function orderSessionKindForDisplay(
   sessionIds: readonly string[],
   sessionsById: Record<string, SidebarSessionItem>,
-  options: { enableSessionParking?: boolean; sortUnpinnedByLastActivity?: boolean }
+  options: { enableSessionParking?: boolean; sortUnpinnedByLastActivity?: boolean; nowMs?: number }
 ): string[] {
   const pinnedSessionIds: string[] = [];
+  const newSessionIds: string[] = [];
   const draftSessionIds: string[] = [];
   const otherSessionIds: string[] = [];
   const parkedSessionIds: string[] = [];
   const snoozedSessionIds: string[] = [];
-  const nowMs = Date.now();
+  const nowMs = options.nowMs ?? Date.now();
   for (const sessionId of sessionIds) {
     const session = sessionsById[sessionId];
     if (isSidebarSessionSnoozed(session, nowMs)) {
       snoozedSessionIds.push(sessionId);
     } else if (options.enableSessionParking && session?.isParked === true) {
       parkedSessionIds.push(sessionId);
+    } else if (!isBrowserSession(session) && isSidebarDraftSectionSession(session, nowMs)) {
+      draftSessionIds.push(sessionId);
     } else if (session?.isPinned === true) {
       pinnedSessionIds.push(sessionId);
-    } else if (session?.isDraft === true) {
-      draftSessionIds.push(sessionId);
+    } else if (!isBrowserSession(session) && isNewSidebarSession(session, nowMs)) {
+      newSessionIds.push(sessionId);
     } else {
       otherSessionIds.push(sessionId);
     }
@@ -127,6 +133,11 @@ function orderSessionKindForDisplay(
   return [
     ...pinnedSessionIds,
     ...draftSessionIds.sort((leftId, rightId) => {
+      const leftTime = Date.parse(sessionsById[leftId]?.createdAt ?? '');
+      const rightTime = Date.parse(sessionsById[rightId]?.createdAt ?? '');
+      return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+    }),
+    ...newSessionIds.sort((leftId, rightId) => {
       const leftTime = Date.parse(sessionsById[leftId]?.createdAt ?? '');
       const rightTime = Date.parse(sessionsById[rightId]?.createdAt ?? '');
       return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);

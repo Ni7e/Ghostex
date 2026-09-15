@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
 import type { SidebarSessionItem } from '../../shared/session-grid-contract';
 import { isSidebarSessionSnoozed } from '../../shared/session-snooze';
+import { isSidebarDraftSectionSession } from '../../shared/session-drafts';
 
-export type ProjectSessionSection = 'browser' | 'pinned' | 'sessions' | 'parked' | 'snoozed';
+export type ProjectSessionSection = 'browser' | 'pinned' | 'sessions' | 'drafts' | 'parked' | 'snoozed';
 export type ProjectSessionSectionCollapseState = Readonly<Record<ProjectSessionSection, boolean>>;
 export type ProjectSessionSectionCollapseStateById = Record<string, ProjectSessionSectionCollapseState>;
 
@@ -10,6 +11,7 @@ export const DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE: ProjectSessionSecti
   browser: false,
   pinned: false,
   sessions: false,
+  drafts: true,
   parked: true,
   snoozed: true,
 };
@@ -63,7 +65,8 @@ export function persistedProjectSessionSectionCollapseState(state: ProjectSessio
 
 export function getProjectSessionSection(
   session: SidebarSessionItem | undefined,
-  enableSessionParking: boolean
+  enableSessionParking: boolean,
+  nowMs: number = Date.now()
 ): ProjectSessionSection {
   if (session?.kind === 'browser' || session?.sessionKind === 'browser') {
     return 'browser';
@@ -73,11 +76,14 @@ export function getProjectSessionSection(
    * Snoozed outranks parked and pinned because the wake time is the stronger statement about when the row matters; the flags stay on the row, so an expired snooze returns the session to Parked or Pinned as it was.
    * Snoozed starts collapsed like Parked, and is not persisted across restarts for the same reason.
    */
-  if (isSidebarSessionSnoozed(session)) {
+  if (isSidebarSessionSnoozed(session, nowMs)) {
     return 'snoozed';
   }
   if (enableSessionParking && session?.isParked === true) {
     return 'parked';
+  }
+  if (isSidebarDraftSectionSession(session, nowMs)) {
+    return 'drafts';
   }
   return session?.isPinned === true ? 'pinned' : 'sessions';
 }

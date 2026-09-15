@@ -469,6 +469,7 @@ function ProjectTitleTooltip({
 }
 
 export type SessionGroupSectionProps = {
+  sessionListNowMs?: number;
   autoEdit: boolean;
   canClose: boolean;
   completionFlashNonceBySessionId?: Record<string, number>;
@@ -696,6 +697,7 @@ function getControlMenuPosition(button: HTMLButtonElement | null): ContextMenuPo
 }
 
 export function SessionGroupSection({
+  sessionListNowMs = Date.now(),
   autoEdit,
   canClose,
   completionFlashNonceBySessionId,
@@ -878,9 +880,10 @@ export function SessionGroupSection({
     projectSessionListStorageId !== undefined &&
     projectSessionListExpandedState[projectSessionListStorageId] === true;
   const isSessionInCollapsedSection = (sessionId: string) => {
-    const section = getProjectSessionSection(sessionsById[sessionId], enableSessionParking);
+    const section = getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs);
     return (
-      (Boolean(projectContext) || (isChatCollection && section === 'parked')) &&
+      (Boolean(projectContext) ||
+        (isChatCollection && (section === 'drafts' || section === 'parked' || section === 'snoozed'))) &&
       collapsedProjectSessionSections[section] === true
     );
   };
@@ -950,6 +953,9 @@ export function SessionGroupSection({
       hideSessionAgentIconUntilHover:
         state.hud.settings?.hideSessionAgentIconUntilHover ?? DEFAULT_ghostex_SETTINGS.hideSessionAgentIconUntilHover,
       hoverButtons: state.hud.settings?.sessionCardHoverButtons ?? DEFAULT_ghostex_SETTINGS.sessionCardHoverButtons,
+      hoverButtonsInContextMenu:
+        state.hud.settings?.showSessionCardHoverButtonsInContextMenu ??
+        DEFAULT_ghostex_SETTINGS.showSessionCardHoverButtonsInContextMenu,
       renameSessionOnDoubleClick:
         state.hud.settings?.renameSessionOnDoubleClick ?? state.hud.renameSessionOnDoubleClick,
       showDebugSessionNumbers: state.hud.debuggingMode,
@@ -1002,7 +1008,7 @@ export function SessionGroupSection({
   if (isProjectSessionListCompact) {
     const seenSections = new Set<ProjectSessionSection>();
     for (const sessionId of orderedSessionIds) {
-      const section = getProjectSessionSection(sessionsById[sessionId], enableSessionParking);
+      const section = getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs);
       if (!seenSections.has(section)) {
         seenSections.add(section);
         sectionHeadingSessionIds.add(sessionId);
@@ -1018,32 +1024,36 @@ export function SessionGroupSection({
       )
     : orderedSessionIds;
   const renderedBrowserSessionIds = renderedSessionIds.filter((sessionId) => {
-    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'browser';
+    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'browser';
   });
   const renderedPinnedSessionIds = renderedSessionIds.filter((sessionId) => {
-    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'pinned';
+    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'pinned';
   });
   const renderedUnpinnedSessionIds = renderedSessionIds.filter((sessionId) => {
-    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'sessions';
+    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'sessions';
+  });
+  const renderedDraftSessionIds = renderedSessionIds.filter((sessionId) => {
+    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'drafts';
   });
   const renderedParkedSessionIds = renderedSessionIds.filter((sessionId) => {
-    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'parked';
+    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'parked';
   });
   const renderedSnoozedSessionIds = renderedSessionIds.filter((sessionId) => {
-    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking) === 'snoozed';
+    return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'snoozed';
   });
   const projectSessionSectionCounts = orderedSessionIds.reduce<Record<ProjectSessionSection, number>>(
     (counts, sessionId) => {
-      counts[getProjectSessionSection(sessionsById[sessionId], enableSessionParking)] += 1;
+      counts[getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs)] += 1;
       return counts;
     },
-    { browser: 0, parked: 0, pinned: 0, sessions: 0, snoozed: 0 }
+    { browser: 0, drafts: 0, parked: 0, pinned: 0, sessions: 0, snoozed: 0 }
   );
   const shouldRenderSessionKindLabels =
     renderedBrowserSessionIds.length > 0 && renderedBrowserSessionIds.length < renderedSessionIds.length;
   const firstBrowserSessionId = renderedBrowserSessionIds[0];
   const firstPinnedSessionId = renderedPinnedSessionIds[0];
   const firstUnpinnedSessionId = renderedUnpinnedSessionIds[0];
+  const firstDraftSessionId = renderedDraftSessionIds[0];
   const firstParkedSessionId = renderedParkedSessionIds[0];
   const firstSnoozedSessionId = renderedSnoozedSessionIds[0];
   const firstTerminalSessionId = renderedSessionIds.find((sessionId) => {
@@ -2572,11 +2582,17 @@ export function SessionGroupSection({
                 <>
                   {renderedSessionIds.map((sessionId, sessionIndex) => {
                     const session = sessionsById[sessionId];
-                    const projectSessionSection = getProjectSessionSection(session, enableSessionParking);
+                    const projectSessionSection = getProjectSessionSection(
+                      session,
+                      enableSessionParking,
+                      sessionListNowMs
+                    );
                     const isProjectSessionSectionCollapsed =
                       (Boolean(projectContext) ||
                         (isChatCollection &&
-                          (projectSessionSection === 'parked' || projectSessionSection === 'snoozed'))) &&
+                          (projectSessionSection === 'drafts' ||
+                            projectSessionSection === 'parked' ||
+                            projectSessionSection === 'snoozed'))) &&
                       collapsedProjectSessionSections[projectSessionSection];
                     /*
                      * CDXC:Sessions 2026-09-10 WHY:
@@ -2588,7 +2604,8 @@ export function SessionGroupSection({
                       projectSessionSection !== 'pinned' &&
                       getProjectSessionSection(
                         sessionsById[renderedSessionIds[sessionIndex - 1]],
-                        enableSessionParking
+                        enableSessionParking,
+                        sessionListNowMs
                       ) === 'pinned';
                     const isVisibleSessionRow = visibleSessionIdSet.has(sessionId);
                     const sessionIdsBelowStartIndex = (visibleSessionIndexById.get(sessionId) ?? -1) + 1;
@@ -2638,6 +2655,14 @@ export function SessionGroupSection({
                             isCollapsed={collapsedProjectSessionSections.sessions}
                             label='Sessions'
                             onToggle={() => toggleProjectSessionSection('sessions')}
+                          />
+                        ) : null}
+                        {(projectContext || isChatCollection) && sessionId === firstDraftSessionId ? (
+                          <ProjectSessionSectionToggle
+                            count={projectSessionSectionCounts.drafts}
+                            isCollapsed={collapsedProjectSessionSections.drafts}
+                            label='Drafts'
+                            onToggle={() => toggleProjectSessionSection('drafts')}
                           />
                         ) : null}
                         {(projectContext || isChatCollection) && sessionId === firstParkedSessionId ? (
