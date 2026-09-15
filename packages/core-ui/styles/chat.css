@@ -1728,6 +1728,19 @@ body[data-session-chat-theme='dark']
   color: #f6daa0;
 }
 
+/* CDXC:Theming 2026-09-15 DECISION:
+ * User: keep the context-usage ring 25% darker in light mode and darken just the permission-mode icon another 30%, superseding its initial 25% reduction.
+ */
+.ghostex-session-chat-scope[data-chat-theme='light'] .ghostex-chat-context-ring,
+body[data-session-chat-theme='light'] .ghostex-session-chat-popup .ghostex-chat-context-ring {
+  filter: brightness(0.75);
+}
+
+.ghostex-session-chat-scope[data-chat-theme='light'] .ghostex-chat-mode-icon,
+body[data-session-chat-theme='light'] .ghostex-session-chat-popup .ghostex-chat-mode-icon {
+  filter: brightness(0.525);
+}
+
 /*
 The stack-push glyph only draws across 16x15 of its 24px box, while the
 paperclip next to it draws across roughly 19x20, so at the shared 16px icon size
@@ -2003,6 +2016,11 @@ so the swap barely moves the composer row.
   cursor: text;
   field-sizing: content;
   white-space: pre-wrap;
+}
+
+/* See session-chat-plain-input.tsx: no overflow means nothing to fade, and dropping the animation clears the progress Chromium holds after the scroll timeline goes inactive. */
+.ghostex-chat-composer-plain-input[data-overflowing='false'] {
+  animation: none;
 }
 
 .ghostex-chat-composer-plain-input[data-empty='true']::before {
@@ -2487,6 +2505,21 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 }
 .ghostex-chat-markdown h6 {
   color: var(--muted-foreground);
+}
+
+.ghostex-chat-color {
+  white-space: nowrap;
+}
+
+.ghostex-chat-color-swatch {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-inline-end: 0.35em;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgb(128 128 128 / 45%);
+  vertical-align: -0.05em;
+  user-select: none;
 }
 
 .ghostex-chat-markdown :not(pre) > code {

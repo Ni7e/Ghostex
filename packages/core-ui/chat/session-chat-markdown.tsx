@@ -84,6 +84,7 @@ import {
 } from './session-chat-code-highlight';
 import { readSessionChatCodeWrapDefault, writeSessionChatCodeWrapDefault } from './session-chat-code-wrap';
 import { remarkSessionChatDetails } from './session-chat-details';
+import { rehypeSessionChatColorSwatches } from './session-chat-color-swatches';
 import {
   remarkSessionChatBareFilePaths,
   remarkSessionChatInlineCode,
@@ -148,6 +149,7 @@ const REMARK_PLUGINS = [
  */
 const CHAT_TEXT_REMARK_PLUGINS = [...REMARK_PLUGINS, remarkSessionChatBareFilePaths, remarkSessionChatHardBreaks];
 const LINE_BREAK_REMARK_PLUGINS = [...REMARK_PLUGINS, remarkSessionChatHardBreaks];
+const REHYPE_PLUGINS = [rehypeSessionChatColorSwatches];
 
 /**
  * GitHub's five alert kinds, with GitHub's own labels and colour families. The
@@ -1061,6 +1063,7 @@ export function SessionChatMarkdown({
           <div className='ghostex-chat-markdown'>
             <ReactMarkdown
               components={components}
+              rehypePlugins={REHYPE_PLUGINS}
               remarkPlugins={
                 chatText ? CHAT_TEXT_REMARK_PLUGINS : preserveLineBreaks ? LINE_BREAK_REMARK_PLUGINS : REMARK_PLUGINS
               }

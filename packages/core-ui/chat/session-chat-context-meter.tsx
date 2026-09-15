@@ -115,7 +115,7 @@ export function SessionChatContextMeter({
           : `Context window ${formatSessionChatContextTokens(usage.usedTokens)} tokens used`;
 
   const ring = (
-    <span className='relative flex size-4 items-center justify-center'>
+    <span className='ghostex-chat-context-ring relative flex size-4 items-center justify-center'>
       <svg aria-hidden='true' className='absolute inset-0 size-full -rotate-90 transform-gpu' viewBox='0 0 24 24'>
         <circle
           cx='12'
