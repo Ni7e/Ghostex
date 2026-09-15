@@ -1,5 +1,68 @@
 # Changelog
 
+## 9.6.0 - 2026-09-15
+
+- New Features
+
+  - Your phone and your Mac can now drive a Windows computer. Install Ghostex on Windows, turn on SSH, and add the Windows address with your Windows username; the connection uses whichever Windows Environment that machine is set to, either native PowerShell with Windows folders or your selected WSL distribution with Linux folders. Native PowerShell projects need Windows agent CLIs installed, and after changing the environment and restarting Windows Ghostex you reconnect the phone or desktop to pick it up.
+  - Install and update agent CLIs from Settings > Agents. Expand an agent row to install or update it, see its installed version and the command output, or open its install docs. Ghostex picks an updater for installations it recognizes and asks you which one to use when it cannot tell; mise is offered for the CLIs that support it and is the default when available. Commands run on the selected computer and keep running if you close Settings.
+  - Welcome to Ghostex greets you the first time the app runs. Five panels cover the agents already on your computer with one-click installs for Claude Code, Codex and Cursor Agent, which views to show, phone pairing and notifications, and your first project folder with its default agent. "I already know Ghostex" skips the rest, and you can reopen the whole thing from Tips > Setup or Quick Access > Commands > Setup.
+  - ZCode joins the agents Ghostex speaks natively, with chat messages, thinking, tool results, attachments and imported conversation history. Install its hooks in Settings > Agents to connect new conversations, and switch to Terminal for its setup, model menus and permission prompts. Campfire has been removed.
+  - Unsent sessions collect in a Drafts section. A new session leads Sessions for ten minutes; after that, one that still has unsent text and has never received a message drops into Drafts, below Pinned and collapsed by default. Pin a draft to move it to Pinned without sending, and sending its first message returns it to Sessions.
+  - Push a scheduled send later without rescheduling it. Right-click an agent with a timed Delayed Send, choose Postpone by, and add 10 minutes, 30 minutes, 1 hour, 2 hours or 5 hours to its existing send time. Session Automations can also wait for one specific agent on the same computer to stay idle for ten seconds before pressing Enter.
+  - Start a chat message with `!` to run a shell command inside a Claude Code or Codex session, for example `! pwd`, with the command and its output shown in the conversation.
+  - Question cards now use the real chat composer. Paste images to get numbered references and the same clickable thumbnails the composer shows, and anything you type is saved on your computer as you edit, so switching sessions or reopening Chat keeps your half-written answer with its question.
+  - Handoff and Export are one page with two clear choices. Handoff writes the file and starts the follow-up session in a single click, and Export swaps the options for the saved path when it is done.
+  - Annotate a Markdown file or an agent's reply and send the notes straight to an agent. Select text in Docs to comment or mark it Looks good, Clarify or Needs tests, then Send to deliver numbered feedback with line numbers into the session you last clicked, either its chat box or its terminal. Reply by Annotating, beside an agent reply, opens that reply in Docs for the same treatment, and Docs stays on screen while the feedback goes out.
+  - Long conversations open faster and stay browsable. Older history arrives with completed turns already collapsed so you can scroll through prompts and answers without wading through tool logs, and expanding a turn or its files loads that detail on demand.
+  - The buttons a session card shows on hover now also lead its right-click menu, in the card's own order, so the actions you chose are in both places. Close is the exception while it is on the card, and a new switch under General > Session Cards turns the whole behavior off.
+  - Ghostex is in the official Homebrew cask, so `brew install ghostex` works without adding a tap first.
+
+- Major Improvements
+
+  - The account switch card stays up until the new account is actually confirmed and the conversation is ready on it, then briefly says so or offers Retry switch when it fails. It shows both accounts with their usage percentages over a dimmed conversation, and uses a compact one-row-per-account layout on phones and narrow chat panes.
+  - Scrollbars look the same everywhere. A thin 5px track floats over the content, appears when you are near it, and reserves no gutter, across the sidebar, chat, dialogs, menus, Docs, Find, the terminal and the embedded Code editor.
+  - A brand new Claude chat shows its model and effort straight away instead of waiting up to thirty seconds for its history to resolve, and changing the effort no longer replays a model command that is already applied.
+  - The Install Hooks prompt is a friendly page with the agent's own logo and color and four cards explaining what hooks give you, rather than a bare warning.
+  - The phone reconnects on its own. With Auto reconnect on, it checks the connection when you return to the app or its network changes and brings interrupted agent terminals back; a red cloud or Reconnect starts a fresh connection when you want one.
+
+- Minor Improvements
+
+  - Hide companion sits immediately beside Hide sidebar in the titlebar and uses one clear chat-bubble icon whether the companion is showing or not.
+  - Open submenus stay open while the pointer crosses other menu rows, so you can move into them without rushing.
+  - Hex colors in messages, inline code and tables get a small rounded swatch beside the value on desktop, mobile and web, and copying still gives you the plain text.
+  - Cursor chats offer `/compact` alongside `/summarize`.
+  - Claude's default-effort pricing notice appears in chat with its original explanation and choices, so you can answer it without opening Terminal.
+  - The sessions sidebar stays on the left, and Cmd+B still collapses it.
+  - Sleeping sessions keep their normal title color with a dimmer last-active time, while awake sessions show a stronger one.
+  - Subagent transcripts have rounded corners and have dropped a header line that no longer said anything.
+  - Diff cards open against the session's own working directory, so their files resolve in worktrees and subfolders.
+  - A short copy sound can play whenever you copy from a terminal, a chat message, the chat composer, a copy button or a menu. It is off by default and lives under Settings > Notifications > Sounds.
+  - Native modal windows keep square corners that match the current theme.
+  - Forking a session names it after the original and saves that name through the agent's own rename, so it survives reopening the conversation.
+  - Light mode sidebars have darker session titles and timestamps and noticeably clearer icons.
+  - A prompt with no project shows a blank project label in Find instead of the words "No project".
+
+- Stabilization
+
+  - Codex questions asked mid-turn stay answerable after the turn ends.
+  - One dead remote tunnel can no longer stall reconnects to every other computer.
+  - Claude keeps its brand color on light notification tiles.
+  - Rewinding to a prompt that appears twice now lands on the one you picked.
+  - Sending from follow mode snaps to the bottom instead of flashing the Scroll to bottom button.
+  - The favorite star stays bright in light mode, and session hover actions stay put next to a running countdown.
+  - Companion width and the split control keep their size and color when the Browser takes focus, and the command pane's Expand no longer jumps when the pane minimizes.
+  - Local commands such as `/usage` no longer leave a pending bubble behind, and the chat composer's top fade clears once the text stops overflowing.
+  - Chat no longer gets stuck showing "Compacting" after a pasted terminal capture.
+  - Sessions started from a custom profile pick up confirmed renames instead of staying pending.
+  - A manually launched Codex opens in chat before its first hook arrives, and opening a file from chat works in projects reached through a symlink.
+  - Closing Ghostex no longer leaves an orphaned editor server holding its port.
+  - The workspace no longer flashes "Source is unavailable" or "No running terminal" while it restores at startup.
+  - Tips you have already read stay read when settings are saved from elsewhere.
+  - Session card title tooltips no longer pop up over the buttons inside the card or after the pointer has left the sidebar.
+  - Tall dialogs are measured without losing their height cap, so their actions no longer get clipped on Windows.
+  - Terminal panes hand over leadership correctly for control keys, Alt combinations and plain arrow, Home and End presses.
+
 ## 9.5.1 - 2026-09-14
 
 - New Features
