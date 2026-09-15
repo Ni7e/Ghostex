@@ -101,6 +101,11 @@ release_gpui_truthy() {
 USE_PREPARED_RUNTIME=0
 USE_PREBUILT_RUST=0
 SKIP_PREPARE_REFERENCES=0
+# `--timings` only writes target/cargo-timings/*.html; it is not a rustc flag,
+# so the later build inside the packaging scripts still finds every artifact
+# fresh. Opt-in (GHOSTEX_CARGO_TIMINGS=1) from the release workflow.
+CARGO_TIMINGS_ARGS=()
+release_gpui_truthy "${GHOSTEX_CARGO_TIMINGS:-0}" && CARGO_TIMINGS_ARGS=(--timings)
 release_gpui_truthy "${GHOSTEX_MACOS_USE_PREPARED_RUNTIME:-0}" && USE_PREPARED_RUNTIME=1
 release_gpui_truthy "${GHOSTEX_GPUI_USE_PREBUILT_RUST:-0}" && USE_PREBUILT_RUST=1
 release_gpui_truthy "${GHOSTEX_MACOS_SKIP_PREPARE_REFERENCES:-0}" && SKIP_PREPARE_REFERENCES=1
@@ -184,7 +189,7 @@ phase_build_server() {
 		cargo_bin="$(command -v cargo)"
 	fi
 	GHOSTEX_GPUI_MARKETING_VERSION="$VERSION" \
-		"$cargo_bin" build --release --bins --manifest-path "$gxserver_root/Cargo.toml" --target aarch64-apple-darwin
+		"$cargo_bin" build --release --bins --manifest-path "$gxserver_root/Cargo.toml" --target aarch64-apple-darwin ${CARGO_TIMINGS_ARGS[@]+"${CARGO_TIMINGS_ARGS[@]}"}
 }
 
 phase_stage_runtime() {
@@ -254,7 +259,7 @@ phase_build_desktop() {
 			GHOSTEX_ON_DEMAND_ASSETS=1 \
 			GHOSTEX_GPUI_SIGN_IDENTITY="$SIGNING_IDENTITY" \
 			GHOSTEX_GPUI_SIGN_TIMESTAMP_FLAG=--timestamp \
-			cargo build --release --bins
+			cargo build --release --bins ${CARGO_TIMINGS_ARGS[@]+"${CARGO_TIMINGS_ARGS[@]}"}
 	)
 }
 

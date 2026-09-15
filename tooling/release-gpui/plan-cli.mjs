@@ -510,6 +510,7 @@ export function planGithubOutputs(plan) {
     feeds_windows: plan.feeds.windowsFeeds.join(','),
     job_android: plan.jobs.android,
     job_code_server_arm64: plan.jobs.code_server_arm64,
+    job_code_server_darwin_arm64: plan.jobs.code_server_darwin_arm64,
     job_code_server_x64: plan.jobs.code_server_x64,
     job_gxserver_arm64: plan.jobs.gxserver_arm64,
     job_gxserver_x64: plan.jobs.gxserver_x64,

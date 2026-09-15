@@ -83,18 +83,21 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      # CDXC:Release 2026-09-15 WHY:
+      # Only the code-server identity input is restored here. The VS Code tree,
+      # its `npm ci` (4 to 6 minutes) and the ripgrep seed were only needed to
+      # build the darwin-arm64 code-server component inside this job; that now
+      # happens in release-gpui-code-server-macos.yml, in parallel, and this job
+      # awaits the published component just in time before staging. A standalone
+      # dispatch (runtime_artifacts_ready=false) restores them below.
       - name: Restore embedded source checkouts
-        run: |
-          git submodule update --init --depth=1 -- .dependencies/code-server
-          git -C .dependencies/code-server submodule update --init --depth=1 -- lib/vscode
+        run: git submodule update --init --depth=1 -- .dependencies/code-server
       - name: Resolve immutable code-server component identity
         id: code_server_identity
         run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform linux-x64 --github-output >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .dependencies/code-server/.node-version
-          cache: npm
-          cache-dependency-path: .dependencies/code-server/package-lock.json
+      - name: Resolve the macOS code-server component artifact name
+        id: code_server_darwin
+        run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform darwin-arm64 --github-output >> "$GITHUB_OUTPUT"
       # CDXC:ReleaseChangeAwarePlanning 2026-08-13: the runtime artifacts used to
       # be downloaded here, behind a `needs: gxserver_*` edge that added ~22 min
       # to the critical path. macos.sh consumes them only in
@@ -131,6 +134,18 @@ jobs:
             ~/.cache/zig
           key: zig-macos-arm64-${{ steps.cache_keys.outputs.zig }}
           restore-keys: zig-macos-arm64-
+      # CDXC:Release 2026-09-15 WHY:
+      # warm-rust-build-cache.yml has cached the GhosttyKit xcframework on the
+      # vendored ghostty revision since 2026-09-02, but this job never restored
+      # it and rebuilt the kit from source on every release (about 4 minutes of
+      # `macos.sh --phase prepare`, measured on 9.4.0 and 9.5.1). Same key as the
+      # warm job; macos.sh skips the Zig build when the kit directory exists.
+      - name: Restore GhosttyKit build cache
+        uses: actions/cache@v6
+        id: ghosttykit_cache
+        with:
+          path: .dependencies/ghostty/macos/GhosttyKit.xcframework
+          key: warm-ghosttykit-macos-arm64-zig0.16.0-${{ steps.cache_keys.outputs.zig }}
       - name: Install build tools
         run: tooling/release-gpui/retry.sh 3 5 -- brew install cmake ninja rsync xcodegen
       - name: Install pinned Zig toolchain
@@ -142,6 +157,7 @@ jobs:
           printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' \
             "$ZIG_BIN" "$ZIG_BIN" >> "$GITHUB_ENV"
       - name: Seed pinned VS Code ripgrep cache
+        if: ${{ !inputs.runtime_artifacts_ready }}
         env:
           RIPGREP_PACKAGE_VERSION: 1.17.1
           RIPGREP_VERSION: v15.0.1
@@ -159,8 +175,13 @@ jobs:
       - name: Install JavaScript dependencies
         env:
           GITHUB_TOKEN: ${{ github.token }}
+        run: tooling/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
+      - name: Restore the VS Code build tree for a standalone dispatch
+        if: ${{ !inputs.runtime_artifacts_ready }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          tooling/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
+          git -C .dependencies/code-server submodule update --init --depth=1 -- lib/vscode
           tooling/release-gpui/retry.sh 3 5 -- npm --prefix .dependencies/code-server ci
       - name: Pre-fetch Zig package dependencies
         run: tooling/release-gpui/fetch-zig-deps.sh ghostty
@@ -318,8 +339,20 @@ jobs:
       - name: Cargo build gxserver (server crates)
         env:
           GH_TOKEN: ${{ github.token }}
+          GHOSTEX_CARGO_TIMINGS: '1'
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: tooling/release-gpui/macos.sh --phase build-server "${{ inputs.version }}"
+      # The macOS code-server component is published by its own job; staging
+      # only needs the tag to be live, which the artifact upload proves.
+      - name: Await the macOS code-server component of this run
+        if: ${{ inputs.runtime_artifacts_ready }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tooling/release-gpui/await-run-artifacts.mjs \
+            --names "${{ steps.code_server_darwin.outputs.artifact_name }}" \
+            --producer-pattern '^(code_server_darwin_arm64)' \
+            --timeout-minutes 45
       - name: Stage macOS runtime (code-server, zmx, portless, gxserver package)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -328,6 +361,7 @@ jobs:
       - name: Cargo build ghostex-gpui (desktop crate)
         env:
           GH_TOKEN: ${{ github.token }}
+          GHOSTEX_CARGO_TIMINGS: '1'
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: tooling/release-gpui/macos.sh --phase build-desktop "${{ inputs.version }}"
       - name: Assemble, sign, and validate Ghostex.app
@@ -365,7 +399,20 @@ jobs:
             echo "- Cargo registry cache: ${{ steps.cargo_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
             echo "- CEF distribution cache: ${{ steps.cef_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
             echo "- Zig package cache: ${{ steps.zig_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- GhosttyKit build cache: ${{ steps.ghosttykit_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
           } >> "$GITHUB_STEP_SUMMARY"
+      # `cargo build --timings` reports for both crates. sccache hits 100 % on a
+      # warm release and the two cargo phases still take ~10 minutes; the report
+      # shows whether that is link time, build scripts, or cache fetches.
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: cargo-timings-macos-arm64
+          path: |
+            apps/desktop/target/cargo-timings/
+            server/target/cargo-timings/
+          if-no-files-found: ignore
+          retention-days: 14
       - uses: actions/upload-artifact@v7
         with:
           name: release-macos-arm64

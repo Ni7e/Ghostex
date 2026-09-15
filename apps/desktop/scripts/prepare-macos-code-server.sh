@@ -488,8 +488,15 @@ stage_code_server_component_asset() {
 		exit 1
 	fi
 	mkdir -p "$asset_dir"
-	local linux_arch linux_archive linux_asset expected_linux_asset_name
+	local linux_arch linux_archive linux_asset expected_linux_asset_name required_platforms
+	required_platforms="darwin-arm64,linux-x64,linux-arm64"
+	# The standalone macOS component job packages and publishes the Darwin
+	# archive alone; the Linux archives are sealed later by the macOS release job.
+	if [[ "${GHOSTEX_ON_DEMAND_CODE_SERVER_DARWIN_ONLY:-0}" == "1" ]]; then
+		required_platforms="darwin-arm64"
+	fi
 	for linux_arch in x64 arm64; do
+		[[ "$required_platforms" == "darwin-arm64" ]] && break
 		if [[ "$linux_arch" == "x64" ]]; then
 			linux_archive="${GHOSTEX_ON_DEMAND_CODE_SERVER_LINUX_X64_ARCHIVE:-}"
 		else
@@ -558,7 +565,7 @@ stage_code_server_component_asset() {
 		--component code-server \
 		--version "$component_version" \
 		--asset-dir "$asset_dir" \
-		--require-platforms darwin-arm64,linux-x64,linux-arm64 \
+		--require-platforms "$required_platforms" \
 		--require-sha256-sidecars \
 		--output "$component_manifest"
 	echo "Prepared code-server component $component_version: $asset_path"

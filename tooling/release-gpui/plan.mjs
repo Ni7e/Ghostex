@@ -279,12 +279,28 @@ function componentJobAction({ arch, components, products }) {
   return 'build';
 }
 
+/*
+ * CDXC:Release 2026-09-15 WHY:
+ * The darwin-arm64 code-server component has its own job
+ * (release-gpui-code-server-macos.yml) so the macOS build no longer builds VS
+ * Code on its critical path. Its only consumer is the macOS product.
+ */
+function darwinComponentJobAction({ components, products }) {
+  if (products['macos-arm64']?.action !== 'build') return 'skip';
+  const component = components['code-server'];
+  if (!component) return 'build';
+  const published = new Set(Object.keys(component.publishedPlatforms ?? {}));
+  if (component.action === 'reuse' || published.has('darwin-arm64')) return 'reuse';
+  return 'build';
+}
+
 function planJobs({ components, products }) {
   const action = (productId) => products[productId]?.action ?? 'skip';
   const linuxPackages = ['deb', 'rpm', 'tar'].filter((format) => action(`linux-${format}-x64`) === 'build');
   return {
     android: action('android'),
     code_server_arm64: componentJobAction({ arch: 'arm64', components, products }),
+    code_server_darwin_arm64: darwinComponentJobAction({ components, products }),
     code_server_x64: componentJobAction({ arch: 'x64', components, products }),
     gxserver_arm64: action('gxserver-linux-arm64'),
     gxserver_x64: action('gxserver-linux-x64'),

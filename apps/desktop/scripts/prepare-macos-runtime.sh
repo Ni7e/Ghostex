@@ -1094,6 +1094,30 @@ if [[ "$GXSERVER_NODE_MAJOR" != "$CODE_SERVER_APP_NODE_MAJOR" ]]; then
 fi
 GXSERVER_NODE_MODULE_VERSION="$("$GXSERVER_NODE_BIN" -p 'process.versions.modules')"
 
+# CDXC:Release 2026-09-15 WHY:
+# The macOS code-server component (VS Code built for darwin-arm64) used to be
+# built inside the release's macOS job, on its critical path: 13 minutes plus a
+# 6-minute `npm ci` whenever the Code pin moved. release-gpui-code-server-macos.yml
+# now builds and publishes it in a parallel job through this mode, which stops
+# right after the component is packaged; the macOS release job then finds the
+# published component and never builds VS Code itself.
+# SEE-ALSO: .github/workflows/release-gpui-code-server-macos.yml, stage_code_server_component_asset.
+if [[ "${GHOSTEX_MACOS_CODE_SERVER_COMPONENT_ONLY:-0}" == "1" ]]; then
+	if [[ -z "$CODE_SERVER_ROOT" ]]; then
+		echo "code-server source is required to build its macOS component." >&2
+		exit 1
+	fi
+	mkdir -p "$WEB_DIR"
+	if published_code_server_component_asset; then
+		echo "The immutable macOS code-server component is already published; nothing to build."
+	else
+		package_code_server_if_needed
+	fi
+	GHOSTEX_ON_DEMAND_CODE_SERVER_DARWIN_ONLY=1 stage_code_server_component_asset
+	printf 'Prepared the macOS code-server component only; skipping the rest of the runtime.\n'
+	exit 0
+fi
+
 # CDXC:Build 2026-05-29-11:24: `bun run start` builds zmx and its Ghostty Zig dependency.
 # Both are on Zig 0.16 now (zmx was re-ported onto upstream/main for 0.16, matching the
 # vendored ghostty pin), so the repo needs exactly one Zig toolchain. An explicit `ZIG` still

@@ -1,0 +1,208 @@
+name: GPUI release - macOS code-server component
+
+# CDXC:Release 2026-09-15 WHY:
+# The darwin-arm64 code-server component (VS Code built for the macOS Code tab)
+# used to be built inside the macOS release job whenever the Code pin moved:
+# 13 minutes of VS Code build plus a 6-minute `npm ci`, both on the critical
+# path of the first product to go live. Measured on 9.5.1 (run 34809095948):
+# "Stage macOS runtime" 13m15s and "Install JavaScript dependencies" 5m55s.
+# This job is the darwin twin of release-gpui-code-server.yml: it probes the
+# immutable component tag first and finishes in about a minute when the exact
+# asset exists, otherwise it builds and publishes it in parallel with the
+# macOS job, which awaits only the artifact just in time before staging.
+# SEE-ALSO: apps/desktop/scripts/prepare-macos-runtime.sh
+# (GHOSTEX_MACOS_CODE_SERVER_COMPONENT_ONLY), release-gpui-macos.yml.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    outputs:
+      component_version:
+        value: ${{ jobs.component.outputs.component_version }}
+      archive_name:
+        value: ${{ jobs.component.outputs.archive_name }}
+      artifact_name:
+        value: ${{ jobs.component.outputs.artifact_name }}
+      action:
+        value: ${{ jobs.component.outputs.action }}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+
+permissions:
+  attestations: write
+  contents: write
+  id-token: write
+
+jobs:
+  component:
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      action: ${{ steps.probe.outputs.action }}
+      archive_name: ${{ steps.code_server_identity.outputs.archive_name }}
+      artifact_name: ${{ steps.code_server_identity.outputs.artifact_name }}
+      component_version: ${{ steps.code_server_identity.outputs.component_version }}
+    env:
+      OUTPUT_DIR: build/release-gpui/${{ inputs.version }}/code-server-darwin-arm64
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - name: Restore the code-server identity input
+        run: git submodule update --init --depth=1 -- .dependencies/code-server
+      - name: Resolve immutable code-server component identity
+        id: code_server_identity
+        run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform darwin-arm64 --github-output >> "$GITHUB_OUTPUT"
+      - name: Probe the published component tag
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          ARCHIVE='${{ steps.code_server_identity.outputs.archive_name }}'
+          TAG='${{ steps.code_server_identity.outputs.download_tag }}'
+          # Same probe as release-gpui-code-server.yml: retry transient API
+          # failures, treat an unreachable API as "not published" because that
+          # direction is safe (a rebuild, never a mutated immutable asset).
+          ERRLOG="$(mktemp)"
+          ASSETS=""
+          for attempt in 1 2 3; do
+            if ASSETS="$(gh release view "$TAG" --repo maddada/Ghostex --json assets 2>"$ERRLOG")"; then
+              break
+            fi
+            ASSETS=""
+            if grep -qiE 'release not found|not found \(HTTP 404\)' "$ERRLOG"; then
+              break
+            fi
+            echo "::warning::Component tag probe attempt ${attempt}/3 failed: $(tr '\n' ' ' <"$ERRLOG")"
+            if [[ $attempt -lt 3 ]]; then
+              sleep $(( attempt * 5 ))
+            fi
+          done
+          if [[ -z "$ASSETS" ]]; then
+            ASSETS='{"assets":[]}'
+          fi
+          rm -f "$ERRLOG"
+          PUBLISHED=0
+          if printf '%s' "$ASSETS" | node -e '
+            const text = require("node:fs").readFileSync(0, "utf8").trim() || "{}";
+            const assets = (JSON.parse(text).assets ?? []).map((asset) => asset.name);
+            const name = process.argv[1];
+            process.exit(assets.includes(name) && assets.includes(`${name}.sha256`) ? 0 : 1);
+          ' "$ARCHIVE"; then
+            PUBLISHED=1
+          fi
+          if [[ "$PUBLISHED" == "1" ]]; then
+            echo "action=reuse" >> "$GITHUB_OUTPUT"
+            echo "::notice::Reusing published component $TAG/$ARCHIVE"
+          else
+            echo "action=build" >> "$GITHUB_OUTPUT"
+            echo "::notice::Component $TAG has no $ARCHIVE yet; building it"
+          fi
+      - name: Reuse the published component asset
+        if: ${{ steps.probe.outputs.action == 'reuse' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tooling/release-gpui/retry.sh 4 2 -- node tooling/release-gpui/publish-component.mjs \
+            --reuse-published \
+            --metadata-only \
+            --require-sha256-sidecars \
+            --component code-server \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform darwin-arm64 \
+            --asset-dir "$OUTPUT_DIR" \
+            --output build/on-demand-components/components.json
+          node tooling/release-gpui/verify-code-server-archive.mjs \
+            --archive "$OUTPUT_DIR/${{ steps.code_server_identity.outputs.archive_name }}" \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform darwin-arm64
+      - name: Restore the code-server build tree
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        run: git -C .dependencies/code-server submodule update --init --depth=1 -- lib/vscode
+      - name: Install build tools
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        run: tooling/release-gpui/retry.sh 3 5 -- brew install rsync
+      - uses: actions/setup-node@v4
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        with:
+          node-version-file: .dependencies/code-server/.node-version
+          cache: npm
+          cache-dependency-path: .dependencies/code-server/package-lock.json
+      - name: Seed pinned VS Code ripgrep cache
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        env:
+          RIPGREP_PACKAGE_VERSION: 1.17.1
+          RIPGREP_VERSION: v15.0.1
+          RIPGREP_SHA256: 2fa16464fd8638588a67c7fc172d3c4b57fbdc65dff366e10b0b0e90734628a6
+        run: |
+          RIPGREP_ASSET="ripgrep-${RIPGREP_VERSION}-aarch64-apple-darwin.tar.gz"
+          RIPGREP_CACHE_DIR="$(node -p 'require("os").tmpdir()')/vscode-ripgrep-cache-${RIPGREP_PACKAGE_VERSION}"
+          RIPGREP_CACHE_PATH="${RIPGREP_CACHE_DIR}/${RIPGREP_ASSET}"
+          mkdir -p "$RIPGREP_CACHE_DIR"
+          curl --fail --location --retry 5 --retry-all-errors \
+            "https://github.com/microsoft/ripgrep-prebuilt/releases/download/${RIPGREP_VERSION}/${RIPGREP_ASSET}" \
+            --output "$RIPGREP_CACHE_PATH"
+          [[ "$(shasum -a 256 "$RIPGREP_CACHE_PATH" | awk '{print $1}')" == "$RIPGREP_SHA256" ]]
+          tar -tzf "$RIPGREP_CACHE_PATH" >/dev/null
+      - name: Install code-server dependencies
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: tooling/release-gpui/retry.sh 3 5 -- npm --prefix .dependencies/code-server ci
+      - name: Build and package the macOS code-server component
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOSTEX_MACOS_ARCH: arm64
+          GHOSTEX_MACOS_CODE_SERVER_COMPONENT_ONLY: '1'
+          GHOSTEX_ON_DEMAND_ASSETS: '1'
+          GHOSTEX_ON_DEMAND_COMPONENT_ASSET_DIR: ${{ github.workspace }}/${{ env.OUTPUT_DIR }}
+          GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST: ${{ github.workspace }}/build/on-demand-components/components.json
+        run: apps/desktop/scripts/prepare-macos-runtime.sh
+      - name: Publish the immutable component
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCHIVE="$OUTPUT_DIR/${{ steps.code_server_identity.outputs.archive_name }}"
+          [[ -f "$ARCHIVE" && -f "$ARCHIVE.sha256" ]]
+          node tooling/release-gpui/verify-code-server-archive.mjs \
+            --archive "$ARCHIVE" \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform darwin-arm64
+          tooling/release-gpui/retry.sh 4 2 -- node tooling/release-gpui/publish-component.mjs \
+            --require-sha256-sidecars \
+            --require-platforms darwin-arm64 \
+            --component code-server \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --asset-dir "$OUTPUT_DIR" \
+            --output build/on-demand-components/components.json
+      - name: Attest build provenance
+        if: ${{ steps.probe.outputs.action == 'build' }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: ${{ env.OUTPUT_DIR }}/${{ steps.code_server_identity.outputs.archive_name }}
+      - name: Record job observability
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### code-server darwin-arm64 — ${{ steps.probe.outputs.action }}"
+            echo ""
+            echo "- Component version \`${{ steps.code_server_identity.outputs.component_version }}\`"
+            echo "- Download tag \`${{ steps.code_server_identity.outputs.download_tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.code_server_identity.outputs.artifact_name }}
+          path: ${{ env.OUTPUT_DIR }}/
+          if-no-files-found: error
+          retention-days: 14
