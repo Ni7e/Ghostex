@@ -538,10 +538,15 @@ fn compacting_activity_from_line(line: &str) -> Option<SessionChatTerminalActivi
 /// User: Codex compaction uses Claude's status card, with a looping bar because Codex reports no percentage.
 /// Its live status row also holds the prompt queue through the shared compaction marker.
 fn codex_compacting_activity_from_line(line: &str) -> Option<SessionChatTerminalActivity> {
-    let status = line.trim().strip_prefix('•')?.trim_start();
-    let metadata = status
+    // CDXC:AgentScreenDetection 2026-09-15 WHY: Codex's live status starts in column zero; quoted status in user messages, drafts and tool output is indented, so trimming the gutter kept chat stuck compacting on a pasted terminal capture.
+    // Codex appends background-terminal and hook status after the closing parenthesis, so requiring the clock to end the line also hid active compaction from chat.
+    let status = line.trim_end().strip_prefix('•')?.trim_start();
+    let (metadata, suffix) = status
         .strip_prefix("Compacting context (")?
-        .strip_suffix(')')?;
+        .split_once(')')?;
+    if !suffix.is_empty() && !suffix.starts_with(" · ") {
+        return None;
+    }
     let (elapsed, interrupt) = metadata.split_once('•')?;
     if interrupt.trim() != "esc to interrupt" {
         return None;
@@ -915,10 +920,9 @@ pub fn detect_session_chat_terminal_activity(
             .find_map(|line| cursor_activity_from_line(line));
     }
     if agent == SessionChatOptionAgent::Codex {
-        return crate::session_chat_agent_fleet::normalized_screen_lines(screen_text)
-            .iter()
-            .rev()
-            .find_map(|line| codex_compacting_activity_from_line(line));
+        return screen_text.lines().rev().find_map(|line| {
+            codex_compacting_activity_from_line(&crate::session_chat_options::strip_ansi_sgr(line))
+        });
     }
     if agent != SessionChatOptionAgent::Claude {
         return None;
