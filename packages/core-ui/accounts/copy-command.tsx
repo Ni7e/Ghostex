@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
 import { AppTooltip } from '../app-tooltip';
+import { playCopySound } from '../copy-sound';
 export function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
@@ -22,6 +23,7 @@ export function CopyCommand({ command }: { command: string }) {
               aria-label={copied ? 'Command copied' : 'Copy command'}
               onClick={() => {
                 setError('');
+                playCopySound();
                 void navigator.clipboard.writeText(command).then(
                   () => setCopied(true),
                   () => setError('Select the command and copy it.')

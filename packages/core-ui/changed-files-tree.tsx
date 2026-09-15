@@ -7,6 +7,7 @@ import {
   type ChangedFilesTreeStat,
 } from './changed-files-tree-utils';
 import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
+import { playCopySound } from './copy-sound';
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
 
@@ -89,6 +90,7 @@ export function ChangedFilesTree({
     if (!filePath || !navigator.clipboard) {
       return;
     }
+    playCopySound();
     void navigator.clipboard.writeText(filePath).catch(() => {});
   };
 

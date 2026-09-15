@@ -163,6 +163,7 @@ impl GpuiTitlebarReadingPanel {
         };
         let prompt = gpui_resources_clean_ram_prompt(snapshot);
         cx.write_to_clipboard(ClipboardItem::new_string(prompt));
+        gpui_play_copy_sound();
         *clean_ram_copied = true;
         cx.notify();
         cx.spawn(async move |this, cx| {

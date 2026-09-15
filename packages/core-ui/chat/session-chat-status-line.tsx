@@ -10,8 +10,10 @@ import { postAppModalHostMessage } from '../app-modal-host-bridge';
 import { AppTooltip } from '../app-tooltip';
 import type { SessionChatContextDetailItem } from './session-chat-context-details';
 import { useSessionChatStatusLineLayout } from './use-session-chat-status-line-layout';
+import { playCopySound } from '../copy-sound';
 
 function copyStatusLineItem(copy: { text: string; label: string }): void {
+  playCopySound();
   void navigator.clipboard.writeText(copy.text).then(() => {
     try {
       postAppModalHostMessage(createAppToastRequest('success', copy.label, copy.text), 'SessionChatStatusLine:toast');

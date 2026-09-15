@@ -15,6 +15,7 @@ import { sql } from '@codemirror/lang-sql';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { MermaidDiagramWidget, getFencedCodeContent } from './mermaidDiagram';
 import { getMermaidColonBlocks } from './mermaidColonBlocks';
+import { playCopySound } from '@/packages/core-ui/copy-sound';
 
 const shellLanguage = StreamLanguage.define({
   name: 'shell',
@@ -742,6 +743,7 @@ class CopyCodeButtonWidget extends WidgetType {
       e.preventDefault();
       e.stopPropagation();
       try {
+        playCopySound();
         await navigator.clipboard.writeText(this.codeContent);
         updateText(true);
         setTimeout(() => updateText(false), 2000);

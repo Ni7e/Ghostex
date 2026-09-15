@@ -563,11 +563,17 @@ pub struct TerminalLayout {
 
 pub type TerminalContextMenuHandler = Box<dyn Fn(Point<Pixels>, bool, &mut Window, &mut App)>;
 
+/// Called after this view writes the clipboard for the user (copy on select,
+/// Cmd+C, OSC 52). The element stays host-agnostic: the app installs the copy
+/// sound here, and the standalone demo binary installs nothing.
+pub type TerminalCopyHandler = Box<dyn Fn()>;
+
 /// Entity that owns a live terminal: the P1b model, the latest snapshot, and
 /// the shaped-row cache. Rendered by [`TerminalElement`]; its own `Render`
 /// impl just emits that element so `cx.notify()` re-renders naturally.
 pub struct TerminalView {
     context_menu_handler: TerminalContextMenuHandler,
+    copy_handler: Option<TerminalCopyHandler>,
     model: TerminalModel,
     font: TerminalFontConfig,
     /// Settings/config-derived size restored by the focused-surface reset shortcut.
@@ -710,6 +716,7 @@ impl TerminalView {
 
         Self {
             context_menu_handler,
+            copy_handler: None,
             model,
             font,
             configured_font_size,
@@ -816,6 +823,16 @@ impl TerminalView {
             return true;
         }
         !self.model.mode_active(ffi::GHOSTTY_MODE_BRACKETED_PASTE) && text.contains('\n')
+    }
+
+    pub fn set_copy_handler(&mut self, handler: TerminalCopyHandler) {
+        self.copy_handler = Some(handler);
+    }
+
+    fn notify_copied(&self) {
+        if let Some(handler) = &self.copy_handler {
+            handler();
+        }
     }
 
     pub fn apply_settings(&mut self, settings: TerminalViewSettings) {
@@ -964,6 +981,7 @@ impl TerminalView {
             TerminalEvent::ClipboardWriteRequested => {
                 for text in self.model.take_clipboard_write_requests() {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    self.notify_copied();
                 }
             }
         }
@@ -1690,6 +1708,7 @@ impl TerminalView {
                 text.truncate(text.trim_end().len());
             }
             cx.write_to_clipboard(ClipboardItem::new_string(text));
+            self.notify_copied();
             if self.settings.selection_clear_on_copy {
                 self.selection = None;
                 cx.notify();

@@ -7,6 +7,7 @@ import { DialogTitle } from '@/packages/components/ui/dialog';
 import { openAppModal } from '../app-modal-host-bridge';
 import { mermaidImageUrl, renderMermaid, type MermaidTheme } from './mermaid-runtime';
 import './mermaid.css';
+import { playCopySound } from '../copy-sound';
 
 function useMermaidTheme(ref: RefObject<HTMLDivElement | null>) {
   const [theme, setTheme] = useState<MermaidTheme>();
@@ -218,6 +219,7 @@ export function MermaidDiagram({
             aria-label={copied ? 'Copied' : 'Copy source'}
             onClick={() => {
               setCopyError('');
+              playCopySound();
               void navigator.clipboard.writeText(source).then(
                 () => setCopied(true),
                 () => setCopyError('Could not copy the diagram source.')

@@ -583,6 +583,7 @@ impl RemoteSitesPanel {
             )
             .on_click(cx.listener(move |panel, _, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(copy_url.clone()));
+                gpui_play_copy_sound();
                 panel.copied = Some((copy_key.clone(), std::time::Instant::now()));
                 cx.notify();
             })),

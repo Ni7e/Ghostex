@@ -117,6 +117,7 @@ impl GhostexGpuiApp {
                             cx.write_to_clipboard(ClipboardItem::new_string(
                                 plan.clipboard_command,
                             ));
+                            gpui_play_copy_sound();
                             this.dispatch_gpui_app_modal_toast(
                                 "info",
                                 "Remote attach command copied",
@@ -147,6 +148,7 @@ impl GhostexGpuiApp {
                     let _ = this.update(cx, |this, cx| match result {
                         Ok(command) => {
                             cx.write_to_clipboard(ClipboardItem::new_string(command));
+                            gpui_play_copy_sound();
                             this.dispatch_gpui_app_modal_toast(
                                 "info",
                                 "Remote resume command copied",
@@ -210,6 +212,7 @@ impl GhostexGpuiApp {
                     let _ = this.update(cx, |this, cx| match result {
                         Ok(path) => {
                             cx.write_to_clipboard(ClipboardItem::new_string(path));
+                            gpui_play_copy_sound();
                             this.dispatch_gpui_workspace_action_toast(
                                 "info",
                                 "Remote project path copied",

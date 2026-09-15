@@ -33,6 +33,7 @@ import { Button } from '@/packages/components/ui/button';
 import { ButtonGroup } from '@/packages/components/ui/button-group';
 import { SESSION_CHAT_FILE_PATH_ATTRIBUTE } from './session-chat-file-paths';
 import { SESSION_CHAT_WEB_URL_ATTRIBUTE } from './session-chat-links';
+import { playCopySound } from '../copy-sound';
 
 export interface SessionChatImageTarget {
   /** Absolute path on the session's machine (loaded over the transport). */
@@ -316,6 +317,7 @@ async function imageAsPngBlob(image: HTMLImageElement): Promise<Blob> {
 async function copySessionChatImage(image: HTMLImageElement): Promise<void> {
   // The blob stays a promise so the clipboard write begins inside the click
   // gesture; re-encoding it before calling write would lose that permission.
+  playCopySound();
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': imageAsPngBlob(image) })]);
 }
 

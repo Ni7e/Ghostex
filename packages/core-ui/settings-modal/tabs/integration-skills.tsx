@@ -23,6 +23,7 @@ import {
 } from '../../../shared/ghostex-agent-skills';
 import { type SidebarGhostexCliStatusMessage } from '../../../shared/session-grid-contract';
 import { SettingButton, SettingDescriptionTooltip, SettingsListItem, SettingsSection } from '../fields';
+import { playCopySound } from '../../copy-sound';
 
 export type IntegrationStatusTone = 'success' | 'warning' | 'neutral';
 
@@ -342,6 +343,7 @@ function CopyCommandButton({ command }: { command: string }) {
         aria-label='Copy the install command'
         disabledReason='Copy isn’t available here.'
         onClick={() => {
+          playCopySound();
           void navigator.clipboard.writeText(command).then(
             () => {
               setCopied(true);

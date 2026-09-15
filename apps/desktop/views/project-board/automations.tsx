@@ -27,6 +27,7 @@ import {
   isAutomationRunActive,
 } from './automations-drafts';
 import { automationAgentLabel, resolveAutomationAgentIcon, AutomationAgentIcon } from './agent-labels';
+import { playCopySound } from '@/packages/core-ui/copy-sound';
 
 export function compareAutomationRunsForTriage(left: AutomationRun, right: AutomationRun): number {
   const unreadDelta = Number(right.isUnread) - Number(left.isUnread);
@@ -714,7 +715,10 @@ export function AutomationRunDetail({
                   <span className='truncate'>{run.sessionId}</span>
                   <Button
                     aria-label='Copy automation session id'
-                    onClick={() => void navigator.clipboard.writeText(run.sessionId ?? '')}
+                    onClick={() => {
+                      playCopySound();
+                      void navigator.clipboard.writeText(run.sessionId ?? '');
+                    }}
                     size='icon-sm'
                     type='button'
                     variant='ghost'
@@ -729,7 +733,10 @@ export function AutomationRunDetail({
                     <span className='truncate'>{run.worktree.branch}</span>
                     <Button
                       aria-label='Copy automation worktree branch'
-                      onClick={() => void navigator.clipboard.writeText(run.worktree?.branch ?? '')}
+                      onClick={() => {
+                        playCopySound();
+                        void navigator.clipboard.writeText(run.worktree?.branch ?? '');
+                      }}
                       size='icon-sm'
                       type='button'
                       variant='ghost'
@@ -741,7 +748,10 @@ export function AutomationRunDetail({
                     <span className='truncate'>{run.worktree.path}</span>
                     <Button
                       aria-label='Copy automation worktree path'
-                      onClick={() => void navigator.clipboard.writeText(run.worktree?.path ?? '')}
+                      onClick={() => {
+                        playCopySound();
+                        void navigator.clipboard.writeText(run.worktree?.path ?? '');
+                      }}
                       size='icon-sm'
                       type='button'
                       variant='ghost'

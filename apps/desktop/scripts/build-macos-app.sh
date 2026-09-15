@@ -114,8 +114,10 @@ GHOSTEX_NOTARY_PROFILE="${GHOSTEX_NOTARY_PROFILE:-notarytool-profile}"
 
 # CDXC:Notifications 2026-06-24-12:10:
 # Packaged GPUI Settings must preview completion sounds and run test-agent-completion from the same trusted bundle path used by the runtime lookup. Keep the packaged asset set explicit and copy only repository-owned MP3s into Contents/Resources/sidebar/sounds so React-provided values cannot expand playback to arbitrary paths.
+# copy.mp3 is the Clipboard copy sound (gpui_play_copy_sound), resolved through the same bundled-sound lookup.
 completion_sound_assets=(
 	arcade.mp3
+	copy.mp3
 	arcadeboost.mp3
 	coin-collect.mp3
 	confirmation-001.mp3

@@ -3,6 +3,7 @@ import { Button } from '@/packages/components/ui/button';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/packages/components/ui/popover';
 import type { GxserverStashedPrompt } from '@/packages/shared/gxserver-protocol';
 import { formatRelativeTimeLabel } from '@/packages/core-ui/relative-time';
+import { playCopySound } from '../copy-sound';
 
 export function SessionChatRecoveredHistory({
   versions,
@@ -41,7 +42,14 @@ export function SessionChatRecoveredHistory({
               <div className='mb-2 flex items-center justify-between gap-2'>
                 <span className='text-xs text-muted-foreground'>{formatRelativeTimeLabel(version.updatedAt)}</span>
                 <div className='flex gap-1'>
-                  <Button size='sm' variant='ghost' onClick={() => void navigator.clipboard.writeText(version.content)}>
+                  <Button
+                    size='sm'
+                    variant='ghost'
+                    onClick={() => {
+                      playCopySound();
+                      void navigator.clipboard.writeText(version.content);
+                    }}
+                  >
                     Copy
                   </Button>
                   <Button size='sm' variant='secondary' onClick={() => onSelect(version)}>

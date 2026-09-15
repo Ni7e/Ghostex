@@ -122,6 +122,7 @@ import {
 } from './session-chat-table-clipboard';
 import { sessionChatListInterruptSource } from './session-chat-list-interrupt';
 import { remarkSessionChatHardBreaks, sessionChatUserMarkdownSource } from './session-chat-user-text';
+import { playCopySound } from '../copy-sound';
 
 /*
  * Order matters in one place: remarkSessionChatDetails runs before the three
@@ -490,6 +491,7 @@ function MarkdownCodeBlock({ children, node }: ComponentProps<'pre'> & ExtraProp
               aria-label={copyLabel}
               onClick={() => {
                 // Always the fence's own source, never the highlighted markup.
+                playCopySound();
                 void navigator.clipboard.writeText(text).then(() => {
                   setCopied(true);
                   window.setTimeout(() => setCopied(false), 1200);
@@ -671,6 +673,7 @@ function MarkdownTable({ children, node, ...props }: ComponentProps<'table'> & E
     const table = tableRef.current;
     if (!table) return;
     const text = format === 'csv' ? sessionChatTableToCsv(table) : sessionChatTableToMarkdown(table);
+    playCopySound();
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
@@ -832,6 +835,7 @@ function MarkdownReferencePill({
           if (openFile) {
             openFile(path, position);
           } else {
+            playCopySound();
             void navigator.clipboard.writeText(path);
           }
         }}

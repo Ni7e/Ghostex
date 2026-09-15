@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/p
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/packages/components/ui/input-group';
 import { cn } from '@/packages/components/utils';
 import type { SessionChatTheme } from '@/packages/shared/session-chat';
+import { playCopySound } from '../copy-sound';
 
 export type SaveSessionMessageMarkdown = (params: { content: string; path: string }) => Promise<{ path: string }>;
 export type ListSessionMessageMarkdownPaths = () => Promise<readonly string[]>;
@@ -208,6 +209,7 @@ export function SessionChatSaveMarkdownDialog({
     setFileNameError(undefined);
     try {
       const result = await save({ content: markdown, path: relativePath });
+      playCopySound();
       await navigator.clipboard.writeText(result.path);
       onOpenChange(false);
       toast.success('Saved to Markdown', {

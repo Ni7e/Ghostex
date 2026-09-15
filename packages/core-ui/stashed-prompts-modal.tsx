@@ -62,6 +62,7 @@ import { useSidebarStore } from './sidebar-store';
 import { StashedPromptEditorTagSelect } from './stashed-prompts-editor-tag-select';
 import { useSidebarTooltipDelayMs } from './tooltip-delay';
 import type { WebviewApi } from './webview-api';
+import { playCopySound } from './copy-sound';
 
 /*
  * CDXC:SavedPrompts 2026-08-24:
@@ -1856,6 +1857,7 @@ function StashedPromptRow({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                playCopySound();
                 void navigator.clipboard.writeText(prompt.content);
               }}
               type='button'
@@ -2021,6 +2023,7 @@ function RecoveredDraftRow({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                playCopySound();
                 void navigator.clipboard.writeText(prompt.content);
               }}
               type='button'

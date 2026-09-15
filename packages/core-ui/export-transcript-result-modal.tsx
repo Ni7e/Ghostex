@@ -21,6 +21,7 @@ import {
   AppModalTitle,
 } from './app-modal-shell';
 import { AppTooltip } from './app-tooltip';
+import { playCopySound } from './copy-sound';
 
 /**
  * CDXC:TranscriptExport 2026-08-24:
@@ -315,6 +316,7 @@ export function ExportTranscriptModal({
                 if (stage.stage !== 'done') {
                   return;
                 }
+                playCopySound();
                 void navigator.clipboard.writeText(stage.path).then(
                   () => setCopied(true),
                   () => setCopied(false)

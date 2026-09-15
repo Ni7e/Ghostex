@@ -1238,6 +1238,7 @@ fn terminal_agent_bar_session_id(
                 window.prevent_default();
                 cx.stop_propagation();
                 cx.write_to_clipboard(ClipboardItem::new_string(copy_session_id.clone()));
+                gpui_play_copy_sound();
             }),
         )
         .child(

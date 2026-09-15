@@ -33,6 +33,7 @@ import type {
   AgentsHubProfile,
   AgentsHubTab,
 } from '../shared/session-grid-contract';
+import { playCopySound } from './copy-sound';
 
 type MonacoAmdRequire = {
   (deps: string[], callback: () => void): void;
@@ -861,6 +862,7 @@ function CopyFilePathButton({ path }: { path: string }) {
     <EditorToolbarButton
       label={copied ? 'Path copied' : 'Copy file path'}
       onClick={() => {
+        playCopySound();
         void navigator.clipboard.writeText(path).then(
           () => setCopied(true),
           () => setCopied(false)

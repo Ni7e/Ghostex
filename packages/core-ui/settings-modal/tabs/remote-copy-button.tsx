@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import { IconCircleCheckFilled, IconCopy } from '@tabler/icons-react';
 import { AppTooltip } from '../../app-tooltip';
+import { playCopySound } from '../../copy-sound';
 
 /** Copies `value` to the clipboard and flashes a check for a moment. */
 export function RemoteCopyButton({
@@ -26,6 +27,7 @@ export function RemoteCopyButton({
         aria-label={copyLabel}
         className={className}
         onClick={() => {
+          playCopySound();
           void navigator.clipboard.writeText(value).then(
             () => {
               setCopied(true);

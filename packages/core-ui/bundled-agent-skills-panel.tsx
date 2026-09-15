@@ -29,6 +29,7 @@ import {
   type BundledGhostexAgentSkillTier,
 } from '../shared/ghostex-agent-skills';
 import type { SidebarGhostexCliStatusMessage } from '../shared/session-grid-contract';
+import { playCopySound } from './copy-sound';
 
 export type BundledAgentSkillInstallHandlers = Partial<Record<BundledGhostexAgentSkillId, () => void>>;
 
@@ -443,6 +444,7 @@ function CopyCommandButton({ command }: { command: string }) {
       <Button
         aria-label={`Copy the ${GHOSTEX_TRYCUA_PRODUCT_NAME} install command`}
         onClick={() => {
+          playCopySound();
           void navigator.clipboard.writeText(command).then(
             () => {
               setCopied(true);

@@ -53,6 +53,7 @@ impl GhostexGpuiApp {
                 |text| {
                     terminal_runtime_clipboard_write_standard_text(text, |item| {
                         cx.write_to_clipboard(item);
+                        gpui_play_copy_sound();
                     });
                 },
             );

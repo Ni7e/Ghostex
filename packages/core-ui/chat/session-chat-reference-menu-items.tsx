@@ -1,6 +1,7 @@
 import { IconBrowser, IconCopy, IconExternalLink } from '@tabler/icons-react';
 import { ContextMenuItem } from '@/packages/components/ui/context-menu';
 import { classifySessionChatLinkHref, useSessionChatHostLinks } from './session-chat-links';
+import { playCopySound } from '../copy-sound';
 
 /**
  * CDXC:SessionChat 2026-09-12 DECISION:
@@ -11,6 +12,7 @@ export function SessionChatReferenceMenuItems({ href }: { href: string }) {
   const links = useSessionChatHostLinks();
   const target = classifySessionChatLinkHref(href);
   const copy = (text: string): void => {
+    playCopySound();
     void navigator.clipboard.writeText(text).catch((error: unknown) => {
       console.error('[session-chat] reference clipboard write failed', error);
     });

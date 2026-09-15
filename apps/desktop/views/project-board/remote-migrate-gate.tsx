@@ -2,6 +2,7 @@ import { IconAlertTriangle, IconCheck, IconCopy } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import { Card, CardContent } from '@/packages/components/ui/card';
+import { playCopySound } from '@/packages/core-ui/copy-sound';
 
 function CopyBeadsFixPromptButton({ prompt }: { prompt: string }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
@@ -12,6 +13,7 @@ function CopyBeadsFixPromptButton({ prompt }: { prompt: string }) {
       aria-label='Copy a prompt for an agent to fix this Beads issue'
       className='project-board-notice-copy-prompt'
       onClick={() => {
+        playCopySound();
         void navigator.clipboard.writeText(prompt).then(
           () => setCopyState('copied'),
           () => setCopyState('error')

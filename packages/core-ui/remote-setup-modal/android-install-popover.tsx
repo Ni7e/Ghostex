@@ -3,6 +3,7 @@ import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
 import { QrCode } from '@/packages/components/ui/qr-code';
 import { GHOSTEX_ANDROID_INSTALL_URL, GHOSTEX_ANDROID_INSTALL_URL_LABEL } from './constants';
+import { playCopySound } from '../copy-sound';
 
 const ANDROID_INSTALL_STEPS: readonly string[] = [
   'On the phone, open the link and download ghostex-android.apk.',
@@ -40,6 +41,7 @@ export function AndroidInstallPopover({ id }: { id: string }) {
             <Button
               aria-label='Copy the Android download link'
               onClick={() => {
+                playCopySound();
                 void navigator.clipboard.writeText(GHOSTEX_ANDROID_INSTALL_URL).then(() => setCopied(true));
               }}
               size='icon-xs'

@@ -478,6 +478,7 @@ impl Render for GpuiAppToastWindow {
                                                                         report.clone(),
                                                                     ),
                                                                 );
+                                                                gpui_play_copy_sound();
                                                             })
                                                             .child("Copy diagnostics"),
                                                     )

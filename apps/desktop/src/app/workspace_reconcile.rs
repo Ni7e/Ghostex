@@ -515,6 +515,7 @@ impl GhostexGpuiApp {
             let _ = this.update(cx, |this, cx| match result {
                 Ok(GpuiSidebarNativeProjectPathActionResult::Copied(path)) => {
                     cx.write_to_clipboard(ClipboardItem::new_string(path));
+                    gpui_play_copy_sound();
                 }
                 Ok(GpuiSidebarNativeProjectPathActionResult::Opened) => {}
                 Err(message) => {

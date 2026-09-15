@@ -14,6 +14,7 @@ import {
   SessionChatSimpleModeContext,
   sessionChatSimpleEditLabel,
 } from './session-chat-simple-mode';
+import { playCopySound } from '../copy-sound';
 
 export { SessionChatFileChangePreviewContext } from './session-chat-simple-mode';
 export const SessionChatFileChangeInteractionContext = createContext<((messageId: string) => void) | null>(null);
@@ -57,6 +58,7 @@ function FileChangeCard({
   }, [copyStatus]);
   const copyPath = async () => {
     try {
+      playCopySound();
       await navigator.clipboard.writeText(change.path);
       setCopyStatus('Path copied');
     } catch (error) {

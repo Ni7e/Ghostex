@@ -23,6 +23,7 @@ import {
   shouldShowSetting,
   shouldShowSettingsSection,
 } from '../search';
+import { playCopySound } from '../../copy-sound';
 
 export function getCuaPermissionStatus(
   ghostexCliStatus: SidebarGhostexCliStatusMessage | undefined,
@@ -65,6 +66,7 @@ export function VersionInfoButton({ label, version }: { label: string; version: 
       <Button
         aria-label={`Copy ${label} version ${version}`}
         onClick={() => {
+          playCopySound();
           void navigator.clipboard.writeText(version).then(
             () => {
               setCopied(true);

@@ -299,6 +299,7 @@ impl GhostexGpuiApp {
         match side_effect {
             ManageFilesBridgeSideEffect::CopyFullPath(path) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(path));
+                gpui_play_copy_sound();
                 Ok(())
             }
             ManageFilesBridgeSideEffect::RevealInFinder(path) => gpui_reveal_path_in_finder(&path),

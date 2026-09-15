@@ -13,6 +13,7 @@ import type {
 } from '@/packages/shared/agent-prompt-search';
 import { FindPromptsView } from '@/packages/core-ui/find/find-prompts-view';
 import type { FindPromptsTransport } from '@/packages/core-ui/find/find-prompts-transport';
+import { playCopySound } from '@/packages/core-ui/copy-sound';
 
 /*
 CDXC:PromptSearch 2026-08-23:
@@ -151,6 +152,7 @@ function createGpuiFindPromptsTransport(bootstrap: { authToken: string; baseUrl:
       postFindHostAction('close');
     },
     async copyText(text) {
+      playCopySound();
       await navigator.clipboard.writeText(text);
     },
     async focusSession(params) {

@@ -434,6 +434,7 @@ impl Render for GpuiTitlebarPopupWindow {
                             return;
                         };
                         cx.write_to_clipboard(ClipboardItem::new_string(branch));
+                        gpui_play_copy_sound();
                     });
                 }),
             )
