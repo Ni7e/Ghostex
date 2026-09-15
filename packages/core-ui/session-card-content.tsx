@@ -67,7 +67,7 @@ const AGENT_SECONDARY_LABELS: Record<SidebarAgentIcon, readonly string[]> = {
   'amp-cli': ['amp', 'amp cli'],
   'antigravity-cli': ['agy', 'antigravity', 'antigravity cli'],
   browser: ['browser'],
-  campfire: ['campfire'],
+  zcode: ['zcode'],
   claude: ['claude', 'claude code'],
   codebuddy: ['codebuddy', 'code buddy'],
   'command-code': ['command code', 'commandcode'],

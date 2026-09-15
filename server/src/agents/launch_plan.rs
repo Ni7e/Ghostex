@@ -281,7 +281,6 @@ pub(crate) fn default_agent_session_title_name(agent_id: &str) -> Option<&'stati
     match agent_id.trim().to_ascii_lowercase().as_str() {
         "amp" => Some("Amp CLI"),
         "antigravity" => Some("Antigravity CLI"),
-        "campfire" => Some("Campfire"),
         "claude" => Some("Claude"),
         "codebuddy" => Some("CodeBuddy"),
         "codex" => Some("Codex"),

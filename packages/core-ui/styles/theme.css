@@ -26,6 +26,7 @@
    */
   --app-titlebar-background: var(--app-background);
   --app-foreground: #c8cdd5;
+  --ghostex-zcode-logo: #ffffff;
   --app-muted: #747b85;
   --app-border: color-mix(in srgb, #ffffff 11%, transparent);
   --sidebar-chrome-separator: #343434;
@@ -180,6 +181,7 @@ body[data-sidebar-theme='plain-light'],
   color-scheme: light;
   --ghostex-codex-logo: #262626;
   --ghostex-light-icon-color: #262626;
+  --ghostex-zcode-logo: #000000;
   /* CDXC:Theming 2026-09-14 DECISION: User: the three Dark theme color controls do not affect light mode. Override the saved inline accent while this appearance is active. */
   --ghostex-accent: #262626 !important;
   --sidebar-chrome-separator: #d4d4d4;
@@ -331,6 +333,12 @@ body[data-sidebar-theme='dark-orange'],
   --working-secondary: color-mix(in srgb, #ffe0a0 58%, #d17b31 42%);
   --attention-primary: color-mix(in srgb, #f3a255 70%, #d17b31 30%);
   --attention-secondary: color-mix(in srgb, #ffd1a3 62%, #964f14 38%);
+}
+
+body[data-sidebar-theme^='light-'],
+.ghostex-root[data-sidebar-theme^='light-'],
+.ghostex-settings-shadcn[data-sidebar-theme^='light-'] {
+  --ghostex-zcode-logo: #000000;
 }
 
 body[data-sidebar-theme='light-blue'],

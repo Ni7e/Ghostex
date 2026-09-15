@@ -265,6 +265,7 @@ pub enum SessionChatTranscriptAgent {
     Grok,
     Hermes,
     Pi,
+    Zcode,
 }
 
 /// `claude` and `openclaude` share the Claude transcript format.
@@ -281,6 +282,7 @@ pub fn resolve_session_chat_transcript_agent(
         "grok" | "grok-build" => Some(SessionChatTranscriptAgent::Grok),
         "hermes" | "hermes agent" | "hermes-agent" => Some(SessionChatTranscriptAgent::Hermes),
         "pi" | "omp" => Some(SessionChatTranscriptAgent::Pi),
+        "zcode" | "zcode-cli" => Some(SessionChatTranscriptAgent::Zcode),
         _ => None,
     }
 }
@@ -294,6 +296,7 @@ pub fn session_chat_transcript_agent_id(agent: Option<&str>) -> Option<&'static 
         SessionChatTranscriptAgent::Grok => Some("grok"),
         SessionChatTranscriptAgent::Hermes => Some("hermes"),
         SessionChatTranscriptAgent::Pi => Some("pi"),
+        SessionChatTranscriptAgent::Zcode => Some("zcode"),
     }
 }
 
@@ -309,6 +312,7 @@ pub fn session_chat_line_decoder(agent: SessionChatTranscriptAgent) -> SessionCh
         SessionChatTranscriptAgent::Grok => decode_grok_transcript_line,
         SessionChatTranscriptAgent::Hermes => decode_hermes_transcript_line,
         SessionChatTranscriptAgent::Pi => decode_pi_transcript_line,
+        SessionChatTranscriptAgent::Zcode => decode_zcode_transcript_line,
     }
 }
 
@@ -323,6 +327,7 @@ pub fn session_chat_lifecycle_decoder(
         SessionChatTranscriptAgent::Grok => Some(decode_grok_turn_lifecycle),
         SessionChatTranscriptAgent::Hermes => Some(decode_hermes_turn_lifecycle),
         SessionChatTranscriptAgent::Pi => None,
+        SessionChatTranscriptAgent::Zcode => Some(decode_zcode_turn_lifecycle),
     }
 }
 
@@ -401,7 +406,8 @@ pub fn session_chat_lineage_extractor(
         | SessionChatTranscriptAgent::Cursor
         | SessionChatTranscriptAgent::Grok
         | SessionChatTranscriptAgent::Hermes
-        | SessionChatTranscriptAgent::Pi => None,
+        | SessionChatTranscriptAgent::Pi
+        | SessionChatTranscriptAgent::Zcode => None,
     }
 }
 
@@ -1077,6 +1083,7 @@ pub use crate::session_chat_decode_cursor::*;
 pub use crate::session_chat_decode_grok::*;
 pub use crate::session_chat_decode_hermes::*;
 pub use crate::session_chat_decode_pi::*;
+pub use crate::session_chat_decode_zcode::*;
 pub use crate::session_chat_follower::*;
 pub use crate::session_chat_interactive::*;
 pub use crate::session_chat_paths::*;

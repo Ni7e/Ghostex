@@ -8,7 +8,6 @@ pub(crate) fn default_agent_icon_to_id(icon: &str) -> Option<&'static str> {
     match icon {
         "amp-cli" => Some("amp"),
         "antigravity-cli" => Some("antigravity"),
-        "campfire" => Some("campfire"),
         "claude" => Some("claude"),
         "codebuddy" => Some("codebuddy"),
         "codex" => Some("codex"),
@@ -29,6 +28,7 @@ pub(crate) fn default_agent_icon_to_id(icon: &str) -> Option<&'static str> {
         "pi" => Some("pi"),
         "qoder" => Some("qoder"),
         "rovo-dev" => Some("rovodev"),
+        "zcode" => Some("zcode"),
         _ => None,
     }
 }
@@ -37,7 +37,6 @@ pub(crate) fn default_agent_command(agent_id: &str) -> Option<&'static str> {
     match agent_id {
         "amp" => Some("amp"),
         "antigravity" => Some("agy"),
-        "campfire" => Some("campfire"),
         "claude" => Some("claude"),
         "codebuddy" => Some("codebuddy"),
         "codex" => Some("codex"),

@@ -13,7 +13,6 @@ pub(crate) const OPENCODE_PLUGIN_SPEC: &str = "./plugins/ghostex-session.js";
 pub(crate) const AMP_PLUGIN_MARKER: &str = "ghostex-amp-session-extension-marker";
 pub(crate) const PI_EXTENSION_MARKER: &str = "ghostex-pi-session-extension-marker";
 pub(crate) const OMP_EXTENSION_MARKER: &str = "ghostex-omp-session-extension-marker";
-pub(crate) const CAMPFIRE_EXTENSION_MARKER: &str = "ghostex-campfire-session-extension-marker";
 pub(crate) const SHELL_PATH_SENTINEL: &str = "__GHOSTEX_GXSERVER_SHELL_PATH__";
 pub(crate) const GXSERVER_AGENT_HOOK_COLOR_DISABLING_ENVIRONMENT_KEYS: &[&str] =
     &["ANSI_COLORS_DISABLED", "NO_COLOR", "NODE_DISABLE_COLORS"];
@@ -32,6 +31,8 @@ pub(crate) enum HookFormat {
     KiroJson,
     MarkedYaml,
     NestedJson,
+    /// ZCode nests event groups under hooks.events and gates them with hooks.enabled.
+    NestedEventsJson,
     Opencode,
     PluginFile,
     /// A Ghostex-owned `# ghostex hooks <agent> begin/end` block inside a TOML
@@ -42,6 +43,10 @@ pub(crate) enum HookFormat {
 }
 
 pub(crate) const HOOK_DEFINITIONS: &[HookDefinition] = &[
+    HookDefinition {
+        agent_id: "zcode",
+        cli_command: "zcode",
+    },
     HookDefinition {
         agent_id: "mastra",
         cli_command: "mastracode",
@@ -119,10 +124,6 @@ pub(crate) const HOOK_DEFINITIONS: &[HookDefinition] = &[
         cli_command: "kimi",
     },
     HookDefinition {
-        agent_id: "campfire",
-        cli_command: "campfire",
-    },
-    HookDefinition {
         agent_id: "openclaude",
         cli_command: "openclaude",
     },
@@ -189,13 +190,14 @@ impl HookPaths {
 pub(crate) fn hook_format(agent_id: &str) -> HookFormat {
     match agent_id {
         "antigravity" => HookFormat::Antigravity,
+        "zcode" => HookFormat::NestedEventsJson,
         "cursor" => HookFormat::FlatJson,
         "mastra" => HookFormat::RootFlatJson,
         "kiro" => HookFormat::KiroJson,
         "rovodev" | "hermes-agent" => HookFormat::MarkedYaml,
         "kimi" => HookFormat::TomlMarked,
         "opencode" => HookFormat::Opencode,
-        "amp" | "omp" | "pi" | "campfire" => HookFormat::PluginFile,
+        "amp" | "omp" | "pi" => HookFormat::PluginFile,
         _ => HookFormat::NestedJson,
     }
 }
@@ -205,7 +207,6 @@ pub(crate) fn hook_marker(agent_id: &str) -> Option<&'static str> {
         "amp" => Some(AMP_PLUGIN_MARKER),
         "omp" => Some(OMP_EXTENSION_MARKER),
         "pi" => Some(PI_EXTENSION_MARKER),
-        "campfire" => Some(CAMPFIRE_EXTENSION_MARKER),
         "opencode" => Some(OPENCODE_PLUGIN_MARKER),
         _ => None,
     }
@@ -214,6 +215,7 @@ pub(crate) fn hook_marker(agent_id: &str) -> Option<&'static str> {
 pub(crate) fn command_agent(agent_id: &str) -> Option<&'static str> {
     match agent_id {
         "mastra" => Some("mastra"),
+        "zcode" => Some("zcode"),
         "claude" => Some("claude"),
         "cursor" => Some("cursor"),
         "gemini" => Some("gemini"),
@@ -231,7 +233,6 @@ pub(crate) fn command_agent(agent_id: &str) -> Option<&'static str> {
         "qoder" => Some("qoder"),
         "opencode" => Some("opencode"),
         "kimi" => Some("kimi"),
-        "campfire" => Some("campfire"),
         "openclaude" => Some("openclaude"),
         "command-code" => Some("command-code"),
         "devin" => Some("devin"),
@@ -250,7 +251,7 @@ pub(crate) const CODEX_INTERRUPT_HOOK_TIMEOUT_SECONDS: i64 = 3;
 
 pub(crate) fn nested_timeout(agent_id: &str) -> Option<i64> {
     match agent_id {
-        "codex" | "grok" => Some(5),
+        "codex" | "grok" | "zcode" => Some(5),
         "command-code" | "devin" => Some(10),
         "gemini" => Some(10000),
         // `openclaude` is deliberately absent: OpenClaude is a Claude-shaped
@@ -271,6 +272,15 @@ pub(crate) fn nested_event_timeout(agent_id: &str, event_name: &str) -> Option<i
 
 pub(crate) fn all_hook_events(agent_id: &str) -> Vec<&'static str> {
     let events: &[&str] = match agent_id {
+        "zcode" => &[
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PermissionRequest",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "Stop",
+        ],
         "mastra" => &[
             "SessionStart",
             "SessionEnd",

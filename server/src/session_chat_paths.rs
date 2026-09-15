@@ -20,6 +20,11 @@ pub fn resolve_session_chat_transcript_path(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(expand_home);
+    if agent == SessionChatTranscriptAgent::Zcode {
+        return crate::session_chat_zcode::resolve_zcode_chat_transcript_path(
+            agent_session_id?, supplied_path.as_deref(),
+        );
+    }
     if agent == SessionChatTranscriptAgent::Cursor {
         // Cursor's chat is read through a mirror that splices the store's
         // thinking into the raw jsonl, whichever way the raw file was named.
@@ -72,6 +77,7 @@ pub fn resolve_session_chat_transcript_path(
             crate::session_chat_hermes::resolve_hermes_chat_transcript_path(session_id)
         }
         SessionChatTranscriptAgent::Pi => find_pi_family_chat_transcript(session_id),
+        SessionChatTranscriptAgent::Zcode => None,
     }
 }
 

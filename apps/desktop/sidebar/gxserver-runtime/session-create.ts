@@ -559,7 +559,7 @@ export const gpuiSidebarRuntimeSessionCreateMethods = {
     const normalizedAgentId = agentId.trim();
     const agent = this.resolveSidebarAgent(normalizedAgentId);
     const hookAgentId = getDefaultSidebarAgentByIcon(agent?.icon)?.agentId;
-    if (!normalizedAgentId || !agent || !hookAgentId) {
+    if (!normalizedAgentId || !agent || !hookAgentId || hookAgentId === 'zcode') {
       await this.createAgentSessionFromSidebarLaunch(agentId, groupId, accountId);
       return;
     }

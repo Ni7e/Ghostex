@@ -63,7 +63,6 @@ pub(crate) fn workspace_tab_agent_icon_path(agent_icon: &str) -> Option<&'static
         "amp-cli" => Some("agent-icons/amp-cli.svg"),
         "antigravity-cli" => Some("agent-icons/antigravity-cli.svg"),
         "browser" => Some("agent-icons/browser.svg"),
-        "campfire" => Some("agent-icons/campfire.svg"),
         "claude" => Some("agent-icons/claude.svg"),
         "codebuddy" => Some("agent-icons/codebuddy.svg"),
         "command-code" => Some("agent-icons/command-code.svg"),
@@ -71,6 +70,7 @@ pub(crate) fn workspace_tab_agent_icon_path(agent_icon: &str) -> Option<&'static
         "codex" => Some("agent-icons/codex.svg"),
         "copilot" => Some("agent-icons/copilot.svg"),
         "mastra" => Some("agent-icons/mastra.svg"),
+        "zcode" => Some("agent-icons/zcode.svg"),
         "devin" => Some("agent-icons/devin.svg"),
         "factory-droid" => Some("agent-icons/factory-droid.svg"),
         "gemini" => Some("agent-icons/gemini.svg"),
@@ -102,7 +102,6 @@ pub(crate) fn workspace_tab_agent_icon_accent_color(agent_icon: &str) -> u32 {
         "amp-cli" => 0xffffff,
         "antigravity-cli" => 0x749bff,
         "browser" => 0x82b7ff,
-        "campfire" => 0xff8a3d,
         "claude" => 0xd97757,
         "codebuddy" => 0x72d6ff,
         "command-code" => 0x22d3ee,
@@ -110,6 +109,15 @@ pub(crate) fn workspace_tab_agent_icon_accent_color(agent_icon: &str) -> u32 {
         "codex" => 0xffffff,
         "copilot" => 0xffffff,
         "mastra" => 0xffffff,
+        "zcode" => {
+            if crate::app::helpers::titlebar::CHROME_LIGHT_APPEARANCE
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                0x000000
+            } else {
+                0xffffff
+            }
+        }
         "devin" => 0x3ea6ff,
         "factory-droid" => 0xff7a1a,
         "gemini" => 0x8b9aff,

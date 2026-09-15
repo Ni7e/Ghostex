@@ -1144,7 +1144,8 @@ fn classify_watchdog_record(
         | SessionChatTranscriptAgent::Grok
         | SessionChatTranscriptAgent::Cursor
         | SessionChatTranscriptAgent::Hermes
-        | SessionChatTranscriptAgent::Pi => None,
+        | SessionChatTranscriptAgent::Pi
+        | SessionChatTranscriptAgent::Zcode => None,
     }
 }
 

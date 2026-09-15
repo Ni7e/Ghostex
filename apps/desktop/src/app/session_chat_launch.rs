@@ -135,6 +135,7 @@ impl GhostexGpuiApp {
                     | "hermes-agent"
                     | "pi"
                     | "omp"
+                    | "zcode"
             )
         ) {
             return;

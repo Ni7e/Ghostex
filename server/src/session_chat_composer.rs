@@ -125,7 +125,7 @@ impl SessionChatComposerReadiness {
         self.is_not_ready()
             || (matches!(
                 normalize_agent_id(agent_id).as_deref(),
-                Some("grok" | "codex")
+                Some("grok" | "codex" | "zcode")
             ) && self.state != SessionChatComposerState::Ready)
     }
 
@@ -276,7 +276,7 @@ fn composer_signature(agent: &str) -> Option<ComposerSignature> {
             markers: &['\u{203a}', '\u{00bb}'],
         },
         // Empty row bounded by two full-width rules, statusline below.
-        "pi" => ComposerSignature::EmptyRuleSandwich,
+        "pi" | "zcode" => ComposerSignature::EmptyRuleSandwich,
         // `│ ❯ … │`, model/mode drawn into the bottom border.
         "grok" => ComposerSignature::BoxedMarker { marker: '\u{276f}' },
         // `▄▄▄▄` / `→ placeholder` / `▀▀▀▀`.
@@ -713,12 +713,13 @@ pub fn detect_session_chat_composer_ready(
     }
     let matches = if agent == "codex" && screen_text.contains('\u{1b}') {
         session_chat_composer_input("codex", screen_text).is_some()
-    } else if matches!(agent.as_str(), "cursor" | "hermes-agent" | "pi" | "omp") {
+    } else if matches!(agent.as_str(), "cursor" | "hermes-agent" | "pi" | "omp" | "zcode") {
         let raw_lines: Vec<_> = screen_text.lines().map(strip_ansi_sgr).collect();
         match agent.as_str() {
             "cursor" => input::cursor_input_region(&raw_lines).is_some(),
             "hermes-agent" => input::hermes_input_region(&raw_lines).is_some(),
             "pi" => input::unmarked_rule_input_region(&raw_lines).is_some(),
+            "zcode" => input::zcode_input_region(&raw_lines).is_some(),
             "omp" => input::omp_input_region(&raw_lines).is_some(),
             _ => unreachable!(),
         }
@@ -820,7 +821,7 @@ pub async fn wait_for_session_chat_composer(
     // User: cover Codex's input-owning states so we know when we can type. Require a readable, enabled composer before releasing a write, including when the terminal capture is unavailable.
     let agent = normalize_agent_id(agent_id);
     let codex = agent.as_deref() == Some("codex");
-    let require_ready = matches!(agent.as_deref(), Some("grok" | "codex"));
+    let require_ready = matches!(agent.as_deref(), Some("grok" | "codex" | "zcode"));
     let mut last_not_ready = require_ready.then(|| {
         SessionChatComposerReadiness::not_ready(
             format!(

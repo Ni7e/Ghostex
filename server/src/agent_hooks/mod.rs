@@ -10,6 +10,7 @@ mod probe_cache;
 pub mod probing;
 pub mod resolution;
 pub mod statusline;
+mod zcode;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]

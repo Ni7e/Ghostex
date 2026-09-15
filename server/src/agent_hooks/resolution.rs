@@ -6,8 +6,8 @@ use crate::paths::GxserverPaths;
 
 use super::config::{
     pi_extension_paths, resolve_config_directory, resolve_omp_agent_directory, HookPaths,
-    AMP_PLUGIN_MARKER, CAMPFIRE_EXTENSION_MARKER, HOOK_DEFINITIONS, OMP_EXTENSION_MARKER,
-    OPENCODE_PLUGIN_MARKER, OPENCODE_PLUGIN_SPEC, PI_EXTENSION_MARKER,
+    AMP_PLUGIN_MARKER, HOOK_DEFINITIONS, OMP_EXTENSION_MARKER, OPENCODE_PLUGIN_MARKER,
+    OPENCODE_PLUGIN_SPEC, PI_EXTENSION_MARKER,
 };
 use super::install::read_json_object;
 use super::probing::{list_profile_hook_paths, read_file_text};
@@ -123,6 +123,7 @@ pub(crate) fn provider_hook_paths(agent_id: &str, hook_paths: &HookPaths) -> Vec
             paths
         }
         "cursor" => vec![hook_paths.home_dir.join(".cursor").join("hooks.json")],
+        "zcode" => vec![hook_paths.home_dir.join(".zcode/cli/config.json")],
         "gemini" => vec![hook_paths.home_dir.join(".gemini").join("settings.json")],
         "opencode" => {
             let config_dir = resolve_config_directory(
@@ -144,21 +145,6 @@ pub(crate) fn provider_hook_paths(agent_id: &str, hook_paths: &HookPaths) -> Vec
             .join("plugins")
             .join("ghostex-session.ts")],
         "pi" => pi_extension_paths(&hook_paths.home_dir, hook_paths.respect_config_environment),
-        /*
-        Campfire is a white-label of pi-coding-agent, so it loads extensions
-        from `<agent dir>/extensions`. Its override env var names the agent
-        directory ITSELF — unlike Pi's `PI_CONFIG_DIR`, no `/agent` suffix is
-        appended to it.
-        */
-        "campfire" => vec![resolve_config_directory(
-            &hook_paths.home_dir,
-            hook_paths.respect_config_environment,
-            "CAMPFIRE_CODING_AGENT_DIR",
-            ".campfire/agent",
-            None,
-        )
-        .join("extensions")
-        .join("ghostex-campfire-session.ts")],
         "omp" => vec![resolve_omp_agent_directory(
             &hook_paths.home_dir,
             hook_paths.respect_config_environment,
@@ -289,7 +275,6 @@ pub(crate) fn text_contains_ghostex_owned_hook_command(text: &str) -> bool {
         || normalized.contains(AMP_PLUGIN_MARKER)
         || normalized.contains(OMP_EXTENSION_MARKER)
         || normalized.contains(PI_EXTENSION_MARKER)
-        || normalized.contains(CAMPFIRE_EXTENSION_MARKER)
         || normalized.contains(OPENCODE_PLUGIN_MARKER)
         || normalized.contains("ghostex-session-plugin-marker")
         || normalized.contains("ghostex-session-extension-marker")

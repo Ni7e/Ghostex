@@ -1062,6 +1062,7 @@ pub(crate) fn parse_agent_resume_identity(text: Option<&str>) -> ResolvedIdentit
     let text = text.unwrap_or_default();
     for (agent_id, needle) in [
         ("codex", "codex"),
+        ("zcode", "zcode"),
         ("claude", "claude"),
         ("cursor", "cursor-agent"),
         ("opencode", "opencode"),
@@ -1144,6 +1145,7 @@ pub(crate) fn normalize_agent_id(value: Option<&str>) -> Option<String> {
         "cursor" | "cursor agent" | "cursor cli" | "cursor-agent" => "cursor",
         "opencode" | "open code" => "opencode",
         "pi" | "π" => "pi",
+        "zcode" | "zcode-cli" => "zcode",
         "omp" => "omp",
         "agy" | "antigravity" | "antigravity cli" => "antigravity",
         "amp" | "amp cli" => "amp",
@@ -1158,7 +1160,6 @@ pub(crate) fn normalize_agent_id(value: Option<&str>) -> Option<String> {
         // Keep these folds identical to the agent-hooks resolver's alias set so
         // a hook payload and a sidebar launch resolve to the same agent id.
         "kimi" | "kimi code" | "kimi-code" | "kimicode" => "kimi",
-        "campfire" => "campfire",
         "openclaude" | "open claude" | "open-claude" | "openclaude cli" => "openclaude",
         "command-code" | "command code" | "commandcode" => "command-code",
         "mastra" | "mastra code" | "mastracode" => "mastra",
@@ -1302,7 +1303,6 @@ pub(crate) fn infer_agent_id_from_command(command: &str) -> Option<String> {
         ("qoder", "qodercli"),
         ("command-code", "commandcode"),
         ("openclaude", "openclaude"),
-        ("campfire", "campfire"),
         ("mastra", "mastracode"),
         ("devin", "devin"),
         ("kimi", "kimi"),
@@ -1310,6 +1310,7 @@ pub(crate) fn infer_agent_id_from_command(command: &str) -> Option<String> {
         ("copilot", "copilot"),
         ("gemini", "gemini"),
         ("codex", "codex"),
+        ("zcode", "zcode"),
         ("droid", "droid"),
         ("grok", "grok"),
         ("amp", "amp"),

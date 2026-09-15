@@ -30,6 +30,7 @@ impl GhostexGpuiApp {
             Some("hermes-agent") => Some("hermes-agent"),
             Some("pi") => Some("pi"),
             Some("omp") => Some("omp"),
+            Some("zcode") => Some("zcode"),
             _ => None,
         }
     }
@@ -910,7 +911,7 @@ impl GhostexGpuiApp {
         let initial_snapshot =
             self.cached_session_chat_runtime_snapshot(page_state.account_key.as_ref());
         let initial_presentation =
-            self.cached_session_chat_presentation(page_state.account_key.as_ref());
+            self.initial_session_chat_presentation(page_state.account_key.as_ref());
         let generation = page_state.generation.to_string();
         let url = append_url_query_params(
             url,

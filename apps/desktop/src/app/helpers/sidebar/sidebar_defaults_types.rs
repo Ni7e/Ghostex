@@ -308,13 +308,6 @@ pub(crate) const GPUI_DEFAULT_SIDEBAR_AGENTS: &[GpuiDefaultSidebarAgent] = &[
         name: "Kimi Code",
     },
     GpuiDefaultSidebarAgent {
-        agent_id: "campfire",
-        command: "campfire",
-        hidden_by_default: true,
-        icon: "campfire",
-        name: "Campfire",
-    },
-    GpuiDefaultSidebarAgent {
         agent_id: "openclaude",
         command: "openclaude",
         hidden_by_default: true,
@@ -341,6 +334,13 @@ pub(crate) const GPUI_DEFAULT_SIDEBAR_AGENTS: &[GpuiDefaultSidebarAgent] = &[
         hidden_by_default: false,
         icon: "mastra",
         name: "Mastra Code",
+    },
+    GpuiDefaultSidebarAgent {
+        agent_id: "zcode",
+        command: "zcode",
+        hidden_by_default: false,
+        icon: "zcode",
+        name: "ZCode",
     },
 ];
 

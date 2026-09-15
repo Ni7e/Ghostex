@@ -53,7 +53,8 @@ pub(crate) fn uninstall_agent_hook(
         | HookFormat::RootFlatJson
         | HookFormat::FlatJson
         | HookFormat::KiroJson
-        | HookFormat::NestedJson => {
+        | HookFormat::NestedJson
+        | HookFormat::NestedEventsJson => {
             let mut removed_paths = Vec::new();
             for config_path in config_paths {
                 // CDXC:AgentHooks 2026-09-02: state keys are positional, so
@@ -206,6 +207,8 @@ pub(crate) fn remove_json_hook(
 fn remove_owned_json_hooks(data: &mut Value, format: HookFormat, command: &str) -> bool {
     let event_groups = if format == HookFormat::Antigravity {
         data.get_mut("ghostex").and_then(Value::as_object_mut)
+    } else if format == HookFormat::NestedEventsJson {
+        data.get_mut("hooks").and_then(|hooks| hooks.get_mut("events")).and_then(Value::as_object_mut)
     } else if format == HookFormat::RootFlatJson {
         data.as_object_mut()
     } else {
@@ -228,7 +231,7 @@ fn remove_owned_json_hooks(data: &mut Value, format: HookFormat, command: &str) 
                 .filter(|entry| !is_ghostex_owned_hook_command(entry, command))
                 .cloned()
                 .collect::<Vec<_>>(),
-            HookFormat::NestedJson => remove_nested_hook_groups(entries, command),
+            HookFormat::NestedJson | HookFormat::NestedEventsJson => remove_nested_hook_groups(entries, command),
             HookFormat::Opencode
             | HookFormat::PluginFile
             | HookFormat::MarkedYaml
@@ -427,7 +430,8 @@ pub(crate) fn inspect_agent_hook_installation(
         HookFormat::RootFlatJson
         | HookFormat::FlatJson
         | HookFormat::KiroJson
-        | HookFormat::NestedJson => {
+        | HookFormat::NestedJson
+        | HookFormat::NestedEventsJson => {
             let existing_paths = config_paths
                 .iter()
                 .filter(|path| !read_file_text(path).trim().is_empty())
@@ -497,7 +501,8 @@ fn inspect_json_hook_config(
             )
             && codex_interrupt_timeout_current
             && claude_statusline_current
-            && codex_status_line_current,
+            && codex_status_line_current
+            && (definition.agent_id != "zcode" || data.pointer("/hooks/enabled") == Some(&json!(true))),
         ghostex_hook_present: json_contains_ghostex_owned_hook_command(&data, command),
     }
 }
@@ -531,7 +536,11 @@ fn json_hook_event_coverage_is_current(
     let event_groups = if format == HookFormat::RootFlatJson {
         data.as_object()
     } else {
-        data.get(container_key).and_then(Value::as_object)
+        if format == HookFormat::NestedEventsJson {
+            data.pointer("/hooks/events").and_then(Value::as_object)
+        } else {
+            data.get(container_key).and_then(Value::as_object)
+        }
     };
     let Some(event_groups) = event_groups else {
         return false;
@@ -758,11 +767,18 @@ pub(crate) fn install_agent_hook(
         | HookFormat::RootFlatJson
         | HookFormat::FlatJson
         | HookFormat::KiroJson
-        | HookFormat::NestedJson => {
+        | HookFormat::NestedJson
+        | HookFormat::NestedEventsJson => {
             let mut installed_paths = Vec::new();
             for config_path in config_paths {
                 merge_json_hook(&config_path, definition, hook_paths, &command)?;
                 installed_paths.push(path_string(&config_path));
+                if definition.agent_id == "zcode" {
+                    let mut data = read_json_object(&read_file_text(&config_path));
+                    ensure_object_property(ensure_json_object(&mut data), "hooks")
+                        .insert("enabled".into(), json!(true));
+                    write_json_file(&config_path, &data)?;
+                }
                 // CDXC:AgentHooks 2026-09-03: the same explicit click
                 // lifts an `"enabled": false` the user put on the Ghostex
                 // named hook in Antigravity; startup repair never does.
@@ -849,7 +865,8 @@ pub(crate) fn repair_agent_hook_paths(
         | HookFormat::RootFlatJson
         | HookFormat::FlatJson
         | HookFormat::KiroJson
-        | HookFormat::NestedJson => {
+        | HookFormat::NestedJson
+        | HookFormat::NestedEventsJson => {
             let command = command_for_agent(definition, &hook_paths.notify_hook_path);
             let mut repaired_paths = Vec::new();
             for config_path in config_paths {
@@ -888,6 +905,9 @@ fn merge_json_hook(
     hook_paths: &HookPaths,
     command: &str,
 ) -> Result<(), DomainStateError> {
+    if definition.agent_id == "zcode" {
+        super::zcode::ensure_zcode_config(config_path, hook_paths)?;
+    }
     let current_text = read_file_text(config_path);
     ensure_json_config_is_rewritable(definition.agent_id, config_path, &current_text)?;
     let mut data = read_json_object(&current_text);
@@ -963,9 +983,15 @@ fn merge_json_hook(
                 );
             }
         }
-        HookFormat::NestedJson => {
+        HookFormat::NestedJson | HookFormat::NestedEventsJson => {
             let object = ensure_json_object(&mut data);
             let hooks = ensure_object_property(object, "hooks");
+            let hooks = if format == HookFormat::NestedEventsJson {
+                hooks.entry("enabled").or_insert(json!(true));
+                ensure_object_property(hooks, "events")
+            } else {
+                hooks
+            };
             for event_name in events {
                 let groups = hooks
                     .get(event_name)
@@ -1746,4 +1772,45 @@ pub(crate) fn is_notify_hook_current(hook_paths: &HookPaths, contents: &str) -> 
         && contents
             .lines()
             .any(|line| line == state_directory_assignment)
+}
+
+#[cfg(test)]
+mod zcode_tests {
+    use super::*;
+
+    #[test]
+    fn zcode_hooks_preserve_user_config_and_respect_disabled_hooks_during_repair() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = HookPaths::new(temp.path().to_path_buf());
+        let definition = HookDefinition {
+            agent_id: "zcode",
+            cli_command: "zcode",
+        };
+        let path = provider_hook_paths("zcode", &paths).remove(0);
+        let user_hook = json!({"hooks":[{"type":"command","command":"my-hook","timeout":3}]});
+        let original = json!({"model":{"main":"zai/glm-5.2"},"provider":{"zai":{"options":{"apiKey":"test-only"}}},"hooks":{"enabled":false,"events":{"Stop":[user_hook.clone()]}}});
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        write_json_file(&path, &original).unwrap();
+        let command = command_for_agent(&definition, &paths.notify_hook_path);
+        merge_json_hook(&path, &definition, &paths, &command).unwrap();
+        let repaired = read_json_object(&read_file_text(&path));
+        assert_eq!(repaired.pointer("/hooks/enabled"), Some(&json!(false)));
+        assert_eq!(repaired.get("provider"), original.get("provider"));
+        install_agent_hook(&definition, &paths).unwrap();
+        install_agent_hook(&definition, &paths).unwrap();
+        let installed = read_json_object(&read_file_text(&path));
+        assert_eq!(installed.pointer("/hooks/enabled"), Some(&json!(true)));
+        for event in all_hook_events("zcode") {
+            let groups = installed["hooks"]["events"][event].as_array().unwrap();
+            assert_eq!(groups.len(), if event == "Stop" { 2 } else { 1 });
+        }
+        uninstall_agent_hook(&definition, &paths).unwrap();
+        let uninstalled = read_json_object(&read_file_text(&path));
+        assert_eq!(uninstalled.get("provider"), original.get("provider"));
+        assert_eq!(
+            uninstalled.pointer("/hooks/events/Stop"),
+            Some(&json!([user_hook]))
+        );
+        assert!(!json_contains_hook_command(&uninstalled, &command));
+    }
 }

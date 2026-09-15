@@ -112,6 +112,13 @@ describe('createSidebarAgentButtons', () => {
           isDefault: true,
           name: 'Mastra Code',
         },
+        {
+          agentId: 'zcode',
+          command: 'zcode',
+          icon: 'zcode',
+          isDefault: true,
+          name: 'ZCode',
+        },
       ])
     );
   });
@@ -209,6 +216,13 @@ describe('createSidebarAgentButtons', () => {
           icon: 'mastra',
           isDefault: true,
           name: 'Mastra Code',
+        },
+        {
+          agentId: 'zcode',
+          command: 'zcode',
+          icon: 'zcode',
+          isDefault: true,
+          name: 'ZCode',
         },
       ])
     );
@@ -332,6 +346,13 @@ describe('createSidebarAgentButtons', () => {
           name: 'Mastra Code',
         },
         {
+          agentId: 'zcode',
+          command: 'zcode',
+          icon: 'zcode',
+          isDefault: true,
+          name: 'ZCode',
+        },
+        {
           agentId: 'aider',
           command: 'aider',
           icon: undefined,
@@ -439,6 +460,13 @@ describe('createSidebarAgentButtons', () => {
           icon: 'mastra',
           isDefault: true,
           name: 'Mastra Code',
+        },
+        {
+          agentId: 'zcode',
+          command: 'zcode',
+          icon: 'zcode',
+          isDefault: true,
+          name: 'ZCode',
         },
       ])
     );
@@ -566,6 +594,13 @@ describe('createSidebarAgentButtons', () => {
           name: 'Mastra Code',
         },
         {
+          agentId: 'zcode',
+          command: 'zcode',
+          icon: 'zcode',
+          isDefault: true,
+          name: 'ZCode',
+        },
+        {
           agentId: 'custom-codex-fast',
           command: 'codex --profile fast',
           icon: 'codex',
@@ -689,6 +724,13 @@ describe('createSidebarAgentButtons', () => {
           icon: 'mastra',
           isDefault: true,
           name: 'Mastra Code',
+        },
+        {
+          agentId: 'zcode',
+          command: 'zcode',
+          icon: 'zcode',
+          isDefault: true,
+          name: 'ZCode',
         },
       ])
     );

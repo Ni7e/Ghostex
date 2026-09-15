@@ -628,10 +628,9 @@ pub(crate) fn resume_agent_family_id(
 pub(crate) fn restorable_agent_id(value: Option<&str>) -> Option<&str> {
     let value = value?.trim();
     match value {
-        "amp" | "antigravity" | "campfire" | "claude" | "codebuddy" | "codex" | "command-code"
-        | "copilot" | "cursor" | "devin" | "droid" | "gemini" | "grok" | "hermes-agent"
-        | "kimi" | "kiro" | "omp" | "openclaude" | "opencode" | "pi" | "qoder" | "rovodev"
-        | "zcode" => Some(value),
+        "amp" | "antigravity" | "claude" | "codebuddy" | "codex" | "command-code" | "copilot"
+        | "cursor" | "devin" | "droid" | "gemini" | "grok" | "hermes-agent" | "kimi" | "kiro"
+        | "omp" | "openclaude" | "opencode" | "pi" | "qoder" | "rovodev" | "zcode" => Some(value),
         _ => None,
     }
 }

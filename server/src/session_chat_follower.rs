@@ -152,6 +152,9 @@ pub(crate) fn follower_drain_once(
     // generic file logic reads it so each tick sees the latest turn state. An
     // in-place rewind rewrite swaps the inode, which the identity check below
     // reports as `content_replaced`.
+    if agent == SessionChatTranscriptAgent::Zcode {
+        crate::session_chat_zcode::sync_zcode_transcript_mirror_for_path(file_path);
+    }
     if agent == SessionChatTranscriptAgent::Hermes {
         crate::session_chat_hermes::sync_hermes_transcript_mirror_for_path(file_path);
     }
@@ -756,7 +759,8 @@ async fn detect_and_adopt_successor_transcript(
         | SessionChatTranscriptAgent::Cursor
         | SessionChatTranscriptAgent::Grok
         | SessionChatTranscriptAgent::Hermes
-        | SessionChatTranscriptAgent::Pi => return None,
+        | SessionChatTranscriptAgent::Pi
+        | SessionChatTranscriptAgent::Zcode => return None,
     };
     // The agent is now narrowed to Claude or Codex; a bool keeps the blocking
     // scan below free of arms that could silently absorb a future agent.
@@ -1103,6 +1107,9 @@ pub async fn run_session_chat_follower(
                 let probe_due = config.options_reader.is_some()
                     && emitted_starting
                     && (!published_screen_probed
+                        || live.working
+                        || published_activity.is_some()
+                        || published_fleet.is_some()
                         || unresolved_passes % UNRESOLVED_STEADY_PROBE_INTERVAL_PASSES == 0);
                 unresolved_passes = unresolved_passes.wrapping_add(1);
                 let detection = if probe_due {
@@ -1183,15 +1190,16 @@ pub async fn run_session_chat_follower(
                     published_screen_probed = published_screen_probed || detection.attempted;
                     emitted_starting = true;
                 }
-                /*
-                An unsettled screen is a launching agent someone is watching:
-                hold the reconcile cadence so its footer paint reaches the
-                pill on the next second, instead of a backed-off resolve poll.
-                */
-                let poll_delay = if published_screen_probed {
-                    resolve_delay
-                } else {
+                // CDXC:AgentScreenDetection 2026-09-15 WHY:
+                // Transcript resolution can lag live compaction. Backing off both the loop and its screen probe freezes progress for up to 30s; active screens need the same reconcile cadence as a resolved transcript.
+                let poll_delay = if !published_screen_probed
+                    || live.working
+                    || published_activity.is_some()
+                    || published_fleet.is_some()
+                {
                     resolve_delay.min(config.tuning.reconcile_interval)
+                } else {
+                    resolve_delay
                 };
                 heartbeat.park();
                 tokio::select! {

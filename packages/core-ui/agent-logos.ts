@@ -1,7 +1,7 @@
+import zcodeLogo from './assets/zcode.svg' with { type: 'text' };
 import ampCliLogo from './assets/amp-cli.svg' with { type: 'text' };
 import antigravityCliLogo from './assets/antigravity-cli.svg' with { type: 'text' };
 import browserLogo from './assets/browser.svg' with { type: 'text' };
-import campfireLogo from './assets/campfire.svg' with { type: 'text' };
 import claudeLogo from './assets/claude.svg' with { type: 'text' };
 import codebuddyLogo from './assets/codebuddy.svg' with { type: 'text' };
 import commandCodeLogo from './assets/command-code.svg' with { type: 'text' };
@@ -81,7 +81,6 @@ export const AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
   'amp-cli': svgTextToDataUrl(ampCliLogo),
   'antigravity-cli': svgTextToDataUrl(antigravityCliLogo),
   browser: svgTextToDataUrl(browserLogo),
-  campfire: svgTextToDataUrl(campfireLogo),
   claude: svgTextToDataUrl(claudeLogo),
   codebuddy: svgTextToDataUrl(codebuddyLogo),
   'command-code': svgTextToDataUrl(commandCodeLogo),
@@ -99,6 +98,7 @@ export const AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
   omp: svgTextToDataUrl(ompLogo),
   openclaude: svgTextToDataUrl(openclaudeLogo),
   opencode: svgTextToDataUrl(opencodeLogo),
+  zcode: svgTextToDataUrl(zcodeLogo),
   pi: svgTextToDataUrl(piLogo),
   qoder: svgTextToDataUrl(qoderLogo),
   'rovo-dev': svgTextToDataUrl(rovoDevLogo),
@@ -112,10 +112,10 @@ export const AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
  * session card.
  */
 export const AGENT_LOGO_COLORS: Record<SidebarAgentIcon, string> = {
+  zcode: '#ffffff',
   'amp-cli': '#ffffff',
   'antigravity-cli': '#749bff',
   browser: '#82b7ff',
-  campfire: '#ff8a3d',
   claude: '#d97757',
   codebuddy: '#72d6ff',
   'command-code': '#22d3ee',
@@ -149,7 +149,6 @@ export const COLORED_AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
   'amp-cli': svgTextToColorizedDataUrl(ampCliLogo, AGENT_LOGO_COLORS['amp-cli']),
   'antigravity-cli': svgTextToColorizedDataUrl(antigravityCliLogo, AGENT_LOGO_COLORS['antigravity-cli']),
   browser: svgTextToColorizedDataUrl(browserLogo, AGENT_LOGO_COLORS.browser),
-  campfire: svgTextToColorizedDataUrl(campfireLogo, AGENT_LOGO_COLORS.campfire),
   claude: svgTextToColorizedDataUrl(claudeLogo, AGENT_LOGO_COLORS.claude),
   codebuddy: svgTextToColorizedDataUrl(codebuddyLogo, AGENT_LOGO_COLORS.codebuddy),
   'command-code': svgTextToColorizedDataUrl(commandCodeLogo, AGENT_LOGO_COLORS['command-code']),
@@ -167,6 +166,7 @@ export const COLORED_AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
   omp: svgTextToColorizedDataUrl(ompLogo, AGENT_LOGO_COLORS.omp),
   openclaude: svgTextToColorizedDataUrl(openclaudeLogo, AGENT_LOGO_COLORS.openclaude),
   opencode: svgTextToColorizedDataUrl(opencodeLogo, AGENT_LOGO_COLORS.opencode),
+  zcode: svgTextToColorizedDataUrl(zcodeLogo, AGENT_LOGO_COLORS.zcode),
   pi: svgTextToColorizedDataUrl(piLogo, AGENT_LOGO_COLORS.pi),
   qoder: svgTextToColorizedDataUrl(qoderLogo, AGENT_LOGO_COLORS.qoder),
   'rovo-dev': svgTextToColorizedDataUrl(rovoDevLogo, AGENT_LOGO_COLORS['rovo-dev']),
@@ -179,6 +179,15 @@ export const COLORED_AGENT_LOGOS: Record<SidebarAgentIcon, string> = {
  * legacy lime mask color.
  */
 export function getBrandAgentLogoStyle(icon: SidebarAgentIcon): CSSProperties {
+  /** CDXC:Icons 2026-09-15 DECISION: User: the Z.ai/ZCode logo must be black on light UI and white on dark UI, including independently themed chat. */
+  if (icon === 'zcode') {
+    return {
+      backgroundColor: 'var(--ghostex-zcode-logo, #fff)',
+      maskImage: `url("${AGENT_LOGOS[icon]}")`,
+      WebkitMaskImage: `url("${AGENT_LOGOS[icon]}")`,
+    };
+  }
+
   if (icon === 'omp') {
     return {
       backgroundColor: 'transparent',

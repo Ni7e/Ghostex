@@ -451,7 +451,6 @@ pub(crate) fn default_agent_name(agent_id: &str) -> Option<&'static str> {
     match agent_id {
         "amp" => Some("Amp CLI"),
         "antigravity" => Some("Antigravity CLI"),
-        "campfire" => Some("Campfire"),
         "claude" => Some("Claude"),
         "codebuddy" => Some("CodeBuddy"),
         "codex" => Some("Codex"),

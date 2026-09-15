@@ -335,7 +335,7 @@ pub(crate) fn gpui_normalized_stored_sidebar_agents(
         let Some(agent_id) = gpui_trimmed_json_string_field(item, "agentId") else {
             continue;
         };
-        if seen_agent_ids.contains(agent_id) {
+        if agent_id == "campfire" || seen_agent_ids.contains(agent_id) {
             continue;
         }
         let Some(name) = gpui_trimmed_json_string_field(item, "name") else {

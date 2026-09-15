@@ -30,7 +30,6 @@ use serde_json::{Map, Number, Value};
 pub const KNOWN_AGENT_IDS: &[&str] = &[
     "amp",
     "antigravity",
-    "campfire",
     "claude",
     "codebuddy",
     "codex",

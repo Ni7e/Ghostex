@@ -45,7 +45,6 @@ const IGNORED_PLACEHOLDER_SESSION_TITLES: &[&str] = &[
     "amp session",
     "antigravity cli session",
     "antigravity session",
-    "campfire session",
     "claude session",
     "claude code session",
     "codebuddy session",
@@ -87,7 +86,6 @@ const IGNORED_PLACEHOLDER_SESSION_TITLES: &[&str] = &[
 const DEFAULT_SESSION_AGENT_TITLE_NAMES: &[&str] = &[
     "antigravity cli",
     "amp cli",
-    "campfire",
     "claude",
     "codebuddy",
     "codex",

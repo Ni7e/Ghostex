@@ -344,6 +344,7 @@ fn agent_display_name(agent: SessionChatTranscriptAgent) -> &'static str {
         SessionChatTranscriptAgent::Grok => "Grok",
         SessionChatTranscriptAgent::Hermes => "Hermes Agent",
         SessionChatTranscriptAgent::Pi => "Pi",
+        SessionChatTranscriptAgent::Zcode => "ZCode",
     }
 }
 
@@ -734,6 +735,7 @@ fn parse_transcript(
             SessionChatTranscriptAgent::Grok => parse_grok_record(&mut builder, &record),
             SessionChatTranscriptAgent::Hermes => parse_hermes_record(&mut builder, &record),
             SessionChatTranscriptAgent::Pi => parse_pi_record(&mut builder, &record),
+            SessionChatTranscriptAgent::Zcode => parse_zcode_record(&mut builder, line),
         }
     }
     builder.finish()
@@ -2014,6 +2016,44 @@ fn strip_grok_user_query(text: &str) -> String {
 // Hermes parser — reads the mirrored row records described in
 // `session_chat_decode_hermes.rs` (role + content + OpenAI-style `toolCalls`).
 // ---------------------------------------------------------------------------
+
+fn parse_zcode_record(builder: &mut TranscriptBuilder, line: &str) {
+    use crate::session_chat::{SessionChatBlock, SessionChatRole};
+    let Some(message) = crate::session_chat::decode_zcode_transcript_line(line, "zcode") else {
+        return;
+    };
+    for block in message.blocks {
+        match block {
+            SessionChatBlock::Text { text } => {
+                let section = match message.role {
+                    SessionChatRole::User => TranscriptExportSection::UserMessage,
+                    SessionChatRole::Reasoning => TranscriptExportSection::AgentReasoning,
+                    SessionChatRole::System => TranscriptExportSection::SystemMessage,
+                    _ => TranscriptExportSection::AgentMessage,
+                };
+                builder.push_dialog(section, text);
+            }
+            SessionChatBlock::ToolCall { name, input } => {
+                let section = classify_tool(&name);
+                builder.push_call(
+                    ExportEntry::new(section, pretty_arguments(&input))
+                        .with_tool(name, Some(message.id.clone())),
+                );
+            }
+            SessionChatBlock::ToolResult { output, is_error } => {
+                builder.push_output(Some(message.id.clone()), output, is_error.unwrap_or(false))
+            }
+            SessionChatBlock::ImageRef { path, url, alt } => builder.push_dialog(
+                TranscriptExportSection::UserMessage,
+                format!(
+                    "{}: {}",
+                    alt.unwrap_or_else(|| "Image".into()),
+                    path.or(url).unwrap_or_default()
+                ),
+            ),
+        }
+    }
+}
 
 fn parse_hermes_record(builder: &mut TranscriptBuilder, record: &Map<String, Value>) {
     match text_field(record, "role").as_deref() {

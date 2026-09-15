@@ -243,6 +243,7 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup {
   --chat-card-muted-foreground: var(--muted-foreground);
   --ghostex-codex-logo: var(--foreground);
   --ghostex-light-icon-color: var(--foreground);
+  --ghostex-zcode-logo: #000000;
   --gx-account-meter-track: color-mix(in srgb, var(--foreground) 12%, transparent);
   --gx-account-meter-fill: color-mix(in srgb, var(--foreground) 65%, var(--background));
   --accent: oklch(96.7% 0.001 286.375);
@@ -286,6 +287,7 @@ body[data-session-chat-theme='dark'] .ghostex-session-chat-popup {
   color-scheme: dark;
   --ghostex-codex-logo: #ffffff;
   --ghostex-light-icon-color: initial;
+  --ghostex-zcode-logo: #ffffff;
   /*
    * CDXC:AppModal 2026-08-24 (round 2):
    * Keep every chat backing layer on the same #0d0d0d tone. A one-step
@@ -667,8 +669,14 @@ body[data-session-chat-bullets='off'] .ghostex-session-chat-popup {
   transition: opacity 120ms ease;
 }
 
-.ghostex-chat-final-action-save {
+/* Rail order is Copy, Reply by Annotating, Save to md; each slot is one row
+   below the previous one. */
+.ghostex-chat-final-action-annotate {
   top: calc(anchor(center) + 1.625rem);
+}
+
+.ghostex-chat-final-action-save {
+  top: calc(anchor(center) + 3.25rem);
 }
 
 .ghostex-session-chat-scope [data-slot='message']:is(:hover, :focus-within) .ghostex-chat-final-action {

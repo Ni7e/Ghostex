@@ -28,6 +28,16 @@ pub(super) fn unmarked_rule_input_region(lines: &[String]) -> Option<Range<usize
     Some(head + 1..foot)
 }
 
+/// ZCode 3.11.2-24 uses Pi's unmarked editor, followed by its model/mode footer.
+/// Require that footer immediately after the editor so a rule inside a picker cannot qualify.
+pub(super) fn zcode_input_region(lines: &[String]) -> Option<Range<usize>> {
+    let region = unmarked_rule_input_region(lines)?;
+    let footer = lines.get(region.end + 1)?.trim();
+    (footer.starts_with('◈') && footer.contains("◉") && footer.contains("⚡")
+        && lines[region.end + 2..].iter().all(|line| line.trim().is_empty()))
+        .then_some(region)
+}
+
 pub(super) fn hermes_input_region(lines: &[String]) -> Option<Range<usize>> {
     let region = unmarked_rule_input_region(lines)?;
     let start = region.clone().find(|&i| !lines[i].trim().is_empty())?;
@@ -429,8 +439,10 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
         clear_codex_composer_particles(&mut lines);
     }
     let plain: Vec<_> = lines.iter().map(|line| line.text.clone()).collect();
-    if agent == "pi" || agent == "omp" {
-        let region = if agent == "pi" {
+    if matches!(agent, "pi" | "omp" | "zcode") {
+        let region = if agent == "zcode" {
+            zcode_input_region(&plain)?
+        } else if agent == "pi" {
             unmarked_rule_input_region(&plain)?
         } else {
             omp_input_region(&plain)?
@@ -532,4 +544,33 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
         }
     }
     Some(input)
+}
+
+#[cfg(test)]
+mod zcode_tests {
+    use super::*;
+    use crate::session_chat_composer::detect_session_chat_composer_ready;
+
+    #[test]
+    fn zcode_editor_accepts_multiline_drafts_but_not_open_pickers() {
+        let screen = "Turn cancelled.\n────────────────────────────────────────\nfirst line\nsecond line\n────────────────────────────────────────\n ◈ zai/glm-5.2 ─ ◉ build ─ ⚡ max ─ ctx 100% left\n";
+        let input = session_chat_composer_input("zcode", screen).unwrap();
+        assert_eq!(input.text, "first line\nsecond line");
+        assert_eq!(input.rows, 2);
+        assert!(
+            !detect_session_chat_composer_ready(Some("zcode"), screen)
+                .blocks_message_for(Some("zcode"))
+        );
+        for blocked in [
+            String::new(),
+            screen.replace("◈ zai", "other"),
+            format!("{screen}Choose a model\n"),
+        ] {
+            assert!(
+                detect_session_chat_composer_ready(Some("zcode"), &blocked)
+                    .blocks_message_for(Some("zcode"))
+            );
+            assert!(session_chat_composer_input("zcode", &blocked).is_none());
+        }
+    }
 }

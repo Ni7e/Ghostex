@@ -240,13 +240,6 @@ const DEFAULT_SIDEBAR_AGENTS: &[DefaultSidebarAgent] = &[
         name: "Kimi Code",
     },
     DefaultSidebarAgent {
-        agent_id: "campfire",
-        command: "campfire",
-        hidden_by_default: true,
-        icon: "campfire",
-        name: "Campfire",
-    },
-    DefaultSidebarAgent {
         agent_id: "openclaude",
         command: "openclaude",
         hidden_by_default: true,
@@ -273,6 +266,13 @@ const DEFAULT_SIDEBAR_AGENTS: &[DefaultSidebarAgent] = &[
         hidden_by_default: false,
         icon: "mastra",
         name: "Mastra Code",
+    },
+    DefaultSidebarAgent {
+        agent_id: "zcode",
+        command: "zcode",
+        hidden_by_default: false,
+        icon: "zcode",
+        name: "ZCode",
     },
 ];
 
@@ -1231,7 +1231,7 @@ fn normalized_stored_sidebar_agents(candidate: Option<&Value>) -> Vec<StoredSide
         let Some(agent_id) = trimmed_json_string_field(item, "agentId") else {
             continue;
         };
-        if seen_agent_ids.contains(agent_id) {
+        if agent_id == "campfire" || seen_agent_ids.contains(agent_id) {
             continue;
         }
         let Some(name) = trimmed_json_string_field(item, "name") else {

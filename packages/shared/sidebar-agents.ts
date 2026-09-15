@@ -175,7 +175,7 @@ const DEFAULT_SIDEBAR_AGENT_DEFINITIONS = [
   },
   /*
    * CDXC:AgentHooks 2026-08-27:
-   * Kimi Code, Campfire, OpenClaude, Command Code, and Devin already have hook
+   * Kimi Code, OpenClaude, Command Code, and Devin already have hook
    * definitions in gxserver's agent-hooks catalog, so the shared registry has
    * to know them too or Settings and first launch would ask for hook status on
    * providers the launcher cannot name, configure, or start. They are
@@ -188,13 +188,6 @@ const DEFAULT_SIDEBAR_AGENT_DEFINITIONS = [
     hiddenByDefault: true,
     icon: 'kimi',
     name: 'Kimi Code',
-  },
-  {
-    agentId: 'campfire',
-    command: 'campfire',
-    hiddenByDefault: true,
-    icon: 'campfire',
-    name: 'Campfire',
   },
   {
     agentId: 'openclaude',
@@ -223,6 +216,7 @@ const DEFAULT_SIDEBAR_AGENT_DEFINITIONS = [
    * SEE-ALSO: server/src/agent_hooks/config.rs, server/src/sidebar_hud.rs, and apps/desktop/src/app/helpers/sidebar/sidebar_defaults_types.rs.
    */
   { agentId: 'mastra', command: 'mastracode', icon: 'mastra', name: 'Mastra Code' },
+  { agentId: 'zcode', command: 'zcode', icon: 'zcode', name: 'ZCode' },
 ] as const;
 
 export const DEFAULT_SIDEBAR_AGENTS = DEFAULT_SIDEBAR_AGENT_DEFINITIONS;
@@ -303,7 +297,7 @@ export function createSidebarAgentButtons(
   commandOverrides: DefaultSidebarAgentCommandOverrides = {}
 ): SidebarAgentButton[] {
   const enabledStoredAgents = storedAgents.filter(
-    (agent) => !agent.isDefault || isDefaultSidebarAgentId(agent.agentId)
+    (agent) => agent.agentId !== 'campfire' && (!agent.isDefault || isDefaultSidebarAgentId(agent.agentId))
   );
   const storedAgentById = new Map(enabledStoredAgents.map((agent) => [agent.agentId, agent]));
   const defaultButtons = DEFAULT_SIDEBAR_AGENTS.flatMap((agent) => {
@@ -453,6 +447,7 @@ export function shouldPreferTerminalTitleForAgentIcon(icon: SidebarAgentIcon | u
   );
 }
 
+/** CDXC:AgentProviders 2026-09-14 DECISION: User: remove Campfire fully from the app. Discard its saved built-in row so it cannot reappear as a custom launcher after removal. */
 export function normalizeStoredSidebarAgents(candidate: unknown): StoredSidebarAgent[] {
   if (!Array.isArray(candidate)) {
     return [];
@@ -475,7 +470,7 @@ export function normalizeStoredSidebarAgents(candidate: unknown): StoredSidebarA
     const isDefault = partialItem.isDefault === true || (agentId ? isDefaultSidebarAgentId(agentId) : false);
     const hidden = partialItem.hidden === true;
 
-    if (!agentId || !name || !command || seenAgentIds.has(agentId)) {
+    if (!agentId || agentId === 'campfire' || !name || !command || seenAgentIds.has(agentId)) {
       continue;
     }
 

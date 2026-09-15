@@ -514,7 +514,6 @@ fn infer_agent_id_from_process_executable(
         match executable_name.as_str() {
             "agy" => "antigravity",
             "amp" => "amp",
-            "campfire" => "campfire",
             "claude" => "claude",
             "codebuddy" => "codebuddy",
             "codex" => "codex",
@@ -534,6 +533,7 @@ fn infer_agent_id_from_process_executable(
             "opencode" => "opencode",
             "pi" => "pi",
             "qodercli" => "qoder",
+            "zcode" | "zcode-cli" => "zcode",
             "rovodev" => "rovodev",
             _ => return None,
         }
@@ -580,6 +580,9 @@ fn extract_agent_process_session_id(
         }) {
             return None;
         }
+        return read_agent_process_flag_value(agent_id, args, "--resume");
+    }
+    if agent_id == "zcode" {
         return read_agent_process_flag_value(agent_id, args, "--resume");
     }
     if agent_id == "opencode" {
