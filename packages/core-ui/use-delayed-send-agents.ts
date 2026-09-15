@@ -11,7 +11,7 @@ function machineId(sessionId: string): string {
 
 /**
  * CDXC:DelayedSend 2026-09-14 DECISION:
- * User: "When a specific agent finishes" offers currently Awake sessions, not sleeping ones.
+ * User: "When a specific agent finishes" offers currently running Agent sessions, not sleeping ones.
  * The receiving session's daemon owns the watcher, so candidates belong to that same computer.
  */
 export function useDelayedSendAgents(targetSessionId: string | undefined): DelayedSendAgentOption[] {

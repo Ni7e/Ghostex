@@ -437,7 +437,7 @@ export function DelayedSendModal({
                       </div>
                     ) : trigger === 'specificAgentStops' ? (
                       <Field>
-                        <FieldLabel htmlFor={specificAgentInputId}>Awake session</FieldLabel>
+                        <FieldLabel htmlFor={specificAgentInputId}>Agent session</FieldLabel>
                         <Select
                           items={awakeSessions?.map((session) => ({
                             label: session.label,
@@ -452,10 +452,10 @@ export function DelayedSendModal({
                               placeholder={
                                 awakeSessionsError ||
                                 (awakeSessionsLoading
-                                  ? 'Loading awake sessions...'
+                                  ? 'Loading agent sessions...'
                                   : awakeSessions?.length
-                                    ? 'Select an awake session'
-                                    : 'No awake sessions available')
+                                    ? 'Select an agent session'
+                                    : 'No agent sessions available')
                               }
                             />
                           </SelectTrigger>

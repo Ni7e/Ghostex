@@ -124,7 +124,7 @@ impl DelayedSendRuntime {
         let watched_target = watched
             .map(|value| {
                 let object = value.as_object().ok_or_else(|| {
-                    DomainStateError::bad_request("Choose an awake session to wait for.")
+                    DomainStateError::bad_request("Choose an agent session to wait for.")
                 })?;
                 let ids = require_target(&repository, object)?;
                 let session = repository.get_session(&ids.0, &ids.1)?.ok_or_else(|| {
@@ -132,7 +132,7 @@ impl DelayedSendRuntime {
                 })?;
                 if effective_lifecycle_state(&session) != "running" {
                     return Err(DomainStateError::bad_request(
-                        "Choose an awake session to wait for.",
+                        "Choose an agent session to wait for.",
                     ));
                 }
                 Ok(ids)
@@ -329,7 +329,7 @@ impl DelayedSendRuntime {
                         && presentation_activity(session, &now_iso()) == "working"
                 };
                 // CDXC:DelayedSend 2026-09-14 DECISION:
-                // User: wait for a specific awake session to finish, then confirm it stays finished for 10 seconds.
+                // User: wait for a specific running agent session to finish, then confirm it stays finished for 10 seconds.
                 // A sleeping or missing session is not evidence of completion; working again resets the observation window.
                 let working = if let (Some(project_id), Some(session_id)) =
                     (&record.watched_project_id, &record.watched_session_id)

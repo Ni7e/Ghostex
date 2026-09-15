@@ -46,12 +46,12 @@ impl GhostexGpuiApp {
                 let snapshot = if remote.is_some() {
                     let target = remote_target.ok_or_else(|| "The remote computer is disconnected.".to_string())?;
                     gpui_remote_gxserver_rpc_result(&target, "/api/readPresentationSnapshot", &json!({}), Duration::from_secs(10))?
-                        .get("snapshot").cloned().ok_or_else(|| "Could not read awake sessions.".to_string())?
+                        .get("snapshot").cloned().ok_or_else(|| "Could not read agent sessions.".to_string())?
                 } else {
                     gpui_read_gxserver_presentation_snapshot()?
                 };
                 let sessions = snapshot.get("sessions").and_then(Value::as_array)
-                    .ok_or_else(|| "Could not read awake sessions.".to_string())?;
+                    .ok_or_else(|| "Could not read agent sessions.".to_string())?;
                 let mut options: Vec<Value> = sessions.iter().filter_map(|session| {
                     if session.get("lifecycleState").and_then(Value::as_str) != Some("running")
                         || !matches!(session.get("kind").and_then(Value::as_str), Some("terminal" | "agent"))
@@ -77,7 +77,7 @@ impl GhostexGpuiApp {
             let _ = this.update(cx, |this, cx| {
                 let response = match result {
                     Ok((sessions, active)) => json!({"sessions": sessions, "active": active}),
-                    Err(_) => json!({"sessions": [], "error": "Could not load awake sessions."}),
+                    Err(_) => json!({"sessions": [], "error": "Could not load agent sessions."}),
                 };
                 this.dispatch_open_gpui_app_modal_message(json!({
                     "type": "delayedSendAgents", "requestId": request_id, "result": response,
