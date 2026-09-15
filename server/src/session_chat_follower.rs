@@ -706,11 +706,8 @@ fn emit_appended_frame(
 /// transcript it tails stays substantively stale.
 pub(crate) const SUCCESSOR_SCAN_INTERVAL: Duration = Duration::from_millis(30_000);
 
-/// CDXC:AgentScreenDetection 2026-09-01: once a still-transcriptless
-/// session's screen has settled, re-probe it only every this many resolve
-/// polls (~30s at the max backed-off poll), mirroring the resolved loop's
-/// idle steady tier.
-const UNRESOLVED_STEADY_PROBE_INTERVAL_PASSES: u64 = 6;
+/// Idle screen refresh remains independent of the faster statusline-file watch.
+const UNRESOLVED_STEADY_PROBE_INTERVAL: Duration = Duration::from_secs(30);
 
 fn now_epoch_ms() -> i64 {
     std::time::SystemTime::now()
@@ -952,7 +949,7 @@ pub async fn run_session_chat_follower(
     let mut resolve_delay = INITIAL_RESOLVE_POLL;
     // CDXC:AgentScreenDetection 2026-09-01: paces the slow steady
     // re-probe of the resolve-poll branch once the launch screen has settled.
-    let mut unresolved_passes: u64 = 0;
+    let mut unresolved_last_probe = std::time::Instant::now();
     let mut file_state = FollowerFileState::new();
     // Rolling AskUserQuestion state folded over everything decoded so far, plus
     // the last prompt/working pair actually published to clients.
@@ -1104,15 +1101,22 @@ pub async fn run_session_chat_follower(
                 subscribe's own seed probe just captured at t=0.
                 */
                 let live = read_live_state();
+                // CDXC:AgentScreenDetection 2026-09-15 WHY:
+                // A new Claude chat can stay transcriptless indefinitely. Watch its statusline here too, so first paint and idle option changes do not wait for the 30-second history-resolution cadence.
+                let statusline_changed = config
+                    .options_change_watch
+                    .as_ref()
+                    .is_some_and(|watch| watch(identity.agent_session_id.as_deref()));
                 let probe_due = config.options_reader.is_some()
                     && emitted_starting
                     && (!published_screen_probed
+                        || statusline_changed
                         || live.working
                         || published_activity.is_some()
                         || published_fleet.is_some()
-                        || unresolved_passes % UNRESOLVED_STEADY_PROBE_INTERVAL_PASSES == 0);
-                unresolved_passes = unresolved_passes.wrapping_add(1);
+                        || unresolved_last_probe.elapsed() >= UNRESOLVED_STEADY_PROBE_INTERVAL);
                 let detection = if probe_due {
+                    unresolved_last_probe = std::time::Instant::now();
                     let reader = config.options_reader.clone();
                     match tokio::time::timeout(
                         STEADY_OPTION_DETECTION_DEADLINE,
@@ -1192,10 +1196,12 @@ pub async fn run_session_chat_follower(
                 }
                 // CDXC:AgentScreenDetection 2026-09-15 WHY:
                 // Transcript resolution can lag live compaction. Backing off both the loop and its screen probe freezes progress for up to 30s; active screens need the same reconcile cadence as a resolved transcript.
-                let poll_delay = if !published_screen_probed
-                    || live.working
+                let poll_delay = if !published_screen_probed {
+                    INITIAL_RESOLVE_POLL
+                } else if live.working
                     || published_activity.is_some()
                     || published_fleet.is_some()
+                    || config.options_change_watch.is_some()
                 {
                     resolve_delay.min(config.tuning.reconcile_interval)
                 } else {

@@ -22,7 +22,8 @@ pub fn resolve_session_chat_transcript_path(
         .map(expand_home);
     if agent == SessionChatTranscriptAgent::Zcode {
         return crate::session_chat_zcode::resolve_zcode_chat_transcript_path(
-            agent_session_id?, supplied_path.as_deref(),
+            agent_session_id?,
+            supplied_path.as_deref(),
         );
     }
     if agent == SessionChatTranscriptAgent::Cursor {
@@ -43,6 +44,16 @@ pub fn resolve_session_chat_transcript_path(
         );
     }
     if let Some(expanded) = supplied_path {
+        // CDXC:AgentScreenDetection 2026-09-15 WHY:
+        // Claude's startup hook names its future transcript before the first prompt creates it. Searching every account's history for that same id on each screen probe delayed the model pills even after the terminal was ready.
+        if agent == SessionChatTranscriptAgent::Claude
+            && expanded.extension().and_then(|value| value.to_str()) == Some("jsonl")
+            && expanded.file_stem().and_then(|value| value.to_str())
+                == agent_session_id.map(str::trim)
+            && expanded.parent().is_some_and(Path::is_dir)
+        {
+            return expanded.is_file().then_some(expanded);
+        }
         if expanded
             .extension()
             .and_then(|extension| extension.to_str())

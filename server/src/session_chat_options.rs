@@ -2883,9 +2883,13 @@ impl SessionChatOptionDetector {
         if !force {
             if let Ok(cache) = self.cache.lock() {
                 if let Some(entry) = cache.get(&key) {
-                    if entry.fetched_at.elapsed()
-                        < crate::session_chat_options::SESSION_CHAT_OPTION_CACHE_TTL
-                    {
+                    // A startup miss is still waiting for the CLI to paint. Keep paced read clients on the same startup cadence as subscribed chat clients.
+                    let ttl = if entry.value.attempted {
+                        SESSION_CHAT_OPTION_CACHE_TTL
+                    } else {
+                        crate::session_chat::INITIAL_RESOLVE_POLL
+                    };
+                    if entry.fetched_at.elapsed() < ttl {
                         let mut detected = entry.value.clone();
                         detected.notice = detected.notice.filter(|notice| {
                             crate::session_chat_notice_progress::visible(

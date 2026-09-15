@@ -553,6 +553,19 @@ impl PickerDriver<'_> {
             if composer.state != crate::session_chat_composer::SessionChatComposerState::Ready {
                 return Err(agent_busy("Waiting for Claude's input box."));
             }
+            // CDXC:SessionChat 2026-09-15 WHY:
+            // The effort picker sends the model too. Reapplying an unchanged model added a complete command/confirmation round trip before every effort change, and retries repeated already-applied work.
+            let selection = detect_session_chat_selection(SessionChatOptionAgent::Claude, &screen);
+            let current = selection.as_ref().and_then(|selection| {
+                if field == "model" {
+                    selection.model.as_ref()
+                } else {
+                    selection.effort.as_ref()
+                }
+            });
+            if current.is_some_and(|choice| choice.value == value) {
+                continue;
+            }
             let command = format!("/{field} {value}");
             // Never replace a terminal draft while applying a queued setting.
             if crate::session_chat_composer::claude_composer_input_text(&screen)
