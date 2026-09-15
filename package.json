@@ -25,6 +25,7 @@
     "release:replace": "node tooling/release-resumable.mjs replace",
     "release:verify": "node tooling/release-final-verify.mjs",
     "release:verify:resumable": "node tooling/release-resumable.mjs verify",
+    "release:watch": "node tooling/release-gpui/watch-run.mjs",
     "release:component": "node tooling/release-gpui/publish-component.mjs",
     "release:plan": "node tooling/release-gpui/plan-cli.mjs",
     "release:classify": "node tooling/release-gpui/failure-classification.mjs",
