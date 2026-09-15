@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+/*
+ * Local, brew-driven update of the legacy personal tap (maddada/homebrew-tap).
+ * Releases update the official Homebrew/homebrew-cask cask and this tap from CI
+ * through tooling/release-gpui/publish-homebrew-cask.mjs; this script remains
+ * for operator use on a Mac.
+ */
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';

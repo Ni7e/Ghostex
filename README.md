@@ -20,13 +20,15 @@ Ghostex is built for developers who keep multiple agents and terminals alive at 
 
 ### macOS
 
-The Homebrew cask installs the Apple Silicon build automatically.
+The official Homebrew cask installs the Apple Silicon build automatically.
 
 ```bash
-brew trust maddada/tap && brew install --cask maddada/tap/ghostex
+brew install ghostex
 ```
 
 Latest download: [macOS Apple Silicon DMG](https://maddada.com/download/macos-arm64).
+
+If you installed from the old `maddada/tap` tap, the tap keeps receiving updates; to move to the official cask run `brew uninstall --cask maddada/tap/ghostex && brew install ghostex`.
 
 ### Windows (WSL2 beta)
 
