@@ -196,6 +196,9 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
+    /// CDXC:Workarea 2026-09-15 DECISION:
+    /// User: remove the "No running terminal" message that flashes in panes during app startup.
+    /// A missing mount slot is also a normal restoration state, so leave its background blank until terminal content attaches.
     pub(crate) fn render_project_editor_companion_terminal_slot_body(
         &self,
         mode: TitlebarMode,
@@ -331,19 +334,6 @@ impl GhostexGpuiApp {
                         this.refresh_zmx_persistence_companion_terminal_if_stale(mode, cx);
                         cx.notify();
                     }),
-                )
-            })
-            .when(slot_id.is_none(), |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(px(12.0))
-                        .text_color(workspace_tab_inactive_text_color())
-                        .child("No running terminal"),
                 )
             })
             .when_some(remote_attach_unavailable_message, |this, message| {

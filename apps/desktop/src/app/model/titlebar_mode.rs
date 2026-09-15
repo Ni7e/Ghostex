@@ -139,7 +139,10 @@ impl TitlebarMode {
     pub(crate) fn placeholder_message(self) -> &'static str {
         match self {
             Self::Agents => "",
-            Self::Source => "Source is unavailable for the current project context.",
+            // CDXC:Workarea 2026-09-15 DECISION:
+            // User: Source must not flash an unavailable-project-context message during startup.
+            // This default also covers pending project/runtime restoration; concrete launch states supply their own progress and error messages.
+            Self::Source => "",
             Self::Browser => "",
             Self::Kanban => "Kanban is unavailable for the current project context.",
             Self::Automate => "Automate is unavailable for the current project context.",
