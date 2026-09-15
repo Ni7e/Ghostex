@@ -61,10 +61,10 @@ terminal pane. The same AppKit observer that owns `data-native-pointer-inside`
 reports the crossing here.
 
 This is a dismissal, not a suppression: `data-sidebar-tooltips-suppressed` is
-deliberately drag-only (see CDXC:Tooltips 2026-06-13-02:30 in
-app-tooltip.tsx), because a persistent CSS flag would also keep the *next*
-hover from opening a tooltip until something cleared it. Closing the open
-tooltips leaves the next pointer-enter free to open a new one.
+reserved for a sidebar drag and an open context menu (see CDXC:Tooltips
+2026-09-15 in app-tooltip.tsx), because a persistent CSS flag would also keep
+the *next* hover from opening a tooltip until something cleared it. Closing the
+open tooltips leaves the next pointer-enter free to open a new one.
 */
 window.ghostexGpui.dismissSidebarTooltips = () => {
   dismissSidebarTooltips();

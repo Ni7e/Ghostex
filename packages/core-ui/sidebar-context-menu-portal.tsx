@@ -13,6 +13,7 @@ import type {
   NativePortlessAdminResult,
   NativePortlessProtocol,
 } from '../shared/native-ghostty-host-protocol';
+import { setSidebarTooltipsSuppressed } from './app-tooltip';
 import type { WebviewApi } from './webview-api';
 
 /**
@@ -69,6 +70,7 @@ type GhostexNativeSidebarBridge = {
 };
 
 const activeDismissHandlers = new Set<() => void>();
+let openSidebarContextMenuCount = 0;
 
 declare global {
   interface Window {
@@ -265,6 +267,21 @@ export function SidebarContextMenuPortal({
   useLayoutEffect(() => {
     return registerSidebarContextMenuDismissHandler(onDismiss);
   }, [onDismiss]);
+
+  useLayoutEffect(() => {
+    /*
+     * CDXC:Tooltips 2026-09-15 DECISION:
+     * User: no tooltip may show while a context menu is open. Hold the shared suppression for as long as any menu portal is mounted; card submenus are raw portals that only exist while their parent menu does, so counting the menu portals is enough.
+     */
+    openSidebarContextMenuCount += 1;
+    setSidebarTooltipsSuppressed('contextMenu', true);
+    return () => {
+      openSidebarContextMenuCount -= 1;
+      if (openSidebarContextMenuCount === 0) {
+        setSidebarTooltipsSuppressed('contextMenu', false);
+      }
+    };
+  }, []);
 
   useLayoutEffect(() => {
     /**

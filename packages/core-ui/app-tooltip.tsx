@@ -4,7 +4,16 @@ import { useEffect, useState, type ComponentProps, type ReactElement, type React
 export const SIDEBAR_TOOLTIP_DISMISS_EVENT = 'ghostex-sidebar-tooltip-dismiss';
 export const SIDEBAR_TOOLTIP_SUPPRESSION_CHANGED_EVENT = 'ghostex-sidebar-tooltip-suppression-changed';
 
-let sidebarTooltipSuppressedForDrag = false;
+/**
+ * CDXC:Tooltips 2026-09-15 DECISION:
+ * User: no tooltip may show while a sidebar context menu is open; one used to open on top of the menu.
+ * Suppression is keyed by reason so a drag and an open menu each hold it independently and it lifts only when the last reason clears.
+ * It stays a temporary block for these two flows only; native pointer-leave keeps dismissing through the event so the next hover can open a tooltip.
+ * SEE-ALSO: packages/core-ui/sidebar-context-menu-portal.tsx, packages/core-ui/sidebar-app/drag-handlers.ts, packages/core-ui/styles/group-panels.css.
+ */
+export type SidebarTooltipSuppressionReason = 'drag' | 'contextMenu';
+
+const sidebarTooltipSuppressionReasons = new Set<SidebarTooltipSuppressionReason>();
 
 function setSidebarTooltipSuppressionBodyFlag(suppressed: boolean) {
   const body = typeof document === 'undefined' ? undefined : document.body;
@@ -54,28 +63,33 @@ export function useDismissSidebarTooltipsOnScroll() {
 }
 
 export function areSidebarTooltipsSuppressed() {
-  return sidebarTooltipSuppressedForDrag;
+  return sidebarTooltipSuppressionReasons.size > 0;
 }
 
-export function setSidebarTooltipsSuppressedForDrag(suppressed: boolean) {
-  setSidebarTooltipSuppressionBodyFlag(suppressed);
-  if (sidebarTooltipSuppressedForDrag === suppressed) {
+export function setSidebarTooltipsSuppressed(reason: SidebarTooltipSuppressionReason, suppressed: boolean) {
+  const wasSuppressed = areSidebarTooltipsSuppressed();
+  if (suppressed) {
+    sidebarTooltipSuppressionReasons.add(reason);
+  } else {
+    sidebarTooltipSuppressionReasons.delete(reason);
+  }
+  const isSuppressed = areSidebarTooltipsSuppressed();
+  setSidebarTooltipSuppressionBodyFlag(isSuppressed);
+  if (wasSuppressed === isSuppressed) {
     return;
   }
-  sidebarTooltipSuppressedForDrag = suppressed;
   /*
    * CDXC:Tooltips 2026-06-02-20:22:
    * Sidebar project/session drag should not spawn hover tooltips under the pointer. Suppress both Radix and local session title tooltips for the duration of sidebar drag operations, and close any tooltip that was already open when the drag started.
-   *
-   * CDXC:Tooltips 2026-06-13-02:30:
-   * Drag is the only flow that should block tooltip creation. Keep the CSS body
-   * flag in this helper so native pointer-leave can dismiss visible tooltips
-   * without leaving pseudo-tooltips disabled after hover returns.
    */
-  if (suppressed) {
+  if (isSuppressed) {
     dismissSidebarTooltips();
   }
   window.dispatchEvent(new Event(SIDEBAR_TOOLTIP_SUPPRESSION_CHANGED_EVENT));
+}
+
+export function setSidebarTooltipsSuppressedForDrag(suppressed: boolean) {
+  setSidebarTooltipsSuppressed('drag', suppressed);
 }
 
 type AppTooltipProps = ComponentProps<typeof Tooltip> & {

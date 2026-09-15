@@ -1511,10 +1511,11 @@ body.native-sidebar-body
 }
 
 /*
- * CDXC:Tooltips 2026-06-13-02:30:
- * This body flag is drag-only tooltip suppression. Native pointer-leave should
- * dismiss visible tooltips through events, not set a persistent CSS flag that
- * prevents later hover from showing a tooltip until the user clicks.
+ * CDXC:Tooltips 2026-09-15 WHY:
+ * This body flag is set only while a sidebar drag or a context menu holds
+ * tooltip suppression (it was drag-only before the context-menu case). Native
+ * pointer-leave dismisses visible tooltips through events instead, because a
+ * persistent CSS flag would keep the next hover from opening a tooltip.
  */
 body[data-sidebar-tooltips-suppressed='true'] .reference-sidebar-hover-action-tooltip::after,
 body[data-sidebar-tooltips-suppressed='true']
