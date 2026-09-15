@@ -10,6 +10,9 @@ pub(crate) struct GpuiResolvedSessionChatFile {
     pub(crate) file_path: PathBuf,
     pub(crate) is_directory: bool,
     pub(crate) project_id: String,
+    /// CDXC:SessionChat 2026-09-15 WHY:
+    /// Code identifies its workspace by the registered project path, including symlinks; using the canonical root leaves chat file opens waiting forever for a different workspace.
+    pub(crate) project_path: PathBuf,
     pub(crate) project_root: PathBuf,
 }
 
@@ -34,7 +37,7 @@ impl GhostexGpuiApp {
         let Some(session_key) = self.local_workspace_key_for_shell_session(session_id) else {
             return Err(GpuiSessionChatFileResolutionError::ProjectUnavailable);
         };
-        let project_root = self
+        let project_path = self
             .latest_sidebar_project_snapshot
             .as_ref()
             .filter(|snapshot| {
@@ -51,7 +54,7 @@ impl GhostexGpuiApp {
                     .map(PathBuf::from)
             })
             .ok_or(GpuiSessionChatFileResolutionError::ProjectUnavailable)?;
-        let project_root = fs::canonicalize(project_root)
+        let project_root = fs::canonicalize(&project_path)
             .map_err(|_| GpuiSessionChatFileResolutionError::ProjectUnavailable)?;
         if !fs::metadata(&project_root).is_ok_and(|metadata| metadata.is_dir()) {
             return Err(GpuiSessionChatFileResolutionError::ProjectUnavailable);
@@ -119,6 +122,7 @@ impl GhostexGpuiApp {
                 file_path,
                 is_directory: metadata.is_dir(),
                 project_id: session_key.project_id,
+                project_path,
                 project_root,
             });
         }

@@ -1308,7 +1308,7 @@ impl GhostexGpuiApp {
             file_path,
             line,
             origin: PendingSourceFileOpenOrigin::SessionChat,
-            project_path: root,
+            project_path: resolved.project_path,
         });
         self.switch_workarea_from_hotkey(TitlebarMode::Source, window, cx);
         self.mark_project_editor_mode_awake(TitlebarMode::Source, cx);
