@@ -2385,8 +2385,7 @@ body[data-custom-sidebar-titlebar-colors='true']
    * Last Active should stay visually stable: no elapsed
    * age color shifts, and 2px smaller than the session title text.
    */
-  --session-last-interaction-color: #4f5359;
-  color: var(--session-last-interaction-color);
+  color: #a6a6a6;
   font-size: 13.55px;
   font-weight: 300 !important;
   letter-spacing: 0;
@@ -2399,31 +2398,15 @@ body[data-custom-sidebar-titlebar-colors='true']
   width: max-content;
 }
 
-/*
- * CDXC:Theming 2026-06-15-15:15:
- * The custom sidebar/titlebar Contrast slider can lighten the sidebar
- * background to #2a2a2a. Derive Last Active timestamps from
- * the current custom foreground/background so they remain legible without
- * adding a sleeping-row surface or changing modal/dropdown colors.
- */
-body[data-custom-sidebar-titlebar-colors='true']
-  .sidebar-reference-layout[data-reference-sidebar='true']
-  .session-last-interaction-time {
-  --session-last-interaction-color: color-mix(
-    in srgb,
-    var(--custom-sidebar-titlebar-foreground-color) 34%,
-    var(--custom-sidebar-titlebar-background-color) 66%
-  );
-}
-
 /* CDXC:SessionSleep 2026-09-15 DECISION:
- * User: keep sleeping sidebar session titles at their normal color and make the last-active time on the right slightly bluish instead.
- * This supersedes the dimmed sleeping-title treatment in every sidebar theme.
+ * User: make light-mode sidebar text darker and use the same title color for awake and sleeping sessions; only the last-active time should differ in color.
+ * Dark awake/sleeping timestamps remain #a6a6a6/#686868; light timestamps use #424242/#959595, with all session titles #262626 in sidebar-light.css.
+ * This supersedes the blue timestamp tint and the earlier light-mode title colors that varied with sleeping, visible, or focused state.
  */
 .sidebar-reference-layout[data-reference-sidebar='true']
   .session[data-sleeping='true']
   .session-last-interaction-time {
-  color: color-mix(in srgb, var(--session-last-interaction-color) 55%, #7294c2 45%);
+  color: #686868;
 }
 
 .sidebar-reference-layout[data-reference-sidebar='true'] .session[data-visible='true'] .session-last-interaction-time {
@@ -2550,7 +2533,7 @@ body[data-custom-sidebar-titlebar-colors='true']
 .sidebar-reference-layout[data-reference-sidebar='true']
   .session-frame:has(.session[data-has-agent-icon='true'])
   .session-persistence-provider-badge[data-slot='floating'] {
-  opacity: 0.48;
+  opacity: calc(0.48 * var(--sidebar-icon-emphasis, 1));
 }
 
 .sidebar-reference-layout[data-reference-sidebar='true']
@@ -2589,7 +2572,7 @@ body[data-custom-sidebar-titlebar-colors='true']
 .sidebar-reference-layout[data-reference-sidebar='true']
   .session-frame:not([data-focused='true']):has(.session:focus-visible)
   .session-persistence-provider-badge[data-slot='floating'] {
-  opacity: 0.26;
+  opacity: calc(0.26 * var(--sidebar-icon-emphasis, 1));
 }
 
 .sidebar-reference-layout[data-reference-sidebar='true']
@@ -2604,7 +2587,7 @@ body[data-custom-sidebar-titlebar-colors='true']
 .sidebar-reference-layout[data-reference-sidebar='true']
   .session-frame[data-focused='true']
   .session-persistence-provider-badge[data-slot='floating'] {
-  opacity: 0.8;
+  opacity: calc(0.8 * var(--sidebar-icon-emphasis, 1));
 }
 
 /*
@@ -2671,7 +2654,7 @@ body[data-custom-sidebar-titlebar-colors='true']
   .session-search-previous-group
   .session-history-frame
   .session-persistence-provider-badge[data-slot='floating'] {
-  opacity: 0.52;
+  opacity: calc(0.52 * var(--sidebar-icon-emphasis, 1));
 }
 
 .sidebar-reference-layout[data-reference-sidebar='true'] .session-persistence-provider-badge[data-slot='floating'] {
