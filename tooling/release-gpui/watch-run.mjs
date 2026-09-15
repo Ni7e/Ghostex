@@ -11,13 +11,22 @@
  *
  * Usage:
  *   node tooling/release-gpui/watch-run.mjs --run <run-id> [--interval 300]
- *     [--repo maddada/Ghostex] [--max-minutes 180] [--once]
+ *     [--repo maddada/Ghostex] [--max-minutes 180] [--once] [--exit-on-change]
  *
  * Exit codes: 0 run finished (only homebrew jobs may have failed), 1 a job
  * failed, 2 --max-minutes elapsed, 3 gh failed five polls in a row.
+ *
+ * --exit-on-change also exits 0 as soon as any job's status or conclusion
+ * differs from the previous poll, after printing the change lines: an operator
+ * that runs the watcher as a background process is woken exactly once per
+ * state change and starts a new watcher. The first poll only records the
+ * baseline (and lists what is still moving or broken); a terminal run still
+ * prints the go-live summary and exits with the normal code, so
+ * `run <run-id> completed:` on stdout distinguishes "over" from "changed".
  */
 
 import { execFile } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -26,12 +35,19 @@ const MAX_CONSECUTIVE_POLL_FAILURES = 5;
 function usage() {
   return (
     'Usage: node tooling/release-gpui/watch-run.mjs --run <run-id> [--interval 300] ' +
-    '[--repo maddada/Ghostex] [--max-minutes 180] [--once]'
+    '[--repo maddada/Ghostex] [--max-minutes 180] [--once] [--exit-on-change]'
   );
 }
 
 export function parseArgs(argv) {
-  const options = { interval: 300, maxMinutes: 180, once: false, repo: 'maddada/Ghostex', runId: null };
+  const options = {
+    exitOnChange: false,
+    interval: 300,
+    maxMinutes: 180,
+    once: false,
+    repo: 'maddada/Ghostex',
+    runId: null,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = () => {
@@ -42,6 +58,7 @@ export function parseArgs(argv) {
     };
     if (arg === '--help' || arg === '-h') return { ...options, help: true };
     if (arg === '--once') options.once = true;
+    else if (arg === '--exit-on-change') options.exitOnChange = true;
     else if (arg === '--run') {
       const match = /(\d+)\/?$/u.exec(next());
       if (!match) throw new Error('--run requires a numeric run id (or a run URL ending in one)');
@@ -135,10 +152,11 @@ function sleep(seconds) {
 
 /*
  * One observation of the run. Prints the changed jobs and the summary, and
- * returns an exit code when the watch is over (a fatal job failure or a
- * terminal run status); null means keep polling.
+ * returns an exit code when the watch is over (a fatal job failure, a
+ * terminal run status, or with exitOnChange any change after the baseline
+ * poll); null means keep polling.
  */
-export function observe({ previous, run, runId }, print = console.log) {
+export function observe({ exitOnChange = false, previous, run, runId }, print = console.log) {
   const changed = changedJobs(previous, run.jobs);
   const baseline = previous === null;
   const lines = changed
@@ -160,6 +178,10 @@ export function observe({ previous, run, runId }, print = console.log) {
   if (run.status === 'completed') {
     print(`run ${runId} completed: ${run.conclusion ?? 'unknown'}`);
     for (const line of goLiveLines(run.jobs)) print(line);
+    return 0;
+  }
+  if (exitOnChange && !baseline && changed.length > 0) {
+    print(`${clock()}  run ${runId} changed; exiting (--exit-on-change), start a new watcher`);
     return 0;
   }
   return null;
@@ -199,7 +221,7 @@ async function main() {
       await sleep(Math.min(options.interval, 30));
       continue;
     }
-    const exitCode = observe({ previous, run, runId: options.runId });
+    const exitCode = observe({ exitOnChange: options.exitOnChange, previous, run, runId: options.runId });
     if (exitCode !== null) return exitCode;
     if (options.once) {
       console.log(`run ${options.runId} ${run.status}`);
@@ -214,7 +236,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().then(
     (code) => {
       process.exitCode = code;

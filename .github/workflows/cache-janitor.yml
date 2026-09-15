@@ -6,7 +6,8 @@ name: Cache janitor
 # 2026-09-15 that eviction took the 1.77 GB Gradle cache the 9.6.0 Android
 # build had just saved, and the next release built Android cold again. This
 # workflow runs tooling/release-gpui/cache-janitor.mjs after every run that
-# writes cache entries (the warm Rust runs and the releases) and once a day,
+# writes cache entries (the warm Rust runs, the releases, and the same-version
+# amends) and once a day,
 # so stale sccache objects and superseded entries are removed first and the
 # release caches (Gradle, ccache, tailcat bridge, CEF, Zig, cargo registry,
 # GhosttyKit, Go) stay under the cap. A manual dispatch is a dry run unless
@@ -16,7 +17,7 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_run:
-    workflows: ['Warm the Rust build cache', 'Release Ghostex']
+    workflows: ['Warm the Rust build cache', 'Release Ghostex', 'Amend existing Ghostex release']
     types: [completed]
   workflow_dispatch:
     inputs:

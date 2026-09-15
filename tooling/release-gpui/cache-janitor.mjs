@@ -19,7 +19,7 @@
  *
  * Usage:
  *   node tooling/release-gpui/cache-janitor.mjs [--apply] [--repo maddada/Ghostex]
- *     [--budget-gb 9] [--sccache-unused-days 3] [--min-age-hours 24]
+ *     [--budget-gb 9] [--sccache-unused-days 6] [--min-age-hours 24]
  *
  * Without --apply it is a dry run: it prints the inventory, the table of
  * entries it would delete, and the totals, and deletes nothing. Requires gh
@@ -27,6 +27,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -36,12 +37,21 @@ const DAY_MS = 24 * HOUR_MS;
 const DELETE_CONCURRENCY = 4;
 const WARM_WORKFLOW_FILE = 'warm-rust-build-cache.yml';
 
+/*
+ * CDXC:Release 2026-09-16 WHY: the sccache-unused window must exceed the
+ * longest gap between warm runs. warm-rust-build-cache.yml runs Monday and
+ * Thursday 04:00 UTC, so every object it reads legitimately sits untouched
+ * for up to four days; with a 3-day window the Sunday and Wednesday janitor
+ * runs would delete the whole sccache set right before the next warm run,
+ * which would then compile cold. Six days stays under GitHub's own 7-day
+ * eviction.
+ */
 export const DEFAULT_OPTIONS = Object.freeze({
   apply: false,
   budgetGb: 9,
   minAgeHours: 24,
   repo: 'maddada/Ghostex',
-  sccacheUnusedDays: 3,
+  sccacheUnusedDays: 6,
 });
 
 /* Key families, matched in order; the first match wins. */
@@ -80,7 +90,7 @@ export const PROTECTED_FAMILIES = new Set([
 function usage() {
   return (
     'Usage: node tooling/release-gpui/cache-janitor.mjs [--apply] [--repo maddada/Ghostex] ' +
-    '[--budget-gb 9] [--sccache-unused-days 3] [--min-age-hours 24]'
+    '[--budget-gb 9] [--sccache-unused-days 6] [--min-age-hours 24]'
   );
 }
 
@@ -448,7 +458,7 @@ async function main() {
   return failures.length === 0 ? 0 : 1;
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().then(
     (code) => {
       process.exitCode = code;
