@@ -1,26 +1,32 @@
 import {
   IconAlertTriangle,
   IconCheck,
+  IconChecklist,
   IconCopy,
   IconEdit,
   IconFileText,
   IconMessagePlus,
   IconMessages,
   IconRefresh,
+  IconSend,
   IconTrash,
+  IconX,
 } from '@tabler/icons-react';
 import { type ProjectDocsFilePreview as ManageFilePreview } from '@/packages/shared/project-docs';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MANAGE_ANNOTATION_IMAGE_MAX_BYTES, MANAGE_ANNOTATION_MAX_IMAGES, MANAGE_QUICK_LABELS } from '../constants';
 import {
   ManageAnnotation,
   ManageAnnotationImage,
   ManageAnnotationPreview,
+  ManageAnnotationSendState,
+  ManageAnnotationSendTarget,
   ManageAnnotationType,
   ManageCapturedSelection,
   ManageCommentDraft,
   ManageQuickLabel,
   ManageQuickLabelId,
+  ManageReviewDocument,
   ManageSelectionAnchor,
   ManageSelectionToolbarMode,
 } from '../types';
@@ -29,6 +35,7 @@ import {
   ManageAnnotationPreviewCard,
   ManageAnnotationToolbar,
   ManageCommentPopover,
+  ManageReviewMenu,
 } from './annotation-overlays';
 import {
   DeferredDrawingEditor as ManageExcalidrawEditor,
@@ -40,44 +47,78 @@ import { ManageTextEditor } from './text-editor';
 import { ManageTooltipButton } from '../manage-tooltip-button';
 import { ManageDocumentTitle } from './document-title';
 import {
+  activeManageAnnotations,
+  archivedManageAnnotations,
   defaultManageSelectionAnchor,
-  formatManageAnnotationsAsMarkdown,
+  manageAnnotationReviewCounts,
   normalizeAnnotationQuote,
   normalizeAttachmentName,
   selectionAnchorFromRect,
   writeTextToClipboard,
 } from '../annotation-store';
+import { formatManageAnnotationFeedback } from '../annotation-feedback';
 import { formatFileSize, isExcalidrawPath, isHtmlPath, isMarkdownPath, languageLabelForPath } from '../file-tree-utils';
 
 export function ManagePreview({
   annotations,
+  canUndoFinishReview,
   draftContent,
   error,
+  folderPendingFeedback,
   hasExternalChanges,
   isDirty,
   onAnnotationsChange,
+  onCloseReviewDocument,
   onDraftContentChange,
+  onEditAnnotationNote,
+  onFinishReview,
   onOpenDocument,
   onReload,
+  onRestoreAnnotation,
+  onSendFeedback,
+  onUndoFinishReview,
   preview,
   previewState,
+  reviewDocument,
   saveState,
   selectedPath,
+  sendState,
+  sendTarget,
 }: {
   annotations: ManageAnnotation[];
+  canUndoFinishReview: boolean;
   draftContent: string;
   error?: string;
+  folderPendingFeedback: { count: number; fileCount: number };
   hasExternalChanges: boolean;
   isDirty: boolean;
   onAnnotationsChange: (updater: (annotations: ManageAnnotation[]) => ManageAnnotation[]) => void;
+  onCloseReviewDocument: () => void;
   onDraftContentChange: (content: string) => void;
+  onEditAnnotationNote: (annotationId: string, note: string) => void;
+  onFinishReview: () => void;
   onOpenDocument: (path: string) => void;
   onReload: () => void;
+  onRestoreAnnotation: (annotationId: string) => void;
+  onSendFeedback: (request: { allFiles?: boolean; scope: 'all' | 'pending' }) => Promise<void>;
+  onUndoFinishReview: () => void;
   preview?: ManageFilePreview;
   previewState: 'idle' | 'loading' | 'ready' | 'error';
+  reviewDocument?: ManageReviewDocument;
   saveState: 'idle' | 'saving' | 'saved' | 'error';
   selectedPath?: string;
+  sendState: ManageAnnotationSendState;
+  sendTarget: ManageAnnotationSendTarget | null;
 }) {
+  /*
+   * The viewer re-syncs its decorations and the captured selection whenever
+   * the annotations array changes identity, so the filtered views must only
+   * change when the annotations do. A fresh array per render re-captured the
+   * selection on every render and the floating toolbar never got its click.
+   */
+  const activeAnnotations = useMemo(() => activeManageAnnotations(annotations), [annotations]);
+  const archivedAnnotations = useMemo(() => archivedManageAnnotations(annotations), [annotations]);
+  const reviewCounts = useMemo(() => manageAnnotationReviewCounts(annotations), [annotations]);
   const [selection, setSelection] = useState<ManageCapturedSelection>();
   const [selectionToolbarMode, setSelectionToolbarMode] = useState<ManageSelectionToolbarMode>('annotations');
   const [commentDraft, setCommentDraft] = useState<ManageCommentDraft>();
@@ -85,8 +126,11 @@ export function ManagePreview({
   const [feedbackCopyState, setFeedbackCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [clearAnnotationsConfirming, setClearAnnotationsConfirming] = useState(false);
   const [annotationsDropdownOpen, setAnnotationsDropdownOpen] = useState(false);
+  const [reviewMenuOpen, setReviewMenuOpen] = useState(false);
+  const [editingAnnotationId, setEditingAnnotationId] = useState<string>();
   const [htmlAnnotationEnabled, setHtmlAnnotationEnabled] = useState(true);
   const annotationsDropdownRef = useRef<HTMLDivElement | null>(null);
+  const reviewMenuRef = useRef<HTMLDivElement | null>(null);
   const clearAnnotationsTimerRef = useRef<number | undefined>(undefined);
   const selectedPathRef = useRef<string | undefined>(selectedPath);
 
@@ -108,14 +152,65 @@ export function ManagePreview({
       setFeedbackCopyState('idle');
       resetClearAnnotationsConfirm();
       setAnnotationsDropdownOpen(false);
+      setReviewMenuOpen(false);
+      setEditingAnnotationId(undefined);
     }
   }, [resetClearAnnotationsConfirm, selectedPath]);
 
   useEffect(() => {
-    if (annotations.length === 0) {
+    if (activeAnnotations.length === 0) {
       resetClearAnnotationsConfirm();
     }
-  }, [annotations.length, resetClearAnnotationsConfirm]);
+  }, [activeAnnotations.length, resetClearAnnotationsConfirm]);
+
+  useEffect(() => {
+    if (!reviewMenuOpen) {
+      return;
+    }
+    function handlePointerDown(event: PointerEvent) {
+      const menuElement = reviewMenuRef.current;
+      if (!menuElement || !event.target || menuElement.contains(event.target as Node)) {
+        return;
+      }
+      setReviewMenuOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setReviewMenuOpen(false);
+      }
+    }
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [reviewMenuOpen]);
+
+  const sendPendingFeedback = useCallback(() => {
+    setReviewMenuOpen(false);
+    void onSendFeedback({ scope: 'pending' });
+  }, [onSendFeedback]);
+
+  /*
+   * Cmd/Ctrl+Enter sends the new notes from anywhere in the document, the
+   * same chord that submits a comment inside the composer. The composer keeps
+   * its own handler, so the two never fire together.
+   */
+  useEffect(() => {
+    if (commentDraft || activeAnnotations.length === 0) {
+      return;
+    }
+    function handleSendShortcut(event: KeyboardEvent) {
+      if (event.isComposing || !(event.metaKey || event.ctrlKey) || event.altKey || event.key !== 'Enter') {
+        return;
+      }
+      event.preventDefault();
+      sendPendingFeedback();
+    }
+    window.addEventListener('keydown', handleSendShortcut);
+    return () => window.removeEventListener('keydown', handleSendShortcut);
+  }, [activeAnnotations.length, commentDraft, sendPendingFeedback]);
 
   useEffect(
     () => () => {
@@ -213,6 +308,7 @@ export function ManagePreview({
     setAnnotationPreview(undefined);
     setSelection(undefined);
     setSelectionToolbarMode('annotations');
+    setEditingAnnotationId(undefined);
     setCommentDraft({
       anchor,
       attachmentError: '',
@@ -248,13 +344,41 @@ export function ManagePreview({
     if (!commentDraft) {
       return;
     }
+    if (editingAnnotationId) {
+      onEditAnnotationNote(editingAnnotationId, commentDraft.note);
+      setEditingAnnotationId(undefined);
+      setCommentDraft(undefined);
+      return;
+    }
     addAnnotation({
       attachments: commentDraft.attachments,
       note: commentDraft.note,
       quote: commentDraft.quote,
       type: 'comment',
     });
-  }, [addAnnotation, commentDraft]);
+  }, [addAnnotation, commentDraft, editingAnnotationId, onEditAnnotationNote]);
+
+  const editAnnotation = useCallback(
+    (annotationId: string) => {
+      const annotation = annotations.find((candidate) => candidate.id === annotationId);
+      if (!annotation) {
+        return;
+      }
+      setAnnotationsDropdownOpen(false);
+      setAnnotationPreview(undefined);
+      setSelection(undefined);
+      setSelectionToolbarMode('annotations');
+      setEditingAnnotationId(annotationId);
+      setCommentDraft({
+        anchor: defaultManageSelectionAnchor(),
+        attachmentError: '',
+        attachments: annotation.attachments,
+        note: annotation.note,
+        quote: annotation.quote,
+      });
+    },
+    [annotations]
+  );
 
   const updateCommentDraftNote = useCallback((note: string) => {
     setCommentDraft((current) => (current ? { ...current, note } : current));
@@ -343,7 +467,10 @@ export function ManagePreview({
      * This markdown is read by a human and by the agent it is pasted to, so it
      * names the file the way the tree does rather than by routing address.
      */
-    const output = formatManageAnnotationsAsMarkdown(preview?.displayPath ?? selectedPath, annotations);
+    const output = formatManageAnnotationFeedback(
+      [{ annotations, content: draftContent, name: preview?.displayPath ?? selectedPath }],
+      'all'
+    ).text;
     try {
       await writeTextToClipboard(output);
       setFeedbackCopyState('copied');
@@ -351,10 +478,10 @@ export function ManagePreview({
     } catch {
       setFeedbackCopyState('error');
     }
-  }, [annotations, preview?.displayPath, selectedPath]);
+  }, [annotations, draftContent, preview?.displayPath, selectedPath]);
 
   const clearAllAnnotations = useCallback(() => {
-    if (annotations.length === 0) {
+    if (activeAnnotations.length === 0) {
       resetClearAnnotationsConfirm();
       return;
     }
@@ -371,8 +498,8 @@ export function ManagePreview({
     }
     resetClearAnnotationsConfirm();
     setAnnotationsDropdownOpen(false);
-    onAnnotationsChange(() => []);
-  }, [annotations.length, clearAnnotationsConfirming, onAnnotationsChange, resetClearAnnotationsConfirm]);
+    onAnnotationsChange((current) => current.filter((annotation) => Boolean(annotation.archivedAt)));
+  }, [activeAnnotations.length, clearAnnotationsConfirming, onAnnotationsChange, resetClearAnnotationsConfirm]);
 
   const openCommentForSelection = useCallback(() => {
     if (!selection) {
@@ -457,6 +584,8 @@ export function ManagePreview({
 
   const language = languageLabelForPath(preview.path);
   const isMarkdown = isMarkdownPath(preview.path);
+  const isReview = Boolean(reviewDocument);
+  const sendLabel = manageSendButtonLabel(sendState, sendTarget, reviewCounts.pending);
   const isDrawing = isExcalidrawPath(preview.path);
   const isHtml = isHtmlPath(preview.path);
   const usesCompactArtifactHeader = isMarkdown || isDrawing || isHtml;
@@ -487,8 +616,9 @@ export function ManagePreview({
           }
         />
         <div className='manage-preview-meta'>
-          <span>{language}</span>
-          {preview.size !== undefined ? <span>{formatFileSize(preview.size)}</span> : null}
+          {isReview ? <span>Agent reply</span> : <span>{language}</span>}
+          {isReview && reviewDocument?.sessionTitle ? <span>{reviewDocument.sessionTitle}</span> : null}
+          {!isReview && preview.size !== undefined ? <span>{formatFileSize(preview.size)}</span> : null}
           {isDirty ? <span>Edited</span> : saveState === 'saved' ? <span>Saved</span> : null}
         </div>
         {isMarkdown ? (
@@ -510,10 +640,14 @@ export function ManagePreview({
                 type='button'
               >
                 <IconMessages aria-hidden='true' size={14} />
-                <span className='manage-count-badge'>{annotations.length}</span>
+                <span className='manage-count-badge'>{activeAnnotations.length}</span>
               </ManageTooltipButton>
               {annotationsDropdownOpen ? (
-                <ManageAnnotationDropdown annotations={annotations} onRemoveAnnotation={removeAnnotation} />
+                <ManageAnnotationDropdown
+                  annotations={activeAnnotations}
+                  onEditAnnotation={editAnnotation}
+                  onRemoveAnnotation={removeAnnotation}
+                />
               ) : null}
             </div>
             <ManageTooltipButton
@@ -530,10 +664,71 @@ export function ManagePreview({
               <IconMessagePlus aria-hidden='true' size={14} />
               <span>Comment</span>
             </ManageTooltipButton>
+            {/*
+              CDXC:Docs 2026-09-15 DECISION:
+              User: feedback goes straight to the agent. The Send button names where it will land before it is pressed (the agent and session last clicked in the sidebar, and whether that lands in its chat or its terminal), and reads "Copy" when the app would put it on the clipboard instead.
+              The Review menu beside it carries Resend all, Finish review, Undo finish, and the Archive, each with a live count, following the Herdr Annotate review loop.
+            */}
+            <ManageTooltipButton
+              aria-label={sendLabel.tooltip}
+              className='manage-send-feedback-button'
+              data-state={sendState.kind}
+              disabled={activeAnnotations.length === 0 || sendState.kind === 'sending'}
+              onClick={sendPendingFeedback}
+              tooltip={sendLabel.tooltip}
+              type='button'
+            >
+              {sendState.kind === 'sent' ? (
+                <IconCheck aria-hidden='true' size={14} />
+              ) : (
+                <IconSend aria-hidden='true' size={14} />
+              )}
+              <span>{sendLabel.text}</span>
+            </ManageTooltipButton>
+            <div className='manage-review-menu-shell' ref={reviewMenuRef}>
+              <ManageTooltipButton
+                aria-controls='manage-markdown-review-menu'
+                aria-expanded={reviewMenuOpen}
+                aria-haspopup='menu'
+                aria-label='Review actions'
+                className='manage-review-menu-trigger'
+                disabled={annotations.length === 0 && folderPendingFeedback.count === 0}
+                onClick={() => setReviewMenuOpen((current) => !current)}
+                tooltip='Review actions'
+                type='button'
+              >
+                <IconChecklist aria-hidden='true' size={14} />
+              </ManageTooltipButton>
+              {reviewMenuOpen ? (
+                <ManageReviewMenu
+                  archivedAnnotations={archivedAnnotations}
+                  canUndoFinish={canUndoFinishReview}
+                  counts={reviewCounts}
+                  folderPending={isReview ? { count: 0, fileCount: 0 } : folderPendingFeedback}
+                  onFinishReview={() => {
+                    setReviewMenuOpen(false);
+                    onFinishReview();
+                  }}
+                  onResendAll={() => {
+                    setReviewMenuOpen(false);
+                    void onSendFeedback({ scope: 'all' });
+                  }}
+                  onRestoreAnnotation={onRestoreAnnotation}
+                  onSendAcrossFiles={() => {
+                    setReviewMenuOpen(false);
+                    void onSendFeedback({ allFiles: true, scope: 'pending' });
+                  }}
+                  onUndoFinish={() => {
+                    setReviewMenuOpen(false);
+                    onUndoFinishReview();
+                  }}
+                />
+              ) : null}
+            </div>
             <ManageTooltipButton
               aria-label='Copy feedback'
               className='manage-copy-feedback-button'
-              disabled={annotations.length === 0}
+              disabled={activeAnnotations.length === 0}
               onClick={() => void copyFeedback()}
               tooltip='Copy feedback'
               type='button'
@@ -549,7 +744,7 @@ export function ManagePreview({
               aria-label='Clear all annotations'
               className='manage-clear-annotations-button'
               data-confirming={String(clearAnnotationsConfirming)}
-              disabled={annotations.length === 0}
+              disabled={activeAnnotations.length === 0}
               onClick={clearAllAnnotations}
               tooltip='Clear All Annotations'
               type='button'
@@ -557,17 +752,29 @@ export function ManagePreview({
               <IconTrash aria-hidden='true' size={14} />
               <span>{clearAnnotationsConfirming ? 'Confirm' : 'Clear'}</span>
             </ManageTooltipButton>
-            <ManageTooltipButton
-              aria-label={hasExternalChanges ? 'Reload file with new changes' : 'Reload file'}
-              className='manage-file-reload-button'
-              data-changes-available={String(hasExternalChanges)}
-              onClick={onReload}
-              tooltip={hasExternalChanges ? 'Reload to show new changes' : 'Reload file'}
-              type='button'
-            >
-              <IconRefresh aria-hidden='true' size={14} />
-              {hasExternalChanges ? <span aria-hidden='true' className='manage-file-change-indicator' /> : null}
-            </ManageTooltipButton>
+            {isReview ? (
+              <ManageTooltipButton
+                aria-label='Close reply review'
+                className='manage-file-reload-button manage-review-close-button'
+                onClick={onCloseReviewDocument}
+                tooltip='Close reply review'
+                type='button'
+              >
+                <IconX aria-hidden='true' size={14} />
+              </ManageTooltipButton>
+            ) : (
+              <ManageTooltipButton
+                aria-label={hasExternalChanges ? 'Reload file with new changes' : 'Reload file'}
+                className='manage-file-reload-button'
+                data-changes-available={String(hasExternalChanges)}
+                onClick={onReload}
+                tooltip={hasExternalChanges ? 'Reload to show new changes' : 'Reload file'}
+                type='button'
+              >
+                <IconRefresh aria-hidden='true' size={14} />
+                {hasExternalChanges ? <span aria-hidden='true' className='manage-file-change-indicator' /> : null}
+              </ManageTooltipButton>
+            )}
           </div>
         ) : isHtml ? (
           <div className='manage-preview-header-actions'>
@@ -617,7 +824,7 @@ export function ManagePreview({
       ) : isMarkdown ? (
         <>
           <ManageMarkdownReviewViewer
-            annotations={annotations}
+            annotations={activeAnnotations}
             content={draftContent}
             documentKey={preview.path}
             gitBaseline={preview.gitBaseline}
@@ -645,10 +852,14 @@ export function ManagePreview({
             <ManageCommentPopover
               draft={commentDraft}
               onAddAttachmentFiles={addAttachmentFiles}
-              onCancel={() => setCommentDraft(undefined)}
+              onCancel={() => {
+                setEditingAnnotationId(undefined);
+                setCommentDraft(undefined);
+              }}
               onDraftNoteChange={updateCommentDraftNote}
               onRemoveDraftAttachment={removeDraftAttachment}
               onSubmit={submitCommentDraft}
+              submitLabel={editingAnnotationId ? 'Save' : 'Submit'}
             />
           ) : null}
           {annotationPreview && !selection && !commentDraft ? (
@@ -660,4 +871,55 @@ export function ManagePreview({
       )}
     </div>
   );
+}
+
+/**
+ * The Send button always says where feedback will land before it is pressed:
+ * the agent and session last clicked in the sidebar, or the clipboard when the
+ * app has no session it can hand the text to.
+ */
+export function manageSendButtonLabel(
+  sendState: ManageAnnotationSendState,
+  sendTarget: ManageAnnotationSendTarget | null,
+  pendingCount: number
+): { text: string; tooltip: string } {
+  switch (sendState.kind) {
+    case 'sending':
+      return { text: 'Sending', tooltip: 'Sending annotations' };
+    case 'sent': {
+      const where =
+        sendState.delivery === 'chat'
+          ? 'Added to chat'
+          : sendState.delivery === 'terminal'
+            ? 'Added to terminal'
+            : 'Copied to clipboard';
+      const across = sendState.fileCount > 1 ? ` across ${sendState.fileCount} files` : '';
+      return {
+        text: where,
+        tooltip: `${where}: ${sendState.count} annotation${sendState.count === 1 ? '' : 's'}${across}`,
+      };
+    }
+    case 'notice':
+    case 'error':
+      return { text: sendState.message, tooltip: sendState.message };
+    case 'idle':
+      break;
+  }
+  if (!sendTarget) {
+    return {
+      text: `Copy ${pendingCount} new`,
+      tooltip:
+        pendingCount === 0
+          ? 'Nothing new to send'
+          : 'No agent session is selected in the sidebar, so the new annotations will be copied to the clipboard',
+    };
+  }
+  const surface = sendTarget.surface === 'chat' ? 'chat' : 'terminal';
+  return {
+    text: `Send ${pendingCount} new \u25B8 ${sendTarget.agentLabel} in ${sendTarget.sessionTitle}`,
+    tooltip:
+      pendingCount === 0
+        ? 'Nothing new to send'
+        : `Add ${pendingCount} new annotation${pendingCount === 1 ? '' : 's'} to the ${surface} of ${sendTarget.agentLabel} in ${sendTarget.sessionTitle} (Cmd+Enter)`,
+  };
 }

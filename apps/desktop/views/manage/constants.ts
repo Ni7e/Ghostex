@@ -9,6 +9,9 @@ export const MANAGE_DOCS_ROOT_PATH = 'docs';
 export const MANAGE_DOCS_EXTRA_ROOT_MOUNT_PATH = '.ghostex-docs-root';
 export const MANAGE_SELECTION_MAX_LENGTH = 700;
 export const MANAGE_ANNOTATIONS_SIDECAR_PATH = '.ghostex/manage-annotations.json';
+/** Virtual folder for documents reviewed without a file behind them (an agent reply opened from chat). Never read from or written to disk. */
+export const MANAGE_REVIEW_DOCUMENT_ROOT = '.ghostex-review';
+export const MANAGE_ANNOTATION_SEND_TARGET_POLL_INTERVAL_MS = 2_500;
 export const MANAGE_ANNOTATION_SCHEMA_VERSION = 1;
 export const MANAGE_ANNOTATION_IMAGE_MAX_BYTES = 512 * 1024;
 export const MANAGE_ANNOTATION_MAX_IMAGES = 4;

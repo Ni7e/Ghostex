@@ -67,7 +67,9 @@ export type ProjectDocsRequest = {
     | 'createFolder'
     | 'move'
     | 'revealInFinder'
-    | 'openDocsFoldersSettings';
+    | 'openDocsFoldersSettings'
+    | 'annotationSendTarget'
+    | 'sendAnnotationFeedback';
   content?: string;
   directoryOnly?: boolean;
   deferGitBaseline?: boolean;
@@ -95,7 +97,25 @@ export type ProjectDocsResponse = {
   path?: string;
   requestId: string;
   rootName?: string;
+  /**
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: annotation feedback goes to the session last clicked in the sidebar for the active project, into its chat composer or its agent CLI depending on which is showing, and only when the CLI's input box is detected as available; otherwise it is copied to the clipboard with a toast and the copy sound.
+   * `annotationSendTarget` answers with the current target (absent when feedback would be copied); `sendAnnotationFeedback` answers with where the text actually went.
+   */
+  annotationTarget?: ProjectDocsAnnotationSendTarget | null;
+  annotationDelivery?: ProjectDocsAnnotationDelivery;
 };
+
+export type ProjectDocsAnnotationSendTarget = {
+  /** Agent name shown to the user ("Claude", "Codex"). */
+  agentLabel: string;
+  /** Sidebar title of the session. */
+  sessionTitle: string;
+  /** Which surface the session currently shows. */
+  surface: 'chat' | 'terminal';
+};
+
+export type ProjectDocsAnnotationDelivery = 'chat' | 'terminal' | 'clipboard';
 
 export type ProjectDocsResourceRequest = {
   action: typeof PROJECT_DOCS_RESOURCE_ACTION;

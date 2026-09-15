@@ -42,6 +42,40 @@ export type ManageAnnotation = {
   quote: string;
   scope: ManageAnnotationScope;
   type: ManageAnnotationType;
+  /**
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: match the Herdr Annotate review loop, so every note remembers when it was last edited and last delivered to the agent, and Finish review archives delivered notes instead of deleting them.
+   * A note is pending while it has never been sent or was edited after its last send; an archived note stays in the sidecar so it can be restored with its send history.
+   */
+  updatedAt?: string;
+  sentAt?: string;
+  archivedAt?: string;
+};
+
+/** Where annotation feedback goes when the user presses Send, as reported by the app. */
+export type ManageAnnotationSendTarget = {
+  agentLabel: string;
+  sessionTitle: string;
+  surface: 'chat' | 'terminal';
+};
+
+export type ManageAnnotationSendState =
+  | { kind: 'idle' }
+  | { kind: 'sending' }
+  | { delivery: 'chat' | 'clipboard' | 'terminal'; kind: 'sent'; count: number; fileCount: number }
+  | { kind: 'error'; message: string }
+  | { kind: 'notice'; message: string };
+
+/**
+ * A document that is reviewed without a file behind it: an agent reply opened
+ * from the chat. Its annotations live only in memory and are never written to
+ * the sidecar.
+ */
+export type ManageReviewDocument = {
+  content: string;
+  id: string;
+  sessionTitle: string;
+  title: string;
 };
 
 export type ManageAnnotationStore = {
@@ -189,6 +223,7 @@ export type ManageSelectionToolbarMode = 'annotations' | 'formatting';
 export type ManageMeoAnnotationDecoration = {
   from: number;
   labelId?: ManageQuickLabelId;
+  sent?: boolean;
   to: number;
   type: ManageAnnotationType;
 };
@@ -223,6 +258,7 @@ export type ExcalidrawFileData = {
 
 export type ManageDocsOpenFileWindow = Window & {
   ghostexOpenDocsFile?: (path: unknown) => void;
+  ghostexOpenDocsReview?: (payload: unknown) => void;
 };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

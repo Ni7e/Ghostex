@@ -310,6 +310,11 @@ impl GhostexGpuiApp {
             self.receive_gpui_app_toast_bridge_message(&message, cx);
             return;
         }
+        // CDXC:Clipboard 2026-09-15 SEE-ALSO: chat.html has its own bridge receiver, so the shared copy-sound message (packages/core-ui/copy-sound.ts) needs this arm as well as the app-modal one.
+        if message.get("type").and_then(serde_json::Value::as_str) == Some("playCopySound") {
+            gpui_play_copy_sound();
+            return;
+        }
         // CDXC:Settings 2026-09-06 WHY: The chat bridge previously dropped Settings opens as unknown chat actions, so the account settings shortcut did nothing. Route this modal through the existing native modal owner.
         // CDXC:SessionChat 2026-09-06 WHY:
         // Transcript diagrams use the shared modal launcher; their expand requests must reach the native diagram window instead of being discarded as unknown chat actions.
@@ -621,6 +626,17 @@ impl GhostexGpuiApp {
                 return;
             };
             self.locate_session_chat_file(session_id, path, cx);
+            return;
+        }
+        if action == "annotateReply" {
+            let Some(markdown) = message
+                .get("markdown")
+                .and_then(serde_json::Value::as_str)
+                .filter(|markdown| !markdown.trim().is_empty())
+            else {
+                return;
+            };
+            self.open_session_chat_reply_in_docs_review(session_id, markdown, window, cx);
             return;
         }
         if action == "openFile" {
@@ -1306,6 +1322,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         cx.write_to_clipboard(ClipboardItem::new_string(path.to_string()));
+        gpui_play_copy_sound();
         self.upsert_gpui_app_toast(
             GpuiAppToast {
                 copy_text: None,
@@ -1333,6 +1350,7 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         cx.write_to_clipboard(ClipboardItem::new_string(path.to_string()));
+        gpui_play_copy_sound();
         self.upsert_gpui_app_toast(
             GpuiAppToast {
                 copy_text: None,
@@ -1383,6 +1401,7 @@ impl GhostexGpuiApp {
             "Couldn't find this file. Try searching in Code.".to_string()
         };
         cx.write_to_clipboard(ClipboardItem::new_string(path.to_string()));
+        gpui_play_copy_sound();
         self.upsert_gpui_app_toast(
             GpuiAppToast {
                 copy_text: None,

@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode } from 'react';
+import { playCopySound } from '@/packages/core-ui/copy-sound';
 import { IconCircleCheck, IconHelpCircle, IconTestPipe } from '@tabler/icons-react';
 import {
   MANAGE_ANNOTATION_IMAGE_MAX_BYTES,
@@ -271,6 +272,9 @@ export function normalizeStoredAnnotation(value: unknown): ManageAnnotation | un
     return undefined;
   }
   const labelId = normalizeQuickLabelId(value.labelId);
+  const updatedAt = normalizeStoredTimestamp(value.updatedAt);
+  const sentAt = normalizeStoredTimestamp(value.sentAt);
+  const archivedAt = normalizeStoredTimestamp(value.archivedAt);
   return {
     attachments,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString(),
@@ -280,7 +284,84 @@ export function normalizeStoredAnnotation(value: unknown): ManageAnnotation | un
     quote,
     scope: quote ? 'selection' : 'global',
     type,
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(sentAt ? { sentAt } : {}),
+    ...(archivedAt ? { archivedAt } : {}),
   };
+}
+
+export function normalizeStoredTimestamp(value: unknown): string | undefined {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : undefined;
+}
+
+export function isManageAnnotationActive(annotation: ManageAnnotation): boolean {
+  return !annotation.archivedAt;
+}
+
+export function isManageAnnotationArchived(annotation: ManageAnnotation): boolean {
+  return Boolean(annotation.archivedAt);
+}
+
+/** Never sent, or edited after its last send. Coverage follows each note's own last send, not the last batch. */
+export function isManageAnnotationPending(annotation: ManageAnnotation): boolean {
+  if (!annotation.sentAt) {
+    return true;
+  }
+  const edited = Date.parse(annotation.updatedAt ?? annotation.createdAt);
+  const sent = Date.parse(annotation.sentAt);
+  if (!Number.isFinite(sent)) {
+    return true;
+  }
+  return Number.isFinite(edited) && edited > sent;
+}
+
+export function activeManageAnnotations(annotations: readonly ManageAnnotation[]): ManageAnnotation[] {
+  return annotations.filter(isManageAnnotationActive);
+}
+
+export function archivedManageAnnotations(annotations: readonly ManageAnnotation[]): ManageAnnotation[] {
+  return annotations.filter(isManageAnnotationArchived);
+}
+
+export function pendingManageAnnotations(annotations: readonly ManageAnnotation[]): ManageAnnotation[] {
+  return annotations.filter(
+    (annotation) => isManageAnnotationActive(annotation) && isManageAnnotationPending(annotation)
+  );
+}
+
+export function sentManageAnnotations(annotations: readonly ManageAnnotation[]): ManageAnnotation[] {
+  return annotations.filter(
+    (annotation) => isManageAnnotationActive(annotation) && !isManageAnnotationPending(annotation)
+  );
+}
+
+export type ManageAnnotationReviewCounts = { archived: number; pending: number; sent: number };
+
+export function manageAnnotationReviewCounts(annotations: readonly ManageAnnotation[]): ManageAnnotationReviewCounts {
+  let pending = 0;
+  let sent = 0;
+  let archived = 0;
+  for (const annotation of annotations) {
+    if (annotation.archivedAt) {
+      archived += 1;
+    } else if (isManageAnnotationPending(annotation)) {
+      pending += 1;
+    } else {
+      sent += 1;
+    }
+  }
+  return { archived, pending, sent };
+}
+
+/**
+ * A timestamp strictly later than `after`, so an edit made in the same
+ * millisecond as a send (or with a clock that moved backwards) still counts as
+ * pending.
+ */
+export function manageAnnotationTimestampAfter(after: string | undefined): string {
+  const now = Date.now();
+  const floor = after ? Date.parse(after) : Number.NaN;
+  return new Date(Number.isFinite(floor) && floor >= now ? floor + 1 : now).toISOString();
 }
 
 export function normalizeStoredAttachment(value: unknown): ManageAnnotationImage | undefined {
@@ -311,54 +392,56 @@ export function normalizeQuickLabelId(value: unknown): ManageQuickLabelId | unde
   return MANAGE_QUICK_LABELS.some((label) => label.id === value) ? (value as ManageQuickLabelId) : undefined;
 }
 
-export function formatManageAnnotationsAsMarkdown(path: string, annotations: ManageAnnotation[]): string {
-  if (annotations.length === 0) {
-    return `# Docs Markdown Feedback\n\nFile: \`${path}\`\n\nNo annotations.\n`;
+export function findManageAnnotationTextMatches(text: string, quote: string): Array<{ from: number; to: number }> {
+  const normalizedQuote = normalizeAnnotationQuote(quote);
+  if (!normalizedQuote) {
+    return [];
   }
-  const lines = ['# Docs Markdown Feedback', '', `File: \`${path}\``, ''];
-  const redlines = annotations.filter((annotation) => annotation.type === 'redline');
-  const comments = annotations.filter((annotation) => annotation.type === 'comment');
-  if (redlines.length > 0) {
-    lines.push('## Redlines', '');
-    for (const annotation of redlines) {
-      lines.push(`- Delete: ${formatMarkdownQuote(annotation.quote)}`);
-      appendAnnotationDetails(lines, annotation);
+  const normalizedText = buildManageNormalizedTextIndex(text);
+  const matches: Array<{ from: number; to: number }> = [];
+  let fromIndex = 0;
+  while (fromIndex < normalizedText.text.length) {
+    const matchIndex = normalizedText.text.indexOf(normalizedQuote, fromIndex);
+    if (matchIndex < 0) {
+      break;
     }
-    lines.push('');
-  }
-  if (comments.length > 0) {
-    lines.push('## Comments', '');
-    for (const annotation of comments) {
-      const prefix = annotation.scope === 'global' ? 'Global' : `On ${formatMarkdownQuote(annotation.quote)}`;
-      const body =
-        annotation.note.trim() || (annotation.labelId ? quickLabelText(annotation.labelId) : '(attachment only)');
-      lines.push(`- ${prefix}: ${body}`);
-      appendAnnotationDetails(lines, annotation);
+    const start = normalizedText.positions[matchIndex];
+    const end = normalizedText.positions[matchIndex + normalizedQuote.length - 1];
+    if (typeof start === 'number' && typeof end === 'number' && end >= start) {
+      matches.push({ from: start, to: end + 1 });
     }
+    fromIndex = matchIndex + normalizedQuote.length;
   }
-  return `${lines.join('\n').trimEnd()}\n`;
+  return matches;
 }
 
-export function appendAnnotationDetails(lines: string[], annotation: ManageAnnotation): void {
-  if (annotation.labelId) {
-    lines.push(`  - Label: ${quickLabelText(annotation.labelId)}`);
-  }
-  if (annotation.type === 'redline' && annotation.note.trim()) {
-    lines.push(`  - Note: ${annotation.note.trim()}`);
-  }
-  if (annotation.attachments.length > 0) {
-    lines.push('  - Attachments:');
-    for (const attachment of annotation.attachments) {
-      lines.push(`    - ${attachment.name}: ${attachment.dataUrl}`);
+export function buildManageNormalizedTextIndex(text: string): { positions: number[]; text: string } {
+  const positions: number[] = [];
+  let normalized = '';
+  let previousWasWhitespace = true;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] ?? '';
+    if (/\s/u.test(character)) {
+      if (!previousWasWhitespace) {
+        normalized += ' ';
+        positions.push(index);
+        previousWasWhitespace = true;
+      }
+      continue;
     }
+    normalized += character;
+    positions.push(index);
+    previousWasWhitespace = false;
   }
-}
-
-export function formatMarkdownQuote(text: string): string {
-  return `"${text.replace(/"/gu, '\\"')}"`;
+  if (normalized.endsWith(' ')) {
+    normalized = normalized.slice(0, -1);
+    positions.pop();
+  }
+  return { positions, text: normalized };
 }
 
 export async function writeTextToClipboard(text: string): Promise<void> {
+  playCopySound();
   try {
     await navigator.clipboard.writeText(text);
     return;

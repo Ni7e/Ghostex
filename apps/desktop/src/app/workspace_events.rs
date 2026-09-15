@@ -51,6 +51,16 @@ impl GhostexGpuiApp {
         Runtime workarea bridge events are accepted only from the CefSurface that owns the current slot. Manage file events resolve against the explicit in-memory project root from the sidebar snapshot, Kanban/Automate Beads and board events call gxserver's typed Project Board endpoints, and response dispatch stays inside the owning CEF surface without WKWebView/WebKit handlers, shelling out to bd, fallback project detection, logs, persistence, or generic IPC.
         */
         match (slot_key, event) {
+            // CDXC:Clipboard 2026-09-15 SEE-ALSO: The Kanban, Automate, and Docs pages have no app-modal host shim, so packages/core-ui/copy-sound.ts posts the copy-sound request through the project-board bridge function every project workarea page receives; it needs no response.
+            (_, cef::ProjectWorkareaBridgeEvent::ProjectBoardRequest(payload))
+                if serde_json::from_str::<serde_json::Value>(&payload)
+                    .ok()
+                    .and_then(|request| manage_request_string(&request, "action"))
+                    .as_deref()
+                    == Some("playCopySound") =>
+            {
+                gpui_play_copy_sound();
+            }
             (
                 ProjectWorkareaCefSurfaceSlotKey::Manage,
                 cef::ProjectWorkareaBridgeEvent::ManageFilesRequest(payload),
@@ -72,6 +82,34 @@ impl GhostexGpuiApp {
                             window,
                             cx,
                         );
+                    }
+                    return;
+                }
+                // Annotation feedback never touches the file system: the target
+                // session and the delivery are app state, so both requests are
+                // answered here instead of through the git-backed file bridge.
+                if let Ok(request) = serde_json::from_str::<serde_json::Value>(&payload)
+                    && let Some(action) = manage_request_string(&request, "action")
+                    && matches!(
+                        action.as_str(),
+                        "annotationSendTarget" | "sendAnnotationFeedback"
+                    )
+                {
+                    let request_id =
+                        manage_request_string(&request, "requestId").unwrap_or_default();
+                    if action == "annotationSendTarget" {
+                        let response =
+                            self.docs_annotation_send_target_response(&action, &request_id);
+                        self.dispatch_project_workarea_json_event(
+                            slot_key,
+                            "ghostex-manage-files-response",
+                            &response.to_string(),
+                            cx,
+                        );
+                    } else {
+                        let content =
+                            manage_request_string(&request, "content").unwrap_or_default();
+                        self.send_docs_annotation_feedback(action, request_id, content, cx);
                     }
                     return;
                 }

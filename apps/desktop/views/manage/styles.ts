@@ -6,6 +6,7 @@ import {
   MANAGE_REDLINE_ANNOTATION_COLOR,
 } from './constants';
 import { quickLabelColor } from './annotation-store';
+import nativeFloatingPanelShadow from '@/packages/core-ui/assets/native-floating-panel-shadow.png';
 
 export const MANAGE_STYLES = `
   :root {
@@ -91,7 +92,7 @@ export const MANAGE_STYLES = `
   .manage-shell {
     background: var(--manage-bg);
     display: grid;
-    grid-template-columns: var(--manage-sidebar-width, 292px) 5px minmax(0, 1fr);
+    grid-template-columns: var(--manage-sidebar-width, 292px) 6px minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     position: relative;
@@ -109,7 +110,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-shell[data-sidebar-side="right"] {
-    grid-template-columns: minmax(0, 1fr) 5px var(--manage-sidebar-width, 292px);
+    grid-template-columns: minmax(0, 1fr) 6px var(--manage-sidebar-width, 292px);
     --manage-sidebar-reveal-offset: 100%;
   }
 
@@ -148,11 +149,11 @@ export const MANAGE_STYLES = `
     }
 
     /* Pinning a peek leaves the panel exactly where it is and only drops its raised shadow, so fade that out over the same curve instead of snapping it. */
-    .manage-sidebar {
-      transition: box-shadow var(--manage-sidebar-reveal-duration) var(--manage-sidebar-reveal-easing);
+    .manage-sidebar::before {
+      transition: opacity var(--manage-sidebar-reveal-duration) var(--manage-sidebar-reveal-easing);
     }
 
-    .manage-shell[data-sidebar-motion] .manage-sidebar {
+    .manage-shell[data-sidebar-motion] .manage-sidebar::before {
       transition: none;
     }
   }
@@ -188,11 +189,12 @@ export const MANAGE_STYLES = `
    * User: make the files list match the existing app sidebar, including its lightweight text, neutral row states, and context menu.
    */
   /*
-   * CDXC:Docs 2026-09-07 DECISION:
-   * User: Docs files sidebar, search row, and header rows (including header button resting fills when set) use #0b0b0b.
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: in light mode the Docs files list, its search row, and the document and formatting toolbars use #f4f4f5, the search row's bottom border is #e5e5e5, and the docked files list gets a #e5e5e5 border on the edge that faces the content next to a 6px resizer gap.
+   * Dark mode keeps the 2026-09-07 decision (files sidebar, search row, and header rows use #0b0b0b) until the user shares dark colours.
    */
   .manage-sidebar {
-    background: light-dark(#ffffff, #0b0b0b);
+    background: light-dark(#f4f4f5, #0b0b0b);
     color: var(--app-foreground);
     box-sizing: border-box;
     display: flex;
@@ -202,6 +204,41 @@ export const MANAGE_STYLES = `
     min-height: 0;
     min-width: 0;
     padding: 0 0 7px;
+    position: relative;
+  }
+
+  .manage-shell[data-sidebar-floating="false"][data-sidebar-side="left"] .manage-sidebar {
+    border-right: 1px solid light-dark(#e5e5e5, #212121);
+  }
+
+  .manage-shell[data-sidebar-floating="false"][data-sidebar-side="right"] .manage-sidebar {
+    border-left: 1px solid light-dark(#e5e5e5, #212121);
+  }
+
+  /*
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: the floating Docs file list shadow must exactly match the app's floating sidebar shadow.
+   * The sidebar uses AppKit's window shadow, so use a 2x capture of the same borderless, nonactivating NSPanel instead of approximating it with CSS blur layers.
+   * The capture has 19/23/27/23px outer margins; nine-slicing preserves 23px of each inner corner, and the clip removes the captured panel so the current theme paints its own content.
+   * SEE-ALSO: apps/desktop/native/macos/GpuiSidebarReveal.m, packages/core-ui/assets/native-floating-panel-shadow.png.
+   */
+  .manage-sidebar::before {
+    border: solid transparent;
+    border-width: 42px 46px 50px;
+    border-image: url("${nativeFloatingPanelShadow}") 84 92 100 92 stretch;
+    clip-path: polygon(evenodd,
+      0 0, 100% 0, 100% 100%, 0 100%, 0 0,
+      23px 19px, calc(100% - 23px) 19px,
+      calc(100% - 23px) calc(100% - 27px), 23px calc(100% - 27px), 23px 19px);
+    content: "";
+    inset: -19px -23px -27px;
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+  }
+
+  .manage-shell[data-sidebar-floating="true"] .manage-sidebar::before {
+    opacity: 1;
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar {
@@ -212,9 +249,6 @@ export const MANAGE_STYLES = `
   .manage-shell[data-sidebar-floating="true"] .manage-sidebar {
     border-right: 1px solid var(--manage-border);
     bottom: 0;
-    box-shadow:
-      16px 0 36px rgba(0, 0, 0, 0.42),
-      4px 0 14px rgba(0, 0, 0, 0.26);
     grid-column: 1;
     grid-row: 1;
     left: 0;
@@ -228,9 +262,6 @@ export const MANAGE_STYLES = `
   .manage-shell[data-sidebar-floating="true"][data-sidebar-side="right"] .manage-sidebar {
     border-left: 1px solid var(--manage-border);
     border-right: 0;
-    box-shadow:
-      -16px 0 36px rgba(0, 0, 0, 0.42),
-      -4px 0 14px rgba(0, 0, 0, 0.26);
     left: auto;
     right: 0;
   }
@@ -240,7 +271,7 @@ export const MANAGE_STYLES = `
     cursor: ew-resize;
     grid-column: 2;
     grid-row: 1;
-    min-width: 5px;
+    min-width: 6px;
     outline: none;
     position: relative;
     touch-action: none;
@@ -261,26 +292,37 @@ export const MANAGE_STYLES = `
     right: auto;
   }
 
+  /*
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: the Docs files-list drag handle works just like the divider between the companion side pane and the main view in the GPUI app.
+   * That divider shows a 3px line centred in the handle after a 50ms hover delay, fades it in over 180ms on an ease-out quint curve, hides it instantly on leave, keeps it while dragging, and resets the width on double-click.
+   * SEE-ALSO: apps/desktop/src/app/render/project_editor_companion.rs (render_project_editor_companion_divider), sidebar_divider_hover_line_color, SIDEBAR_DIVIDER_HOVER_DELAY, SIDEBAR_DIVIDER_HOVER_FADE_DURATION.
+   */
   .manage-sidebar-resizer::after {
-    background: #ffffff;
+    background: light-dark(#93c5fd, #ffffff);
     bottom: 0;
     content: "";
     opacity: 0;
     position: absolute;
-    right: 0;
+    right: 2px;
     top: 0;
-    transition: opacity 180ms ease-out 50ms;
     width: 3px;
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar-resizer::after {
-    left: 0;
+    left: 2px;
     right: auto;
   }
 
   .manage-sidebar-resizer:hover::after,
-  .manage-sidebar-resizer:focus-visible::after {
+  .manage-sidebar-resizer:focus-visible::after,
+  .manage-sidebar-resizer[data-dragging="true"]::after {
     opacity: 1;
+    transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1) 50ms;
+  }
+
+  .manage-sidebar-resizer[data-dragging="true"]::after {
+    transition: none;
   }
 
   .manage-shell[data-sidebar-floating="true"] .manage-sidebar-resizer {
@@ -549,9 +591,9 @@ export const MANAGE_STYLES = `
   .manage-search {
     /* CDXC:Docs 2026-09-06 DECISION: User: make the Docs file search bar 3px taller. */
     align-items: center;
-    background: light-dark(#ffffff, #0b0b0b);
+    background: light-dark(#f4f4f5, #0b0b0b);
     border: 0;
-    border-bottom: 1px solid #292929;
+    border-bottom: 1px solid light-dark(#e5e5e5, #292929);
     box-sizing: border-box;
     display: flex;
     gap: 11px;
@@ -910,7 +952,7 @@ export const MANAGE_STYLES = `
   .manage-preview-header {
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     align-items: center;
-    background: light-dark(#ffffff, #0b0b0b);
+    background: light-dark(#f4f4f5, #0b0b0b);
     border-bottom: 1px solid var(--manage-border);
     box-sizing: border-box;
     display: flex;
@@ -1084,7 +1126,7 @@ export const MANAGE_STYLES = `
     width: 100%;
   }
 
-  .manage-preview-header-actions button,
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)),
   .manage-comment-popover-actions button,
   .manage-markdown-selection-toolbar button {
     align-items: center;
@@ -1096,7 +1138,7 @@ export const MANAGE_STYLES = `
     min-width: 0;
   }
 
-  .manage-preview-header-actions button,
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)),
   .manage-comment-popover-actions button {
     background: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
     border: 1px solid var(--manage-border);
@@ -1105,7 +1147,7 @@ export const MANAGE_STYLES = `
     padding: 0 8px;
   }
 
-  .manage-preview-header-actions button {
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)) {
     background: transparent;
     border: 0;
     border-radius: 4px;
@@ -1122,8 +1164,8 @@ export const MANAGE_STYLES = `
     padding: 0 7px;
   }
 
-  .manage-preview-header-actions button:not(:disabled):hover,
-  .manage-preview-header-actions button:not(:disabled):focus-visible,
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)):not(:disabled):hover,
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)):not(:disabled):focus-visible,
   .manage-comment-popover-actions button:not(:disabled):hover,
   .manage-comment-popover-actions button:not(:disabled):focus-visible {
     background: rgba(125, 211, 252, 0.12);
@@ -1132,9 +1174,9 @@ export const MANAGE_STYLES = `
     outline: none;
   }
 
-  .manage-preview-header-actions button:not(:disabled):hover,
-  .manage-preview-header-actions button:not(:disabled):focus-visible,
-  .manage-preview-header-actions button[aria-expanded="true"],
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)):not(:disabled):hover,
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)):not(:disabled):focus-visible,
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button))[aria-expanded="true"],
   .manage-preview-header-actions .manage-annotation-toggle[aria-pressed="true"] {
     background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
     border-color: light-dark(#d4d4d8, #252525);
@@ -1142,19 +1184,19 @@ export const MANAGE_STYLES = `
     outline: none;
   }
 
-  .manage-preview-header-actions button:disabled,
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)):disabled,
   .manage-comment-popover-actions button:disabled {
     color: var(--manage-subtle);
   }
 
-  .manage-preview-header-actions button:disabled {
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)):disabled {
     background: transparent;
     color: var(--manage-toolbar-disabled-color);
     cursor: default;
     opacity: 1;
   }
 
-  .manage-preview-header-actions button:disabled:hover {
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)):disabled:hover {
     background: transparent;
     color: var(--manage-toolbar-disabled-color);
   }
@@ -1203,7 +1245,13 @@ export const MANAGE_STYLES = `
     padding: 0 4px;
   }
 
-  .manage-preview-header-actions button svg {
+  /*
+   * CDXC:Docs 2026-09-15 WHY:
+   * The review-menu exclusion is wrapped in :where() so these generic rules keep the specificity of a plain descendant selector.
+   * Without it the base padding (0 7px) outranked the icon-only buttons' padding: 0, the 28px tile left 14px of content, and the flex-item icon shrank to 14px wide while the files-list header icons stayed 18px.
+   */
+  .manage-preview-header-actions button:where(:not(.manage-review-menu button)) svg {
+    flex: 0 0 auto;
     height: 18px;
     width: 18px;
     stroke-width: 1.7;
@@ -1215,7 +1263,7 @@ export const MANAGE_STYLES = `
 
   .manage-file-change-indicator {
     background: #fbbf24;
-    border: 1px solid light-dark(#f7f7f8, #0e0e0e);
+    border: 1px solid light-dark(#f4f4f5, #0e0e0e);
     border-radius: 999px;
     box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.18);
     height: 7px;
@@ -1243,7 +1291,7 @@ export const MANAGE_STYLES = `
    * Keep Meo's single-row toolbar layout, measure before hiding the three secondary right-side utility buttons, and use one Live/Source toggle button instead of a two-option segmented control.
    */
   .manage-meo-markdown-editor .mode-toolbar {
-    background: light-dark(#ffffff, #0b0b0b);
+    background: light-dark(#f4f4f5, #0b0b0b);
     box-shadow: inset 0 -1px 0 var(--manage-border);
     box-sizing: border-box;
     display: flex;
@@ -1774,6 +1822,158 @@ export const MANAGE_STYLES = `
     padding: 10px;
   }
 
+  .manage-preview-header-actions .manage-send-feedback-button {
+    color: light-dark(#0f766e, #5eead4);
+    flex: 0 1 auto;
+    gap: 5px;
+    max-width: min(360px, 42vw);
+    padding: 0 8px;
+  }
+
+  .manage-preview-header-actions .manage-send-feedback-button > span {
+    display: inline-block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .manage-preview-header-actions .manage-send-feedback-button:not(:disabled):hover,
+  .manage-preview-header-actions .manage-send-feedback-button:not(:disabled):focus-visible {
+    background: rgba(45, 212, 191, 0.12);
+    color: light-dark(#0f766e, #99f6e4);
+  }
+
+  .manage-preview-header-actions .manage-send-feedback-button[data-state="sent"] {
+    color: light-dark(#15803d, #86efac);
+  }
+
+  .manage-preview-header-actions .manage-send-feedback-button[data-state="error"] {
+    color: light-dark(#be123c, #fda4af);
+  }
+
+  .manage-preview-header-actions .manage-send-feedback-button[data-state="notice"],
+  .manage-preview-header-actions .manage-send-feedback-button[data-state="sending"] {
+    color: var(--manage-muted);
+  }
+
+  .manage-review-menu-shell {
+    display: inline-flex;
+    position: relative;
+  }
+
+  .manage-preview-header-actions .manage-review-menu-trigger {
+    flex: 0 0 var(--manage-header-button-size);
+    padding: 0;
+    width: var(--manage-header-button-size);
+  }
+
+  /*
+   * The menu lives inside the header actions, whose generic button rules size
+   * every button as an icon tile and hide its text in the compact header, so
+   * those rules exclude the menu's buttons and the rows style themselves.
+   */
+  .manage-review-menu {
+    width: min(320px, calc(100vw - 28px));
+  }
+
+  .manage-review-menu-back {
+    background: transparent;
+    border: 0;
+    color: var(--manage-muted);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+  }
+
+  .manage-review-menu-back:hover {
+    color: var(--manage-text);
+  }
+
+  .manage-review-menu-list {
+    display: grid;
+    gap: 2px;
+    padding: 6px;
+  }
+
+  .manage-review-menu-row {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: var(--manage-text);
+    cursor: pointer;
+    display: grid;
+    font: inherit;
+    font-size: 12px;
+    gap: 8px;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+    min-height: 30px;
+    padding: 0 8px;
+    text-align: left;
+  }
+
+  .manage-review-menu-row svg {
+    color: var(--manage-muted);
+  }
+
+  .manage-review-menu-row:not(:disabled):hover,
+  .manage-review-menu-row:not(:disabled):focus-visible {
+    background: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
+    outline: none;
+  }
+
+  .manage-review-menu-row:disabled {
+    color: var(--manage-subtle);
+    cursor: default;
+  }
+
+  .manage-review-menu-row:disabled svg {
+    color: var(--manage-subtle);
+  }
+
+  .manage-review-menu-row-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .manage-review-menu-row-description {
+    color: var(--manage-muted);
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  .manage-review-menu-row:disabled .manage-review-menu-row-description {
+    color: var(--manage-subtle);
+  }
+
+  .manage-annotation-sent-pill {
+    align-items: center;
+    border: 1px solid color-mix(in srgb, var(--manage-annotation-color) 45%, transparent);
+    border-radius: 999px;
+    color: var(--manage-muted);
+    display: inline-flex;
+    font-size: 9.5px;
+    font-weight: 500;
+    gap: 3px;
+    line-height: 1;
+    margin-left: 6px;
+    padding: 2px 6px;
+    vertical-align: middle;
+  }
+
+  .manage-annotation-card[data-sent="true"],
+  .manage-annotation-card[data-archived="true"] {
+    opacity: 0.78;
+  }
+
+  .manage-annotation-highlight[data-sent="true"] {
+    background: color-mix(in srgb, var(--manage-annotation-color) 14%, transparent);
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--manage-annotation-color) 55%, transparent);
+  }
+
   .manage-attachment-strip {
     display: grid;
     gap: 6px;
@@ -1872,7 +2072,9 @@ export const MANAGE_STYLES = `
   }
 
   .manage-preview-header-actions .manage-annotation-remove-button,
-  .manage-annotation-remove-button {
+  .manage-annotation-remove-button,
+  .manage-annotation-edit-button,
+  .manage-annotation-restore-button {
     background: transparent;
     border: 0;
     border-left: 0;
@@ -1895,6 +2097,17 @@ export const MANAGE_STYLES = `
     background: transparent;
     border: 0;
     border-left: 0;
+    color: color-mix(in srgb, var(--manage-annotation-color) 70%, var(--manage-text));
+  }
+
+  .manage-annotation-edit-button {
+    right: 31px;
+  }
+
+  .manage-annotation-edit-button:hover,
+  .manage-annotation-edit-button:focus-visible,
+  .manage-annotation-restore-button:hover,
+  .manage-annotation-restore-button:focus-visible {
     color: color-mix(in srgb, var(--manage-annotation-color) 70%, var(--manage-text));
   }
 
@@ -2252,7 +2465,7 @@ export const MANAGE_STYLES = `
       align-self: auto;
     }
 
-    .manage-preview-content[data-kind="markdown"] .manage-preview-header-actions button span:not(.manage-count-badge):not(.manage-file-change-indicator) {
+    .manage-preview-content[data-kind="markdown"] .manage-preview-header-actions button:where(:not(.manage-review-menu button)) span:not(.manage-count-badge):not(.manage-file-change-indicator) {
       display: none;
     }
 

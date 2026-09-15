@@ -3,9 +3,21 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   useRef,
+  useState,
 } from 'react';
-import { IconMessagePlus, IconX } from '@tabler/icons-react';
+import {
+  IconArchive,
+  IconArrowBackUp,
+  IconCheck,
+  IconFolders,
+  IconMessagePlus,
+  IconPencil,
+  IconRestore,
+  IconSend,
+  IconX,
+} from '@tabler/icons-react';
 import { Bold as MeoBoldIcon } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import {
@@ -21,6 +33,7 @@ import {
   ManageQuickLabel,
   ManageSelectionAnchor,
 } from '../types';
+import { type ManageAnnotationReviewCounts, isManageAnnotationPending } from '../annotation-store';
 import { ManageTooltipButton } from '../manage-tooltip-button';
 import {
   annotationDisplayNote,
@@ -167,6 +180,7 @@ export function ManageCommentPopover({
   onDraftNoteChange,
   onRemoveDraftAttachment,
   onSubmit,
+  submitLabel = 'Submit',
 }: {
   draft: ManageCommentDraft;
   onAddAttachmentFiles: (files: FileList | File[]) => void;
@@ -174,6 +188,7 @@ export function ManageCommentPopover({
   onDraftNoteChange: (note: string) => void;
   onRemoveDraftAttachment: (attachmentId: string) => void;
   onSubmit: () => void;
+  submitLabel?: string;
 }) {
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const canSubmit = Boolean(draft.note.trim()) || draft.attachments.length > 0;
@@ -240,7 +255,7 @@ export function ManageCommentPopover({
          */}
         <button className='manage-comment-popover-submit' disabled={!canSubmit} onClick={onSubmit} type='button'>
           <IconMessagePlus aria-hidden='true' size={14} />
-          Submit
+          {submitLabel}
         </button>
       </div>
       <input
@@ -264,9 +279,11 @@ export function ManageCommentPopover({
 
 export function ManageAnnotationDropdown({
   annotations,
+  onEditAnnotation,
   onRemoveAnnotation,
 }: {
   annotations: ManageAnnotation[];
+  onEditAnnotation: (annotationId: string) => void;
   onRemoveAnnotation: (annotationId: string) => void;
 }) {
   return (
@@ -283,16 +300,40 @@ export function ManageAnnotationDropdown({
         {annotations.length === 0 ? <div className='manage-annotation-empty'>No annotations</div> : null}
         {annotations.map((annotation) => {
           const note = annotationDisplayNote(annotation);
+          const sent = !isManageAnnotationPending(annotation);
           return (
             <article
               className='manage-annotation-card'
               data-label-id={annotation.labelId}
+              data-sent={String(sent)}
               data-type={annotation.type}
               key={annotation.id}
               style={{ '--manage-annotation-color': manageAnnotationColor(annotation) } as CSSProperties}
             >
               <div className='manage-annotation-card-header'>
-                <span>{annotationTypeLabel(annotation)}</span>
+                <span>
+                  {annotationTypeLabel(annotation)}
+                  {sent ? (
+                    <span
+                      className='manage-annotation-sent-pill'
+                      title='Already sent to the agent; editing sends it again'
+                    >
+                      <IconCheck aria-hidden='true' size={11} />
+                      Sent
+                    </span>
+                  ) : null}
+                </span>
+                {annotation.type === 'comment' ? (
+                  <ManageTooltipButton
+                    aria-label='Edit annotation'
+                    className='manage-annotation-edit-button manage-icon-button'
+                    onClick={() => onEditAnnotation(annotation.id)}
+                    tooltip='Edit note'
+                    type='button'
+                  >
+                    <IconPencil aria-hidden='true' size={14} />
+                  </ManageTooltipButton>
+                ) : null}
                 <ManageTooltipButton
                   aria-label='Remove annotation'
                   className='manage-annotation-remove-button manage-icon-button'
@@ -318,6 +359,161 @@ export function ManageAnnotationDropdown({
             </article>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Review menu: the four actions that manage a review round, each with a
+ * live count, dimmed when there is nothing for it to act on. Archive opens the
+ * list of finished notes in place so one can be restored.
+ */
+export function ManageReviewMenu({
+  archivedAnnotations,
+  canUndoFinish,
+  counts,
+  folderPending,
+  onFinishReview,
+  onResendAll,
+  onRestoreAnnotation,
+  onSendAcrossFiles,
+  onUndoFinish,
+}: {
+  archivedAnnotations: ManageAnnotation[];
+  canUndoFinish: boolean;
+  counts: ManageAnnotationReviewCounts;
+  folderPending: { count: number; fileCount: number };
+  onFinishReview: () => void;
+  onResendAll: () => void;
+  onRestoreAnnotation: (annotationId: string) => void;
+  onSendAcrossFiles: () => void;
+  onUndoFinish: () => void;
+}) {
+  const [showArchive, setShowArchive] = useState(false);
+  const activeCount = counts.pending + counts.sent;
+  if (showArchive) {
+    return (
+      <div
+        aria-label='Archived annotations'
+        className='manage-annotation-dropdown manage-review-menu'
+        id='manage-markdown-review-menu'
+        role='dialog'
+      >
+        <header>
+          <span>Archive</span>
+          <button className='manage-review-menu-back' onClick={() => setShowArchive(false)} type='button'>
+            Back
+          </button>
+        </header>
+        <div className='manage-annotation-dropdown-list'>
+          {archivedAnnotations.length === 0 ? (
+            <div className='manage-annotation-empty'>No archived annotations</div>
+          ) : null}
+          {archivedAnnotations.map((annotation) => {
+            const note = annotationDisplayNote(annotation);
+            return (
+              <article
+                className='manage-annotation-card'
+                data-archived='true'
+                data-label-id={annotation.labelId}
+                data-type={annotation.type}
+                key={annotation.id}
+                style={{ '--manage-annotation-color': manageAnnotationColor(annotation) } as CSSProperties}
+              >
+                <div className='manage-annotation-card-header'>
+                  <span>{annotationTypeLabel(annotation)}</span>
+                  <ManageTooltipButton
+                    aria-label='Restore annotation'
+                    className='manage-annotation-restore-button manage-icon-button'
+                    onClick={() => onRestoreAnnotation(annotation.id)}
+                    tooltip='Restore'
+                    type='button'
+                  >
+                    <IconRestore aria-hidden='true' size={14} />
+                  </ManageTooltipButton>
+                </div>
+                {annotation.scope === 'selection' ? <blockquote>{annotation.quote}</blockquote> : null}
+                {note ? <p>{note}</p> : null}
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+  const rows: Array<{
+    description: string;
+    disabled: boolean;
+    icon: ReactNode;
+    label: string;
+    onSelect: () => void;
+  }> = [
+    ...(folderPending.fileCount > 1
+      ? [
+          {
+            description: `${folderPending.count} new in ${folderPending.fileCount} files`,
+            disabled: false,
+            icon: <IconFolders aria-hidden='true' size={15} />,
+            label: 'Send new across all files',
+            onSelect: onSendAcrossFiles,
+          },
+        ]
+      : []),
+    {
+      description: `${counts.sent} sent, ${counts.pending} new`,
+      disabled: activeCount === 0,
+      icon: <IconSend aria-hidden='true' size={15} />,
+      label: 'Resend all',
+      onSelect: onResendAll,
+    },
+    {
+      description: `archive ${counts.sent} sent`,
+      disabled: counts.sent === 0,
+      icon: <IconArchive aria-hidden='true' size={15} />,
+      label: 'Finish review',
+      onSelect: onFinishReview,
+    },
+    {
+      description: 'bring back the last finished batch',
+      disabled: !canUndoFinish,
+      icon: <IconArrowBackUp aria-hidden='true' size={15} />,
+      label: 'Undo finish',
+      onSelect: onUndoFinish,
+    },
+    {
+      description: `${counts.archived} ${counts.archived === 1 ? 'note' : 'notes'}`,
+      disabled: counts.archived === 0,
+      icon: <IconRestore aria-hidden='true' size={15} />,
+      label: 'Archive',
+      onSelect: () => setShowArchive(true),
+    },
+  ];
+  return (
+    <div
+      aria-label='Review actions'
+      className='manage-annotation-dropdown manage-review-menu'
+      id='manage-markdown-review-menu'
+      role='menu'
+    >
+      <header>
+        <span>Review</span>
+      </header>
+      <div className='manage-review-menu-list'>
+        {rows.map((row) => (
+          <button
+            className='manage-review-menu-row'
+            disabled={row.disabled}
+            key={row.label}
+            onClick={row.onSelect}
+            role='menuitem'
+            type='button'
+          >
+            {row.icon}
+            <span className='manage-review-menu-row-label'>{row.label}</span>
+            <span className='manage-review-menu-row-description'>{row.description}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

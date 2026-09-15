@@ -53,6 +53,8 @@ import {
 import { ManageTooltipButton } from './manage-tooltip-button';
 import {
   defaultManageSelectionAnchor,
+  findManageAnnotationTextMatches,
+  isManageAnnotationPending,
   manageAnnotationColor,
   meoSelectionToolbarPosition,
   normalizeAnnotationQuote,
@@ -778,6 +780,7 @@ export function createManageMeoAnnotationDecorations(
   return collectManageAnnotationRanges(text, annotations).map((range) => ({
     from: range.from,
     labelId: range.annotation.labelId,
+    sent: !isManageAnnotationPending(range.annotation),
     to: range.to,
     type: range.annotation.type,
   }));
@@ -798,6 +801,7 @@ export function buildManageMeoAnnotationDecorations(
         attributes: {
           'data-type': decoration.type,
           ...(decoration.labelId ? { 'data-label-id': decoration.labelId } : {}),
+          ...(decoration.sent ? { 'data-sent': 'true' } : {}),
           style: `--manage-annotation-color: ${manageAnnotationColor(decoration)};`,
         },
         class: `annotation-highlight manage-annotation-highlight ${decoration.type === 'redline' ? 'deletion' : 'comment'}`,
@@ -827,54 +831,6 @@ export function collectManageAnnotationRanges(
     }
   }
   return ranges;
-}
-
-export function findManageAnnotationTextMatches(text: string, quote: string): Array<{ from: number; to: number }> {
-  const normalizedQuote = normalizeAnnotationQuote(quote);
-  if (!normalizedQuote) {
-    return [];
-  }
-  const normalizedText = buildManageNormalizedTextIndex(text);
-  const matches: Array<{ from: number; to: number }> = [];
-  let fromIndex = 0;
-  while (fromIndex < normalizedText.text.length) {
-    const matchIndex = normalizedText.text.indexOf(normalizedQuote, fromIndex);
-    if (matchIndex < 0) {
-      break;
-    }
-    const start = normalizedText.positions[matchIndex];
-    const end = normalizedText.positions[matchIndex + normalizedQuote.length - 1];
-    if (typeof start === 'number' && typeof end === 'number' && end >= start) {
-      matches.push({ from: start, to: end + 1 });
-    }
-    fromIndex = matchIndex + normalizedQuote.length;
-  }
-  return matches;
-}
-
-export function buildManageNormalizedTextIndex(text: string): { positions: number[]; text: string } {
-  const positions: number[] = [];
-  let normalized = '';
-  let previousWasWhitespace = true;
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index] ?? '';
-    if (/\s/u.test(character)) {
-      if (!previousWasWhitespace) {
-        normalized += ' ';
-        positions.push(index);
-        previousWasWhitespace = true;
-      }
-      continue;
-    }
-    normalized += character;
-    positions.push(index);
-    previousWasWhitespace = false;
-  }
-  if (normalized.endsWith(' ')) {
-    normalized = normalized.slice(0, -1);
-    positions.pop();
-  }
-  return { positions, text: normalized };
 }
 
 export function syncManageMeoAnnotationReviewState(

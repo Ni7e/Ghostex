@@ -1,6 +1,5 @@
 import { useManageFileIndex } from './file-index';
 import { ManageFileTree, type ManageFileTreeHandle } from './file-tree';
-import { AppTooltip } from '@/packages/core-ui/app-tooltip';
 import {
   type CSSProperties,
   type DragEvent as ReactDragEvent,
@@ -35,6 +34,7 @@ import {
   MANAGE_ANNOTATIONS_SIDECAR_PATH,
   MANAGE_BRIDGE_TIMEOUT_MS,
   MANAGE_CONTENT_AUTOSAVE_DELAY_MS,
+  MANAGE_ANNOTATION_SEND_TARGET_POLL_INTERVAL_MS,
   MANAGE_DOCS_ROOT_PATH,
   MANAGE_DRAG_DATA_TYPE,
   MANAGE_FILES_CHANGED_EVENT,
@@ -55,6 +55,8 @@ import {
 } from './constants';
 import {
   ManageAnnotation,
+  ManageAnnotationSendState,
+  ManageAnnotationSendTarget,
   ManageArtifactKind,
   ManageDocsOpenFileWindow,
   ManageDragState,
@@ -62,8 +64,10 @@ import {
   ManageFileContextMenuState,
   ManageFileOperationState,
   ManageRenameDialogState,
+  ManageReviewDocument,
   ManageSidebarSide,
   ManageWebKitWindow,
+  isRecord,
 } from './types';
 import { ManageFileContextMenu, ManageRenameDialog, ManageSidebarActions } from './file-tree-ui';
 import { isManageFindShortcut } from './keyboard';
@@ -85,8 +89,10 @@ import {
   isExcalidrawPath,
   isHtmlPath,
   isManageDescendantPath,
+  isManageReviewDocumentPath,
   isMarkdownPath,
   isNoOpManageEntryDrop,
+  manageReviewDocumentPath,
   manageFileMetadataSignature,
   moveManagePathToDirectory,
   orderManageEntriesForTree,
@@ -101,11 +107,16 @@ import {
   validateManageRenameFileName,
 } from './file-tree-utils';
 import {
+  activeManageAnnotations,
+  isManageAnnotationPending,
+  manageAnnotationReviewCounts,
+  manageAnnotationTimestampAfter,
   parseManageAnnotationStore,
   serializeManageAnnotationStore,
   stableManageAnnotationStoreKey,
   writeTextToClipboard,
 } from './annotation-store';
+import { type ManageAnnotationFeedbackDocument, formatManageAnnotationFeedback } from './annotation-feedback';
 
 /*
  * CDXC:Docs 2026-06-20-06:14:
@@ -360,6 +371,9 @@ import {
  * once ManageApp registers its handler.
  */
 
+/** One shared empty list so a file without notes keeps the same array identity across renders. */
+const MANAGE_NO_ANNOTATIONS: ManageAnnotation[] = [];
+
 let pendingManageDocsOpenPath: string | undefined;
 let manageDocsOpenFileHandler: ((path: string) => void) | undefined;
 
@@ -382,6 +396,50 @@ export function registerManageDocsOpenFileHandler(handler?: (path: string) => vo
     return;
   }
   pendingManageDocsOpenPath = path;
+};
+
+/*
+ * CDXC:Docs 2026-09-15 DECISION:
+ * User: an agent reply can be annotated like a document. The chat's Annotate action hands the reply's markdown to Docs, which opens it as a review document with no file behind it; its notes live only in memory and feedback goes back to the same session.
+ * The handoff mirrors `ghostexOpenDocsFile`: the app injects the payload before React has mounted, so it parks until the handler registers.
+ * SEE-ALSO: apps/desktop/src/app/session_chat.rs (`annotateReply`), packages/core-ui/chat/session-chat-message-list/rows.tsx (the Annotate button).
+ */
+let pendingManageDocsReviewDocument: ManageReviewDocument | undefined;
+let manageDocsOpenReviewHandler: ((document: ManageReviewDocument) => void) | undefined;
+
+export function registerManageDocsOpenReviewHandler(handler?: (document: ManageReviewDocument) => void): void {
+  manageDocsOpenReviewHandler = handler;
+  if (handler === undefined || pendingManageDocsReviewDocument === undefined) {
+    return;
+  }
+  const document = pendingManageDocsReviewDocument;
+  pendingManageDocsReviewDocument = undefined;
+  handler(document);
+}
+
+export function parseManageReviewDocument(payload: unknown): ManageReviewDocument | undefined {
+  if (!isRecord(payload) || typeof payload.content !== 'string' || payload.content.trim().length === 0) {
+    return undefined;
+  }
+  const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : 'Agent reply';
+  const sessionTitle = typeof payload.sessionTitle === 'string' ? payload.sessionTitle.trim() : '';
+  const id =
+    typeof payload.id === 'string' && /^[A-Za-z0-9._-]+$/u.test(payload.id)
+      ? payload.id
+      : `reply-${Date.now().toString(36)}`;
+  return { content: payload.content, id, sessionTitle, title };
+}
+
+(window as ManageDocsOpenFileWindow).ghostexOpenDocsReview = (payload: unknown) => {
+  const document = parseManageReviewDocument(payload);
+  if (!document) {
+    return;
+  }
+  if (manageDocsOpenReviewHandler !== undefined) {
+    manageDocsOpenReviewHandler(document);
+    return;
+  }
+  pendingManageDocsReviewDocument = document;
 };
 
 /** Every ancestor folder of a docs-relative path ("a/b/c.md" → ["a", "a/b"]). */
@@ -425,8 +483,15 @@ export function ManageApp() {
   const [, setAnnotationPersistenceState] = useState<'idle' | 'loading' | 'ready' | 'saving' | 'saved' | 'error'>(
     'idle'
   );
+  const [reviewDocument, setReviewDocument] = useState<ManageReviewDocument>();
+  const [reviewAnnotations, setReviewAnnotations] = useState<ManageAnnotation[]>([]);
+  const [annotationSendTarget, setAnnotationSendTarget] = useState<ManageAnnotationSendTarget | null>(null);
+  const [annotationSendState, setAnnotationSendState] = useState<ManageAnnotationSendState>({ kind: 'idle' });
+  const lastFinishedReviewRef = useRef<{ ids: string[]; path: string } | undefined>(undefined);
+  const annotationSendStateTimerRef = useRef<number | undefined>(undefined);
   const [sidebarSide, setSidebarSide] = useState<ManageSidebarSide>(() => readStoredManageSidebarSide());
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   /**
    * CDXC:Docs 2026-09-12 DECISION:
    * User: the files sidebar has one persisted intent, pinned or hidden, and the shell width alone decides whether a pinned sidebar is docked or, below the floating breakpoint, a closed drawer.
@@ -475,11 +540,16 @@ export function ManageApp() {
   const fileTreeRef = useRef<ManageFileTreeHandle>(null);
   const lastPersistedAnnotationsRef = useRef('');
   const isEditablePreview = preview?.kind === 'text';
-  const isDirty = isEditablePreview && draftContent !== lastSavedContent;
+  const isReviewDocumentSelected = isManageReviewDocumentPath(selectedPath);
+  const isDirty = isEditablePreview && !isReviewDocumentSelected && draftContent !== lastSavedContent;
 
   const readFile = useCallback(
     async (path: string) => {
       const sequence = ++fileReadSequenceRef.current;
+      if (isManageReviewDocumentPath(selectedPathRef.current)) {
+        setReviewDocument(undefined);
+        setReviewAnnotations([]);
+      }
       setHasExternalChanges(false);
       setSelectedPath(path);
       selectedPathRef.current = path;
@@ -579,6 +649,42 @@ export function ManageApp() {
     return () => registerManageDocsOpenFileHandler(undefined);
   }, [readFile]);
 
+  const openReviewDocument = useCallback((document: ManageReviewDocument) => {
+    fileReadSequenceRef.current += 1;
+    const path = manageReviewDocumentPath(document.id);
+    setReviewDocument(document);
+    setReviewAnnotations([]);
+    setHasExternalChanges(false);
+    setSelectedPath(path);
+    selectedPathRef.current = path;
+    setPreview({ content: document.content, displayPath: document.title, kind: 'text', name: document.title, path });
+    setDraftContent(document.content);
+    setLastSavedContent(document.content);
+    setPreviewState('ready');
+    setSaveState('idle');
+    setError(undefined);
+  }, []);
+
+  useEffect(() => {
+    registerManageDocsOpenReviewHandler(openReviewDocument);
+    return () => registerManageDocsOpenReviewHandler(undefined);
+  }, [openReviewDocument]);
+
+  const closeReviewDocument = useCallback(() => {
+    if (!isManageReviewDocumentPath(selectedPathRef.current)) {
+      return;
+    }
+    fileReadSequenceRef.current += 1;
+    setReviewDocument(undefined);
+    setReviewAnnotations([]);
+    setSelectedPath(undefined);
+    selectedPathRef.current = undefined;
+    setPreview(undefined);
+    setDraftContent('');
+    setLastSavedContent('');
+    setPreviewState('idle');
+  }, []);
+
   const refreshFiles = useCallback(() => refreshIndex(true), [refreshIndex]);
 
   useLayoutEffect(() => {
@@ -656,6 +762,7 @@ export function ManageApp() {
     if (
       gpuiApi?.supportsManageFileChangePolling !== true ||
       !selectedPath ||
+      isManageReviewDocumentPath(selectedPath) ||
       !preview ||
       (!isHtmlPath(selectedPath) && !isExcalidrawPath(selectedPath) && !isMarkdownPath(selectedPath))
     ) {
@@ -1180,11 +1287,19 @@ export function ManageApp() {
         return;
       }
       event.preventDefault();
+      if (event.detail >= 2) {
+        // Double-click resets the width, like the GPUI companion divider.
+        const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+        setSidebarWidth(clampManageSidebarWidth(MANAGE_SIDEBAR_DEFAULT_WIDTH, containerWidth));
+        return;
+      }
+      setSidebarResizing(true);
       updateSidebarWidthFromClientX(event.clientX);
       const handlePointerMove = (moveEvent: PointerEvent) => {
         updateSidebarWidthFromClientX(moveEvent.clientX);
       };
       const handlePointerUp = () => {
+        setSidebarResizing(false);
         window.removeEventListener('pointermove', handlePointerMove);
         window.removeEventListener('pointerup', handlePointerUp);
         window.removeEventListener('pointercancel', handlePointerUp);
@@ -1239,16 +1354,235 @@ export function ManageApp() {
     []
   );
 
-  const annotationsForSelectedPath = selectedPath ? (annotationsByPath[selectedPath] ?? []) : [];
+  const annotationsForSelectedPath = isReviewDocumentSelected
+    ? reviewAnnotations
+    : selectedPath
+      ? (annotationsByPath[selectedPath] ?? MANAGE_NO_ANNOTATIONS)
+      : MANAGE_NO_ANNOTATIONS;
   const annotationCountsByPath = useMemo(() => {
     const nextCounts = new Map<string, number>();
     for (const [path, annotations] of Object.entries(annotationsByPath)) {
-      if (annotations.length > 0) {
-        nextCounts.set(path, annotations.length);
+      const active = activeManageAnnotations(annotations).length;
+      if (active > 0) {
+        nextCounts.set(path, active);
       }
     }
     return nextCounts;
   }, [annotationsByPath]);
+  const folderPendingFeedback = useMemo(() => {
+    let count = 0;
+    let fileCount = 0;
+    for (const annotations of Object.values(annotationsByPath)) {
+      const pending = manageAnnotationReviewCounts(annotations).pending;
+      if (pending > 0) {
+        count += pending;
+        fileCount += 1;
+      }
+    }
+    return { count, fileCount };
+  }, [annotationsByPath]);
+  const hasAnyActiveAnnotations = reviewAnnotations.length > 0 || annotationCountsByPath.size > 0;
+
+  /*
+   * The Send button names its target before anything is pressed, and the
+   * target is whatever the user last clicked in the sidebar, so Docs asks the
+   * app again while it has something to send.
+   */
+  useEffect(() => {
+    if (!hasAnyActiveAnnotations) {
+      setAnnotationSendTarget(null);
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    const query = async () => {
+      if (cancelled || inFlight || document.visibilityState !== 'visible') {
+        return;
+      }
+      inFlight = true;
+      try {
+        const response = await requestManageFiles({ action: 'annotationSendTarget', projectEditorId, projectId });
+        if (!cancelled) {
+          setAnnotationSendTarget(response.error ? null : (response.annotationTarget ?? null));
+        }
+      } catch {
+        if (!cancelled) {
+          setAnnotationSendTarget(null);
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void query();
+    const interval = window.setInterval(() => void query(), MANAGE_ANNOTATION_SEND_TARGET_POLL_INTERVAL_MS);
+    const onVisible = () => void query();
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [hasAnyActiveAnnotations, projectEditorId, projectId]);
+
+  useEffect(
+    () => () => {
+      if (annotationSendStateTimerRef.current !== undefined) {
+        window.clearTimeout(annotationSendStateTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const showTransientSendState = useCallback((state: ManageAnnotationSendState) => {
+    if (annotationSendStateTimerRef.current !== undefined) {
+      window.clearTimeout(annotationSendStateTimerRef.current);
+    }
+    setAnnotationSendState(state);
+    annotationSendStateTimerRef.current = window.setTimeout(() => {
+      annotationSendStateTimerRef.current = undefined;
+      setAnnotationSendState({ kind: 'idle' });
+    }, 4_000);
+  }, []);
+
+  const markAnnotationsSent = useCallback(
+    (idsByPath: Map<string, string[]>) => {
+      const sentAt = new Date().toISOString();
+      const mark = (annotations: ManageAnnotation[], ids: string[]) =>
+        annotations.map((annotation) => (ids.includes(annotation.id) ? { ...annotation, sentAt } : annotation));
+      const reviewIds = isReviewDocumentSelected && selectedPath ? idsByPath.get(selectedPath) : undefined;
+      if (reviewIds) {
+        setReviewAnnotations((current) => mark(current, reviewIds));
+      }
+      setAnnotationsByPath((current) => {
+        let changed = false;
+        const next = { ...current };
+        for (const [path, ids] of idsByPath) {
+          const annotations = current[path];
+          if (!annotations || isManageReviewDocumentPath(path)) {
+            continue;
+          }
+          next[path] = mark(annotations, ids);
+          changed = true;
+        }
+        return changed ? next : current;
+      });
+    },
+    [isReviewDocumentSelected, selectedPath]
+  );
+
+  /*
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: implement the Herdr Annotate review loop. Send delivers only new or edited notes by default, Resend all includes the sent ones, and a send across the whole Docs folder combines every file's pending notes into one message.
+   * Which file a note belongs to is carried by the tree's display path so the agent reads the same name the user sees.
+   */
+  const sendAnnotationFeedback = useCallback(
+    async ({ allFiles = false, scope }: { allFiles?: boolean; scope: 'all' | 'pending' }) => {
+      if (annotationSendState.kind === 'sending') {
+        return;
+      }
+      const documents: ManageAnnotationFeedbackDocument[] = [];
+      const pathByName = new Map<string, string>();
+      const addDocument = (
+        path: string,
+        name: string,
+        content: string | undefined,
+        annotations: ManageAnnotation[]
+      ) => {
+        const uniqueName = pathByName.has(name) ? `${name} (${path})` : name;
+        pathByName.set(uniqueName, path);
+        documents.push({ annotations, content, name: uniqueName });
+      };
+      setAnnotationSendState({ kind: 'sending' });
+      try {
+        if (isReviewDocumentSelected && selectedPath && reviewDocument) {
+          addDocument(selectedPath, reviewDocument.title, draftContent, reviewAnnotations);
+        } else if (allFiles) {
+          const paths = Object.keys(annotationsByPath).filter((path) => {
+            const annotations = annotationsByPath[path] ?? [];
+            return scope === 'all'
+              ? activeManageAnnotations(annotations).length > 0
+              : manageAnnotationReviewCounts(annotations).pending > 0;
+          });
+          for (const path of paths.sort()) {
+            const entry = entries.find((candidate) => candidate.path === path);
+            const name = entry?.displayPath ?? (path === selectedPath ? (preview?.displayPath ?? path) : path);
+            let content: string | undefined;
+            if (path === selectedPath) {
+              content = draftContent;
+            } else {
+              try {
+                const response = await requestManageFiles({ action: 'read', path, projectEditorId, projectId });
+                content = response.error ? undefined : response.file?.content;
+              } catch {
+                content = undefined;
+              }
+            }
+            addDocument(path, name, content, annotationsByPath[path] ?? []);
+          }
+        } else if (selectedPath) {
+          addDocument(
+            selectedPath,
+            preview?.displayPath ?? selectedPath,
+            draftContent,
+            annotationsByPath[selectedPath] ?? []
+          );
+        }
+        const feedback = formatManageAnnotationFeedback(documents, scope);
+        if (feedback.count === 0) {
+          showTransientSendState({
+            kind: 'notice',
+            message: scope === 'pending' ? 'Nothing new to send' : 'Nothing to send',
+          });
+          return;
+        }
+        const response = await requestManageFiles({
+          action: 'sendAnnotationFeedback',
+          content: feedback.text,
+          projectEditorId,
+          projectId,
+        });
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        const idsByPath = new Map<string, string[]>();
+        for (const [name, ids] of feedback.annotationIdsByDocument) {
+          const path = pathByName.get(name);
+          if (path) {
+            idsByPath.set(path, ids);
+          }
+        }
+        markAnnotationsSent(idsByPath);
+        showTransientSendState({
+          count: feedback.count,
+          delivery: response.annotationDelivery ?? 'clipboard',
+          fileCount: feedback.documentCount,
+          kind: 'sent',
+        });
+      } catch (sendError) {
+        showTransientSendState({
+          kind: 'error',
+          message: sendError instanceof Error ? sendError.message : 'Could not send annotations.',
+        });
+      }
+    },
+    [
+      annotationSendState.kind,
+      annotationsByPath,
+      draftContent,
+      entries,
+      isReviewDocumentSelected,
+      markAnnotationsSent,
+      preview?.displayPath,
+      projectEditorId,
+      projectId,
+      reviewAnnotations,
+      reviewDocument,
+      selectedPath,
+      showTransientSendState,
+    ]
+  );
 
   const saveContentSnapshot = useCallback(
     async ({ content, path, throwOnError = false }: { content: string; path: string; throwOnError?: boolean }) => {
@@ -1322,7 +1656,7 @@ export function ManageApp() {
   );
 
   const saveFile = useCallback(async () => {
-    if (!selectedPath || !preview || preview.kind !== 'text') {
+    if (!selectedPath || !preview || preview.kind !== 'text' || isManageReviewDocumentPath(selectedPath)) {
       return;
     }
     await saveContentSnapshot({ content: draftContent, path: selectedPath });
@@ -2101,6 +2435,10 @@ export function ManageApp() {
       if (!selectedPath) {
         return;
       }
+      if (isManageReviewDocumentPath(selectedPath)) {
+        setReviewAnnotations((current) => updater(current));
+        return;
+      }
       setAnnotationsByPath((current) => {
         const nextAnnotations = updater(current[selectedPath] ?? []);
         if (nextAnnotations.length === 0) {
@@ -2115,6 +2453,80 @@ export function ManageApp() {
     },
     [selectedPath]
   );
+
+  const editAnnotationNote = useCallback(
+    (annotationId: string, note: string) => {
+      updateAnnotationsForSelectedFile((current) =>
+        current.map((annotation) =>
+          annotation.id === annotationId
+            ? {
+                ...annotation,
+                note: note.trim().slice(0, 4_000),
+                updatedAt: manageAnnotationTimestampAfter(annotation.sentAt),
+              }
+            : annotation
+        )
+      );
+    },
+    [updateAnnotationsForSelectedFile]
+  );
+
+  /*
+   * Finish review archives the notes the agent has already seen and leaves
+   * pending ones in place; Undo brings back exactly that batch during this
+   * session, and Restore brings back one note from the archive with its id and
+   * send history intact.
+   */
+  const finishReview = useCallback(() => {
+    if (!selectedPath) {
+      return;
+    }
+    const archivedAt = new Date().toISOString();
+    const ids: string[] = [];
+    updateAnnotationsForSelectedFile((current) =>
+      current.map((annotation) => {
+        if (annotation.archivedAt || isManageAnnotationPending(annotation)) {
+          return annotation;
+        }
+        ids.push(annotation.id);
+        return { ...annotation, archivedAt };
+      })
+    );
+    lastFinishedReviewRef.current = { ids, path: selectedPath };
+  }, [selectedPath, updateAnnotationsForSelectedFile]);
+
+  const undoFinishReview = useCallback(() => {
+    const finished = lastFinishedReviewRef.current;
+    if (!finished || finished.path !== selectedPath) {
+      return;
+    }
+    lastFinishedReviewRef.current = undefined;
+    updateAnnotationsForSelectedFile((current) =>
+      current.map((annotation) => {
+        if (!finished.ids.includes(annotation.id) || !annotation.archivedAt) {
+          return annotation;
+        }
+        const { archivedAt: _archivedAt, ...restored } = annotation;
+        return restored;
+      })
+    );
+  }, [selectedPath, updateAnnotationsForSelectedFile]);
+
+  const restoreArchivedAnnotation = useCallback(
+    (annotationId: string) => {
+      updateAnnotationsForSelectedFile((current) =>
+        current.map((annotation) => {
+          if (annotation.id !== annotationId || !annotation.archivedAt) {
+            return annotation;
+          }
+          const { archivedAt: _archivedAt, ...restored } = annotation;
+          return restored;
+        })
+      );
+    },
+    [updateAnnotationsForSelectedFile]
+  );
+  const canUndoFinishReview = lastFinishedReviewRef.current?.path === selectedPath;
 
   const HideSidebarIcon = sidebarSide === 'right' ? IconLayoutSidebarRightCollapse : IconLayoutSidebarLeftCollapse;
   /*
@@ -2272,40 +2684,50 @@ export function ManageApp() {
         </button>
       )}
       {sidebarVisible && !sidebarOverlay ? (
-        <AppTooltip content='Resize file sidebar'>
-          <div
-            aria-label='Resize file sidebar'
-            aria-orientation='vertical'
-            aria-valuemax={MANAGE_SIDEBAR_MAX_WIDTH}
-            aria-valuemin={MANAGE_SIDEBAR_MIN_WIDTH}
-            aria-valuenow={Math.round(sidebarWidth)}
-            className='manage-sidebar-resizer'
-            onKeyDown={handleSidebarResizeKeyDown}
-            onPointerDown={handleSidebarResizePointerDown}
-            role='separator'
-            tabIndex={0}
-          />
-        </AppTooltip>
+        <div
+          aria-label='Resize file sidebar'
+          aria-orientation='vertical'
+          aria-valuemax={MANAGE_SIDEBAR_MAX_WIDTH}
+          aria-valuemin={MANAGE_SIDEBAR_MIN_WIDTH}
+          aria-valuenow={Math.round(sidebarWidth)}
+          className='manage-sidebar-resizer'
+          data-dragging={String(sidebarResizing)}
+          onKeyDown={handleSidebarResizeKeyDown}
+          onPointerDown={handleSidebarResizePointerDown}
+          role='separator'
+          tabIndex={0}
+        />
       ) : null}
       <section className='manage-preview'>
         <ManagePreview
           annotations={annotationsForSelectedPath}
+          canUndoFinishReview={canUndoFinishReview}
           draftContent={draftContent}
           error={error ?? indexError}
+          folderPendingFeedback={folderPendingFeedback}
           isDirty={isDirty}
           hasExternalChanges={hasExternalChanges}
           onAnnotationsChange={updateAnnotationsForSelectedFile}
+          onCloseReviewDocument={closeReviewDocument}
           onDraftContentChange={setDraftContent}
+          onEditAnnotationNote={editAnnotationNote}
+          onFinishReview={finishReview}
           onOpenDocument={(path) => void readFile(path)}
           onReload={() => {
             if (selectedPath) {
               void readFile(selectedPath);
             }
           }}
+          onRestoreAnnotation={restoreArchivedAnnotation}
+          onSendFeedback={sendAnnotationFeedback}
+          onUndoFinishReview={undoFinishReview}
           preview={preview}
           previewState={previewState}
+          reviewDocument={reviewDocument}
           saveState={saveState}
           selectedPath={selectedPath}
+          sendState={annotationSendState}
+          sendTarget={annotationSendTarget}
         />
       </section>
       {fileContextMenu && contextMenuEntry ? (

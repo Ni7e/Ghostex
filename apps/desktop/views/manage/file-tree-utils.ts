@@ -3,7 +3,7 @@ import {
   type ProjectDocsFileEntry as ManageFileEntry,
   type ProjectDocsFilePreview as ManageFilePreview,
 } from '@/packages/shared/project-docs';
-import { MANAGE_DOCS_EXTRA_ROOT_MOUNT_PATH, MANAGE_DOCS_ROOT_PATH } from './constants';
+import { MANAGE_DOCS_EXTRA_ROOT_MOUNT_PATH, MANAGE_DOCS_ROOT_PATH, MANAGE_REVIEW_DOCUMENT_ROOT } from './constants';
 import { ManageAnnotation, ManageArtifactKind } from './types';
 import { createEmptyExcalidrawFile } from './excalidraw-io';
 
@@ -484,7 +484,15 @@ export function isExcalidrawPath(path: string): boolean {
 }
 
 export function shouldAutosaveManageFile(path: string): boolean {
-  return isMarkdownPath(path) || isExcalidrawPath(path);
+  return (isMarkdownPath(path) || isExcalidrawPath(path)) && !isManageReviewDocumentPath(path);
+}
+
+export function isManageReviewDocumentPath(path: string | undefined): boolean {
+  return typeof path === 'string' && path.startsWith(`${MANAGE_REVIEW_DOCUMENT_ROOT}/`);
+}
+
+export function manageReviewDocumentPath(id: string): string {
+  return `${MANAGE_REVIEW_DOCUMENT_ROOT}/${id}.md`;
 }
 
 export function isHtmlPath(path: string): boolean {

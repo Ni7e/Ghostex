@@ -34,6 +34,7 @@ pub(crate) mod command_pane_remote_action;
 pub(crate) mod companion_reveal;
 pub(crate) mod delayed_send;
 pub(crate) mod delayed_send_sessions;
+pub(crate) mod docs_annotation_feedback;
 pub(crate) mod drag_resize;
 pub(crate) mod focus;
 pub(crate) mod keyboard_owner;

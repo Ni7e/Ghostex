@@ -1176,6 +1176,7 @@ impl GhostexGpuiApp {
         }
         changed |= self.open_pending_source_file_if_ready(cx);
         changed |= self.deliver_pending_docs_file_open(cx);
+        changed |= self.deliver_pending_docs_review_open(cx);
         changed
     }
 
@@ -1218,6 +1219,7 @@ impl GhostexGpuiApp {
             if let Err(message) = result {
                 let _ = this.update(cx, |this, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(failed_file_path));
+                    gpui_play_copy_sound();
                     let (id, title) = match origin {
                         PendingSourceFileOpenOrigin::AgentsHub => (
                             "gpui-agents-hub-source-open-failed",

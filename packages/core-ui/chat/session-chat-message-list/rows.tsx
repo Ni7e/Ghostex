@@ -10,6 +10,7 @@ import {
   IconInfoCircle,
   IconPhoto,
   IconSparkles,
+  IconMessagePlus,
 } from '@tabler/icons-react';
 import { memo, useContext, useId, useRef } from 'react';
 import {
@@ -59,6 +60,7 @@ import { pairSessionChatToolBlocks, splitSessionChatBlocks } from '../session-ch
 import { SessionChatToolRun } from '../session-chat-tool-run';
 import { SessionChatUserMessageLayout } from '../session-chat-user-message-layout';
 import '../session-chat-agent-tools-disclosure.css';
+import { playCopySound } from '../../copy-sound';
 export const PASTED_IMAGE_NAME = /^ghostex-paste-.+\.png$/i;
 export function isPastedImagePath(path: string | undefined): boolean {
   if (!path) {
@@ -148,6 +150,7 @@ export function CopyFooter({
   anchoredToAssistantMarker = false,
   className,
   markdown,
+  onAnnotate,
   onRewind,
   onSaveMarkdown,
   onSavePrompt,
@@ -155,6 +158,11 @@ export function CopyFooter({
   anchoredToAssistantMarker?: boolean;
   className?: string;
   markdown: string;
+  /**
+   * CDXC:Docs 2026-09-15 DECISION:
+   * User: an agent reply can be annotated like a document. The button is titled "Reply by Annotating" and sits between Copy message and Save to md in the final reply's rail. Set only by hosts with a Docs review (the desktop app); the reply opens there and the feedback comes back to this session.
+   */
+  onAnnotate?: (markdown: string) => void;
   /** Opens the rewind confirmation for this prompt (user rows only). */
   onRewind?: () => void;
   onSaveMarkdown?: (markdown: string) => void;
@@ -175,6 +183,7 @@ export function CopyFooter({
         aria-label='Copy message'
         className={anchoredToAssistantMarker ? 'ghostex-chat-final-action ghostex-chat-final-action-copy' : undefined}
         onClick={() => {
+          playCopySound();
           void navigator.clipboard.writeText(markdown);
         }}
         size='icon-xs'
@@ -187,6 +196,20 @@ export function CopyFooter({
       {onRewind ? (
         <Button aria-label='Rewind to here' onClick={onRewind} size='icon-xs' title='Rewind to here' variant='ghost'>
           <IconArrowBackUp aria-hidden='true' data-icon='inline-start' stroke={1.9} />
+        </Button>
+      ) : null}
+      {onAnnotate && markdown.trim().length > 0 ? (
+        <Button
+          aria-label='Reply by Annotating'
+          className={
+            anchoredToAssistantMarker ? 'ghostex-chat-final-action ghostex-chat-final-action-annotate' : undefined
+          }
+          onClick={() => onAnnotate(markdown)}
+          size='icon-xs'
+          title='Reply by Annotating'
+          variant='ghost'
+        >
+          <IconMessagePlus aria-hidden='true' data-icon='inline-start' stroke={1.9} />
         </Button>
       ) : null}
       {onSaveMarkdown && canSaveMarkdown ? (
@@ -676,6 +699,7 @@ export function MessageRowBody({
   hideFileChanges = false,
   isStreaming = false,
   message,
+  onAnnotate,
   onRewind,
   onSaveMarkdown,
   onSavePrompt,
@@ -693,6 +717,8 @@ export function MessageRowBody({
   isStreaming?: boolean;
   hideFileChanges?: boolean;
   message: SessionChatMessage;
+  /** Opens this assistant reply in the host's Docs review; see `CopyFooter`. */
+  onAnnotate?: (markdown: string) => void;
   /** Set only when this transcript may be rewound; see the list's prop. */
   onRewind?: (request: SessionChatRewindRequest) => void;
   onSaveMarkdown?: (markdown: string) => void;
@@ -940,6 +966,7 @@ export function MessageRowBody({
           <CopyFooter
             anchoredToAssistantMarker={tools.length === 0}
             markdown={markdown}
+            onAnnotate={onAnnotate}
             onSaveMarkdown={onSaveMarkdown}
           />
         ) : null}
