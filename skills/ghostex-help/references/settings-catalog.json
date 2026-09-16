@@ -6762,367 +6762,6 @@
       "agentWritable": true
     },
     {
-      "key": "debuggingMode",
-      "title": "Show debug UI controls",
-      "subtitle": "Show debug-only controls, inspect storage usage and budgets, and allow enabled routine diagnostic logs.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "advanced",
-      "groupTitle": "Advanced",
-      "section": "debugging",
-      "sectionTitle": "Debugging",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "diagnosticLogging",
-      "title": "Diagnostic disk logging scenarios",
-      "subtitle": "Choose routine repro log areas while Show debug UI controls is on. Important warnings, errors, and crashes remain captured when it is off.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "advanced",
-      "groupTitle": "Advanced",
-      "section": "debugging",
-      "sectionTitle": "Debugging",
-      "type": "json",
-      "default": {
-        "scenarios": {},
-        "version": 1
-      },
-      "options": [
-        {
-          "label": "Desktop performance profiling",
-          "value": "gpui.performance"
-        },
-        {
-          "label": "gpui-performance.jsonl",
-          "value": "gpui-performance.jsonl"
-        },
-        {
-          "label": "Chat draft persistence and recovery",
-          "value": "gpui.sessionChat.drafts"
-        },
-        {
-          "label": "gpui-session-chat-debug.jsonl",
-          "value": "gpui-session-chat-debug.jsonl"
-        },
-        {
-          "label": "gxserver.jsonl",
-          "value": "gxserver.jsonl"
-        },
-        {
-          "label": "Terminal focus and input routing",
-          "value": "native.terminal.focus"
-        },
-        {
-          "label": "native-terminal-focus-debug.log",
-          "value": "native-terminal-focus-debug.log"
-        },
-        {
-          "label": "gpui-terminal-focus-debug.log",
-          "value": "gpui-terminal-focus-debug.log"
-        },
-        {
-          "label": "Terminal resize and reflow",
-          "value": "native.terminal.resize"
-        },
-        {
-          "label": "native-terminal-focus-debug.log",
-          "value": "native-terminal-focus-debug.log"
-        },
-        {
-          "label": "Sidebar refresh and hydration",
-          "value": "native.sidebar.refresh"
-        },
-        {
-          "label": "sidebar-refresh-debug.log",
-          "value": "sidebar-refresh-debug.log"
-        },
-        {
-          "label": "gpui-sidebar-refresh-debug.log",
-          "value": "gpui-sidebar-refresh-debug.log"
-        },
-        {
-          "label": "Sidebar collapse state",
-          "value": "native.sidebar.collapse"
-        },
-        {
-          "label": "sidebar-collapse-state-debug.log",
-          "value": "sidebar-collapse-state-debug.log"
-        },
-        {
-          "label": "Pane tabs, resize rails, and sidebar divider",
-          "value": "native.pane.tabs"
-        },
-        {
-          "label": "native-pane-tabs-debug.log",
-          "value": "native-pane-tabs-debug.log"
-        },
-        {
-          "label": "Pane reorder repros",
-          "value": "native.pane.reorder"
-        },
-        {
-          "label": "native-pane-reorder-repro.log",
-          "value": "native-pane-reorder-repro.log"
-        },
-        {
-          "label": "Layout, layering, and hit testing",
-          "value": "native.layout.layering"
-        },
-        {
-          "label": "native-layout-layering-debug.log",
-          "value": "native-layout-layering-debug.log"
-        },
-        {
-          "label": "Mode switcher and titlebar routing",
-          "value": "native.mode.switcher"
-        },
-        {
-          "label": "native-mode-switcher-debug.log",
-          "value": "native-mode-switcher-debug.log"
-        },
-        {
-          "label": "Sidebar and titlebar responsiveness",
-          "value": "native.chrome.responsiveness"
-        },
-        {
-          "label": "native-chrome-responsiveness-debug.log",
-          "value": "native-chrome-responsiveness-debug.log"
-        },
-        {
-          "label": "sidebar-refresh-debug.log",
-          "value": "sidebar-refresh-debug.log"
-        },
-        {
-          "label": "Session titles and auto-rename",
-          "value": "native.session.title"
-        },
-        {
-          "label": "session-title-sync-debug.log",
-          "value": "session-title-sync-debug.log"
-        },
-        {
-          "label": "Agent detection and activity",
-          "value": "native.agent.detection"
-        },
-        {
-          "label": "agent-detection-debug.log",
-          "value": "agent-detection-debug.log"
-        },
-        {
-          "label": "Workspace restore and startup",
-          "value": "native.workspace.restore"
-        },
-        {
-          "label": "workspace-restore-debug.log",
-          "value": "workspace-restore-debug.log"
-        },
-        {
-          "label": "Workspace dock indicator",
-          "value": "native.workspace.dock"
-        },
-        {
-          "label": "workspace-dock-indicator-debug.log",
-          "value": "workspace-dock-indicator-debug.log"
-        },
-        {
-          "label": "Native host lifecycle",
-          "value": "native.host.lifecycle"
-        },
-        {
-          "label": "native-host-lifecycle.log",
-          "value": "native-host-lifecycle.log"
-        },
-        {
-          "label": "gpui-host-lifecycle.log",
-          "value": "gpui-host-lifecycle.log"
-        },
-        {
-          "label": "Menu bar session status dropdown",
-          "value": "native.menuBar.status"
-        },
-        {
-          "label": "native-menu-bar-status-debug.log",
-          "value": "native-menu-bar-status-debug.log"
-        },
-        {
-          "label": "Project board actions",
-          "value": "native.project.board"
-        },
-        {
-          "label": "project-board-debug.log",
-          "value": "project-board-debug.log"
-        },
-        {
-          "label": "gpui-project-board-debug.log",
-          "value": "gpui-project-board-debug.log"
-        },
-        {
-          "label": "Ghostty config startup",
-          "value": "native.ghostty.config"
-        },
-        {
-          "label": "native-ghostty-config.log",
-          "value": "native-ghostty-config.log"
-        },
-        {
-          "label": "Terminal link opening",
-          "value": "native.terminal.links"
-        },
-        {
-          "label": "terminal-link-open-debug.log",
-          "value": "terminal-link-open-debug.log"
-        },
-        {
-          "label": "Prompt editor",
-          "value": "native.prompt.editor"
-        },
-        {
-          "label": "native-prompt-editor-debug.log",
-          "value": "native-prompt-editor-debug.log"
-        },
-        {
-          "label": "Remote gxserver install",
-          "value": "native.remote.gxserver.install"
-        },
-        {
-          "label": "remote-gxserver-install-debug.log",
-          "value": "remote-gxserver-install-debug.log"
-        },
-        {
-          "label": "gpui-remote-gxserver-install-debug.log",
-          "value": "gpui-remote-gxserver-install-debug.log"
-        },
-        {
-          "label": "App modals and Settings windows",
-          "value": "native.app.modal"
-        },
-        {
-          "label": "app-modal-debug.log",
-          "value": "app-modal-debug.log"
-        },
-        {
-          "label": "app-modal-errors.log",
-          "value": "app-modal-errors.log"
-        },
-        {
-          "label": "GPUI sidebar focus and bouncing",
-          "value": "gpui.sidebar.focus"
-        },
-        {
-          "label": "gpui-sidebar-focus-debug.jsonl",
-          "value": "gpui-sidebar-focus-debug.jsonl"
-        },
-        {
-          "label": "GPUI sidebar renderer lifecycle",
-          "value": "gpui.sidebar.renderer"
-        },
-        {
-          "label": "gpui-sidebar-renderer-debug.jsonl",
-          "value": "gpui-sidebar-renderer-debug.jsonl"
-        },
-        {
-          "label": "GPUI app modals and Settings",
-          "value": "gpui.app.modal"
-        },
-        {
-          "label": "gpui-app-modal-debug.jsonl",
-          "value": "gpui-app-modal-debug.jsonl"
-        },
-        {
-          "label": "GPUI session chat view state",
-          "value": "gpui.sessionChat.viewState"
-        },
-        {
-          "label": "gpui-session-chat-debug.jsonl",
-          "value": "gpui-session-chat-debug.jsonl"
-        },
-        {
-          "label": "Daemon lifecycle",
-          "value": "gxserver.lifecycle"
-        },
-        {
-          "label": "gxserver.jsonl",
-          "value": "gxserver.jsonl"
-        },
-        {
-          "label": "API requests",
-          "value": "gxserver.requests"
-        },
-        {
-          "label": "gxserver.jsonl",
-          "value": "gxserver.jsonl"
-        },
-        {
-          "label": "Typed operations",
-          "value": "gxserver.typedOperations"
-        },
-        {
-          "label": "gxserver.jsonl",
-          "value": "gxserver.jsonl"
-        },
-        {
-          "label": "Repository cloning",
-          "value": "gxserver.repositoryClone"
-        },
-        {
-          "label": "gxserver.jsonl",
-          "value": "gxserver.jsonl"
-        },
-        {
-          "label": "Portless",
-          "value": "gxserver.portless"
-        },
-        {
-          "label": "gxserver.jsonl",
-          "value": "gxserver.jsonl"
-        },
-        {
-          "label": "Agent activity transitions",
-          "value": "gxserver.agentActivity"
-        },
-        {
-          "label": "gxserver.jsonl",
-          "value": "gxserver.jsonl"
-        }
-      ],
-      "advanced": true,
-      "agentWritable": false
-    },
-    {
-      "key": "showSessionCommandCopyActions",
-      "title": "Show command copy actions",
-      "subtitle": "Show Copy resume and Copy attach command in session context menus.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "advanced",
-      "groupTitle": "Advanced",
-      "section": "debugging",
-      "sectionTitle": "Debugging",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
-      "key": "showSessionDetailsCopyAction",
-      "title": "Show Copy Details option",
-      "subtitle": "Show Copy Details in session context menus.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "advanced",
-      "groupTitle": "Advanced",
-      "section": "debugging",
-      "sectionTitle": "Debugging",
-      "type": "boolean",
-      "default": false,
-      "advanced": true,
-      "agentWritable": true
-    },
-    {
       "key": "appShotsEnabled",
       "title": "App Shots",
       "subtitle": "Enable App Shots: press the App Shots hotkey to capture a window screenshot into the prompt.",
@@ -7429,6 +7068,377 @@
       "type": "string",
       "default": "boo",
       "agentWritable": true
+    },
+    {
+      "key": "debuggingMode",
+      "title": "Show debug UI controls",
+      "subtitle": "Show debug-only controls, storage statistics, and enabled routine diagnostic logs.",
+      "tab": "debugging",
+      "tabTitle": "Debugging",
+      "section": "controls",
+      "sectionTitle": "Debug controls",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "diagnosticLogging",
+      "title": "Diagnostic disk logging scenarios",
+      "subtitle": "Choose routine repro log areas while Show debug UI controls is on. Important warnings, errors, and crashes remain captured when it is off.",
+      "tab": "debugging",
+      "tabTitle": "Debugging",
+      "section": "controls",
+      "sectionTitle": "Debug controls",
+      "type": "json",
+      "default": {
+        "scenarios": {},
+        "version": 1
+      },
+      "options": [
+        {
+          "label": "Desktop performance profiling",
+          "value": "gpui.performance"
+        },
+        {
+          "label": "gpui-performance.jsonl",
+          "value": "gpui-performance.jsonl"
+        },
+        {
+          "label": "Chat draft persistence and recovery",
+          "value": "gpui.sessionChat.drafts"
+        },
+        {
+          "label": "gpui-session-chat-debug.jsonl",
+          "value": "gpui-session-chat-debug.jsonl"
+        },
+        {
+          "label": "gxserver.jsonl",
+          "value": "gxserver.jsonl"
+        },
+        {
+          "label": "Terminal focus and input routing",
+          "value": "native.terminal.focus"
+        },
+        {
+          "label": "native-terminal-focus-debug.log",
+          "value": "native-terminal-focus-debug.log"
+        },
+        {
+          "label": "gpui-terminal-focus-debug.log",
+          "value": "gpui-terminal-focus-debug.log"
+        },
+        {
+          "label": "Terminal resize and reflow",
+          "value": "native.terminal.resize"
+        },
+        {
+          "label": "native-terminal-focus-debug.log",
+          "value": "native-terminal-focus-debug.log"
+        },
+        {
+          "label": "Sidebar refresh and hydration",
+          "value": "native.sidebar.refresh"
+        },
+        {
+          "label": "sidebar-refresh-debug.log",
+          "value": "sidebar-refresh-debug.log"
+        },
+        {
+          "label": "gpui-sidebar-refresh-debug.log",
+          "value": "gpui-sidebar-refresh-debug.log"
+        },
+        {
+          "label": "Sidebar collapse state",
+          "value": "native.sidebar.collapse"
+        },
+        {
+          "label": "sidebar-collapse-state-debug.log",
+          "value": "sidebar-collapse-state-debug.log"
+        },
+        {
+          "label": "Pane tabs, resize rails, and sidebar divider",
+          "value": "native.pane.tabs"
+        },
+        {
+          "label": "native-pane-tabs-debug.log",
+          "value": "native-pane-tabs-debug.log"
+        },
+        {
+          "label": "Pane reorder repros",
+          "value": "native.pane.reorder"
+        },
+        {
+          "label": "native-pane-reorder-repro.log",
+          "value": "native-pane-reorder-repro.log"
+        },
+        {
+          "label": "Layout, layering, and hit testing",
+          "value": "native.layout.layering"
+        },
+        {
+          "label": "native-layout-layering-debug.log",
+          "value": "native-layout-layering-debug.log"
+        },
+        {
+          "label": "Mode switcher and titlebar routing",
+          "value": "native.mode.switcher"
+        },
+        {
+          "label": "native-mode-switcher-debug.log",
+          "value": "native-mode-switcher-debug.log"
+        },
+        {
+          "label": "Sidebar and titlebar responsiveness",
+          "value": "native.chrome.responsiveness"
+        },
+        {
+          "label": "native-chrome-responsiveness-debug.log",
+          "value": "native-chrome-responsiveness-debug.log"
+        },
+        {
+          "label": "sidebar-refresh-debug.log",
+          "value": "sidebar-refresh-debug.log"
+        },
+        {
+          "label": "Session titles and auto-rename",
+          "value": "native.session.title"
+        },
+        {
+          "label": "session-title-sync-debug.log",
+          "value": "session-title-sync-debug.log"
+        },
+        {
+          "label": "Agent detection and activity",
+          "value": "native.agent.detection"
+        },
+        {
+          "label": "agent-detection-debug.log",
+          "value": "agent-detection-debug.log"
+        },
+        {
+          "label": "Workspace restore and startup",
+          "value": "native.workspace.restore"
+        },
+        {
+          "label": "workspace-restore-debug.log",
+          "value": "workspace-restore-debug.log"
+        },
+        {
+          "label": "Workspace dock indicator",
+          "value": "native.workspace.dock"
+        },
+        {
+          "label": "workspace-dock-indicator-debug.log",
+          "value": "workspace-dock-indicator-debug.log"
+        },
+        {
+          "label": "Native host lifecycle",
+          "value": "native.host.lifecycle"
+        },
+        {
+          "label": "native-host-lifecycle.log",
+          "value": "native-host-lifecycle.log"
+        },
+        {
+          "label": "gpui-host-lifecycle.log",
+          "value": "gpui-host-lifecycle.log"
+        },
+        {
+          "label": "Menu bar session status dropdown",
+          "value": "native.menuBar.status"
+        },
+        {
+          "label": "native-menu-bar-status-debug.log",
+          "value": "native-menu-bar-status-debug.log"
+        },
+        {
+          "label": "Project board actions",
+          "value": "native.project.board"
+        },
+        {
+          "label": "project-board-debug.log",
+          "value": "project-board-debug.log"
+        },
+        {
+          "label": "gpui-project-board-debug.log",
+          "value": "gpui-project-board-debug.log"
+        },
+        {
+          "label": "Ghostty config startup",
+          "value": "native.ghostty.config"
+        },
+        {
+          "label": "native-ghostty-config.log",
+          "value": "native-ghostty-config.log"
+        },
+        {
+          "label": "Terminal link opening",
+          "value": "native.terminal.links"
+        },
+        {
+          "label": "terminal-link-open-debug.log",
+          "value": "terminal-link-open-debug.log"
+        },
+        {
+          "label": "Prompt editor",
+          "value": "native.prompt.editor"
+        },
+        {
+          "label": "native-prompt-editor-debug.log",
+          "value": "native-prompt-editor-debug.log"
+        },
+        {
+          "label": "Remote gxserver install",
+          "value": "native.remote.gxserver.install"
+        },
+        {
+          "label": "remote-gxserver-install-debug.log",
+          "value": "remote-gxserver-install-debug.log"
+        },
+        {
+          "label": "gpui-remote-gxserver-install-debug.log",
+          "value": "gpui-remote-gxserver-install-debug.log"
+        },
+        {
+          "label": "App modals and Settings windows",
+          "value": "native.app.modal"
+        },
+        {
+          "label": "app-modal-debug.log",
+          "value": "app-modal-debug.log"
+        },
+        {
+          "label": "app-modal-errors.log",
+          "value": "app-modal-errors.log"
+        },
+        {
+          "label": "GPUI sidebar focus and bouncing",
+          "value": "gpui.sidebar.focus"
+        },
+        {
+          "label": "gpui-sidebar-focus-debug.jsonl",
+          "value": "gpui-sidebar-focus-debug.jsonl"
+        },
+        {
+          "label": "GPUI sidebar renderer lifecycle",
+          "value": "gpui.sidebar.renderer"
+        },
+        {
+          "label": "gpui-sidebar-renderer-debug.jsonl",
+          "value": "gpui-sidebar-renderer-debug.jsonl"
+        },
+        {
+          "label": "GPUI app modals and Settings",
+          "value": "gpui.app.modal"
+        },
+        {
+          "label": "gpui-app-modal-debug.jsonl",
+          "value": "gpui-app-modal-debug.jsonl"
+        },
+        {
+          "label": "GPUI session chat view state",
+          "value": "gpui.sessionChat.viewState"
+        },
+        {
+          "label": "gpui-session-chat-debug.jsonl",
+          "value": "gpui-session-chat-debug.jsonl"
+        },
+        {
+          "label": "Daemon lifecycle",
+          "value": "gxserver.lifecycle"
+        },
+        {
+          "label": "gxserver.jsonl",
+          "value": "gxserver.jsonl"
+        },
+        {
+          "label": "API requests",
+          "value": "gxserver.requests"
+        },
+        {
+          "label": "gxserver.jsonl",
+          "value": "gxserver.jsonl"
+        },
+        {
+          "label": "Typed operations",
+          "value": "gxserver.typedOperations"
+        },
+        {
+          "label": "gxserver.jsonl",
+          "value": "gxserver.jsonl"
+        },
+        {
+          "label": "Repository cloning",
+          "value": "gxserver.repositoryClone"
+        },
+        {
+          "label": "gxserver.jsonl",
+          "value": "gxserver.jsonl"
+        },
+        {
+          "label": "Portless",
+          "value": "gxserver.portless"
+        },
+        {
+          "label": "gxserver.jsonl",
+          "value": "gxserver.jsonl"
+        },
+        {
+          "label": "Agent activity transitions",
+          "value": "gxserver.agentActivity"
+        },
+        {
+          "label": "gxserver.jsonl",
+          "value": "gxserver.jsonl"
+        }
+      ],
+      "agentWritable": false
+    },
+    {
+      "key": "showSessionCommandCopyActions",
+      "title": "Show command copy actions",
+      "subtitle": "Show Copy resume and Copy attach command in session context menus.",
+      "tab": "debugging",
+      "tabTitle": "Debugging",
+      "section": "controls",
+      "sectionTitle": "Debug controls",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "showSessionDetailsCopyAction",
+      "title": "Show Copy Details option",
+      "subtitle": "Show Copy Details in session context menus.",
+      "tab": "debugging",
+      "tabTitle": "Debugging",
+      "section": "controls",
+      "sectionTitle": "Debug controls",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "storageUsage",
+      "title": "Storage usage",
+      "subtitle": "Inspect browser storage by feature, budgets, pending saves, and disposable caches.",
+      "tab": "debugging",
+      "tabTitle": "Debugging",
+      "section": "storage",
+      "sectionTitle": "Storage",
+      "type": "ui",
+      "agentWritable": false
+    },
+    {
+      "key": "storageStats",
+      "title": "Ghostex folder storage",
+      "subtitle": "View on-disk Ghostex folder sizes and total usage, refresh statistics, or open the data folder.",
+      "tab": "debugging",
+      "tabTitle": "Debugging",
+      "section": "storage",
+      "sectionTitle": "Storage",
+      "type": "ui",
+      "agentWritable": false
     },
     {
       "key": "version",

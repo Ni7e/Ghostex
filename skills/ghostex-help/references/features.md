@@ -143,8 +143,10 @@ session replaces that active pane's session and leaves the other pane in place.
   details at once; the individual rows below it are marked Advanced.
 - Timed Delayed Send: open **Delayed Send** from an agent's right-click menu
   under **Advanced**. Choose **After a delay** for hours and minutes, or
-  **Specific time** for a future date and time on your computer, then **Save changes**.
-  Specific time calculates the remaining wait and uses the same timed send.
+  **Specific time** for a future date and time, then **Save changes**.
+  Specific time is available in Session Automations on desktop, web, and mobile.
+  It uses the local time of the device where you set it, calculates the remaining
+  wait when you save, and uses the same timed send.
   For an active timed send, right-click the agent and choose **Postpone by**, then
   **10 minutes**, **30 minutes**, **1 hour**, **2 hours**, or **5 hours** to add
   that duration to its existing send time. The same submenu has **Edit delayed send**
@@ -371,6 +373,10 @@ the same command accepts `--mode <mode>` and `--fast-mode on|off`.
 Claude's default-effort pricing notice also appears in chat with its original
 explanation and choices, so you can keep the current effort or switch to the
 recommended effort there without opening Terminal.
+Escape interrupts the agent. If a Claude message is cancelled before it is
+accepted, its text returns to the chat composer for editing. Rewind to here
+also returns the selected text when the message was never accepted, keeping
+anything already in the composer (`ghostex interrupt-session-chat <session>`).
 Codex rewind continues in a new conversation before the selected prompt and
 returns that prompt for editing. If the chat cannot reconnect after the rewind,
 choose Retry synchronization in the dialog to reconnect without rewinding again
@@ -394,9 +400,10 @@ Unrecorded model values are labelled Model not recorded.
 Slash commands sent from chat stay in the conversation after a reload, together
 with any captured output. Long command output expands when clicked; model, effort,
 Fast mode, and compaction results keep their status rows.
-During `/compact`, Claude and Codex show a compaction card above the input.
-Claude shows its reported progress; Codex shows a looping bar. Messages sent or
-queued during compaction wait until it finishes without a delivery warning.
+During `/compact`, Claude, Codex, and Cursor show a compaction card above the input.
+Cursor's `/summarize` uses the same flow. Claude shows its reported progress;
+Codex and Cursor show a looping bar. Messages sent or queued during compaction
+wait until it finishes without a delivery warning.
 In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
 While Claude Code writes a reply, the chat shows the text as it appears in the
 terminal, updated about once a second, and swaps in the saved message the moment
@@ -435,7 +442,11 @@ previews in Settings > Chat to show the first seven code lines by default.
 Long paths truncate from the start, keeping the filename visible. Click anywhere
 on the path or filename to open it in Editor or Docs, just like a file reference
 pill. Folder links in desktop chat open the folder in your system file explorer.
-Right-click anywhere on a path for Copy Path, just like file references.
+File reference pills in the composer also open with one click using the same
+Code/Docs preferences as transcript links. Double-click a composer pill to edit
+its reference text. Right-click a file reference or file-change path for Open in
+Code, Open in Docs (Markdown, HTML, and Excalidraw), or Copy Path. Disabled views
+are omitted from the menu.
 Hosts without an editor copy the path on click.
 Click the card background, circle, or change counts to expand or collapse the full diff.
 Only clicks directly on the path or filename open the file. The
@@ -460,6 +471,9 @@ If the context ring and effort still do not fit beside the model, they move
 together into Model settings at the top of More actions. Controls return as
 space opens up; More actions and Send or Stop stay visible.
 Click effort or the context meter to open it; hovering does not open either control.
+Hover the model or effort to see the configured Model & Effort Picker shortcut
+(Option+P by default on macOS). Hover the context circle to read the agent's
+terminal status line.
 
 Unsent chat drafts are saved automatically. Switching between Chat and Terminal
 keeps a saved copy while the text moves, and a late transfer preserves anything
@@ -599,7 +613,10 @@ selected computer and keep running if Settings closes. Start a new session to us
 and update it with `npm install -g zcode-app-cli@latest`, as documented at
 [the ZCode installation docs](https://github.com/kingsword09/zcode-cli).
 Agent Hooks let gxserver watch agent status, questions, and
-completions for chat and notifications. Agent approvals ("accept all") is a
+completions for chat and notifications. Installing the Claude Code hooks also
+sets Claude Code's transcript retention (`cleanupPeriodDays`) so past
+conversations stay on disk instead of being deleted after 30 days; a value you
+set yourself is left unchanged. Agent approvals ("accept all") is a
 per-machine default with per-project overrides. Actions (Settings > Actions)
 are saved terminal commands or browser URLs shown on project headers and in
 the titlebar Actions menu; Global Actions apply to every project.
@@ -843,11 +860,15 @@ Advanced to find Dark theme background contrast, Dark theme background tint, and
 Dark theme accent color; these controls do not recolor light-mode chrome.
 Keep Awake (Power)
 prevents sleep while agents work.
-Advanced holds Enable Experimental Features and the Debugging rows (Show debug
-UI controls gates diagnostic disk logging; leave these to the user).
-To see what is using local space, enable Show debug UI controls and open Storage
-usage in the same section. It lists usage by feature and lets you clear disposable
-caches; unsaved drafts and pending work are protected. The setting is `debuggingMode`.
+Advanced holds Enable Experimental Features. The separate Debugging page sits
+above About and starts with Show debug UI controls. Enable that switch to see
+diagnostic logging scenarios, session context-menu debugging controls, Storage
+usage, and Ghostex folder storage. Storage usage lists browser space by feature
+and can clear disposable caches; unsaved drafts and pending work are protected.
+Ghostex folder storage shows on-disk folder sizes with Refresh and Open Folder.
+Both storage panels load only while debug controls are enabled on that page.
+Open the page with `ghostex settings open --tab debugging`, or the inspector
+with `ghostex settings open storageUsage` after enabling debug controls.
 Settings that depend on a setting above them have an indented ↳ before their
 name. They appear when the parent setting enables them.
 In the Settings table of contents, click a page or section title to go there.
