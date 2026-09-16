@@ -1,8 +1,10 @@
+/* CDXC:SessionChat 2026-09-16 DECISION:
+   User: leave space outside the left of More actions in the narrow, scroll-collapsed composer so the placeholder does not crowd it. */
 .ghostex-chat-composer[data-scroll-collapsed='true'] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 0.5rem;
+  column-gap: 0.75rem;
   padding-block: 0.5rem;
 }
 
@@ -16,6 +18,10 @@
   min-height: 2rem;
   max-height: 2rem;
   overflow: hidden;
+}
+
+.ghostex-chat-composer[data-scroll-collapsed='true'] .ghostex-chat-composer-lexical {
+  margin-right: 0;
 }
 
 .ghostex-chat-composer[data-scroll-collapsed='true'] .ghostex-chat-composer-plain-input,

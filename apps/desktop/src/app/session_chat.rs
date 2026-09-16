@@ -655,7 +655,15 @@ impl GhostexGpuiApp {
                     .and_then(|value| u32::try_from(value).ok())
                     .filter(|value| *value > 0)
             });
-            self.open_session_chat_file_for_session(session_id, path, line, column, window, cx);
+            let view = match message.get("view").and_then(serde_json::Value::as_str) {
+                Some("code") => Some(shared_settings::SharedChatFileOpenView::Code),
+                Some("docs") => Some(shared_settings::SharedChatFileOpenView::Docs),
+                Some(_) => return,
+                None => None,
+            };
+            self.open_session_chat_file_for_session(
+                session_id, path, line, column, view, window, cx,
+            );
             return;
         }
         // The chat surface is only interactive as a rendered pane's active
@@ -1125,7 +1133,7 @@ impl GhostexGpuiApp {
             );
             return;
         };
-        self.open_session_chat_file_for_session(session_id, path, line, column, window, cx);
+        self.open_session_chat_file_for_session(session_id, path, line, column, None, window, cx);
     }
 
     pub(crate) fn open_session_chat_file_for_session(
@@ -1134,6 +1142,7 @@ impl GhostexGpuiApp {
         path: &str,
         line: Option<u32>,
         column: Option<u32>,
+        requested_view: Option<shared_settings::SharedChatFileOpenView>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -1201,22 +1210,37 @@ impl GhostexGpuiApp {
                 self.embedded_code_editor_unavailable_reason()
             };
         let code_available = code_unavailable_reason.is_none();
-        let destination = match document_preferred_view {
-            Some(shared_settings::SharedChatFileOpenView::Docs) if docs_available => {
-                Some(shared_settings::SharedChatFileOpenView::Docs)
+        let destination = match requested_view {
+            Some(shared_settings::SharedChatFileOpenView::Code) if code_available => requested_view,
+            Some(shared_settings::SharedChatFileOpenView::Docs)
+                if docs_available && document_preferred_view.is_some() =>
+            {
+                requested_view
             }
-            Some(shared_settings::SharedChatFileOpenView::Docs) if code_available => {
-                Some(shared_settings::SharedChatFileOpenView::Code)
+            Some(_) => {
+                self.report_session_chat_file_open_failure(
+                    "That view is not available for this file.",
+                    cx,
+                );
+                return;
             }
-            Some(shared_settings::SharedChatFileOpenView::Code) if code_available => {
-                Some(shared_settings::SharedChatFileOpenView::Code)
-            }
-            Some(shared_settings::SharedChatFileOpenView::Code) if docs_available => {
-                Some(shared_settings::SharedChatFileOpenView::Docs)
-            }
-            Some(_) => None,
-            None if code_available => Some(shared_settings::SharedChatFileOpenView::Code),
-            None => None,
+            None => match document_preferred_view {
+                Some(shared_settings::SharedChatFileOpenView::Docs) if docs_available => {
+                    Some(shared_settings::SharedChatFileOpenView::Docs)
+                }
+                Some(shared_settings::SharedChatFileOpenView::Docs) if code_available => {
+                    Some(shared_settings::SharedChatFileOpenView::Code)
+                }
+                Some(shared_settings::SharedChatFileOpenView::Code) if code_available => {
+                    Some(shared_settings::SharedChatFileOpenView::Code)
+                }
+                Some(shared_settings::SharedChatFileOpenView::Code) if docs_available => {
+                    Some(shared_settings::SharedChatFileOpenView::Docs)
+                }
+                Some(_) => None,
+                None if code_available => Some(shared_settings::SharedChatFileOpenView::Code),
+                None => None,
+            },
         };
 
         if destination.is_none() {
@@ -1247,9 +1271,6 @@ impl GhostexGpuiApp {
                     || manage_is_root_artifact_file_relative_path(relative)
             });
             let relative_path = if let Some(relative_path) = normal_docs_path {
-                if let Ok(mut authorization) = self.session_chat_docs_file_authorization.lock() {
-                    *authorization = None;
-                }
                 relative_path
             } else {
                 let Some(project_id) = session_project_id else {
@@ -1261,33 +1282,13 @@ impl GhostexGpuiApp {
                     );
                     return;
                 };
-                let Some(parent) = file_path.parent().map(Path::to_path_buf) else {
-                    self.report_session_chat_file_open_failure(
-                        "That document has no containing folder.",
-                        cx,
-                    );
-                    return;
-                };
-                let Some(file_name) = file_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                else {
-                    self.report_session_chat_file_open_failure("That path is not a file.", cx);
-                    return;
-                };
-                let Ok(mut authorization) = self.session_chat_docs_file_authorization.lock() else {
-                    self.report_session_chat_file_open_failure(
-                        "Docs could not authorize that file.",
-                        cx,
-                    );
-                    return;
-                };
-                *authorization = Some(GpuiSessionChatDocsFileAuthorization {
-                    file_name: file_name.clone(),
-                    project_id,
-                    root: parent,
-                });
-                format!("{MANAGE_DOCS_CHAT_FILE_MOUNT_SEGMENT}/{file_name}")
+                match authorize_manage_chat_file(&project_id, &file_path) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        self.report_session_chat_file_open_failure(&error, cx);
+                        return;
+                    }
+                }
             };
             self.report_session_chat_file_opening("Docs view", &file_path, cx);
             self.pending_docs_file_open = Some(relative_path);
@@ -1298,9 +1299,6 @@ impl GhostexGpuiApp {
                 self.schedule_pending_docs_file_open_delivery(cx);
             }
             return;
-        }
-        if let Ok(mut authorization) = self.session_chat_docs_file_authorization.lock() {
-            *authorization = None;
         }
         self.report_session_chat_file_opening("Code view", &file_path, cx);
         self.pending_source_file_open = Some(PendingSourceFileOpen {

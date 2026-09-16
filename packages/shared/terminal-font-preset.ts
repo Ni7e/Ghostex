@@ -34,7 +34,7 @@ export const TERMINAL_FONT_PRESETS = [
   { preset: 'Cross Platform Mono', fontFamily: CROSS_PLATFORM_MONO_TERMINAL_FONT_FAMILY },
   { preset: 'Consolas (Windows Default)', fontFamily: CONSOLAS_TERMINAL_FONT_FAMILY },
   { preset: 'Menlo', fontFamily: MENLO_TERMINAL_FONT_FAMILY },
-  { preset: 'Monaco (macOS Default)', fontFamily: MONACO_TERMINAL_FONT_FAMILY },
+  { preset: 'Monaco', fontFamily: MONACO_TERMINAL_FONT_FAMILY },
   { preset: 'Droid Sans Mono (Linux Default)', fontFamily: DROID_SANS_MONO_TERMINAL_FONT_FAMILY },
   { preset: 'Liberation Mono', fontFamily: LIBERATION_MONO_TERMINAL_FONT_FAMILY },
   { preset: 'DejaVu Sans Mono', fontFamily: DEJAVU_SANS_MONO_TERMINAL_FONT_FAMILY },
@@ -70,7 +70,7 @@ const TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE = new Map<string, TerminalFontPre
 
 TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set('ui-monospace', 'UI Monospace');
 TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set('consolas', 'Consolas (Windows Default)');
-TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set('monaco', 'Monaco (macOS Default)');
+TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set('monaco', 'Monaco');
 TERMINAL_FONT_PRESET_BY_NORMALIZED_VALUE.set('droid sans mono', 'Droid Sans Mono (Linux Default)');
 
 export function normalizeTerminalFontPreset(value: string | undefined): TerminalFontPreset {

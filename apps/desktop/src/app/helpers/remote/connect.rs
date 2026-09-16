@@ -46,7 +46,7 @@ pub(crate) fn gpui_connect_remote_gxserver_platform(
 ) -> GpuiRemoteGxserverConnectResult {
     GpuiRemoteGxserverConnectResult::without_connection(
         GpuiRemoteGxserverConnectState::Unsupported,
-        "Remote gxserver connect from Settings is only available in the macOS GPUI build.",
+        "Remote gxserver connect from Settings is unavailable in this build.",
     )
 }
 
@@ -228,7 +228,7 @@ pub(crate) fn gpui_connect_remote_gxserver_platform_inner(
         GpuiRemoteTokenKeychainResult::Unsupported => {
             return GpuiRemoteGxserverConnectResult::without_connection(
                 GpuiRemoteGxserverConnectState::Unsupported,
-                "Remote gxserver token storage is only available on macOS.",
+                "Remote gxserver token storage is unavailable in this build.",
             );
         }
         GpuiRemoteTokenKeychainResult::Failed => {

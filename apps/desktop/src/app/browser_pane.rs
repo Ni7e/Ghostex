@@ -87,7 +87,11 @@ impl GhostexGpuiApp {
             let subscription = cx.subscribe(
                 &input,
                 move |this: &mut Self, input, event: &InputEvent, cx| match event {
-                    InputEvent::Focus | InputEvent::Change => {
+                    InputEvent::Focus => {
+                        this.reclaim_gpui_root_for_chrome_input_focus();
+                        this.browser_address_input_editing.insert(pane_id);
+                    }
+                    InputEvent::Change => {
                         this.browser_address_input_editing.insert(pane_id);
                     }
                     InputEvent::Blur => {
@@ -190,7 +194,8 @@ impl GhostexGpuiApp {
             InputEvent::PressEnter { shift, .. } => {
                 let _ = self.perform_browser_find_navigation(tab_id, !*shift, cx);
             }
-            InputEvent::Focus | InputEvent::Blur => {}
+            InputEvent::Focus => self.reclaim_gpui_root_for_chrome_input_focus(),
+            InputEvent::Blur => {}
         }
     }
 

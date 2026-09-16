@@ -58,6 +58,11 @@ impl GhostexGpuiApp {
         persist_gpui_workspace_shell_state(self);
     }
 
+    /// Synchronous variant for the quit path; see `flush_gpui_workspace_shell_state`.
+    pub(crate) fn flush_shell_layout_state(&self) {
+        flush_gpui_workspace_shell_state(self);
+    }
+
     pub(crate) fn project_scoped_workarea_availability(&self) -> ProjectScopedWorkareaAvailability {
         project_scoped_workarea_availability_from_latest_sidebar_snapshot(
             self.latest_sidebar_project_snapshot.as_ref(),
@@ -983,7 +988,6 @@ impl GhostexGpuiApp {
                 let project_root = snapshot.in_memory_project_path.clone()?;
                 let project_id = active_project_id.to_string();
                 let dynamic_project_id = project_id.clone();
-                let chat_file_authorization = self.session_chat_docs_file_authorization.clone();
                 let docs_folders = gpui_manage_additional_docs_folders_text(
                     &self.sidebar_runtime_settings_snapshot,
                 );
@@ -1017,15 +1021,14 @@ impl GhostexGpuiApp {
                         }
                         Some(mounts)
                     }),
-                    Arc::new(move || {
-                        let authorization = chat_file_authorization.lock().ok()?;
-                        let authorization = authorization.as_ref().filter(|authorization| {
-                            authorization.project_id == dynamic_project_id
-                        })?;
+                    Arc::new(move |relative_path| {
+                        let (id, _) = manage_chat_file_address(relative_path)?;
+                        let authorization =
+                            resolve_manage_chat_file(&dynamic_project_id, relative_path)?;
                         Some(cef::ManageDocsResourceRoot {
                             allowed_relative_roots: vec![String::new()],
-                            mount_segment: MANAGE_DOCS_CHAT_FILE_MOUNT_SEGMENT.to_string(),
-                            path: authorization.root.clone(),
+                            mount_segment: format!("{MANAGE_DOCS_CHAT_FILE_MOUNT_SEGMENT}/{id}"),
+                            path: authorization.root,
                         })
                     }),
                 ))

@@ -91,6 +91,19 @@ if ($BuildPhase -ne "stage") {
     finally { Pop-Location }
 }
 
+# CDXC:PromptEditor 2026-09-16 WHY:
+# Ctrl+G needs the standalone helper as well as Code. Omitting it made every Windows build report the prompt editor unavailable.
+if ($BuildPhase -ne "stage") {
+    Push-Location $RepoRoot
+    try {
+        bun apps/editor/scripts/build-editor-web.mjs
+        if ($LASTEXITCODE -ne 0) { throw "Prompt editor page build failed" }
+        cargo build --release --manifest-path apps/editor/desktop/Cargo.toml
+        if ($LASTEXITCODE -ne 0) { throw "Prompt editor helper build failed" }
+    }
+    finally { Pop-Location }
+}
+
 if ($BuildPhase -eq "compile") {
     Write-Host "Compiled $AppName ($ReleaseArch); staging deferred to the stage phase"
     exit 0
@@ -98,6 +111,9 @@ if ($BuildPhase -eq "compile") {
 
 # CDXC:Release 2026-09-14 WHY:
 # The native editor payload is consumed only by staging. Building it during compile made both Windows Rust cache jobs fail on the editor's pinned Node requirement before reaching cargo.
+# CDXC:Release 2026-09-16 WHY:
+# The release workflow hands the verified native editor component archive to the script through GHOSTEX_WINDOWS_NATIVE_CODE_SERVER_ARCHIVE.
+# Without it the script reuses the published component when the code-server tree is clean and builds from source otherwise, so local builds keep working without CI.
 & (Join-Path $ScriptDir "build-windows-code-server.ps1")
 
 # 3) Locate the extracted CEF distribution. cef-dll-sys may export either a
@@ -218,6 +234,11 @@ if ($OnDemandComponents) {
         --output $ComponentManifest
     if ($LASTEXITCODE -ne 0) { throw "Could not seal Windows CEF component metadata" }
 }
+
+$PromptEditorResources = Join-Path $AppDir "resources/GhostexEditor"
+New-Item -ItemType Directory -Force -Path $PromptEditorResources | Out-Null
+Copy-Item (Join-Path $RepoRoot "apps/editor/desktop/target/release/ghostex-editor.exe") (Join-Path $PromptEditorResources "GhostexEditor.exe")
+Copy-Item (Join-Path $RepoRoot "apps/editor/dist/web") (Join-Path $PromptEditorResources "web") -Recurse
 
 # Both environments ship their matching runtime. Source/code-server remains
 # an optional WSL component.
@@ -349,4 +370,13 @@ if (!(Test-Path (Join-Path $NativeCodeRoot "lib/node.exe")) -or
     throw "The native Windows editor build did not produce the required staging payload."
 }
 Copy-Item $NativeCodeRoot (Join-Path $AppDir "code-server") -Recurse -Force
+# CDXC:Release 2026-09-16 WHY:
+# The native editor payload is an immutable, version-free component reused across releases, so the app version and commit are stamped on the staged copy here, not at build time.
+# A reused payload therefore reports the current release exactly like a freshly built one.
+$StagedPackagePath = Join-Path $AppDir "code-server/package.json"
+$StagedPackage = Get-Content $StagedPackagePath -Raw | ConvertFrom-Json
+$StagedPackage.version = $ReleaseVersion
+# The wrapper reports the code-server revision it was built from; the gitlink resolves even when the submodule is not initialized.
+$StagedPackage | Add-Member -NotePropertyName commit -NotePropertyValue ((& git -C $RepoRoot rev-parse "HEAD:.dependencies/code-server").Trim()) -Force
+[IO.File]::WriteAllText($StagedPackagePath, ($StagedPackage | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
 Write-Host "Staged $AppDir"

@@ -13,7 +13,6 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 // RefCell backs cross-platform runtime state (window frame persistence), not
@@ -37,6 +36,7 @@ use gpui_component::input::InputState;
 use crate::app::element::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::native_app_modal_lifecycle::NativeAppModal;
 use crate::app::terminal_sync::GpuiEngineTerminalAnnouncedVisibility;
 use crate::app::window::*;
 use crate::*;
@@ -345,13 +345,6 @@ pub struct GhostexGpuiApp {
     /// `window.ghostexOpenDocsReview`), parked like `pending_docs_file_open`.
     pub(crate) pending_docs_review_open: Option<String>,
     /*
-    Bounded filesystem authority for the one external or out-of-tree document
-    explicitly opened from chat. The Docs bridge and HTML resource loader share
-    it, while the project id prevents cross-project reuse.
-    */
-    pub(crate) session_chat_docs_file_authorization:
-        Arc<Mutex<Option<GpuiSessionChatDocsFileAuthorization>>>,
-    /*
     CDXC:Workarea 2026-06-24-10:12:
     Source, Kanban, Automate, and Manage real CEF panes now have permanent app-owned runtime surface storage keyed by the safe workarea slot. The map owns Entity<CefSurface> plus the process-local direct runtime URL identity required to reject stale slot reuse; it must not store project names/paths, page titles, bridge payloads, file contents, tokens, cookies, shell text, or fallback navigation state, and creation is allowed only through a helper that receives a real runtime URL value.
 
@@ -445,6 +438,8 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_chat_page_states: HashMap<TerminalSessionId, SessionChatPageState>,
     pub(crate) session_chat_diagnostics: super::session_chat_diagnostics::SessionChatDiagnostics,
     pub(crate) agents_chat_eviction_running: bool,
+    pub(crate) agents_chat_eviction_retry_scheduled: bool,
+    pub(crate) agents_chat_reconcile_scheduled: bool,
     pub(crate) agents_chat_eviction_requested: bool,
     pub(crate) agents_chat_surfaces: HashMap<TerminalSessionId, Entity<CefSurface>>,
     pub(crate) session_chat_broker_endpoints: HashMap<String, (String, String)>,
@@ -537,9 +532,8 @@ pub struct GhostexGpuiApp {
     pub(crate) sidebar_timer_presentations_replayed_after_ready: bool,
     /// The sidebar page's last-used launcher agent id, published over the native host bridge for the native New Thread picker.
     pub(crate) sidebar_primary_agent_launcher_id: Option<String>,
-    /// The native Handoff / Export dialog window, if open; see app/window/export_transcript_modal.rs.
-    pub(crate) export_transcript_modal_window:
-        Option<WindowHandle<GpuiExportTranscriptModalWindow>>,
+    /// The open native GPUI app modal, if any; see app/native_app_modal_lifecycle.rs.
+    pub(crate) native_app_modal: Option<NativeAppModal>,
     pub(crate) new_thread_picker_window: Option<WindowHandle<Root>>,
     pub(crate) new_thread_picker: Option<Entity<GpuiNewThreadPickerWindow>>,
     pub(crate) new_thread_picker_visible: bool,

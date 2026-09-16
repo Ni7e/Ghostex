@@ -395,7 +395,7 @@ pub(super) fn matches_session_ref_part(part: &str, prefix: u8, tail_len: usize) 
 // ---------------------------------------------------------------------------
 // floating-monaco-editor (lines 3509-3712).
 
-fn machine_editor_args(command: &str, file_path: &str) -> Vec<String> {
+pub(super) fn machine_editor_args(command: &str, file_path: &str) -> Vec<String> {
     #[cfg(windows)]
     {
         let shell = crate::platform::shell::command_shell();

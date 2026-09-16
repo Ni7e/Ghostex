@@ -49,6 +49,10 @@ const NOTIFICATION_BELL_ICON: &str = "titlebar/bell.svg";
 const NOTIFICATION_BELL_ICON_SIZE: f32 = 15.0;
 /// The app-wide attention blue (`--attention-dot` in the shared theme).
 pub(crate) const NOTIFICATION_ATTENTION_BLUE: u32 = 0x95d7f6;
+/// CDXC:Notifications 2026-09-16 DECISION:
+/// User: make the "Project · Finished" meta line more visible in light mode.
+/// The fill/border accent stays #95d7f6; this darker same-hue ink is only for unread meta text on pale unread cards.
+pub(crate) const NOTIFICATION_ATTENTION_BLUE_TEXT_LIGHT: u32 = 0x0d7eab;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GpuiNotificationFeedKind {

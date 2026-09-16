@@ -469,16 +469,18 @@ Automatic compaction announces itself to nobody, so it is still discovered by
 the working-tier probe; that is the case this cannot help with.
 */
 pub fn is_session_chat_activity_command_text(agent: Option<&str>, text: &str) -> bool {
-    if !matches!(
-        session_chat_option_agent(agent),
-        Some(SessionChatOptionAgent::Claude | SessionChatOptionAgent::Codex)
-    ) {
-        return false;
-    }
     let Some(first) = text.trim_start().split_whitespace().next() else {
         return false;
     };
-    first == "/compact"
+    match session_chat_option_agent(agent) {
+        Some(
+            SessionChatOptionAgent::Claude
+            | SessionChatOptionAgent::Codex
+            | SessionChatOptionAgent::Grok,
+        ) => first == "/compact",
+        Some(SessionChatOptionAgent::Cursor) => matches!(first, "/compact" | "/summarize"),
+        _ => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2179,21 +2181,23 @@ pub fn detect_session_chat_terminal_state(
             composer.state == crate::session_chat_composer::SessionChatComposerState::Ready,
         );
     }
-    let activity = if agent == Some(SessionChatOptionAgent::Cursor)
-        && composer.state == crate::session_chat_composer::SessionChatComposerState::Ready
-    {
-        // Cursor leaves its last Braille working row in scrollback after an
-        // answer or interruption. Its live composer is authoritative idle
-        // evidence, so that older row must not survive as chat activity.
-        None
-    } else {
-        screen.and_then(|capture| {
+    let activity = screen
+        .and_then(|capture| {
             crate::session_chat_terminal_activity::detect_session_chat_terminal_activity(
                 agent_id,
                 &capture.text,
             )
         })
-    };
+        .filter(|activity| {
+            // Cursor leaves old working rows in scrollback, but its composer
+            // also stays available during summarizing. The compaction detector
+            // requires the live stop hint before bypassing this idle gate.
+            agent != Some(SessionChatOptionAgent::Cursor)
+                || composer.state != crate::session_chat_composer::SessionChatComposerState::Ready
+                || crate::session_chat_terminal_activity::is_session_chat_compacting_activity(Some(
+                    activity,
+                ))
+        });
     let (fleet, fleet_observed) = if matches!(
         agent,
         Some(SessionChatOptionAgent::Codex | SessionChatOptionAgent::Claude)

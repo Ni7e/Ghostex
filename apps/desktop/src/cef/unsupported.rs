@@ -166,7 +166,10 @@ pub struct ManageDocsResourceRoot {
 type ManageDocsRemoteResourceLoader = Arc<dyn Fn(&str) -> Option<Vec<u8>> + Send + Sync>;
 
 impl ManageDocsResourceScope {
-    pub fn new(_resolve_root: ManageDocsLocalRootResolver) -> Self {
+    pub fn new(
+        _resolve_root: ManageDocsLocalRootResolver,
+        _resolve_dynamic_root: Arc<dyn Fn(&str) -> Option<ManageDocsResourceRoot> + Send + Sync>,
+    ) -> Self {
         Self
     }
 

@@ -31,7 +31,7 @@ describe('normalizeTerminalFontPreset', () => {
     expect(normalizeTerminalFontPreset('Meslo')).toBe('Meslo');
     expect(normalizeTerminalFontPreset('Cross Platform Mono')).toBe('Cross Platform Mono');
     expect(normalizeTerminalFontPreset('Consolas')).toBe('Consolas (Windows Default)');
-    expect(normalizeTerminalFontPreset('Monaco')).toBe('Monaco (macOS Default)');
+    expect(normalizeTerminalFontPreset('Monaco')).toBe('Monaco');
     expect(normalizeTerminalFontPreset('Droid Sans Mono')).toBe('Droid Sans Mono (Linux Default)');
     expect(normalizeTerminalFontPreset('Fira Code')).toBe('Fira Code');
   });
@@ -55,7 +55,7 @@ describe('terminal font preset helpers', () => {
       'Cross Platform Mono',
       'Consolas (Windows Default)',
       'Menlo',
-      'Monaco (macOS Default)',
+      'Monaco',
       'Droid Sans Mono (Linux Default)',
       'Liberation Mono',
       'DejaVu Sans Mono',

@@ -85,7 +85,7 @@ export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] =
   {
     command: 'ghostex computer-use install-skill',
     description:
-      'Let agents control your machine: click, type, and see the screen in native apps. Runs through Trycua, and macOS asks for Accessibility and Screen Recording permissions.',
+      'Let agents control your machine: click, type, and see the screen in native apps. Runs through Trycua, and your operating system may ask for accessibility and screen recording permissions.',
     id: 'computerUse',
     name: 'Ghostex Computer Use',
     requiresCuaDriver: true,

@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 /*
 CDXC:PromptSearch 2026-08-20:
 The three overlays take over the bottom pane exactly where the terminal picker
@@ -78,7 +79,7 @@ export function FindAgentFilterOverlay({
 }) {
   return (
     <OverlayShell
-      hint='↑/↓ or ^p/^n move · Enter/Space toggle · 1-6 quick toggle · Esc close · select none to show all'
+      hint={`↑/↓ or ${formatSidebarHotkeyLabel('ctrl+p')}/${formatSidebarHotkeyLabel('ctrl+n')} move · Enter/Space toggle · 1-6 quick toggle · Esc close · select none to show all`}
       title='Filter by agent'
     >
       {FIND_PROMPT_AGENTS.map((agent, position) => (
@@ -111,7 +112,7 @@ export function FindProjectFilterOverlay({
 }) {
   return (
     <OverlayShell
-      hint='Type to search · ↑/↓ or ^p/^n move · Enter select · Space clears · Esc close'
+      hint={`Type to search · ↑/↓ or ${formatSidebarHotkeyLabel('ctrl+p')}/${formatSidebarHotkeyLabel('ctrl+n')} move · Enter select · Space clears · Esc close`}
       title='Filter by project'
     >
       <div className='mb-1'>

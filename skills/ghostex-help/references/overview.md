@@ -31,7 +31,7 @@ Run `ghostex guide <chapter>` for the details:
 - **Quick Access** (Cmd+Shift+P): search every command, pane action, settings
   shortcut, and recent session. Cmd+P opens it on Recent Sessions.
 - **Settings** (Cmd+,): pages for General, Integrations, Extensions, Remote,
-  Projects, Agents, Accounts, Actions, Open In, Hotkeys, and About, with one
+  Projects, Agents, Accounts, Actions, Open In, Hotkeys, Debugging, and About, with one
   search box that finds rows on every page.
 
 ## Key concepts

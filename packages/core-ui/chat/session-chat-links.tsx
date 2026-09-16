@@ -34,6 +34,9 @@ export interface SessionChatHostLinks {
    * the first line of a range; hosts that only know how to open a file ignore it.
    */
   openFile?: (path: string, position?: SessionChatFilePosition) => void;
+  /** Explicit destinations, supplied only while the host view is available. */
+  openFileInCode?: (path: string, position?: SessionChatFilePosition) => void;
+  openFileInDocs?: (path: string, position?: SessionChatFilePosition) => void;
   /** Reveals a file reference in the machine's file manager. */
   locateFile?: (path: string) => void;
 }

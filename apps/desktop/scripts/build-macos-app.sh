@@ -1014,8 +1014,10 @@ cef_component_version() {
 
 prepare_cef_component_asset() {
 	local component_version component_tag asset_dir asset_path component_manifest stage_root staged_framework
-	local published_asset_names signing_identity expected_team actual_team
+	local published_asset_names signing_identity expected_team actual_team components_repo
 	component_version="$(cef_component_version)"
+	# Component tags live in the components repository (GHOSTEX_COMPONENTS_REPO, resolved by components-repo.mjs).
+	components_repo="$(node "$REPO_ROOT/tooling/release-gpui/components-repo.mjs")"
 	component_tag="cef-$component_version"
 	asset_dir="${GHOSTEX_ON_DEMAND_COMPONENT_ASSET_DIR:-$REPO_ROOT/build/on-demand-components/assets}"
 	component_manifest="${GHOSTEX_ON_DEMAND_COMPONENTS_MANIFEST:-$REPO_ROOT/build/on-demand-components/components.json}"
@@ -1025,11 +1027,11 @@ prepare_cef_component_asset() {
 	mkdir -p "$asset_dir"
 	published_asset_names=""
 	if command -v gh >/dev/null 2>&1; then
-		published_asset_names="$(gh release view "$component_tag" --repo maddada/Ghostex --json assets --jq '.assets[].name' 2>/dev/null || true)"
+		published_asset_names="$(gh release view "$component_tag" --repo "$components_repo" --json assets --jq '.assets[].name' 2>/dev/null || true)"
 	fi
 	if printf '%s\n' "$published_asset_names" | grep -Fxq "$(basename "$asset_path")"; then
 		gh release download "$component_tag" \
-			--repo maddada/Ghostex \
+			--repo "$components_repo" \
 			--pattern "$(basename "$asset_path")" \
 			--dir "$asset_dir" \
 			--clobber

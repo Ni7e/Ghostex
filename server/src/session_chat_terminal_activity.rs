@@ -50,7 +50,7 @@ const CURSOR_ACTIVITY_SCAN_LINES: usize = 15;
 /// next line; two leaves room for a wrap.
 const ACTIVITY_PERCENT_LOOKAHEAD: usize = 2;
 
-/// Activity kind for Claude Code and Codex compaction (manual and automatic).
+/// Activity kind for Claude Code, Codex, Cursor and Grok compaction (manual and automatic).
 pub const SESSION_CHAT_ACTIVITY_COMPACTING: &str = "compacting";
 
 /// Claude Code's current assistant status, not yet flushed to transcript JSONL.
@@ -599,11 +599,15 @@ optional token counter:
 
     ⠠⠜ Thinking 73 tokens
     ⠋ Composing 1.2K tokens
+    ⠠⠜ Summarizing 42.61k tokens
 
-The spinner is required so assistant prose containing either word cannot be
+The spinner is required so assistant prose containing these labels cannot be
 mistaken for live activity. The token count is intentionally not projected:
 it is throughput metadata, not stable reasoning content.
 */
+/// CDXC:AgentScreenDetection 2026-09-16 DECISION:
+/// User: Cursor's /summarize and /compact use the same chat compaction flow as Codex, detected from its live Summarizing spinner row.
+/// Cursor reports tokens, not completion percentage, so the shared compaction card uses a looping bar and holds queued prompts until summarizing ends.
 fn cursor_activity_from_line(line: &str) -> Option<SessionChatTerminalActivity> {
     let mut tokens = line.split_whitespace();
     let spinner = tokens.next()?;
@@ -615,7 +619,7 @@ fn cursor_activity_from_line(line: &str) -> Option<SessionChatTerminalActivity> 
         return None;
     }
     let label = tokens.next()?;
-    if label != "Thinking" && label != "Composing" {
+    if !matches!(label, "Thinking" | "Composing" | "Summarizing") {
         return None;
     }
     let remaining: Vec<_> = tokens.collect();
@@ -623,16 +627,50 @@ fn cursor_activity_from_line(line: &str) -> Option<SessionChatTerminalActivity> 
         && (remaining.len() != 2
             || remaining[1] != "tokens"
             || !remaining[0]
-                .trim_end_matches(['K', 'M'])
+                .trim_end_matches(['k', 'K', 'm', 'M'])
                 .chars()
                 .all(|ch| ch.is_ascii_digit() || ch == '.'))
     {
         return None;
     }
-    Some(SessionChatTerminalActivity::new(
-        SESSION_CHAT_ACTIVITY_CURSOR_THINKING,
-        label,
-    ))
+    let (kind, label) = if label == "Summarizing" {
+        (SESSION_CHAT_ACTIVITY_COMPACTING, "Compacting conversation")
+    } else {
+        (SESSION_CHAT_ACTIVITY_CURSOR_THINKING, label)
+    };
+    Some(SessionChatTerminalActivity::new(kind, label))
+}
+
+/// CDXC:AgentScreenDetection 2026-09-16 DECISION:
+/// User: Grok Build's /compact uses the same chat compaction flow as Cursor and Codex, based on its actual terminal status.
+/// The live Braille Compacting… row ends in [stop] immediately above the composer; the transcript's Compacting conversation… and completed notice remain after it finishes.
+fn grok_compacting_activity(screen_text: &str) -> Option<SessionChatTerminalActivity> {
+    let lines = crate::session_chat_agent_fleet::normalized_screen_lines(screen_text);
+    let composer = lines.iter().rposition(|line| line.starts_with("│ ❯"))?;
+    let border = lines.get(composer.checked_sub(1)?)?;
+    if !border.starts_with("╭─") || !border.ends_with('╮') {
+        return None;
+    }
+    let line = lines.get(composer.checked_sub(2)?)?;
+    let mut tokens = line.split_whitespace();
+    let spinner = tokens.next()?;
+    if !spinner
+        .chars()
+        .all(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))
+        || tokens.next()? != "Compacting…"
+        || !line.ends_with(" [stop]")
+    {
+        return None;
+    }
+    let mut activity =
+        SessionChatTerminalActivity::new(SESSION_CHAT_ACTIVITY_COMPACTING, COMPACTING_LABEL);
+    activity.elapsed_seconds = tokens
+        .next()
+        .and_then(|clock| clock.strip_suffix('s'))
+        .and_then(|seconds| seconds.parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map(|seconds| seconds as u64);
+    Some(activity)
 }
 
 /*
@@ -825,6 +863,9 @@ whether the bullet is drawn or not. What sits above a gutter is a tool only
 when it is a bullet row or an indented row: the spinner's `⎿ Tip:` and a
 prompt's `⎿ Referenced file` hang under marker and prompt rows and are not.
 */
+/// CDXC:AgentScreenDetection 2026-09-16 WHY:
+/// Claude's Bash results can include file diffs followed by another output gutter, even for changes made by another session.
+/// A clipped or blank-separated diff tail used to become the shared chat card's heading; a heading cannot sit deeper than the output gutter it owns.
 fn claude_tool_activity(rows: &[ScreenRow], gutter: usize) -> Option<SessionChatTerminalActivity> {
     if gutter == 0 || rows[gutter].after_blank {
         return None;
@@ -856,6 +897,7 @@ fn claude_tool_activity(rows: &[ScreenRow], gutter: usize) -> Option<SessionChat
     // above the whole stack.
     if row.text.starts_with(CLAUDE_TOOL_OUTPUT_MARKER)
         || (!bullet && row.indent < CLAUDE_STATUS_CONTINUATION_INDENT)
+        || row.indent > rows[gutter].indent
     {
         return None;
     }
@@ -911,13 +953,23 @@ pub fn detect_session_chat_terminal_activity(
     screen_text: &str,
 ) -> Option<SessionChatTerminalActivity> {
     let agent = session_chat_option_agent(agent)?;
+    if agent == SessionChatOptionAgent::Grok {
+        return grok_compacting_activity(screen_text);
+    }
     if agent == SessionChatOptionAgent::Cursor {
         let lines = crate::session_chat_agent_fleet::normalized_screen_lines(screen_text);
-        return lines
+        let composer = lines.iter().rposition(|line| line.starts_with('→'));
+        let summarizing_live =
+            composer.is_some_and(|index| lines[index].ends_with("ctrl+c to stop"));
+        let status_lines = composer.map_or(lines.as_slice(), |index| &lines[..index]);
+        return status_lines
             .iter()
             .rev()
             .take(CURSOR_ACTIVITY_SCAN_LINES)
-            .find_map(|line| cursor_activity_from_line(line));
+            .find_map(|line| cursor_activity_from_line(line))
+            .filter(|activity| {
+                activity.kind != SESSION_CHAT_ACTIVITY_COMPACTING || summarizing_live
+            });
     }
     if agent == SessionChatOptionAgent::Codex {
         return screen_text.lines().rev().find_map(|line| {

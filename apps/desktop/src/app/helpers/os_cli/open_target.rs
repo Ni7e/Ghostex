@@ -95,16 +95,12 @@ pub(crate) fn gpui_spawn_os_open(target: &std::ffi::OsStr) -> Result<(), String>
         .stderr(std::process::Stdio::null())
         .spawn()
         .map(|_| ())
-        .map_err(|_| "macOS could not open the requested Ghostex Settings target.".to_string())
+        .map_err(|_| {
+            "The operating system could not open the requested Ghostex Settings target.".to_string()
+        })
 }
 
-/// The OS file manager, named the way this platform's users name it.
-#[cfg(target_os = "macos")]
-pub(crate) const GPUI_FILE_MANAGER_NAME: &str = "Finder";
-#[cfg(target_os = "windows")]
-pub(crate) const GPUI_FILE_MANAGER_NAME: &str = "File Explorer";
-#[cfg(all(unix, not(target_os = "macos")))]
-pub(crate) const GPUI_FILE_MANAGER_NAME: &str = "your file manager";
+pub(crate) const GPUI_FILE_MANAGER_NAME: &str = "the file manager";
 
 #[cfg(target_os = "macos")]
 pub(crate) fn gpui_reveal_path_in_finder(path: &Path) -> Result<(), String> {

@@ -165,13 +165,103 @@ pub(crate) fn persist_gpui_workspace_shell_state(app: &GhostexGpuiApp) {
     CDXC:Telemetry 2026-06-23-13:18:
     Phase 10 persistence re-audit keeps this as the only GPUI-owned workspace shell-state writer. It may write writer-owned layout/focus/tab/profile/lifecycle metadata, bounded canonical gxserver P/G identities, the validated bounded command Action selector used for restart reuse, safe Agents Delayed Send trigger/remaining-time checkpoints, complete sanitized Browser HTTP(S) URLs, plus the `petOverlayActivitiesVisible` UI boolean only; pet activity payloads, pet titles, raw settings JSON, terminal content, command text, stdout/stderr, project paths, file paths, page titles, profile paths, cookies, URL credentials, raw payloads, unrelated private user content, and runtime surface data must stay out at the serializer boundary.
     */
-    let path = gpui_workspace_shell_state_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+    let Ok(data) = serde_json::to_vec_pretty(&gpui_workspace_shell_state_json(app)) else {
+        return;
+    };
+    shell_state_writer().enqueue(data);
+}
+
+/// Write the shell state synchronously. Only the quit path uses this, so the last layout is on disk before the process exits.
+pub(crate) fn flush_gpui_workspace_shell_state(app: &GhostexGpuiApp) {
+    let Ok(data) = serde_json::to_vec_pretty(&gpui_workspace_shell_state_json(app)) else {
+        return;
+    };
+    shell_state_writer().write_now(data);
+}
+
+/// CDXC:SessionChat 2026-09-16 WHY:
+/// The shell state is persisted on every session switch, tab change and layout edit (well over a hundred call sites) and used to be written to disk synchronously on the UI thread, inside the click path.
+/// Serialization stays on the UI thread; the bytes go to one writer thread that always writes the newest pending state, and a sequence number keeps a slower background write from landing after the synchronous quit-time flush.
+struct ShellStateWriter {
+    pending: std::sync::Mutex<Option<(u64, Vec<u8>)>>,
+    wake: std::sync::Condvar,
+    written: std::sync::Mutex<u64>,
+    sequence: std::sync::atomic::AtomicU64,
+}
+
+impl ShellStateWriter {
+    fn next_sequence(&self) -> u64 {
+        self.sequence
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            + 1
     }
-    if let Ok(data) = serde_json::to_vec_pretty(&gpui_workspace_shell_state_json(app)) {
+
+    fn enqueue(&self, data: Vec<u8>) {
+        let sequence = self.next_sequence();
+        if let Ok(mut pending) = self.pending.lock() {
+            *pending = Some((sequence, data));
+        }
+        self.wake.notify_one();
+    }
+
+    fn write_now(&self, data: Vec<u8>) {
+        let sequence = self.next_sequence();
+        if let Ok(mut pending) = self.pending.lock() {
+            *pending = None;
+        }
+        self.write_if_newer(sequence, &data);
+    }
+
+    fn write_if_newer(&self, sequence: u64, data: &[u8]) {
+        let Ok(mut written) = self.written.lock() else {
+            return;
+        };
+        if sequence <= *written {
+            return;
+        }
+        let path = gpui_workspace_shell_state_path();
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
         let _ = fs::write(path, data);
+        *written = sequence;
     }
+
+    fn run(&self) {
+        loop {
+            let (sequence, data) = {
+                let Ok(mut pending) = self.pending.lock() else {
+                    return;
+                };
+                loop {
+                    if let Some(next) = pending.take() {
+                        break next;
+                    }
+                    pending = match self.wake.wait(pending) {
+                        Ok(guard) => guard,
+                        Err(_) => return,
+                    };
+                }
+            };
+            self.write_if_newer(sequence, &data);
+        }
+    }
+}
+
+fn shell_state_writer() -> &'static ShellStateWriter {
+    static WRITER: std::sync::OnceLock<&'static ShellStateWriter> = std::sync::OnceLock::new();
+    WRITER.get_or_init(|| {
+        let writer: &'static ShellStateWriter = Box::leak(Box::new(ShellStateWriter {
+            pending: std::sync::Mutex::new(None),
+            wake: std::sync::Condvar::new(),
+            written: std::sync::Mutex::new(0),
+            sequence: std::sync::atomic::AtomicU64::new(0),
+        }));
+        let _ = std::thread::Builder::new()
+            .name("gpui-shell-state-writer".to_string())
+            .spawn(move || writer.run());
+        writer
+    })
 }
 
 pub(crate) fn sole_local_workspace_mapping_project_id(

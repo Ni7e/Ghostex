@@ -208,7 +208,9 @@ fn remove_owned_json_hooks(data: &mut Value, format: HookFormat, command: &str) 
     let event_groups = if format == HookFormat::Antigravity {
         data.get_mut("ghostex").and_then(Value::as_object_mut)
     } else if format == HookFormat::NestedEventsJson {
-        data.get_mut("hooks").and_then(|hooks| hooks.get_mut("events")).and_then(Value::as_object_mut)
+        data.get_mut("hooks")
+            .and_then(|hooks| hooks.get_mut("events"))
+            .and_then(Value::as_object_mut)
     } else if format == HookFormat::RootFlatJson {
         data.as_object_mut()
     } else {
@@ -231,7 +233,9 @@ fn remove_owned_json_hooks(data: &mut Value, format: HookFormat, command: &str) 
                 .filter(|entry| !is_ghostex_owned_hook_command(entry, command))
                 .cloned()
                 .collect::<Vec<_>>(),
-            HookFormat::NestedJson | HookFormat::NestedEventsJson => remove_nested_hook_groups(entries, command),
+            HookFormat::NestedJson | HookFormat::NestedEventsJson => {
+                remove_nested_hook_groups(entries, command)
+            }
             HookFormat::Opencode
             | HookFormat::PluginFile
             | HookFormat::MarkedYaml
@@ -502,7 +506,8 @@ fn inspect_json_hook_config(
             && codex_interrupt_timeout_current
             && claude_statusline_current
             && codex_status_line_current
-            && (definition.agent_id != "zcode" || data.pointer("/hooks/enabled") == Some(&json!(true))),
+            && (definition.agent_id != "zcode"
+                || data.pointer("/hooks/enabled") == Some(&json!(true))),
         ghostex_hook_present: json_contains_ghostex_owned_hook_command(&data, command),
     }
 }
@@ -1034,6 +1039,7 @@ fn merge_json_hook(
     // statusLine command, registered (or re-pointed) alongside the hooks.
     if definition.agent_id == "claude" {
         register_claude_statusline(&mut data, hook_paths);
+        super::claude_retention::ensure_claude_transcript_retention(&mut data);
     }
     write_json_file(config_path, &data)
 }

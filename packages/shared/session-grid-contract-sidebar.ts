@@ -1110,6 +1110,17 @@ export type ApplySidebarSpaceEditorResultMessage = SidebarSpaceEditorResultField
   type: 'applySidebarSpaceEditorResult';
 };
 
+/**
+ * CDXC:Spaces 2026-09-15 DECISION:
+ * User: a project added through the Add Project dialog is assigned to the Space currently open in the sidebar and lands at the top of it.
+ * The host posts the added project's raw id (plus the owning machine for a remote add) before it activates the project; SidebarApp, which owns the Space document and the selected Space, applies the membership and the reorder.
+ */
+export type SidebarAssignAddedProjectToSelectedSpaceMessage = {
+  projectId: string;
+  remoteMachineId?: string;
+  type: 'assignAddedProjectToSelectedSpace';
+};
+
 export type SidebarHudChangedMessage = {
   hud: SidebarHudState;
   revision: number;
@@ -1262,11 +1273,9 @@ export type SidebarGhostexFolderStat = {
 };
 
 /**
- * CDXC:Settings 2026-05-09-15:25
- * Settings exposes Ghostex data-directory usage only after the user scrolls to the
- * bottom of the modal. The native sidebar sends per-folder byte counts back as
- * a sidebar message so the full-window modal can render stats without owning
- * filesystem access or accepting client-provided paths.
+ * CDXC:Diagnostics 2026-09-16 SEE-ALSO:
+ * packages/core-ui/settings-modal/tabs/debugging.tsx gates folder-size requests on Show debug UI controls.
+ * The native sidebar returns folder sizes so the Settings page does not own filesystem access or accept client-provided paths.
  */
 export type SidebarGhostexFolderStatsMessage = {
   errorMessage?: string;
@@ -1520,6 +1529,7 @@ export type ExtensionToSidebarMessage =
   | SidebarSpacesChangedMessage
   | CustomSessionTagsChangedMessage
   | ApplySidebarSpaceEditorResultMessage
+  | SidebarAssignAddedProjectToSelectedSpaceMessage
   | SidebarHudChangedMessage
   | SidebarPlayCompletionSoundMessage
   | SidebarOrderSyncResultMessage
@@ -2970,6 +2980,7 @@ export type SidebarToExtensionMessage =
       groupId?: string;
       projectId?: string;
       requestId?: string;
+      openLocation?: boolean;
       type: 'openSidebarGitChangedFile';
     }
   | {

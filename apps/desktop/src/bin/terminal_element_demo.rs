@@ -25,6 +25,8 @@ built-in showcase.
 
 #[path = "../ghostty_vt.rs"]
 mod ghostty_vt;
+#[path = "../hotkey_label.rs"]
+mod hotkey_label;
 #[path = "../shared_settings.rs"]
 mod shared_settings;
 #[path = "../support_logs.rs"]

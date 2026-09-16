@@ -62,6 +62,7 @@ impl GhostexGpuiApp {
             .values()
             .any(|progress| progress.page_generation == Some(candidate.generation))
             || self.chat_eviction_drag_active()
+            || candidate.hidden_since.elapsed() < GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE
         {
             return false;
         }
@@ -224,7 +225,11 @@ impl GhostexGpuiApp {
     /// CDXC:SessionChat 2026-09-05 WHY:
     /// A prior empty report can precede the final keystroke or blur, so elapsed time is not a safe substitute for a fresh reply.
     /// Ask the exact hidden editor to commit its draft and transfer pending revisions to the shared broker, then recheck native guards and its hidden epoch before releasing the binding.
-    /// Serial probes preserve oldest-first release without simultaneous snapshot reads for every cached page; refusal, timeout and unknown state protect the page.
+    /// Refusal, timeout and unknown state protect the page.
+    /// CDXC:SessionChat 2026-09-16 WHY:
+    /// Probes used to run one at a time, so a page that never answered held every later candidate for the full three-second timeout.
+    /// All probes are requested at once and their replies are awaited oldest-first, which keeps the release order; the probe reply carries the page's collapsed snapshot, small enough now that a handful of concurrent replies is not a concern.
+    /// Pages younger than the pool grace are skipped and the pass re-arms itself once the youngest of them has aged, so they do not wait for the sixty-second poll.
     pub(crate) fn evict_expired_hidden_agents_chat_surfaces(
         &mut self,
         cx: &mut gpui::Context<Self>,
@@ -238,6 +243,26 @@ impl GhostexGpuiApp {
             return;
         }
         let candidates = self.chat_eviction_candidates();
+        if let Some(youngest) = candidates
+            .iter()
+            .map(|candidate| candidate.hidden_since.elapsed())
+            .filter(|age| *age < GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE)
+            .min()
+        {
+            if !self.agents_chat_eviction_retry_scheduled {
+                self.agents_chat_eviction_retry_scheduled = true;
+                let delay =
+                    GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE - youngest + Duration::from_millis(50);
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(delay).await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.agents_chat_eviction_retry_scheduled = false;
+                        this.evict_expired_hidden_agents_chat_surfaces(cx);
+                    });
+                })
+                .detach();
+            }
+        }
         if !candidates
             .iter()
             .any(|candidate| self.chat_eviction_candidate_allowed(candidate, false))
@@ -247,13 +272,18 @@ impl GhostexGpuiApp {
         self.agents_chat_eviction_running = true;
         self.agents_chat_eviction_requested = false;
         cx.spawn(async move |this, cx| {
-            for candidate in candidates {
-                let probe = this.update(cx, |this, cx| {
-                    this.request_chat_eviction_probe(&candidate, cx)
-                });
-                let Ok(Some((nonce, receiver))) = probe else {
-                    continue;
-                };
+            let probes = this
+                .update(cx, |this, cx| {
+                    candidates
+                        .iter()
+                        .filter_map(|candidate| {
+                            this.request_chat_eviction_probe(candidate, cx)
+                                .map(|(nonce, receiver)| (candidate.clone(), nonce, receiver))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            for (candidate, nonce, receiver) in probes {
                 let timeout = cx.background_executor().timer(Duration::from_secs(3));
                 let allowed = match select(receiver, Box::pin(timeout)).await {
                     Either::Left((Ok(allowed), _)) => allowed,

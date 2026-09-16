@@ -25,6 +25,7 @@ import {
 import { cn } from '@/packages/components/utils';
 import type { SessionChatTheme } from '@/packages/shared/session-chat';
 import type { GxserverRewindSessionChatResult } from '@/packages/shared/gxserver-protocol';
+import { gxserverRpcErrorCode } from '@/packages/shared/gxserver-rpc-error';
 
 export type RewindSessionChatToMessage = (params: { messageId: string }) => Promise<GxserverRewindSessionChatResult>;
 
@@ -62,7 +63,7 @@ export function SessionChatRewindDialog({
   /**
    * The rewind landed: the prompt it rewound to, verbatim, so the surface can
    * put it back in the composer, including when terminal cleanup reports a
-   * warning after the rewind succeeded. Never called on a refusal.
+   * warning after the rewind succeeded, or when the agent has no accepted prompt to rewind.
    */
   onRewound?: (prompt: string) => void;
   /** The row being rewound to; null closes the dialog. */
@@ -119,6 +120,15 @@ export function SessionChatRewindDialog({
         setRewinding(false);
       }
     } catch (failure) {
+      /** CDXC:SessionChat 2026-09-16 DECISION:
+       * User: if Rewind finds that the message was never accepted, put its text back in the composer instead of showing an error.
+       */
+      if (gxserverRpcErrorCode(failure) === 'messageNotFound') {
+        onOpenChange(false);
+        onRewound?.(request.prompt);
+        setRewinding(false);
+        return;
+      }
       // The daemon's own sentence names what it verified on the screen and why
       // it stopped, which is the only useful thing to show for a refusal.
       setError(failure instanceof Error ? failure.message : 'The conversation could not be rewound.');

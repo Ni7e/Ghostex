@@ -39,6 +39,7 @@ pub(crate) enum GpuiSidebarNativeProjectPathAction {
     OpenActiveWorkspaceProjectInZed,
     OpenExistingPullRequestInBrowser,
     OpenSidebarGitChangedFileInIde,
+    RevealSidebarGitChangedFile,
     CopyRemoteProjectPath,
     OpenRemoteProjectTerminal,
     OpenRemoteWorkspaceProjectInIde,
@@ -65,6 +66,7 @@ impl GpuiSidebarNativeProjectPathAction {
             "openActiveWorkspaceProjectInZed" => Some(Self::OpenActiveWorkspaceProjectInZed),
             "openExistingPullRequestInBrowser" => Some(Self::OpenExistingPullRequestInBrowser),
             "openSidebarGitChangedFileInIde" => Some(Self::OpenSidebarGitChangedFileInIde),
+            "revealSidebarGitChangedFile" => Some(Self::RevealSidebarGitChangedFile),
             "copyRemoteProjectPath" => Some(Self::CopyRemoteProjectPath),
             "openRemoteProjectTerminal" => Some(Self::OpenRemoteProjectTerminal),
             "openRemoteWorkspaceProjectInIde" => Some(Self::OpenRemoteWorkspaceProjectInIde),
@@ -110,7 +112,9 @@ impl GpuiSidebarNativeProjectPathAction {
     pub(crate) fn requires_file_path(self) -> bool {
         matches!(
             self,
-            Self::OpenSidebarGitChangedFileInIde | Self::OpenRemoteSidebarGitChangedFileInIde
+            Self::OpenSidebarGitChangedFileInIde
+                | Self::RevealSidebarGitChangedFile
+                | Self::OpenRemoteSidebarGitChangedFileInIde
         )
     }
 

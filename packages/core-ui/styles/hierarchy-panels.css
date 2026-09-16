@@ -547,7 +547,7 @@ section.project-collection[data-collapsed='true'][data-contains-active-session='
 
 .session-kind-label {
   color: color-mix(in srgb, var(--app-foreground) 88%, transparent);
-  font-size: 8.5px;
+  font-size: 10.5px;
   font-weight: 650;
   letter-spacing: 0.12em;
   opacity: 0.96;

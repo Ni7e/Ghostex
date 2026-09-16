@@ -381,7 +381,11 @@ pub(crate) async fn handle_read_session_chat_http(
             Ok(resolution) => resolution,
             Err(error) => return domain_error_response(endpoint_path, request_id, error),
         };
-    if let Some(mode) = params.get("historyMode").and_then(Value::as_str) {
+    // CDXC:SessionChat 2026-09-16 WHY:
+    // A live read collapses older turns (see `collapse_snapshot_messages`); `historyMode: "detail"` without a cursor keeps the verbatim tail for the CLI and agents that read a transcript's rows.
+    let history_mode = params.get("historyMode").and_then(Value::as_str);
+    let verbatim_tail = history_mode == Some("detail") && before_offset.is_none();
+    if let Some(mode) = history_mode.filter(|_| !verbatim_tail) {
         if !matches!(mode, "turns" | "detail") || before_offset.is_none() {
             return domain_error_response(
                 endpoint_path,
@@ -843,10 +847,15 @@ pub(crate) async fn handle_read_session_chat_http(
                 messages,
                 &local_commands,
             );
-            result.insert(
-                "messages".to_string(),
-                serde_json::to_value(&messages).unwrap_or(json!([])),
-            );
+            let messages_value = if before_offset.is_none() && !verbatim_tail {
+                Value::Array(crate::session_chat_history::collapse_snapshot_messages(
+                    &messages,
+                    page_before_offset,
+                ))
+            } else {
+                serde_json::to_value(&messages).unwrap_or(json!([]))
+            };
+            result.insert("messages".to_string(), messages_value);
             if let Some(lifecycle) = lifecycle.as_ref() {
                 if let Ok(value) = serde_json::to_value(lifecycle) {
                     result.insert("lifecycle".to_string(), value);

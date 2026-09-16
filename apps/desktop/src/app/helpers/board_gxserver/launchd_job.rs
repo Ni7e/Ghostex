@@ -67,10 +67,20 @@ pub(crate) fn gpui_run_launchctl(arguments: &[&str]) -> GpuiCapturedCommandOutpu
 /// `launchctl print` nests `state = active` lines under the job's resource
 /// limits, so only the first `pid`, `state`, and `program` lines count: those
 /// are the job's own.
-pub(crate) fn gpui_inspect_launchd_job(job_target: &str) -> GpuiLaunchdJobSnapshot {
+pub(crate) fn gpui_inspect_launchd_job(job_target: &str) -> Result<GpuiLaunchdJobSnapshot, String> {
     let output = gpui_run_launchctl(&["print", job_target]);
     if !output.success {
-        return GpuiLaunchdJobSnapshot::default();
+        let missing = format!(
+            "Could not find service \"{}\"",
+            job_target.rsplit('/').next().unwrap_or(job_target)
+        );
+        if output.stderr.contains(&missing) {
+            return Ok(GpuiLaunchdJobSnapshot::default());
+        }
+        return Err(format!(
+            "Could not inspect launchd job {job_target}: {}",
+            gpui_launchctl_failure_text(&output)
+        ));
     }
     let mut snapshot = GpuiLaunchdJobSnapshot {
         loaded: true,
@@ -88,39 +98,46 @@ pub(crate) fn gpui_inspect_launchd_job(job_target: &str) -> GpuiLaunchdJobSnapsh
             _ => {}
         }
     }
-    snapshot
+    Ok(snapshot)
 }
 
 /// Blocks until launchd has dropped the label, which happens only after the
 /// job's process has exited; `launchctl bootout` itself returns as soon as the
-/// signal is sent. Returns how long the removal took, or the snapshot that was
-/// still there at the deadline.
+/// signal is sent. Returns how long the removal took, or an error if the job is
+/// still there at the deadline or inspection fails.
 pub(crate) fn gpui_wait_for_launchd_job_removal(
     job_target: &str,
     timeout: Duration,
-) -> Result<Duration, GpuiLaunchdJobSnapshot> {
+) -> Result<Duration, String> {
     let started = Instant::now();
     loop {
-        let snapshot = gpui_inspect_launchd_job(job_target);
+        let snapshot = gpui_inspect_launchd_job(job_target)?;
         if !snapshot.loaded {
             return Ok(started.elapsed());
         }
         if started.elapsed() >= timeout {
-            return Err(snapshot);
+            return Err(format!(
+                "launchd did not remove the previous gxserver job within {} seconds ({}).",
+                timeout.as_secs(),
+                snapshot.describe()
+            ));
         }
         std::thread::sleep(Duration::from_millis(100));
     }
 }
 
 /// Blocks until the job reports a pid, i.e. launchd actually spawned it.
-pub(crate) fn gpui_wait_for_launchd_job_pid(job_target: &str, timeout: Duration) -> Option<u32> {
+pub(crate) fn gpui_wait_for_launchd_job_pid(
+    job_target: &str,
+    timeout: Duration,
+) -> Result<Option<u32>, String> {
     let started = Instant::now();
     loop {
-        if let Some(pid) = gpui_inspect_launchd_job(job_target).pid {
-            return Some(pid);
+        if let Some(pid) = gpui_inspect_launchd_job(job_target)?.pid {
+            return Ok(Some(pid));
         }
         if started.elapsed() >= timeout {
-            return None;
+            return Ok(None);
         }
         std::thread::sleep(Duration::from_millis(100));
     }

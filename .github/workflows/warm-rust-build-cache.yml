@@ -507,7 +507,6 @@ jobs:
         run: |
           {
             printf 'zig=%s\n' "$(git rev-parse HEAD:.dependencies/zmx)"
-            printf 'cargo=%s\n' "$(git rev-parse HEAD:server)"
           } >> "$GITHUB_OUTPUT"
       - name: Restore Cargo registry cache
         uses: actions/cache@v6
@@ -516,7 +515,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-reg-gxserver-${{ runner.os }}-x64-${{ steps.cache_keys.outputs.cargo }}
+          key: cargo-reg-gxserver-${{ runner.os }}-x64-${{ hashFiles('server/Cargo.lock') }}
           restore-keys: cargo-reg-gxserver-${{ runner.os }}-x64-
       - name: Restore Zig package cache
         uses: actions/cache@v6
@@ -587,7 +586,6 @@ jobs:
         run: |
           {
             printf 'zig=%s\n' "$(git rev-parse HEAD:.dependencies/zmx)"
-            printf 'cargo=%s\n' "$(git rev-parse HEAD:server)"
           } >> "$GITHUB_OUTPUT"
       - name: Restore Cargo registry cache
         uses: actions/cache@v6
@@ -596,7 +594,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-reg-gxserver-${{ runner.os }}-arm64-${{ steps.cache_keys.outputs.cargo }}
+          key: cargo-reg-gxserver-${{ runner.os }}-arm64-${{ hashFiles('server/Cargo.lock') }}
           restore-keys: cargo-reg-gxserver-${{ runner.os }}-arm64-
       - name: Restore Zig package cache
         uses: actions/cache@v6

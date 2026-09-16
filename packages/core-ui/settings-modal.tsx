@@ -1,3 +1,5 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
+import { DebuggingSettingsTab } from './settings-modal/tabs/debugging';
 import { WindowsTerminalFields } from './settings-modal/tabs/windows-terminal-fields';
 import { useSystemColorScheme } from './use-system-color-scheme';
 import {
@@ -71,7 +73,6 @@ import {
   SIDEBAR_SPACE_SWITCH_BEHAVIOR_OPTIONS,
   SIDEBAR_VISIBILITY_MEMORY_OPTIONS,
   WEB_LINK_OPEN_TARGET_OPTIONS,
-  areDiagnosticLoggingSettingsEqual,
   COMMANDS_PANEL_SIDE_OPTIONS,
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
   MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
@@ -121,7 +122,6 @@ import {
   ActionButtonPairField,
   AppIconPickerField,
   ColorField,
-  DiagnosticLoggingSettingsField,
   PetPickerField,
   PreferredAgentInterfaceField,
   SelectField,
@@ -374,6 +374,7 @@ export function SettingsModal({
   onOpenAccessibilityPreferences,
   onOpenMacOSNotificationSettings,
   onOpenScreenRecordingPreferences,
+  onOpenGhostexFolder,
   onGhosttySettingsAction,
   onInstallCliSkill,
   onInstallBrowserControl,
@@ -394,6 +395,7 @@ export function SettingsModal({
   onUninstallBundledAgentSkills,
   onRequestAgentHookStatus,
   onRequestGhostexCliStatus,
+  onRequestGhostexFolderStats,
   onRequestOSIntegrationStatus,
   onRequestPluginSettingsStatus,
   onReinstallPlugin,
@@ -408,6 +410,8 @@ export function SettingsModal({
   vscode,
   ghostexCliStatus,
   ghostexCliStatusLoading = false,
+  ghostexFolderStats,
+  ghostexFolderStatsLoading = false,
   osIntegrationStatus,
   osIntegrationStatusLoading = false,
   pluginSettingsStatus,
@@ -482,7 +486,6 @@ export function SettingsModal({
   const powerSectionRef = useRef<HTMLDivElement>(null);
   const statusIndicatorsSectionRef = useRef<HTMLDivElement>(null);
   const sessionCardsSectionRef = useRef<HTMLDivElement>(null);
-  const debuggingSectionRef = useRef<HTMLDivElement>(null);
   const betaSectionRef = useRef<HTMLDivElement>(null);
   const agentsOnboardingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarSectionRef = useRef<HTMLDivElement>(null);
@@ -774,7 +777,7 @@ export function SettingsModal({
   const settingsSearch = getSettingsSearchSections(settingsSearchQuery, draft);
   const mainSettingsGroupSearch = getMainSettingsGroupSearch(settingsSearchQuery, settingsSearch);
   const mainSettingsSectionNavigation = getMainSettingsSectionNavigation(mainSettingsGroupSearch);
-  const { debuggingSettingVisible, mainSectionVisible, mainSettingVisible, mainSubsectionVisible } =
+  const { mainSectionVisible, mainSettingVisible, mainSubsectionVisible } =
     createMainSettingsVisibility({
       appIconPickerUnavailable,
       draft,
@@ -795,7 +798,6 @@ export function SettingsModal({
     fileOpening: fileOpeningSectionRef,
     browser: browserSectionRef,
     chat: chatSectionRef,
-    debugging: debuggingSectionRef,
     editor: editorSectionRef,
     notifications: soundsSectionRef,
     power: powerSectionRef,
@@ -877,7 +879,6 @@ export function SettingsModal({
     betaSectionRef,
     browserSectionRef,
     chatSectionRef,
-    debuggingSectionRef,
     dialogContentRef,
     editorSectionRef,
     fileOpeningSectionRef,
@@ -1321,7 +1322,7 @@ export function SettingsModal({
                          */}
                         {mainSubsectionVisible('appIcon', settingsSearch.appIcon) ? (
                           <SettingsSection
-                            description='Changes the Dock and app-switcher icon. The app file icon may also change when macOS allows it.'
+                            description='Changes the Dock and app-switcher icon. The app file icon may also change when the operating system allows it.'
                             sectionRef={appIconSectionRef}
                             title='App Icon'
                           >
@@ -2048,7 +2049,7 @@ export function SettingsModal({
                                     The Ghostty controls also apply to your external Ghostty terminal because this
                                     Ghostty terminal uses the same settings file. ghostex reloads its embedded Ghostty
                                     terminal about 3 seconds after you stop changing these controls; external Ghostty
-                                    windows may still need Cmd+Shift+, to reload. Theme overrides and the terminal light
+                                    windows may still need {formatSidebarHotkeyLabel('cmd+shift+,')} to reload. Theme overrides and the terminal light
                                     palette apply only to Ghostex.
                                   </p>
                                 </div>
@@ -2712,7 +2713,7 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.power, 'keepAwakeDeactivateOnLowPowerMode') ? (
                               <ToggleField
                                 checked={draft.keepAwakeDeactivateOnLowPowerMode}
-                                description='Stop preventing sleep when macOS Low Power Mode is enabled.'
+                                description='Stop preventing sleep when Low Power Mode is enabled.'
                                 label='Deactivate in Low Power Mode'
                                 {...getSettingModificationProps('keepAwakeDeactivateOnLowPowerMode')}
                                 onChange={(checked) => updateDraft('keepAwakeDeactivateOnLowPowerMode', checked)}
@@ -2739,8 +2740,8 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.sounds, 'showMacOSAttentionNotifications') ? (
                               <ToggleField
                                 checked={draft.showMacOSAttentionNotifications}
-                                description='Show a macOS banner when a session needs attention.'
-                                label='macOS Attention Notifications'
+                                description='Show a system notification when a session needs attention.'
+                                label='Attention Notifications'
                                 {...getSettingModificationProps('showMacOSAttentionNotifications')}
                                 onChange={(checked) => {
                                   updateDraft('showMacOSAttentionNotifications', checked);
@@ -2793,11 +2794,11 @@ export function SettingsModal({
                                     onClick: () => onTestAgentTaskCompletion?.(),
                                   },
                                   {
-                                    label: 'macOS Notification Settings',
+                                    label: 'Notification Settings',
                                     onClick: () => onOpenMacOSNotificationSettings?.(),
                                   },
                                 ]}
-                                description='Run the current completion sound and notification flow, or open macOS notification permissions.'
+                                description='Run the current completion sound and notification flow, or open system notification permissions.'
                                 label='Completion Alerts'
                               />
                             ) : null}
@@ -2850,78 +2851,6 @@ export function SettingsModal({
                                     <li>Title bar and Power settings: Keep Awake</li>
                                   </ul>
                                 </div>
-                              </>
-                            ) : null}
-                          </SettingsSection>
-                        ) : null}
-
-                        {mainSubsectionVisible('debugging', settingsSearch.debugging) ? (
-                          <SettingsSection sectionRef={debuggingSectionRef} title='Debugging'>
-                            {debuggingSettingVisible('debuggingMode') ? (
-                              <ToggleField
-                                checked={draft.debuggingMode}
-                                description={
-                                  draft.debuggingMode
-                                    ? 'Shows debug-only UI controls and allows the enabled diagnostic scenarios below to write routine logs.'
-                                    : 'Turn on to reveal debug-only controls and allow routine diagnostic logging. Important warnings, errors, and crashes remain captured.'
-                                }
-                                label='Show debug UI controls'
-                                {...getSettingModificationProps('debuggingMode')}
-                                onChange={(checked) => updateDraft('debuggingMode', checked)}
-                              />
-                            ) : null}
-                            {debuggingSettingVisible('diagnosticLogging') ? (
-                              <DiagnosticLoggingSettingsField
-                                dependent
-                                isModified={
-                                  !areDiagnosticLoggingSettingsEqual(
-                                    draft.diagnosticLogging,
-                                    DEFAULT_ghostex_SETTINGS.diagnosticLogging
-                                  )
-                                }
-                                onChange={updateDiagnosticLoggingScenario}
-                                onResetToDefault={() =>
-                                  updateDraft('diagnosticLogging', DEFAULT_ghostex_SETTINGS.diagnosticLogging)
-                                }
-                                value={draft.diagnosticLogging}
-                              />
-                            ) : null}
-                            {debuggingSettingVisible('showSessionCommandCopyActions') ? (
-                              <>
-                                {/*
-                                 * CDXC:ContextMenus 2026-06-09-23:17:
-                                 * Copy resume and Copy attach command are advanced session-card context-menu utilities. Keep both hidden unless this Settings toggle is enabled so the default menu stays focused on normal session actions.
-                                 *
-                                 * CDXC:Diagnostics 2026-06-15-21:34:
-                                 * Command copy actions are support-oriented session-card context-menu controls and should appear in the bottom Debugging section rather than the everyday Session Cards section.
-                                 */}
-                                <ToggleField
-                                  checked={draft.showSessionCommandCopyActions}
-                                  description='Show Copy resume and Copy attach command in session context menus.'
-                                  dependent
-                                  label='Show command copy actions'
-                                  {...getSettingModificationProps('showSessionCommandCopyActions')}
-                                  onChange={(checked) => updateDraft('showSessionCommandCopyActions', checked)}
-                                />
-                              </>
-                            ) : null}
-                            {debuggingSettingVisible('showSessionDetailsCopyAction') ? (
-                              <>
-                                {/*
-                                 * CDXC:ContextMenus 2026-06-11-23:08:
-                                 * Copy details is separate from command-copy actions because it copies metadata, not executable shell commands. Keep it opt-in so users choose when session ids and project paths appear in context menus.
-                                 *
-                                 * CDXC:Diagnostics 2026-06-15-21:34:
-                                 * Copy details can expose support metadata in the context menu, so Settings groups it with Debugging rather than normal session-card appearance controls.
-                                 */}
-                                <ToggleField
-                                  checked={draft.showSessionDetailsCopyAction}
-                                  description='Show Copy Details in session context menus.'
-                                  dependent
-                                  label='Show Copy Details option'
-                                  {...getSettingModificationProps('showSessionDetailsCopyAction')}
-                                  onChange={(checked) => updateDraft('showSessionDetailsCopyAction', checked)}
-                                />
                               </>
                             ) : null}
                           </SettingsSection>
@@ -3162,6 +3091,24 @@ export function SettingsModal({
                         updateDraft('showLessForExpandedProjectJumps', checked)
                       }
                     />
+                  </TabsContent>
+                ) : null}
+                {!isFirstLaunchSetup ? (
+                  <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='debugging'>
+                    {isOpen && activeTab === 'debugging' ? (
+                      <DebuggingSettingsTab
+                        settings={draft}
+                        search={extraSettingsTabSearches.debugging}
+                        searchEmptyState={settingsSearchEmptyState}
+                        onChange={updateDraft}
+                        getModificationProps={getSettingModificationProps}
+                        onChangeDiagnosticScenario={updateDiagnosticLoggingScenario}
+                        folderStats={ghostexFolderStats}
+                        folderStatsLoading={ghostexFolderStatsLoading}
+                        onRequestFolderStats={onRequestGhostexFolderStats}
+                        onOpenFolder={onOpenGhostexFolder}
+                      />
+                    ) : null}
                   </TabsContent>
                 ) : null}
                 {!isFirstLaunchSetup ? (
@@ -3429,10 +3376,10 @@ function PromptEditorBackendField({
   return (
     <SettingRow
       advanced={advanced}
-      description='Choose which editor new terminals use when Ctrl+G asks the shell to edit prompt text.'
+      description={`Choose which editor new terminals use when ${formatSidebarHotkeyLabel('ctrl+g')} asks the shell to edit prompt text.`}
       htmlFor={id}
       isModified={isModified}
-      label='Ctrl+G prompt editor'
+      label={`${formatSidebarHotkeyLabel('ctrl+g')} prompt editor`}
       onResetToDefault={onResetToDefault}
     >
       <SettingsSelect onValueChange={(value) => onChange(value as PromptEditorBackend)} value={backend}>

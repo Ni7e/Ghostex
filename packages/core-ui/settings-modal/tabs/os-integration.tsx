@@ -60,7 +60,7 @@ export function OSIntegrationSettingsTab({
               <SettingButton
                 className='h-8 px-3'
                 disabled={!onSetDefaults}
-                disabledReason='macOS default-app changes aren’t available here.'
+                disabledReason='Default-app changes aren’t available here.'
                 onClick={() => onSetDefaults?.('editor')}
                 type='button'
                 variant='outline'
@@ -73,7 +73,7 @@ export function OSIntegrationSettingsTab({
               <SettingButton
                 className='h-8 px-3'
                 disabled={!onSetDefaults}
-                disabledReason='macOS default-app changes aren’t available here.'
+                disabledReason='Default-app changes aren’t available here.'
                 onClick={() => onSetDefaults?.('terminalLinks')}
                 type='button'
                 variant='outline'
@@ -86,7 +86,7 @@ export function OSIntegrationSettingsTab({
               <SettingButton
                 className='h-8 px-3'
                 disabled={!onSetDefaults}
-                disabledReason='macOS default-app changes aren’t available here.'
+                disabledReason='Default-app changes aren’t available here.'
                 onClick={() => onSetDefaults?.('scriptRunner')}
                 type='button'
                 variant='outline'
@@ -99,7 +99,7 @@ export function OSIntegrationSettingsTab({
               <SettingButton
                 className='h-8 px-3'
                 disabled={!onSetDefaults}
-                disabledReason='macOS default-app changes aren’t available here.'
+                disabledReason='Default-app changes aren’t available here.'
                 onClick={() => onSetDefaults?.('all')}
                 type='button'
               >
@@ -123,12 +123,14 @@ export function OSIntegrationSettingsTab({
 
         {shouldShowSettingsSection(search.sections.diagnostics) ? (
           <SettingsSection title='Diagnostics'>
-            <SettingsListItem title={loading && !status ? 'Checking macOS handlers...' : 'macOS handler status'}>
+            <SettingsListItem
+              title={loading && !status ? 'Checking file and link handlers...' : 'File and link handler status'}
+            >
               <SettingButton
                 className='h-8 px-3'
                 disabled={loading || !onRequestStatus}
                 disabledReason={
-                  loading ? 'macOS handler status is being checked.' : 'Status checks aren’t available here.'
+                  loading ? 'File and link handler status is being checked.' : 'Status checks aren’t available here.'
                 }
                 onClick={onRequestStatus}
                 type='button'
@@ -211,16 +213,16 @@ export function OSIntegrationSettingsTab({
 
 export function getOSIntegrationStatusNoticeTitle(items: readonly SidebarOSIntegrationStatusItem[]): string {
   if (items.some((item) => item.reason === 'unsupportedPlatform')) {
-    return 'macOS Launch Services is unavailable in this build.';
+    return 'System app registration is unavailable in this build.';
   }
-  return 'Some macOS handler updates need attention.';
+  return 'Some file and link handler updates need attention.';
 }
 
 export function getOSIntegrationStatusNoticeDescription(items: readonly SidebarOSIntegrationStatusItem[]): string {
   if (items.some((item) => item.reason === 'unsupportedPlatform')) {
-    return 'This platform cannot inspect or change macOS app defaults.';
+    return 'This platform cannot inspect or change system app defaults.';
   }
-  return 'Refresh after macOS finishes updating Launch Services, or choose Ghostex manually in macOS Open With/System Settings.';
+  return 'Refresh after your operating system finishes updating app registration, or choose Ghostex manually in Open With or system settings.';
 }
 
 export function formatOSIntegrationStatusItemSubject(item: SidebarOSIntegrationStatusItem): string {

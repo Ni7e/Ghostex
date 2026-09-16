@@ -1,3 +1,5 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
+import { flushClientStorage } from '@/packages/client-storage';
 import { SessionChatAttachmentPreviews } from './session-chat-attachment-previews';
 import {
   clipboardImageFiles,
@@ -11,7 +13,7 @@ import {
   type PastedImagePreview,
 } from './session-chat-image-attachments';
 import { persistDraftsForRelease, type PendingDraft } from './session-chat-draft-outbox';
-import { readSessionChatComposerSelection, saveSessionChatComposerSelection } from './session-chat-composer-parking';
+import { readSessionChatComposerSelection, saveSessionChatComposerSelection, isSessionChatComposerSelectionDurable } from './session-chat-composer-parking';
 import type { SessionChatDraftHandoff } from '@/packages/shared/session-chat-queue';
 import {
   registerDraftWriter,
@@ -85,7 +87,7 @@ import { useSessionChatComposerCollapse } from './use-session-chat-composer-coll
 import { SessionChatWorkingStrip, type SessionChatWorkingStripProps } from './session-chat-working-strip';
 import { cn } from '@/packages/components/utils';
 import type { GxserverReadSessionTerminalTailResult, GxserverRpcErrorCode } from '@/packages/shared/gxserver-protocol';
-import { gxserverRpcErrorCode } from '@/packages/shared/gxserver-rpc-error';
+import { GxserverRpcError, gxserverRpcErrorCode } from '@/packages/shared/gxserver-rpc-error';
 import { Button } from '../../components/ui/button';
 import {
   ContextMenu,
@@ -93,6 +95,7 @@ import {
   ContextMenuGroup,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuTrigger,
 } from '../../components/ui/context-menu';
 import { Field, FieldError } from '../../components/ui/field';
@@ -274,7 +277,7 @@ export interface SessionChatComposerProps {
   isWorking: boolean;
   /** Session activity may differ from the transcript's held working state. */
   workingStatus?: SessionChatWorkingStripProps;
-  /** Places status above the host's cards; maximized composers keep it in their own overlay. */
+  /** Places status above the host's cards while the composer is not maximized. */
   workingStatusContainer?: HTMLElement | null;
   /** Whether plain Enter sends instead of inserting a newline. */
   sendOnEnter?: boolean;
@@ -567,7 +570,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       onAttachFile,
       onDelayedActions,
       onDraftEmptyChange,
-      onInterrupt,
+      onInterrupt: interruptAgent,
       onLoadImagePreview,
       onNativeDropPaths,
       onPasteImage,
@@ -709,12 +712,18 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const pendingInsertTextRef = useRef('');
     const pendingSavedPromptRef = useRef('');
     const sendInFlightRef = useRef(false);
+    const sendAttemptRef = useRef<{ cancelled: boolean } | null>(null);
+    const onInterrupt = (): void => {
+      if (sendAttemptRef.current) sendAttemptRef.current.cancelled = true;
+      interruptAgent();
+    };
     /** Newest draft stamp already applied or dismissed here (never re-offered). */
     const lastHandledDraftAtRef = useRef<string | null>(null);
     /** Exact content of the last successful push, so blur cannot spam gxserver. */
     const lastPushedDraftRef = useRef<string | null>(null);
     const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const longPressFiredRef = useRef(false);
+    const sendPointerTypeRef = useRef('mouse');
     const stopButtonCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const useLexical = inputBackend === 'lexical';
     const diagnosticLogRef = useRef(diagnosticLog);
@@ -926,7 +935,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
      */
     const releasePreparedTextRef = useRef<string | null>(null);
     const releasePreparedVersionRef = useRef<string | undefined>(undefined);
-    const canRelease = (): boolean => {
+    const canRelease = (requireDurableSelection = true): boolean => {
       const input = getInputApi();
       const allowed =
         input !== null &&
@@ -944,6 +953,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       if (allowed && sessionKey && input) {
         try {
           saveSessionChatComposerSelection(sessionKey, { text: input.getValue(), ...input.getSelection() });
+          if (requireDurableSelection && !isSessionChatComposerSelectionDurable(sessionKey)) return false;
         } catch {
           return false;
         }
@@ -966,7 +976,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       const content = input.getValue();
       releasePreparedTextRef.current = content;
       releasePreparedVersionRef.current = JSON.stringify(draftVersionRef.current);
-      if (!canRelease()) {
+      if (!canRelease(false)) {
         releasePreparedTextRef.current = null;
         return null;
       }
@@ -976,8 +986,10 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       releasePreparedVersionRef.current = JSON.stringify(draftVersionRef.current);
       try {
         const revisions = await persistDraftsForRelease(sessionKey);
-        if (!canRelease() || readStoredSessionChatDraftEntry(sessionKey)?.text !== content) return null;
+        if (!canRelease(false) || readStoredSessionChatDraftEntry(sessionKey)?.text !== content) return null;
         saveSessionChatComposerSelection(sessionKey, { text: content, ...input.getSelection() });
+        await flushClientStorage(['drafts', 'recovery', 'recoveryDismissed', 'draftOutbox', 'composerSelection', 'questionDrafts']);
+        if (!canRelease() || input.getValue() !== content) return null;
         return revisions;
       } catch {
         releasePreparedTextRef.current = null;
@@ -1098,6 +1110,10 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           // Moving an editor is not sending its draft. Keep its identity and durable text.
           preserveDraftRevision({ sessionKey, text: content, updatedAt: saved.updatedAt ?? Date.now(), version });
           writeStoredSessionChatDraft(sessionKey, content, saved.updatedAt, version, false, true);
+          await flushClientStorage(['drafts', 'recovery', 'draftOutbox']);
+          if ((getInputApi()?.getValue() ?? draftRef.current) !== content ||
+              draftVersionRef.current?.draftId !== version.draftId || draftVersionRef.current?.revision !== version.revision)
+            throw new Error('The draft changed during transfer. It has been kept in Chat.');
           parkedDraftRef.current = true;
           composerTouchedRef.current = false;
           draftVersionRef.current = undefined;
@@ -1290,8 +1306,18 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       getInputApi()?.focus();
     };
 
-    const send = (text: string = getInputApi()?.getValue() ?? draftRef.current): void => {
+    /** CDXC:SessionChat 2026-09-16 DECISION:
+     * User: Option+Enter or Send's right-click "Compact & Send" sends /compact to the terminal first, then queues the text written in chat.
+     */
+    const send = (
+      text: string = getInputApi()?.getValue() ?? draftRef.current,
+      compactFirst = false
+    ): void => {
       if (text.trim() === '' || sendInFlightRef.current) {
+        return;
+      }
+      const compactQueue = compactFirst ? queue : undefined;
+      if (compactFirst && !compactQueue?.capabilities.canQueue) {
         return;
       }
       if (sendBlocked) {
@@ -1301,7 +1327,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       const nativeCommand = slashCommands?.find(
         (command) => command.insertText !== undefined && text.trim() === `/${command.name}`
       );
-      if (nativeCommand?.insertText !== undefined) {
+      if (!compactFirst && nativeCommand?.insertText !== undefined) {
         updateDraft(nativeCommand.insertText, nativeCommand.insertText.length);
         getInputApi()?.applyValue(nativeCommand.insertText, nativeCommand.insertText.length);
         getInputApi()?.focus();
@@ -1312,6 +1338,8 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         storedPrefixOfSent: text.startsWith(readStoredSessionChatDraft(sessionKey)),
       });
       sendInFlightRef.current = true;
+      const attempt = { cancelled: false };
+      sendAttemptRef.current = attempt;
       pendingDraftTransfersRef.current += 1;
       const submittedDraft = persistComposerDraft(text, true);
       // Sending closes the maximize overlay: the user's next look is at the
@@ -1338,8 +1366,28 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           await draftSync.push(text, submittedDraft.version);
           traceDraft('sendSaveAcknowledged', { sent: sessionChatDraftFingerprint(text) });
         }
+        /** CDXC:SessionChat 2026-09-16 WHY:
+         * Escape can reach gxserver while this send is still saving its draft, before there is a terminal send to cancel.
+         * Cancel the pending submission here so it cannot start after the interrupt and consume the recovered draft.
+         */
+        const checkCancelled = () => {
+          if (attempt.cancelled) {
+            throw new GxserverRpcError(
+              'sendCancelled',
+              'The session chat send was cancelled.',
+              '/api/sendSessionChatMessage'
+            );
+          }
+        };
+        checkCancelled();
         traceDraft('deliveryBegin', { sent: sessionChatDraftFingerprint(text) });
-        await onSend(text, submittedDraft.version);
+        if (compactQueue) {
+          await onSend('/compact');
+          checkCancelled();
+          await compactQueue.queuePrompt(text, submittedDraft.version);
+        } else {
+          await onSend(text, submittedDraft.version);
+        }
       })();
       /*
       CDXC:SessionChat 2026-09-10 WHY:
@@ -1395,6 +1443,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         })
         .finally(() => {
           sendInFlightRef.current = false;
+          sendAttemptRef.current = null;
           pendingDraftTransfersRef.current -= 1;
           lastPushedDraftRef.current = null;
           if (!draftSyncUnmountedRef.current) {
@@ -1404,9 +1453,8 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     };
 
     // --- Ghostex prompt queue (plan 016) ---------------------------------------
-    // Enter is untouched by everything below: it still sends immediately,
-    // mid-turn included. Tab and a long-press on Send are the ONLY gestures that
-    // make a queued row.
+    // Plain Enter sends immediately, mid-turn included. Tab and a long-press
+    // on Send queue directly; Compact & Send queues after sending /compact.
     const queueCapabilities = queue?.capabilities;
     const canQueueDraft = queueCapabilities?.canQueue === true && draft.trim() !== '';
 
@@ -2239,6 +2287,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       if (event.isComposing) {
         return;
       }
+      if (event.key === 'Enter' && event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        send(undefined, true);
+        return;
+      }
       if (handleSkillKeyDown(event) || handleFileKeyDown(event) || handleSlashKeyDown(event)) {
         return;
       }
@@ -2445,15 +2498,16 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           className={cn('relative min-w-0 gap-2', maximized && 'ghostex-chat-composer-maximized')}
           data-invalid={sendError !== null ? true : undefined}
         >
-          {/* CDXC:SessionChat 2026-09-12 DECISION: User corrected the earlier placement: the working indicator belongs at the very top, above all component cards. The host supplies the top slot; maximized and standalone composers put it before their own cards. */}
-          {!maximized && workingStatusContainer ? (
-            createPortal(
-              <SessionChatWorkingStrip {...(workingStatus ?? { working: isWorking, activity: null })} />,
-              workingStatusContainer
-            )
-          ) : (
-            <SessionChatWorkingStrip {...(workingStatus ?? { working: isWorking, activity: null })} />
-          )}
+          {/* CDXC:SessionChat 2026-09-16 DECISION: User: never show the working indicator, task list, or subagents above the maximized composer. This supersedes the maximized status placement from 2026-09-12; otherwise the working indicator stays above all component cards. */}
+          {!maximized &&
+            (workingStatusContainer ? (
+              createPortal(
+                <SessionChatWorkingStrip {...(workingStatus ?? { working: isWorking, activity: null })} />,
+                workingStatusContainer
+              )
+            ) : (
+              <SessionChatWorkingStrip {...(workingStatus ?? { working: isWorking, activity: null })} />
+            ))}
           {slashOpen ? (
             <div className='ghostex-chat-composer-picker absolute inset-x-0 bottom-full z-10 mb-2 overflow-hidden rounded-2xl border border-input bg-popover shadow-xl'>
               <div
@@ -2630,12 +2684,16 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
               {saveStatus}
             </div>
           ) : null}
-          <SessionChatAgentTasksPanel tasks={agentTasks ?? null} />
-          <SessionChatAgentFleetStrip
-            fleet={agentFleet ?? null}
-            provider={agentFleetProvider}
-            sessionKey={sessionKey}
-          />
+          {!maximized && (
+            <>
+              <SessionChatAgentTasksPanel tasks={agentTasks ?? null} />
+              <SessionChatAgentFleetStrip
+                fleet={agentFleet ?? null}
+                provider={agentFleetProvider}
+                sessionKey={sessionKey}
+              />
+            </>
+          )}
           {incomingDraft ? (
             <SessionChatDraftConflict
               draft={incomingDraft}
@@ -2781,7 +2839,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
               >
                 {composerInput}
               </ContextMenuTrigger>
-              <ContextMenuContent>
+              <ContextMenuContent className='ghostex-session-chat-popup' data-chat-theme={theme}>
                 {referenceInteractions.contextReference !== null ? (
                   <ContextMenuGroup>
                     <SessionChatReferenceMenuItems href={referenceInteractions.contextReference} />
@@ -2899,29 +2957,45 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                       <IconPlayerStopFilled aria-hidden='true' className='size-3' stroke={1.6} />
                     </Button>
                   ) : (
-                    <Button
-                      aria-disabled={sendBlocked ? 'true' : undefined}
-                      aria-label={canQueueDraft ? 'Send (hold to queue)' : 'Send'}
-                      // A blocked send stays clickable so the tap can explain
-                      // itself with a toast; only an empty draft truly disables it.
-                      className={cn('ghostex-chat-send-button size-6', sendBlocked && 'opacity-50')}
-                      disabled={!hasSendableDraft}
-                      onClick={handleSendClick}
-                      onContextMenu={(event) => {
-                        // A touch long-press otherwise raises the platform callout
-                        // menu on top of the queue gesture.
-                        if (canQueueDraft) {
-                          event.preventDefault();
+                    <ContextMenu
+                      onOpenChange={(open, details) => {
+                        // Touch holds keep their existing queue gesture.
+                        if (
+                          open &&
+                          (details.event.type.startsWith('touch') ||
+                            (details.event.type === 'contextmenu' && sendPointerTypeRef.current === 'touch'))
+                        ) {
+                          details.cancel();
+                          return;
                         }
+                        if (open) cancelSendLongPress();
                       }}
-                      onPointerCancel={cancelSendLongPress}
-                      onPointerDown={beginSendLongPress}
-                      onPointerLeave={cancelSendLongPress}
-                      onPointerUp={cancelSendLongPress}
-                      size='icon'
                     >
-                      <IconArrowUp aria-hidden='true' className='size-3' stroke={2.2} />
-                    </Button>
+                      <ContextMenuTrigger
+                        render={<Button disabled={!hasSendableDraft} size='icon' />}
+                        aria-disabled={sendBlocked ? 'true' : undefined}
+                        aria-label={canQueueDraft ? 'Send (hold to queue, right-click for Compact & Send)' : 'Send'}
+                        // A blocked send stays clickable so the tap can explain
+                        // itself with a toast; only an empty draft truly disables it.
+                        className={cn('ghostex-chat-send-button size-6', sendBlocked && 'opacity-50')}
+                        onClick={handleSendClick}
+                        onPointerCancel={cancelSendLongPress}
+                        onPointerDown={(event) => {
+                          sendPointerTypeRef.current = event.pointerType;
+                          if (event.button === 0) beginSendLongPress();
+                        }}
+                        onPointerLeave={cancelSendLongPress}
+                        onPointerUp={cancelSendLongPress}
+                      >
+                        <IconArrowUp aria-hidden='true' className='size-3' stroke={2.2} />
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className='ghostex-session-chat-popup' data-chat-theme={theme}>
+                        <ContextMenuItem disabled={!canQueueDraft} onClick={() => send(undefined, true)}>
+                          Compact &amp; Send
+                          <ContextMenuShortcut>{formatSidebarHotkeyLabel('alt+enter')}</ContextMenuShortcut>
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   )}
                 </div>
               </div>

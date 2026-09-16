@@ -23,6 +23,6 @@ describe('native titlebar Git source', () => {
     expect(projectStateSource).toContain('readCachedTitlebarGitState(projectIdentity)');
     expect(appSource).toContain('cacheTitlebarGitState(next);');
     expect(projectStateSource).toContain('cacheTitlebarGitState(mergedState);');
-    expect(projectStateSource).toContain('localStorage.setItem(cacheKey, JSON.stringify(state.git));');
+    expect(projectStateSource).toContain('clientStorage.setItem(cacheKey, JSON.stringify(state.git));');
   });
 });

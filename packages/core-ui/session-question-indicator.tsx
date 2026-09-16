@@ -1,4 +1,5 @@
 import './session-question-indicator.css';
+import { AppTooltip } from './app-tooltip';
 
 /**
  * CDXC:SessionStatus 2026-09-13 DECISION:
@@ -6,13 +7,10 @@ import './session-question-indicator.css';
  * Pink replaces the previously requested blue question dot.
  */
 export function SessionQuestionIndicator({ working }: { working: boolean }) {
+  const label = working ? 'Working · answer requested' : 'Answer requested';
   return (
-    <span
-      className='session-question-indicator'
-      data-working={working}
-      role='img'
-      aria-label={working ? 'Working · answer requested' : 'Answer requested'}
-      title={working ? 'Working · answer requested' : 'Answer requested'}
-    />
+    <AppTooltip content={label}>
+      <span className='session-question-indicator' data-working={working} role='img' aria-label={label} />
+    </AppTooltip>
   );
 }

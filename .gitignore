@@ -95,3 +95,7 @@ docs/
 # embedded-database gate; they are machine state, not board content.
 .beads.gate.lock
 .beads/*.gate.lock
+
+# Python bytecode caches from the tooling scripts. Machine state, not source.
+__pycache__/
+*.pyc

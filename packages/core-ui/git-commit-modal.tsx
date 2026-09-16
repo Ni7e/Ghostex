@@ -1,3 +1,4 @@
+import { storageScope } from '@/packages/client-storage';
 import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react';
 import { cn } from '@/packages/components/utils';
 import {
@@ -30,6 +31,8 @@ import {
   type GitDiffViewMode,
   type GitFileDiffModalDraft,
 } from './git-file-diff-modal';
+
+const clientStorage = storageScope(["gitDiff"]);
 
 type GitCommitInlineDiffMode = 'all' | 'file';
 
@@ -91,6 +94,7 @@ export type GitCommitModalProps = {
   fileDiffDraft?: GitFileDiffModalDraft;
   onMultipleCommits: (requestId: string, agentId?: string) => void;
   onOpenFileDiff: (filePath: string, requestId: string) => void;
+  onOpenFileLocation?: (filePath: string, requestId: string) => void;
   onPromptAgentIdChange?: (agentId: string) => void;
   promptAgentId?: string;
   theme?: SidebarTheme;
@@ -106,6 +110,7 @@ export function GitCommitModal({
   fileDiffDraft,
   onMultipleCommits,
   onOpenFileDiff,
+  onOpenFileLocation,
   onPromptAgentIdChange,
   promptAgentId,
   theme = 'dark-1',
@@ -411,6 +416,9 @@ export function GitCommitModal({
                         });
                       }}
                       onOpenFile={openInlineFileDiff}
+                      onOpenFileLocation={
+                        onOpenFileLocation ? (path) => onOpenFileLocation(path, draft.requestId) : undefined
+                      }
                       selectedPath={inlineDiffMode === 'file' ? selectedDiffFilePath : undefined}
                     />
                   </div>
@@ -663,7 +671,7 @@ function readGitCommitDiffPreferences(): GitCommitDiffPreferences {
     return DEFAULT_GIT_COMMIT_DIFF_PREFERENCES;
   }
   try {
-    const rawPreferences = window.localStorage.getItem(GIT_COMMIT_DIFF_PREFERENCES_STORAGE_KEY);
+    const rawPreferences = clientStorage.getItem(GIT_COMMIT_DIFF_PREFERENCES_STORAGE_KEY);
     if (!rawPreferences) {
       return DEFAULT_GIT_COMMIT_DIFF_PREFERENCES;
     }
@@ -690,7 +698,7 @@ function writeGitCommitDiffPreferences(preferences: GitCommitDiffPreferences): v
     return;
   }
   try {
-    window.localStorage.setItem(GIT_COMMIT_DIFF_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+    clientStorage.setItem(GIT_COMMIT_DIFF_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
   } catch {
     // localStorage can be unavailable in isolated test/story contexts.
   }

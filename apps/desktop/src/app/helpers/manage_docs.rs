@@ -419,8 +419,6 @@ pub(crate) fn run_manage_files_bridge_request_for_project_snapshot(
     snapshot: Option<&GpuiProjectSnapshot>,
     additional_docs_folders_text: &str,
     global_docs_directory_text: &str,
-    chat_docs_root: Option<PathBuf>,
-    chat_docs_file_name: Option<String>,
 ) -> ManageFilesBridgeOutcome {
     let request = serde_json::from_str::<serde_json::Value>(payload).unwrap_or_default();
     let action = request
@@ -442,8 +440,6 @@ pub(crate) fn run_manage_files_bridge_request_for_project_snapshot(
             snapshot,
             additional_docs_folders_text,
             global_docs_directory_text,
-            chat_docs_root,
-            chat_docs_file_name,
         ),
     )
 }
@@ -453,8 +449,6 @@ pub(crate) fn manage_files_bridge_result(
     snapshot: Option<&GpuiProjectSnapshot>,
     additional_docs_folders_text: &str,
     global_docs_directory_text: &str,
-    chat_docs_root: Option<PathBuf>,
-    chat_docs_file_name: Option<String>,
 ) -> Result<serde_json::Value, String> {
     /*
     macOS `runManageFilesBridgeRequest` parity: the bridge is DOCS-scoped, not
@@ -471,14 +465,20 @@ pub(crate) fn manage_files_bridge_result(
     let action = manage_request_string(request, "action").unwrap_or_default();
     let request_id = manage_request_string(request, "requestId").unwrap_or_default();
     let snapshot = snapshot.ok_or_else(|| "No active project root is available.".to_string())?;
+    manage_validate_request_identity(request, snapshot)?;
+    let chat_authorization = snapshot
+        .active_project_id
+        .as_ref()
+        .and_then(|id| resolve_manage_chat_file(&id.0, request.get("path")?.as_str()?));
     let roots = manage_docs_root(
         snapshot.active_project_id.as_ref().map(|id| id.0.as_str()),
         snapshot.in_memory_project_path.as_deref(),
         global_docs_directory_text,
-        chat_docs_root,
-        chat_docs_file_name,
+        chat_authorization
+            .as_ref()
+            .map(|authorization| authorization.root.clone()),
+        chat_authorization.map(|authorization| authorization.file_name),
     )?;
-    manage_validate_request_identity(request, snapshot)?;
     let context = ManageDocsContext {
         additional_docs_folders_text,
         roots: &roots,
@@ -772,12 +772,14 @@ pub(crate) fn manage_docs_path<'a>(
     path: Option<&str>,
 ) -> Result<ManageDocsPath<'a>, String> {
     let outer = manage_normalized_relative_path(path)?;
-    if let Some(inner) = manage_chat_file_root_relative_path(&outer) {
-        let root = context
-            .roots
-            .chat
-            .as_deref()
-            .ok_or_else(|| "That chat file is no longer authorized for Docs.".to_string())?;
+    if manage_chat_file_root_relative_path(&outer).is_some() {
+        let (_, inner) = manage_chat_file_address(&outer).ok_or_else(|| {
+            "Reopen this file from its chat link to restore access in Docs.".to_string()
+        })?;
+        let inner = inner.to_string();
+        let root = context.roots.chat.as_deref().ok_or_else(|| {
+            "Reopen this file from its chat link to restore access in Docs.".to_string()
+        })?;
         return Ok(ManageDocsPath {
             chat: true,
             extra: false,
@@ -1236,8 +1238,8 @@ pub(crate) fn manage_docs_extra_root_name(configured: &str) -> String {
 /*
 CDXC:Docs 2026-08-09:
 The persistent project/configured roots mirror `DocsRoots` in
-`server/src/project_docs.rs`; `chat` is one runtime-only folder explicitly
-authorized by a file click. The configured mount carries either its location
+`server/src/project_docs.rs`; `chat` is the folder selected by this request's
+persisted native file grant. The configured mount carries either its location
 or its error because that failure belongs on one tree node.
 */
 pub(crate) struct ManageDocsRoots {

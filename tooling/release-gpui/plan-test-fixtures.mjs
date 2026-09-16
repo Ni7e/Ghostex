@@ -335,7 +335,15 @@ export function componentTagStateFixture() {
     'code-server': {
       componentVersion: `390f119a145e-p2-${fixtureDigest('payload')}`,
       platforms: Object.fromEntries(
-        ['darwin-arm64', 'linux-arm64', 'linux-x64', 'windows-arm64', 'windows-x64'].map((platform) => [
+        [
+          'darwin-arm64',
+          'linux-arm64',
+          'linux-x64',
+          'windows-arm64',
+          'windows-native-arm64',
+          'windows-native-x64',
+          'windows-x64',
+        ].map((platform) => [
           platform,
           { assetName: `code-server-x-${platform}.tar.gz`, sha256: fixtureDigest(platform), sizeBytes: 10 },
         ])

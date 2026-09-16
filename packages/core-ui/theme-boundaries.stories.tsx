@@ -6,7 +6,7 @@ import { Input } from '@/packages/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/packages/components/ui/popover';
 import { SegmentedControl, SegmentedControlItem } from '@/packages/components/ui/segmented-control';
 import { SessionChatActivityRow } from './chat/session-chat-activity-row';
-import { SessionChatNoticeCard } from './chat/session-chat-notice-card';
+import { SessionChatStatusCard, SessionChatStatusCardLead } from './chat/session-chat-status-card';
 
 function ThemeBoundaries() {
   const [choice, setChoice] = useState('first');
@@ -27,11 +27,15 @@ function ThemeBoundaries() {
             <SessionChatActivityRow
               activity={{ kind: 'compacting', label: 'Compacting conversation', detectedAt: '2026-09-13T00:00:00Z' }}
             />
-            <SessionChatNoticeCard className='mt-4 grid gap-3 p-4' kind='preview' severity='info'>
-              <p className='ghostex-chat-card-title'>Message queued</p>
+            <SessionChatStatusCard
+              className='mt-4'
+              data-kind='preview'
+              footer={<Button variant='outline'>Open terminal</Button>}
+              lead={<SessionChatStatusCardLead icon={IconInfoCircle} />}
+              title='Message queued'
+            >
               <p>Your message will be sent after compaction.</p>
-              <Button variant='outline'>Open terminal</Button>
-            </SessionChatNoticeCard>
+            </SessionChatStatusCard>
           </div>
         ))}
       </section>

@@ -153,7 +153,7 @@ export function DesktopControlSection({
           title={
             <IntegrationRowTitle
               description={`${permissionStatus.status}. ${GHOSTEX_TRYCUA_PRODUCT_NAME} needs Accessibility to click and type in apps, and Screen Recording to understand what is visible on the desktop.`}
-              label='macOS permissions'
+              label='System permissions'
             />
           }
         >

@@ -1,3 +1,5 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
+import { storageScope } from '@/packages/client-storage';
 /*
 CDXC:AgentScreenDetection 2026-08-19:
 Banner for state the agent paints only on its TERMINAL SCREEN — an expired
@@ -36,8 +38,8 @@ nothing on screen explaining why, since the CLI cannot accept the draft until
 it is answered. The composer stays editable. "Open terminal" stays as the escape hatch.
 
 CDXC:AgentScreenDetection 2026-09-03:
-User decision: expanding terminal output starts at the newest text, and its Terminal action stays on the opposite side of the same control row so both ways of inspecting the terminal remain together.
-User decision: terminal notice cards in every chat host have no decorative severity icon in their top-left corner; severity remains expressed by the card styling and copy.
+User decision: expanding terminal output starts at the newest text. (Until 2026-09-16 the Terminal action shared the output toggle's row; it now lives in the footer band with every other action, per the shared card decision below.)
+User decision (2026-09-03, superseded 2026-09-16): the cards used to carry no severity icon. Since 2026-09-16 every card leads with an icon (info circle, warning triangle, red alert circle by severity) on the shared status card, and an error keeps its red border.
 
 CDXC:AgentScreenDetection 2026-09-03:
 User decision: a dismissed notice must stay dismissed until it makes sense to show it again.
@@ -46,12 +48,20 @@ gxserver now keeps the timestamp across short gaps, and this side remembers the 
 Watchdog notices (`deliveryFailed`, an undelivered-send verdict) are exempt from the cooldown because each one reports a distinct lost message.
 
 CDXC:SessionChat 2026-09-04 DECISION:
-User: a picker card first shows collapsed and compact, with only its first two options side by side (the " (recommended)" suffix dropped), and clicking the title expands it to the full card (detail, every option, terminal output). The chevron floats in the corner and never pushes the card's content.
+User: a picker card first shows collapsed and compact, with only its first two options side by side (the " (recommended)" suffix dropped), and clicking the title expands it to the full card (detail, every option, terminal output). The chevron sits in the header's trailing slot.
+CDXC:SessionChat 2026-09-16 DECISION: User: notices are the shared status card. Actions sit right-aligned in the footer band with a keyed action on the left; the 2026-09-07 20px padding rule is superseded by the card's shared padding.
 User: no "Selected in terminal" badge on any picker row, in any state.
 User: picking an option is optimistic: the card disappears at once while the answer is sent in the background; it only comes back, with its failure line, when the daemon proves the answer did not land.
 */
 
-import { IconChevronRight, IconSwitchHorizontal, IconTerminal2, IconX } from '@tabler/icons-react';
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconChevronRight,
+  IconInfoCircle,
+  IconSwitchHorizontal,
+  IconTerminal2,
+} from '@tabler/icons-react';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { GxserverAnswerSessionChatPromptParams, SessionChatTerminalNotice } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
@@ -60,8 +70,15 @@ import { sessionChatKeyboardPopupOpen } from './session-chat-caret-navigation';
 import { Button } from '../../components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
-import { SessionChatNoticeCard } from './session-chat-notice-card';
+import {
+  SessionChatStatusCard,
+  SessionChatStatusCardActions,
+  SessionChatStatusCardChevron,
+  SessionChatStatusCardLead,
+} from './session-chat-status-card';
 import { SessionChatTerminalDialogCard } from './session-chat-terminal-dialog';
+
+const clientStorage = storageScope(['notices']);
 
 const SEND_FAILED_NOTICE = "Couldn't deliver those keys. Switch to Terminal View to act there.";
 const READ_ONLY_HINT = 'Input is held by another device.';
@@ -140,7 +157,7 @@ function readStoredDismissedNotice(sessionKey: string | undefined): DismissedNot
     return null;
   }
   try {
-    const raw = window.localStorage.getItem(`${DISMISS_STORAGE_PREFIX}${sessionKey}`);
+    const raw = clientStorage.getItem(`${DISMISS_STORAGE_PREFIX}${sessionKey}`);
     if (!raw) {
       return null;
     }
@@ -169,7 +186,7 @@ function writeStoredDismissedNotice(sessionKey: string | undefined, dismissed: D
     return;
   }
   try {
-    window.localStorage.setItem(`${DISMISS_STORAGE_PREFIX}${sessionKey}`, JSON.stringify(dismissed));
+    clientStorage.setItem(`${DISMISS_STORAGE_PREFIX}${sessionKey}`, JSON.stringify(dismissed));
   } catch {
     // Quota/private-mode failures must not break the dismiss button.
   }
@@ -252,7 +269,7 @@ export function SessionChatTerminalNoticeCard({
   const screenTailRef = useRef<HTMLPreElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const isMac = detectghostexHotkeyPlatform() === 'mac';
-  const primaryShortcutLabel = isMac ? '⌘ Enter' : 'Ctrl Enter';
+  const primaryShortcutLabel = formatSidebarHotkeyLabel('cmd+enter');
 
   const noticeKey = sessionChatTerminalNoticeDismissKey(notice);
   const dismiss = (): void => {
@@ -406,14 +423,14 @@ export function SessionChatTerminalNoticeCard({
   }
   if (notice.dialog && notice.dialog.rows.length === 0 && onAnswerDialog) {
     return (
-      <SessionChatNoticeCard ref={cardRef} kind={notice.kind} severity={notice.severity}>
-        <SessionChatTerminalDialogCard
-          key={notice.dialog.title}
-          dialog={notice.dialog}
-          canSend={canSend}
-          onAnswer={onAnswerDialog}
-        />
-      </SessionChatNoticeCard>
+      <SessionChatTerminalDialogCard
+        key={notice.dialog.title}
+        dialog={notice.dialog}
+        canSend={canSend}
+        onAnswer={onAnswerDialog}
+        ref={cardRef}
+        severity={notice.severity}
+      />
     );
   }
 
@@ -460,207 +477,151 @@ export function SessionChatTerminalNoticeCard({
     renderAccountMenu && (notice.kind === 'loginExpired' || notice.kind === 'usageLimit') ? (
       <NoticeAccountMenu key={sessionKey} renderMenu={renderAccountMenu} />
     ) : null;
+  const severityIcon =
+    notice.severity === 'error' ? IconAlertCircle : notice.severity === 'warning' ? IconAlertTriangle : IconInfoCircle;
+  const terminalButtons = switchToTerminalActions.map((action) => (
+    <Button key={action.id} onClick={onSwitchToTerminal} size='sm' variant='outline'>
+      <IconTerminal2 aria-hidden='true' stroke={2} />
+      {action.label}
+      {showShortcutLabels && switchToTerminalShortcut ? (
+        <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 shrink-0 items-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground'>
+          {switchToTerminalShortcut}
+        </kbd>
+      ) : null}
+    </Button>
+  ));
+  const escapeHatch = accountMenu || switchToTerminalActions.length > 0;
+  const footer =
+    !collapsed && (sendKeysActions.length > 0 || escapeHatch) ? (
+      <>
+        {sendKeysActions.map((action, sendKeysIndex) => (
+          <Button
+            disabled={!canSend || sending}
+            key={action.id}
+            onClick={() => runSendKeys(action.send)}
+            size='sm'
+            variant='outline'
+            {...(canSend ? {} : { title: READ_ONLY_HINT })}
+          >
+            {action.label}
+            {showShortcutLabels && sendKeysIndex === 0 && keyboardSendKeys ? (
+              <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 min-w-4 shrink-0 items-center justify-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground tabular-nums'>
+                {primaryShortcutLabel}
+              </kbd>
+            ) : null}
+          </Button>
+        ))}
+        {escapeHatch ? (
+          <SessionChatStatusCardActions>
+            {accountMenu}
+            {terminalButtons}
+          </SessionChatStatusCardActions>
+        ) : null}
+      </>
+    ) : undefined;
   return (
-    <SessionChatNoticeCard
+    <SessionChatStatusCard
       className='ghostex-chat-terminal-notice'
+      data-kind={notice.kind}
+      data-severity={notice.severity}
+      footer={footer}
+      lead={
+        <SessionChatStatusCardLead
+          className={notice.severity === 'error' ? 'text-destructive' : undefined}
+          icon={severityIcon}
+        />
+      }
       ref={cardRef}
-      kind={notice.kind}
+      role='status'
       severity={notice.severity}
+      title={notice.title}
+      {...(answerable
+        ? {
+            headerExpanded: expanded,
+            onHeaderActivate: toggleExpanded,
+            trailing: (
+              <SessionChatStatusCardChevron
+                expanded={expanded}
+                label={expanded ? 'Show less' : 'Show all options'}
+                onClick={toggleExpanded}
+              />
+            ),
+          }
+        : { onClose: dismiss })}
     >
-      <div
-        className={cn(
-          'relative flex items-start gap-2',
-          answerable ? (collapsed ? 'px-[22px] py-[18px]' : 'px-[22px] py-[20px]') : 'p-[20px]'
-        )}
-      >
-        {/* CDXC:SessionChat 2026-09-07 DECISION: User: notices like the folder-trust card have 20px padding on all sides and 10px more space between their rows. Picker cards get 10px additional padding on all sides. */}
-        <div className={cn('min-w-0 flex-1', !answerable && 'flex flex-col gap-[10px]')}>
-          {answerable ? (
-            /* CDXC:SessionChat 2026-09-07 DECISION: User: picker titles align with the content and action edges below. Offset the title button's own inset into the card padding so its hover background still has breathing room. */
-            <button
-              aria-expanded={expanded}
-              className='group/title -ml-2 flex w-[calc(100%+0.5rem)] min-w-0 cursor-pointer items-center gap-1.5 rounded-md py-1 pl-2 pr-6 text-left outline-none'
-              data-slot='session-chat-notice-title-toggle'
-              onClick={toggleExpanded}
+      {notice.detail && !collapsed ? (
+        <p className='whitespace-pre-line break-words text-muted-foreground'>{notice.detail}</p>
+      ) : null}
+      {answerable ? (
+        <div>
+          <SessionChatChoiceRows
+            dense={collapsed}
+            onSelect={(index) => answerChoice(choices[index].index)}
+            options={collapsed ? choiceOptions.slice(0, COLLAPSED_CHOICE_COUNT) : choiceOptions}
+            // The rows lock while an answer is in flight; the card itself
+            // is hidden optimistically, so this only matters for the
+            // instant before the hide and for a failed answer.
+            readOnly={!canSend || sending || pickedChoice !== null}
+            selected={pickedChoice === null ? [] : [choices.findIndex((choice) => choice.index === pickedChoice)]}
+            showShortcuts={showShortcutLabels}
+            shortcutLabels={[primaryShortcutLabel, 'Esc']}
+          />
+          {!canSend ? (
+            /* CDXC:SessionChat 2026-09-07 DECISION: User: the input-ownership sentence is a smaller secondary hint beneath the picker actions. */
+            <p className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] mt-2 font-normal leading-snug text-[#b4b8bf]'>
+              {READ_ONLY_HINT}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {notice.dialog && onAnswerDialog && !collapsed && !rateLimitPicker ? (
+        <SessionChatTerminalDialogCard
+          dialog={notice.dialog}
+          canSend={canSend && !sending && pickedChoice === null}
+          onAnswer={onAnswerDialog}
+          controlsOnly
+        />
+      ) : null}
+      {notice.screenTail && !collapsed ? (
+        <div>
+          <div className='flex min-w-0 flex-wrap items-center gap-2'>
+            <Button
+              className='ghostex-chat-card-action group/tail'
+              size='sm'
+              variant='outline'
+              // The sidebar's legacy bare-button base paints a 1px app border
+              // on every unnamed button; naming the slot opts this row out.
+              data-slot='session-chat-notice-tail-toggle'
+              onClick={() => setTailOpen((value) => !value)}
               type='button'
             >
-              <span className='ghostex-chat-card-title min-w-0 flex-1 text-sm leading-snug font-medium text-foreground'>
-                {notice.title}
-              </span>
-            </button>
-          ) : (
-            // CDXC:AgentScreenDetection 2026-09-06 DECISION: User: the top-right dismiss button must not reserve a right-hand gap beside the content below it.
-            <div className='flex min-w-0 items-start gap-2'>
-              <p className='ghostex-chat-card-title min-w-0 flex-1 text-sm leading-snug font-medium text-foreground'>
-                {notice.title}
-              </p>
-              <Button
-                className='ghostex-chat-card-dismiss'
-                aria-label='Dismiss'
-                onClick={dismiss}
-                size='icon-xs'
-                variant='outline'
-              >
-                <IconX aria-hidden='true' stroke={2} />
-              </Button>
-            </div>
-          )}
-          {notice.detail && !collapsed ? (
-            <p className='mt-1 whitespace-pre-line break-words text-xs leading-snug text-muted-foreground'>
-              {notice.detail}
-            </p>
-          ) : null}
-          {answerable ? (
-            <div className={collapsed ? 'mt-2' : 'mt-3'}>
-              <SessionChatChoiceRows
-                dense={collapsed}
-                onSelect={(index) => answerChoice(choices[index].index)}
-                options={collapsed ? choiceOptions.slice(0, COLLAPSED_CHOICE_COUNT) : choiceOptions}
-                // The rows lock while an answer is in flight; the card itself
-                // is hidden optimistically, so this only matters for the
-                // instant before the hide and for a failed answer.
-                readOnly={!canSend || sending || pickedChoice !== null}
-                selected={pickedChoice === null ? [] : [choices.findIndex((choice) => choice.index === pickedChoice)]}
-                showShortcuts={showShortcutLabels}
-                shortcutLabels={[primaryShortcutLabel, 'Esc']}
+              {tailOpen ? 'Hide terminal output' : 'Show terminal output'}
+              {/* Control tier, like every other expander in the chat. */}
+              <IconChevronRight
+                aria-hidden='true'
+                className={cn('ghostex-chat-disclosure-chevron', tailOpen && 'is-open')}
               />
-              {!canSend ? (
-                /* CDXC:SessionChat 2026-09-07 DECISION: User: the input-ownership sentence is a smaller secondary hint beneath the picker actions. */
-                <p className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] mt-2 font-normal leading-snug text-[#b4b8bf]'>
-                  {READ_ONLY_HINT}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          {notice.dialog && onAnswerDialog && !collapsed && !rateLimitPicker ? (
-            <SessionChatTerminalDialogCard
-              dialog={notice.dialog}
-              canSend={canSend && !sending && pickedChoice === null}
-              onAnswer={onAnswerDialog}
-              controlsOnly
-            />
-          ) : null}
-          {notice.screenTail && !collapsed ? (
-            <div className='mt-2'>
-              <div className='flex min-w-0 flex-wrap items-center justify-between gap-2'>
-                <Button
-                  className='ghostex-chat-card-action group/tail'
-                  size='sm'
-                  variant='outline'
-                  // The sidebar's legacy bare-button base paints a 1px app border
-                  // on every unnamed button; naming the slot opts this row out.
-                  data-slot='session-chat-notice-tail-toggle'
-                  onClick={() => setTailOpen((value) => !value)}
-                  type='button'
-                >
-                  {tailOpen ? 'Hide terminal output' : 'Show terminal output'}
-                  {/* Control tier, like every other expander in the chat. */}
-                  <IconChevronRight
-                    aria-hidden='true'
-                    className={cn('ghostex-chat-disclosure-chevron', tailOpen && 'is-open')}
-                  />
-                </Button>
-                {accountMenu || switchToTerminalActions.length > 0 ? (
-                  <div className='ml-auto flex flex-wrap items-center justify-end gap-2'>
-                    {accountMenu}
-                    {switchToTerminalActions.map((action) => (
-                      <Button key={action.id} onClick={onSwitchToTerminal} size='sm' variant='outline'>
-                        <IconTerminal2 aria-hidden='true' stroke={2} />
-                        {action.label}
-                        {showShortcutLabels && switchToTerminalShortcut ? (
-                          <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 shrink-0 items-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground'>
-                            {switchToTerminalShortcut}
-                          </kbd>
-                        ) : null}
-                      </Button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              {tailOpen ? (
-                <div className='ghostex-chat-notice-tail mt-2 min-w-0 rounded-lg border border-border/65 bg-background/70 p-3'>
-                  <pre
-                    className='max-h-40 min-w-0 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]'
-                    ref={screenTailRef}
-                  >
-                    {notice.screenTail}
-                  </pre>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          {sendFailed ? (
-            <p className='mt-2 text-[11px] leading-snug text-destructive/80'>{SEND_FAILED_NOTICE}</p>
-          ) : null}
-          {choiceError ? (
-            <p role='alert' className='mt-2 text-[11px] leading-snug text-destructive/80'>
-              {choiceError}
-            </p>
-          ) : null}
-          {!collapsed &&
-          (sendKeysActions.length > 0 ||
-            (!notice.screenTail && (accountMenu || switchToTerminalActions.length > 0))) ? (
-            <div className='mt-3 flex flex-wrap items-center gap-2'>
-              {sendKeysActions.map((action, sendKeysIndex) => (
-                <Button
-                  disabled={!canSend || sending}
-                  key={action.id}
-                  onClick={() => runSendKeys(action.send)}
-                  size='sm'
-                  variant='outline'
-                  {...(canSend ? {} : { title: READ_ONLY_HINT })}
-                >
-                  {action.label}
-                  {showShortcutLabels && sendKeysIndex === 0 && keyboardSendKeys ? (
-                    <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 min-w-4 shrink-0 items-center justify-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground tabular-nums'>
-                      {primaryShortcutLabel}
-                    </kbd>
-                  ) : null}
-                </Button>
-              ))}
-              {!notice.screenTail && (accountMenu || switchToTerminalActions.length > 0) ? (
-                // Without captured output, the escape hatch keeps its existing bottom-right position.
-                <div className='ml-auto flex flex-wrap items-center justify-end gap-2'>
-                  {accountMenu}
-                  {switchToTerminalActions.map((action) => (
-                    <Button key={action.id} onClick={onSwitchToTerminal} size='sm' variant='outline'>
-                      <IconTerminal2 aria-hidden='true' stroke={2} />
-                      {action.label}
-                      {showShortcutLabels && switchToTerminalShortcut ? (
-                        <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 shrink-0 items-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground'>
-                          {switchToTerminalShortcut}
-                        </kbd>
-                      ) : null}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
+            </Button>
+          </div>
+          {tailOpen ? (
+            <div className='ghostex-chat-notice-tail mt-2 min-w-0 rounded-lg border border-border/65 bg-background/70 p-3'>
+              <pre
+                className='max-h-40 min-w-0 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]'
+                ref={screenTailRef}
+              >
+                {notice.screenTail}
+              </pre>
             </div>
           ) : null}
         </div>
-        {answerable ? (
-          // Floats in the corner: the title row keeps its full width and the
-          // rows below never shift when the control appears.
-          <button
-            aria-expanded={expanded}
-            aria-label={expanded ? 'Show less' : 'Show all options'}
-            className={cn(
-              'absolute right-[22px] inline-flex size-5 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground',
-              collapsed ? 'top-[22px]' : 'top-[24px]'
-            )}
-            data-slot='session-chat-notice-expand-toggle'
-            onClick={toggleExpanded}
-            title={expanded ? 'Show less' : 'Show all options'}
-            type='button'
-          >
-            <IconChevronRight
-              aria-hidden='true'
-              className={cn('ghostex-chat-disclosure-chevron', expanded && 'is-open')}
-            />
-          </button>
-        ) : null}
-      </div>
-    </SessionChatNoticeCard>
+      ) : null}
+      {sendFailed ? <p className='text-[11px] leading-snug text-destructive/80'>{SEND_FAILED_NOTICE}</p> : null}
+      {choiceError ? (
+        <p role='alert' className='text-[11px] leading-snug text-destructive/80'>
+          {choiceError}
+        </p>
+      ) : null}
+    </SessionChatStatusCard>
   );
 }
 
@@ -673,7 +634,7 @@ function NoticeAccountMenu({ renderMenu }: { renderMenu: (close: () => void) => 
         <IconSwitchHorizontal aria-hidden='true' stroke={2} />
         Switch account
       </DropdownMenuTrigger>
-      <DropdownMenuContent align='end' className='gx-account-submenu' side='top'>
+      <DropdownMenuContent align='end' className='ghostex-session-chat-popup gx-account-submenu' side='top'>
         {renderMenu(() => setOpen(false))}
       </DropdownMenuContent>
     </DropdownMenu>

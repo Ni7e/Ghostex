@@ -7,12 +7,24 @@
     <style>
       html,
       body {
-        background: #0e0e0e;
+        background: var(--ghostex-sidebar-initial-background);
         margin: 0;
       }
     </style>
   </head>
-  <body data-sidebar-theme="plain-dark">
+  <body data-sidebar-starting>
+    <script>
+      // CDXC:Theming 2026-09-16 WHY:
+      // Apply the native startup palette before CSS/React or the load-end settings bridge can paint a dark sidebar in a light window.
+      const params = new URLSearchParams(window.location.search);
+      const initialTheme = params.get('initialTheme');
+      const light = initialTheme === 'light' ||
+        (initialTheme !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches);
+      const background = params.get('initialBackground');
+      document.documentElement.style.setProperty('--ghostex-sidebar-initial-background',
+        /^[0-9a-f]{6}$/i.test(background ?? '') ? `#${background}` : light ? '#f4f4f5' : '#0e0e0e');
+      document.body.dataset.sidebarTheme = light ? 'plain-light' : 'dark-2';
+    </script>
     <div id="root"></div>
     <script type="module" src="./sidebar/main.tsx"></script>
   </body>

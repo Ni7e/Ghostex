@@ -1236,6 +1236,10 @@ impl GhostexGpuiApp {
         if let Some(surface) = gpui_telemetry_surface_for_app_modal(modal) {
             record_gpui_surface_opened_telemetry(surface, cx.background_executor());
         }
+        // Kinds rebuilt in native GPUI leave the React host here (native_app_modal_lifecycle.rs).
+        if self.try_open_native_app_modal(modal, &open_message, cx) {
+            return;
+        }
         if modal == GpuiAppModalKind::StashedPrompts {
             self.enrich_gpui_saved_prompts_quick_access_open_message(&mut open_message);
         }
@@ -1333,8 +1337,8 @@ impl GhostexGpuiApp {
         if reset_ready_retry {
             self.app_modal_ready_retry_used = false;
         }
-        // The native Handoff / Export dialog counts as the one open app modal.
-        self.remove_gpui_export_transcript_modal_window(cx);
+        // A native GPUI modal counts as the one open app modal.
+        self.remove_native_app_modal_window(cx);
         support_logs::append(
             support_logs::GpuiSupportLog::AppModal,
             "gpui.appModal.lifecycle",
@@ -2042,6 +2046,12 @@ impl GhostexGpuiApp {
         let chat_transcript_width_script = format!(
             "window.ghostexSetSessionChatTranscriptWidthPercent?.({chat_transcript_width_percent});undefined;"
         );
+        let code_file_view_available = self.titlebar_mode_available(TitlebarMode::Source)
+            && self.embedded_code_editor_unavailable_reason().is_none();
+        let docs_file_view_available = self.titlebar_mode_available(TitlebarMode::Manage);
+        let chat_file_views_script = format!(
+            "window.ghostexSetSessionChatFileViews?.({code_file_view_available},{docs_file_view_available});undefined;"
+        );
         let chat_file_edit_previews =
             gpui_session_chat_file_edit_previews_from_settings(settings_snapshot.object());
         let chat_file_edit_previews_script = format!(
@@ -2079,6 +2089,7 @@ impl GhostexGpuiApp {
                 surface.refresh_session_chat_zoom();
                 surface.execute_app_owned_script(&account_privacy_script);
                 surface.execute_app_owned_script(&chat_file_edit_previews_script);
+                surface.execute_app_owned_script(&chat_file_views_script);
                 surface.execute_app_owned_script(&chat_simple_mode_script);
                 surface.execute_app_owned_script(&chat_hotkeys_script);
             });
@@ -2138,6 +2149,11 @@ impl GhostexGpuiApp {
             .agents_gpui_engine_terminals
             .values_mut()
             .chain(self.command_gpui_engine_terminals.values_mut())
+            .chain(
+                self.parked_agents_terminal_runtimes_by_project
+                    .values_mut()
+                    .flat_map(|runtime| runtime.gpui_engine_terminals.values_mut()),
+            )
         {
             record.confirm_close_behavior = confirm_close_behavior;
             let view = record.view.clone();
@@ -2157,7 +2173,7 @@ impl GhostexGpuiApp {
                         &colors.palette,
                     );
                 }
-                cx.notify();
+                view.refresh_appearance(cx);
             });
         }
     }
@@ -2290,6 +2306,9 @@ impl GhostexGpuiApp {
         message: serde_json::Value,
         cx: &mut gpui::Context<Self>,
     ) {
+        if self.receive_native_app_modal_message(&message, cx) {
+            return;
+        }
         let Some(handle) = self.app_modal_window.clone() else {
             return;
         };
@@ -2309,6 +2328,13 @@ impl GhostexGpuiApp {
         description: &str,
         cx: &mut gpui::Context<Self>,
     ) {
+        // A native GPUI modal has no toast layer, and the React host's toast
+        // dies with its window; after a native modal closes, its outcome goes
+        // to the bottom-center app toast window instead of being dropped.
+        if self.app_modal_window.is_none() {
+            self.dispatch_gpui_workspace_action_toast(level, title, description, cx);
+            return;
+        }
         self.dispatch_open_gpui_app_modal_message(
             serde_json::json!({
                 "description": gpui_normalized_app_toast_description(title, Some(description)),
@@ -2464,7 +2490,7 @@ impl GhostexGpuiApp {
             "gpui.host.willTerminate",
             serde_json::json!({ "pid": std::process::id() }),
         );
-        self.persist_shell_layout_state();
+        self.flush_shell_layout_state();
         self.stop_gpui_keep_awake_runtime();
         self.source_code_server_runtime.stop();
         let _ = cx;

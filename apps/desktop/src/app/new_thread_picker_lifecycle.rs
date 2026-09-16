@@ -1,12 +1,182 @@
 //! Open, close, preload, and data loading for the native New Thread picker window.
 //! SEE-ALSO: apps/desktop/src/app/window/new_thread_picker.rs (the window entity and its decision record).
 use crate::app::helpers::*;
+use crate::app::titlebar::account_usage::{
+    account_display_name, account_display_text, claude_headline_windows,
+};
 use crate::app::window::*;
 use crate::*;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
+
+/// The picker's window root inside the app: it answers the New Thread hotkey
+/// (a second Cmd+Shift+T closes the picker) around the kit-only picker view,
+/// which cannot name the app's action types itself.
+pub(crate) struct GpuiNewThreadPickerShell {
+    picker: Entity<GpuiNewThreadPickerWindow>,
+    main_app: gpui::WeakEntity<GhostexGpuiApp>,
+}
+
+impl Render for GpuiNewThreadPickerShell {
+    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .on_action(
+                cx.listener(|this, action: &RunConfiguredGhostexHotkey, window, cx| {
+                    if action.action_id == "openNewThreadPalette" {
+                        window.remove_window();
+                        let _ = this.main_app.update(cx, |app, cx| {
+                            app.release_gpui_new_thread_picker_window(cx);
+                        });
+                    }
+                }),
+            )
+            .child(self.picker.clone())
+    }
+}
+
+fn new_thread_picker_agent_from_hud(value: &Value) -> Option<NewThreadPickerAgent> {
+    let agent_id = value.get("agentId")?.as_str()?.trim();
+    let name = value.get("name")?.as_str()?.trim();
+    if agent_id.is_empty() || name.is_empty() {
+        return None;
+    }
+    let icon = value
+        .get("icon")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|icon| !icon.is_empty())
+        .map(str::to_string);
+    let icon_path = icon.as_deref().and_then(workspace_tab_agent_icon_path);
+    let (icon_svg_size, icon_accent) = match icon.as_deref() {
+        Some(icon) => (
+            workspace_tab_agent_svg_size(icon),
+            workspace_tab_agent_icon_accent_color(icon),
+        ),
+        None => (12.0, 0xffffff),
+    };
+    Some(NewThreadPickerAgent {
+        agent_id: agent_id.to_string(),
+        name: name.to_string(),
+        icon,
+        icon_path,
+        icon_svg_size,
+        icon_accent,
+    })
+}
+
+/// The sidebar HUD agent buttons in dropdown order, with the last-used agent
+/// moved to the front so it is the preselected row.
+fn order_new_thread_picker_agents(
+    hud_agents: &[Value],
+    primary_agent_id: Option<&str>,
+) -> Vec<NewThreadPickerAgent> {
+    let mut agents: Vec<NewThreadPickerAgent> = hud_agents
+        .iter()
+        .filter_map(new_thread_picker_agent_from_hud)
+        .collect();
+    if let Some(primary_index) = primary_agent_id
+        .and_then(|primary| agents.iter().position(|agent| agent.agent_id == primary))
+    {
+        let primary = agents.remove(primary_index);
+        agents.insert(0, primary);
+    }
+    agents
+}
+
+/// Port of `accountUsageLabel` in packages/shared/account-usage-label.ts.
+/// CDXC:AgentProviders 2026-09-12 SEE-ALSO:
+/// packages/shared/account-usage-label.ts owns the shared Fable percentage label decision.
+fn usage_window_label(window: &Value) -> Option<String> {
+    if window["model"]
+        .as_str()
+        .is_some_and(|model| model.eq_ignore_ascii_case("fable"))
+    {
+        return Some("Fable".to_string());
+    }
+    let seconds = window["limitWindowSeconds"].as_i64().unwrap_or(0);
+    let duration = if seconds > 0 {
+        if seconds % 86_400 == 0 {
+            Some(format!("{}d", seconds / 86_400))
+        } else if seconds % 3_600 == 0 {
+            Some(format!("{}h", seconds / 3_600))
+        } else {
+            Some(format!("{}m", seconds / 60))
+        }
+    } else if window["id"].as_str() == Some("fiveHour") {
+        Some("5h".to_string())
+    } else if window["id"].as_str() == Some("sevenDay") || window["model"].is_string() {
+        Some("7d".to_string())
+    } else {
+        None
+    };
+    match duration {
+        Some(duration) => Some(match window["model"].as_str() {
+            Some(model) => format!("{model} {duration}"),
+            None => duration,
+        }),
+        None => window["label"].as_str().map(str::to_string),
+    }
+}
+
+/// Port of `AccountLauncherUsage` in packages/core-ui/accounts/agent-launcher-menu.tsx:
+/// Claude shows its two tightest limits out of weekly, five-hour, and Fable, Codex the weekly window and available resets.
+fn account_usage_line(account: &Value) -> Option<String> {
+    let windows = account["usage"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let main: Vec<&Value> = windows.iter().filter(|w| w["model"].is_null()).collect();
+    let weekly = main.iter().copied().find(|w| {
+        w["id"].as_str() == Some("sevenDay")
+            || w["limitWindowSeconds"].as_i64().unwrap_or(0) >= 604_800
+    });
+    let percent = |w: &Value| -> Option<String> {
+        let label = usage_window_label(w)?;
+        let used = w["usedPercent"].as_f64()?;
+        Some(format!("{label}: {}%", used.round() as i64))
+    };
+    let values: Vec<String> = if account["provider"].as_str() == Some("claude") {
+        claude_headline_windows(windows)
+            .into_iter()
+            .filter_map(percent)
+            .collect()
+    } else {
+        let mut values: Vec<String> = weekly.and_then(percent).into_iter().collect();
+        if let Some(resets) = account["resetCredits"].as_u64() {
+            values.push(format!("{resets}rs"));
+        }
+        values
+    };
+    (!values.is_empty()).then(|| values.join(" · "))
+}
+
+/// The registered accounts of the `/api/agentAccounts` list, masked and
+/// summarised for the picker's rows.
+fn new_thread_picker_accounts(state: &Value) -> Vec<NewThreadPickerAccount> {
+    state["accounts"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+        .iter()
+        .filter(|account| account["registered"].as_bool() == Some(true))
+        .filter_map(|account| {
+            let id = account["id"].as_str()?.to_string();
+            let provider = account["provider"].as_str()?.to_string();
+            let is_default = state["defaultAccounts"][&provider].as_str() == Some(id.as_str());
+            Some(NewThreadPickerAccount {
+                name: account_display_name(account),
+                usage: account_usage_line(account),
+                ready: account["status"].as_str() == Some("ready"),
+                is_default,
+                id,
+                provider,
+            })
+        })
+        .collect()
+}
 
 impl GhostexGpuiApp {
     /// Cmd+Shift+T toggles the picker: a second press while it is open closes it.
@@ -62,15 +232,27 @@ impl GhostexGpuiApp {
         )
     }
 
+    /// The picker's current palette, agents, and cached accounts.
+    fn new_thread_picker_config(&self) -> NewThreadPickerConfig {
+        NewThreadPickerConfig {
+            palette: self.gpui_native_modal_palette(),
+            agents: self.ordered_new_thread_picker_agents(),
+            agents_loaded: self.new_thread_picker_agents.is_some(),
+            accounts: self
+                .new_thread_picker_accounts
+                .as_ref()
+                .map(new_thread_picker_accounts),
+            close_when_inactive: true,
+        }
+    }
+
     fn create_gpui_new_thread_picker_window(
         &mut self,
         visible: bool,
         cx: &mut gpui::Context<Self>,
     ) {
-        let agents = self.ordered_new_thread_picker_agents();
-        let agent_count = agents.len();
-        let agents_loaded = self.new_thread_picker_agents.is_some();
-        let accounts = self.new_thread_picker_accounts.clone();
+        let config = self.new_thread_picker_config();
+        let agent_count = config.agents.len();
         let window_size = size(
             px(NEW_THREAD_PICKER_WIDTH),
             px(new_thread_picker_window_height(agent_count)),
@@ -91,6 +273,7 @@ impl GhostexGpuiApp {
             window_background: gpui::WindowBackgroundAppearance::Transparent,
             ..Default::default()
         };
+        let host = self.native_app_modal_host(cx, Self::handle_new_thread_picker_command);
         let main_app = cx.weak_entity();
         let picker_slot: Rc<RefCell<Option<Entity<GpuiNewThreadPickerWindow>>>> =
             Rc::new(RefCell::new(None));
@@ -101,22 +284,16 @@ impl GhostexGpuiApp {
                 if visible {
                     window.activate_window();
                 }
-                let picker = GpuiNewThreadPickerWindow::new(
-                    main_app,
-                    agents,
-                    agents_loaded,
-                    accounts,
-                    window,
-                    cx,
-                );
+                let picker = cx.new(|cx| GpuiNewThreadPickerWindow::new(config, host, window, cx));
                 *picker_out.borrow_mut() = Some(picker.clone());
+                let shell = cx.new(|_cx| GpuiNewThreadPickerShell { picker, main_app });
                 /*
                 gpui-component's text input reads the window root as
                 `gpui_component::Root` while painting, so the picker must sit
                 inside one; the Root's own surface is cleared so the rounded
                 popup frame is the only thing painted.
                 */
-                cx.new(|cx| Root::new(picker, window, cx).bg(gpui::transparent_black()))
+                cx.new(|cx| Root::new(shell, window, cx).bg(gpui::transparent_black()))
             })
             .ok();
         self.new_thread_picker = picker_slot.borrow_mut().take();
@@ -128,21 +305,19 @@ impl GhostexGpuiApp {
         if self.new_thread_picker_visible {
             return;
         }
-        let agents = self.ordered_new_thread_picker_agents();
+        let config = self.new_thread_picker_config();
         let stale = self.new_thread_picker_window.is_none()
-            || self.new_thread_picker_preloaded_agent_count != agents.len();
+            || self.new_thread_picker_preloaded_agent_count != config.agents.len();
         if stale {
             self.remove_gpui_new_thread_picker_window(cx);
             self.create_gpui_new_thread_picker_window(true, cx);
         } else {
-            let agents_loaded = self.new_thread_picker_agents.is_some();
-            let accounts = self.new_thread_picker_accounts.clone();
             let picker = self.new_thread_picker.clone();
             if let (Some(handle), Some(picker)) = (self.new_thread_picker_window, picker) {
                 let shown = handle
                     .update(cx, |_root, window, cx| {
                         picker.update(cx, |picker, cx| {
-                            picker.reset(agents, agents_loaded, accounts, window, cx);
+                            picker.reset(config, window, cx);
                         });
                         window.activate_window();
                     })
@@ -167,10 +342,10 @@ impl GhostexGpuiApp {
         self.ensure_gpui_new_thread_picker_preloaded(cx);
     }
 
-    /// Called by the picker window itself right before it removes its own
-    /// window (Escape, a launch, or losing activation). The handle is dropped
-    /// here and the replacement is preloaded once this update has finished, so
-    /// no window is opened while the closing one is still being updated.
+    /// Called once the picker has removed its own window (Escape, a launch,
+    /// or losing activation). The handle is dropped here and the replacement
+    /// is preloaded once this update has finished, so no window is opened
+    /// while the closing one is still being updated.
     pub(crate) fn release_gpui_new_thread_picker_window(&mut self, cx: &mut gpui::Context<Self>) {
         self.new_thread_picker_visible = false;
         self.new_thread_picker_window = None;
@@ -181,6 +356,53 @@ impl GhostexGpuiApp {
                 app.ensure_gpui_new_thread_picker_preloaded(cx);
             });
         });
+    }
+
+    /// The picker's commands: launches and pane openers go through the same
+    /// sidebar messages the React palette posts, then the window is released.
+    fn handle_new_thread_picker_command(
+        &mut self,
+        command: NewThreadPickerCommand,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        match command {
+            NewThreadPickerCommand::LaunchAgent {
+                agent_id,
+                account_id,
+            } => {
+                let mut message = json!({
+                    "agentId": agent_id,
+                    "type": "runSidebarAgent",
+                });
+                if let Some(account_id) = account_id {
+                    message["accountId"] = json!(account_id);
+                }
+                self.sidebar_primary_agent_launcher_id = Some(agent_id);
+                self.dispatch_gpui_sidebar_host_message(message, cx);
+                self.release_gpui_new_thread_picker_window(cx);
+            }
+            NewThreadPickerCommand::OpenBrowser => {
+                self.dispatch_gpui_sidebar_host_message(
+                    json!({ "type": "openBrowserPaneInGroup" }),
+                    cx,
+                );
+                self.release_gpui_new_thread_picker_window(cx);
+            }
+            NewThreadPickerCommand::CreateTerminal => {
+                self.dispatch_gpui_sidebar_host_message(json!({ "type": "createSession" }), cx);
+                self.release_gpui_new_thread_picker_window(cx);
+            }
+            NewThreadPickerCommand::AddAccount => {
+                self.open_gpui_settings_accounts_from_new_thread_picker(cx);
+                self.release_gpui_new_thread_picker_window(cx);
+            }
+            NewThreadPickerCommand::RetryAccounts => {
+                self.refresh_gpui_new_thread_picker_accounts(cx);
+            }
+            NewThreadPickerCommand::Closed => {
+                self.release_gpui_new_thread_picker_window(cx);
+            }
+        }
     }
 
     /// Reads the sidebar HUD agent buttons in the background and caches them.
@@ -254,13 +476,17 @@ impl GhostexGpuiApp {
                 if let Ok(state) = &result {
                     this.new_thread_picker_accounts = Some(state.clone());
                 }
+                let accounts = result
+                    .as_ref()
+                    .map(new_thread_picker_accounts)
+                    .map_err(|error| account_display_text(error));
                 if let (Some(handle), Some(picker)) = (
                     this.new_thread_picker_window,
                     this.new_thread_picker.clone(),
                 ) {
                     let _ = handle.update(cx, |_root, _window, cx| {
                         picker.update(cx, |picker, cx| {
-                            picker.set_accounts(result, cx);
+                            picker.set_accounts(accounts, cx);
                         });
                     });
                 }

@@ -327,6 +327,9 @@ fn classify_raw_line(line: &[u8]) -> RawLine<'_> {
     if record.get("type").and_then(Value::as_str).is_some() {
         return RawLine::Event(line);
     }
+    if crate::session_chat_decode_cursor::is_cursor_context_metadata(&record) {
+        return RawLine::Other(line);
+    }
     match record.get("role").and_then(Value::as_str) {
         Some("user") => RawLine::User(line),
         Some("assistant") => {

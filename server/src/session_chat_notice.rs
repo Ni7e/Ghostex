@@ -1164,7 +1164,7 @@ const CLAUDE_RULES: &[NoticeRule] = &[
         kind: SESSION_CHAT_NOTICE_LOGIN_EXPIRED,
         severity: SessionChatTerminalNoticeSeverity::Error,
         title: "Claude Code is waiting for sign-in",
-        detail: "Complete or cancel the sign-in flow in the terminal before sending a message. If macOS asks you to unlock the keychain, finish that step there.",
+        detail: "Complete or cancel the sign-in flow in the terminal before sending a message. If your operating system asks you to unlock credential storage, finish that step there.",
         blocks_input: true,
         signatures: &[
             NoticeSignature {

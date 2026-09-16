@@ -65,8 +65,12 @@ jobs:
         run: |
           {
             printf 'zig=%s\n' "$(git rev-parse HEAD:.dependencies/zmx)"
-            printf 'cargo=%s\n' "$(git rev-parse HEAD:server)"
           } >> "$GITHUB_OUTPUT"
+      # CDXC:Release 2026-09-16 WHY: this key used to carry the tree hash of
+      # server/, which changes on nearly every push, so every push wrote two
+      # new 45 MB registry entries that only superseded the previous ones. The
+      # lockfile hash changes only when the dependency set does, like the
+      # desktop registry keys.
       - name: Restore Cargo registry cache
         uses: actions/cache@v6
         id: cargo_cache
@@ -74,7 +78,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-reg-gxserver-${{ runner.os }}-${{ inputs.arch }}-${{ steps.cache_keys.outputs.cargo }}
+          key: cargo-reg-gxserver-${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('server/Cargo.lock') }}
           restore-keys: cargo-reg-gxserver-${{ runner.os }}-${{ inputs.arch }}-
       - name: Restore Zig package cache
         uses: actions/cache@v6

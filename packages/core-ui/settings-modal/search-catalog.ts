@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 /*
  * CDXC:RepoStructure 2026-08-23:
  * Settings search metadata, the grouped page search, and the main-settings
@@ -10,7 +11,6 @@ import {
   CHAT_FILE_OPEN_VIEW_OPTIONS,
   COMMANDS_PANEL_SIDE_OPTIONS,
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
-  DIAGNOSTIC_LOGGING_SCENARIOS,
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
   GHOSTTY_SCROLLBAR_OPTIONS,
@@ -42,8 +42,7 @@ import {
 
 export const IS_WINDOWS_HOST = typeof navigator !== 'undefined' && /Windows/iu.test(navigator.userAgent);
 
-export const PASTE_PREVIEWABLE_IMAGES_DESCRIPTION =
-  'Paste clipboard images as previewable Markdown links with Cmd+V or Ctrl+V. Hold Cmd over the linked path to preview it in the terminal, and see the same image preview in the Ctrl+G Rich Prompt Editor.';
+export const PASTE_PREVIEWABLE_IMAGES_DESCRIPTION = `Paste clipboard images as previewable Markdown links with ${formatSidebarHotkeyLabel('cmd+v')}. Hold ${formatSidebarHotkeyLabel('cmd')} over the linked path to preview it in the terminal, and see the same image preview in the ${formatSidebarHotkeyLabel('ctrl+g')} Rich Prompt Editor.`;
 
 export type SettingsSearchSectionDefinition = {
   settings: readonly SettingSearchDefinition[];
@@ -67,7 +66,7 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'appIconSourceId',
           subtitle:
-            'Choose the macOS Dock and app-switcher icon. The app file icon may also change when macOS allows it.',
+            'Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.',
           title: 'App Icon',
         },
       ],
@@ -246,7 +245,7 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'keepAwakeDeactivateOnLowPowerMode',
-          subtitle: 'Stop preventing sleep when macOS Low Power Mode is enabled.',
+          subtitle: 'Stop preventing sleep when Low Power Mode is enabled.',
           title: 'Deactivate in Low Power Mode',
         },
         {
@@ -628,12 +627,12 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'showMacOSAttentionNotifications',
-          subtitle: 'Show a macOS banner when a session needs attention.',
-          title: 'macOS Attention Notifications',
+          subtitle: 'Show a system notification when a session needs attention.',
+          title: 'Attention Notifications',
         },
         {
           key: 'attentionNotificationActions',
-          subtitle: 'Test the current completion alert settings or open macOS Notification Settings.',
+          subtitle: 'Test the current completion alert settings or open Notification Settings.',
           title: 'Agent Completion Alert Test',
         },
         {
@@ -787,8 +786,7 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'showQuickModelPickerInTerminal',
-          subtitle:
-            'Use the model picker shortcut (Option+P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.',
+          subtitle: `Use the model picker shortcut (${formatSidebarHotkeyLabel('alt+p')} by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.`,
           title: 'Show quick model & effort picker for Claude and Codex in terminal view',
         },
         {
@@ -804,8 +802,8 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'promptEditorBackend',
           options: PROMPT_EDITOR_BACKEND_OPTIONS,
-          subtitle: 'Choose which editor Ctrl+G uses when a terminal prompt asks for $EDITOR.',
-          title: 'Ctrl+G prompt editor',
+          subtitle: `Choose which editor ${formatSidebarHotkeyLabel('ctrl+g')} uses when a terminal prompt asks for $EDITOR.`,
+          title: `${formatSidebarHotkeyLabel('ctrl+g')} prompt editor`,
         },
       ],
     },
@@ -912,51 +910,6 @@ export function getSettingsSearchSectionDefinitions() {
         },
       ],
     },
-    debugging: {
-      title: 'Debugging',
-      settings: [
-        /*
-         * CDXC:Diagnostics 2026-06-06-07:09:
-         * Show debug UI controls is the global gate for routine diagnostic disk
-         * logging as well as debug-only UI. Scenario controls narrow which
-         * routine log area writes while the global gate is on; important
-         * warnings, errors, and crashes remain available independently.
-         *
-         * CDXC:Diagnostics 2026-06-15-21:34:
-         * The Debugging section owns support and diagnostic toggles at the bottom of Settings, including command copy actions and Copy details, so users can find debug-only context-menu features together.
-         *
-         * CDXC:Diagnostics 2026-06-27-22:07:
-         * Disk logging needs exact scenario controls. Search should match both
-         * the scenario labels and their support-bundle file names so a user can
-         * enable only the requested repro log without browsing every Debugging row.
-         */
-        {
-          key: 'debuggingMode',
-          subtitle: 'Show debug-only UI controls and allow enabled routine diagnostic logs.',
-          title: 'Show debug UI controls',
-        },
-        {
-          key: 'diagnosticLogging',
-          options: DIAGNOSTIC_LOGGING_SCENARIOS.flatMap((scenario) => [
-            { label: scenario.label, value: scenario.id },
-            ...scenario.logFiles.map((logFile) => ({ label: logFile, value: logFile })),
-          ]),
-          subtitle:
-            'Choose routine repro log areas while Show debug UI controls is on. Important warnings, errors, and crashes remain captured when it is off.',
-          title: 'Diagnostic disk logging scenarios',
-        },
-        {
-          key: 'showSessionCommandCopyActions',
-          subtitle: 'Show Copy resume and Copy attach command in session context menus.',
-          title: 'Show command copy actions',
-        },
-        {
-          key: 'showSessionDetailsCopyAction',
-          subtitle: 'Show Copy Details in session context menus.',
-          title: 'Show Copy Details option',
-        },
-      ],
-    },
   } satisfies Record<string, SettingsSearchSectionDefinition>;
 
   return settingsSearchSections;
@@ -1003,7 +956,7 @@ export const MAIN_SETTINGS_GROUP_SECTIONS: Record<
   statusIndicators: { sections: ['statusIndicators'], title: 'Status Indicators' },
   notifications: { sections: ['sounds'], title: 'Notifications' },
   system: { sections: ['autoSleep', 'power'], title: 'System' },
-  advanced: { sections: ['beta', 'debugging'], title: 'Advanced' },
+  advanced: { sections: ['beta'], title: 'Advanced' },
 };
 
 export function getMainSettingsGroupSearch(settingsSearchQuery: string, settingsSearch: SettingsSearchSections) {

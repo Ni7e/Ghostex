@@ -8,6 +8,7 @@ use crate::session_chat::{
 };
 use crate::session_chat_fork_stitch::{
     decode_stitched_cursor, encode_stitched_cursor, read_session_chat_tail_page_stitched,
+    FORK_BOUNDARY_MESSAGE_ID_PREFIX,
 };
 use crate::session_chat_tail::SessionChatTailPage;
 
@@ -121,6 +122,89 @@ pub(crate) fn read_history(
         }
         cursor = before_offset;
     }
+}
+
+/// CDXC:SessionChat 2026-09-16 DECISION:
+/// User: the initial chat snapshot carries only the latest turn in detail; every older completed turn in the tail window arrives collapsed like a history page and loads its work on expansion.
+/// The detailed region starts at the newest genuine prompt (not queued, not a harness-injected row), the same boundary the message list uses for a streaming response, so a task notification or local command output landing mid-turn never folds live work.
+/// Rows no prompt owns (a window that starts mid-turn, a turn cut by a fork boundary) stay verbatim, and each collapsed turn's `beforeOffset` is the cursor of the row after it so expansion finds the turn on its first detail page.
+pub(crate) fn collapse_snapshot_messages(
+    messages: &[SessionChatMessage],
+    before_offset: u64,
+) -> Vec<Value> {
+    let is_prompt = |message: &SessionChatMessage| {
+        message.role == SessionChatRole::User && message.byte_offset.is_some()
+    };
+    let Some(detail_start) = messages.iter().rposition(|message| {
+        is_prompt(message)
+            && !message.queued
+            && !crate::session_chat_decode_claude::is_noise_message(message)
+    }) else {
+        return messages.iter().map(|message| json!(message)).collect();
+    };
+    let (mut hop, _) = decode_stitched_cursor(before_offset);
+    let mut cursors = Vec::with_capacity(messages.len());
+    for message in messages {
+        if message.id.starts_with(FORK_BOUNDARY_MESSAGE_ID_PREFIX) {
+            hop = hop.saturating_sub(1);
+        }
+        cursors.push(encode_stitched_cursor(
+            hop,
+            message.byte_offset.unwrap_or(0),
+        ));
+    }
+    let mut segments: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0;
+    for (index, message) in messages.iter().enumerate().take(detail_start) {
+        let boundary = message.id.starts_with(FORK_BOUNDARY_MESSAGE_ID_PREFIX);
+        if boundary || is_prompt(message) {
+            if index > start {
+                segments.push((start, index));
+            }
+            if boundary {
+                segments.push((index, index + 1));
+                start = index + 1;
+            } else {
+                start = index;
+            }
+        }
+    }
+    if detail_start > start {
+        segments.push((start, detail_start));
+    }
+    let mut output = Vec::with_capacity(messages.len());
+    for (segment_start, segment_end) in segments {
+        let first = &messages[segment_start];
+        if first.id.starts_with(FORK_BOUNDARY_MESSAGE_ID_PREFIX) || !is_prompt(first) {
+            output.extend(
+                messages[segment_start..segment_end]
+                    .iter()
+                    .map(|message| json!(message)),
+            );
+            continue;
+        }
+        let before = (segment_end..messages.len())
+            .find(|index| {
+                !messages[*index]
+                    .id
+                    .starts_with(FORK_BOUNDARY_MESSAGE_ID_PREFIX)
+            })
+            .map(|index| cursors[index])
+            .unwrap_or(before_offset);
+        let mut turn = Turn::default();
+        for message in messages[segment_start + 1..segment_end].iter().rev() {
+            turn.push(message.clone(), false);
+        }
+        let mut rows = turn.finish(Some(first.clone()), before);
+        rows.reverse();
+        output.extend(rows);
+    }
+    output.extend(
+        messages[detail_start..]
+            .iter()
+            .map(|message| json!(message)),
+    );
+    output
 }
 
 // A transcript can begin with work without a user prompt, or a fork can cut a

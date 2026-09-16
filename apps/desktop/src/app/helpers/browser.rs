@@ -1016,148 +1016,202 @@ pub(crate) fn browser_feedback_js_string_literal(value: &str) -> String {
 
 pub(crate) fn browser_agentation_feedback_injection_script() -> String {
     /*
-    CDXC:Browser 2026-06-23-11:04:
-    Browser feedback toolbar parity now injects the Settings-selected Agentation tool into the active GPUI CEF main frame instead of showing a placeholder notification. Keep the script bounded to pinned module URLs, auto-start feedback mode, and avoid persistent logs, console page metadata, raw URLs, titles, page content, cookies, tokens, paths, command text, terminal content, or JS error payloads.
+    CDXC:Browser 2026-09-16 DECISION:
+    User: Annotate must land in the frame that owns the page content. Agentation picks elements with elementFromPoint on its own document, so a toolbar mounted in the Storybook manager could only select the sidebar and header while the story sat in the preview iframe. The script therefore runs itself, via Function.prototype.toString, inside the largest same-origin iframe that covers at least a third of the viewport, toggles whichever realm already hosts it, and stays in the host page when there is no such frame or the frame's document cannot run an injected script. Supersedes the 2026-06-23 main-frame-only injection. Keep the script bounded to pinned module URLs, auto-start feedback mode, and avoid persistent logs, console page metadata, raw URLs, titles, page content, cookies, tokens, paths, command text, terminal content, or JS error payloads.
+    SEE-ALSO: packages/client-storage/catalog.ts (agentationToolbar, agentationAnnotations).
     */
     const TEMPLATE: &str = r##"
 (function() {
-  const packageModuleUrl = __AGENTATION_PACKAGE_MODULE_URL__;
-  const reactModuleUrl = __AGENTATION_REACT_MODULE_URL__;
-  const reactDOMClientModuleUrl = __AGENTATION_REACT_DOM_CLIENT_MODULE_URL__;
   const stateKey = '__GHOSTEX_AGENTATION__';
-  const rootId = 'ghostex-agentation-root';
-  const directionStyleId = 'ghostex-agentation-direction-style';
+  const mount = function() {
+    const packageModuleUrl = __AGENTATION_PACKAGE_MODULE_URL__;
+    const reactModuleUrl = __AGENTATION_REACT_MODULE_URL__;
+    const reactDOMClientModuleUrl = __AGENTATION_REACT_DOM_CLIENT_MODULE_URL__;
+    const stateKey = '__GHOSTEX_AGENTATION__';
+    const rootId = 'ghostex-agentation-root';
+    const directionStyleId = 'ghostex-agentation-direction-style';
+    const existing = window[stateKey];
+    if (existing && typeof existing.unmount === 'function') {
+      existing.unmount();
+      return;
+    }
+
+    const state = {
+      canceled: false,
+      container: null,
+      directionStyle: null,
+      root: null,
+      activated: false,
+      failed: false,
+      unmount: function() {
+        this.canceled = true;
+        if (this.root && typeof this.root.unmount === 'function') {
+          try {
+            this.root.unmount();
+          } catch (_) {}
+        }
+        if (this.container && this.container.parentNode) {
+          this.container.parentNode.removeChild(this.container);
+        }
+        if (this.directionStyle && this.directionStyle.parentNode) {
+          this.directionStyle.parentNode.removeChild(this.directionStyle);
+        }
+        if (window[stateKey] === this) {
+          delete window[stateKey];
+        }
+      }
+    };
+    window[stateKey] = state;
+
+    const findStartButton = function() {
+      const root = state.container || document.getElementById(rootId);
+      return document.querySelector('[data-agentation-toolbar] [title="Start feedback mode"][role="button"]')
+        || document.querySelector('[data-agentation-toolbar][title="Start feedback mode"][role="button"]')
+        || document.querySelector('[title="Start feedback mode"][role="button"]')
+        || (root && root.querySelector('[title="Start feedback mode"][role="button"]'))
+        || document.querySelector('[data-agentation-toolbar][title="Start feedback mode"]')
+        || document.querySelector('[title="Start feedback mode"]')
+        || (root && root.querySelector('[title="Start feedback mode"]'));
+    };
+
+    const autoActivate = function(attempt) {
+      if (state.canceled) {
+        return;
+      }
+      const startButton = findStartButton();
+      if (startButton && typeof startButton.click === 'function') {
+        startButton.click();
+        state.activated = true;
+        return;
+      }
+      if (attempt < 20) {
+        window.setTimeout(function() {
+          autoActivate(attempt + 1);
+        }, 50);
+      }
+    };
+
+    const scheduleAutoActivate = function() {
+      const run = function() {
+        autoActivate(0);
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(function() {
+          window.requestAnimationFrame(run);
+        });
+      } else {
+        window.setTimeout(run, 0);
+      }
+    };
+
+    const mount = async function() {
+      const modules = await Promise.all([
+        import(reactModuleUrl),
+        import(reactDOMClientModuleUrl),
+        import(packageModuleUrl)
+      ]);
+      if (state.canceled) {
+        return;
+      }
+      const React = modules[0].default || modules[0];
+      const ReactDOMClient = modules[1];
+      const Agentation = modules[2].Agentation;
+      if (!React || typeof React.createElement !== 'function' || !ReactDOMClient.createRoot || !Agentation) {
+        state.failed = true;
+        state.unmount();
+        return;
+      }
+
+      const staleContainer = document.getElementById(rootId);
+      if (staleContainer && staleContainer.parentNode) {
+        staleContainer.parentNode.removeChild(staleContainer);
+      }
+      const staleDirectionStyle = document.getElementById(directionStyleId);
+      if (staleDirectionStyle && staleDirectionStyle.parentNode) {
+        staleDirectionStyle.parentNode.removeChild(staleDirectionStyle);
+      }
+      // Agentation portals its visible UI into document.body, outside this
+      // mount container. Give that portal an explicit writing-mode boundary so
+      // RTL page content cannot reverse Agentation's own controls.
+      const directionStyle = document.createElement('style');
+      directionStyle.id = directionStyleId;
+      directionStyle.textContent = '[data-agentation-root][data-agentation-theme] { direction: ltr !important; text-align: left !important; }';
+      (document.head || document.documentElement).appendChild(directionStyle);
+      const container = document.createElement('div');
+      container.id = rootId;
+      container.setAttribute('data-agentation-root', 'true');
+      (document.body || document.documentElement).appendChild(container);
+
+      state.container = container;
+      state.directionStyle = directionStyle;
+      state.root = ReactDOMClient.createRoot(container);
+      state.root.render(React.createElement(Agentation));
+      scheduleAutoActivate();
+    };
+
+    const start = function() {
+      mount().catch(function() {
+        state.failed = true;
+        state.unmount();
+      });
+    };
+
+    if (document.body || document.readyState !== 'loading') {
+      start();
+    } else {
+      window.addEventListener('DOMContentLoaded', start, { once: true });
+    }
+  };
   const existing = window[stateKey];
   if (existing && typeof existing.unmount === 'function') {
     existing.unmount();
     return;
   }
-
-  const state = {
-    canceled: false,
-    container: null,
-    directionStyle: null,
-    root: null,
-    activated: false,
-    failed: false,
-    unmount: function() {
-      this.canceled = true;
-      if (this.root && typeof this.root.unmount === 'function') {
-        try {
-          this.root.unmount();
-        } catch (_) {}
+  const contentFrame = function() {
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const frames = document.querySelectorAll('iframe');
+    let best = null;
+    let bestArea = 0;
+    for (let index = 0; index < frames.length; index++) {
+      const frame = frames[index];
+      let frameDocument = null;
+      try {
+        frameDocument = frame.contentDocument;
+      } catch (_) {
+        frameDocument = null;
       }
-      if (this.container && this.container.parentNode) {
-        this.container.parentNode.removeChild(this.container);
+      if (!frameDocument || !frameDocument.body) {
+        continue;
       }
-      if (this.directionStyle && this.directionStyle.parentNode) {
-        this.directionStyle.parentNode.removeChild(this.directionStyle);
-      }
-      if (window[stateKey] === this) {
-        delete window[stateKey];
+      const rect = frame.getBoundingClientRect();
+      const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+      if (area > bestArea) {
+        best = frame;
+        bestArea = area;
       }
     }
+    return best && bestArea * 3 >= viewportArea ? best : null;
   };
-  window[stateKey] = state;
-
-  const findStartButton = function() {
-    const root = state.container || document.getElementById(rootId);
-    return document.querySelector('[data-agentation-toolbar] [title="Start feedback mode"][role="button"]')
-      || document.querySelector('[data-agentation-toolbar][title="Start feedback mode"][role="button"]')
-      || document.querySelector('[title="Start feedback mode"][role="button"]')
-      || (root && root.querySelector('[title="Start feedback mode"][role="button"]'))
-      || document.querySelector('[data-agentation-toolbar][title="Start feedback mode"]')
-      || document.querySelector('[title="Start feedback mode"]')
-      || (root && root.querySelector('[title="Start feedback mode"]'));
-  };
-
-  const autoActivate = function(attempt) {
-    if (state.canceled) {
+  const frame = contentFrame();
+  if (frame) {
+    const frameWindow = frame.contentWindow;
+    const frameDocument = frame.contentDocument;
+    const framed = frameWindow && frameWindow[stateKey];
+    if (framed && typeof framed.unmount === 'function') {
+      framed.unmount();
       return;
     }
-    const startButton = findStartButton();
-    if (startButton && typeof startButton.click === 'function') {
-      startButton.click();
-      state.activated = true;
+    const script = frameDocument.createElement('script');
+    script.textContent = '(' + mount.toString() + ')();';
+    (frameDocument.head || frameDocument.documentElement).appendChild(script);
+    if (script.parentNode) {
+      script.parentNode.removeChild(script);
+    }
+    if (frameWindow && frameWindow[stateKey]) {
       return;
     }
-    if (attempt < 20) {
-      window.setTimeout(function() {
-        autoActivate(attempt + 1);
-      }, 50);
-    }
-  };
-
-  const scheduleAutoActivate = function() {
-    const run = function() {
-      autoActivate(0);
-    };
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(function() {
-        window.requestAnimationFrame(run);
-      });
-    } else {
-      window.setTimeout(run, 0);
-    }
-  };
-
-  const mount = async function() {
-    const modules = await Promise.all([
-      import(reactModuleUrl),
-      import(reactDOMClientModuleUrl),
-      import(packageModuleUrl)
-    ]);
-    if (state.canceled) {
-      return;
-    }
-    const React = modules[0].default || modules[0];
-    const ReactDOMClient = modules[1];
-    const Agentation = modules[2].Agentation;
-    if (!React || typeof React.createElement !== 'function' || !ReactDOMClient.createRoot || !Agentation) {
-      state.failed = true;
-      state.unmount();
-      return;
-    }
-
-    const staleContainer = document.getElementById(rootId);
-    if (staleContainer && staleContainer.parentNode) {
-      staleContainer.parentNode.removeChild(staleContainer);
-    }
-    const staleDirectionStyle = document.getElementById(directionStyleId);
-    if (staleDirectionStyle && staleDirectionStyle.parentNode) {
-      staleDirectionStyle.parentNode.removeChild(staleDirectionStyle);
-    }
-    // Agentation portals its visible UI into document.body, outside this
-    // mount container. Give that portal an explicit writing-mode boundary so
-    // RTL page content cannot reverse Agentation's own controls.
-    const directionStyle = document.createElement('style');
-    directionStyle.id = directionStyleId;
-    directionStyle.textContent = '[data-agentation-root][data-agentation-theme] { direction: ltr !important; text-align: left !important; }';
-    (document.head || document.documentElement).appendChild(directionStyle);
-    const container = document.createElement('div');
-    container.id = rootId;
-    container.setAttribute('data-agentation-root', 'true');
-    (document.body || document.documentElement).appendChild(container);
-
-    state.container = container;
-    state.directionStyle = directionStyle;
-    state.root = ReactDOMClient.createRoot(container);
-    state.root.render(React.createElement(Agentation));
-    scheduleAutoActivate();
-  };
-
-  const start = function() {
-    mount().catch(function() {
-      state.failed = true;
-      state.unmount();
-    });
-  };
-
-  if (document.body || document.readyState !== 'loading') {
-    start();
-  } else {
-    window.addEventListener('DOMContentLoaded', start, { once: true });
   }
+  mount();
 })();
 "##;
 

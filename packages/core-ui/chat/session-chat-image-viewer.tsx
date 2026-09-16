@@ -371,18 +371,20 @@ async function saveSessionChatImage(
 type ViewerState =
   | { status: 'closed' }
   | { status: 'loading'; alt?: string }
-  | { status: 'ready'; src: string; alt?: string; name: string; copyPath?: string }
+  | { status: 'ready'; src: string; alt?: string; name: string; copyPath?: string; filePath?: string }
   | { status: 'error'; alt?: string };
 
 export function SessionChatImageViewerProvider({
   children,
   loadImage,
+  locateFile,
   saveImageAs,
   sessionTitle,
 }: {
   children: ReactNode;
   /** Resolves a machine path to a data URL; omit when the host cannot. */
   loadImage?: (path: string) => Promise<string>;
+  locateFile?: (path: string) => void;
   /**
    * Writes the picture to Downloads through the native host (gpui). Hosts
    * without a writer omit it and the overlay saves with a browser download.
@@ -473,6 +475,7 @@ export function SessionChatImageViewerProvider({
                 status: 'ready',
                 ...(alt !== undefined ? { alt } : {}),
                 ...(copyPath !== undefined ? { copyPath } : {}),
+                ...(target.path !== undefined ? { filePath: target.path } : {}),
               });
             }
           })
@@ -824,9 +827,25 @@ export function SessionChatImageViewerProvider({
                 Copy image
               </button>
               {state.status === 'ready' && state.copyPath !== undefined ? (
-                <button className='ghostex-chat-image-menu-item' onClick={copyPath} role='menuitem' type='button'>
-                  Copy path
-                </button>
+                <>
+                  <button className='ghostex-chat-image-menu-item' onClick={copyPath} role='menuitem' type='button'>
+                    {state.filePath !== undefined ? 'Copy Path' : 'Copy URL'}
+                  </button>
+                  {state.filePath !== undefined ? (
+                    <button
+                      className='ghostex-chat-image-menu-item'
+                      disabled={!locateFile}
+                      onClick={() => {
+                        if (state.filePath !== undefined) locateFile?.(state.filePath);
+                        setMenuAt(null);
+                      }}
+                      role='menuitem'
+                      type='button'
+                    >
+                      Open File/Folder Location
+                    </button>
+                  ) : null}
+                </>
               ) : null}
               <button className='ghostex-chat-image-menu-item' onClick={saveImage} role='menuitem' type='button'>
                 Save image

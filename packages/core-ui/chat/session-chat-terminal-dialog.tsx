@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { IconX } from '@tabler/icons-react';
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import { IconTerminal2 } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
 import { Input } from '@/packages/components/ui/input';
 import { Textarea } from '@/packages/components/ui/textarea';
 import { useSessionChatHostLinks } from './session-chat-links';
 import type { GxserverAnswerSessionChatPromptParams, SessionChatTerminalDialog } from '@/packages/shared/session-chat';
+import {
+  SessionChatStatusCard,
+  SessionChatStatusCardActions,
+  SessionChatStatusCardLead,
+} from './session-chat-status-card';
 
 type DialogAnswer = Omit<GxserverAnswerSessionChatPromptParams, 'projectId' | 'sessionId'>;
 const ACTION_LABELS: Record<string, string> = {
@@ -35,11 +40,16 @@ export function SessionChatTerminalDialogCard({
   canSend,
   onAnswer,
   controlsOnly = false,
+  ref,
+  severity,
 }: {
   dialog: SessionChatTerminalDialog;
   canSend: boolean;
+  /** Render only the controls, for a notice card that already shows the title and body. */
   controlsOnly?: boolean;
   onAnswer: (answer: DialogAnswer) => Promise<void>;
+  ref?: Ref<HTMLDivElement>;
+  severity?: 'info' | 'warning' | 'error';
 }) {
   const hostLinks = useSessionChatHostLinks();
   const [text, setText] = useState(dialog.inputValue);
@@ -71,28 +81,36 @@ export function SessionChatTerminalDialogCard({
    */
   if (dialog.id === 'codex-transcript-pager') {
     return (
-      /* CDXC:SessionChat 2026-09-07 DECISION: User: Restore chat uses the same 20px outer padding and additional 10px row spacing as the other notice cards. */
-      <section
+      <SessionChatStatusCard
         aria-label={dialog.title}
-        className='flex min-w-0 flex-col gap-[10px] p-[20px]'
         data-slot='terminal-dialog'
+        footer={
+          <SessionChatStatusCardActions>
+            <Button
+              disabled={disabled}
+              onClick={() => void run({ dialogAction: 'cancel' })}
+              size='sm'
+              variant='outline'
+            >
+              {pending ? 'Restoring chat…' : 'Restore chat'}
+            </Button>
+          </SessionChatStatusCardActions>
+        }
+        lead={<SessionChatStatusCardLead icon={IconTerminal2} />}
+        ref={ref}
+        severity={severity}
+        title={dialog.title}
       >
-        <h3 className='ghostex-chat-card-title text-sm leading-snug font-medium text-foreground'>{dialog.title}</h3>
-        <p className='mt-1 whitespace-pre-line break-words text-sm leading-snug text-muted-foreground'>{dialog.body}</p>
-        <div className='mt-3 flex flex-wrap items-center gap-2'>
-          <Button disabled={disabled} onClick={() => void run({ dialogAction: 'cancel' })} size='sm' variant='outline'>
-            {pending ? 'Restoring chat…' : 'Restore chat'}
-          </Button>
-        </div>
+        <p className='whitespace-pre-line break-words text-muted-foreground'>{dialog.body}</p>
         {!canSend ? (
-          <p className='mt-2 text-[11px] leading-snug text-muted-foreground'>Input is held by another device.</p>
+          <p className='text-[11px] leading-snug text-muted-foreground'>Input is held by another device.</p>
         ) : null}
         {error ? (
-          <p role='alert' className='mt-2 text-[11px] leading-snug text-destructive/80'>
+          <p role='alert' className='text-[11px] leading-snug text-destructive/80'>
             {error}
           </p>
         ) : null}
-      </section>
+      </SessionChatStatusCard>
     );
   }
   const submitLabel =
@@ -128,48 +146,32 @@ export function SessionChatTerminalDialogCard({
       : dialog.footer.includes('close') || dialog.footer.includes('q to quit')
         ? 'Close'
         : 'Cancel';
-  return (
-    <section aria-label={dialog.title} className='grid min-w-0 gap-3 p-4' data-slot='terminal-dialog'>
-      {!controlsOnly ? (
-        <div className='flex items-center justify-between gap-3'>
-          <h3 className='ghostex-chat-card-title text-sm font-medium'>{dialog.title}</h3>
-          {/* CDXC:SessionChat 2026-09-06 DECISION: User: top-right Cancel/Close controls use the same X button as the existing question cards. */}
-          <Button
-            className='ghostex-chat-card-dismiss'
-            aria-label={cancelLabel}
-            disabled={disabled}
-            onClick={() => void run({ dialogAction: 'cancel' })}
-            size='icon-xs'
-            variant='outline'
+  const body = dialog.body ? (
+    <pre className='max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/30 p-3 text-xs leading-relaxed'>
+      {dialog.body.split(/(https?:\/\/[^\s<>]+)/g).map((part, index) =>
+        /^https?:\/\//.test(part) ? (
+          <a
+            key={index}
+            href={part}
+            target='_blank'
+            rel='noreferrer'
+            className='underline underline-offset-2'
+            onClick={(event) => {
+              if (!hostLinks?.openUrl) return;
+              event.preventDefault();
+              hostLinks.openUrl(part, { external: event.shiftKey });
+            }}
           >
-            <IconX aria-hidden='true' stroke={2} />
-          </Button>
-        </div>
-      ) : null}
-      {dialog.body && !controlsOnly ? (
-        <pre className='max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/30 p-3 text-xs leading-relaxed'>
-          {dialog.body.split(/(https?:\/\/[^\s<>]+)/g).map((part, index) =>
-            /^https?:\/\//.test(part) ? (
-              <a
-                key={index}
-                href={part}
-                target='_blank'
-                rel='noreferrer'
-                className='underline underline-offset-2'
-                onClick={(event) => {
-                  if (!hostLinks?.openUrl) return;
-                  event.preventDefault();
-                  hostLinks.openUrl(part, { external: event.shiftKey });
-                }}
-              >
-                {part}
-              </a>
-            ) : (
-              part
-            )
-          )}
-        </pre>
-      ) : null}
+            {part}
+          </a>
+        ) : (
+          part
+        )
+      )}
+    </pre>
+  ) : null;
+  const controls: ReactNode = (
+    <>
       {dialog.input === 'key' ? (
         <Button
           data-session-chat-typing-redirect-ignore='true'
@@ -236,25 +238,6 @@ export function SessionChatTerminalDialogCard({
           )}
         </form>
       ) : null}
-      {visibleActions.length > 0 ? (
-        <div className='flex flex-wrap gap-2'>
-          {visibleActions.map((action) => (
-            <Button
-              key={action}
-              disabled={disabled}
-              size='sm'
-              variant='outline'
-              onClick={() => void run({ dialogAction: action })}
-            >
-              {action === 'cancel'
-                ? cancelLabel
-                : action === 'confirm' && dialog.footer.includes('set as default')
-                  ? 'Set as default'
-                  : (ACTION_LABELS[action] ?? action)}
-            </Button>
-          ))}
-        </div>
-      ) : null}
       {!multilineInput ? <p className='ghostex-chat-card-hint text-xs text-muted-foreground'>{dialog.footer}</p> : null}
       {!canSend ? <p className='text-xs text-muted-foreground'>Input is currently controlled elsewhere.</p> : null}
       {error ? (
@@ -262,6 +245,51 @@ export function SessionChatTerminalDialogCard({
           {error}
         </p>
       ) : null}
-    </section>
+    </>
+  );
+  const actions =
+    visibleActions.length > 0 ? (
+      <SessionChatStatusCardActions>
+        {visibleActions.map((action) => (
+          <Button
+            key={action}
+            disabled={disabled}
+            size='sm'
+            variant='outline'
+            onClick={() => void run({ dialogAction: action })}
+          >
+            {action === 'cancel'
+              ? cancelLabel
+              : action === 'confirm' && dialog.footer.includes('set as default')
+                ? 'Set as default'
+                : (ACTION_LABELS[action] ?? action)}
+          </Button>
+        ))}
+      </SessionChatStatusCardActions>
+    ) : null;
+  if (controlsOnly) {
+    return (
+      <section aria-label={dialog.title} className='grid min-w-0 gap-3' data-slot='terminal-dialog'>
+        {controls}
+        {actions ? <div className='flex flex-wrap gap-2'>{actions}</div> : null}
+      </section>
+    );
+  }
+  return (
+    <SessionChatStatusCard
+      aria-label={dialog.title}
+      closeLabel={cancelLabel}
+      data-slot='terminal-dialog'
+      footer={actions ?? undefined}
+      lead={<SessionChatStatusCardLead icon={IconTerminal2} />}
+      // CDXC:SessionChat 2026-09-06 DECISION: User: top-right Cancel/Close controls use the same X button as the existing question cards.
+      onClose={disabled ? undefined : () => void run({ dialogAction: 'cancel' })}
+      ref={ref}
+      severity={severity}
+      title={dialog.title}
+    >
+      {body}
+      {controls}
+    </SessionChatStatusCard>
   );
 }

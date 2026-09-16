@@ -43,6 +43,11 @@ const settingsModalVisibilitySource = readFileSync(
   new URL('./settings-modal/main-settings-visibility.ts', import.meta.url),
   'utf8'
 );
+const settingsModalSearchSource = readFileSync(new URL('./settings-modal/search.ts', import.meta.url), 'utf8');
+const settingsModalDebuggingTabSource = readFileSync(
+  new URL('./settings-modal/tabs/debugging.tsx', import.meta.url),
+  'utf8'
+);
 const settingsModalSidebarPagesSource = readFileSync(
   new URL('./settings-modal/sidebar-pages.ts', import.meta.url),
   'utf8'
@@ -406,12 +411,12 @@ describe('settings modal source', () => {
     const betaSearch = sourceBetween(
       settingsModalSearchCatalogSource,
       "beta: {\n      title: 'Experimental',",
-      "debugging: {\n      title: 'Debugging',"
+      '} satisfies Record<string, SettingsSearchSectionDefinition>;'
     );
     const betaSection = sourceBetween(
       settingsModalSource,
       "<SettingsSection sectionRef={betaSectionRef} title='Experimental'>",
-      "{mainSubsectionVisible('debugging', settingsSearch.debugging) ? ("
+      '</SettingsSection>'
     );
     const mainVisibility = sourceBetween(
       settingsModalVisibilitySource,
@@ -435,37 +440,28 @@ describe('settings modal source', () => {
      * Disabling Show debug UI controls should hide the related Debugging rows
      * below it, and Settings search/navigation should use the same gate so
      * hidden diagnostic rows do not leave an empty Debugging section.
+     *
+     * CDXC:RepoStructure 2026-09-16: Debugging moved onto its own Settings page
+     * (settings-modal/tabs/debugging.tsx), so the gate is now the page's own
+     * `settings.debuggingMode` branch instead of the main page's key list.
      */
-    const dependentKeys = sourceBetween(
-      settingsModalTypesSource,
-      'const DEBUGGING_MODE_DEPENDENT_SETTING_KEYS = [',
-      '] as const;'
+    const debuggingSearch = sourceBetween(
+      settingsModalSearchSource,
+      "  debugging: {\n    title: 'Debugging',",
+      '  extensions: {'
     );
-    const debuggingVisibility = sourceFrom(
-      settingsModalVisibilitySource,
-      'const debuggingModeDependentSettingsVisible = draft.debuggingMode;'
-    );
-    const debuggingSection = sourceBetween(
-      settingsModalSource,
-      "<SettingsSection sectionRef={debuggingSectionRef} title='Debugging'>",
-      '{!isFirstLaunchSetup && !hasVisibleMainSettings ? ('
-    );
+    const gatedRows = sourceFrom(settingsModalDebuggingTabSource, '{settings.debuggingMode ? (');
 
-    expect(dependentKeys).toContain("'diagnosticLogging'");
-    expect(dependentKeys).toContain("'showSessionCommandCopyActions'");
-    expect(dependentKeys).toContain("'showSessionDetailsCopyAction'");
-    expect(debuggingVisibility).toContain('DEBUGGING_MODE_DEPENDENT_SETTING_KEY_SET.has(settingKey)');
-    expect(debuggingVisibility).toContain("sectionId === 'debugging'");
-    expect(debuggingVisibility).toContain('subsectionMatchesGroupedSectionTitle(sectionId)');
-    expect(debuggingVisibility).toContain("shouldShowSetting(sectionResult, 'debuggingMode', showAdvancedSettings)");
-    expect(debuggingVisibility).toContain(
-      'const hasVisibleMainSettings = visibleMainSettingsSectionNavigation.length > 0;'
+    expect(debuggingSearch).toContain("key: 'diagnosticLogging'");
+    expect(debuggingSearch).toContain("key: 'showSessionCommandCopyActions'");
+    expect(debuggingSearch).toContain("key: 'showSessionDetailsCopyAction'");
+    expect(settingsModalDebuggingTabSource).toContain('checked={settings.debuggingMode}');
+    expect(gatedRows).toContain("visible('controls', 'diagnosticLogging')");
+    expect(gatedRows).toContain("visible('controls', 'showSessionCommandCopyActions')");
+    expect(gatedRows).toContain("visible('controls', 'showSessionDetailsCopyAction')");
+    expect(settingsModalDebuggingTabSource).toContain(
+      'Show debug-only controls, load storage statistics, and allow enabled routine diagnostic logs.'
     );
-    expect(debuggingSection).toContain("debuggingSettingVisible('debuggingMode')");
-    expect(debuggingSection).toContain("debuggingSettingVisible('diagnosticLogging')");
-    expect(debuggingSection).toContain("debuggingSettingVisible('showSessionCommandCopyActions')");
-    expect(debuggingSection).toContain("debuggingSettingVisible('showSessionDetailsCopyAction')");
-    expect(debuggingSection).toContain('Turn on to reveal debug-only controls and allow routine diagnostic logging.');
   });
 
   test('shows unavailable gxserver-owned default prompt agents without selecting Codex', () => {
@@ -767,7 +763,7 @@ describe('settings modal source', () => {
     expect(appIconField).not.toContain('Reset to default');
     expect(settingsModalSource).not.toContain('function AppIconPickerTile');
     expect(settingsModalSource).toContain(
-      "description='Changes the Dock and app-switcher icon. The app file icon may also change when macOS allows it.'"
+      "description='Changes the Dock and app-switcher icon. The app file icon may also change when the operating system allows it.'"
     );
   });
 

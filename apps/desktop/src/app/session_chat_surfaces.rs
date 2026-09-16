@@ -656,6 +656,17 @@ impl GhostexGpuiApp {
             ("sessionId", gxserver_session_id),
             ("agentId", agent.to_string()),
             (
+                "codeFileViewAvailable",
+                (self.titlebar_mode_available(TitlebarMode::Source)
+                    && self.embedded_code_editor_unavailable_reason().is_none())
+                .to_string(),
+            ),
+            (
+                "docsFileViewAvailable",
+                self.titlebar_mode_available(TitlebarMode::Manage)
+                    .to_string(),
+            ),
+            (
                 "hideAccountEmails",
                 shared_settings::shared_sidebar_settings_snapshot()
                     .object()
@@ -881,8 +892,22 @@ impl GhostexGpuiApp {
     }
 
     /// Reconcile the per-session Chat surfaces that can occupy a workspace pane.
+    /// CDXC:SessionChat 2026-09-16 WHY:
+    /// One session switch used to run the chat reconcile four times back to back (bootstrap refresh, keyboard handoff, text-focus handoff, CEF visibility sync), each re-walking every surface.
+    /// Requests through this entry coalesce into a single pass at the end of the current effect cycle, which still lands before the next frame paints.
+    /// Callers that read the surface map right after reconciling must call `reconcile_agents_chat_surfaces` directly.
     pub(crate) fn reconcile_agents_pane_surfaces(&mut self, cx: &mut gpui::Context<Self>) {
-        self.reconcile_agents_chat_surfaces(cx);
+        if self.agents_chat_reconcile_scheduled {
+            return;
+        }
+        self.agents_chat_reconcile_scheduled = true;
+        let app = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            let _ = app.update(cx, |app, cx| {
+                app.agents_chat_reconcile_scheduled = false;
+                app.reconcile_agents_chat_surfaces(cx);
+            });
+        });
     }
 
     /// The Chat CEF surface currently occupying a session's pane.
@@ -1161,6 +1186,25 @@ impl GhostexGpuiApp {
                 self.agents_chat_surface_hidden_since
                     .insert(*session_id, Instant::now());
                 self.session_chat_composer_empty_reports.remove(session_id);
+                // Which gate hid the page: the evidence a later re-activation is traced back to.
+                let reason = if drag_active {
+                    "dragActive"
+                } else if !visible_session_ids.contains(session_id) {
+                    "notInVisiblePanes"
+                } else if self
+                    .agents_chat_page_states
+                    .get(session_id)
+                    .is_some_and(|state| state.awaiting_activation)
+                {
+                    "awaitingActivation"
+                } else {
+                    "accountSwitchPlaceholder"
+                };
+                self.record_session_chat_lifecycle(
+                    *session_id,
+                    "sessionChat.nativePageHidden",
+                    reason,
+                );
             }
         }
         if visibility_changed {

@@ -331,7 +331,9 @@ impl GhostexGpuiApp {
                 &["agentId", "message", "requestId"]
             }
             "runSidebarGitMultipleCommits" => &["agentId", "requestId"],
-            "openSidebarGitChangedFileDiff" => &["filePath", "requestId"],
+            "openSidebarGitChangedFileDiff" | "openSidebarGitChangedFile" => {
+                &["filePath", "requestId"]
+            }
             "cancelSidebarGitCommit" => &["requestId"],
             _ => return false,
         };
@@ -340,6 +342,14 @@ impl GhostexGpuiApp {
         for field in allowed_string_fields {
             if let Some(value) = command.get(*field).and_then(serde_json::Value::as_str) {
                 message.insert((*field).to_string(), serde_json::json!(value));
+            }
+        }
+        if command_type == "openSidebarGitChangedFile" {
+            if let Some(value) = command
+                .get("openLocation")
+                .and_then(serde_json::Value::as_bool)
+            {
+                message.insert("openLocation".to_string(), serde_json::json!(value));
             }
         }
         if matches!(
@@ -452,6 +462,38 @@ impl GhostexGpuiApp {
             {
                 message.insert(field.to_string(), serde_json::json!(value));
             }
+        }
+        self.dispatch_gpui_sidebar_host_message(serde_json::Value::Object(message), cx)
+    }
+
+    /// CDXC:Spaces 2026-09-15 DECISION:
+    /// User: a project added through the Add Project dialog joins the Space that is open in the sidebar and goes to the top of it.
+    /// SidebarApp owns the Space document and the selected Space, so only the added project's raw id and the owning machine id cross, under the inbound `assignAddedProjectToSelectedSpace` type, and nothing is applied here.
+    /// It must be dispatched before the project activation so the membership exists when the activation reveal resolves the project's Space.
+    pub(crate) fn forward_gpui_added_project_to_sidebar(
+        &mut self,
+        project_id: &str,
+        remote_machine_id: Option<&str>,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let bounded = |value: &str| {
+            let value = value.trim();
+            (!value.is_empty()
+                && value.chars().count() <= 256
+                && !value.chars().any(char::is_control))
+            .then(|| value.to_string())
+        };
+        let Some(project_id) = bounded(project_id) else {
+            return false;
+        };
+        let mut message = serde_json::Map::new();
+        message.insert("projectId".to_string(), serde_json::json!(project_id));
+        message.insert(
+            "type".to_string(),
+            serde_json::json!("assignAddedProjectToSelectedSpace"),
+        );
+        if let Some(machine_id) = remote_machine_id.and_then(bounded) {
+            message.insert("remoteMachineId".to_string(), serde_json::json!(machine_id));
         }
         self.dispatch_gpui_sidebar_host_message(serde_json::Value::Object(message), cx)
     }
@@ -2136,7 +2178,7 @@ impl GhostexGpuiApp {
         window.prevent_default();
         cx.stop_propagation();
 
-        let max_width = current_sidebar_max_width(window);
+        let max_width = current_sidebar_max_width(window, self.active_mode);
         let delta = event.position.x.as_f32() - drag.start_x;
         let next_width = clamp_sidebar_width(drag.start_width + delta, max_width);
         if (next_width - self.sidebar_width).abs() >= 0.5 {
@@ -2168,7 +2210,7 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn reset_sidebar_width(&mut self, window: &Window) {
-        let max_width = current_sidebar_max_width(window);
+        let max_width = current_sidebar_max_width(window, self.active_mode);
         let reset_width = read_sidebar_default_width_setting().unwrap_or(SIDEBAR_RESET_WIDTH);
         self.sidebar_width = clamp_sidebar_width(reset_width, max_width);
         self.cancel_sidebar_divider_interaction_state();

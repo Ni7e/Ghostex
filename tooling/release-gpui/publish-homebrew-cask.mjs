@@ -40,13 +40,13 @@ import { releaseProvenanceAssetName, validateReleaseProvenance } from './provena
 import { withRetryProfile } from './retry.mjs';
 
 const defaultRepo = 'maddada/Ghostex';
-const officialCask = Object.freeze({
+export const officialCask = Object.freeze({
   label: 'Homebrew/homebrew-cask',
   repo: 'Homebrew/homebrew-cask',
   base: 'main',
   path: 'Casks/g/ghostex.rb',
 });
-const personalTap = Object.freeze({
+export const personalTap = Object.freeze({
   label: 'maddada/homebrew-tap',
   repo: 'maddada/homebrew-tap',
   base: 'main',
@@ -366,7 +366,9 @@ export async function waitForLivecheckAppcast({ version, timeoutMs = 8 * 60 * 10
   }
 }
 
-async function findOpenPullRequest({ version, token }) {
+// Shared with tooling/release-final-verify.mjs, which treats an open bump pull
+// request as the official cask being on its way rather than missing.
+export async function findOpenPullRequest({ version, token }) {
   const query = `repo:${officialCask.repo} is:pr is:open ghostex in:title`;
   const search = await ghApi(`search/issues?q=${encodeURIComponent(query)}&per_page=50`, { token });
   const pattern = new RegExp(`\\bghostex\\b.*\\b${version.replaceAll('.', '\\.')}\\b`, 'iu');
@@ -399,46 +401,68 @@ async function ensureFork({ owner, token }) {
   throw new Error(`${fork} is still not visible a minute after forking; rerun once GitHub finishes the fork`);
 }
 
-async function syncFork({ fork, token }) {
-  const result = await ghApi(`repos/${fork}/merge-upstream`, {
-    body: { branch: officialCask.base },
-    method: 'POST',
-    token,
-  });
-  process.stdout.write(`${fork} ${officialCask.base}: ${result?.message ?? 'synced with upstream'}\n`);
+async function upstreamHead({ token }) {
+  const repository = await ghApi(`repos/${officialCask.repo}`, { token });
+  const branch = repository?.default_branch;
+  if (!branch) throw new Error(`${officialCask.repo} reports no default branch`);
+  const ref = await ghApi(`repos/${officialCask.repo}/git/ref/heads/${branch}`, { token });
+  const sha = ref?.object?.sha;
+  if (!/^[0-9a-f]{40}$/u.test(sha ?? '')) {
+    throw new Error(`${officialCask.repo} ${branch} resolves to no commit: ${JSON.stringify(ref)}`);
+  }
+  return { branch, sha };
 }
 
-async function ensureBranch({ fork, branch, token }) {
+/*
+ * CDXC:Release 2026-09-16 WHY:
+ * The bump branch is created at upstream's own head commit, never from the fork's
+ * `main`, and the fork is never synced. Release 9.7.0 failed one step earlier, in
+ * `POST repos/maddada/homebrew-cask/merge-upstream`, with HTTP 422 "refusing to
+ * allow a Personal Access Token to create or update workflow
+ * `.github/workflows/check-issues.yml` without `workflow` scope": the sync writes
+ * every upstream commit into the fork, Homebrew edits its workflow files often, and
+ * a token limited to contents and pull requests may not write those. Widening
+ * HOMEBREW_GITHUB_API_TOKEN to the `workflow` scope just to fast-forward a branch
+ * nobody reads was rejected. A fork shares upstream's object network, so a ref in
+ * the fork can point straight at an upstream commit; the fork's `main` may stay
+ * arbitrarily far behind and the PR never depends on it. An existing branch is
+ * force-reset to the same commit so a retry always rebases the bump on current
+ * upstream instead of failing on a stale base.
+ */
+async function ensureBranch({ fork, branch, sha, token }) {
   const existing = await ghApi(`repos/${fork}/git/ref/heads/${branch}`, { allowNotFound: true, token });
-  if (existing) {
-    process.stdout.write(`Reusing existing branch ${fork}:${branch}.\n`);
+  if (existing?.object?.sha === sha) {
+    process.stdout.write(`${fork}:${branch} is already at upstream ${sha.slice(0, 12)}.\n`);
     return;
   }
-  const base = await ghApi(`repos/${fork}/git/ref/heads/${officialCask.base}`, { token });
-  await ghApi(`repos/${fork}/git/refs`, {
-    body: { ref: `refs/heads/${branch}`, sha: base.object.sha },
-    method: 'POST',
-    token,
-  });
-  process.stdout.write(`Created branch ${fork}:${branch} from ${base.object.sha.slice(0, 12)}.\n`);
+  if (existing) {
+    await ghApi(`repos/${fork}/git/refs/heads/${branch}`, { body: { force: true, sha }, method: 'PATCH', token });
+    process.stdout.write(`Reset ${fork}:${branch} to upstream ${sha.slice(0, 12)}.\n`);
+    return;
+  }
+  await ghApi(`repos/${fork}/git/refs`, { body: { ref: `refs/heads/${branch}`, sha }, method: 'POST', token });
+  process.stdout.write(`Created ${fork}:${branch} at upstream ${sha.slice(0, 12)}.\n`);
+}
+
+function alreadyShips({ content, sha256, version, where }) {
+  if (caskVersion(content) !== version) return false;
+  const same = content.includes(`sha256 "${sha256}"`);
+  process.stdout.write(
+    `${where} already ships ghostex ${version}${same ? '' : ' with a different sha256'}; nothing to do.\n`
+  );
+  if (!same) {
+    throw new Error(
+      `${where} ghostex ${version} carries a different sha256 than ${releaseAssetName(version)}; ` +
+        'a release must never republish the same version with different bytes'
+    );
+  }
+  return true;
 }
 
 async function publishOfficialCask({ checks, dryRun, render, sha256, token, version }) {
   const live = await readFile({ path: officialCask.path, ref: officialCask.base, repo: officialCask.repo });
   const liveVersion = caskVersion(live.content);
-  if (liveVersion === version) {
-    const same = live.content.includes(`sha256 "${sha256}"`);
-    process.stdout.write(
-      `${officialCask.label} already ships ghostex ${version}${same ? '' : ' with a different sha256'}; nothing to do.\n`
-    );
-    if (!same) {
-      throw new Error(
-        `${officialCask.label} ghostex ${version} carries a different sha256 than ${releaseAssetName(version)}; ` +
-          'a release must never republish the same version with different bytes'
-      );
-    }
-    return;
-  }
+  if (alreadyShips({ content: live.content, sha256, version, where: officialCask.label })) return;
   const bumped = bumpCask(live.content, { sha256, version });
   const diff = unifiedDiff(live.content, bumped, officialCask.path);
   process.stdout.write(`${officialCask.label}: ${liveVersion} -> ${version}\n${diff}`);
@@ -462,33 +486,33 @@ async function publishOfficialCask({ checks, dryRun, render, sha256, token, vers
   await waitForLivecheckAppcast({ version });
   const owner = await tokenLogin(token);
   const fork = await ensureFork({ owner, token });
-  await syncFork({ fork, token });
-  const branch = branchName(version);
-  await ensureBranch({ fork, branch, token });
-  const onBranch = await readFile({ path: officialCask.path, ref: branch, repo: fork, token });
-  if (onBranch.content === bumped) {
-    process.stdout.write(`${fork}:${branch} already carries the bump.\n`);
-  } else {
-    if (caskVersion(onBranch.content) !== liveVersion) {
-      throw new Error(
-        `${fork}:${branch} is at ghostex ${caskVersion(onBranch.content)}, not ${liveVersion}; ` +
-          'delete the stale branch and rerun'
-      );
-    }
-    await writeFile({
-      branch,
-      content: bumped,
-      message: pullRequestTitle(version),
-      path: officialCask.path,
-      repo: fork,
-      sha: onBranch.sha,
-      token,
-    });
-    process.stdout.write(`Committed the bump to ${fork}:${branch}.\n`);
+  // The livecheck wait can last minutes, so the cask is re-read at the exact
+  // upstream commit the branch is based on: the contents API needs that blob's
+  // sha, and a maintainer edit to another stanza in between must not be lost.
+  const head = await upstreamHead({ token });
+  const base = await readFile({ path: officialCask.path, ref: head.sha, repo: officialCask.repo, token });
+  const where = `${officialCask.label} ${head.branch} at ${head.sha.slice(0, 12)}`;
+  if (alreadyShips({ content: base.content, sha256, version, where })) return;
+  const commit = bumpCask(base.content, { sha256, version });
+  if (base.content !== live.content) {
+    process.stdout.write(`Upstream moved during the wait; the bump below is rebased on ${head.sha.slice(0, 12)}.\n`);
+    process.stdout.write(unifiedDiff(base.content, commit, officialCask.path));
   }
+  const branch = branchName(version);
+  await ensureBranch({ fork, branch, sha: head.sha, token });
+  await writeFile({
+    branch,
+    content: commit,
+    message: pullRequestTitle(version),
+    path: officialCask.path,
+    repo: fork,
+    sha: base.sha,
+    token,
+  });
+  process.stdout.write(`Committed the bump to ${fork}:${branch} on top of upstream ${head.sha.slice(0, 12)}.\n`);
   const pull = await ghApi(`repos/${officialCask.repo}/pulls`, {
     body: {
-      base: officialCask.base,
+      base: head.branch,
       body: pullRequestBody({ checks, version }),
       head: `${owner}:${branch}`,
       maintainer_can_modify: true,

@@ -292,9 +292,6 @@ export function SessionRenameModal({
           ) : null}
         </FieldGroup>
         <AppModalFooter>
-          <AppModalButton disabled={!directRenameTitle} onClick={() => confirmTitle(title, false)} type='button'>
-            Rename
-          </AppModalButton>
           <AppModalButton
             disabled={!canGenerateTitle && !canGenerateTitleFromSessionHistory}
             onClick={() => {
@@ -307,6 +304,9 @@ export function SessionRenameModal({
             type='button'
           >
             Generate Name
+          </AppModalButton>
+          <AppModalButton disabled={!directRenameTitle} onClick={() => confirmTitle(title, false)} type='button'>
+            Rename
           </AppModalButton>
         </AppModalFooter>
       </AppModalForm>

@@ -94,7 +94,7 @@ impl GhostexGpuiApp {
         not-connected line instead of quietly disappearing.
         */
         let local_label = if cfg!(target_os = "macos") {
-            "This Mac"
+            "This machine"
         } else if cfg!(target_os = "windows") {
             "This PC"
         } else {

@@ -318,7 +318,7 @@ impl GhostexGpuiApp {
                         this.show_gpui_gxserver_bootstrap_toast(
                             "error",
                             "gxserver failed",
-                            &message,
+                            message.lines().next().unwrap_or(&message),
                             true,
                             cx,
                         );

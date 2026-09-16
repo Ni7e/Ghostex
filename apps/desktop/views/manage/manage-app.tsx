@@ -1,3 +1,4 @@
+import { storageScope } from '@/packages/client-storage';
 import { useManageFileIndex } from './file-index';
 import { ManageFileTree, type ManageFileTreeHandle } from './file-tree';
 import {
@@ -14,8 +15,6 @@ import {
   useState,
 } from 'react';
 import {
-  IconLayoutSidebarLeftCollapse,
-  IconLayoutSidebarLeftExpand,
   IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
   IconPin,
@@ -31,6 +30,7 @@ import {
   type ProjectDocsResponse as ManageFilesBridgeResponse,
 } from '@/packages/shared/project-docs';
 import {
+  MANAGE_ACTIVE_FILE_STORAGE_KEY_PREFIX,
   MANAGE_ANNOTATIONS_SIDECAR_PATH,
   MANAGE_BRIDGE_TIMEOUT_MS,
   MANAGE_CONTENT_AUTOSAVE_DELAY_MS,
@@ -50,7 +50,6 @@ import {
   MANAGE_SIDEBAR_PEEK_OPEN_DELAY_MS,
   MANAGE_SIDEBAR_PINNED_STORAGE_KEY,
   MANAGE_SIDEBAR_REVEAL_DURATION_MS,
-  MANAGE_SIDEBAR_SIDE_STORAGE_KEY,
   MANAGE_SIDEBAR_WIDTH_STORAGE_KEY,
 } from './constants';
 import {
@@ -65,11 +64,17 @@ import {
   ManageFileOperationState,
   ManageRenameDialogState,
   ManageReviewDocument,
-  ManageSidebarSide,
   ManageWebKitWindow,
   isRecord,
 } from './types';
 import { ManageFileContextMenu, ManageRenameDialog, ManageSidebarActions } from './file-tree-ui';
+import {
+  manageOpenFileLabel,
+  readStoredManageActiveFile,
+  useManageOpenDocuments,
+  writeStoredManageDrafts,
+} from './open-documents';
+import { ManageCloseDocumentDialog, ManageOpenFilesList } from './open-files-list';
 import { isManageFindShortcut } from './keyboard';
 import { ManagePreview } from './preview/manage-preview';
 import { ManageTooltipButton } from './manage-tooltip-button';
@@ -115,6 +120,8 @@ import {
   writeTextToClipboard,
 } from './annotation-store';
 import { type ManageAnnotationFeedbackDocument, formatManageAnnotationFeedback } from './annotation-feedback';
+
+const clientStorage = storageScope(['docsWidth', 'docsPinned', 'docsActiveFile']);
 
 /*
  * CDXC:Docs 2026-06-20-06:14:
@@ -243,7 +250,7 @@ import { type ManageAnnotationFeedbackDocument, formatManageAnnotationFeedback }
  * The macOS Manage editor header should not show an explicit Save button. Keep edited/saved status visible in metadata while retaining the existing bridge-backed save behavior through the keyboard shortcut and editor flows.
  *
  * CDXC:Docs 2026-06-20-17:15:
- * Manage's file-sidebar refresh control is an overflow menu with Refresh and Switch sidebar side actions. A separate adjacent icon hides the file sidebar, and the editor area provides a small restore affordance so hiding is reversible.
+ * Manage's file-sidebar refresh control is an overflow menu with a Refresh action. A separate adjacent icon hides the file sidebar, and the editor area provides a small restore affordance so hiding is reversible. The Switch sidebar side action that used to sit in this menu was removed on 2026-09-16 (see the data-sidebar-side decision on the shell).
  *
  * CDXC:Docs 2026-06-30-01:35:
  * The Docs sidebar overflow dropdown should read as a compact polished popover instead of a flat black rectangle. Inset it from the sidebar edge, round the menu surface, soften the shadow, and keep each action as a clear icon/text row with a visible hover state.
@@ -464,9 +471,20 @@ export function ManageApp() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedPath, setSelectedPath] = useState<string>();
   const selectedPathRef = useRef<string | undefined>(undefined);
+  /* True until the mount effect below has reopened the last active file, so the first frame does not count as "no file open". */
+  const [activeFileRestorePending, setActiveFileRestorePending] = useState(
+    () => readStoredManageActiveFile(projectId) !== undefined
+  );
   const [preview, setPreview] = useState<ManageFilePreview>();
   const [draftContent, setDraftContent] = useState('');
   const [lastSavedContent, setLastSavedContent] = useState('');
+  /* Mirrors for callbacks that must see the latest text without re-creating on every keystroke. */
+  const draftContentRef = useRef('');
+  draftContentRef.current = draftContent;
+  const lastSavedContentRef = useRef('');
+  lastSavedContentRef.current = lastSavedContent;
+  const openDocuments = useManageOpenDocuments(projectId);
+  const [closeDocumentPrompt, setCloseDocumentPrompt] = useState<{ error?: string; path: string; saving: boolean }>();
   const listState = indexing ? 'loading' : indexError ? 'error' : 'ready';
   const [previewState, setPreviewState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -483,7 +501,6 @@ export function ManageApp() {
   const [annotationSendTarget, setAnnotationSendTarget] = useState<ManageAnnotationSendTarget | null>(null);
   const [annotationSendState, setAnnotationSendState] = useState<ManageAnnotationSendState>({ kind: 'idle' });
   const annotationSendStateTimerRef = useRef<number | undefined>(undefined);
-  const [sidebarSide, setSidebarSide] = useState<ManageSidebarSide>(() => readStoredManageSidebarSide());
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
   const [sidebarResizing, setSidebarResizing] = useState(false);
   /**
@@ -496,7 +513,13 @@ export function ManageApp() {
   const [sidebarPinned, setSidebarPinned] = useState(() => readStoredManageSidebarPinned());
   const [sidebarTransient, setSidebarTransient] = useState<'peek' | 'drawer'>();
   const [sidebarFloating, setSidebarFloating] = useState(() => window.innerWidth < MANAGE_FLOATING_SIDEBAR_MAX_WIDTH);
-  const sidebarDocked = sidebarPinned && !sidebarFloating;
+  /**
+   * CDXC:Docs 2026-09-16 DECISION:
+   * User: when no file is open the files list must be showing, docked, even in a narrow pane where it would otherwise be a floating drawer, because an empty document area with no list is a dead end.
+   * The forced dock never rewrites the pinned intent, so opening a file returns the list to whatever the user chose for that width.
+   */
+  const sidebarForcedOpen = selectedPath === undefined && !activeFileRestorePending;
+  const sidebarDocked = (sidebarPinned && !sidebarFloating) || sidebarForcedOpen;
   const sidebarVisible = sidebarDocked || sidebarTransient !== undefined;
   const sidebarOverlay = sidebarVisible && !sidebarDocked;
   /**
@@ -537,10 +560,21 @@ export function ManageApp() {
   const isReviewDocumentSelected = isManageReviewDocumentPath(selectedPath);
   const isDirty = isEditablePreview && !isReviewDocumentSelected && draftContent !== lastSavedContent;
 
+  /* `discardDraft` is the explicit Reload: it returns to the disk content. Every other read of the selected file keeps its unsaved draft. */
   const readFile = useCallback(
-    async (path: string) => {
+    async (path: string, { discardDraft = false }: { discardDraft?: boolean } = {}) => {
       const sequence = ++fileReadSequenceRef.current;
-      if (isManageReviewDocumentPath(selectedPathRef.current)) {
+      const previousPath = selectedPathRef.current;
+      if (
+        previousPath !== undefined &&
+        previousPath !== path &&
+        !isManageReviewDocumentPath(previousPath) &&
+        draftContentRef.current !== lastSavedContentRef.current
+      ) {
+        openDocuments.stashDraft(previousPath, draftContentRef.current, lastSavedContentRef.current);
+      }
+      openDocuments.openDocument(path);
+      if (isManageReviewDocumentPath(previousPath)) {
         setReviewDocument(undefined);
         setReviewAnnotations([]);
       }
@@ -567,9 +601,19 @@ export function ManageApp() {
         }
         const openedFile = response.file;
         setPreview(openedFile);
-        const nextContent = openedFile?.content ?? '';
+        const savedContentOnDisk = openedFile?.content ?? '';
+        /* Switching back to a file restores its unsaved draft over whatever is on disk now; re-reading the selected file keeps the draft in hand unless this is the Reload. */
+        const pendingDraft = discardDraft
+          ? undefined
+          : previousPath === path
+            ? { draft: draftContentRef.current, savedContent: lastSavedContentRef.current }
+            : openDocuments.takeDraft(path);
+        const nextContent =
+          pendingDraft && openedFile?.kind === 'text' && pendingDraft.draft !== savedContentOnDisk
+            ? pendingDraft.draft
+            : savedContentOnDisk;
         setDraftContent(nextContent);
-        setLastSavedContent(nextContent);
+        setLastSavedContent(savedContentOnDisk);
         if (openedFile) {
           setEntries((currentEntries) =>
             currentEntries.map((entry) =>
@@ -616,8 +660,48 @@ export function ManageApp() {
         setError(readError instanceof Error ? readError.message : 'Could not open file.');
       }
     },
-    [projectEditorId, projectId]
+    [openDocuments.openDocument, openDocuments.stashDraft, openDocuments.takeDraft, projectEditorId, projectId]
   );
+
+  const dirtyPaths = useMemo(() => {
+    if (!isDirty || !selectedPath) {
+      return openDocuments.backgroundDirtyPaths;
+    }
+    const next = new Set(openDocuments.backgroundDirtyPaths);
+    next.add(selectedPath);
+    return next;
+  }, [isDirty, openDocuments.backgroundDirtyPaths, selectedPath]);
+
+  useEffect(() => {
+    const drafts = { ...openDocuments.backgroundDrafts };
+    if (isDirty && selectedPath && !isManageReviewDocumentPath(selectedPath)) {
+      drafts[selectedPath] = { draft: draftContent, savedContent: lastSavedContent };
+    }
+    writeStoredManageDrafts(projectId, drafts);
+  }, [draftContent, isDirty, lastSavedContent, openDocuments.backgroundDrafts, projectId, selectedPath]);
+
+  /* Reopen the file that was showing when Docs last closed, if it is still in the open list. Runs once, before the active-file store below can clear the key. */
+  const restoredActiveFileRef = useRef(false);
+  useEffect(() => {
+    if (restoredActiveFileRef.current) {
+      return;
+    }
+    restoredActiveFileRef.current = true;
+    const storedActivePath = readStoredManageActiveFile(projectId);
+    if (storedActivePath !== undefined && selectedPathRef.current === undefined) {
+      void readFile(storedActivePath);
+    }
+    setActiveFileRestorePending(false);
+  }, [projectId, readFile]);
+
+  useEffect(() => {
+    const key = `${MANAGE_ACTIVE_FILE_STORAGE_KEY_PREFIX}${projectId}`;
+    if (selectedPath && !isManageReviewDocumentPath(selectedPath)) {
+      clientStorage.setItem(key, selectedPath);
+    } else if (!selectedPath) {
+      clientStorage.removeItem(key);
+    }
+  }, [projectId, selectedPath]);
 
   /*
    * CDXC:SessionChat 2026-08-03:
@@ -814,7 +898,7 @@ export function ManageApp() {
             return;
           }
           if (automaticallyReload) {
-            void readFile(path);
+            void readFile(path, { discardDraft: true });
           } else {
             setHasExternalChanges(true);
           }
@@ -856,15 +940,11 @@ export function ManageApp() {
   }, [refreshFiles]);
 
   useEffect(() => {
-    window.localStorage.setItem(MANAGE_SIDEBAR_SIDE_STORAGE_KEY, sidebarSide);
-  }, [sidebarSide]);
-
-  useEffect(() => {
-    window.localStorage.setItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(sidebarWidth)));
+    clientStorage.setItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(sidebarWidth)));
   }, [sidebarWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem(MANAGE_SIDEBAR_PINNED_STORAGE_KEY, String(sidebarPinned));
+    clientStorage.setItem(MANAGE_SIDEBAR_PINNED_STORAGE_KEY, String(sidebarPinned));
   }, [sidebarPinned]);
 
   useLayoutEffect(() => {
@@ -996,9 +1076,8 @@ export function ManageApp() {
       const withinEdgeBand =
         event.clientY >= bounds.top &&
         event.clientY < bounds.bottom &&
-        (sidebarSide === 'right'
-          ? event.clientX >= bounds.right - MANAGE_SIDEBAR_EDGE_REVEAL_WIDTH && event.clientX < bounds.right
-          : event.clientX >= bounds.left && event.clientX < bounds.left + MANAGE_SIDEBAR_EDGE_REVEAL_WIDTH);
+        event.clientX >= bounds.right - MANAGE_SIDEBAR_EDGE_REVEAL_WIDTH &&
+        event.clientX < bounds.right;
       if (!withinEdgeBand && !overRestoreButton) {
         sidebarEdgeRevealArmedRef.current = true;
         cancelScheduledSidebarPeek();
@@ -1011,7 +1090,7 @@ export function ManageApp() {
     };
     window.addEventListener('pointermove', revealSidebarFromEdgeHover);
     return () => window.removeEventListener('pointermove', revealSidebarFromEdgeHover);
-  }, [cancelScheduledSidebarPeek, scheduleSidebarPeek, sidebarSide, sidebarVisible]);
+  }, [cancelScheduledSidebarPeek, scheduleSidebarPeek, sidebarVisible]);
 
   useEffect(() => cancelSidebarPeekTimers, [cancelSidebarPeekTimers]);
 
@@ -1156,10 +1235,6 @@ export function ManageApp() {
     }, 550);
   }, [annotationsByPath, projectEditorId, projectId]);
 
-  const switchSidebarSide = useCallback(() => {
-    setSidebarSide((current) => (current === 'left' ? 'right' : 'left'));
-  }, []);
-
   const dismissFileContextMenu = useCallback(() => {
     setFileContextMenu(undefined);
   }, []);
@@ -1228,7 +1303,7 @@ export function ManageApp() {
         }
         setFileContextMenu(undefined);
       } catch (revealError) {
-        setError(revealError instanceof Error ? revealError.message : 'Could not reveal item in Finder.');
+        setError(revealError instanceof Error ? revealError.message : 'Could not open the file or folder location.');
       } finally {
         setFileOperation((current) =>
           current?.action === 'revealInFinder' && current.path === entry.path ? undefined : current
@@ -1258,17 +1333,13 @@ export function ManageApp() {
     setFileContextMenu(undefined);
   }, []);
 
-  const updateSidebarWidthFromClientX = useCallback(
-    (clientX: number) => {
-      const shellRect = shellRef.current?.getBoundingClientRect();
-      if (!shellRect) {
-        return;
-      }
-      const nextWidth = sidebarSide === 'right' ? shellRect.right - clientX : clientX - shellRect.left;
-      setSidebarWidth(clampManageSidebarWidth(nextWidth, shellRect.width));
-    },
-    [sidebarSide]
-  );
+  const updateSidebarWidthFromClientX = useCallback((clientX: number) => {
+    const shellRect = shellRef.current?.getBoundingClientRect();
+    if (!shellRect) {
+      return;
+    }
+    setSidebarWidth(clampManageSidebarWidth(shellRect.right - clientX, shellRect.width));
+  }, []);
 
   const resizeSidebarBy = useCallback((delta: number) => {
     const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
@@ -1307,15 +1378,15 @@ export function ManageApp() {
 
   const handleSidebarResizeKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      const direction = sidebarSide === 'right' ? -1 : 1;
+      // The sidebar hangs off the right edge, so the left arrow widens it.
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
-        resizeSidebarBy(-12 * direction);
+        resizeSidebarBy(12);
         return;
       }
       if (event.key === 'ArrowRight') {
         event.preventDefault();
-        resizeSidebarBy(12 * direction);
+        resizeSidebarBy(-12);
         return;
       }
       if (event.key === 'Home') {
@@ -1330,7 +1401,7 @@ export function ManageApp() {
         setSidebarWidth(clampManageSidebarWidth(MANAGE_SIDEBAR_MAX_WIDTH, containerWidth));
       }
     },
-    [resizeSidebarBy, sidebarSide]
+    [resizeSidebarBy]
   );
 
   useEffect(
@@ -1874,6 +1945,7 @@ export function ManageApp() {
           nextPath
         );
         setCollapsedDirectoryPaths((current) => remapManagePathSetForMove(current, path, nextPath));
+        openDocuments.remapMovedEntry(path, nextPath);
         if (currentEntry.kind === 'file' && renamedFile && selectedPathRef.current === path) {
           selectedPathRef.current = renamedFile.path;
           setSelectedPath(renamedFile.path);
@@ -1905,6 +1977,7 @@ export function ManageApp() {
       draftContent,
       entries,
       isDirty,
+      openDocuments.remapMovedEntry,
       projectEditorId,
       projectId,
       readFile,
@@ -1951,6 +2024,7 @@ export function ManageApp() {
           path
         );
         setCollapsedDirectoryPaths((current) => removeManagePathSetForDeletedEntry(current, path));
+        openDocuments.removeDeletedEntry(path);
         setFileContextMenu(undefined);
         if (deletesSelectedPath) {
           selectedPathRef.current = undefined;
@@ -1968,7 +2042,17 @@ export function ManageApp() {
         setFileOperation((current) => (current?.action === 'delete' && current.path === path ? undefined : current));
       }
     },
-    [clearPendingContentAutosave, entries, fileOperation, isDirty, projectEditorId, projectId, refreshFiles, saveState]
+    [
+      clearPendingContentAutosave,
+      entries,
+      fileOperation,
+      isDirty,
+      openDocuments.removeDeletedEntry,
+      projectEditorId,
+      projectId,
+      refreshFiles,
+      saveState,
+    ]
   );
 
   const duplicateFile = useCallback(
@@ -2126,6 +2210,7 @@ export function ManageApp() {
           nextPath
         );
         setCollapsedDirectoryPaths((current) => remapManagePathSetForMove(current, entry.path, nextPath));
+        openDocuments.remapMovedEntry(entry.path, nextPath);
         if (movedSelectedPath) {
           selectedPathRef.current = movedSelectedPath;
           setSelectedPath(movedSelectedPath);
@@ -2142,7 +2227,17 @@ export function ManageApp() {
         );
       }
     },
-    [entries, fileOperation, isDirty, projectEditorId, projectId, readFile, refreshFiles, saveState]
+    [
+      entries,
+      fileOperation,
+      isDirty,
+      openDocuments.remapMovedEntry,
+      projectEditorId,
+      projectId,
+      readFile,
+      refreshFiles,
+      saveState,
+    ]
   );
 
   const submitRenameDialog = useCallback(() => {
@@ -2373,7 +2468,9 @@ export function ManageApp() {
   const selectTreeEntry = useCallback(
     (entry: ManageFileEntry) => {
       if (entry.kind === 'file') {
-        void readFile(entry.path);
+        if (entry.path !== selectedPathRef.current) {
+          void readFile(entry.path);
+        }
         if (sidebarTransient === 'drawer') {
           closeTransientSidebar();
         }
@@ -2384,6 +2481,98 @@ export function ManageApp() {
     },
     [closeTransientSidebar, prioritizeDirectory, readFile, sidebarTransient, toggleDirectory]
   );
+
+  const selectOpenDocument = useCallback(
+    (path: string) => {
+      if (path !== selectedPathRef.current) {
+        void readFile(path);
+      }
+      if (sidebarTransient === 'drawer') {
+        closeTransientSidebar();
+      }
+    },
+    [closeTransientSidebar, readFile, sidebarTransient]
+  );
+
+  const clearSelectedDocument = useCallback(() => {
+    fileReadSequenceRef.current += 1;
+    selectedPathRef.current = undefined;
+    setSelectedPath(undefined);
+    setPreview(undefined);
+    setDraftContent('');
+    setLastSavedContent('');
+    setPreviewState('idle');
+    setSaveState('idle');
+    setHasExternalChanges(false);
+    setError(undefined);
+  }, []);
+
+  /* Closing the selected file moves to its neighbour below, else above; the selection is cleared first so the read does not stash the closing file's draft. */
+  const closeOpenDocument = useCallback(
+    (path: string) => {
+      const index = openDocuments.openPaths.indexOf(path);
+      const neighbour =
+        index === -1 ? undefined : (openDocuments.openPaths[index + 1] ?? openDocuments.openPaths[index - 1]);
+      const wasSelected = selectedPathRef.current === path;
+      if (wasSelected) {
+        clearPendingContentAutosave();
+        clearSelectedDocument();
+      }
+      openDocuments.removeDocument(path);
+      setCloseDocumentPrompt(undefined);
+      if (wasSelected && neighbour !== undefined) {
+        void readFile(neighbour);
+      }
+    },
+    [
+      clearPendingContentAutosave,
+      clearSelectedDocument,
+      openDocuments.openPaths,
+      openDocuments.removeDocument,
+      readFile,
+    ]
+  );
+
+  const requestCloseDocument = useCallback(
+    (path: string) => {
+      const dirty =
+        selectedPathRef.current === path
+          ? draftContentRef.current !== lastSavedContentRef.current
+          : path in openDocuments.backgroundDrafts;
+      if (!dirty) {
+        closeOpenDocument(path);
+        return;
+      }
+      setCloseDocumentPrompt({ path, saving: false });
+    },
+    [closeOpenDocument, openDocuments.backgroundDrafts]
+  );
+
+  const saveAndCloseDocument = useCallback(async () => {
+    if (!closeDocumentPrompt) {
+      return;
+    }
+    const { path } = closeDocumentPrompt;
+    const content =
+      selectedPathRef.current === path ? draftContentRef.current : openDocuments.backgroundDrafts[path]?.draft;
+    if (content === undefined) {
+      closeOpenDocument(path);
+      return;
+    }
+    setCloseDocumentPrompt({ path, saving: true });
+    try {
+      await saveContentSnapshot({ content, path, throwOnError: true });
+      closeOpenDocument(path);
+    } catch (saveError) {
+      setCloseDocumentPrompt({
+        error: saveError instanceof Error ? saveError.message : 'Could not save file.',
+        path,
+        saving: false,
+      });
+    }
+  }, [closeDocumentPrompt, closeOpenDocument, openDocuments.backgroundDrafts, saveContentSnapshot]);
+
+  const entriesByPath = useMemo(() => new Map(entries.map((entry) => [entry.path, entry] as const)), [entries]);
 
   /**
    * CDXC:Docs 2026-09-07 DECISION:
@@ -2463,14 +2652,16 @@ export function ManageApp() {
     [updateAnnotationsForSelectedFile]
   );
 
-  const HideSidebarIcon = sidebarSide === 'right' ? IconLayoutSidebarRightCollapse : IconLayoutSidebarLeftCollapse;
   /*
    * CDXC:Docs 2026-09-12 WHY:
    * The peek replaces the corner button with the sidebar, so the header button on the window-edge side sits on the exact pixels the cursor is already over.
    * One click there pins a peek, closes a drawer, or hides a docked sidebar, without the cursor moving and without a second overlapping control.
+   *
+   * CDXC:Docs 2026-09-16 DECISION:
+   * User: show the pin icon only when the list can actually be pinned. A narrow pane cannot dock the list, so a peek there offers the close control instead of a pin that appears to do nothing.
    */
   const sidebarEdgeButton =
-    sidebarTransient === 'peek' ? (
+    sidebarTransient === 'peek' && !sidebarFloating ? (
       <button
         aria-label='Pin file sidebar'
         className='manage-sidebar-edge-button manage-icon-button'
@@ -2479,14 +2670,14 @@ export function ManageApp() {
       >
         <IconPin aria-hidden='true' size={15} stroke={1.8} />
       </button>
-    ) : sidebarTransient === 'drawer' ? (
+    ) : sidebarTransient !== undefined ? (
       <button
         aria-label='Close file sidebar'
         className='manage-sidebar-edge-button manage-icon-button'
         onClick={closeTransientSidebar}
         type='button'
       >
-        <HideSidebarIcon aria-hidden='true' size={15} stroke={1.8} />
+        <IconLayoutSidebarRightCollapse aria-hidden='true' size={15} stroke={1.8} />
       </button>
     ) : (
       <button
@@ -2495,7 +2686,7 @@ export function ManageApp() {
         onClick={hideSidebar}
         type='button'
       >
-        <HideSidebarIcon aria-hidden='true' size={15} stroke={1.8} />
+        <IconLayoutSidebarRightCollapse aria-hidden='true' size={15} stroke={1.8} />
       </button>
     );
 
@@ -2505,7 +2696,11 @@ export function ManageApp() {
       data-sidebar-floating={String(sidebarOverlay || sidebarClosing)}
       data-sidebar-hidden={String(!sidebarVisible)}
       data-sidebar-motion={sidebarMotion}
-      data-sidebar-side={sidebarSide}
+      /*
+       * CDXC:Docs 2026-09-16 DECISION:
+       * User: the Docs files list always sits on the right; the option to switch it to the left was removed from the sidebar menu.
+       */
+      data-sidebar-side='right'
       ref={shellRef}
       style={{ '--manage-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
     >
@@ -2520,7 +2715,6 @@ export function ManageApp() {
           ref={sidebarRef}
         >
           <div className='manage-sidebar-header' data-root-drop-target={String(dropTarget?.kind === 'root')}>
-            {sidebarSide === 'left' ? sidebarEdgeButton : null}
             <ManageSidebarActions
               canRevealOpenFile={entries.some((entry) => entry.kind === 'file' && entry.path === selectedPath)}
               creatingKind={creatingArtifactKind}
@@ -2533,11 +2727,9 @@ export function ManageApp() {
               onOpenDocsFoldersSettings={() => void openDocsFoldersSettings()}
               onRefresh={() => void refreshFiles()}
               onRevealOpenFile={revealOpenFile}
-              onSwitchSide={switchSidebarSide}
               onToggleAllDirectories={toggleAllDirectories}
-              sidebarSide={sidebarSide}
             />
-            {sidebarSide === 'right' ? sidebarEdgeButton : null}
+            {sidebarForcedOpen ? null : sidebarEdgeButton}
           </div>
           <div
             className='manage-search'
@@ -2580,6 +2772,15 @@ export function ManageApp() {
               </ManageTooltipButton>
             ) : null}
           </div>
+          <ManageOpenFilesList
+            dirtyPaths={dirtyPaths}
+            entriesByPath={entriesByPath}
+            onClose={requestCloseDocument}
+            onSelect={selectOpenDocument}
+            openPaths={openDocuments.openPaths}
+            selectedPath={selectedPath}
+          />
+          <div className='manage-sidebar-section-label'>Project Docs</div>
           <ManageFileTree
             ref={fileTreeRef}
             entries={visibleEntries}
@@ -2611,11 +2812,7 @@ export function ManageApp() {
           onClick={showSidebar}
           type='button'
         >
-          {sidebarSide === 'right' ? (
-            <IconLayoutSidebarRightExpand aria-hidden='true' size={16} stroke={1.8} />
-          ) : (
-            <IconLayoutSidebarLeftExpand aria-hidden='true' size={16} stroke={1.8} />
-          )}
+          <IconLayoutSidebarRightExpand aria-hidden='true' size={16} stroke={1.8} />
         </button>
       )}
       {sidebarVisible && !sidebarOverlay ? (
@@ -2634,6 +2831,11 @@ export function ManageApp() {
         />
       ) : null}
       <section className='manage-preview'>
+        {openDocuments.storageError ? (
+          <p role='alert' className='m-2 rounded border border-destructive p-2 text-sm text-destructive'>
+            {openDocuments.storageError}
+          </p>
+        ) : null}
         <ManagePreview
           annotations={annotationsForSelectedPath}
           draftContent={draftContent}
@@ -2648,7 +2850,7 @@ export function ManageApp() {
           onOpenDocument={(path) => void readFile(path)}
           onReload={() => {
             if (selectedPath) {
-              void readFile(selectedPath);
+              void readFile(selectedPath, { discardDraft: true });
             }
           }}
           onSendFeedback={sendAnnotationFeedback}
@@ -2661,6 +2863,16 @@ export function ManageApp() {
           sendTarget={annotationSendTarget}
         />
       </section>
+      {closeDocumentPrompt ? (
+        <ManageCloseDocumentDialog
+          error={closeDocumentPrompt.error}
+          isSaving={closeDocumentPrompt.saving}
+          label={entriesByPath.get(closeDocumentPrompt.path)?.name ?? manageOpenFileLabel(closeDocumentPrompt.path)}
+          onCancel={() => setCloseDocumentPrompt(undefined)}
+          onDiscard={() => closeOpenDocument(closeDocumentPrompt.path)}
+          onSave={() => void saveAndCloseDocument()}
+        />
+      ) : null}
       {fileContextMenu && contextMenuEntry ? (
         <ManageFileContextMenu
           canAddToSessionContext={contextMenuEntry.kind === 'file'}
@@ -2748,16 +2960,12 @@ export function requestManageFiles(
   });
 }
 
-export function readStoredManageSidebarSide(): ManageSidebarSide {
-  return window.localStorage.getItem(MANAGE_SIDEBAR_SIDE_STORAGE_KEY) === 'left' ? 'left' : 'right';
-}
-
 export function readStoredManageSidebarPinned(): boolean {
-  return window.localStorage.getItem(MANAGE_SIDEBAR_PINNED_STORAGE_KEY) !== 'false';
+  return clientStorage.getItem(MANAGE_SIDEBAR_PINNED_STORAGE_KEY) !== 'false';
 }
 
 export function readStoredManageSidebarWidth(): number {
-  const parsedWidth = Number(window.localStorage.getItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY));
+  const parsedWidth = Number(clientStorage.getItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY));
   return clampManageSidebarWidth(
     Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : MANAGE_SIDEBAR_DEFAULT_WIDTH,
     window.innerWidth

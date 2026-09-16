@@ -82,10 +82,17 @@ pub fn run_notify_hook(args: Vec<String>) -> Result<(), DomainStateError> {
         nested_get(&payload, &["properties", "info", "id"]),
     ]);
     let transcript_path = if agent_key == "zcode" {
-        if session_id.as_deref().is_some_and(|id| id.starts_with("sess_subagent")) {
+        if session_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("sess_subagent"))
+        {
             return Ok(());
         }
-        Some(crate::session_chat_zcode::zcode_database_path(None).to_string_lossy().into_owned())
+        Some(
+            crate::session_chat_zcode::zcode_database_path(None)
+                .to_string_lossy()
+                .into_owned(),
+        )
     } else {
         first_path([
             payload.get("transcript_path"),
@@ -454,6 +461,18 @@ fn post_gxserver_hook_event(
             if let Some(value) = payload.get(key) {
                 params.insert(key.to_string(), value.clone());
             }
+        }
+    }
+    // CDXC:Notifications 2026-09-15 SEE-ALSO:
+    // The server re-derives Stop activity, so it needs the same background-work evidence as activity_for_hook_event.
+    if matches!(agent_key, "claude" | "openclaude")
+        && event_name.trim().eq_ignore_ascii_case("stop")
+    {
+        if let Some(tasks) = payload
+            .get("background_tasks")
+            .filter(|value| value.is_array())
+        {
+            params.insert("background_tasks".to_string(), tasks.clone());
         }
     }
     params.insert("agentName".to_string(), json!(agent_key));

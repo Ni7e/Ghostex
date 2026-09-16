@@ -130,22 +130,6 @@ impl GhostexGpuiApp {
                 );
                 let global_docs_directory_text =
                     gpui_global_docs_directory_text(&self.sidebar_runtime_settings_snapshot);
-                let chat_docs_authorization = snapshot
-                    .as_ref()
-                    .and_then(|snapshot| snapshot.active_project_id.as_ref())
-                    .and_then(|project_id| {
-                        self.session_chat_docs_file_authorization
-                            .lock()
-                            .ok()
-                            .and_then(|authorization| {
-                                authorization
-                                    .as_ref()
-                                    .filter(|authorization| {
-                                        authorization.project_id == project_id.0
-                                    })
-                                    .cloned()
-                            })
-                    });
                 let remote_context = snapshot
                     .as_ref()
                     .and_then(|snapshot| snapshot.active_project_id.as_ref())
@@ -177,11 +161,6 @@ impl GhostexGpuiApp {
                                     snapshot.as_ref(),
                                     &additional_docs_folders_text,
                                     &global_docs_directory_text,
-                                    chat_docs_authorization
-                                        .as_ref()
-                                        .map(|authorization| authorization.root.clone()),
-                                    chat_docs_authorization
-                                        .map(|authorization| authorization.file_name),
                                 ),
                             }
                         })

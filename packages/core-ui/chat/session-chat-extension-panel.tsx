@@ -1,4 +1,5 @@
-import { IconChevronDown, IconChevronUp, IconLoader2, IconPuzzle, IconX } from '@tabler/icons-react';
+import { IconChevronDown, IconLoader2, IconPuzzle } from '@tabler/icons-react';
+import { SessionChatStatusCard } from './session-chat-status-card';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import {
@@ -232,16 +233,27 @@ export function SessionChatExtensionPanel({
   }
 
   return (
-    <section
+    <SessionChatStatusCard
       aria-label={`${activeExtension.title} chat extension`}
       className='ghostex-chat-extension-panel'
+      closeLabel='Close chat extension'
       data-minimized={minimized ? 'true' : 'false'}
-    >
-      <header className='ghostex-chat-extension-header'>
-        <ExtensionIcon extension={activeExtension} />
-        {extensions.length > 1 ? (
+      lead={
+        <span aria-hidden='true' className='ghostex-chat-status-card-lead'>
+          <ExtensionIcon extension={activeExtension} />
+        </span>
+      }
+      onClose={onClose}
+      onOpenChange={(open) => onMinimizedChange(!open)}
+      open={!minimized}
+      title={
+        extensions.length > 1 ? (
           <DropdownMenu>
-            <DropdownMenuTrigger aria-label='Switch chat extension' className='ghostex-chat-extension-switcher'>
+            <DropdownMenuTrigger
+              aria-label='Switch chat extension'
+              className='ghostex-chat-extension-switcher'
+              onClick={(event) => event.stopPropagation()}
+            >
               <span className='truncate'>{activeExtension.title}</span>
               <IconChevronDown aria-hidden='true' className='size-3.5 shrink-0' stroke={2} />
             </DropdownMenuTrigger>
@@ -255,61 +267,37 @@ export function SessionChatExtensionPanel({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <span className='ghostex-chat-extension-title'>{activeExtension.title}</span>
+          activeExtension.title
+        )
+      }
+      toggleTitle={{ open: 'Minimize chat extension', closed: 'Expand chat extension' }}
+    >
+      <div className='ghostex-chat-extension-body'>
+        {activeExtension.url ? (
+          <iframe
+            className='ghostex-chat-extension-frame'
+            key={activeExtension.id}
+            onLoad={() =>
+              postToFrame({
+                type: 'ghostexChatBarBridgeReady',
+                bridgeVersion: GHOSTEX_CHAT_BAR_BRIDGE_VERSION,
+              })
+            }
+            ref={iframeRef}
+            src={activeExtension.url}
+            title={activeExtension.title}
+          />
+        ) : activeExtension.error ? (
+          <div className='ghostex-chat-extension-status' role='alert'>
+            {activeExtension.error}
+          </div>
+        ) : (
+          <div aria-label={`Loading ${activeExtension.title}`} className='ghostex-chat-extension-status'>
+            <IconLoader2 aria-hidden='true' className='size-4 animate-spin' stroke={2} />
+            Loading extension…
+          </div>
         )}
-        <div className='ml-auto flex items-center'>
-          <Button
-            aria-label={minimized ? 'Expand chat extension' : 'Minimize chat extension'}
-            className='ghostex-chat-extension-header-button'
-            onClick={() => onMinimizedChange(!minimized)}
-            size='icon-sm'
-            variant='ghost'
-          >
-            {minimized ? (
-              <IconChevronUp aria-hidden='true' className='size-3.5' stroke={2} />
-            ) : (
-              <IconChevronDown aria-hidden='true' className='size-3.5' stroke={2} />
-            )}
-          </Button>
-          <Button
-            aria-label='Close chat extension'
-            className='ghostex-chat-extension-header-button'
-            onClick={onClose}
-            size='icon-sm'
-            variant='ghost'
-          >
-            <IconX aria-hidden='true' className='size-3.5' stroke={2} />
-          </Button>
-        </div>
-      </header>
-      {!minimized ? (
-        <div className='ghostex-chat-extension-body'>
-          {activeExtension.url ? (
-            <iframe
-              className='ghostex-chat-extension-frame'
-              key={activeExtension.id}
-              onLoad={() =>
-                postToFrame({
-                  type: 'ghostexChatBarBridgeReady',
-                  bridgeVersion: GHOSTEX_CHAT_BAR_BRIDGE_VERSION,
-                })
-              }
-              ref={iframeRef}
-              src={activeExtension.url}
-              title={activeExtension.title}
-            />
-          ) : activeExtension.error ? (
-            <div className='ghostex-chat-extension-status' role='alert'>
-              {activeExtension.error}
-            </div>
-          ) : (
-            <div aria-label={`Loading ${activeExtension.title}`} className='ghostex-chat-extension-status'>
-              <IconLoader2 aria-hidden='true' className='size-4 animate-spin' stroke={2} />
-              Loading extension…
-            </div>
-          )}
-        </div>
-      ) : null}
-    </section>
+      </div>
+    </SessionChatStatusCard>
   );
 }

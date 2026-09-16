@@ -32,10 +32,15 @@ pub(crate) const GPUI_SESSION_CHAT_QUEUE_COUNT_POLL_INTERVAL: Duration = Duratio
 
 pub(crate) const GPUI_SESSION_CHAT_QUEUE_COUNT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Confirmed idle, empty pages enter the reusable renderer pool immediately.
+/// Confirmed idle, empty pages enter the reusable renderer pool once they have been hidden for `GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE`.
 /// Age and count limits apply to unused pooled renderers; protected session bindings stay mounted until their fresh release probe succeeds.
 pub(crate) const GPUI_AGENTS_CHAT_SURFACE_HIDDEN_EVICT_AFTER: Duration =
     Duration::from_secs(5 * 60);
+
+/// CDXC:SessionChat 2026-09-16 WHY:
+/// A page was pooled 50 to 120 ms after it stopped being visible, so any momentary hide (a reconcile pass during a tab drag, an activation still pending, a pane briefly not rendered) cost a fresh generation, a new activation and a full snapshot re-render on the very next pass.
+/// A short grace keeps a just-hidden page bound to its session; switching back inside it re-shows the page without any activation, and the spare-page count and five-minute expiry are unchanged.
+pub(crate) const GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE: Duration = Duration::from_secs(2);
 
 /// CDXC:SessionChat 2026-09-13 DECISION:
 /// User approved app-wide shared chat state and renderer ownership tied to visible panes, retaining the three spare pages and five-minute expiry.
@@ -777,24 +782,6 @@ pub(crate) const APP_MODAL_HOST_SIDEBAR_SPACE_EDITOR_WINDOW_HEIGHT: f32 = 380.0;
 
 pub(crate) const APP_MODAL_HOST_PREVIOUS_SESSIONS_WINDOW_HEIGHT: f32 = 680.0;
 
-/*
- * CDXC:AgentLauncher 2026-09-09 DECISION:
- * User: the native New Thread picker is sized to its rows: the search field,
- * the key-hint row, one row per agent up to twelve, the divider, and the
- * Browser and Terminal rows; more agents scroll. The chrome height is the 6px
- * top inset, 36px search field, 26px hint row, 2px list inset, 9px divider,
- * two 36px rows, the 6px bottom inset, and the 2px frame border.
- */
-pub(crate) const NEW_THREAD_PICKER_WIDTH: f32 = 420.0;
-
-pub(crate) const NEW_THREAD_PICKER_SEARCH_HEIGHT: f32 = 36.0;
-
-pub(crate) const NEW_THREAD_PICKER_ROW_HEIGHT: f32 = 36.0;
-
-pub(crate) const NEW_THREAD_PICKER_MAX_AGENT_ROWS: usize = 12;
-
-pub(crate) const NEW_THREAD_PICKER_CHROME_HEIGHT: f32 = 159.0;
-
 pub(crate) const APP_MODAL_HOST_DELAYED_SEND_WINDOW_WIDTH: f32 = 470.0;
 
 /*
@@ -1488,7 +1475,7 @@ pub(crate) const COMMAND_PANE_DELAYED_SEND_BADGE_BODY_WIDTH_CLAMP_INSET: f32 = 3
 
 pub(crate) const COMMAND_PANE_DELAYED_SEND_BADGE_BODY_HEIGHT_CLAMP_INSET: f32 = 24.0;
 
-pub(crate) const COMMAND_PANE_DELAYED_SEND_MIN_DELAY_MS: u64 = 60_000;
+pub(crate) const COMMAND_PANE_DELAYED_SEND_MIN_DELAY_MS: u64 = 1;
 
 pub(crate) const COMMAND_PANE_DELAYED_SEND_MAX_DELAY_MS: u64 = 2_147_483_647;
 

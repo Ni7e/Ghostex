@@ -24,6 +24,9 @@ import { IconBoltFilled, IconChevronDown, IconMap } from '@tabler/icons-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { postAppModalHostMessage } from '../app-modal-host-bridge';
 import { AppTooltip } from '../app-tooltip';
+import { formatSidebarHotkeyLabel } from '../hotkey-label';
+import { useSidebarStore } from '../sidebar-store';
+import { normalizeghostexHotkeySettings } from '@/packages/shared/ghostex-hotkeys';
 import { createAppToastRequest } from '../../shared/app-toast-contract';
 import type {
   SessionChatAvailableAgent,
@@ -301,7 +304,7 @@ function PillTrigger({
   /**
    * Keeps the tooltip hoverable while the pill is disabled: the disabled
    * button drops its own pointer events, so a wrapper span carries the hover.
-   * The model pill uses this so the terminal status line stays readable.
+   * The model pill uses this so its picker shortcut stays discoverable.
    */
   tooltipWhenDisabled?: boolean;
   trailingIcon?: ReactNode;
@@ -527,6 +530,8 @@ export function SessionChatSessionOptionPills({
   onSwitchToTerminal,
   screenProbed,
 }: SessionChatSessionOptionPillsProps) {
+  const hotkeys = useSidebarStore((store) => store.hud.settings?.hotkeys);
+  const modelPickerShortcut = formatSidebarHotkeyLabel(normalizeghostexHotkeySettings(hotkeys).openModelPicker ?? '');
   const modelPickerActions = useRef<ModelPickerActions | null>(null);
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const dispatchingRef = useRef<object | null>(null);
@@ -970,7 +975,7 @@ export function SessionChatSessionOptionPills({
   );
   const modelLabel = sessionChatOptionValueLabel(catalog.model, state);
   // Long catalog names ("Gemini 3.7 Flash", "GPT 5.3 Codex Spark") are cut
-  // for the pill; the tooltip still carries the whole label.
+  // for the pill; the accessible name still carries the whole label.
   const modelPillLabel = modelLabel === null ? null : truncateAgentModelLabel(modelLabel);
   const isCursor = catalog.modelIcon === 'cursor-cli';
   const isCodex = catalog.modelIcon === 'codex';
@@ -1018,12 +1023,12 @@ export function SessionChatSessionOptionPills({
   );
   const usesCombinedAgentPicker = catalog.model.dispatch.kind === 'agent-picker' && combinedPickerEffort !== undefined;
   const modelTitle = modelLabel ? `${catalog.model.label} ${modelLabel}` : catalog.model.label;
-  /*
-  Every tooltip names what its dropdown represents, never where the value came
-  from: the options pill names its categories ("Effort"), the mode pill names
-  the detected mode itself ("Bypass permissions"), and the model pill shows the
-  agent's full terminal status line whenever gxserver has read one.
-  */
+  /** CDXC:Tooltips 2026-09-16 DECISION:
+   * User: model and effort tooltips show their quick-picker hotkey, and the terminal status line moves to the context circle's tooltip.
+   */
+  const pickerShortcutSuffix =
+    QUICK_MODEL_PICKER_ENABLED && quickPicker && modelPickerShortcut ? ` (${modelPickerShortcut})` : '';
+  const modelTooltip = `Model${pickerShortcutSuffix}`;
   const menuSections = optionMenuSections(menuOptions);
   /**
    * CDXC:SessionChat 2026-09-05 DECISION:
@@ -1033,6 +1038,17 @@ export function SessionChatSessionOptionPills({
   const optionsTitle =
     [
       ...menuSections.map((section) => section.label).filter((label) => label !== MODES_SECTION_LABEL),
+      ...(isCodex && fastMode ? ['Fast enabled'] : []),
+      ...(planMode ? ['Plan mode'] : []),
+    ].join(' • ') || 'Options';
+  const optionsTooltip =
+    [
+      ...menuSections
+        .filter((section) => section.label !== MODES_SECTION_LABEL)
+        .map((section) => {
+          const suffix = section.descriptors.some((descriptor) => descriptor.id === 'effort') ? pickerShortcutSuffix : '';
+          return `${section.label}${suffix}`;
+        }),
       ...(isCodex && fastMode ? ['Fast enabled'] : []),
       ...(planMode ? ['Plan mode'] : []),
     ].join(' • ') || 'Options';
@@ -1077,6 +1093,7 @@ export function SessionChatSessionOptionPills({
     contextMeterUsage || hasContextDetails ? (
       <SessionChatContextMeter
         inMenu={inMenu}
+        statusLine={terminalStatusLine}
         compactDisabled={disabled}
         compactDisabledReason={isWorking ? 'Available once the agent is idle.' : null}
         onCompact={() => {
@@ -1153,7 +1170,7 @@ export function SessionChatSessionOptionPills({
               icon={modelIcon}
               label={modelPillLabel ?? catalog.model.label}
               skeleton={skeletonFor('model', modelLabel)}
-              title={terminalStatusLine || modelHandoffTitle}
+              title={modelHandoffTitle}
               tooltipWhenDisabled
             />
             <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-64 rounded-xl [--radius:0.625rem]'>
@@ -1179,7 +1196,7 @@ export function SessionChatSessionOptionPills({
             label={modelPillLabel ?? catalog.model.label}
             onClick={() => onSwitchToTerminal?.()}
             skeleton={skeletonFor('model', modelLabel)}
-            title={terminalStatusLine || modelHandoffTitle}
+            title={modelHandoffTitle}
             tooltipWhenDisabled
           />
         )}
@@ -1214,7 +1231,7 @@ export function SessionChatSessionOptionPills({
             icon={modelIcon}
             label={combinedLabel}
             skeleton={skeletonFor('combined', selectedLabel)}
-            title={terminalStatusLine || combinedTitle}
+            title={combinedTitle}
             tooltipWhenDisabled
           />
           <DropdownMenuContent align='start' className='ghostex-session-chat-popup w-60 rounded-xl [--radius:0.625rem]'>
@@ -1247,14 +1264,14 @@ export function SessionChatSessionOptionPills({
           icon={modelIcon}
           label={modelPillLabel ?? catalog.model.label}
           skeleton={skeletonFor('model', modelLabel)}
-          title={terminalStatusLine || modelTitle}
+          title={modelTooltip}
           tooltipWhenDisabled
         />
         <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-64 rounded-xl [--radius:0.625rem]'>
           {agentsSection}
           {QUICK_MODEL_PICKER_ENABLED && quickPicker && (
             <DropdownMenuItem closeOnClick className='rounded-md' onClick={() => modelPickerActions.current?.open()}>
-              Quick picker <span className='ml-auto text-xs text-muted-foreground'>⌥P</span>
+              Quick picker <span className='ml-auto text-xs text-muted-foreground'>{modelPickerShortcut}</span>
             </DropdownMenuItem>
           )}
           {/* Base UI's GroupLabel throws outside a Menu.Group context. */}
@@ -1278,7 +1295,7 @@ export function SessionChatSessionOptionPills({
               disabled={optionsDisabled}
               label={optionsLabel ?? 'Options'}
               skeleton={skeletonFor('options', optionsLabel)}
-              title={optionsTitle}
+              title={optionsTooltip}
               trailingIcon={optionsTrailingIcon}
             />
             <DropdownMenuContent align='end' className='ghostex-session-chat-popup w-60 rounded-xl [--radius:0.625rem]'>

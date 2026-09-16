@@ -70,6 +70,7 @@ declare global {
     ghostexSetSessionChatTheme?: (theme: unknown) => void;
     ghostexSetSessionChatTranscriptWidthPercent?: (widthPercent: unknown) => void;
     ghostexSetSessionChatFileEditPreviews?: (enabled: unknown) => void;
+    ghostexSetSessionChatFileViews?: (code: boolean, docs: boolean) => void;
     ghostexSetSessionChatHotkeys?: (hotkeys: unknown) => void;
     ghostexSetSessionChatVerboseMode?: (verboseMode: unknown) => void;
     ghostexSetSessionChatSimpleMode?: (enabled: unknown) => void;
@@ -975,7 +976,14 @@ Where a web URL actually lands is the host's call, not this page's: it reads the
 terminal links use, and hands the URL to the system default browser when that
 setting is off.
 */
-  const GPUI_SESSION_CHAT_HOST_LINKS: SessionChatHostLinks = {
+  const openFileInView = (view: 'code' | 'docs'): NonNullable<SessionChatHostLinks['openFile']> =>
+    (path, position) =>
+      postSessionChatHostAction('openFile', {
+        path,
+        view,
+        ...(position ? { line: position.line, ...(position.column ? { column: position.column } : {}) } : {}),
+      });
+  let GPUI_SESSION_CHAT_HOST_LINKS: SessionChatHostLinks = {
     openUrl: (url, { external, forceEmbedded }) =>
       postSessionChatHostAction('openLink', { external, forceEmbedded: forceEmbedded === true, url }),
     openFile: (path, position) =>
@@ -984,6 +992,17 @@ setting is off.
         ...(position ? { line: position.line, ...(position.column ? { column: position.column } : {}) } : {}),
       }),
     locateFile: (path) => postSessionChatHostAction('locateFile', { path }),
+    ...(searchParams.get('codeFileViewAvailable') === 'true' ? { openFileInCode: openFileInView('code') } : {}),
+    ...(searchParams.get('docsFileViewAvailable') === 'true' ? { openFileInDocs: openFileInView('docs') } : {}),
+  };
+
+  window.ghostexSetSessionChatFileViews = (code, docs) => {
+    GPUI_SESSION_CHAT_HOST_LINKS = {
+      ...GPUI_SESSION_CHAT_HOST_LINKS,
+      openFileInCode: code ? openFileInView('code') : undefined,
+      openFileInDocs: docs ? openFileInView('docs') : undefined,
+    };
+    renderReadyChat?.(chatTheme);
   };
 
   function createGpuiSessionChatHostActions(hotkeysValue: unknown): SessionChatHostActions {

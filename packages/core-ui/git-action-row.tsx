@@ -299,7 +299,23 @@ export function GitActionRow({ git, groupId, projectId, vscode }: GitActionRowPr
             <span>Changed Files</span>
             <span className='git-action-changed-files-count'>{git.files.length}</span>
           </div>
-          <ChangedFilesTree allDirectoriesExpanded={false} files={git.files} onOpenFile={openChangedFile} />
+          <ChangedFilesTree
+            allDirectoriesExpanded={false}
+            files={git.files}
+            onOpenFile={openChangedFile}
+            onOpenFileLocation={
+              typeof window !== 'undefined' && 'ghostexGpui' in window
+                ? (filePath) =>
+                    vscode.postMessage({
+                      filePath,
+                      groupId,
+                      projectId,
+                      openLocation: true,
+                      type: 'openSidebarGitChangedFile',
+                    })
+                : undefined
+            }
+          />
         </div>
       ) : null}
     </div>

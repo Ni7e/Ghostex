@@ -55,14 +55,18 @@ impl GpuiMacOSNotificationAuthorizationStatus {
 
     pub(crate) fn message(self) -> &'static str {
         match self {
-            Self::Authorized => "macOS allows Ghostex notification banners.",
-            Self::Provisional => "macOS allows provisional Ghostex notification banners.",
-            Self::NotDetermined => "macOS notification permission has not been decided yet.",
-            Self::Denied => {
-                "macOS is not allowing Ghostex notification banners. Use Open macOS Notification Settings to allow notifications."
+            Self::Authorized => "The operating system allows Ghostex notification banners.",
+            Self::Provisional => {
+                "The operating system allows provisional Ghostex notification banners."
             }
-            Self::Unsupported => "macOS notification banners are not available in this GPUI build.",
-            Self::Unknown => "GPUI could not read macOS notification permission status.",
+            Self::NotDetermined => "Notification permission has not been decided yet.",
+            Self::Denied => {
+                "The operating system is not allowing Ghostex notification banners. Use Open Notification Settings to allow notifications."
+            }
+            Self::Unsupported => {
+                "System notification banners are not available in this GPUI build."
+            }
+            Self::Unknown => "GPUI could not read notification permission status.",
         }
     }
 
@@ -141,44 +145,44 @@ pub(crate) fn gpui_macos_notification_test_action_message(
         GpuiMacOSNotificationDeliveryResult::Sent => {
             if completion_sound_enabled && played_sound {
                 (
-                    "Played the completion sound and sent a macOS notification test.",
+                    "Played the completion sound and sent a notification test.",
                     true,
                 )
             } else if completion_sound_enabled {
                 (
-                    "Sent a macOS notification test. The completion sound preview reported a separate failure.",
+                    "Sent a notification test. The completion sound preview reported a separate failure.",
                     true,
                 )
             } else {
-                ("Sent a macOS notification test.", true)
+                ("Sent a notification test.", true)
             }
         }
         GpuiMacOSNotificationDeliveryResult::PermissionDenied => {
             if completion_sound_enabled && played_sound {
                 (
-                    "Played the completion sound, but macOS is not allowing Ghostex notification banners. Use Open macOS Notification Settings to allow notifications.",
+                    "Played the completion sound, but the operating system is not allowing Ghostex notification banners. Use Open Notification Settings to allow notifications.",
                     false,
                 )
             } else {
                 (
-                    "macOS is not allowing Ghostex notification banners. Use Open macOS Notification Settings to allow notifications.",
+                    "The operating system is not allowing Ghostex notification banners. Use Open Notification Settings to allow notifications.",
                     false,
                 )
             }
         }
         GpuiMacOSNotificationDeliveryResult::PermissionNotDetermined => (
-            "macOS did not return a notification permission decision. Use the notification permission button or Open macOS Notification Settings.",
+            "The operating system did not return a notification permission decision. Use the notification permission button or Open Notification Settings.",
             false,
         ),
         GpuiMacOSNotificationDeliveryResult::Unsupported => (
-            "macOS notification banners are not available in this GPUI build.",
+            "System notification banners are not available in this GPUI build.",
             false,
         ),
         GpuiMacOSNotificationDeliveryResult::Failed => {
-            ("GPUI could not send a macOS notification test.", false)
+            ("GPUI could not send a notification test.", false)
         }
         GpuiMacOSNotificationDeliveryResult::Unknown => (
-            "GPUI could not determine whether the macOS notification test was sent.",
+            "GPUI could not determine whether the notification test was sent.",
             false,
         ),
     }

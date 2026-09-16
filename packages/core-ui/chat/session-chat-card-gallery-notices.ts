@@ -181,7 +181,7 @@ export const DETECTED_NOTICE_EXAMPLES = [
       detectedAt: '2026-09-06T12:00:00.000Z',
       title: 'Claude Code is waiting for sign-in',
       detail:
-        'Complete or cancel the sign-in flow in the terminal before sending a message. If macOS asks you to unlock the keychain, finish that step there.',
+        'Complete or cancel the sign-in flow in the terminal before sending a message. If your operating system asks you to unlock credential storage, finish that step there.',
       screenTail: 'Select login method:',
       actions: [
         {

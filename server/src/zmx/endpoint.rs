@@ -1050,9 +1050,12 @@ from stdin) instead of growing a second pty-write mechanism. One call = one
 stdin burst; the queue owns all pacing (clear burst, bracketed-paste body,
 separate delayed Enter) between bursts.
 */
+/// CDXC:SessionChat 2026-09-16 WHY:
+/// Escape and terminal controls must not wait for a fresh login shell to source the user's profile on every keystroke.
+/// The bundled provider receives these bytes on stdin; the user's existing terminal shell owns their interpretation.
 pub(crate) fn session_chat_zmx_write(zmx_name: &str, payload: &str) -> Result<i32, String> {
     let zmx = require_bundled_zmx()?;
-    let result = run_zmx_interaction_command(
+    let result = run_zmx_profileless_command(
         build_zmx_send_command(zmx_name, &zmx.executable_path),
         ZmxCommandOptions {
             stdin: Some(payload.to_string()),

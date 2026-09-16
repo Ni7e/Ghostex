@@ -311,7 +311,7 @@ export function RemoteMachineFields({
         </div>
         <FieldDescription className='settings-remote-machine-field-description'>
           {passwordDescription ??
-            'Passwords are stored in macOS Keychain. Leave blank and press Save to remove a saved password.'}
+            'Passwords are stored in secure system storage. Leave blank and press Save to remove a saved password.'}
         </FieldDescription>
       </Field>
       {/* CDXC:RemotePairing 2026-09-05 DECISION: User: simplify adding a machine and hide the WSL version details under Advanced. */}

@@ -262,7 +262,7 @@ impl GhostexGpuiApp {
             self.dispatch_gpui_app_modal_toast(
                 "warning",
                 "Delayed Send unavailable",
-                "Choose a Delayed Send timer between 1 minute and 24 days.",
+                "Choose a future send time within 24 days.",
                 cx,
             );
             return;
@@ -2048,6 +2048,7 @@ impl GhostexGpuiApp {
             | "confirmSidebarGitDirectMerge"
             | "runSidebarGitMultipleCommits"
             | "openSidebarGitChangedFileDiff"
+            | "openSidebarGitChangedFile"
             | "cancelSidebarGitCommit" => {
                 self.forward_gpui_git_commit_modal_command_to_sidebar(command_type, command, cx);
             }

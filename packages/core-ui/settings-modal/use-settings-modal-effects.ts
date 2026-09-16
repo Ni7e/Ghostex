@@ -23,7 +23,6 @@ export function useSettingsModalEffects({
   betaSectionRef,
   browserSectionRef,
   chatSectionRef,
-  debuggingSectionRef,
   dialogContentRef,
   editorSectionRef,
   fileOpeningSectionRef,
@@ -61,7 +60,6 @@ export function useSettingsModalEffects({
   betaSectionRef: RefObject<HTMLDivElement | null>;
   browserSectionRef: RefObject<HTMLDivElement | null>;
   chatSectionRef: RefObject<HTMLDivElement | null>;
-  debuggingSectionRef: RefObject<HTMLDivElement | null>;
   dialogContentRef: RefObject<HTMLDivElement | null>;
   editorSectionRef: RefObject<HTMLDivElement | null>;
   fileOpeningSectionRef: RefObject<HTMLDivElement | null>;
@@ -118,7 +116,6 @@ export function useSettingsModalEffects({
       statusIndicators: statusIndicatorsSectionRef,
       system: powerSectionRef,
       sidebarTags: sidebarTagsSectionRef,
-      debugging: debuggingSectionRef,
       tools: browserSectionRef,
       terminal: ghosttyTerminalSectionRef,
       terminalBehavior: ghosttyBehaviorSectionRef,

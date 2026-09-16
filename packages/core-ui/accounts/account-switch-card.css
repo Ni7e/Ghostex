@@ -542,16 +542,15 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup .gx-account-sw
 }
 
 /*
- * CDXC:AgentProviders 2026-09-15 DECISION:
- * User: the switch card has a dark backdrop behind it, like a modal. The overlay dims the transcript above the composer band and takes the pointer while a switch is in flight or finishing, so the conversation underneath cannot be clicked until the second account is ready.
- * A failed switch lets the pointer through again: its card stays until Retry or a new switch, and the transcript must remain readable and scrollable behind it.
- * The composer band below the overlay is untouched: the draft stays editable, and Send is dimmed by the composer's own block reason.
+ * CDXC:AgentProviders 2026-09-16 DECISION:
+ * User: the switch card has a dark backdrop behind it, like a modal, and the backdrop must cover the composer too, not only the transcript. The overlay spans the whole chat pane, stacks above the composer band (z-20 in session-chat-view.tsx), and takes the pointer while a switch is in flight or finishing, so nothing underneath can be used until the second account is ready. This supersedes the 2026-09-15 layout that stopped at the composer's top edge.
+ * A failed switch lets the pointer through again: its card stays until Retry or a new switch, and the transcript and composer must remain usable behind it.
  */
 .gx-account-switch-overlay {
   --as-backdrop: rgba(0, 0, 0, 0.58);
   position: absolute;
-  inset: 0 0 var(--ghostex-chat-composer-overlay, 0px);
-  z-index: 15;
+  inset: 0;
+  z-index: 30;
   display: flex;
   background: var(--as-backdrop);
   pointer-events: auto;
@@ -569,4 +568,34 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup .gx-account-sw
 .gx-account-switch-overlay .gx-account-switch-card {
   pointer-events: auto;
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+/* CDXC:AgentProviders 2026-09-15 DECISION: User: the backdrop and the switch card animate in a bit when the modal appears. The backdrop fades, the card fades while rising and settling from a slight scale-down; reduced-motion keeps the fade only. */
+.gx-account-switch-overlay {
+  animation: gx-account-switch-backdrop-in 180ms ease-out both;
+}
+.gx-account-switch-overlay .gx-account-switch-card {
+  animation: gx-account-switch-card-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes gx-account-switch-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes gx-account-switch-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gx-account-switch-overlay .gx-account-switch-card {
+    animation: gx-account-switch-backdrop-in 180ms ease-out both;
+  }
 }

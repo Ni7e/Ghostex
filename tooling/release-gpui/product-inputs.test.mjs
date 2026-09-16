@@ -221,7 +221,7 @@ describe('release product input map', () => {
     });
     expect(componentPlatformRequirements('windows-arm64')).toEqual({
       cef: ['windows-arm64'],
-      'code-server': ['linux-arm64', 'windows-arm64'],
+      'code-server': ['linux-arm64', 'windows-arm64', 'windows-native-arm64'],
     });
     expect(componentPlatformRequirements('linux-deb-x64')).toEqual({
       cef: ['linux-x64'],

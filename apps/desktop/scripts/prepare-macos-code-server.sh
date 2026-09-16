@@ -469,7 +469,10 @@ published_code_server_component_asset() {
 	if ! command -v gh >/dev/null 2>&1; then
 		return 1
 	fi
-	published_asset_names="$(gh release view "$component_tag" --repo maddada/Ghostex --json assets --jq '.assets[].name' 2>/dev/null || true)"
+	# Component tags live in the components repository (GHOSTEX_COMPONENTS_REPO, resolved by components-repo.mjs).
+	local components_repo
+	components_repo="$(node "$REPO_ROOT/tooling/release-gpui/components-repo.mjs")"
+	published_asset_names="$(gh release view "$component_tag" --repo "$components_repo" --json assets --jq '.assets[].name' 2>/dev/null || true)"
 	printf '%s\n' "$published_asset_names" | grep -Fxq "$asset_name" &&
 		printf '%s\n' "$published_asset_names" | grep -Fxq "$sidecar_name"
 }
@@ -526,7 +529,7 @@ stage_code_server_component_asset() {
 	if published_code_server_component_asset; then
 		reused_published_component=1
 		gh release download "$component_tag" \
-			--repo maddada/Ghostex \
+			--repo "$(node "$REPO_ROOT/tooling/release-gpui/components-repo.mjs")" \
 			--pattern "$(basename "$asset_path")" \
 			--pattern "$(basename "$asset_sidecar")" \
 			--dir "$asset_dir" \

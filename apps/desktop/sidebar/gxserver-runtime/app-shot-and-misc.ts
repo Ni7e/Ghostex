@@ -982,7 +982,7 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
         return;
       }
       this.postRemoteToast('warning', 'Remote project open unavailable', {
-        description: 'GPUI does not open remote project paths in local Finder.',
+        description: 'Remote project locations cannot be opened in the local file manager.',
       });
       return;
     }
@@ -1015,7 +1015,7 @@ export const gpuiSidebarRuntimeAppShotAndMiscMethods = {
       this.postRemoteToast('warning', 'Remote project open unavailable', {
         description:
           action === 'openActiveWorkspaceProjectInFinder'
-            ? 'GPUI does not open remote project paths in local Finder.'
+            ? 'Remote project locations cannot be opened in the local file manager.'
             : 'That editor is not supported for GPUI remote project opens.',
       });
       return;

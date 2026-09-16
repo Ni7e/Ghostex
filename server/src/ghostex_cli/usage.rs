@@ -1059,7 +1059,7 @@ Writing:
 
 Tabs (for --tab):
   settings integrations extensions osIntegration remote projects agents
-  accounts actions openTargets hotkeys about
+  accounts actions openTargets hotkeys debugging about
 "
     .to_string()
 }

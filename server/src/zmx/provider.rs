@@ -624,7 +624,7 @@ pub fn read_zmx_session_process_identities(
 
 pub fn read_zmx_existing_session_names() -> Result<HashSet<String>, ZmxEndpointError> {
     let zmx = require_zmx()?;
-    let result = run_zmx_probe_command(
+    let result = run_zmx_profileless_command(
         {
             #[cfg(windows)]
             {

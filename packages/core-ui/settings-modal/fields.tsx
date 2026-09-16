@@ -834,7 +834,7 @@ export function AppIconPickerField({
   return (
     <SettingRow
       advanced={advanced}
-      description='Choose a PNG for the macOS Dock and app-switcher icon.'
+      description='Choose a PNG for the application and app-switcher icon.'
       htmlFor={id}
       label='Custom app icon'
       wide
@@ -1764,7 +1764,7 @@ export function DiagnosticLoggingSettingsField({
           const scenarios = DIAGNOSTIC_LOGGING_SCENARIOS.filter((scenario) => scenario.group === group);
           return (
             <div className='grid gap-2' key={group}>
-              <div className='text-[13px] text-muted-foreground'>{group}</div>
+              <div className='text-[13px] text-muted-foreground'>{group === 'macOS' ? 'Native' : group}</div>
               <div className='grid gap-2'>
                 {scenarios.map((scenario) => {
                   const scenarioId = scenario.id as DiagnosticLoggingScenarioId;

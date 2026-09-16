@@ -114,7 +114,7 @@ import {
 } from './primary-agent-launcher';
 import { ProjectAgentLauncherIcon } from './project-agent-launcher-icon';
 import { getSidebarReorderActivationConstraints } from './sidebar-reorder-activation';
-import { useSidebarItemTooltipDelayMs } from './tooltip-delay';
+import { useSidebarTooltipDelayMs } from './tooltip-delay';
 
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 196;
@@ -531,21 +531,36 @@ export type SessionGroupSectionProps = {
   vscode: WebviewApi;
 };
 
+/**
+ * CDXC:Sidebar 2026-09-16 DECISION:
+ * User: section headers show orange/blue dots for working/done sessions and a separate plain circle for the section containing the active session, white on dark sidebars and #474747 on light sidebars.
+ */
 function ProjectSessionSectionToggle({
+  containsActiveSession,
   count,
   isCollapsed,
   label,
   onToggle,
+  summary,
 }: {
+  containsActiveSession: boolean;
   count: number;
   isCollapsed: boolean;
   label: string;
   onToggle: () => void;
+  summary: GroupSessionSummary;
 }) {
+  const statusLabel = [
+    containsActiveSession ? 'Contains active session' : '',
+    summary.workingCount > 0 ? `${summary.workingCount} working` : '',
+    summary.attentionCount > 0 ? `${summary.attentionCount} done or awaiting attention` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
   return (
     <button
       aria-expanded={!isCollapsed}
-      aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${label}`}
+      aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${label}${statusLabel ? `, ${statusLabel}` : ''}`}
       className='session-kind-toggle'
       onClick={(event) => {
         event.preventDefault();
@@ -558,6 +573,15 @@ function ProjectSessionSectionToggle({
         {label}
         {isCollapsed ? ` ⋅ ${count}` : null}
       </span>
+      {statusLabel ? (
+        <AppTooltip content={statusLabel}>
+          <span aria-hidden='true' className='session-kind-indicators'>
+            {containsActiveSession ? <span className='session-kind-dot' data-status='active' /> : null}
+            {summary.workingCount > 0 ? <span className='session-kind-dot' data-status='working' /> : null}
+            {summary.attentionCount > 0 ? <span className='session-kind-dot' data-status='attention' /> : null}
+          </span>
+        </AppTooltip>
+      ) : null}
       <IconChevronRight
         aria-hidden='true'
         className='session-kind-toggle-chevron'
@@ -750,7 +774,7 @@ export function SessionGroupSection({
     [vscode, groupId]
   );
 
-  const sidebarItemTooltipDelayMs = useSidebarItemTooltipDelayMs();
+  const sidebarItemTooltipDelayMs = useSidebarTooltipDelayMs();
   const group = useSidebarStore((state) => state.groupsById[groupId]);
   const storedSessionIds = useSidebarStore((state) => state.sessionIdsByGroup[groupId] ?? []);
   const sessionsById = useSidebarStore((state) => state.sessionsById);
@@ -1041,13 +1065,26 @@ export function SessionGroupSection({
   const renderedSnoozedSessionIds = renderedSessionIds.filter((sessionId) => {
     return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'snoozed';
   });
-  const projectSessionSectionCounts = orderedSessionIds.reduce<Record<ProjectSessionSection, number>>(
-    (counts, sessionId) => {
-      counts[getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs)] += 1;
-      return counts;
-    },
-    { browser: 0, drafts: 0, parked: 0, pinned: 0, sessions: 0, snoozed: 0 }
-  );
+  const projectSessionSections: Record<ProjectSessionSection, SidebarSessionItem[]> = {
+    browser: [],
+    drafts: [],
+    parked: [],
+    pinned: [],
+    sessions: [],
+    snoozed: [],
+  };
+  for (const sessionId of orderedSessionIds) {
+    const session = sessionsById[sessionId];
+    if (session) {
+      projectSessionSections[getProjectSessionSection(session, enableSessionParking, sessionListNowMs)].push(session);
+    }
+  }
+  const getSectionIndicators = (section: ProjectSessionSection) => ({
+    containsActiveSession:
+      group?.isActive === true && projectSessionSections[section].some((session) => session.isFocused),
+    count: projectSessionSections[section].length,
+    summary: getGroupSessionSummary(projectSessionSections[section]),
+  });
   const shouldRenderSessionKindLabels =
     renderedBrowserSessionIds.length > 0 && renderedBrowserSessionIds.length < renderedSessionIds.length;
   const firstBrowserSessionId = renderedBrowserSessionIds[0];
@@ -1150,7 +1187,7 @@ export function SessionGroupSection({
     ? getPinnedSessionDropGapKey({
         dropTarget: pinnedSessionDropIndicator,
         groupId: group.groupId,
-        visibleSessionIds,
+        visibleSessionIds: renderedSessionIds,
       })
     : undefined;
   const visibleGroupSessions = visibleSessionIds
@@ -2595,8 +2632,9 @@ export function SessionGroupSection({
                             projectSessionSection === 'snoozed'))) &&
                       collapsedProjectSessionSections[projectSessionSection];
                     /*
-                     * CDXC:Sessions 2026-09-10 WHY:
+                     * CDXC:Sessions 2026-09-15 WHY:
                      * The gap after the last pinned row is keyed to the next session, but belongs above that session's section heading, even when the next section is collapsed.
+                     * Resolve the gap key against renderedSessionIds, matching this loop: visibleSessionIds skips collapsed and Compact-hidden rows that still own headings, which moved the line below Drafts and Sessions.
                      */
                     const isPinnedSectionEndGap =
                       Boolean(projectContext) &&
@@ -2635,7 +2673,7 @@ export function SessionGroupSection({
                         ) : null}
                         {projectContext && sessionId === firstBrowserSessionId ? (
                           <ProjectSessionSectionToggle
-                            count={projectSessionSectionCounts.browser}
+                            {...getSectionIndicators('browser')}
                             isCollapsed={collapsedProjectSessionSections.browser}
                             label='Browser'
                             onToggle={() => toggleProjectSessionSection('browser')}
@@ -2643,7 +2681,7 @@ export function SessionGroupSection({
                         ) : null}
                         {projectContext && sessionId === firstPinnedSessionId ? (
                           <ProjectSessionSectionToggle
-                            count={projectSessionSectionCounts.pinned}
+                            {...getSectionIndicators('pinned')}
                             isCollapsed={collapsedProjectSessionSections.pinned}
                             label='Pinned'
                             onToggle={() => toggleProjectSessionSection('pinned')}
@@ -2651,7 +2689,7 @@ export function SessionGroupSection({
                         ) : null}
                         {projectContext && sessionId === firstUnpinnedSessionId ? (
                           <ProjectSessionSectionToggle
-                            count={projectSessionSectionCounts.sessions}
+                            {...getSectionIndicators('sessions')}
                             isCollapsed={collapsedProjectSessionSections.sessions}
                             label='Sessions'
                             onToggle={() => toggleProjectSessionSection('sessions')}
@@ -2659,7 +2697,7 @@ export function SessionGroupSection({
                         ) : null}
                         {(projectContext || isChatCollection) && sessionId === firstDraftSessionId ? (
                           <ProjectSessionSectionToggle
-                            count={projectSessionSectionCounts.drafts}
+                            {...getSectionIndicators('drafts')}
                             isCollapsed={collapsedProjectSessionSections.drafts}
                             label='Drafts'
                             onToggle={() => toggleProjectSessionSection('drafts')}
@@ -2667,7 +2705,7 @@ export function SessionGroupSection({
                         ) : null}
                         {(projectContext || isChatCollection) && sessionId === firstParkedSessionId ? (
                           <ProjectSessionSectionToggle
-                            count={projectSessionSectionCounts.parked}
+                            {...getSectionIndicators('parked')}
                             isCollapsed={collapsedProjectSessionSections.parked}
                             label='Parked'
                             onToggle={() => toggleProjectSessionSection('parked')}
@@ -2675,7 +2713,7 @@ export function SessionGroupSection({
                         ) : null}
                         {(projectContext || isChatCollection) && sessionId === firstSnoozedSessionId ? (
                           <ProjectSessionSectionToggle
-                            count={projectSessionSectionCounts.snoozed}
+                            {...getSectionIndicators('snoozed')}
                             isCollapsed={collapsedProjectSessionSections.snoozed}
                             label='Snoozed'
                             onToggle={() => toggleProjectSessionSection('snoozed')}
@@ -3082,7 +3120,7 @@ export function SessionGroupSection({
                  * Worktree project rows have their own compact context menu: open/reveal/rename first, then destructive worktree-specific actions. Delete removes the Git worktree checkout after confirmation; Remove only drops the Ghostex project row.
                  *
                  * CDXC:Projects 2026-06-04-13:39:
-                 * Project and worktree filesystem menu items should say Open Folder instead of Finder-specific copy so the macOS app presents OS-agnostic action names.
+                 * Project and worktree filesystem menu items should say Open File/Folder Location instead of Finder-specific copy so the macOS app presents OS-agnostic action names.
                  *
                  * CDXC:Projects 2026-06-08-09:19:
                  * Worktree project headings should keep Copy Path but omit Open so the compact menu prioritizes filesystem copy/reveal and worktree-specific rename/delete/remove actions.
@@ -3090,6 +3128,15 @@ export function SessionGroupSection({
                 <button className='session-context-menu-item' onClick={copyProjectPath} role='menuitem' type='button'>
                   <IconCopy aria-hidden='true' className='session-context-menu-icon' size={14} />
                   Copy Path
+                </button>
+                <button
+                  className='session-context-menu-item'
+                  onClick={openProjectInFinder}
+                  role='menuitem'
+                  type='button'
+                >
+                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
+                  Open File/Folder Location
                 </button>
                 {projectGitRemoteOriginUrl ? (
                   <button
@@ -3102,15 +3149,6 @@ export function SessionGroupSection({
                     Copy Remote URL
                   </button>
                 ) : null}
-                <button
-                  className='session-context-menu-item'
-                  onClick={openProjectInFinder}
-                  role='menuitem'
-                  type='button'
-                >
-                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  Open Folder
-                </button>
                 {/*
                  * CDXC:Worktrees 2026-08-10:
                  * Worktree rows deliberately do NOT offer the label-only
@@ -3212,6 +3250,15 @@ export function SessionGroupSection({
                   <IconCopy aria-hidden='true' className='session-context-menu-icon' size={14} />
                   Copy Path
                 </button>
+                <button
+                  className='session-context-menu-item'
+                  onClick={openProjectInFinder}
+                  role='menuitem'
+                  type='button'
+                >
+                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
+                  Open File/Folder Location
+                </button>
                 {projectGitRemoteOriginUrl ? (
                   <button
                     className='session-context-menu-item'
@@ -3223,15 +3270,6 @@ export function SessionGroupSection({
                     Copy Remote URL
                   </button>
                 ) : null}
-                <button
-                  className='session-context-menu-item'
-                  onClick={openProjectInFinder}
-                  role='menuitem'
-                  type='button'
-                >
-                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  Open Folder
-                </button>
                 {onCreateProjectCollection && onMoveProjectToCollection ? (
                   <button
                     className='session-context-menu-item'

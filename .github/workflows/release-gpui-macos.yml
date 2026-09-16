@@ -78,6 +78,18 @@ jobs:
         with:
           fetch-depth: 0
           submodules: false
+      # Component tags are published to a separate repository that
+      # github.token cannot write; fail before any build work when the PAT is
+      # missing (see tooling/release-gpui/components-repo-setup.md).
+      - name: Require the components publishing token
+        shell: bash
+        env:
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "$COMPONENTS_GITHUB_TOKEN" ]]; then
+            echo "::error::COMPONENTS_GITHUB_TOKEN is not configured; component tags are published to $(node tooling/release-gpui/components-repo.mjs) and github.token cannot write there. See tooling/release-gpui/components-repo-setup.md."
+            exit 1
+          fi
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.11
       - uses: oven-sh/setup-bun@v2
@@ -367,6 +379,7 @@ jobs:
       - name: Assemble, sign, and validate Ghostex.app
         env:
           GH_TOKEN: ${{ github.token }}
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: tooling/release-gpui/macos.sh --phase assemble "${{ inputs.version }}"
       - name: Create DMG

@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/packages/components/ui/field';
 import { Textarea } from '@/packages/components/ui/textarea';
@@ -172,7 +173,9 @@ export function SessionNoteModal({ initialNote, isOpen, onCancel, onConfirm, ses
               value={note}
             />
             <FieldDescription>
-              {hasExistingNote ? 'Save an empty note to clear it.' : 'Press ⌘/Ctrl + Enter to save.'}
+              {hasExistingNote
+                ? 'Save an empty note to clear it.'
+                : `Press ${formatSidebarHotkeyLabel('cmd+enter')} to save.`}
             </FieldDescription>
           </Field>
         </FieldGroup>

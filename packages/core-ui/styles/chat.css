@@ -14,6 +14,7 @@
  */
 @import '@fontsource-variable/dm-sans/index.css';
 @import '../chat/session-chat-card-styles.css';
+@import '../chat/session-chat-status-card.css';
 
 /*
  * CDXC:SessionChat 2026-07-31:
@@ -118,13 +119,12 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
   color: var(--primary-foreground);
 }
 
-/* Mirror gpui's native terminal find chrome exactly. The chat transcript is a
-   CEF document, so it cannot instantiate the Rust GPUI element directly; this
-   row keeps the same normal-layout dimensions, colors, type, and controls. */
+/* The chat transcript is a CEF document, so it mirrors the native terminal
+   find row's normal-layout dimensions, type, and controls using chat theme colors. */
 .ghostex-chat-terminal-search-row {
   align-items: center;
-  background: #000;
-  border-bottom: 1px solid #202020;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex: 0 0 35px;
   height: 35px;
@@ -135,8 +135,8 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 
 .ghostex-chat-terminal-search-bar {
   align-items: center;
-  background: #000;
-  border-left: 1px solid #252525;
+  background: var(--background);
+  border-left: 1px solid var(--border);
   display: flex;
   flex: 0 1 300px;
   gap: 4px;
@@ -150,7 +150,7 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
   appearance: none;
   background: transparent;
   border: 0;
-  color: rgba(255, 255, 255, 0.937);
+  color: var(--foreground);
   flex: 1 1 auto;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 13px;
@@ -161,12 +161,12 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 }
 
 .ghostex-chat-terminal-search-input::placeholder {
-  color: rgba(255, 255, 255, 0.56);
+  color: var(--muted-foreground);
   opacity: 1;
 }
 
 .ghostex-chat-terminal-search-count {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--muted-foreground);
   flex: 0 0 auto;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
@@ -185,11 +185,11 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 .ghostex-chat-terminal-search-button {
   align-items: center;
   appearance: none;
-  background: #000;
+  background: var(--background);
   border: 0;
-  border-left: 1px solid #252525;
+  border-left: 1px solid var(--border);
   border-radius: 0;
-  color: #cfcfcf;
+  color: var(--foreground);
   cursor: default;
   display: flex;
   flex: 0 0 42px;
@@ -208,7 +208,7 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 }
 
 .ghostex-chat-terminal-search-button:hover {
-  background: #343434;
+  background: var(--accent);
 }
 
 /* CDXC:SessionChat 2026-09-09 DECISION:
@@ -226,7 +226,8 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 /* The chat palette is intentionally scoped to the conversation. The
    surrounding Ghostex shell remains dark even when chat content is light. */
 .ghostex-session-chat-scope[data-chat-theme='light'],
-body[data-session-chat-theme='light'] .ghostex-session-chat-popup {
+.ghostex-session-chat-popup[data-chat-theme='light'],
+body[data-session-chat-theme='light'] .ghostex-session-chat-popup:not([data-chat-theme]) {
   color-scheme: light;
   --background: oklch(99.2% 0 0);
   --foreground: oklch(27.4% 0.006 286.033);
@@ -283,7 +284,8 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup {
 }
 
 .ghostex-session-chat-scope[data-chat-theme='dark'],
-body[data-session-chat-theme='dark'] .ghostex-session-chat-popup {
+.ghostex-session-chat-popup[data-chat-theme='dark'],
+body[data-session-chat-theme='dark'] .ghostex-session-chat-popup:not([data-chat-theme]) {
   color-scheme: dark;
   --ghostex-codex-logo: #ffffff;
   --ghostex-light-icon-color: initial;
@@ -1132,9 +1134,10 @@ the markdown block) rather than pinned to a tier of its own.
 
 .ghostex-chat-scroll-bottom-button,
 .ghostex-chat-scroll-bottom-button:not(:disabled):hover {
-  /* Matches the chat page background (see the dark-theme --background). */
-  background-color: var(--background);
+  background-color: var(--card);
+  background-clip: border-box;
   border-radius: 9999px;
+  color: var(--chat-primary-foreground);
 }
 
 /* CDXC:SessionChat 2026-09-04 DECISION: User: the scroll-to-bottom button
@@ -1184,14 +1187,9 @@ the markdown block) rather than pinned to a tier of its own.
   );
 }
 
-.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-composer {
-  background: #141414;
-}
-
-/* The interactive prompt card stands in for the composer while a question is
-   live, so it wears the same raised surface instead of disappearing into the
-   conversation background (--card is the page background in this theme). */
-.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-question-card {
+.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-composer,
+.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-scroll-bottom-button,
+.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-scroll-bottom-button:not(:disabled):hover {
   background: #141414;
 }
 
@@ -1671,6 +1669,13 @@ body[data-session-chat-theme='dark']
 .ghostex-chat-model-pill-icon {
   display: inline-flex;
   margin-inline-end: 2px;
+}
+
+/* CDXC:Theming 2026-09-16 DECISION:
+ * User: darken the model and effort text in light mode to match the composer action icons on the right.
+ */
+.ghostex-session-chat-scope[data-chat-theme='light'] :is(.ghostex-chat-model-pill, .ghostex-chat-options-pill) {
+  color: inherit;
 }
 
 .ghostex-chat-footer-control:not(:disabled):hover {
@@ -3153,7 +3158,12 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   white-space: nowrap;
 }
 
-.ghostex-chat-image-menu-item:hover {
+.ghostex-chat-image-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ghostex-chat-image-menu-item:not(:disabled):hover {
   background: var(--accent);
   color: var(--accent-foreground);
 }
@@ -3699,27 +3709,6 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 
 /* One line above the composer. It only ever OFFERS the other device's draft:
    pressing Use is the single path that writes the composer. */
-.ghostex-chat-draft-conflict {
-  align-items: center;
-  background: color-mix(in srgb, var(--foreground) 5%, transparent);
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  color: var(--muted-foreground);
-  display: flex;
-  font-size: 0.75rem;
-  gap: 0.375rem;
-  min-width: 0;
-  padding: 0.3125rem 0.625rem;
-}
-
-.ghostex-chat-draft-conflict-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .ghostex-chat-draft-conflict-action {
   background: none;
   border: 0;
@@ -3743,63 +3732,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
    read as one stack, but a tighter radius and no focus ring, so the composer
    stays the only thing that looks typeable. */
 .ghostex-chat-agent-tasks {
-  background: var(--card);
-  border: 1px solid var(--input);
-  border-radius: 1rem;
-  display: flex;
-  flex-direction: column;
   margin-bottom: 0.375rem;
-  min-width: 0;
-  overflow: hidden;
-}
-
-/* The header is the fold toggle, edge to edge, so the whole bar is the target
-   and there is no separate button to hunt for. */
-.ghostex-chat-agent-tasks-header {
-  align-items: center;
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  display: flex;
-  font: inherit;
-  gap: 0.5rem;
-  min-width: 0;
-  padding: 0.4375rem 0.75rem 0.4375rem 0.875rem;
-  text-align: left;
-  width: 100%;
-}
-
-.ghostex-chat-agent-tasks-header:hover {
-  background: color-mix(in srgb, var(--foreground) 3%, transparent);
-}
-
-.ghostex-chat-agent-tasks-header:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ring) 40%, transparent);
-  outline-offset: -2px;
-}
-
-.ghostex-chat-agent-tasks-icon {
-  color: var(--muted-foreground);
-  flex: none;
-}
-
-.ghostex-chat-agent-tasks-title {
-  color: var(--foreground);
-  flex: none;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  line-height: 1.2;
-}
-
-.ghostex-chat-agent-tasks-count {
-  color: var(--muted-foreground);
-  flex: none;
-  font-size: 0.6875rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
 }
 
 /* A short fixed-width bar, not a stretch one: progress is a glance, and the
@@ -3821,52 +3754,28 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   transition: width 240ms ease;
 }
 
-/* Present in both states so the chevron never jumps; only carries text when
-   the panel is folded. */
-.ghostex-chat-agent-tasks-headline {
-  color: var(--muted-foreground);
-  flex: 1 1 auto;
-  font-size: 0.75rem;
-  line-height: 1.2;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ghostex-chat-agent-tasks-chevron {
-  color: var(--muted-foreground);
-  flex: none;
-  transition: transform 160ms ease;
-}
-
-.ghostex-chat-agent-tasks-collapsed .ghostex-chat-agent-tasks-chevron {
-  transform: rotate(-90deg);
-}
-
 /* Around seven rows, then scroll: a long plan must never push the input off
    the pane. Same rule the fleet and queue strips follow. */
 .ghostex-chat-agent-tasks-rows {
-  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   display: flex;
   flex-direction: column;
-  gap: 0.0625rem;
+  gap: 0.25rem;
   list-style: none;
   margin: 0;
   max-height: 12.5rem;
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 0.375rem 0.75rem 0.4375rem 0.875rem;
+  padding: 0;
 }
 
 .ghostex-chat-agent-tasks-row {
   align-items: baseline;
   color: var(--foreground);
   display: flex;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   gap: 0.5rem;
-  line-height: 1.25rem;
+  line-height: 1.375rem;
   min-width: 0;
 }
 
@@ -3938,9 +3847,26 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 }
 
 .ghostex-chat-agent-tasks-fold {
+  border-top: 1px solid var(--chat-card-hairline);
   display: flex;
   min-width: 0;
-  padding-left: 1.375rem;
+  padding-top: 0.5rem;
+}
+
+.ghostex-session-chat-scope button.ghostex-chat-agent-tasks-fold-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0;
+}
+
+.ghostex-session-chat-scope button.ghostex-chat-agent-tasks-fold-toggle:hover {
+  color: var(--foreground);
 }
 
 /* CDXC:AgentScreenDetection 2026-08-23:
@@ -3951,66 +3877,11 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
    Same quiet weight as the draft-conflict bar above it, so neither reads as a
    second composer. */
 .ghostex-chat-agent-fleet {
-  /* CDXC:SessionChat 2026-09-07 DECISION: User: increase the space below the Subagents title by 5px and the padding on every side by 8px. */
   /* Its own container, because the composer's is on a SIBLING box and cannot be
      queried from here. Same technique the composer footer uses to drop the
      agent name under a narrow pane. */
   container: ghostex-chat-agent-fleet / inline-size;
-  background: color-mix(in srgb, var(--foreground) 3%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  border-radius: 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: calc(0.125rem + 5px);
   margin-bottom: 0.375rem;
-  min-width: 0;
-  padding: calc(0.375rem + 8px) calc(0.5rem + 8px);
-}
-
-.ghostex-chat-agent-fleet-header {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  display: flex;
-  gap: 0.375rem;
-  padding: 0.375rem 0.5rem;
-  text-align: left;
-  width: 100%;
-}
-
-.ghostex-chat-agent-fleet-header > .ghostex-chat-disclosure-chevron {
-  margin-left: auto;
-}
-
-.ghostex-chat-agent-fleet-header:hover .ghostex-chat-agent-fleet-title {
-  color: var(--foreground);
-}
-
-.ghostex-chat-agent-fleet-header:focus-visible {
-  border-radius: 0.25rem;
-  outline: 1px solid var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent);
-}
-
-.ghostex-chat-agent-fleet-title {
-  color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  letter-spacing: 0.04em;
-  line-height: 1.2;
-  text-transform: none;
-}
-
-/* The count carries the roster size on its own, so the title never has to be
-   rewritten with a number in it. */
-.ghostex-chat-agent-fleet-count {
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
-  border-radius: 999px;
-  color: var(--muted-foreground);
-  font-size: 0.625rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  padding: 0.1875rem 0.3125rem;
 }
 
 /* ONE grid for every row, not a flex box per row: that is what makes each task
@@ -4185,36 +4056,6 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 
 /* --- chat-bar extensions ---------------------------------------------------- */
 
-.ghostex-chat-extension-panel {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  display: grid;
-  grid-template-rows: 2rem minmax(5.5rem, 1fr);
-  height: clamp(7.5rem, 28vh, 40vh);
-  min-height: 7.5rem;
-  overflow: hidden;
-}
-
-.ghostex-chat-extension-panel[data-minimized='true'] {
-  grid-template-rows: 2rem;
-  height: 2rem;
-  min-height: 2rem;
-}
-
-.ghostex-chat-extension-header {
-  align-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  display: flex;
-  gap: 0.375rem;
-  min-width: 0;
-  padding: 0 0.25rem 0 0.625rem;
-}
-
-.ghostex-chat-extension-panel[data-minimized='true'] .ghostex-chat-extension-header {
-  border-bottom: none;
-}
-
 .ghostex-chat-extension-icon {
   border-radius: 0.1875rem;
   height: 1rem;
@@ -4222,48 +4063,35 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   width: 1rem;
 }
 
-.ghostex-chat-extension-title,
-.ghostex-chat-extension-switcher {
-  color: var(--foreground);
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1rem;
-  min-width: 0;
-}
-
 .ghostex-chat-extension-switcher {
   align-items: center;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 0.25rem;
+  color: var(--foreground);
   display: inline-flex;
+  font: inherit;
   gap: 0.25rem;
   max-width: min(16rem, 60%);
-  padding: 0.125rem 0.25rem;
+  min-width: 0;
+  padding: 0 0.25rem;
+  vertical-align: baseline;
 }
 
 .ghostex-chat-extension-switcher:hover {
   background: var(--accent);
 }
 
-.ghostex-chat-extension-switcher:focus-visible,
-.ghostex-chat-extension-header-button:focus-visible {
+.ghostex-chat-extension-switcher:focus-visible {
   border-color: var(--ring);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent);
   outline: none;
 }
 
-.ghostex-chat-extension-header-button {
-  border: 1px solid transparent;
-  color: var(--muted-foreground);
-}
-
-.ghostex-chat-extension-header-button:hover {
-  color: var(--foreground);
-}
-
 .ghostex-chat-extension-body {
-  min-height: 0;
+  height: clamp(5.5rem, 24vh, 36vh);
+  min-height: 5.5rem;
+  overflow: hidden;
   position: relative;
 }
 

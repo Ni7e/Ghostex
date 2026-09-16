@@ -1,3 +1,5 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
+import { detectghostexHotkeyPlatform } from '@/packages/shared/ghostex-hotkeys';
 import {
   IconAlertTriangle,
   IconArrowLeft,
@@ -51,7 +53,6 @@ import {
   ADD_PROJECT_ROOT_BROWSE_PATH,
   addProjectEmptyStateMessage,
   addProjectInitialBrowseQuery,
-  addProjectModifierLabel,
   addProjectNewFolderMessage,
   addProjectPathPlaceholder,
   addProjectRepositoryActionLabel,
@@ -60,7 +61,6 @@ import {
   addProjectSourceRowDescription,
   addProjectSourceRowTitle,
   buildAddProjectSourceReadiness,
-  isPrimaryModifierPlatform,
   matchesAddProjectFilter,
   orderedAddProjectSources,
 } from './add-project-modal-logic';
@@ -470,8 +470,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
         : willCreateProjectPath
           ? 'Create & Add'
           : 'Add';
-  const submitModifierLabel = addProjectModifierLabel(platform);
-  const addShortcutLabel = hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : 'Enter';
+  const addShortcutLabel = hasHighlightedBrowseItem ? formatSidebarHotkeyLabel('cmd+enter') : 'Enter';
   const readiness = useMemo(
     () => buildAddProjectSourceReadiness(machineId ? discoveryByMachineId[machineId] : null),
     [discoveryByMachineId, machineId]
@@ -1132,7 +1131,7 @@ function AddProjectModalBody(props: AddProjectModalProps) {
   }
 
   function isPrimaryModifierPressed(event: ReactKeyboardEvent<HTMLInputElement>): boolean {
-    return isPrimaryModifierPlatform(platform) ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    return detectghostexHotkeyPlatform() === 'mac' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>): void {

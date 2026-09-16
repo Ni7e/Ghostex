@@ -34,6 +34,10 @@ pub(crate) const PROJECT_EDITOR_COMPANION_WIDTH_RATIO: f32 = 0.32;
 
 pub(crate) const PROJECT_EDITOR_COMPANION_MIN_WIDTH: f32 = PANE_RESIZE_MINIMUM_WIDTH;
 
+/// CDXC:Workarea 2026-09-16 DECISION:
+/// User: main panes in non-agent views, including Docs and Browser, have a minimum width of 455px.
+pub(crate) const PROJECT_EDITOR_MAIN_MIN_WIDTH: f32 = 455.0;
+
 pub(crate) const PROJECT_EDITOR_COMPANION_SPLIT_RATIO: f32 = 0.5;
 
 pub(crate) const PROJECT_EDITOR_AWAKE_MODE_CAP: usize = 3;
@@ -45,7 +49,11 @@ pub(crate) const GPUI_NATIVE_TITLEBAR_TIPS: &[GpuiNativeTitlebarTip] = &[
         body: "Search for project actions, pane splits and moves, session controls, settings shortcuts, and other Ghostex actions.",
         icon_path: COMMAND_ICON_COMMAND,
         id: "command-palette-all-actions",
-        title: "Press Cmd Shift P anywhere to open Ghostex Quick Access",
+        title: if cfg!(target_os = "macos") {
+            "Press ⌘⇧P anywhere to open Ghostex Quick Access"
+        } else {
+            "Press Ctrl+Shift+P anywhere to open Ghostex Quick Access"
+        },
     },
     GpuiNativeTitlebarTip {
         body: "Open Settings to customize sidebar presets, visible details, agents, actions, project tools, and workspace open targets.",
@@ -66,7 +74,7 @@ pub(crate) const GPUI_NATIVE_TITLEBAR_TIPS: &[GpuiNativeTitlebarTip] = &[
         title: "Run the same project in a worktree",
     },
     GpuiNativeTitlebarTip {
-        body: "Configure Ghostex Computer Use in Settings, then ask agents to use /ghostex-computer-use for native macOS app control.",
+        body: "Configure Ghostex Computer Use in Settings, then ask agents to use /ghostex-computer-use for desktop app control.",
         icon_path: TITLEBAR_ICON_DEVICE_DESKTOP,
         id: "use-ghostex-computer-use-skill",
         title: "Use /ghostex-computer-use for desktop control",

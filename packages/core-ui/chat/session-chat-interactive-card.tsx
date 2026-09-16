@@ -12,14 +12,15 @@
 //     instead of vanishing, so the question is still visible with a hint to
 //     answer it in the terminal.
 //
-// Layout: the card takes the composer's place while a prompt is live, so it
-// wears the composer's surface (same radius, border, and dark fill) with the
-// question panel stacked on top of a composer-shaped answer row. One question
-// at a time behind a collapsible header with an "n/total" counter, options as
-// full-width rows optionally carrying their 1-9 shortcut key, and a free-text
-// answer in the bottom row next to the send button.
+// Layout: the card takes the composer's place while a prompt is live. Since
+// 2026-09-16 it is the shared status card (session-chat-status-card.tsx): a
+// shield or question icon, the title, the tool name or question counter
+// right-aligned on the first body row, options as full-width rows optionally
+// carrying their 1-9 shortcut key, and the footer band holding the free-text
+// answer, Cancel and the send button.
+// CDXC:SessionChat 2026-09-16 DECISION: User: the question's X was the interrupt, an action rather than a dismiss, and sat beside the collapse chevron; it is a Cancel button in the footer instead. The approval keeps its circled X since it has no chevron.
 
-import { IconArrowLeft, IconChevronRight, IconTerminal2, IconX } from '@tabler/icons-react';
+import { IconArrowLeft, IconHelpCircle, IconShieldCheck, IconTerminal2 } from '@tabler/icons-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   GxserverAnswerSessionChatPromptParams,
@@ -30,6 +31,12 @@ import type {
 import { cn } from '@/packages/components/utils';
 import { Button } from '../../components/ui/button';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
+import {
+  SessionChatStatusCard,
+  SessionChatStatusCardActions,
+  SessionChatStatusCardLead,
+  SessionChatStatusCardRow,
+} from './session-chat-status-card';
 import { useSessionChatQuestionDrafts } from './session-chat-question-drafts';
 import { SessionChatAnswerInput } from './session-chat-answer-input';
 import type { SaveSessionChatImage } from './session-chat-image-attachments';
@@ -75,110 +82,6 @@ interface DraftAnswer {
   other: string;
 }
 
-/** Composer-shaped surface: the card stands in for the composer while live. */
-function CardShell({ children, kind }: { children?: React.ReactNode; kind: string }) {
-  return (
-    <div
-      className='ghostex-chat-question-card ghostex-chat-prompt-card min-w-0 overflow-hidden rounded-3xl border border-input bg-card'
-      data-kind={kind}
-    >
-      {children}
-    </div>
-  );
-}
-
-/** The panel half of the card: everything above the answer row. */
-function CardPanel({ children }: { children: React.ReactNode }) {
-  return <div className='border-b border-border/65 bg-muted/20'>{children}</div>;
-}
-
-/**
- * Section label + trailing controls. The label row is the collapse trigger when
- * `onToggleCollapsed` is given; a collapsed panel echoes the question next to
- * the label so the header still says what is being asked.
- */
-function CardHeader({
-  collapsed,
-  collapsedSummary,
-  counter,
-  label,
-  onDismiss,
-  onToggleCollapsed,
-  uppercase = true,
-}: {
-  collapsed?: boolean;
-  collapsedSummary?: string;
-  counter?: string;
-  label: string;
-  onDismiss?: () => void;
-  onToggleCollapsed?: () => void;
-  uppercase?: boolean;
-}) {
-  const labelRow = (
-    <>
-      <span
-        className={cn(
-          'ghostex-chat-card-title text-[11px] font-semibold text-muted-foreground',
-          uppercase ? 'tracking-widest uppercase' : 'tracking-wide',
-          onToggleCollapsed && 'group-hover/header:text-foreground'
-        )}
-      >
-        {label}
-      </span>
-      {counter ? (
-        <span className='flex h-5 shrink-0 items-center rounded-md bg-muted/60 px-1.5 ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] text-[10px] font-medium text-muted-foreground tabular-nums'>
-          {counter}
-        </span>
-      ) : null}
-      {collapsed && collapsedSummary ? (
-        <span className='ghostex-chat-card-content min-w-0 flex-1 truncate text-xs text-muted-foreground'>
-          {collapsedSummary}
-        </span>
-      ) : null}
-    </>
-  );
-
-  return (
-    <div className='flex items-center gap-1 px-2.5 py-2.5'>
-      {onToggleCollapsed ? (
-        <button
-          className='group/header flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors duration-150'
-          // The sidebar's legacy `button:where(:not([data-slot]))` base paints a
-          // 1px app border on every bare button; naming the slot opts these
-          // custom rows out so their Tailwind borders/fills are the only ones.
-          data-slot='session-chat-question-header'
-          onClick={onToggleCollapsed}
-          title={collapsed ? 'Show the question and its options' : 'Hide the question and its options'}
-          type='button'
-        >
-          {labelRow}
-          {/* Control tier, like every other expander in the chat. */}
-          <IconChevronRight
-            aria-hidden='true'
-            className={cn(
-              'ghostex-chat-disclosure-chevron ml-auto text-muted-foreground group-hover/header:text-foreground',
-              !collapsed && 'is-open'
-            )}
-          />
-        </button>
-      ) : (
-        <div className='flex min-w-0 flex-1 items-center gap-3 px-2.5 py-1.5'>{labelRow}</div>
-      )}
-      {onDismiss ? (
-        <Button
-          className='ghostex-chat-card-dismiss'
-          aria-label='Dismiss'
-          onClick={onDismiss}
-          size='icon-xs'
-          variant='outline'
-        >
-          <IconX aria-hidden='true' stroke={2} />
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
 function CardNotice({
   onSwitchToTerminal,
   text,
@@ -203,16 +106,6 @@ function CardNotice({
           Terminal
         </Button>
       ) : null}
-    </div>
-  );
-}
-
-/** Composer-shaped bottom row: notices, free text, and the primary action. */
-function CardActionRow({ children, notice }: { children: React.ReactNode; notice?: React.ReactNode }) {
-  return (
-    <div className='grid gap-2 px-4 py-2.5'>
-      {notice}
-      <div className='ghostex-chat-card-input-row flex items-center gap-2'>{children}</div>
     </div>
   );
 }
@@ -421,49 +314,59 @@ export function SessionChatInteractiveCard({
     <CardNotice text={READ_ONLY_NOTICE} tone='muted' {...(onSwitchToTerminal ? { onSwitchToTerminal } : {})} />
   ) : null;
 
+  // The notice (save error, failed delivery, read-only) is a full-width line
+  // in the footer above the controls.
+  const footerNotice = notice ? <div className='basis-full'>{notice}</div> : null;
+
   if (prompt.kind === 'approval') {
     return (
-      <CardShell kind='approval'>
-        <CardPanel>
-          <CardHeader label='Approval Request' uppercase={false} {...(readOnly ? {} : { onDismiss: dismiss })} />
-          <div className='min-w-0 px-5 pt-1 pb-3.5'>
-            <p className='text-sm text-foreground/90'>Allow this command?</p>
-            {prompt.summary ? (
-              <div className='mt-3 min-w-0 rounded-lg border border-border/65 bg-background/70 p-3'>
-                <pre className='max-h-40 min-w-0 overflow-auto font-mono text-xs leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]'>
-                  {prompt.summary}
-                </pre>
-              </div>
-            ) : null}
+      <SessionChatStatusCard
+        className='ghostex-chat-question-card'
+        data-kind='approval'
+        footer={
+          <>
+            {footerNotice}
+            <SessionChatStatusCardActions>
+              <Button
+                data-chat-answer-control=''
+                disabled={submitting || readOnly}
+                onClick={() => {
+                  submitAnswer({ approvalSend: '', kind: 'approval' });
+                }}
+                size='sm'
+                variant='outline'
+              >
+                Deny
+              </Button>
+              <Button
+                data-chat-answer-control=''
+                disabled={submitting || readOnly}
+                onClick={() => {
+                  submitAnswer({ approvalSend: '1', kind: 'approval' });
+                }}
+                size='sm'
+                variant='outline'
+              >
+                Allow
+              </Button>
+            </SessionChatStatusCardActions>
+          </>
+        }
+        lead={<SessionChatStatusCardLead icon={IconShieldCheck} />}
+        title='Approval request'
+        {...(readOnly ? {} : { onClose: dismiss })}
+      >
+        <SessionChatStatusCardRow annotation={prompt.tool}>
+          <p className='text-foreground/90'>Allow this command?</p>
+        </SessionChatStatusCardRow>
+        {prompt.summary ? (
+          <div className='min-w-0 rounded-lg border border-border/65 bg-background/70 p-3'>
+            <pre className='max-h-40 min-w-0 overflow-auto font-mono text-xs leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]'>
+              {prompt.summary}
+            </pre>
           </div>
-        </CardPanel>
-        <CardActionRow {...(notice ? { notice } : {})}>
-          <div className='ml-auto flex items-center gap-2'>
-            <Button
-              data-chat-answer-control=''
-              disabled={submitting || readOnly}
-              onClick={() => {
-                submitAnswer({ approvalSend: '', kind: 'approval' });
-              }}
-              size='sm'
-              variant='outline'
-            >
-              Deny
-            </Button>
-            <Button
-              data-chat-answer-control=''
-              disabled={submitting || readOnly}
-              onClick={() => {
-                submitAnswer({ approvalSend: '1', kind: 'approval' });
-              }}
-              size='sm'
-              variant='outline'
-            >
-              Allow
-            </Button>
-          </div>
-        </CardActionRow>
-      </CardShell>
+        ) : null}
+      </SessionChatStatusCard>
     );
   }
 
@@ -501,84 +404,92 @@ export function SessionChatInteractiveCard({
       : questionAnswered(questionIndex)
         ? 'Next'
         : 'Skip';
+  const counter = questions.length > 1 ? `question ${questionIndex + 1} of ${questions.length}` : undefined;
+  const canDismiss = !(readOnly || savingImages);
 
   return (
-    <CardShell kind='question'>
-      <CardPanel>
-        <CardHeader
-          collapsed={collapsed}
-          label={question?.header ?? (questions.length === 1 ? 'Question' : 'Questions')}
-          onToggleCollapsed={() => setCollapsed((value) => !value)}
-          {...(question ? { collapsedSummary: question.question } : {})}
-          {...(questions.length > 1 ? { counter: `${questionIndex + 1}/${questions.length}` } : {})}
-          {...(readOnly || savingImages ? {} : { onDismiss: dismiss })}
-        />
-        {question && !collapsed ? (
-          <div className='px-4 pt-1 pb-3 sm:px-5'>
-            <p className='text-sm text-foreground/90'>{question.question}</p>
-            {question.multiSelect ? (
-              <p className='mt-1 text-xs text-muted-foreground'>Select one or more options.</p>
-            ) : null}
-            <div className='mt-3'>
-              <SessionChatChoiceRows
-                onSelect={selectOption}
-                options={question.options}
-                readOnly={readOnly || submitting || savingImages}
-                selected={customAnswerActive ? [] : draft.indices}
-                showShortcuts={showShortcutLabels}
-              />
-            </div>
-          </div>
-        ) : null}
-      </CardPanel>
-      <CardActionRow {...(notice ? { notice } : {})}>
-        {questionIndex > 0 ? (
-          <Button
-            aria-label='Previous question'
-            disabled={submitting || savingImages}
-            onClick={() => setActiveQuestion(questionIndex - 1)}
-            size='icon-sm'
-            variant='ghost'
-          >
-            <IconArrowLeft aria-hidden='true' stroke={2} />
-          </Button>
-        ) : null}
-        {question?.allowCustom === false ? (
-          // The asking tool takes no free-text answer (Pi's cursor_ask_question
-          // with allowCustom: false), so only the options are offered.
-          <div aria-hidden='true' className='min-w-0 flex-1' />
-        ) : (
-          <SessionChatAnswerInput
-            key={`${promptContentKey}:${questionIndex}`}
-            className='w-full min-w-0 resize-none bg-transparent text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-default'
-            disabled={readOnly || submitting}
-            onPasteImage={onPasteImage}
-            onPendingChange={setSavingImages}
-            onUpdate={(update) =>
-              updateDraft(String(questionIndex), (current) => ({ ...current, other: update(current.other) }))
-            }
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-                event.preventDefault();
-                if (!event.repeat) advance();
+    <SessionChatStatusCard
+      className='ghostex-chat-question-card'
+      data-kind='question'
+      footer={
+        <>
+          {footerNotice}
+          {questionIndex > 0 ? (
+            <Button
+              aria-label='Previous question'
+              disabled={submitting || savingImages}
+              onClick={() => setActiveQuestion(questionIndex - 1)}
+              size='icon-sm'
+              variant='ghost'
+            >
+              <IconArrowLeft aria-hidden='true' stroke={2} />
+            </Button>
+          ) : null}
+          {question?.allowCustom === false ? (
+            // The asking tool takes no free-text answer (Pi's cursor_ask_question
+            // with allowCustom: false), so only the options are offered.
+            <div aria-hidden='true' className='min-w-0 flex-1' />
+          ) : (
+            <SessionChatAnswerInput
+              key={`${promptContentKey}:${questionIndex}`}
+              className='w-full min-w-0 flex-1 resize-none bg-transparent text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-default'
+              disabled={readOnly || submitting}
+              onPasteImage={onPasteImage}
+              onPendingChange={setSavingImages}
+              onUpdate={(update) =>
+                updateDraft(String(questionIndex), (current) => ({ ...current, other: update(current.other) }))
               }
-            }}
-            placeholder='Write a custom answer…'
-            theme={theme}
-            value={draft.other}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+                  event.preventDefault();
+                  if (!event.repeat) advance();
+                }
+              }}
+              placeholder='Write a custom answer…'
+              theme={theme}
+              value={draft.other}
+            />
+          )}
+          {canDismiss ? (
+            <Button data-chat-answer-control='' onClick={dismiss} size='sm' variant='ghost'>
+              Cancel
+            </Button>
+          ) : null}
+          <Button
+            className='min-w-24'
+            data-chat-answer-control=''
+            disabled={readOnly || submitting || savingImages || (isLastQuestion && !hasAnswer)}
+            onClick={advance}
+            size='sm'
+            variant='outline'
+          >
+            {trailingLabel}
+          </Button>
+        </>
+      }
+      lead={<SessionChatStatusCardLead icon={IconHelpCircle} />}
+      // A collapsed card still says what is being asked.
+      meta={collapsed && question ? question.question : undefined}
+      onOpenChange={(open) => setCollapsed(!open)}
+      open={!collapsed}
+      title={question?.header ?? (questions.length === 1 ? 'Question' : 'Questions')}
+      toggleTitle={{ open: 'Hide the question and its options', closed: 'Show the question and its options' }}
+    >
+      {question ? (
+        <>
+          <SessionChatStatusCardRow annotation={counter}>
+            <p className='text-foreground/90'>{question.question}</p>
+          </SessionChatStatusCardRow>
+          {question.multiSelect ? <p className='text-xs text-muted-foreground'>Select one or more options.</p> : null}
+          <SessionChatChoiceRows
+            onSelect={selectOption}
+            options={question.options}
+            readOnly={readOnly || submitting || savingImages}
+            selected={customAnswerActive ? [] : draft.indices}
+            showShortcuts={showShortcutLabels}
           />
-        )}
-        <Button
-          className='min-w-24'
-          data-chat-answer-control=''
-          disabled={readOnly || submitting || savingImages || (isLastQuestion && !hasAnswer)}
-          onClick={advance}
-          size='sm'
-          variant='outline'
-        >
-          {trailingLabel}
-        </Button>
-      </CardActionRow>
-    </CardShell>
+        </>
+      ) : null}
+    </SessionChatStatusCard>
   );
 }

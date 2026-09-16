@@ -371,6 +371,12 @@ export const gpuiSidebarRuntimeGitWorktreeMergeAndReviewMethods = {
     */
     const normalizedFilePath = normalizeGpuiRelativeGitFilePath(message.filePath);
     const request = message.requestId ? this.pendingGitCommitRequests.get(message.requestId) : undefined;
+    if (message.openLocation && (request?.remoteReference || (!request && this.isGitPreferenceRemoteScope(message)))) {
+      this.postGitToast('warning', 'File location unavailable', {
+        description: 'Open File/Folder Location requires a local project on this machine.',
+      });
+      return;
+    }
     if (request?.remoteReference) {
       const remoteScope = this.resolveRemotePresentationProjectScope(request.remoteReference);
       if (!normalizedFilePath || !remoteScope || !request.files.some((file) => file.path === normalizedFilePath)) {
@@ -433,9 +439,12 @@ export const gpuiSidebarRuntimeGitWorktreeMergeAndReviewMethods = {
       });
       return;
     }
-    this.postNativeProjectPathAction('openSidebarGitChangedFileInIde', scopedProject.projectId, message, {
-      filePath: normalizedFilePath,
-    });
+    this.postNativeProjectPathAction(
+      message.openLocation ? 'revealSidebarGitChangedFile' : 'openSidebarGitChangedFileInIde',
+      scopedProject.projectId,
+      message,
+      { filePath: normalizedFilePath }
+    );
   },
 
   postSidebarGitFileDiff(this: GpuiSidebarRuntime, requestId: string, draft: SidebarGitFileDiffDraft): void {

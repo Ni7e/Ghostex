@@ -192,7 +192,7 @@ impl Render for GhostexGpuiApp {
         GPUI must prove the macOS sidebar React UI and normal browser surfaces can run as CEF children inside the shell. Keep the CEF child views as exact GPUI layout siblings, with the address-bar chrome owned by GPUI above only the main browser area, so future Linux and Windows backends can replace the macOS FFI without changing the app layout contract.
 
         CDXC:Sidebar 2026-06-21-18:34:
-        The GPUI sidebar must match native macOS sidebar resizing: start from the persisted native sidebarWidth, reserve a real five-pixel divider rail between the sidebar and browser siblings, clamp drag/reset width to 150px..520px while preserving a 240px workspace minimum, and use the Settings-owned sidebarDefaultWidthPx only for double-click reset.
+        The GPUI sidebar must match native macOS sidebar resizing: start from the persisted native sidebarWidth, reserve a real five-pixel divider rail between the sidebar and browser siblings, clamp drag/reset width to 150px..520px while preserving the active view's workspace minimum, and use the Settings-owned sidebarDefaultWidthPx only for double-click reset.
 
         CDXC:Sidebar 2026-06-21-22:17:
         The GPUI divider rail must behave like the native sidebar divider without AppKit dependencies: the rail stays a real GPUI sibling, keeps the sidebar background color, uses the ew-resize cursor over the rail, and reveals the white hover line after the same short delay/fade from pointer hover instead of requiring a click.
@@ -203,8 +203,10 @@ impl Render for GhostexGpuiApp {
         CDXC:Sidebar 2026-06-26-23:35:
         Sidebar layout is normal sibling order, never overlays or hit-test rerouting: expanded is sidebar/divider/workspace, and collapsed mode removes sidebar/divider while preserving the saved expanded width.
         */
-        self.sidebar_width =
-            clamp_sidebar_width(self.sidebar_width, current_sidebar_max_width(window));
+        self.sidebar_width = clamp_sidebar_width(
+            self.sidebar_width,
+            current_sidebar_max_width(window, self.active_mode),
+        );
         self.refresh_gpui_sidebar_browser_tabs_if_changed(cx);
         self.refresh_gpui_sidebar_displayed_sessions_if_changed(cx);
         self.prepare_focus_bounds_for_render(window.scale_factor(), cx);

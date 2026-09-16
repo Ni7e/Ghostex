@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 // RefCell backs cross-platform runtime state (window frame persistence), not
@@ -225,7 +224,6 @@ impl GhostexGpuiApp {
                 pending_source_file_open: None,
                 pending_docs_file_open: None,
                 pending_docs_review_open: None,
-                session_chat_docs_file_authorization: Arc::new(Mutex::new(None)),
                 startup_restore_wake_pending,
                 remote_workspace_attach_pending: HashSet::new(),
                 project_view_states_by_project: shell_layout_state.project_view_states_by_project,
@@ -261,6 +259,8 @@ impl GhostexGpuiApp {
                 agents_chat_page_states: HashMap::new(),
                 session_chat_diagnostics: Default::default(),
                 agents_chat_eviction_running: false,
+                agents_chat_eviction_retry_scheduled: false,
+                agents_chat_reconcile_scheduled: false,
                 agents_chat_eviction_requested: false,
                 agents_chat_surfaces: HashMap::new(),
                 session_chat_broker_endpoints: HashMap::new(),
@@ -287,7 +287,7 @@ impl GhostexGpuiApp {
                 sidebar_agents_delayed_sends_snapshot: String::new(),
                 sidebar_timer_presentations_replayed_after_ready: false,
                 sidebar_primary_agent_launcher_id: None,
-                export_transcript_modal_window: None,
+                native_app_modal: None,
                 new_thread_picker_window: None,
                 new_thread_picker: None,
                 new_thread_picker_visible: false,

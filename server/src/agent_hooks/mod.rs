@@ -1,4 +1,5 @@
 pub mod api;
+pub(crate) mod claude_retention;
 pub(crate) mod codex_status_line;
 pub(crate) mod codex_trust;
 pub mod config;
@@ -10,11 +11,11 @@ mod probe_cache;
 pub mod probing;
 pub mod resolution;
 pub mod statusline;
-mod zcode;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
 pub(crate) mod windows;
+mod zcode;
 
 pub use api::{
     install_agent_hooks, read_agent_hook_status, repair_installed_agent_hook_paths,

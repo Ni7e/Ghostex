@@ -214,6 +214,7 @@ report_build_phase "Building sidebar CSS and CEF web assets..."
 (
 	cd "$REPO_ROOT"
 	"$WINDOWS_BUN" run build:sidebar-css 2>&1 | cat
+	"$WINDOWS_BUN" apps/editor/scripts/build-editor-web.mjs 2>&1 | cat
 	"$REPO_ROOT/node_modules/.bin/vite.exe" build --config "$GPUI_DIR_WIN\\vite.config.ts" 2>&1 | cat
 )
 
@@ -263,6 +264,8 @@ printf '%s\r\n' \
 	"\"$WINDOWS_CARGO_WIN\" build --release --manifest-path \"$REPO_ROOT_WIN\\server\\Cargo.toml\" --target $RUST_TARGET --bin gxserver --bin ghostex" \
 	'if errorlevel 1 exit /b %errorlevel%' \
 	"\"$WINDOWS_CARGO_WIN\" build --release --locked --manifest-path \"$REPO_ROOT_WIN\\.dependencies\\wmx\\Cargo.toml\" --target $RUST_TARGET" \
+	'if errorlevel 1 exit /b %errorlevel%' \
+	"\"$WINDOWS_CARGO_WIN\" build --release --manifest-path \"$REPO_ROOT_WIN\\apps\\editor\\desktop\\Cargo.toml\" --target $RUST_TARGET" \
 	'exit /b %errorlevel%' \
 	>"$WINDOWS_BUILD_BATCH"
 report_build_phase "Building the native Windows GPUI shell..."
@@ -432,6 +435,10 @@ else
 	cp "$RUST_RELEASE_DIR/ghostex-gpui.exe" "$APP_DIR/Ghostex.exe"
 fi
 cp "$RUST_RELEASE_DIR/ghostex-gpui-cef-helper.exe" "$APP_DIR/"
+# Keep the Windows prompt helper and its composer page together in both build routes.
+mkdir -p "$APP_DIR/resources/GhostexEditor"
+cp "$RUST_RELEASE_DIR/ghostex-editor.exe" "$APP_DIR/resources/GhostexEditor/GhostexEditor.exe"
+cp -R "$REPO_ROOT/apps/editor/dist/web" "$APP_DIR/resources/GhostexEditor/web"
 mkdir -p "$APP_DIR/resources/native"
 for native_binary in gxserver.exe ghostex.exe wmx.exe; do
 	cp "$RUST_RELEASE_DIR/$native_binary" "$APP_DIR/resources/native/$native_binary"

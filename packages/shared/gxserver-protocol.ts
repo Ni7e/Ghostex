@@ -120,6 +120,7 @@ export type GxserverRpcErrorCode =
   | 'sendCancelled'
   | 'internalError'
   | 'methodNotAllowed'
+  | 'messageNotFound'
   | 'notFound'
   | 'notImplemented'
   | 'protocolMismatch'

@@ -38,9 +38,7 @@ fn source_code_server_spawn_host_runtime(
         #[cfg(target_os = "macos")]
         return source_code_server_spawn_remote_runtime(target, startup_deadline);
         #[cfg(not(target_os = "macos"))]
-        return Err(
-            "Remote Source runtime is available only from the macOS SSH owner.".to_string(),
-        );
+        return Err("Remote Source runtime is unavailable from this SSH host.".to_string());
     }
     if source_code_server_health_check() {
         let remaining = startup_deadline.saturating_duration_since(Instant::now());

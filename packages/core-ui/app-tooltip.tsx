@@ -1,5 +1,6 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { useEffect, useState, type ComponentProps, type ReactElement, type ReactNode } from 'react';
+import { useConfiguredSidebarTooltipDelayMs } from './tooltip-delay';
 
 export const SIDEBAR_TOOLTIP_DISMISS_EVENT = 'ghostex-sidebar-tooltip-dismiss';
 export const SIDEBAR_TOOLTIP_SUPPRESSION_CHANGED_EVENT = 'ghostex-sidebar-tooltip-suppression-changed';
@@ -127,6 +128,7 @@ export function AppTooltip({
   sideOffset = 8,
   ...tooltipProps
 }: AppTooltipProps) {
+  const sidebarDelayMs = useConfiguredSidebarTooltipDelayMs();
   const { defaultOpen, onOpenChange, open: controlledOpen, ...tooltipRootProps } = tooltipProps;
   const isControlled = controlledOpen !== undefined;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(Boolean(defaultOpen));
@@ -180,9 +182,9 @@ export function AppTooltip({
    * titlebar wrapper can adjust placement through Base UI's positioner instead
    * of CSS transforms.
    */
-  return (
+  const tooltip = (
     <Tooltip {...tooltipRootProps} onOpenChange={setOpen} open={open}>
-      <TooltipTrigger delay={delay} render={children} />
+      <TooltipTrigger delay={sidebarDelayMs ?? delay} render={children} />
       <TooltipContent
         align={align}
         alignOffset={alignOffset}
@@ -196,6 +198,13 @@ export function AppTooltip({
         {content}
       </TooltipContent>
     </Tooltip>
+  );
+  return sidebarDelayMs === undefined ? (
+    tooltip
+  ) : (
+    <TooltipProvider delay={sidebarDelayMs} timeout={0}>
+      {tooltip}
+    </TooltipProvider>
   );
 }
 

@@ -46,7 +46,7 @@ pub(crate) fn gpui_finish_desktop_control_setup(
         Ok(_) => Ok(if was_update {
             "Trycua is up to date. Ghostex Computer Use is ready.".to_string()
         } else {
-            "Trycua installed. Grant macOS Accessibility and Screen Recording permissions if needed."
+            "Trycua installed. Grant accessibility and screen recording permissions if needed."
                 .to_string()
         }),
         Err(message) => Err(format!(

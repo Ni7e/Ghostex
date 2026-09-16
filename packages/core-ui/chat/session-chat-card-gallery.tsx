@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { useState, type ReactNode } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import { Textarea } from '@/packages/components/ui/textarea';
@@ -8,14 +9,20 @@ import { SessionChatComposerNotReadyNotice } from './session-chat-composer-not-r
 import { SessionChatAgentTasksPanel } from './session-chat-agent-tasks-panel';
 import { SessionChatAgentFleetStrip } from './session-chat-agent-fleet-strip';
 import { SessionChatActivityRow } from './session-chat-activity-row';
+import { SessionChatTerminalToolRow } from './session-chat-terminal-tool-row';
+import { SessionChatWorkingStrip } from './session-chat-working-strip';
+import { SessionChatGoalCard } from './session-chat-goal-card';
+import { SessionChatAgentMessageCard } from './session-chat-agent-message-card';
+import { SessionChatDraftConflict } from './session-chat-draft-conflict';
+import { SessionChatExtensionPanel } from './session-chat-extension-panel';
 import { DETECTED_NOTICE_EXAMPLES } from './session-chat-card-gallery-notices';
 import { DIALOG_EXAMPLES, PICKER_EXAMPLES } from './session-chat-card-gallery-dialogs';
 
 type Outcome = 'success' | 'failure' | 'pending';
 type Act = (label: string) => Promise<void>;
 const AT = new Date().toISOString();
-const APPROVAL: SessionChatInteractivePrompt = { kind: 'approval', tool: 'Bash', summary: 'git diff --stat' };
-const QUESTION = {
+export const APPROVAL: SessionChatInteractivePrompt = { kind: 'approval', tool: 'Bash', summary: 'git diff --stat' };
+export const QUESTION = {
   question: 'Which part should I update first?',
   header: 'Next step',
   multiSelect: false,
@@ -47,7 +54,7 @@ const PROMPTS: { label: string; prompt: SessionChatInteractivePrompt; readOnly?:
   { label: 'Question, input held elsewhere', prompt: { kind: 'question', questions: [QUESTION] }, readOnly: true },
 ];
 
-const DELIVERY_NOTICES: SessionChatTerminalNotice[] = [
+export const DELIVERY_NOTICES: SessionChatTerminalNotice[] = [
   {
     kind: 'deliveryFailed',
     severity: 'error',
@@ -77,10 +84,60 @@ const DELIVERY_NOTICES: SessionChatTerminalNotice[] = [
   actions: [{ id: 'switchToTerminal', label: 'Open terminal', kind: 'switchToTerminal' }],
 })) as SessionChatTerminalNotice[];
 
-function Example({ label, children }: { label: string; children: ReactNode }) {
+export function Example({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
-    <div className='ghostex-session-chat-scope grid min-w-0 gap-2' data-gallery-example={label}>
+    <div className='grid min-w-0 gap-2' data-gallery-example={label}>
       <p className='text-xs text-muted-foreground'>{label}</p>
+      {note ? (
+        <p className='text-xs text-foreground/70' data-gallery-note>
+          {note}
+        </p>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
+export const PENDING_TOOL_ACTIVITY = {
+  kind: 'claude-tool',
+  label:
+    'Checking whether the session card file was committed by another agent and rerunning the context-menu verification',
+  detail: 'Bash(git log --oneline -3 -- packages/core-ui/chat/session-chat-card-gallery.tsx)',
+  detectedAt: AT,
+};
+
+export const SUBAGENTS_FLEET = {
+  detectedAt: AT,
+  agents: [
+    {
+      name: 'general-purpose',
+      task: 'Reviewing card layouts',
+      elapsedSeconds: 120,
+      tokens: '↓ 12k tokens',
+    },
+    { name: 'explore', task: 'Checking the shared controls', elapsedSeconds: 45, nested: 2 },
+  ],
+};
+
+export function Family({
+  index,
+  title,
+  spec,
+  children,
+}: {
+  index: number;
+  title: string;
+  spec: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className='grid min-w-0 gap-4 rounded-xl border border-dashed border-border/70 p-4' data-style-family={title}>
+      <div className='grid gap-1'>
+        <h3 className='text-sm font-semibold'>
+          Family {index}: {title}
+        </h3>
+        <p className='text-xs text-muted-foreground'>{spec}</p>
+      </div>
       {children}
     </div>
   );
@@ -203,7 +260,7 @@ export function SessionChatCardGallery() {
                 <Textarea
                   aria-label='Resume picker draft'
                   className='rounded-lg'
-                  placeholder='Keep typing here. Use Command+Enter (Control+Enter on Windows/Linux) for the left action, or Escape for the second.'
+                  placeholder={`Keep typing here. Use ${formatSidebarHotkeyLabel('cmd+enter')} for the left action, or Escape for the second.`}
                 />
               ) : null}
             </Example>
@@ -286,19 +343,71 @@ export function SessionChatCardGallery() {
             />
           </Example>
           <Example label='Active sub-agents'>
+            <SessionChatAgentFleetStrip fleet={SUBAGENTS_FLEET} sessionKey='gallery-subagents-running' />
+          </Example>
+          <Example label='One sub-agent'>
+            <SessionChatAgentFleetStrip
+              fleet={{ detectedAt: AT, agents: [SUBAGENTS_FLEET.agents[0]!] }}
+              sessionKey='gallery-subagents-one'
+            />
+          </Example>
+          <Example label='Sub-agents with an idle row'>
             <SessionChatAgentFleetStrip
               fleet={{
                 detectedAt: AT,
-                agents: [
-                  {
-                    name: 'general-purpose',
-                    task: 'Reviewing card layouts',
-                    elapsedSeconds: 120,
-                    tokens: '↓ 12k tokens',
-                  },
-                  { name: 'explore', task: 'Checking the shared controls', elapsedSeconds: 45, nested: 2 },
-                ],
+                agents: [SUBAGENTS_FLEET.agents[0]!, { ...SUBAGENTS_FLEET.agents[1]!, status: 'idle' }],
               }}
+              sessionKey='gallery-subagents-idle'
+            />
+          </Example>
+          <Example label='Sub-agents, status unavailable'>
+            <SessionChatAgentFleetStrip
+              fleet={{ ...SUBAGENTS_FLEET, stale: true }}
+              sessionKey='gallery-subagents-stale'
+            />
+          </Example>
+          <Example label='Pending tool card'>
+            <SessionChatTerminalToolRow activity={PENDING_TOOL_ACTIVITY} />
+          </Example>
+          <Example label='Working strip'>
+            <SessionChatWorkingStrip working activity={null} />
+          </Example>
+          <Example label='Codex goal'>
+            <SessionChatGoalCard
+              objective='Unify the composer cards so every header shares the pending tool card shape, then report which cards still differ.'
+              status='active'
+              usage='12% of budget'
+            />
+          </Example>
+          <Example label='Received agent message'>
+            <SessionChatAgentMessageCard
+              body='The card gallery now lists every composer card. The Subagents header matches the pending tool card; the rest are noted for review.'
+              sender='/root/windows_support'
+            />
+          </Example>
+          <Example label='Saved draft notice'>
+            <SessionChatDraftConflict
+              draft={{ content: 'A draft saved from another device.', originClientId: 'gallery', updatedAt: AT }}
+              onDismiss={() => setLastAction('Saved draft: dismissed')}
+              onUse={() => setLastAction('Saved draft: used')}
+            />
+          </Example>
+          <Example label='Chat extension panel, minimized'>
+            <SessionChatExtensionPanel
+              activeExtensionId='session-scratchpad'
+              extensions={[
+                {
+                  id: 'session-scratchpad',
+                  title: 'Session Scratchpad',
+                  iconUrl: '',
+                  url: 'https://session-scratchpad.example.invalid/',
+                },
+              ]}
+              minimized
+              onActiveExtensionChange={() => undefined}
+              onBridgeRequest={async () => null}
+              onClose={() => setLastAction('Extension panel: closed')}
+              onMinimizedChange={() => setLastAction('Extension panel: toggled')}
             />
           </Example>
           <Example label='Compaction progress'>

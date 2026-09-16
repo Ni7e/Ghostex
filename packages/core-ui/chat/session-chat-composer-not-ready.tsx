@@ -20,14 +20,19 @@ endpoint) simply does not pass the callback and the affordance is not rendered,
 rather than showing a control that does nothing.
 
 User decision: this refusal uses the same notice card as terminal-detected notices above the chat box instead of appearing as an unframed error block.
+Since 2026-09-16 that card is the shared status card (session-chat-status-card.tsx): red alert icon, red border, one tone, actions in the footer band.
 */
 
-import { IconChevronRight, IconLoader2, IconTerminal2 } from '@tabler/icons-react';
+import { IconAlertCircle, IconChevronRight, IconLoader2, IconTerminal2 } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import type { GxserverReadSessionTerminalTailResult } from '@/packages/shared/gxserver-protocol';
 import { cn } from '@/packages/components/utils';
 import { Button } from '../../components/ui/button';
-import { SessionChatNoticeCard } from './session-chat-notice-card';
+import {
+  SessionChatStatusCard,
+  SessionChatStatusCardActions,
+  SessionChatStatusCardLead,
+} from './session-chat-status-card';
 
 const NOT_READY_HEADLINE = 'Message not sent. Your draft was restored.';
 
@@ -93,17 +98,35 @@ export function SessionChatComposerNotReadyNotice({
     return tail.lines.join('\n');
   })();
 
-  return (
-    <SessionChatNoticeCard kind='composerNotReady' role='alert' severity='error'>
-      <div className='flex min-w-0 flex-col px-3 py-2.5'>
-        <div className='ghostex-chat-card-title text-sm leading-snug font-medium text-foreground'>
-          {NOT_READY_HEADLINE}
+  const excerptBox = expanded ? (
+    <div className='min-w-0 overflow-hidden rounded-lg border border-input bg-muted/40'>
+      {loading ? (
+        <div className='ghostex-chat-card-content flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground'>
+          <IconLoader2 aria-hidden='true' className='size-3.5 animate-spin' stroke={2} />
+          Reading the terminal…
         </div>
-        {reason && reason !== NOT_READY_HEADLINE ? (
-          <div className='ghostex-chat-card-content mt-1 text-xs leading-snug text-muted-foreground'>{reason}</div>
-        ) : null}
-        {onReadTerminalTail || onOpenTerminal ? (
-          <div className='mt-3 flex flex-wrap items-center gap-1.5'>
+      ) : tailError !== null ? (
+        <div className='ghostex-chat-card-content px-3 py-2 text-xs text-muted-foreground'>{tailError}</div>
+      ) : excerpt !== null ? (
+        <pre className='max-h-48 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.45] text-foreground'>
+          {excerpt}
+        </pre>
+      ) : (
+        <div className='ghostex-chat-card-content px-3 py-2 text-xs text-muted-foreground'>
+          {tail && !tail.captured
+            ? 'Ghostex could not read this session’s terminal screen.'
+            : 'The terminal screen is empty.'}
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  return (
+    <SessionChatStatusCard
+      data-kind='composerNotReady'
+      footer={
+        onReadTerminalTail || onOpenTerminal ? (
+          <SessionChatStatusCardActions>
             {onReadTerminalTail ? (
               <Button aria-expanded={expanded} onClick={toggle} size='sm' type='button' variant='outline'>
                 <IconChevronRight
@@ -120,31 +143,18 @@ export function SessionChatComposerNotReadyNotice({
                 Open Terminal
               </Button>
             ) : null}
-          </div>
-        ) : null}
-        {expanded ? (
-          <div className='mt-2 min-w-0 overflow-hidden rounded-lg border border-input bg-muted/40'>
-            {loading ? (
-              <div className='ghostex-chat-card-content flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground'>
-                <IconLoader2 aria-hidden='true' className='size-3.5 animate-spin' stroke={2} />
-                Reading the terminal…
-              </div>
-            ) : tailError !== null ? (
-              <div className='ghostex-chat-card-content px-3 py-2 text-xs text-muted-foreground'>{tailError}</div>
-            ) : excerpt !== null ? (
-              <pre className='max-h-48 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.45] text-foreground'>
-                {excerpt}
-              </pre>
-            ) : (
-              <div className='ghostex-chat-card-content px-3 py-2 text-xs text-muted-foreground'>
-                {tail && !tail.captured
-                  ? 'Ghostex could not read this session’s terminal screen.'
-                  : 'The terminal screen is empty.'}
-              </div>
-            )}
-          </div>
-        ) : null}
-      </div>
-    </SessionChatNoticeCard>
+          </SessionChatStatusCardActions>
+        ) : undefined
+      }
+      lead={<SessionChatStatusCardLead className='text-destructive' icon={IconAlertCircle} />}
+      role='alert'
+      severity='error'
+      title={NOT_READY_HEADLINE}
+    >
+      {reason && reason !== NOT_READY_HEADLINE ? (
+        <p className='ghostex-chat-card-content text-muted-foreground'>{reason}</p>
+      ) : null}
+      {excerptBox}
+    </SessionChatStatusCard>
   );
 }

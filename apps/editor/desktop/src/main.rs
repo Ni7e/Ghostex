@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use std::{
     collections::HashMap,
     env, fs, io,
@@ -149,7 +151,7 @@ fn run() -> Result<(), String> {
     let socket_arg = parse_daemon_args(&args)?;
     let endpoint = resolve_socket_endpoint(socket_arg.as_deref())?;
 
-    if ping_existing_daemon(&endpoint.name) {
+    if ping_existing_daemon(&endpoint) {
         return Ok(());
     }
     remove_stale_socket(&endpoint.cleanup_path);
@@ -282,21 +284,7 @@ fn default_socket_path() -> String {
 
 #[cfg(target_os = "windows")]
 fn default_socket_path() -> String {
-    let user = env::var("USERNAME")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "user".to_string());
-    let sanitized: String = user
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    format!(r"\\.\pipe\ghostex-editor-{sanitized}")
+    ghostex_editor_client::default_pipe_path()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -327,8 +315,27 @@ fn set_directory_private(path: &Path) {
 #[cfg(not(unix))]
 fn set_directory_private(_path: &Path) {}
 
-fn ping_existing_daemon(name: &Name<'static>) -> bool {
-    let Ok(mut stream) = Stream::connect(name.clone()) else {
+#[cfg(windows)]
+fn ping_existing_daemon(endpoint: &SocketEndpoint) -> bool {
+    let Ok(mut stream) = ghostex_editor_client::PipeStream::connect(
+        &endpoint.display_path,
+        Duration::from_millis(750),
+    ) else {
+        return false;
+    };
+    if stream.write_all(b"{\"v\":1,\"type\":\"ping\"}\n").is_err() {
+        return false;
+    }
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).is_ok()
+        && serde_json::from_str::<Value>(&line)
+            .ok()
+            .is_some_and(|reply| reply["type"] == "pong")
+}
+
+#[cfg(unix)]
+fn ping_existing_daemon(endpoint: &SocketEndpoint) -> bool {
+    let Ok(mut stream) = Stream::connect(endpoint.name.clone()) else {
         return false;
     };
     let _ = stream.set_recv_timeout(Some(Duration::from_millis(750)));
@@ -854,6 +861,8 @@ impl EditorApp {
         let window = builder
             .build(target)
             .map_err(|error| format!("unable to create window: {error}"))?;
+        #[cfg(target_os = "windows")]
+        hide_windows_titlebar_icon(&window)?;
         let window_id = window.id();
         let proxy = self.proxy.clone();
         let web_root = self.web_root.clone();
@@ -1283,6 +1292,50 @@ fn apply_skip_taskbar(builder: WindowBuilder) -> WindowBuilder {
 fn apply_skip_taskbar(builder: WindowBuilder) -> WindowBuilder {
     use tao::platform::windows::WindowBuilderExtWindows;
     builder.with_skip_taskbar(true)
+}
+
+/// CDXC:PromptEditor 2026-09-16 DECISION:
+/// User: hide the Windows prompt editor's titlebar icon, superseding the earlier request for a better icon.
+/// The dialog frame suppresses Windows' generic icon when no window icons are assigned.
+#[cfg(target_os = "windows")]
+fn hide_windows_titlebar_icon(window: &Window) -> Result<(), String> {
+    use tao::platform::windows::WindowExtWindows;
+    use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_EX_DLGMODALFRAME,
+    };
+
+    // SAFETY: this newly created HWND belongs to the current UI thread and remains alive throughout.
+    unsafe {
+        let hwnd = window.hwnd() as _;
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetLastError(0);
+        if SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_DLGMODALFRAME as isize) == 0
+            && GetLastError() != 0
+        {
+            return Err(format!(
+                "unable to hide editor titlebar icon: {}",
+                io::Error::last_os_error()
+            ));
+        }
+        if SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        ) == 0
+        {
+            return Err(format!(
+                "unable to update editor titlebar: {}",
+                io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

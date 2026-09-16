@@ -129,7 +129,7 @@ export function OpenTargetsSettingsTab({
                     isAvailable
                       ? target.id === 'finder'
                         ? 'Built-in'
-                        : (target.commands?.join(', ') ?? 'macOS')
+                        : (target.commands?.join(', ') ?? 'Installed app')
                       : 'Not installed'
                   }
                   icon={<OpenTargetSettingsIcon targetId={target.id} />}

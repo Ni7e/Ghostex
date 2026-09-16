@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/shared/hotkey-label';
 import {
   getDefaultSidebarAgentById,
   getDefaultSidebarAgentByIcon,
@@ -32,7 +33,7 @@ export const TITLEBAR_TIPS: TitlebarTip[] = [
     body: 'Search for project actions, pane splits and moves, session controls, settings shortcuts, and other Ghostex actions.',
     icon: 'command',
     id: 'command-palette-all-actions',
-    title: 'Press Cmd Shift P anywhere to open Ghostex Quick Access',
+    title: `Press ${formatSidebarHotkeyLabel('cmd+shift+p')} anywhere to open Ghostex Quick Access`,
   },
   {
     body: 'Open Settings to customize sidebar presets, visible details, agents, actions, project tools, and workspace open targets.',
@@ -57,7 +58,7 @@ export const TITLEBAR_TIPS: TitlebarTip[] = [
       settingsSearchQuery: 'Ghostex Computer Use',
       type: 'openSettings',
     },
-    body: 'Configure Ghostex Computer Use in Settings, then ask agents to use /ghostex-computer-use for native macOS app control.',
+    body: 'Configure Ghostex Computer Use in Settings, then ask agents to use /ghostex-computer-use for desktop app control.',
     icon: 'resources',
     id: 'use-ghostex-computer-use-skill',
     title: 'Use /ghostex-computer-use for desktop control',

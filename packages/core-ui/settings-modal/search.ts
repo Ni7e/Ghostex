@@ -1,6 +1,11 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import Fuse from 'fuse.js';
 import { Command } from '@/packages/components/ui/command';
-import { APP_SHOTS_HOTKEY_OPTIONS, SESSION_TITLE_GENERATION_AGENT_OPTIONS } from '../../shared/ghostex-settings';
+import {
+  APP_SHOTS_HOTKEY_OPTIONS,
+  DIAGNOSTIC_LOGGING_SCENARIOS,
+  SESSION_TITLE_GENERATION_AGENT_OPTIONS,
+} from '../../shared/ghostex-settings';
 import { BUILT_IN_WORKSPACE_OPEN_TARGETS } from '../../shared/workspace-open-targets';
 import { BUNDLED_GHOSTEX_AGENT_SKILLS } from '../../shared/ghostex-agent-skills';
 import { DEFAULT_SIDEBAR_AGENTS } from '../../shared/sidebar-agents';
@@ -211,6 +216,7 @@ export type SettingsTabSearch = {
 
 export type SearchableExtraSettingsTabId =
   | 'about'
+  | 'debugging'
   | 'actions'
   | 'agents'
   | 'accounts'
@@ -234,6 +240,58 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
   SearchableExtraSettingsTabId,
   { sections: readonly SettingsTabSearchSectionDefinition[]; title: string }
 > = {
+  debugging: {
+    title: 'Debugging',
+    sections: [
+      {
+        id: 'controls',
+        title: 'Debug controls',
+        settings: [
+          {
+            key: 'debuggingMode',
+            title: 'Show debug UI controls',
+            subtitle: 'Show debug-only controls, storage statistics, and enabled routine diagnostic logs.',
+          },
+          {
+            key: 'diagnosticLogging',
+            title: 'Diagnostic disk logging scenarios',
+            subtitle:
+              'Choose routine repro log areas while Show debug UI controls is on. Important warnings, errors, and crashes remain captured when it is off.',
+            options: DIAGNOSTIC_LOGGING_SCENARIOS.flatMap((scenario) => [
+              { label: scenario.label, value: scenario.id },
+              ...scenario.logFiles.map((logFile) => ({ label: logFile, value: logFile })),
+            ]),
+          },
+          {
+            key: 'showSessionCommandCopyActions',
+            title: 'Show command copy actions',
+            subtitle: 'Show Copy resume and Copy attach command in session context menus.',
+          },
+          {
+            key: 'showSessionDetailsCopyAction',
+            title: 'Show Copy Details option',
+            subtitle: 'Show Copy Details in session context menus.',
+          },
+        ],
+      },
+      {
+        id: 'storage',
+        title: 'Storage',
+        settings: [
+          {
+            key: 'storageUsage',
+            title: 'Storage usage',
+            subtitle: 'Inspect browser storage by feature, budgets, pending saves, and disposable caches.',
+          },
+          {
+            key: 'storageStats',
+            title: 'Ghostex folder storage',
+            subtitle: 'View on-disk Ghostex folder sizes and total usage, refresh statistics, or open the data folder.',
+          },
+        ],
+      },
+    ],
+  },
   about: {
     sections: [
       {
@@ -444,8 +502,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
           {
             key: 'titlebarViewOrder',
             title: 'Arrange titlebar views',
-            subtitle:
-              'Reorder built-in, extension, and custom views. Option Alt numbered view shortcuts follow the visible order.',
+            subtitle: `Reorder built-in, extension, and custom views. ${formatSidebarHotkeyLabel('alt+1')} through ${formatSidebarHotkeyLabel('alt+9')} follow the visible order.`,
           },
         ],
         title: 'Titlebar views',
@@ -536,7 +593,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
         settings: [
           {
             key: 'setDefaultEditor',
-            subtitle: 'Make Ghostex the default macOS editor for supported file types.',
+            subtitle: 'Make Ghostex the default editor for supported file types.',
             title: 'Set as Default Editor',
           },
           {
@@ -546,7 +603,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
           },
           {
             key: 'setScriptRunner',
-            subtitle: 'Make Ghostex the default macOS script runner.',
+            subtitle: 'Make Ghostex the default script runner.',
             title: 'Set Script Runner',
           },
           {
@@ -573,9 +630,8 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
         settings: [
           {
             key: 'handlerStatus',
-            subtitle:
-              'Check macOS Launch Services registration for editor defaults, script runner, and ghostex:// links.',
-            title: 'macOS handler status',
+            subtitle: 'Check system registration for editor defaults, script runner, and ghostex:// links.',
+            title: 'File and link handler status',
           },
         ],
         title: 'Diagnostics',
@@ -770,12 +826,20 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
   },
 };
 
-export function getExtraSettingsTabSearch(query: string, tab: SearchableExtraSettingsTabId): SettingsTabSearch {
+export function getExtraSettingsTabSearch(
+  query: string,
+  tab: SearchableExtraSettingsTabId,
+  debuggingMode = true
+): SettingsTabSearch {
   const definition = EXTRA_SETTINGS_TAB_SEARCH_SECTIONS[tab];
   const tabTitleResult = getSettingsSectionSearch(query, definition.title, []);
   const sections = Object.fromEntries(
     definition.sections.map((section) => {
-      const sectionResult = getSettingsSectionSearch(query, section.title, section.settings);
+      const settings =
+        tab === 'debugging' && !debuggingMode
+          ? section.settings.filter((setting) => setting.key === 'debuggingMode')
+          : section.settings;
+      const sectionResult = getSettingsSectionSearch(query, settings.length ? section.title : '', settings);
       return [
         section.id,
         // A tab-title match (e.g. "remote") should reveal the whole page, so
@@ -790,11 +854,11 @@ export function getExtraSettingsTabSearch(query: string, tab: SearchableExtraSet
   };
 }
 
-export function getExtraSettingsTabSearches(query: string): ExtraSettingsTabSearches {
+export function getExtraSettingsTabSearches(query: string, debuggingMode = true): ExtraSettingsTabSearches {
   return Object.fromEntries(
     (Object.keys(EXTRA_SETTINGS_TAB_SEARCH_SECTIONS) as SearchableExtraSettingsTabId[]).map((tab) => [
       tab,
-      getExtraSettingsTabSearch(query, tab),
+      getExtraSettingsTabSearch(query, tab, debuggingMode),
     ])
   ) as ExtraSettingsTabSearches;
 }

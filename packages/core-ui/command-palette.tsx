@@ -318,8 +318,8 @@ const SIDEBAR_MESSAGE_PALETTE_COMMANDS = [
     hotkey: '',
     kind: 'sidebarMessage',
     message: { type: 'openCurrentProjectInFinder' },
-    searchText: 'Open Current Project in Finder open folder workspace',
-    title: 'Open Current Project in Finder',
+    searchText: 'Open File/Folder Location current project open folder workspace',
+    title: 'Open File/Folder Location',
   },
   /*
    * CDXC:Onboarding 2026-09-15 DECISION:

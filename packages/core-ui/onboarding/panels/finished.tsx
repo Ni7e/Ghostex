@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { useEffect, useRef, useState } from 'react';
 import { InstallGuidePopup } from '../install-guide-popup';
 import {
@@ -214,7 +215,7 @@ export function FinishedPanel({ props, flow, setFlow, go, toast }: PanelProps) {
               <span className='dim' style={{ flex: 1, fontSize: 13.5 }}>
                 {startWith === 'terminal' ? 'Type a command…' : `Message ${agentName}`}
               </span>
-              <span className='kbd'>⌃G</span>
+              <span className='kbd'>{formatSidebarHotkeyLabel('ctrl+g')}</span>
             </div>
           </div>
         </div>

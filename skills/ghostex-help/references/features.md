@@ -43,6 +43,9 @@ without closing Ghostex.
   skill. Web links from terminals, chat, and detected dev servers open here or
   in the system browser depending on Open links in. Annotate the current page
   with Agentation in the Browser toolbar; GitHub pages disallow that tool.
+  When a page shows its content inside a frame, such as a Storybook story,
+  the Annotate toolbar opens inside that frame so the content itself can be
+  selected.
   HTML files in Docs use the same Agentation overlay via Annotate. Markdown
   files use Docs selection comments instead (see Docs below).
 - **Kanban**: the project board backed by the Beads `bd` CLI (see Project
@@ -98,6 +101,11 @@ filter cannot be saved as a Space. Create one with the "Create space" button
 that fills the Space row while you have none, by right-clicking the Other
 button or a Space icon and choosing New Space, or from the More menu when
 Spaces overflow.
+A project added with Add Project (from the More menu, from the "Add Project"
+button that an empty project list or empty Space shows, or by right-clicking
+the empty sidebar area) joins the Space that is open at the time and appears at
+the top of it; add a project while Other is selected to leave it out of every
+Space.
 Space icons keep their normal glyph and show amber working-session and blue
 attention-session counts in extra-bold text near the bottom of each icon, including
 the selected Space.
@@ -133,12 +141,20 @@ session replaces that active pane's session and leaves the other pane in place.
   a floating panel; in a wide view with the companion hidden, the lower half
   of that edge reveals the companion instead.
 - Pane width: agent panes and chat companion sidepanes have a minimum resize
-  width of 388px.
+  width of 388px. In the desktop app, the main pane in Code, Browser, Kanban,
+  Automate, and Docs has a minimum width of 455px.
 - Presets: Settings > General > Sidebar > Preset switches groups of card
   details at once; the individual rows below it are marked Advanced.
-- Timed Delayed Send: right-click an agent with a timed send scheduled, choose
-  **Postpone by**, then **10 minutes**, **30 minutes**, **1 hour**, **2 hours**,
-  or **5 hours**. The duration is added to its existing send time.
+- Timed Delayed Send: open **Delayed Send** from an agent's right-click menu
+  under **Advanced**. Choose **After a delay** for hours and minutes, or
+  **Specific time** for a future date and time, then **Save changes**.
+  Specific time is available in Session Automations on desktop, web, and mobile.
+  It uses the local time of the device where you set it, calculates the remaining
+  wait when you save, and uses the same timed send.
+  For an active timed send, right-click the agent and choose **Postpone by**, then
+  **10 minutes**, **30 minutes**, **1 hour**, **2 hours**, or **5 hours** to add
+  that duration to its existing send time. The same submenu has **Edit delayed send**
+  to reopen its settings and **Disable delayed send** to cancel the pending send.
 - Session cards: agent icon, favicon, last-active time, git stats, colored
   icons, and rename-on-double-click are all toggles.
 - Session hover buttons (click to toggle, drag to reorder), under General >
@@ -175,6 +191,12 @@ session replaces that active pane's session and leaves the other pane in place.
   mode. The sidebar is the only scroller, and a project's header stays pinned
   at the top while you scroll through its rows. Setting:
   `projectSessionListCollapsedCount`.
+- Sidebar section headings (Pinned, Sessions, Drafts, Browser, Parked, and
+  Snoozed) show an orange dot when a session is working and a blue dot when
+  a session is done or awaiting attention, including rows hidden by collapse
+  or Compact mode. Both dots appear when both states are present. A separate
+  plain dot marks the section containing the active session: white on dark
+  sidebars and dark gray on light sidebars. No setting is required.
 - New sessions appear at the top of Sessions for 10 minutes. After that,
   a session with unsent text that has not received its first message moves
   into Drafts, below Pinned and above Sessions. Drafts starts collapsed;
@@ -258,7 +280,8 @@ Fork starts the new session as `Fork: <original name>` and saves that name
 through the agent's own rename command so it survives reopening the conversation.
 
 - Sleeping frees RAM; Auto Sleep does it after idle minutes; Resources in the
-  titlebar sleeps many at once and shows CPU and RAM per session.
+  titlebar sleeps many at once and shows CPU and RAM per session. Clean RAM
+  copies a diagnosis prompt; paste it into an agent session to reduce RAM use.
   Sleeping sidebar sessions keep their normal title color and show a dimmer
   last-active time on the right; awake sessions show a stronger timestamp. Use `ghostex sleep|wake <selector>` to
   sleep or wake a session.
@@ -361,6 +384,10 @@ the same command accepts `--mode <mode>` and `--fast-mode on|off`.
 Claude's default-effort pricing notice also appears in chat with its original
 explanation and choices, so you can keep the current effort or switch to the
 recommended effort there without opening Terminal.
+Escape interrupts the agent. If a Claude message is cancelled before it is
+accepted, its text returns to the chat composer for editing. Rewind to here
+also returns the selected text when the message was never accepted, keeping
+anything already in the composer (`ghostex interrupt-session-chat <session>`).
 Codex rewind continues in a new conversation before the selected prompt and
 returns that prompt for editing. If the chat cannot reconnect after the rewind,
 choose Retry synchronization in the dialog to reconnect without rewinding again
@@ -384,9 +411,13 @@ Unrecorded model values are labelled Model not recorded.
 Slash commands sent from chat stay in the conversation after a reload, together
 with any captured output. Long command output expands when clicked; model, effort,
 Fast mode, and compaction results keep their status rows.
-During `/compact`, Claude and Codex show a compaction card above the input.
-Claude shows its reported progress; Codex shows a looping bar. Messages sent or
-queued during compaction wait until it finishes without a delivery warning.
+During `/compact`, Claude, Codex, Cursor, and Grok Build show a compaction card above the input.
+Cursor's `/summarize` uses the same flow. Claude shows its reported progress;
+Codex, Cursor, and Grok Build show a looping bar. Messages sent or queued during compaction
+wait until it finishes without a delivery warning.
+To compact before sending a new prompt, press `⌥Enter` on macOS or `Alt+Enter` on Windows and Linux in the chat box,
+or right-click Send and choose Compact & Send. Ghostex sends `/compact` first,
+then puts your written prompt in the queue above the input to send after compaction.
 In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
 While Claude Code writes a reply, the chat shows the text as it appears in the
 terminal, updated about once a second, and swaps in the saved message the moment
@@ -425,7 +456,14 @@ previews in Settings > Chat to show the first seven code lines by default.
 Long paths truncate from the start, keeping the filename visible. Click anywhere
 on the path or filename to open it in Editor or Docs, just like a file reference
 pill. Folder links in desktop chat open the folder in your system file explorer.
-Right-click anywhere on a path for Copy Path, just like file references.
+File reference pills in the composer also open with one click using the same
+Code/Docs preferences as transcript links. Double-click a composer pill to edit
+its reference text. Right-click a file reference or file-change path for Open in
+Code, Open in Docs (Markdown, HTML, and Excalidraw), Copy Path, or Open File/Folder
+Location. Open File/Folder Location appears directly below the path-copy actions
+in chat, image previews, Git changed files, projects, and Docs menus, and opens
+the location in the machine’s file manager. It requires a local desktop path.
+Disabled Code and Docs views are omitted from the menu.
 Hosts without an editor copy the path on click.
 Click the card background, circle, or change counts to expand or collapse the full diff.
 Only clicks directly on the path or filename open the file. The
@@ -450,6 +488,9 @@ If the context ring and effort still do not fit beside the model, they move
 together into Model settings at the top of More actions. Controls return as
 space opens up; More actions and Send or Stop stay visible.
 Click effort or the context meter to open it; hovering does not open either control.
+Hover the model or effort to see the configured Model & Effort Picker shortcut
+(Option+P by default on macOS). Hover the context circle to read the agent's
+terminal status line.
 
 Unsent chat drafts are saved automatically. Switching between Chat and Terminal
 keeps a saved copy while the text moves, and a late transfer preserves anything
@@ -560,8 +601,9 @@ Terminal theme can override the app with Light, Dark, or System. The palette
 selectors show your existing Ghostty theme names, including separate light and
 dark selections when configured. A single Ghostty theme is used for both appearances
 unless you select a separate light palette. Without a configured theme, the defaults
-are GitHub Light and GitHub Dark. Already-open terminals update when the app or system
-appearance changes. The appearance override and light palette apply to Ghostex only.
+are GitHub Light and GitHub Dark. All open terminals refresh automatically when their
+app, system, or terminal theme changes, including idle terminals and terminals in
+inactive projects. The appearance override and light palette apply to Ghostex only.
 
 Terminal links (`ghostex://terminal`) without a folder open in the active local
 project. A folder supplied in the link takes precedence.
@@ -589,7 +631,10 @@ selected computer and keep running if Settings closes. Start a new session to us
 and update it with `npm install -g zcode-app-cli@latest`, as documented at
 [the ZCode installation docs](https://github.com/kingsword09/zcode-cli).
 Agent Hooks let gxserver watch agent status, questions, and
-completions for chat and notifications. Agent approvals ("accept all") is a
+completions for chat and notifications. Installing the Claude Code hooks also
+sets Claude Code's transcript retention (`cleanupPeriodDays`) so past
+conversations stay on disk instead of being deleted after 30 days; a value you
+set yourself is left unchanged. Agent approvals ("accept all") is a
 per-machine default with per-project overrides. Actions (Settings > Actions)
 are saved terminal commands or browser URLs shown on project headers and in
 the titlebar Actions menu; Global Actions apply to every project.
@@ -707,6 +752,10 @@ finishes, an attention state on the session card, OS notifications on macOS,
 menu bar badges with running and done counts (click one to jump to the
 session), terminal bell detection, and push notifications on the mobile app.
 The optional status pet in the sidebar mirrors session state.
+Claude progress updates do not trigger completion notifications while Claude
+reports background work still running. Completion notifications arrive when
+Claude finishes after that work completes; requests for your input or permission
+still get your attention.
 Copy Sound is off by default. Enable it under Settings > Notifications > Sounds
 to hear a short sound when copying from a terminal, a chat message, the chat
 composer (including its right-click Copy menu), a copy button, or a menu
@@ -829,8 +878,15 @@ Advanced to find Dark theme background contrast, Dark theme background tint, and
 Dark theme accent color; these controls do not recolor light-mode chrome.
 Keep Awake (Power)
 prevents sleep while agents work.
-Advanced holds Enable Experimental Features and the Debugging rows (Show debug
-UI controls gates diagnostic disk logging; leave these to the user).
+Advanced holds Enable Experimental Features. The separate Debugging page sits
+above About and starts with Show debug UI controls. Enable that switch to see
+diagnostic logging scenarios, session context-menu debugging controls, Storage
+usage, and Ghostex folder storage. Storage usage lists browser space by feature
+and can clear disposable caches; unsaved drafts and pending work are protected.
+Ghostex folder storage shows on-disk folder sizes with Refresh and Open Folder.
+Both storage panels load only while debug controls are enabled on that page.
+Open the page with `ghostex settings open --tab debugging`, or the inspector
+with `ghostex settings open storageUsage` after enabling debug controls.
 Settings that depend on a setting above them have an indented ↳ before their
 name. They appear when the parent setting enables them.
 In the Settings table of contents, click a page or section title to go there.

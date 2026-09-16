@@ -1081,11 +1081,11 @@ pub(crate) async fn send_session_chat_message_with_draft(
             terminal_agent.as_deref(),
             text,
         );
-    let is_option_command = is_option_readback_command
-        || crate::session_chat_options::is_session_chat_activity_command_text(
-            terminal_agent.as_deref(),
-            text,
-        );
+    let is_activity_command = crate::session_chat_options::is_session_chat_activity_command_text(
+        terminal_agent.as_deref(),
+        text,
+    );
+    let is_option_command = is_option_readback_command || is_activity_command;
     /*
     CDXC:Drafts 2026-08-28:
     THE chat half of the draft promotion choke point. Both callers reach the
@@ -1139,12 +1139,9 @@ pub(crate) async fn send_session_chat_message_with_draft(
             draft_before_send.as_ref(),
         );
     }
-    // Claude's transcript-keyed burst discovers /compact. Codex does not
-    // record the command until completion, so its send needs a screen probe.
-    if is_option_readback_command
-        || capture_local_output
-        || (terminal_agent.as_deref() == Some("codex") && is_option_command)
-    {
+    // Probe activity commands after sending too: Codex and Cursor need not
+    // record a command in their transcript before the compaction starts.
+    if is_option_readback_command || capture_local_output || is_activity_command {
         schedule_session_chat_option_redetect(
             state,
             &target.project_id,
