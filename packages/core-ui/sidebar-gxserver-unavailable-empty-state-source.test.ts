@@ -50,9 +50,13 @@ describe('gxserver unavailable sidebar empty state source', () => {
     expect(emptyStateSource).toContain('Unable to load sessions.');
     expect(emptyStateSource).toContain('<br />');
     expect(emptyStateSource).toContain('Restart Ghostex to try again.');
-    expect(emptyStateSource).toContain('No Projects Added.');
-    expect(emptyStateSource).toContain(
-      'Open the More menu at the top of the sidebar and choose Add Project to get started!'
-    );
+    /*
+     * CDXC:Projects 2026-09-15 DECISION:
+     * The bare "No Projects Added." copy and the More-menu instruction were
+     * replaced by the shared empty state with its own Add Project button.
+     */
+    expect(emptyStateSource).toContain("'No projects added yet.'");
+    expect(emptyStateSource).toContain('<SidebarEmptyProjectsState');
+    expect(emptyStateSource).toContain('onAddProject={() => openAddProjectModal()}');
   });
 });

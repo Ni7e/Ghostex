@@ -50,7 +50,7 @@ describe('discover ghostex modal source', () => {
       expect(discoverModalSource).toContain(screenshotPath);
     }
     expectSourceOrder(discoverModalSource, [
-      "title: 'Rich Prompt Editor with Ctrl + G'",
+      "title: `Rich Prompt Editor with ${formatSidebarHotkeyLabel('ctrl+g')}`",
       'Edit your agent prompts with full hotkeys support and even image previews!',
       "title: 'Chromium Browser with Design Mode'",
       'Comes with Devtools, Agent Browser Control, and Profiles mgmt. Your agent can control it with the /ghostex-embedded-browser-use skill.',

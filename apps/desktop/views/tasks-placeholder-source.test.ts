@@ -497,7 +497,7 @@ describe('Project Board form event handling', () => {
 
     expect(constantsSource).toContain('function readProjectBoardViewPreferences(): ProjectBoardViewPreferences {');
     expect(constantsSource).toContain(
-      "JSON.parse(window.localStorage.getItem(PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY) || 'null')"
+      "JSON.parse(clientStorage.getItem(PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY) || 'null')"
     );
     expect(constantsSource).toContain('return DEFAULT_PROJECT_BOARD_VIEW_PREFERENCES;');
     expect(projectBoardSource).toContain(
@@ -508,7 +508,7 @@ describe('Project Board form event handling', () => {
     expect(projectBoardSource).toContain('useState<BoardSortOption>(storedViewPreferences.sortOption);');
     expect(projectBoardSource).toContain('useState<BoardTagFilter>(storedViewPreferences.tagFilter);');
     expect(projectBoardSource).toContain(
-      'try {\n      window.localStorage.setItem(\n        PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,\n        JSON.stringify({ estimateFilter, priorityFilter, sortOption, tagFilter })\n      );\n    } catch {'
+      'try {\n      clientStorage.setItem(\n        PROJECT_BOARD_VIEW_PREFERENCES_STORAGE_KEY,\n        JSON.stringify({ estimateFilter, priorityFilter, sortOption, tagFilter })\n      );\n    } catch {'
     );
     expect(projectBoardSource).toContain('}, [estimateFilter, priorityFilter, sortOption, tagFilter]);');
     expect(projectBoardSource).not.toContain('JSON.stringify({ estimateFilter, priorityFilter, searchQuery');

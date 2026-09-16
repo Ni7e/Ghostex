@@ -231,7 +231,7 @@ describe('session shortcut labels', () => {
   test('should format per-session shortcut text from the slot index', () => {
     expect(getSessionShortcutLabel(0, 'mac')).toBe('⌘⌥1');
     expect(getSessionShortcutLabel(5, 'mac')).toBe('⌘⌥6');
-    expect(getSessionShortcutLabel(8, 'default')).toBe('⌃⌥9');
+    expect(getSessionShortcutLabel(8, 'default')).toBe('Ctrl+Alt+9');
   });
 
   test('should expose shortcut labels through sidebar session items', () => {
