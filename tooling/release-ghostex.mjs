@@ -2053,12 +2053,18 @@ function extractChangelogSectionFromText(changelog, version) {
 const LEGACY_RELEASE_NOTE_HEADINGS = ['- Major', '- Minor', '- GPUI'];
 const RELEASE_NOTE_HEADINGS = ['- New Features', '- Major Improvements', '- Minor Improvements', '- Stabilization'];
 const BULLET_RELEASE_NOTE_HEADINGS = [...LEGACY_RELEASE_NOTE_HEADINGS, ...RELEASE_NOTE_HEADINGS];
-const HEADED_RELEASE_NOTE_HEADINGS = [
-  '### ✨ New Features',
-  '### 🚀 Major Improvements',
-  '### 🔧 Minor Improvements',
-  '### 🩹 Stabilization',
+/* Category names of the retired formats; a headed theme heading may not reuse them. */
+const RETIRED_RELEASE_NOTE_CATEGORY_NAMES = [
+  'New Features',
+  'Major Improvements',
+  'Minor Improvements',
+  'Stabilization',
+  'Major',
+  'Minor',
+  'GPUI',
 ];
+/* `### <one emoji, optional VS16> <theme text>`; digits, `#` and `*` are not Extended_Pictographic so a bare number never passes as the emoji. */
+const HEADED_RELEASE_NOTE_HEADING_PATTERN = /^### (\p{Extended_Pictographic}️?) (\S.*)$/u;
 
 function changelogNotesLines(notes) {
   return notes.split(/\r?\n/).filter((line) => line.trim().length > 0);
@@ -2066,11 +2072,11 @@ function changelogNotesLines(notes) {
 
 /**
  * Which of the three accepted section shapes `notes` is written in: `headed`
- * (emoji `###` group headings with flat `- ` items, 9.8.0 and later),
- * `bullets` (`- New Features` top-level bullets with `  - ` items), or
- * `legacy` (`- Major` / `- Minor` / `- GPUI`). Any `#` line makes the section
- * headed so a headed section that also carries bullet headings is reported as
- * mixed instead of as a malformed bullet section.
+ * (an optional bold intro line, then emoji `###` theme headings with flat `- `
+ * items, 9.8.0 and later), `bullets` (`- New Features` top-level bullets with
+ * `  - ` items), or `legacy` (`- Major` / `- Minor` / `- GPUI`). Any `#` line
+ * makes the section headed so a headed section that also carries bullet
+ * headings is reported as mixed instead of as a malformed bullet section.
  */
 function changelogNotesFormat(notes) {
   const lines = changelogNotesLines(notes);
@@ -2083,7 +2089,7 @@ function changelogNotesFormat(notes) {
   return 'bullets';
 }
 
-/** The change items of a section in document order, without their bullet markers, in every accepted format. */
+/** The change items of a section in document order, without their bullet markers, in every accepted format. Never the intro line or a heading. */
 function changelogNotesItems(notes) {
   const lines = changelogNotesLines(notes);
   if (changelogNotesFormat(notes) === 'headed') {
@@ -2094,46 +2100,66 @@ function changelogNotesItems(notes) {
 
 function validateHeadedReleaseNotes(lines, version) {
   const prefix = `CHANGELOG.md section for ${version}`;
-  const headingList = HEADED_RELEASE_NOTE_HEADINGS.join(', ');
   const mixed = lines.find((line) => BULLET_RELEASE_NOTE_HEADINGS.includes(line));
   if (mixed) {
-    throw new ReleaseError(`${prefix} must not mix the ${headingList} headings with the \`${mixed}\` bullet heading.`);
+    throw new ReleaseError(
+      `${prefix} must not mix \`###\` theme headings with the \`${mixed}\` bullet heading of the older formats.`
+    );
   }
-  if (!lines[0].startsWith('#')) {
-    throw new ReleaseError(`${prefix} must start with one of ${headingList}; its first line is \`${lines[0]}\`.`);
+  const firstHeading = lines.findIndex((line) => line.startsWith('#'));
+  const intro = lines.slice(0, firstHeading);
+  if (intro.length > 1) {
+    throw new ReleaseError(
+      `${prefix} may have at most one intro line before its first heading; found a second one: \`${intro[1]}\`.`
+    );
   }
-  const used = [];
+  if (intro.length === 1 && !intro[0].startsWith('**')) {
+    throw new ReleaseError(
+      `${prefix} may only carry one bold \`**...**\` intro line before its first heading; found \`${intro[0]}\`.`
+    );
+  }
+  const themes = [];
+  let currentHeading = null;
   let itemsInGroup = 0;
-  for (const line of lines) {
+  for (const line of lines.slice(firstHeading)) {
     if (line.startsWith('#')) {
-      if (!HEADED_RELEASE_NOTE_HEADINGS.includes(line)) {
-        throw new ReleaseError(`${prefix} has an unknown group heading \`${line}\`; use one of ${headingList}.`);
+      if (!/^### /u.test(line)) {
+        throw new ReleaseError(`${prefix} must write every group heading at level 3 (\`### \`); found \`${line}\`.`);
       }
-      const previous = used.at(-1);
-      if (previous && itemsInGroup === 0) {
-        throw new ReleaseError(`${prefix} has no items under ${previous}.`);
-      }
-      if (used.includes(line)) {
-        throw new ReleaseError(`${prefix} repeats the ${line} heading.`);
-      }
-      if (previous && HEADED_RELEASE_NOTE_HEADINGS.indexOf(line) < HEADED_RELEASE_NOTE_HEADINGS.indexOf(previous)) {
+      const match = HEADED_RELEASE_NOTE_HEADING_PATTERN.exec(line);
+      if (!match) {
         throw new ReleaseError(
-          `${prefix} must keep its groups in ${headingList} order; ${line} cannot follow ${previous}.`
+          `${prefix} heading \`${line}\` must be \`### <one emoji> <what changed>\`, with exactly one emoji and non-empty text after it.`
         );
       }
-      used.push(line);
+      const theme = match[2].trim();
+      if (RETIRED_RELEASE_NOTE_CATEGORY_NAMES.some((name) => name.toLowerCase() === theme.toLowerCase())) {
+        throw new ReleaseError(
+          `${prefix} heading \`${line}\` names a category; headings must describe what changed, not a category.`
+        );
+      }
+      if (currentHeading && itemsInGroup === 0) {
+        throw new ReleaseError(`${prefix} has no items under \`${currentHeading}\`.`);
+      }
+      if (themes.includes(theme.toLowerCase())) {
+        throw new ReleaseError(
+          `${prefix} repeats the heading text \`${theme}\`; every heading must name a different theme.`
+        );
+      }
+      themes.push(theme.toLowerCase());
+      currentHeading = line;
       itemsInGroup = 0;
       continue;
     }
     if (!line.startsWith('- ') || line.slice(2).trim().length === 0) {
       throw new ReleaseError(
-        `${prefix} must keep every change item on one physical \`- \` line at column 0 under ${used.at(-1)}; found \`${line}\`.`
+        `${prefix} must keep every change item on one physical \`- \` line at column 0 under \`${currentHeading}\`; found \`${line}\`.`
       );
     }
     itemsInGroup += 1;
   }
   if (itemsInGroup === 0) {
-    throw new ReleaseError(`${prefix} has no items under ${used.at(-1)}.`);
+    throw new ReleaseError(`${prefix} has no items under \`${currentHeading}\`.`);
   }
 }
 
@@ -2141,13 +2167,16 @@ function validateMajorMinorReleaseNotes(notes, version) {
   /*
    * CDXC:Release 2026-09-16 DECISION:
    * User: "we add emojis and headings dividing the changelog items into
-   * different groups", so a section is `### ✨ New Features`, `### 🚀 Major
-   * Improvements`, `### 🔧 Minor Improvements`, `### 🩹 Stabilization`, in
-   * that order, each at most once, with flat `- ` items and no nesting or
-   * wrapping. This supersedes the 2026-09-07 decision that wrote the same four
-   * groups as `- New Features` top-level bullets with `  - ` items; that shape
-   * and the older Major/Minor/GPUI bullets stay valid because sections up to
-   * 9.7.0 are already published, and a section may not mix formats.
+   * different groups", and each heading "should actually describe what
+   * changed in high level with the points under it". So a section is an
+   * optional bold intro line, then `### <emoji> <theme>` headings that each
+   * name what changed (never one of the retired category names such as New
+   * Features or Stabilization), each with flat `- ` items and no nesting or
+   * wrapping, in any order the author picks. This supersedes the earlier
+   * 2026-09-16 draft of fixed emoji category headings and the 2026-09-07
+   * decision that wrote `- New Features` top-level bullets with `  - ` items;
+   * that shape and the older Major/Minor/GPUI bullets stay valid because
+   * sections up to 9.7.0 are already published, and a section may not mix formats.
    * Enforce this before publishing so GitHub, Sparkle, and Velopack notes stay consistent.
    */
   const lines = changelogNotesLines(notes);

@@ -19,18 +19,19 @@ import { validateMajorMinorReleaseNotes } from './release-ghostex.mjs';
  CHANGELOG.md: drafting and committing are separate acts, and the operator
  reviews in between.
 
- It is not an oracle and must not be trusted blindly. The group each commit
- lands in (New Features, Minor Improvements, Stabilization) is a guess from the
- conventional-commit type; the real judgement is the operator's.
+ It is not an oracle and must not be trusted blindly. The grouping is a guess
+ from the conventional-commit scope and type; the real judgement, and every
+ theme name, is the operator's.
 
  CDXC:Release 2026-09-16 DECISION:
  User: "we add emojis and headings dividing the changelog items into different
- groups", so the draft is written in the headed section format (`### ✨ New
- Features` and its siblings with flat `- ` items) that
- validateMajorMinorReleaseNotes accepts for 9.8.0 and later, instead of the
- `- Major` / `- Minor` bullets it emitted before. Empty groups are omitted
- because the format allows it; only a draft with no classified commit at all
- keeps a TODO placeholder so the section still validates.
+ groups", and each heading "should actually describe what changed in high level
+ with the points under it". So the draft is written in the headed section
+ format validateMajorMinorReleaseNotes accepts for 9.8.0 and later: a bold
+ intro line, one `### <emoji> <theme>` heading per conventional-commit scope
+ (a TODO placeholder name, because a scope is a code area and not a theme),
+ and a `### 🩹 Fixes` heading collecting fix commits, all with flat `- ` items,
+ instead of the `- Major` / `- Minor` bullets it emitted before.
 */
 
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname);
@@ -46,17 +47,10 @@ const FIELD_SEPARATOR = '\u001f';
 */
 const internalTypes = new Set(['build', 'chore', 'ci', 'docs', 'refactor', 'release', 'revert', 'style', 'test']);
 const internalScopes = new Set(['ci', 'deps', 'release', 'skills', 'tooling']);
-const featureTypes = new Set(['feat']);
-const minorTypes = new Set(['perf']);
-const stabilizationTypes = new Set(['fix']);
+const fixTypes = new Set(['fix']);
 
-/* Section groups in the order the validator requires, keyed by draft bucket. */
-const groupHeadings = [
-  ['features', '### ✨ New Features'],
-  ['major', '### 🚀 Major Improvements'],
-  ['minor', '### 🔧 Minor Improvements'],
-  ['stabilization', '### 🩹 Stabilization'],
-];
+const fixesHeading = '### 🩹 Fixes';
+const noScopeHeading = '### 🧭 TODO: name this theme';
 
 /* Co-author trailers written by agent tooling, never a human to credit. */
 const toolAuthorPattern = /(cursor|claude|codex|copilot|github-actions|dependabot|renovate|\[bot\])/i;
@@ -315,19 +309,13 @@ function classify(commit) {
   if (commit.files.length > 0 && commit.files.every((file) => internalPathPattern.test(file))) {
     return { bucket: 'omitted', why: 'touches only docs, skills, tooling, or workflow files' };
   }
-  if (commit.breaking) {
-    return { bucket: 'features', why: 'marked breaking' };
+  if (commit.type && fixTypes.has(commit.type)) {
+    return { bucket: 'fix', why: `${commit.type} commits start under ${fixesHeading}` };
   }
-  if (commit.type && featureTypes.has(commit.type)) {
-    return { bucket: 'features', why: `${commit.type} commits start in New Features` };
-  }
-  if (commit.type && minorTypes.has(commit.type)) {
-    return { bucket: 'minor', why: `${commit.type} commits start in Minor Improvements` };
-  }
-  if (commit.type && stabilizationTypes.has(commit.type)) {
-    return { bucket: 'stabilization', why: `${commit.type} commits start in Stabilization` };
-  }
-  return { bucket: 'minor', why: 'unrecognized commit type; parked in Minor Improvements for review' };
+  return {
+    bucket: 'change',
+    why: commit.scope ? `grouped under the ${commit.scope} scope theme` : 'no scope; parked under the TODO theme',
+  };
 }
 
 function attributionFor(commit, primaryAuthor) {
@@ -362,23 +350,35 @@ function todayIso() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+/* The scope-named theme placeholder; the operator replaces it with what actually changed. */
+function scopeHeading(scope) {
+  return scope ? `### 🧭 TODO: name the ${scope} theme` : noScopeHeading;
+}
+
 export function renderChangelogSection({ commits, date, primaryAuthor, version }) {
-  const byScope = (left, right) => (left.scope ?? '~').localeCompare(right.scope ?? '~');
-  const lines = [`## ${version} - ${date}`];
-  let groups = 0;
-  for (const [bucket, heading] of groupHeadings) {
-    const members = commits.filter((commit) => commit.bucket === bucket).sort(byScope);
-    if (members.length === 0) {
-      continue;
-    }
-    groups += 1;
-    lines.push('', heading, '', ...members.map((commit) => renderBullet(commit, primaryAuthor)));
+  const lines = [
+    `## ${version} - ${date}`,
+    '',
+    `**Ghostex ${version} is out.** TODO: one paragraph naming the headline changes of this release.`,
+  ];
+  const changes = commits.filter((commit) => commit.bucket === 'change');
+  const scopes = [...new Set(changes.map((commit) => commit.scope ?? ''))].sort((left, right) =>
+    (left || '~').localeCompare(right || '~')
+  );
+  for (const scope of scopes) {
+    const members = changes.filter((commit) => (commit.scope ?? '') === scope);
+    lines.push('', scopeHeading(scope), ...members.map((commit) => renderBullet(commit, primaryAuthor)));
   }
-  if (groups === 0) {
+  const fixes = commits
+    .filter((commit) => commit.bucket === 'fix')
+    .sort((left, right) => (left.scope ?? '~').localeCompare(right.scope ?? '~'));
+  if (fixes.length > 0) {
+    lines.push('', fixesHeading, ...fixes.map((commit) => renderBullet(commit, primaryAuthor)));
+  }
+  if (scopes.length === 0 && fixes.length === 0) {
     lines.push(
       '',
-      groupHeadings[0][1],
-      '',
+      noScopeHeading,
       '- TODO: no commit was classified as user-facing. Write the release headline here before this ships.'
     );
   }
@@ -393,12 +393,11 @@ function renderGuidance({ base, commitCount, head, primaryAuthor, version }) {
     'THIS IS A FIRST DRAFT, NOT AN ORACLE. Do not paste it unread.',
     '  - Every bullet is a commit subject plus its body, not release prose. Rewrite',
     '    each one the way a user would describe it, and merge the duplicates.',
-    '  - The group is guessed from the conventional-commit type (feat starts in New',
-    '    Features, perf in Minor Improvements, fix in Stabilization). That judgement',
-    "    is yours, not the script's - move bullets between the groups freely.",
-    '  - Major Improvements is never guessed: promote the improvements to existing',
-    '    features that deserve the headline into that group by hand. Groups with no',
-    '    items are omitted; the four headings must stay in the printed order.',
+    '  - Headings are grouped by conventional-commit scope and named TODO on purpose:',
+    '    a scope is a code area, and each heading must say what changed for the user',
+    '    (one emoji, then the theme). Rename, merge, and reorder them freely; fix',
+    '    commits start under "### 🩹 Fixes".',
+    '  - Fill in the bold intro line with the headline changes of the release.',
     '  - Verify every "thanks to @handle". The handle comes from the commit author',
     '    name, which is not always the GitHub login.',
     '  - Confirm every entry under "omitted - confirm" before accepting the exclusion.',

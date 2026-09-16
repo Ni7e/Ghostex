@@ -142,74 +142,91 @@ describe('Ghostex release automation helpers', () => {
     );
   });
 
-  test('accepts the emoji-headed changelog format with flat items', () => {
+  test('accepts the emoji-headed changelog format with theme headings and flat items', () => {
     const headed = [
-      '### ✨ New Features',
+      '**Ghostex 9.8.0 is out.** One paragraph naming the headline changes of the release.',
       '',
-      '- One user-facing sentence per item.',
-      '- Another item.',
+      '### ✨ Compact before you send',
+      '- **Compact and send in one step.** Press Option+Enter and Ghostex sends /compact first, then your prompt.',
+      '- **Cursor and Grok use the same flow.** Same card, same hold on queued messages.',
       '',
-      '### 🚀 Major Improvements',
-      '',
-      '- Item.',
-      '',
-      '### 🔧 Minor Improvements',
-      '',
-      '- Item.',
-      '',
-      '### 🩹 Stabilization',
-      '',
-      '- Item.',
+      '### 🩹 Fixes',
+      '- **Easy Connect pairing works again.** Update the phone app and scan the code again.',
     ].join('\n');
     expect(() => validateMajorMinorReleaseNotes(headed, '9.8.0')).not.toThrow();
-    expect(() => validateMajorMinorReleaseNotes('### 🩹 Stabilization\n\n- Only a fix.', '9.8.0')).not.toThrow();
+    expect(() => validateMajorMinorReleaseNotes('### 🩹 Fixes\n\n- Only a fix.', '9.8.0')).not.toThrow();
     expect(() =>
-      validateMajorMinorReleaseNotes('### ✨ New Features\n- Feature.\n### 🩹 Stabilization\n- Fix.', '9.8.0')
+      validateMajorMinorReleaseNotes('### 🩹 Fixes\n- Fix.\n### ✨ Compact before you send\n- Feature.', '9.8.0')
     ).not.toThrow();
+    /* A variation selector after the emoji is part of the emoji, not the theme text. */
+    expect(() => validateMajorMinorReleaseNotes('### ⚙️ Settings pages moved\n- Item.', '9.8.0')).not.toThrow();
     expect(changelogNotesFormat(headed)).toBe('headed');
     expect(changelogNotesItems(headed)).toEqual([
-      'One user-facing sentence per item.',
-      'Another item.',
-      'Item.',
-      'Item.',
-      'Item.',
+      '**Compact and send in one step.** Press Option+Enter and Ghostex sends /compact first, then your prompt.',
+      '**Cursor and Grok use the same flow.** Same card, same hold on queued messages.',
+      '**Easy Connect pairing works again.** Update the phone app and scan the code again.',
     ]);
   });
 
   test('rejects malformed emoji-headed changelog sections with a precise reason', () => {
-    expect(() =>
-      validateMajorMinorReleaseNotes('### 🩹 Stabilization\n- Fix.\n### ✨ New Features\n- Feature.', '9.8.0')
-    ).toThrow(/order; ### ✨ New Features cannot follow ### 🩹 Stabilization/u);
-    expect(() =>
-      validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n### ✨ New Features\n- Two.', '9.8.0')
-    ).toThrow(/repeats the ### ✨ New Features heading/u);
-    expect(() =>
-      validateMajorMinorReleaseNotes('### ✨ New Features\n\n### 🩹 Stabilization\n- Fix.', '9.8.0')
-    ).toThrow(/no items under ### ✨ New Features/u);
-    expect(() => validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n### 🩹 Stabilization', '9.8.0')).toThrow(
-      /no items under ### 🩹 Stabilization/u
+    const fixes = '### 🩹 Fixes\n- Fix.';
+    expect(() => validateMajorMinorReleaseNotes(`Plain intro.\n${fixes}`, '9.8.0')).toThrow(
+      /one bold `\*\*\.\.\.\*\*` intro line before its first heading; found `Plain intro\.`/u
     );
-    expect(() => validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n  - Nested.', '9.8.0')).toThrow(
-      /one physical `- ` line at column 0 under ### ✨ New Features; found `  - Nested\.`/u
+    expect(() => validateMajorMinorReleaseNotes(`**Lead.**\n**Second lead.**\n${fixes}`, '9.8.0')).toThrow(
+      /at most one intro line before its first heading; found a second one: `\*\*Second lead\.\*\*`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes(`- Loose item.\n${fixes}`, '9.8.0')).toThrow(
+      /intro line before its first heading; found `- Loose item\.`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes('## 🩹 Fixes\n- Fix.', '9.8.0')).toThrow(
+      /at level 3 \(`### `\); found `## 🩹 Fixes`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes('#### 🩹 Fixes\n- Fix.', '9.8.0')).toThrow(/at level 3/u);
+    expect(() => validateMajorMinorReleaseNotes('### Fixes\n- Fix.', '9.8.0')).toThrow(
+      /heading `### Fixes` must be `### <one emoji> <what changed>`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes('### 🩹\n- Fix.', '9.8.0')).toThrow(/must be `### <one emoji>/u);
+    expect(() => validateMajorMinorReleaseNotes('### 🩹 \n- Fix.', '9.8.0')).toThrow(/must be `### <one emoji>/u);
+    expect(() => validateMajorMinorReleaseNotes('### 🩹✨ Fixes\n- Fix.', '9.8.0')).toThrow(/exactly one emoji/u);
+    expect(() => validateMajorMinorReleaseNotes('### 1 Fixes\n- Fix.', '9.8.0')).toThrow(/exactly one emoji/u);
+    for (const category of [
+      'New Features',
+      'major improvements',
+      'Minor Improvements',
+      'STABILIZATION',
+      'Major',
+      'Minor',
+      'GPUI',
+    ]) {
+      expect(() => validateMajorMinorReleaseNotes(`### ✨ ${category}\n- Item.`, '9.8.0')).toThrow(
+        /headings must describe what changed, not a category/u
+      );
+    }
+    expect(() => validateMajorMinorReleaseNotes('### ✨ Compact\n- One.\n### 🚀 compact \n- Two.', '9.8.0')).toThrow(
+      /repeats the heading text `compact`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes(`### ✨ Compact\n\n${fixes}`, '9.8.0')).toThrow(
+      /no items under `### ✨ Compact`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes('### ✨ Compact\n- One.\n### 🩹 Fixes', '9.8.0')).toThrow(
+      /no items under `### 🩹 Fixes`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes('### ✨ Compact\n- One.\n  - Nested.', '9.8.0')).toThrow(
+      /one physical `- ` line at column 0 under `### ✨ Compact`; found `  - Nested\.`/u
     );
     expect(() =>
-      validateMajorMinorReleaseNotes('### ✨ New Features\n- Session Chat controls.\n  Includes wrapping.', '9.8.0')
+      validateMajorMinorReleaseNotes('### ✨ Compact\n- Session Chat controls.\n  Includes wrapping.', '9.8.0')
     ).toThrow(/found `  Includes wrapping\.`/u);
-    expect(() => validateMajorMinorReleaseNotes('### ✨ New Features\n- ', '9.8.0')).toThrow(/found `- `/u);
-    expect(() => validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n- Major\n  - Big.', '9.8.0')).toThrow(
-      /must not mix .* with the `- Major` bullet heading/u
+    expect(() => validateMajorMinorReleaseNotes('### ✨ Compact\n- ', '9.8.0')).toThrow(/found `- `/u);
+    expect(() => validateMajorMinorReleaseNotes('### ✨ Compact\n- One.\nStray prose.', '9.8.0')).toThrow(
+      /found `Stray prose\.`/u
     );
-    expect(() =>
-      validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n- Stabilization\n  - Fix.', '9.8.0')
-    ).toThrow(/with the `- Stabilization` bullet heading/u);
-    expect(() => validateMajorMinorReleaseNotes('- Loose item.\n### ✨ New Features\n- One.', '9.8.0')).toThrow(
-      /must start with one of .*; its first line is `- Loose item\.`/u
+    expect(() => validateMajorMinorReleaseNotes('### ✨ Compact\n- One.\n- Major\n  - Big.', '9.8.0')).toThrow(
+      /must not mix `###` theme headings with the `- Major` bullet heading/u
     );
-    expect(() => validateMajorMinorReleaseNotes('### New Features\n- One.', '9.8.0')).toThrow(
-      /unknown group heading `### New Features`/u
-    );
-    expect(() => validateMajorMinorReleaseNotes('## ✨ New Features\n- One.', '9.8.0')).toThrow(
-      /unknown group heading `## ✨ New Features`/u
+    expect(() => validateMajorMinorReleaseNotes('### ✨ Compact\n- One.\n- Stabilization\n  - Fix.', '9.8.0')).toThrow(
+      /with the `- Stabilization` bullet heading/u
     );
   });
 
@@ -292,11 +309,13 @@ describe('Ghostex release automation helpers', () => {
         '',
         '## 9.8.0 - 2026-09-20',
         '',
-        '### ✨ New Features',
+        '**Ghostex 9.8.0 is out.** Headline.',
+        '',
+        '### ✨ Compact before you send',
         '',
         '- Feature.',
         '',
-        '### 🩹 Stabilization',
+        '### 🩹 Fixes',
         '',
         '- Fix.',
         '',
@@ -304,7 +323,10 @@ describe('Ghostex release automation helpers', () => {
       ].join('\n'),
       '9.8.0'
     );
-    expect(headed).toBe('### ✨ New Features\n\n- Feature.\n\n### 🩹 Stabilization\n\n- Fix.');
+    expect(headed).toBe(
+      '**Ghostex 9.8.0 is out.** Headline.\n\n### ✨ Compact before you send\n\n- Feature.\n\n### 🩹 Fixes\n\n- Fix.'
+    );
+    expect(changelogNotesItems(headed)).toEqual(['Feature.', 'Fix.']);
     expect(() => extractChangelogSectionFromText(changelog, '1.0.0')).toThrow(ReleaseError);
     expect(() =>
       extractChangelogSectionFromText(
