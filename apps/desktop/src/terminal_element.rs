@@ -839,6 +839,15 @@ impl TerminalView {
         self.row_cache.fill(None);
     }
 
+    /// CDXC:Theming 2026-09-16 DECISION:
+    /// User: refresh all terminals after app or terminal theme changes that affect terminal appearance.
+    /// Updating the model's colors alone leaves the displayed snapshot stale until the next PTY output, which idle terminals may never produce.
+    pub fn refresh_appearance(&mut self, cx: &mut Context<Self>) {
+        self.row_cache.fill(None);
+        self.refresh_snapshot();
+        cx.notify();
+    }
+
     pub fn apply_font(&mut self, font: TerminalFontConfig) {
         self.configured_font_size = font.size;
         if self.font == font {
@@ -2690,6 +2699,7 @@ pub(crate) fn terminal_overlay_hotkey_chord_label(chord: &str) -> String {
                 "down" | "arrowdown" => "↓".to_string(),
                 "left" | "arrowleft" => "←".to_string(),
                 "tab" => "Tab".to_string(),
+                "enter" | "return" => "Enter".to_string(),
                 "ß" if has_option_modifier => "S".to_string(),
                 value if value.len() == 1 => value.to_uppercase(),
                 value if value.starts_with('f') => value.to_uppercase(),
@@ -2707,6 +2717,7 @@ pub(crate) fn terminal_overlay_hotkey_chord_label(chord: &str) -> String {
                 "down" | "arrowdown" => "↓".to_string(),
                 "left" | "arrowleft" => "←".to_string(),
                 "tab" => "Tab".to_string(),
+                "enter" | "return" => "Enter".to_string(),
                 "ß" if has_option_modifier => "S".to_string(),
                 value if value.len() == 1 => value.to_uppercase(),
                 value if value.starts_with('f') => value.to_uppercase(),
@@ -2717,7 +2728,7 @@ pub(crate) fn terminal_overlay_hotkey_chord_label(chord: &str) -> String {
             labels.push(label);
         }
     }
-    labels.join(if cfg!(target_os = "macos") { "" } else { " + " })
+    labels.join(if cfg!(target_os = "macos") { "" } else { "+" })
 }
 
 fn terminal_scroll_button_glyph(edge: TerminalScrollEdge, light_theme: bool) -> impl IntoElement {

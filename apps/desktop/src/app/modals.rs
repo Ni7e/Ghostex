@@ -2149,6 +2149,11 @@ impl GhostexGpuiApp {
             .agents_gpui_engine_terminals
             .values_mut()
             .chain(self.command_gpui_engine_terminals.values_mut())
+            .chain(
+                self.parked_agents_terminal_runtimes_by_project
+                    .values_mut()
+                    .flat_map(|runtime| runtime.gpui_engine_terminals.values_mut()),
+            )
         {
             record.confirm_close_behavior = confirm_close_behavior;
             let view = record.view.clone();
@@ -2168,7 +2173,7 @@ impl GhostexGpuiApp {
                         &colors.palette,
                     );
                 }
-                cx.notify();
+                view.refresh_appearance(cx);
             });
         }
     }
