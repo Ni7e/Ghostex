@@ -54,7 +54,7 @@ import {
   TooltipProvider,
 } from './app-tooltip';
 import { formatRelativeTime } from './relative-time';
-import { useSidebarItemTooltipDelayMs, useSidebarTooltipDelayMs } from './tooltip-delay';
+import { useSidebarTooltipDelayMs } from './tooltip-delay';
 import { useRelativeTimeTick } from './use-relative-time-tick';
 
 const SESSION_TOOLTIP_VIEWPORT_MARGIN_PX = 8;
@@ -346,7 +346,7 @@ export function SessionCardContent({
  * Each button gets its own single-member delay group with no grouping timeout, because in the sidebar-wide group the next button's label opens instantly once any tooltip in the sidebar is showing.
  */
 function SessionCardButtonTooltip({ children, content }: { children: ReactElement; content: ReactNode }) {
-  const sidebarItemTooltipDelayMs = useSidebarItemTooltipDelayMs();
+  const sidebarItemTooltipDelayMs = useSidebarTooltipDelayMs();
   return (
     <TooltipProvider delay={sidebarItemTooltipDelayMs} timeout={0}>
       <AppTooltip content={content}>{children}</AppTooltip>

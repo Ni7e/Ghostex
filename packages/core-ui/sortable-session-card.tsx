@@ -80,7 +80,7 @@ import { closeAppModal, openAppModal } from './app-modal-host-bridge';
 import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
 import { postSidebarRefreshDebugLog } from './sidebar-refresh-debug-log';
 import { getSidebarReorderActivationConstraints } from './sidebar-reorder-activation';
-import { useSidebarItemTooltipDelayMs } from './tooltip-delay';
+import { useSidebarTooltipDelayMs } from './tooltip-delay';
 import { useSidebarStore, type SidebarGroupRecord } from './sidebar-store';
 import {
   getEffectiveSessionTag,
@@ -737,7 +737,7 @@ export function SortableSessionCard({
   showDropPositionIndicator = true,
   vscode,
 }: SortableSessionCardProps) {
-  const sidebarItemTooltipDelayMs = useSidebarItemTooltipDelayMs();
+  const sidebarItemTooltipDelayMs = useSidebarTooltipDelayMs();
   const [contextMenuPosition, setContextMenuPosition] = useState<ContextMenuPosition>();
   const [contextMenuSessionIdsBelow, setContextMenuSessionIdsBelow] = useState<readonly string[]>(EMPTY_SESSION_IDS);
   const [contextMenuSleepableSessionIdsBelow, setContextMenuSleepableSessionIdsBelow] =

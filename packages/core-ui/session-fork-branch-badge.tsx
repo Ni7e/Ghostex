@@ -1,4 +1,5 @@
 import { IconGitBranch } from '@tabler/icons-react';
+import { AppTooltip } from './app-tooltip';
 
 /**
  * CDXC:SessionFork 2026-08-28:
@@ -17,9 +18,11 @@ export function SessionForkBranchBadge({ branchCount }: { branchCount?: number }
   const tooltip = `This session has ${count} branches that share earlier history.`;
 
   return (
-    <span aria-label={tooltip} className='session-fork-branch-badge' title={tooltip}>
-      <IconGitBranch aria-hidden='true' size={11} stroke={2} />
-      {count}
-    </span>
+    <AppTooltip content={tooltip}>
+      <span aria-label={tooltip} className='session-fork-branch-badge'>
+        <IconGitBranch aria-hidden='true' size={11} stroke={2} />
+        {count}
+      </span>
+    </AppTooltip>
   );
 }
