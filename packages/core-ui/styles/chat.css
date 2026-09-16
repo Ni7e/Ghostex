@@ -227,7 +227,8 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 /* The chat palette is intentionally scoped to the conversation. The
    surrounding Ghostex shell remains dark even when chat content is light. */
 .ghostex-session-chat-scope[data-chat-theme='light'],
-body[data-session-chat-theme='light'] .ghostex-session-chat-popup {
+.ghostex-session-chat-popup[data-chat-theme='light'],
+body[data-session-chat-theme='light'] .ghostex-session-chat-popup:not([data-chat-theme]) {
   color-scheme: light;
   --background: oklch(99.2% 0 0);
   --foreground: oklch(27.4% 0.006 286.033);
@@ -284,7 +285,8 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup {
 }
 
 .ghostex-session-chat-scope[data-chat-theme='dark'],
-body[data-session-chat-theme='dark'] .ghostex-session-chat-popup {
+.ghostex-session-chat-popup[data-chat-theme='dark'],
+body[data-session-chat-theme='dark'] .ghostex-session-chat-popup:not([data-chat-theme]) {
   color-scheme: dark;
   --ghostex-codex-logo: #ffffff;
   --ghostex-light-icon-color: initial;
@@ -1133,9 +1135,10 @@ the markdown block) rather than pinned to a tier of its own.
 
 .ghostex-chat-scroll-bottom-button,
 .ghostex-chat-scroll-bottom-button:not(:disabled):hover {
-  /* Matches the chat page background (see the dark-theme --background). */
-  background-color: var(--background);
+  background-color: var(--card);
+  background-clip: border-box;
   border-radius: 9999px;
+  color: var(--chat-primary-foreground);
 }
 
 /* CDXC:SessionChat 2026-09-04 DECISION: User: the scroll-to-bottom button
@@ -1185,7 +1188,9 @@ the markdown block) rather than pinned to a tier of its own.
   );
 }
 
-.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-composer {
+.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-composer,
+.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-scroll-bottom-button,
+.ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-scroll-bottom-button:not(:disabled):hover {
   background: #141414;
 }
 
@@ -3154,7 +3159,12 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   white-space: nowrap;
 }
 
-.ghostex-chat-image-menu-item:hover {
+.ghostex-chat-image-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ghostex-chat-image-menu-item:not(:disabled):hover {
   background: var(--accent);
   color: var(--accent-foreground);
 }

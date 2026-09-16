@@ -2,7 +2,7 @@
 CDXC:SessionChat 2026-09-16 DECISION:
 User: every card above the composer, and the status cards in the transcript, shares one shell (session-chat-status-card.tsx) so a change is made once.
 The shell is two tones from one formula: a panel for the header and body, and a band under a hairline for the actions, both a little lighter and greyer than the page in dark mode, and pinned to #fdfdfd over #f5f5f5 in light mode; an input border, 0.75rem radius, 1rem/0.75rem padding, 0.875rem text at a relaxed line height.
-Each card leads with its own icon; only working status keeps the blinking dot. The title is medium weight, a dismiss is a circled X, actions sit right-aligned in the footer band with a keyed action on the left, and the tool name or question counter sits right-aligned on the first body row instead of beside the title.
+Each card leads with its own icon; only working status keeps the blinking dot. The title matches the transcript text (0.875rem, regular weight; the medium weight from earlier the same day was dropped because a pending tool card should read like the chat itself), a dismiss is a circled X, actions sit right-aligned in the footer band with a keyed action on the left, and the tool name or question counter sits right-aligned on the first body row instead of beside the title.
 A card whose border carries a colour (an error notice) is one tone: the coloured frame is the emphasis. The compact variant (saved draft) keeps its old 0.75rem text and 0.3125rem/0.625rem padding. The working strip stays a bare line and never becomes a card.
 Every knob below is a custom property on the chat scope so a future retune is one edit here.
 */
@@ -138,7 +138,7 @@ Every knob below is a custom property on the chat scope so a future retune is on
 .ghostex-chat-status-card-heading {
   color: var(--foreground);
   flex: 1 1 auto;
-  font-weight: 500;
+  font-weight: 400;
   min-width: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;

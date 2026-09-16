@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { flushClientStorage } from '@/packages/client-storage';
 import { SessionChatAttachmentPreviews } from './session-chat-attachment-previews';
 import {
@@ -2838,7 +2839,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
               >
                 {composerInput}
               </ContextMenuTrigger>
-              <ContextMenuContent>
+              <ContextMenuContent className='ghostex-session-chat-popup' data-chat-theme={theme}>
                 {referenceInteractions.contextReference !== null ? (
                   <ContextMenuGroup>
                     <SessionChatReferenceMenuItems href={referenceInteractions.contextReference} />
@@ -2988,10 +2989,10 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                       >
                         <IconArrowUp aria-hidden='true' className='size-3' stroke={2.2} />
                       </ContextMenuTrigger>
-                      <ContextMenuContent>
+                      <ContextMenuContent className='ghostex-session-chat-popup' data-chat-theme={theme}>
                         <ContextMenuItem disabled={!canQueueDraft} onClick={() => send(undefined, true)}>
                           Compact &amp; Send
-                          <ContextMenuShortcut>Option/Alt+Enter</ContextMenuShortcut>
+                          <ContextMenuShortcut>{formatSidebarHotkeyLabel('alt+enter')}</ContextMenuShortcut>
                         </ContextMenuItem>
                       </ContextMenuContent>
                     </ContextMenu>
