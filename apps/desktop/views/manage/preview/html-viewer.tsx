@@ -276,6 +276,27 @@ Promise.all([
   if (!React?.createElement || !ReactDOMClient?.createRoot || !Agentation) {
     throw new Error("Agentation modules did not expose the expected React mounting API.");
   }
+  // Agentation reads its settings from this key once, on mount, and merges them
+  // over its own defaults; it exposes no prop for them. Ghostex turns
+  // "Clear on copy/send" on once per origin and keeps the stamp inside the
+  // stored object, which Agentation preserves, so a later manual toggle stays
+  // in force. Same default as the Browser toolbar injection in
+  // apps/desktop/src/app/helpers/browser.rs.
+  const settingsKey = "feedback-toolbar-settings";
+  let settings = null;
+  try {
+    settings = JSON.parse(localStorage.getItem(settingsKey) || "null");
+  } catch {
+    settings = null;
+  }
+  if (!settings || typeof settings !== "object") {
+    settings = {};
+  }
+  if (settings.ghostexDefaults !== 1) {
+    settings.autoClearAfterCopy = true;
+    settings.ghostexDefaults = 1;
+    localStorage.setItem(settingsKey, JSON.stringify(settings));
+  }
   const root = ReactDOMClient.createRoot(rootEl);
   globalThis.__GHOSTEX_AGENTATION__ = { container: rootEl, root };
   root.render(React.createElement(Agentation));
