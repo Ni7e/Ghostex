@@ -691,7 +691,9 @@ pub async fn run_gxserver_foreground(
     shutdown_tail_steps.push(("tailcatStop", step_started.elapsed().as_millis()));
     serve_result.with_context(|| "run gxserver HTTP listener")?;
 
+    let step_started = std::time::Instant::now();
     remove_runtime_metadata(&paths)?;
+    shutdown_tail_steps.push(("runtimeMetadataRemove", step_started.elapsed().as_millis()));
     let step_started = std::time::Instant::now();
     stop_all_zmx_title_observers(&state);
     stop_all_session_chat_followers(&state);
