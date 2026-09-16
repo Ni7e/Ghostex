@@ -157,7 +157,7 @@ pub(crate) fn refresh_gpui_visual_settings(
 }
 
 pub(crate) fn workspace_tab_drag_preview_color() -> Hsla {
-    rgb(0x242424).opacity(0.94).into()
+    chrome_color(0x242424, 0xf4f4f5).opacity(0.94).into()
 }
 
 pub(crate) fn workspace_drop_feedback_border_color() -> Hsla {

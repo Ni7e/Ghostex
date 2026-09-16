@@ -12,6 +12,7 @@ use gpui::{
 };
 use gpui_component::v_flex;
 
+use crate::app::helpers::chrome_color;
 use crate::*;
 
 pub(crate) fn paint_agent_gui_loading_spinner(bounds: Bounds<Pixels>, window: &mut Window) {
@@ -46,16 +47,18 @@ pub(crate) fn paint_agent_gui_loading_spinner(bounds: Bounds<Pixels>, window: &m
     }
 }
 
+/// CDXC:Theming 2026-09-16 DECISION:
+/// User: Agents tab split and merge drop areas should use light gray in light mode.
 pub(crate) fn agents_drop_feedback_border_color() -> Hsla {
-    rgb(0xffffff).opacity(0.42).into()
+    chrome_color(0xffffff, 0x71717a).opacity(0.42).into()
 }
 
 pub(crate) fn agents_drop_group_feedback_color() -> Hsla {
-    rgb(0xffffff).opacity(0.08).into()
+    chrome_color(0xffffff, 0x000000).opacity(0.08).into()
 }
 
 pub(crate) fn agents_drop_split_feedback_color() -> Hsla {
-    rgb(0xffffff).opacity(0.12).into()
+    chrome_color(0xffffff, 0x000000).opacity(0.12).into()
 }
 
 pub(crate) fn workspace_tab_agent_icon_path(agent_icon: &str) -> Option<&'static str> {
@@ -152,9 +155,12 @@ pub(crate) fn workspace_tab_agent_icon_text_color(
     agent_icon: &str,
     visual_tone: WorkspaceTabLifecycleVisualTone,
 ) -> Hsla {
-    rgb(workspace_tab_agent_icon_accent_color(agent_icon))
-        .opacity(workspace_tab_agent_icon_opacity(visual_tone))
-        .into()
+    let accent = workspace_tab_agent_icon_accent_color(agent_icon);
+    let color = match accent {
+        0xffffff | 0xedecec => chrome_color(accent, 0x262626),
+        _ => rgb(accent),
+    };
+    color.opacity(workspace_tab_agent_icon_opacity(visual_tone)).into()
 }
 
 pub(crate) fn agent_terminal_tab_status_color(tab_status: AgentTerminalTabStatus) -> u32 {
