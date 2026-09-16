@@ -95,7 +95,10 @@ const agentsBundle = await esbuild.build({
   format: 'esm',
   platform: 'node',
   stdin: {
-    contents: 'export { SESSION_CHAT_SUPPORTED_AGENTS } from "./packages/shared/session-chat";\n',
+    contents: [
+      'export { SESSION_CHAT_SUPPORTED_AGENTS } from "./packages/shared/session-chat";',
+      'export { resolveAgentIconId } from "./apps/mobile/app/src/contract/mobileSummary";',
+    ].join('\n'),
     loader: 'ts',
     resolveDir: repoRoot,
     sourcefile: 'session-chat-agents-entry.ts',
@@ -103,12 +106,24 @@ const agentsBundle = await esbuild.build({
   write: false,
 });
 const agentsModuleSource = agentsBundle.outputFiles[0]?.text ?? '';
-const { SESSION_CHAT_SUPPORTED_AGENTS } = await import(
+const { SESSION_CHAT_SUPPORTED_AGENTS, resolveAgentIconId } = await import(
   `data:text/javascript;base64,${Buffer.from(agentsModuleSource).toString('base64')}`
 );
 const supportedAgents = [...SESSION_CHAT_SUPPORTED_AGENTS];
 if (supportedAgents.length === 0) {
   throw new Error('packages/shared/session-chat.ts exported no supported Session Chat agents.');
+}
+
+/**
+ * CDXC:SessionChat 2026-09-16 DECISION:
+ * User: the React Native app must support chat for the same agents as the GPUI app.
+ * ZCode and OpenClaude were in the generated support list but resolved to terminal in the native app, hiding the chat toggle.
+ */
+const unrecognizedAgents = supportedAgents.filter(
+  (agentId) => resolveAgentIconId(agentId) === 'terminal' || resolveAgentIconId(undefined, agentId) === 'terminal'
+);
+if (unrecognizedAgents.length > 0) {
+  throw new Error(`Mobile agent resolution hides chat for supported agents: ${unrecognizedAgents.join(', ')}`);
 }
 
 const result = await esbuild.build({
