@@ -91,6 +91,19 @@ if ($BuildPhase -ne "stage") {
     finally { Pop-Location }
 }
 
+# CDXC:PromptEditor 2026-09-16 WHY:
+# Ctrl+G needs the standalone helper as well as Code. Omitting it made every Windows build report the prompt editor unavailable.
+if ($BuildPhase -ne "stage") {
+    Push-Location $RepoRoot
+    try {
+        bun apps/editor/scripts/build-editor-web.mjs
+        if ($LASTEXITCODE -ne 0) { throw "Prompt editor page build failed" }
+        cargo build --release --manifest-path apps/editor/desktop/Cargo.toml
+        if ($LASTEXITCODE -ne 0) { throw "Prompt editor helper build failed" }
+    }
+    finally { Pop-Location }
+}
+
 if ($BuildPhase -eq "compile") {
     Write-Host "Compiled $AppName ($ReleaseArch); staging deferred to the stage phase"
     exit 0
@@ -221,6 +234,11 @@ if ($OnDemandComponents) {
         --output $ComponentManifest
     if ($LASTEXITCODE -ne 0) { throw "Could not seal Windows CEF component metadata" }
 }
+
+$PromptEditorResources = Join-Path $AppDir "resources/GhostexEditor"
+New-Item -ItemType Directory -Force -Path $PromptEditorResources | Out-Null
+Copy-Item (Join-Path $RepoRoot "apps/editor/desktop/target/release/ghostex-editor.exe") (Join-Path $PromptEditorResources "GhostexEditor.exe")
+Copy-Item (Join-Path $RepoRoot "apps/editor/dist/web") (Join-Path $PromptEditorResources "web") -Recurse
 
 # Both environments ship their matching runtime. Source/code-server remains
 # an optional WSL component.

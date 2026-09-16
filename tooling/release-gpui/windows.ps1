@@ -73,7 +73,7 @@ if (-not $RunPackage) {
 }
 
 $AppDir = Join-Path $RepoRoot "apps/desktop/build/windows/Ghostex"
-foreach ($required in @("Ghostex.exe", "ghostex-gpui-runtime.exe", "ghostex-gpui-cef-helper.exe")) {
+foreach ($required in @("Ghostex.exe", "ghostex-gpui-runtime.exe", "ghostex-gpui-cef-helper.exe", "resources/GhostexEditor/GhostexEditor.exe", "resources/GhostexEditor/web/index.html")) {
     if (-not (Test-Path (Join-Path $AppDir $required))) {
         throw "Windows staged app is missing $required"
     }
@@ -157,7 +157,7 @@ if ($RequireSigning) {
         Sort-Object FullName -Descending |
         Select-Object -First 1
     if (-not $SignTool) { throw "A native $ExpectedNativeArch signtool.exe was not found" }
-    foreach ($binary in @("Ghostex.exe", "ghostex-gpui-runtime.exe", "ghostex-gpui-cef-helper.exe")) {
+    foreach ($binary in @("Ghostex.exe", "ghostex-gpui-runtime.exe", "ghostex-gpui-cef-helper.exe", "resources/GhostexEditor/GhostexEditor.exe")) {
         $binaryPath = Join-Path $AppDir $binary
         & $SignTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $SigningPfx /p $SigningPassword $binaryPath
         if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $binary" }
