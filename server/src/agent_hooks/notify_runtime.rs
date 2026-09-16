@@ -82,10 +82,17 @@ pub fn run_notify_hook(args: Vec<String>) -> Result<(), DomainStateError> {
         nested_get(&payload, &["properties", "info", "id"]),
     ]);
     let transcript_path = if agent_key == "zcode" {
-        if session_id.as_deref().is_some_and(|id| id.starts_with("sess_subagent")) {
+        if session_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("sess_subagent"))
+        {
             return Ok(());
         }
-        Some(crate::session_chat_zcode::zcode_database_path(None).to_string_lossy().into_owned())
+        Some(
+            crate::session_chat_zcode::zcode_database_path(None)
+                .to_string_lossy()
+                .into_owned(),
+        )
     } else {
         first_path([
             payload.get("transcript_path"),
