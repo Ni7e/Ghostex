@@ -569,11 +569,17 @@ pub(crate) fn domain_error_response(
         "dependencyUnavailable" => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    routed_json(
+    let reason = crate::session_chat_send_diagnostics::SendFailureReason {
+        code: error.code.to_string(),
+        message: error.message.clone(),
+    };
+    let mut response = routed_json(
         Some(endpoint_path),
         status,
         rpc_error(error.code, error.message, Some(request_id)),
-    )
+    );
+    response.response.extensions_mut().insert(reason);
+    response
 }
 
 pub(crate) async fn handle_automation_http(

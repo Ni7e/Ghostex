@@ -338,6 +338,12 @@ impl GhostexGpuiApp {
         let Some(action) = message.get("action").and_then(serde_json::Value::as_str) else {
             return;
         };
+        if action == "recordSendFailure" {
+            if let Some(details) = message.get("details") {
+                support_logs::append_session_chat_send_failure(details.clone());
+            }
+            return;
+        }
         if action == "setSimpleMode" {
             if let Some(enabled) = message.get("enabled").and_then(serde_json::Value::as_bool) {
                 self.handle_gpui_app_modal_update_settings_patch_message(

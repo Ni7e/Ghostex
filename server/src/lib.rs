@@ -74,6 +74,7 @@ pub mod session_chat_zcode;
 pub(crate) mod session_chat_delivered_drafts;
 pub mod session_chat_diff_panel;
 pub(crate) mod session_chat_draft_diagnostics;
+pub(crate) mod session_chat_send_diagnostics;
 pub(crate) mod session_chat_draft_handoffs;
 pub(crate) mod session_chat_draft_recovery;
 pub(crate) mod session_chat_draft_versions;

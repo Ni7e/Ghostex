@@ -313,6 +313,41 @@ pub fn logs_directory() -> PathBuf {
     shared_settings::ghostex_storage_paths().logs_dir.clone()
 }
 
+/// CDXC:SessionChat 2026-09-16 SEE-ALSO:
+/// server/src/session_chat_send_diagnostics.rs records server refusals and the active screen. This file keeps client failures too, including draft saves and requests that never reach gxserver.
+pub fn append_session_chat_send_failure(details: serde_json::Value) {
+    static WRITER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = WRITER.lock().unwrap_or_else(|error| error.into_inner());
+    let write = || -> std::io::Result<()> {
+        let directory = logs_directory();
+        fs::create_dir_all(&directory)?;
+        let path = directory.join("gpui-session-chat-send-failures.jsonl");
+        let line = serde_json::json!({
+            "ts": timestamp_now(),
+            "event": "sessionChat.sendFailure",
+            "details": details,
+        })
+        .to_string();
+        rotate_log_if_needed(&path, line.len() as u64 + 1)?;
+        let mut options = fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        writeln!(options.open(path)?, "{line}")
+    };
+    if let Err(error) = write() {
+        eprintln!("session chat send diagnostic could not be written: {error}");
+        append(
+            GpuiSupportLog::SessionChat,
+            "sessionChat.sendDiagnosticWriteFailed",
+            serde_json::json!({ "error": error.to_string() }),
+        );
+    }
+}
+
 /// Installs the process panic hook writing crash reports to
 /// `gpui-crash-reports.log` before delegating to the previous hook. macOS
 /// counterpart: NativeCrashDiagnostics; GPUI previously lost panics to stderr.

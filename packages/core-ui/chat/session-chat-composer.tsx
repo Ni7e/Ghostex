@@ -13,7 +13,11 @@ import {
   type PastedImagePreview,
 } from './session-chat-image-attachments';
 import { persistDraftsForRelease, type PendingDraft } from './session-chat-draft-outbox';
-import { readSessionChatComposerSelection, saveSessionChatComposerSelection, isSessionChatComposerSelectionDurable } from './session-chat-composer-parking';
+import {
+  readSessionChatComposerSelection,
+  saveSessionChatComposerSelection,
+  isSessionChatComposerSelectionDurable,
+} from './session-chat-composer-parking';
 import type { SessionChatDraftHandoff } from '@/packages/shared/session-chat-queue';
 import {
   registerDraftWriter,
@@ -988,7 +992,14 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         const revisions = await persistDraftsForRelease(sessionKey);
         if (!canRelease(false) || readStoredSessionChatDraftEntry(sessionKey)?.text !== content) return null;
         saveSessionChatComposerSelection(sessionKey, { text: content, ...input.getSelection() });
-        await flushClientStorage(['drafts', 'recovery', 'recoveryDismissed', 'draftOutbox', 'composerSelection', 'questionDrafts']);
+        await flushClientStorage([
+          'drafts',
+          'recovery',
+          'recoveryDismissed',
+          'draftOutbox',
+          'composerSelection',
+          'questionDrafts',
+        ]);
         if (!canRelease() || input.getValue() !== content) return null;
         return revisions;
       } catch {
@@ -1111,8 +1122,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           preserveDraftRevision({ sessionKey, text: content, updatedAt: saved.updatedAt ?? Date.now(), version });
           writeStoredSessionChatDraft(sessionKey, content, saved.updatedAt, version, false, true);
           await flushClientStorage(['drafts', 'recovery', 'draftOutbox']);
-          if ((getInputApi()?.getValue() ?? draftRef.current) !== content ||
-              draftVersionRef.current?.draftId !== version.draftId || draftVersionRef.current?.revision !== version.revision)
+          if (
+            (getInputApi()?.getValue() ?? draftRef.current) !== content ||
+            draftVersionRef.current?.draftId !== version.draftId ||
+            draftVersionRef.current?.revision !== version.revision
+          )
             throw new Error('The draft changed during transfer. It has been kept in Chat.');
           parkedDraftRef.current = true;
           composerTouchedRef.current = false;
@@ -1309,10 +1323,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     /** CDXC:SessionChat 2026-09-16 DECISION:
      * User: Option+Enter or Send's right-click "Compact & Send" sends /compact to the terminal first, then queues the text written in chat.
      */
-    const send = (
-      text: string = getInputApi()?.getValue() ?? draftRef.current,
-      compactFirst = false
-    ): void => {
+    const send = (text: string = getInputApi()?.getValue() ?? draftRef.current, compactFirst = false): void => {
       if (text.trim() === '' || sendInFlightRef.current) {
         return;
       }
@@ -1355,6 +1366,8 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       // and the only one left if this composer is gone when the send fails.
       vacateComposer({ retainStoredDraft: true });
 
+      let sendPhase = 'saveDraft';
+      const sendStartedAtMs = Date.now();
       const sendRequest = (async () => {
         /*
         CDXC:Drafts 2026-09-06 DECISION:
@@ -1380,10 +1393,12 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           }
         };
         checkCancelled();
+        sendPhase = 'deliverMessage';
         traceDraft('deliveryBegin', { sent: sessionChatDraftFingerprint(text) });
         if (compactQueue) {
           await onSend('/compact');
           checkCancelled();
+          sendPhase = 'queueAfterCompact';
           await compactQueue.queuePrompt(text, submittedDraft.version);
         } else {
           await onSend(text, submittedDraft.version);
@@ -1405,6 +1420,21 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
             recordSentSessionChatMessage(text, sessionKey);
           },
           (error: unknown) => {
+            if (gxserverRpcErrorCode(error) !== 'sendCancelled') {
+              diagnosticLogRef.current?.('sessionChat.sendFailure', {
+                failureId: crypto.randomUUID(),
+                sessionKey,
+                phase: sendPhase,
+                startedAtMs: sendStartedAtMs,
+                failedAtMs: Date.now(),
+                code: gxserverRpcErrorCode(error),
+                message: error instanceof Error ? error.message : String(error),
+                errorName: error instanceof Error ? error.name : null,
+                endpoint: error instanceof GxserverRpcError ? error.endpoint : null,
+                sent: sessionChatDraftFingerprint(text),
+                draftVersion: submittedDraft.version,
+              });
+            }
             traceDraft('deliveryRejected', {
               code: gxserverRpcErrorCode(error),
               sent: sessionChatDraftFingerprint(text),

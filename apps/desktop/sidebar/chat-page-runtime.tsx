@@ -620,6 +620,28 @@ first-responder log they are meant to be correlated with.
 */
   const postSessionChatDiagnosticLog = createSessionChatDiagnosticRecorder((event, details) => {
     postSessionChatHostAction('diagnosticLog', { details: details ?? {}, event });
+    if (event === 'sessionChat.sendFailure') {
+      const failure = { ...details, projectId, sessionId, machineId };
+      postSessionChatHostAction('recordSendFailure', { details: failure });
+      void rpc<GxserverReadSessionTerminalTailResult>(
+        bootstrap,
+        '/api/readSessionTerminalTail',
+        {
+          projectId,
+          sessionId,
+        },
+        AbortSignal.timeout(8_000)
+      ).then(
+        (terminal) =>
+          postSessionChatHostAction('recordSendFailure', {
+            details: { ...failure, capturedAtMs: Date.now(), terminal },
+          }),
+        (error: unknown) =>
+          postSessionChatHostAction('recordSendFailure', {
+            details: { ...failure, captureError: error instanceof Error ? error.message : String(error) },
+          })
+      );
+    }
   });
 
   function postSessionChatHostAction(action: string, fields?: Record<string, unknown>): boolean {
@@ -976,7 +998,8 @@ Where a web URL actually lands is the host's call, not this page's: it reads the
 terminal links use, and hands the URL to the system default browser when that
 setting is off.
 */
-  const openFileInView = (view: 'code' | 'docs'): NonNullable<SessionChatHostLinks['openFile']> =>
+  const openFileInView =
+    (view: 'code' | 'docs'): NonNullable<SessionChatHostLinks['openFile']> =>
     (path, position) =>
       postSessionChatHostAction('openFile', {
         path,

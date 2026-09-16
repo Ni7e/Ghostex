@@ -2048,10 +2048,13 @@ pub(crate) async fn write_session_chat_payload(
         crate::zmx::session_chat_zmx_write(&zmx_name, &payload)
     })
     .await;
-    if matches!(write, Ok(Ok(_))) {
-        Ok(())
-    } else {
-        Err("The session terminal did not accept the chat input.".to_string())
+    match write {
+        Ok(Ok(0)) => Ok(()),
+        Ok(Ok(code)) => Err(format!(
+            "The session terminal refused chat input (exit {code})."
+        )),
+        Ok(Err(error)) => Err(error),
+        Err(error) => Err(format!("The session terminal input task failed: {error}")),
     }
 }
 

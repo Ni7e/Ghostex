@@ -2396,8 +2396,21 @@ async fn route_http(
             handle_read_session_chat_files_http(&state, endpoint.path, request_id, &body_json).await
         }
         "/api/sendSessionChatMessage" => {
-            handle_send_session_chat_message_http(&state, endpoint.path, request_id, &body_json)
-                .await
+            let mut response = handle_send_session_chat_message_http(
+                &state,
+                endpoint.path,
+                request_id.clone(),
+                &body_json,
+            )
+            .await;
+            crate::session_chat_send_diagnostics::record_response(
+                &state,
+                &request_id,
+                &body_json,
+                &mut response,
+            )
+            .await;
+            response
         }
         "/api/saveSessionChatImage" => {
             handle_save_session_chat_image_http(&state, endpoint.path, request_id, &body_json)
@@ -2461,7 +2474,21 @@ async fn route_http(
         | "/api/sendSessionChatQueuedPrompt"
         | "/api/setSessionChatDraft"
         | "/api/acknowledgeSessionChatDraftHandoff" => {
-            handle_session_chat_queue_http(&state, endpoint.path, request_id, &body_json).await
+            let mut response = handle_session_chat_queue_http(
+                &state,
+                endpoint.path,
+                request_id.clone(),
+                &body_json,
+            )
+            .await;
+            crate::session_chat_send_diagnostics::record_response(
+                &state,
+                &request_id,
+                &body_json,
+                &mut response,
+            )
+            .await;
+            response
         }
         // CDXC:Drafts 2026-08-28: the boot-time draft-cache
         // reconcile read; see list_session_chat_drafts_value.
