@@ -61,7 +61,9 @@ without closing Ghostex.
   numbered feedback with line numbers to the session last clicked in the
   sidebar for the active project: into its chat composer when the chat is
   showing, or into the agent's terminal when its input box is available. The
-  button names that session before you press it. When no agent session is
+  Send button reads Send plus the count, or Copy plus the count when notes
+  will go to the clipboard, and is icon-only on a narrow Docs pane; the
+  tooltip names the session it will land in. When no agent session is
   selected, the agent's input box is busy, or Ghostex cannot tell for that
   agent, the feedback is copied to the clipboard instead and a toast says so.
   Sending leaves Docs on screen. Sent notes stay visible with a Sent mark;
@@ -131,6 +133,10 @@ session replaces that active pane's session and leaves the other pane in place.
 
 - Width: the sidebar sits on the left; drag the divider to resize,
   double-click it to restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
+- Reveal active session: the titlebar button expands its section and scrolls
+  the active session into view, then blinks its outline twice: pale blue in
+  light mode and white in dark mode. Active sessions also have a slightly
+  stronger background and border in light mode.
 - Pane memory: the companion and Commands panes are remembered for Agents and,
   separately, for the wide views (Browser, Code, Docs, Kanban, Automate), the
   same for every project, so switching projects never moves them. The sidebar
@@ -192,11 +198,19 @@ session replaces that active pane's session and leaves the other pane in place.
   at the top while you scroll through its rows. Setting:
   `projectSessionListCollapsedCount`.
 - Sidebar section headings (Pinned, Sessions, Drafts, Browser, Parked, and
-  Snoozed) show an orange dot when a session is working and a blue dot when
-  a session is done or awaiting attention, including rows hidden by collapse
-  or Compact mode. Both dots appear when both states are present. A separate
-  plain dot marks the section containing the active session: white on dark
-  sidebars and dark gray on light sidebars. No setting is required.
+  Snoozed) show an orange dot when a session is working, a blue dot when
+  a session is done, and a pink dot when an agent is waiting for an answer,
+  including rows hidden by collapse or Compact mode. Pending questions use
+  pink instead of blue; multiple dots appear when multiple states are present,
+  including orange and pink when an agent keeps working after asking. Collapsed
+  headings show their session count at the right edge and a muted gray hollow
+  circle after the status dots when they contain the active session. The circle
+  disappears when expanded without moving the other dots. Hovering gives the
+  header a subtle square background and replaces the dots with a chevron.
+  Click anywhere across the heading row, including the empty space to its
+  right, to animate the section closed or open. The animation follows Sidebar
+  Collapse Animation and reduced-motion preferences. Related setting:
+  `sidebarCollapseAnimationDurationMs`.
 - New sessions appear at the top of Sessions for 10 minutes. After that,
   a session with unsent text that has not received its first message moves
   into Drafts, below Pinned and above Sessions. Drafts starts collapsed;
