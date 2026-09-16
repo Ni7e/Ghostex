@@ -206,6 +206,7 @@ export interface SessionChatTerminalNoticeCardProps {
    * approval lane — the same path the interactive card's Allow/Deny uses.
    */
   onSendKeys: (send: string) => Promise<void>;
+  onFocusSession?: (target: { projectId: string; sessionId: string }) => Promise<void>;
   /**
    * Answers an on-screen picker by row index. Rejects when the picker has left
    * the screen, which the card reports rather than swallowing: the alternative
@@ -235,7 +236,8 @@ export interface SessionChatTerminalNoticeCardProps {
 /** An action this build knows how to run, with its payload already proven. */
 type RenderableNoticeAction =
   | { id: string; label: string; kind: 'switchToTerminal' }
-  | { id: string; label: string; kind: 'sendKeys'; send: string };
+  | { id: string; label: string; kind: 'sendKeys'; send: string }
+  | { id: string; label: string; kind: 'recoverCodexConversation' };
 
 export function SessionChatTerminalNoticeCard({
   canSend,
@@ -243,6 +245,7 @@ export function SessionChatTerminalNoticeCard({
   onAnswerChoice,
   onAnswerDialog,
   onSendKeys,
+  onFocusSession,
   onSwitchToTerminal,
   onVisibleChange,
   renderAccountMenu,
@@ -353,20 +356,39 @@ export function SessionChatTerminalNoticeCard({
   const primaryChoiceIndex = choices[0]?.index;
   const secondaryChoiceIndex = choices[1]?.index;
 
-  const firstSendKeys =
+  const firstSendAction =
     !answerable && notice
-      ? (notice.actions ?? []).find((action) => action.kind === 'sendKeys' && action.send !== undefined)?.send
+      ? (notice.actions ?? []).find(
+          (action) =>
+            (action.kind === 'sendKeys' && action.send !== undefined) ||
+            (action.kind === 'recoverCodexConversation' && notice.conversationLock && onAnswerDialog)
+        )
       : undefined;
 
-  const runSendKeys = (send: string): void => {
+  const runNoticeAction = (action: { kind: string; send?: string }): void => {
     if (sendingRef.current || !canSend) {
       return;
     }
+    if (
+      action.kind === 'recoverCodexConversation'
+        ? !notice?.conversationLock || !onAnswerDialog
+        : action.send === undefined
+    )
+      return;
     sendingRef.current = true;
     setSending(true);
     setSendFailed(false);
-    void onSendKeys(send)
-      .catch(() => {
+    setChoiceError(null);
+    const request =
+      action.kind === 'recoverCodexConversation' && notice?.conversationLock && onAnswerDialog
+        ? onAnswerDialog({ kind: 'recoverCodexConversation', conversationLock: notice.conversationLock })
+        : onSendKeys(action.send!);
+    void request
+      .catch((error: unknown) => {
+        if (action.kind === 'recoverCodexConversation') {
+          setChoiceError(error instanceof Error ? error.message : 'Could not recover the conversation. Please retry.');
+          return;
+        }
         // The keystrokes never reached the TUI: say so instead of pretending
         // the notice was handled.
         setSendFailed(true);
@@ -377,13 +399,12 @@ export function SessionChatTerminalNoticeCard({
       });
   };
 
-  const runSendKeysRef = useRef(runSendKeys);
-  runSendKeysRef.current = runSendKeys;
-  const keyboardSendKeys =
+  const runNoticeActionRef = useRef(runNoticeAction);
+  runNoticeActionRef.current = runNoticeAction;
+  const keyboardInputAction =
     visible &&
-    firstSendKeys !== undefined &&
+    firstSendAction !== undefined &&
     canSend &&
-    !sending &&
     !(notice?.dialog && notice.dialog.rows.length === 0 && onAnswerDialog);
 
   /**
@@ -392,7 +413,7 @@ export function SessionChatTerminalNoticeCard({
    * Windows and Linux use Control+Enter for the primary action. Capture within the focused chat before the composer can submit or interrupt; open popups keep their keyboard ownership.
    */
   useEffect(() => {
-    if (!keyboardAnswerable && !keyboardSendKeys) return;
+    if (!keyboardAnswerable && !keyboardInputAction) return;
     const root = cardRef.current?.closest<HTMLElement>('.ghostex-session-chat-scope');
     if (!root) return;
     const handler = (event: KeyboardEvent): void => {
@@ -408,15 +429,23 @@ export function SessionChatTerminalNoticeCard({
         event.preventDefault();
         event.stopPropagation();
         answerChoiceRef.current(choiceIndex);
-      } else if (primary && keyboardSendKeys && firstSendKeys !== undefined) {
+      } else if (primary && keyboardInputAction && firstSendAction !== undefined) {
         event.preventDefault();
         event.stopPropagation();
-        runSendKeysRef.current(firstSendKeys);
+        runNoticeActionRef.current(firstSendAction);
       }
     };
     root.ownerDocument.addEventListener('keydown', handler, true);
     return () => root.ownerDocument.removeEventListener('keydown', handler, true);
-  }, [firstSendKeys, isMac, keyboardAnswerable, keyboardSendKeys, primaryChoiceIndex, secondaryChoiceIndex, noticeKey]);
+  }, [
+    firstSendAction,
+    isMac,
+    keyboardAnswerable,
+    keyboardInputAction,
+    primaryChoiceIndex,
+    secondaryChoiceIndex,
+    noticeKey,
+  ]);
 
   if (!visible || !notice) {
     return null;
@@ -445,6 +474,8 @@ export function SessionChatTerminalNoticeCard({
       if (onSwitchToTerminal) {
         actions.push({ id: action.id, kind: 'switchToTerminal', label: action.label });
       }
+    } else if (action.kind === 'recoverCodexConversation' && notice.conversationLock && onAnswerDialog) {
+      actions.push({ id: action.id, kind: action.kind, label: action.label });
     } else if (action.kind === 'sendKeys' && action.send !== undefined) {
       // A `sendKeys` action without bytes has nothing to write; an inert button
       // would claim an ability the notice never carried.
@@ -457,8 +488,9 @@ export function SessionChatTerminalNoticeCard({
     }
   }
 
-  const sendKeysActions = actions.filter(
-    (action): action is Extract<RenderableNoticeAction, { kind: 'sendKeys' }> => action.kind === 'sendKeys'
+  const inputActions = actions.filter(
+    (action): action is Exclude<RenderableNoticeAction, { kind: 'switchToTerminal' }> =>
+      action.kind !== 'switchToTerminal'
   );
   const switchToTerminalActions = actions.filter(
     (action): action is Extract<RenderableNoticeAction, { kind: 'switchToTerminal' }> =>
@@ -490,21 +522,37 @@ export function SessionChatTerminalNoticeCard({
       ) : null}
     </Button>
   ));
-  const escapeHatch = accountMenu || switchToTerminalActions.length > 0;
+  const otherSession = notice.conversationLock?.sessions[0];
+  const otherSessionButton =
+    otherSession && onFocusSession ? (
+      <Button
+        size='sm'
+        variant='outline'
+        disabled={sending}
+        onClick={() => {
+          void onFocusSession(otherSession).catch((error: unknown) => {
+            setChoiceError(error instanceof Error ? error.message : 'Could not open the other session.');
+          });
+        }}
+      >
+        Go to other session
+      </Button>
+    ) : null;
+  const escapeHatch = accountMenu || switchToTerminalActions.length > 0 || otherSessionButton;
   const footer =
-    !collapsed && (sendKeysActions.length > 0 || escapeHatch) ? (
+    !collapsed && (inputActions.length > 0 || escapeHatch) ? (
       <>
-        {sendKeysActions.map((action, sendKeysIndex) => (
+        {inputActions.map((action, inputIndex) => (
           <Button
             disabled={!canSend || sending}
             key={action.id}
-            onClick={() => runSendKeys(action.send)}
+            onClick={() => runNoticeAction(action)}
             size='sm'
             variant='outline'
             {...(canSend ? {} : { title: READ_ONLY_HINT })}
           >
-            {action.label}
-            {showShortcutLabels && sendKeysIndex === 0 && keyboardSendKeys ? (
+            {sending && action.kind === 'recoverCodexConversation' ? 'Continuing…' : action.label}
+            {showShortcutLabels && inputIndex === 0 && keyboardInputAction ? (
               <kbd className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ml-0.5 flex h-4 min-w-4 shrink-0 items-center justify-center rounded border border-border/60 bg-background/50 px-1 text-[10px] font-medium text-muted-foreground tabular-nums'>
                 {primaryShortcutLabel}
               </kbd>
@@ -514,6 +562,7 @@ export function SessionChatTerminalNoticeCard({
         {escapeHatch ? (
           <SessionChatStatusCardActions>
             {accountMenu}
+            {otherSessionButton}
             {terminalButtons}
           </SessionChatStatusCardActions>
         ) : null}

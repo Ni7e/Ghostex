@@ -44,6 +44,7 @@ export interface SessionChatHostAction {
  */
 export interface SessionChatHostActions {
   onSwitchToTerminal: () => void;
+  onFocusSession?: (target: { projectId: string; sessionId: string }) => Promise<void>;
   /** Route the system clipboard through the host's native editor paste command. */
   onPasteIntoComposer?: () => void;
   /** Formatted shortcut for switching between Terminal View and Chat View. */

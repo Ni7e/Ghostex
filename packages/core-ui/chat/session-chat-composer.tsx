@@ -186,6 +186,12 @@ export interface SessionChatComposerHandle {
   */
   flushDraft: () => void;
   focus: () => void;
+  /**
+   * Send the current draft as if Enter (or Option+Enter with `compactFirst`) was
+   * pressed inside the field. Returns false when this composer does not send on
+   * Enter, so a host key handler leaves the key alone.
+   */
+  sendDraft: (compactFirst?: boolean) => boolean;
   getDraft: () => string;
   handoffDraft: () => Promise<SessionChatDraftHandoff>;
   receiveDraftHandoff: (handoff: SessionChatDraftHandoff) => Promise<void>;
@@ -1050,6 +1056,13 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         setFileDismissed(false);
         setFileIndex(0);
         setSendError(null);
+        return true;
+      },
+      sendDraft: (compactFirst = false): boolean => {
+        if (!sendOnEnter) {
+          return false;
+        }
+        send(undefined, compactFirst);
         return true;
       },
       flushDraft: (): void => {
@@ -2947,6 +2960,14 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                     maximized={maximized}
                     onToggleMaximized={() => {
                       setMaximizedAndFocus(!maximized);
+                    }}
+                    onMenuClosed={() => {
+                      // The menu hands focus back to its trigger; a trigger that
+                      // keeps it would turn the next Enter into a reopen.
+                      const active = document.activeElement;
+                      if (active instanceof HTMLElement && active.closest('.ghostex-chat-composer-toolbar')) {
+                        getInputApi()?.focus();
+                      }
                     }}
                     sessionNoteActive={sessionNoteActive}
                     sessionNoteHasText={sessionNoteHasText}

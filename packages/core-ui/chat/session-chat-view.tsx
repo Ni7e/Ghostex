@@ -2,6 +2,7 @@ import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { AccountSwitchCard } from '../accounts/account-switch-card';
 import { useAccountSwitchStatus } from '../accounts/use-account-switch-status';
 import type { SessionChatDraftHandoff } from '@/packages/shared/session-chat-queue';
+import { AppMenuThemeProvider } from '@/packages/components/ui/app-menu-panel';
 import {
   SessionChatPresentationProvider,
   sessionChatPreservesAgentLineBreaks,
@@ -97,6 +98,16 @@ import { useSessionChatWorkingHold } from './use-session-chat-working-hold';
 import { useSessionChatComposerInset } from './use-session-chat-composer-inset';
 import { SessionChatLoadingState } from './session-chat-loading-state';
 import { playCopySound } from '../copy-sound';
+
+/** Controls that own the Enter key themselves; every other target sends the draft. */
+const EDITABLE_TARGET_SELECTOR = [
+  'input',
+  'select',
+  'textarea',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="textbox"]',
+  '[role="combobox"]',
+].join(', ');
 
 const INTERACTIVE_TARGET_SELECTOR = [
   'a[href]',
@@ -1233,7 +1244,9 @@ export function SessionChatView({
     [chat.prompt, chat.terminalNotice, chatAnswerPrompt, noticeKey]
   );
   const terminalChoicePending =
-    ((chat.terminalNotice?.choices?.length ?? 0) > 0 || !!chat.terminalNotice?.dialog) &&
+    ((chat.terminalNotice?.choices?.length ?? 0) > 0 ||
+      !!chat.terminalNotice?.dialog ||
+      !!chat.terminalNotice?.conversationLock) &&
     noticeKey !== retiredNoticeKey;
   /*
   CDXC:AgentScreenDetection 2026-09-04 WHY:
@@ -1298,13 +1311,15 @@ export function SessionChatView({
     ? 'Input is held by another device.'
     : accountSwitch.busy
       ? 'Wait for the account switch to complete.'
-      : terminalChoicePending
-        ? noticeCardVisible
-          ? 'Answer the question above first.'
-          : 'Your answer is still being applied. Try again in a moment.'
-        : sessionOptionSwitching
-          ? 'Claude is still switching mode. Try again in a moment.'
-          : null;
+      : chat.terminalNotice?.conversationLock
+        ? 'This conversation is open elsewhere. Use Continue here or close it in the other app and retry.'
+        : terminalChoicePending
+          ? noticeCardVisible
+            ? 'Answer the question above first.'
+            : 'Your answer is still being applied. Try again in a moment.'
+          : sessionOptionSwitching
+            ? 'Claude is still switching mode. Try again in a moment.'
+            : null;
   /*
   CDXC:SessionChat 2026-09-02:
   The transcript's "Rewind to here" action. Three gates, all of which have to
@@ -1460,6 +1475,27 @@ export function SessionChatView({
         return;
       }
       const target = event.target as HTMLElement | null;
+      /*
+      CDXC:SessionChat 2026-09-16 DECISION:
+      User: pressing Enter in the chat view sends the message, and Option+Enter always compacts then sends, no matter which control holds DOM focus.
+      A click on the More actions trigger or an image thumbnail leaves focus on that button, and Enter there used to reopen the menu or the picture instead of sending.
+      Text fields keep their own Enter; an open menu, dialog or picker keeps its own Enter for item selection.
+      */
+      if (
+        event.key === 'Enter' &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !target?.closest?.(EDITABLE_TARGET_SELECTOR) &&
+        !sessionChatKeyboardPopupOpen(event.currentTarget)
+      ) {
+        if (composerRef.current?.sendDraft(event.altKey)) {
+          composerRef.current.focus();
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+      }
       const interactiveTarget = target?.closest?.(INTERACTIVE_TARGET_SELECTOR);
       const editingShortcut = sessionChatEditingShortcut(event.nativeEvent);
       if (interactiveTarget) {
@@ -1628,6 +1664,7 @@ export function SessionChatView({
       simpleMode={simpleMode}
       onSimpleModeChange={onSimpleModeChange}
     >
+      <AppMenuThemeProvider theme={theme}>
       <TooltipProvider theme={theme}>
         <div
           className={cn(
@@ -1654,6 +1691,11 @@ export function SessionChatView({
           tabIndex={-1}
         >
           <SessionChatImageViewerProvider
+            onClosed={() => {
+              // The thumbnail that opened the picture still holds DOM focus;
+              // left there, the next Enter would open the picture again.
+              window.requestAnimationFrame(() => composerRef.current?.focus());
+            }}
             {...(hostLinks?.locateFile ? { locateFile: hostLinks.locateFile } : {})}
             {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
             {...(saveImageAs ? { saveImageAs } : {})}
@@ -1668,7 +1710,10 @@ export function SessionChatView({
                     rootRef={chatRootRef}
                     searchRevision={chat.messages}
                   />
-                  <div className='relative flex min-h-0 flex-1 flex-col' ref={composerInset.hostRef}>
+                  <div
+                    className='ghostex-chat-scroll-region relative flex min-h-0 flex-1 flex-col'
+                    ref={composerInset.hostRef}
+                  >
                     {/*
                 CDXC:SessionFork 2026-08-28:
                 The chat has no title bar of its own (desktop draws the title
@@ -1765,7 +1810,7 @@ export function SessionChatView({
                                 verboseMode={verbose}
                               />
                             </ContextMenuTrigger>
-                            <ContextMenuContent>
+                            <ContextMenuContent data-chat-theme={theme}>
                               <ContextMenuGroup>
                                 {transcriptFilePath !== null ? (
                                   <SessionChatReferenceMenuItems filePath={transcriptFilePath} />
@@ -1855,6 +1900,7 @@ export function SessionChatView({
                           onAnswerChoice={answerNoticeChoice}
                           onAnswerDialog={chat.answerPrompt}
                           onSendKeys={sendNoticeKeys}
+                          {...(hostActions?.onFocusSession ? { onFocusSession: hostActions.onFocusSession } : {})}
                           onVisibleChange={setNoticeCardVisible}
                           {...(renderAccountMenu ? { renderAccountMenu } : {})}
                           showShortcutLabels={showShortcutLabels}
@@ -2076,6 +2122,7 @@ export function SessionChatView({
           </SessionChatImageViewerProvider>
         </div>
       </TooltipProvider>
+      </AppMenuThemeProvider>
     </SessionChatPresentationProvider>
   );
 }

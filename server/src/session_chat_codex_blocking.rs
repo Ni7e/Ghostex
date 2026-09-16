@@ -205,6 +205,12 @@ fn is_structured_request_user_input(lines: &[String], selected_index: usize) -> 
 /// decision surface. `None` means either the composer is live, the selected UI
 /// is stale scrollback, or the structured request_user_input path owns it.
 pub fn detect_codex_blocking_screen(text: &str) -> Option<CodexBlockingScreen> {
+    if crate::session_chat_codex_lock::is_locked(text) {
+        return Some(CodexBlockingScreen {
+            title: "Conversation open elsewhere",
+            detail: "Close this conversation in the other app, then retry.",
+        });
+    }
     let lines = scan_lines(text);
     if lines.is_empty() {
         return None;

@@ -2154,9 +2154,12 @@ pub fn detect_session_chat_terminal_state(
             );
         }
     }
-    let notice = screen.and_then(|capture| {
+    let mut notice = screen.and_then(|capture| {
         crate::session_chat_notice::classify_session_chat_terminal_notice(agent_id, &capture.text)
     });
+    if let Some(notice) = notice.as_mut() {
+        crate::session_chat_codex_lock::enrich_notice(repository, project_id, session_id, notice);
+    }
     let options = merge_session_chat_option_selections(transcript, statusline, terminal)
         .map(SessionChatDetectedOptions::new);
     // A usage limit an account switch is hiding must not veto the composer either: after the switch the resumed CLI repaints the previous login's limit, and the continuation dot and the user's sends have to reach the new login.

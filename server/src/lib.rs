@@ -55,6 +55,7 @@ pub mod session_chat_codex_blocking;
 pub mod session_chat_codex_dialog;
 pub(crate) mod session_chat_codex_fleet;
 pub mod session_chat_codex_goal;
+pub mod session_chat_codex_lock;
 pub(crate) mod session_chat_codex_pager;
 pub mod session_chat_codex_picker;
 pub(crate) mod session_chat_codex_stats;
