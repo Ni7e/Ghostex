@@ -303,18 +303,34 @@ impl GhostexGpuiApp {
                 .background_executor()
                 .spawn(async move { gpui_spawn_local_gxserver_daemon(&binary) })
                 .await;
-            if let Err(message) = spawn_result {
-                let _ = this.update(cx, |this, cx| {
-                    this.show_gpui_gxserver_bootstrap_toast(
-                        "error",
-                        "gxserver failed",
-                        &message,
-                        true,
-                        cx,
-                    );
-                });
-                return;
-            }
+            let launch_steps = match spawn_result {
+                Ok(steps) => steps,
+                Err(message) => {
+                    // The launcher's own step log is the evidence for this
+                    // failure, so it goes into the same copyable report as a
+                    // health timeout.
+                    startup_diagnostics.push(format!("+{}ms launcher failed: {message}", startup_started.elapsed().as_millis()));
+                    let report = cx
+                        .background_executor()
+                        .spawn(async move { gpui_gxserver_startup_failure_report(&startup_diagnostics) })
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.show_gpui_gxserver_bootstrap_toast(
+                            "error",
+                            "gxserver failed",
+                            &message,
+                            true,
+                            cx,
+                        );
+                        if let Some(toast) = this.app_toasts.iter_mut().find(|toast| toast.id == GPUI_GXSERVER_DAEMON_TOAST_ID) {
+                            toast.copy_text = Some(report);
+                        }
+                        this.sync_gpui_app_toast_window(cx);
+                    });
+                    return;
+                }
+            };
+            startup_diagnostics.extend(launch_steps);
             startup_diagnostics.push(format!("+{}ms launcher accepted the start request.", startup_started.elapsed().as_millis()));
             for attempt in 1..=40 {
                 cx.background_executor()

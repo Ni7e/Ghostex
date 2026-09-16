@@ -648,6 +648,15 @@ pub async fn run_gxserver_foreground(
             let _ = shutdown_rx.recv().await;
         })
         .await;
+    /*
+    CDXC:ServerDaemon 2026-09-16 WHY:
+    Everything from here to the return runs after the listener has closed, while clients already see "connection refused" and may start a replacement daemon.
+    On 2026-09-16 that tail kept the 9.6.0 daemon alive for over two seconds after an app update asked it to stop, long enough for the desktop's launchd re-bootstrap to race it.
+    The desktop now waits for the process, but a slow tail still delays every restart, so a tail over 1.5 s is logged with per-step timings to make the culprit visible.
+    */
+    let shutdown_tail_started = std::time::Instant::now();
+    let mut shutdown_tail_steps: Vec<(&str, u128)> = Vec::new();
+    let step_started = std::time::Instant::now();
     agent_metadata_title_sync_task.abort();
     portless_background_sync_task.abort();
     session_lifecycle_sweep_task.abort();
@@ -668,15 +677,46 @@ pub async fn run_gxserver_foreground(
         telemetry_tasks.flush,
     )
     .await;
+    shutdown_tail_steps.push(("telemetryFlush", step_started.elapsed().as_millis()));
+    let step_started = std::time::Instant::now();
     crate::accounts::setup::cancel_all(&state);
     state.extension_registry.stop_all();
     crate::project_views::stop_all();
+    shutdown_tail_steps.push((
+        "accountsExtensionsProjectViews",
+        step_started.elapsed().as_millis(),
+    ));
+    let step_started = std::time::Instant::now();
     state.tailcat_runtime.stop();
+    shutdown_tail_steps.push(("tailcatStop", step_started.elapsed().as_millis()));
     serve_result.with_context(|| "run gxserver HTTP listener")?;
 
     remove_runtime_metadata(&paths)?;
+    let step_started = std::time::Instant::now();
     stop_all_zmx_title_observers(&state);
     stop_all_session_chat_followers(&state);
+    shutdown_tail_steps.push((
+        "zmxTitleObserversAndChatFollowers",
+        step_started.elapsed().as_millis(),
+    ));
+    let shutdown_tail = shutdown_tail_started.elapsed();
+    if shutdown_tail >= std::time::Duration::from_millis(1500) {
+        let _ = state.logger.log(GxserverLogInput {
+            level: crate::logging::LogLevel::Warn,
+            event: "serverShutdownTailSlow".to_string(),
+            server_id: Some(state.metadata.server_id.clone()),
+            request_id: None,
+            client: None,
+            duration_ms: Some(shutdown_tail.as_millis()),
+            error: None,
+            details: Some(json!({
+                "stepsMs": shutdown_tail_steps
+                    .iter()
+                    .map(|(name, ms)| (name.to_string(), json!(ms)))
+                    .collect::<serde_json::Map<String, serde_json::Value>>(),
+            })),
+        });
+    }
     Ok(GxserverForegroundResult { reused: false })
 }
 

@@ -55,6 +55,69 @@ pub(crate) fn gpui_gxserver_server_health(timeout: Duration) -> Result<serde_jso
         .map_err(|_| "gxserver health returned invalid JSON.".to_string())
 }
 
+/// Pid the local daemon reports on `/api/health/server`, read before asking it
+/// to stop so the caller can wait for the process itself and not just its port.
+pub(crate) fn gpui_local_gxserver_health_pid() -> Option<u32> {
+    let health = gpui_gxserver_server_health(Duration::from_millis(1000)).ok()?;
+    let pid = health.get("pid")?.as_u64()?;
+    u32::try_from(pid).ok()
+}
+
+/*
+CDXC:ServerDaemon 2026-09-16 WHY:
+`/api/control/stop` closes the listener first and the process exits only after its shutdown tail (telemetry flush, tailcat stop, observer teardown), so "port unreachable" arrives seconds before "process gone".
+Restart paths that spawned on the first signal raced launchd's removal of the old job and ended with no daemon at all (see gpui_spawn_local_gxserver_daemon). Callers wait for the process, bounded, before starting the next one.
+*/
+pub(crate) fn gpui_wait_for_local_gxserver_process_exit(
+    previous_pid: Option<u32>,
+    timeout: Duration,
+) -> bool {
+    let started = std::time::Instant::now();
+    loop {
+        let pid_alive = previous_pid.is_some_and(gpui_local_process_is_alive);
+        #[cfg(target_os = "macos")]
+        let job_alive = gpui_inspect_launchd_job(&gpui_gxserver_launchd_job_target())
+            .pid
+            .is_some();
+        #[cfg(not(target_os = "macos"))]
+        let job_alive = false;
+        if !pid_alive && !job_alive {
+            return true;
+        }
+        if started.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+#[cfg(unix)]
+fn gpui_local_process_is_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    // Signal 0 to a live process of another user is refused, not "no such
+    // process".
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(windows)]
+fn gpui_local_process_is_alive(pid: u32) -> bool {
+    let filter = format!("PID eq {pid}");
+    match gpui_run_command_with_captured_output_timeout(
+        Path::new("tasklist"),
+        &["/FI", &filter, "/NH", "/FO", "CSV"],
+        Duration::from_secs(3),
+        16 * 1024,
+    ) {
+        Ok(output) => output.success && output.stdout.contains(&format!("\"{pid}\"")),
+        Err(_) => false,
+    }
+}
+
 pub(crate) const GPUI_GXSERVER_DAEMON_TOAST_ID: &str = "toast-gxserver-daemon";
 pub(crate) const GPUI_MISSING_MONACO_PROMPT_EDITOR_TOAST_ID: &str =
     "toast-monaco-prompt-editor-missing";
@@ -160,6 +223,7 @@ pub(crate) fn gpui_schedule_agents_delayed_send_with_current_gxserver_build(
 }
 
 pub(crate) fn gpui_restart_local_gxserver_for_current_build() -> Result<(), String> {
+    let previous_pid = gpui_local_gxserver_health_pid();
     let (status_code, _) = gxserver_post_typed_operation(
         "/api/control/stop",
         &serde_json::json!({}),
@@ -183,10 +247,14 @@ pub(crate) fn gpui_restart_local_gxserver_for_current_build() -> Result<(), Stri
     if !stopped {
         return Err("gxserver did not stop before its build update.".to_string());
     }
+    // The port closes before the process exits; a start that runs in between
+    // races launchd's removal of the old job. Best effort: the spawn below
+    // boots out whatever is still alive.
+    let _ = gpui_wait_for_local_gxserver_process_exit(previous_pid, Duration::from_secs(15));
 
     let binary = gpui_resolve_local_gxserver_binary()
         .ok_or_else(|| "Bundled gxserver binary is missing.".to_string())?;
-    gpui_spawn_local_gxserver_daemon(&binary)?;
+    let _launch_steps = gpui_spawn_local_gxserver_daemon(&binary)?;
     for _ in 0..40 {
         std::thread::sleep(Duration::from_millis(500));
         match gpui_probe_local_gxserver_health() {
@@ -425,7 +493,7 @@ also covers the color-blocker and session-identity stripping the nohup path
 performed; CLICOLOR mirrors terminal_environment's color opt-in.
 */
 #[cfg(target_os = "macos")]
-pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
+pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<Vec<String>, String> {
     const LAUNCH_FAILURE: &str = "gxserver failed to launch.";
     let Some(binary_path) = binary.to_str() else {
         return Err(LAUNCH_FAILURE.to_string());
@@ -523,52 +591,155 @@ pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), Stri
     );
     std::fs::write(&plist_path, plist).map_err(|_| LAUNCH_FAILURE.to_string())?;
 
-    let uid_output = std::process::Command::new("/usr/bin/id")
-        .arg("-u")
-        .output()
-        .map_err(|_| LAUNCH_FAILURE.to_string())?;
-    let uid = String::from_utf8_lossy(&uid_output.stdout)
-        .trim()
-        .to_string();
-    if uid.is_empty() {
-        return Err(LAUNCH_FAILURE.to_string());
-    }
-    let job_target = format!("gui/{uid}/{label}");
-    let domain_target = format!("gui/{uid}");
-
-    let run_launchctl = |arguments: &[&str]| -> bool {
-        std::process::Command::new("/bin/launchctl")
-            .args(arguments)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+    let job_target = gpui_gxserver_launchd_job_target();
+    let domain_target = format!("gui/{}", gpui_current_uid());
+    let plist_argument = plist_path.to_string_lossy().to_string();
+    let started = std::time::Instant::now();
+    let mut steps: Vec<String> = Vec::new();
+    let note = |steps: &mut Vec<String>, text: String| {
+        steps.push(format!(
+            "launchd +{}ms: {text}",
+            started.elapsed().as_millis()
+        ));
     };
-    // This path only runs when the daemon health probe reported unreachable,
-    // so removing a stale or hung job definition before loading the fresh
-    // plist (whose binary path changes across app versions) is safe.
-    let _ = run_launchctl(&["bootout", &job_target]);
-    let bootstrapped = run_launchctl(&["bootstrap", &domain_target, &plist_path.to_string_lossy()]);
-    // A concurrent client may have loaded the same label between the bootout
-    // and bootstrap (making bootstrap fail) or already started the job
-    // (making kickstart report already-active), so either success signal
-    // means the job is loaded; the caller's health-probe loop owns the
-    // final running/not-running verdict.
-    let kickstarted = run_launchctl(&["kickstart", &job_target]);
-    support_logs::append(
-        support_logs::GpuiSupportLog::HostLifecycle,
-        "gpui.gxserverBootstrap.launchdAgent",
-        serde_json::json!({
-            "bootstrapped": bootstrapped,
-            "kickstarted": kickstarted,
-        }),
+
+    /*
+    CDXC:ServerDaemon 2026-09-16 WHY:
+    `launchctl bootout` only signals the job and returns; launchd drops the label after the process has exited, up to 5 s later when it escalates to SIGKILL.
+    On 2026-09-16 an app update stopped the previous daemon's control plane, the port closed, and this function ran bootout, bootstrap and kickstart within 30 ms while pid 83573 was still draining its shutdown. launchd's log: bootout returned at once and only sent SIGTERM; 7 ms later "Bootstrap by launchctl failed (37: Operation already in progress)"; kickstart landed on the dying registration, blocked until that process exited 380 ms later, and returned 0; launchd then removed the label. No WILL_SPAWN ever followed, so the 20 s health loop timed out with "Connection refused" on every probe and the daemon only came up when the user clicked reload.
+    Every step below therefore waits for launchd's actual state (label gone, then a pid) instead of trusting exit codes, and a job that is already running this binary and answers health is left alone so two overlapping starts cannot boot each other out.
+    */
+    let before = gpui_inspect_launchd_job(&job_target);
+    note(
+        &mut steps,
+        format!("job before start: {}", before.describe()),
     );
-    if !bootstrapped && !kickstarted {
-        return Err(LAUNCH_FAILURE.to_string());
+    if before.pid.is_some() && before.program.as_deref() == Some(binary_path) {
+        // Same binary with a live process: either a concurrent start or a
+        // daemon still shutting down. Health decides, with a moment's grace
+        // for a fresh start to open its listener.
+        let probe_started = std::time::Instant::now();
+        loop {
+            if matches!(
+                gpui_probe_local_gxserver_health(),
+                GpuiLocalGxserverHealthState::Healthy { .. }
+            ) {
+                note(
+                    &mut steps,
+                    "a daemon with this binary is already running and healthy; leaving it alone"
+                        .to_string(),
+                );
+                gpui_log_launchd_spawn_outcome(true, true, before.pid, &steps);
+                return Ok(steps);
+            }
+            if probe_started.elapsed() >= Duration::from_secs(3) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        note(
+            &mut steps,
+            "the running process did not answer health within 3 s; treating it as exiting"
+                .to_string(),
+        );
     }
-    Ok(())
+
+    let current = gpui_inspect_launchd_job(&job_target);
+    if current.loaded {
+        let bootout = gpui_run_launchctl(&["bootout", &job_target]);
+        note(
+            &mut steps,
+            format!(
+                "bootout of the {} job: {}",
+                current.describe(),
+                gpui_describe_launchctl_result(&bootout)
+            ),
+        );
+        match gpui_wait_for_launchd_job_removal(&job_target, Duration::from_secs(12)) {
+            Ok(elapsed) => note(
+                &mut steps,
+                format!("previous job removed after {}ms", elapsed.as_millis()),
+            ),
+            Err(stuck) => {
+                note(
+                    &mut steps,
+                    format!(
+                        "previous job still present after 12 s: {}",
+                        stuck.describe()
+                    ),
+                );
+                gpui_log_launchd_spawn_outcome(false, false, stuck.pid, &steps);
+                return Err(format!(
+                    "launchd did not remove the previous gxserver job within 12 seconds ({}). Quit Ghostex, run `launchctl bootout {job_target}`, and start Ghostex again.",
+                    stuck.describe()
+                ));
+            }
+        }
+    } else {
+        note(&mut steps, "no job loaded; nothing to boot out".to_string());
+    }
+
+    let mut bootstrap = gpui_run_launchctl(&["bootstrap", &domain_target, &plist_argument]);
+    let mut bootstrap_attempts = 1u32;
+    while !bootstrap.success
+        && bootstrap_attempts < 10
+        && !gpui_inspect_launchd_job(&job_target).loaded
+    {
+        std::thread::sleep(Duration::from_millis(200));
+        bootstrap = gpui_run_launchctl(&["bootstrap", &domain_target, &plist_argument]);
+        bootstrap_attempts += 1;
+    }
+    let bootstrapped = bootstrap.success;
+    note(
+        &mut steps,
+        format!(
+            "bootstrap after {bootstrap_attempts} attempt(s): {}",
+            gpui_describe_launchctl_result(&bootstrap)
+        ),
+    );
+    // A concurrent client may have loaded the same label in between, which
+    // makes our bootstrap fail although the job is there; the pid check below
+    // owns the verdict either way.
+    if !bootstrapped && !gpui_inspect_launchd_job(&job_target).loaded {
+        gpui_log_launchd_spawn_outcome(false, false, None, &steps);
+        return Err(format!(
+            "launchctl could not load the gxserver job: {}",
+            gpui_launchctl_failure_text(&bootstrap)
+        ));
+    }
+
+    let mut spawned_pid = None;
+    let mut last_kickstart = None;
+    for round in 1..=2u32 {
+        let kickstart = gpui_run_launchctl(&["kickstart", &job_target]);
+        note(
+            &mut steps,
+            format!(
+                "kickstart {round}: {}",
+                gpui_describe_launchctl_result(&kickstart)
+            ),
+        );
+        last_kickstart = Some(kickstart);
+        if let Some(pid) = gpui_wait_for_launchd_job_pid(&job_target, Duration::from_secs(3)) {
+            spawned_pid = Some(pid);
+            break;
+        }
+        note(&mut steps, "no pid within 3 s".to_string());
+    }
+    gpui_log_launchd_spawn_outcome(bootstrapped, spawned_pid.is_some(), spawned_pid, &steps);
+    match spawned_pid {
+        Some(pid) => {
+            note(&mut steps, format!("gxserver spawned as pid {pid}"));
+            Ok(steps)
+        }
+        None => Err(format!(
+            "launchd loaded the gxserver job but never spawned it: {}",
+            last_kickstart
+                .as_ref()
+                .map(gpui_launchctl_failure_text)
+                .unwrap_or_default()
+        )),
+    }
 }
 
 /// Launches the daemon exactly like the macOS client used to: a
@@ -577,7 +748,7 @@ pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), Stri
 /// child as ownership. (Linux has no Dock background-attribution concern, so
 /// the detached-child launch remains correct there.)
 #[cfg(target_os = "linux")]
-pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
+pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<Vec<String>, String> {
     let Some(binary_path) = binary.to_str() else {
         return Err("gxserver failed to launch.".to_string());
     };
@@ -612,11 +783,11 @@ pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), Stri
     if !status.success() {
         return Err("gxserver failed to launch.".to_string());
     }
-    Ok(())
+    Ok(vec!["launcher: detached nohup start accepted".to_string()])
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), String> {
+pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<Vec<String>, String> {
     use std::os::windows::process::CommandExt;
 
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
@@ -645,7 +816,9 @@ pub(crate) fn gpui_spawn_local_gxserver_daemon(binary: &Path) -> Result<(), Stri
         .creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW)
         .spawn()
         .map_err(|_| "gxserver failed to launch.".to_string())?;
-    Ok(())
+    Ok(vec![
+        "launcher: detached process start accepted".to_string(),
+    ])
 }
 
 /*

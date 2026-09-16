@@ -32,6 +32,10 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
+            let previous_pid = cx
+                .background_executor()
+                .spawn(async { gpui_local_gxserver_health_pid() })
+                .await;
             let stop_result = cx
                 .background_executor()
                 .spawn(async {
@@ -64,6 +68,18 @@ impl GhostexGpuiApp {
                         break;
                     }
                 }
+                // The port closes before the process exits; restarting in
+                // between races launchd's removal of the old job. Best effort:
+                // the spawn itself boots out whatever is still alive.
+                let _ = cx
+                    .background_executor()
+                    .spawn(async move {
+                        gpui_wait_for_local_gxserver_process_exit(
+                            previous_pid,
+                            Duration::from_secs(15),
+                        )
+                    })
+                    .await;
             }
             let _ = this.update(cx, |this, cx| {
                 let should_restart = restart_after_stop && stop_error.is_none();

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Stabilization
+
+  - After an app update, gxserver comes back on the first start instead of showing "gxserver failed to start" until you reload. Ghostex now waits for the previous daemon to exit before it re-registers the background job, verifies that launchd actually spawned the new one, and the copyable diagnostics include every launchd step and launchctl error.
+
 ## 9.6.0 - 2026-09-15
 
 - New Features
