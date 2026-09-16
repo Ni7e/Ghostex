@@ -8,6 +8,11 @@ section here in the same change.
 Each section ends with "Related settings" so the helper can turn an
 explanation into a change with `ghostex settings set`.
 
+Context menus share the sidebar's rounded appearance and follow the current
+light or dark theme. Click a submenu to open it; it stays open as you move the
+pointer across other rows. Long menus scroll vertically to keep every action
+reachable, without a horizontal scrollbar.
+
 ## Views (titlebar tabs)
 
 Every project has the same six built-in views, switched from the titlebar tabs
@@ -23,11 +28,13 @@ become a dropdown on the left after the Notifications bell that follows Next
 the same outlined chat bubble with text lines whether the companion is visible or hidden.
 
 Right-click Code, Browser, Kanban, Automate, Docs, or another web-based view's
-titlebar button for **Reload** and **Sleep**, followed by **Extensions**. Reload
+titlebar button for **Reload** and **Sleep** (or **Wake** when sleeping), followed by **Extensions**. Reload
 refreshes the clicked view (the focused tab in Browser); a sleeping view opens
 again. Sleep unloads the view while keeping its place, and Code also stops its
-editor server. Select the view again to wake it. Resources can stop Code too,
-without closing Ghostex.
+editor server. Choose Wake or select the view again to wake it. Resources can stop Code too,
+without closing Ghostex. Custom project views also offer **Command output** and
+**Configure view** before **Extensions**. Configure view opens that view's editor
+in Settings > Extensions and focuses its name field.
 
 - **Agents**: the terminal grid. Panes and tabs run agent CLIs or plain shells,
   split horizontally or vertically, in one or more groups. Each pane can show
@@ -54,8 +61,9 @@ without closing Ghostex.
 - **Docs**: Markdown, HTML, and Excalidraw files from the project's docs
   folders, with a markdown editor and an annotation system that sends notes
   back to the agent. Select text in a Markdown file to comment on it, mark it
-  Looks good, Clarify, or Needs tests, or delete it (press D), and add a global
-  comment from the header. In the comment box, Add (or Cmd+Enter, Ctrl+Enter
+  Looks good, Clarify, or Needs tests, or mark it Remove this (the X button, or
+  press D), and add a global comment from the header. Unselect the text to
+  close the toolbar. In the comment box, Add (or Cmd+Enter, Ctrl+Enter
   on Windows and Linux) adds the note to the list; the same chord outside the
   box is Send. Send (or Cmd+Enter) delivers the new notes as
   numbered feedback with line numbers to the session last clicked in the
@@ -94,6 +102,9 @@ Related settings: `terminalViewWidthMode`, `webLinkOpenTarget`,
 
 The sidebar lists projects and their sessions. Project headers carry the git
 branch and diff stats, an agent launcher, Add Worktree, and project actions.
+Close Project parks the project in Recent Projects; when it held the active
+session, Ghostex stays in the current Space and switches to an awake session
+of the next project in the list.
 Session rows show the agent icon, title, status, tags, and last-active time.
 Top chrome holds the Quick section (projectless Quick chats and terminals),
 tag filters, Spaces, and More Options: Settings, Search by
@@ -133,7 +144,7 @@ session replaces that active pane's session and leaves the other pane in place.
 
 - Width: the sidebar sits on the left; drag the divider to resize,
   double-click it to restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
-- Reveal active session: the titlebar button expands its section and scrolls
+- Reveal active session: the hollow-circle titlebar button expands its section and scrolls
   the active session into view, then blinks its outline twice: pale blue in
   light mode and white in dark mode. Active sessions also have a slightly
   stronger background and border in light mode.
@@ -208,7 +219,8 @@ session replaces that active pane's session and leaves the other pane in place.
   disappears when expanded without moving the other dots. Hovering gives the
   header a subtle square background and replaces the dots with a chevron.
   Click anywhere across the heading row, including the empty space to its
-  right, to animate the section closed or open. The animation follows Sidebar
+  right, to animate the section closed or open. Sessions keep their full size
+  and spacing while the section reveals or clips the list. The animation follows Sidebar
   Collapse Animation and reduced-motion preferences. Related setting:
   `sidebarCollapseAnimationDurationMs`.
 - New sessions appear at the top of Sessions for 10 minutes. After that,
@@ -315,9 +327,13 @@ through the agent's own rename command so it survives reopening the conversation
   a terminal with `zcode --resume <session-id>`; install the ZCode CLI on that
   computer first. Deleted, archived, running, and subagent ZCode conversations
   are excluded from discovery.
-- Search by Prompt (More Options, or `gx f` in a terminal) fuzzy-searches every
-  prompt you ever sent to an agent; Enter resumes that session, and starred
-  prompts stay on top. Ctrl+G is agents, Ctrl+J is projects inside the picker.
+- Search by Prompt (More Options, the floating Search by Prompt button at the
+  bottom of Quick Access > Sessions, the `openFindPrompts` hotkey, default
+  `cmd+shift+f`, or `gx f` in a terminal) fuzzy-searches every prompt you ever
+  sent to an agent; Enter resumes that session, and starred prompts stay on
+  top. Inside the picker the agent and project filters are dropdowns at the top
+  right (Ctrl+G and Ctrl+J open them), Grouping (Ctrl+D) toggles day headers,
+  and hovering any control shows its hotkey.
 - Delayed Actions opens Session Automations. Send Enter can run after a delay,
   when this agent finishes, when all agents in the project finish, or **When a
   specific agent finishes**. Choose the specific agent from the Agent sessions
@@ -433,6 +449,12 @@ To compact before sending a new prompt, press `⌥Enter` on macOS or `Alt+Enter`
 or right-click Send and choose Compact & Send. Ghostex sends `/compact` first,
 then puts your written prompt in the queue above the input to send after compaction.
 In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
+If Codex says **Conversation open elsewhere**, choose **Continue here** or press
+Cmd+Enter (Ctrl+Enter on Windows and Linux) to close the other matching Ghostex
+sessions and retry here. This stops their running work but keeps conversation history.
+**Go to other session**, when available, opens the existing session instead.
+If the conversation is open outside Ghostex, close it in that app and choose
+**Retry** with the same shortcut. Your draft stays editable and is not sent by recovery.
 While Claude Code writes a reply, the chat shows the text as it appears in the
 terminal, updated about once a second, and swaps in the saved message the moment
 Claude records it; nothing to enable.
