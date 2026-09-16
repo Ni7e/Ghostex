@@ -119,13 +119,12 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
   color: var(--primary-foreground);
 }
 
-/* Mirror gpui's native terminal find chrome exactly. The chat transcript is a
-   CEF document, so it cannot instantiate the Rust GPUI element directly; this
-   row keeps the same normal-layout dimensions, colors, type, and controls. */
+/* The chat transcript is a CEF document, so it mirrors the native terminal
+   find row's normal-layout dimensions, type, and controls using chat theme colors. */
 .ghostex-chat-terminal-search-row {
   align-items: center;
-  background: #000;
-  border-bottom: 1px solid #202020;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
   display: flex;
   flex: 0 0 35px;
   height: 35px;
@@ -136,8 +135,8 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 
 .ghostex-chat-terminal-search-bar {
   align-items: center;
-  background: #000;
-  border-left: 1px solid #252525;
+  background: var(--background);
+  border-left: 1px solid var(--border);
   display: flex;
   flex: 0 1 300px;
   gap: 4px;
@@ -151,7 +150,7 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
   appearance: none;
   background: transparent;
   border: 0;
-  color: rgba(255, 255, 255, 0.937);
+  color: var(--foreground);
   flex: 1 1 auto;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 13px;
@@ -162,12 +161,12 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 }
 
 .ghostex-chat-terminal-search-input::placeholder {
-  color: rgba(255, 255, 255, 0.56);
+  color: var(--muted-foreground);
   opacity: 1;
 }
 
 .ghostex-chat-terminal-search-count {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--muted-foreground);
   flex: 0 0 auto;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
@@ -186,11 +185,11 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 .ghostex-chat-terminal-search-button {
   align-items: center;
   appearance: none;
-  background: #000;
+  background: var(--background);
   border: 0;
-  border-left: 1px solid #252525;
+  border-left: 1px solid var(--border);
   border-radius: 0;
-  color: #cfcfcf;
+  color: var(--foreground);
   cursor: default;
   display: flex;
   flex: 0 0 42px;
@@ -209,7 +208,7 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
 }
 
 .ghostex-chat-terminal-search-button:hover {
-  background: #343434;
+  background: var(--accent);
 }
 
 /* CDXC:SessionChat 2026-09-09 DECISION:
