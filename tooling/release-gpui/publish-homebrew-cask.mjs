@@ -40,13 +40,13 @@ import { releaseProvenanceAssetName, validateReleaseProvenance } from './provena
 import { withRetryProfile } from './retry.mjs';
 
 const defaultRepo = 'maddada/Ghostex';
-const officialCask = Object.freeze({
+export const officialCask = Object.freeze({
   label: 'Homebrew/homebrew-cask',
   repo: 'Homebrew/homebrew-cask',
   base: 'main',
   path: 'Casks/g/ghostex.rb',
 });
-const personalTap = Object.freeze({
+export const personalTap = Object.freeze({
   label: 'maddada/homebrew-tap',
   repo: 'maddada/homebrew-tap',
   base: 'main',
@@ -366,7 +366,9 @@ export async function waitForLivecheckAppcast({ version, timeoutMs = 8 * 60 * 10
   }
 }
 
-async function findOpenPullRequest({ version, token }) {
+// Shared with tooling/release-final-verify.mjs, which treats an open bump pull
+// request as the official cask being on its way rather than missing.
+export async function findOpenPullRequest({ version, token }) {
   const query = `repo:${officialCask.repo} is:pr is:open ghostex in:title`;
   const search = await ghApi(`search/issues?q=${encodeURIComponent(query)}&per_page=50`, { token });
   const pattern = new RegExp(`\\bghostex\\b.*\\b${version.replaceAll('.', '\\.')}\\b`, 'iu');
