@@ -7,6 +7,7 @@
 **Ghostex 9.8.0 is out.** Continue a Codex conversation that is open in another session, animated session sections with a separate dot for pending questions, one menu style across the app, Search by Prompt filters in the toolbar, and a reliable restart of the background server after an update.
 
 ### 💬 Chat and agents
+
 - **Continue a Codex conversation that is open somewhere else.** When Codex says the conversation is in use by another session, choose Continue here (or press Cmd+Enter) and Ghostex closes the other Ghostex session, retries, and keeps your draft unsent until it succeeds.
 - **Rewind lands on the prompt you picked.** Claude slash commands now appear in the rewind list, so choosing a row no longer rewinds to a different prompt.
 - **Delayed Send waits for the agent to really finish.** A scheduled send no longer goes out while the agent is still writing its last turn.
@@ -14,26 +15,31 @@
 - **Cursor conversations keep their place.** Late thinking steps from Cursor no longer shift where your next message is sent.
 
 ### 🗂 A clearer sidebar
+
 - **Session sections open and close with an animation.** Status dots stay put while rows slide, and a session waiting on a question shows its own pink dot.
 - **Reveal Session is easy to spot.** After the section expands, the revealed session blinks with an outline, and the titlebar button uses a hollow circle.
 - **Closing a project keeps you in your Space.** Ghostex moves focus to an awake session in the next project of the same Space instead of leaving it.
 - **Light mode reads better.** The active session row and its hover buttons stand out more, and resize handles and agent tab drop targets use a softer gray.
 
 ### 🎨 One look for menus and scrollbars
+
 - **Every menu shares one panel.** Dropdowns, context menus, and titlebar popups have the same rounded panel and shadow, and submenus open on click.
 - **Scrollbars are thin and match your theme everywhere.** Terminals, the code editor, chat, and the menu bar panel all use the same slim scrollbar that appears on hover.
 - **Long pick lists stay inside the window.** Delayed Send and other pickers scroll to the highlighted row instead of running off screen.
 
 ### 🔍 Search by Prompt
+
 - **Agent and project filters sit in the toolbar.** They are dropdowns at the top right, and the list shows placeholders while your history loads.
 - **Open Search by Prompt from Previous Sessions.** A Search by Prompt button floats over the Sessions list.
 
 ### 📝 Docs and views
+
 - **The annotation toolbar sits above your selection.** It moves below the text near the top of the page, and the X marks text for removal with a note.
 - **The Docs header shows Send or Copy with the annotation count.** It shrinks to an icon in narrow windows.
 - **Titlebar view menus offer Configure view and Wake again.** Configure view opens that custom view in Settings, and a sleeping web view can be woken from its menu.
 
 ### 🩹 Fixes
+
 - **The background server starts on the first try after an update.** Ghostex waits for the old server to exit before starting the new one, so "gxserver failed to start" no longer appears until you reload, and the copyable diagnostics explain any start failure.
 
 ## 9.7.0 - 2026-09-16
@@ -74,7 +80,7 @@
   - Unread notification text is darker in light mode, and session-list dots are visible there.
   - Escape and single-key terminal controls act immediately in chat instead of waiting on your login profile.
   - Workspace state is written off the UI thread, so clicking around no longer waits on a save.
-  - Annotate in the Browser toolbar now opens inside the frame that holds the page content, so a Storybook story or another framed preview can be annotated instead of only the chrome around it. It also shows up again on Ghostex's own development pages, where it used to disappear before appearing.
+  - Annotate in the Browser toolbar now opens inside the frame that holds the page content, so a Storybook story or another framed preview can be annotated instead of only the chrome around it. It also shows up again on Ghostex's own development pages, where it used to disappear before appearing. Copying or sending annotations now clears them by default, in the Browser toolbar and in Docs HTML files; the toolbar's settings panel can turn that off.
   - Sidebar section headings (Pinned, Sessions, Drafts, Browser, Parked, Snoozed) carry an orange dot when a session there is working and a blue dot when one is done or waiting on you, counting rows hidden by collapse or Compact mode, plus a plain dot on the section holding the active session. Section labels are also a little larger.
   - Every sidebar tooltip waits exactly as long as the delay you set in Settings, including project titles, session cards, fixed action buttons, the branch badge, and the question dot. Moving from one label to the next no longer skips the wait.
 
