@@ -86,7 +86,7 @@ import { useSessionChatComposerCollapse } from './use-session-chat-composer-coll
 import { SessionChatWorkingStrip, type SessionChatWorkingStripProps } from './session-chat-working-strip';
 import { cn } from '@/packages/components/utils';
 import type { GxserverReadSessionTerminalTailResult, GxserverRpcErrorCode } from '@/packages/shared/gxserver-protocol';
-import { gxserverRpcErrorCode } from '@/packages/shared/gxserver-rpc-error';
+import { GxserverRpcError, gxserverRpcErrorCode } from '@/packages/shared/gxserver-rpc-error';
 import { Button } from '../../components/ui/button';
 import {
   ContextMenu,
@@ -275,7 +275,7 @@ export interface SessionChatComposerProps {
   isWorking: boolean;
   /** Session activity may differ from the transcript's held working state. */
   workingStatus?: SessionChatWorkingStripProps;
-  /** Places status above the host's cards; maximized composers keep it in their own overlay. */
+  /** Places status above the host's cards while the composer is not maximized. */
   workingStatusContainer?: HTMLElement | null;
   /** Whether plain Enter sends instead of inserting a newline. */
   sendOnEnter?: boolean;
@@ -568,7 +568,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       onAttachFile,
       onDelayedActions,
       onDraftEmptyChange,
-      onInterrupt,
+      onInterrupt: interruptAgent,
       onLoadImagePreview,
       onNativeDropPaths,
       onPasteImage,
@@ -710,6 +710,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     const pendingInsertTextRef = useRef('');
     const pendingSavedPromptRef = useRef('');
     const sendInFlightRef = useRef(false);
+    const sendAttemptRef = useRef<{ cancelled: boolean } | null>(null);
+    const onInterrupt = (): void => {
+      if (sendAttemptRef.current) sendAttemptRef.current.cancelled = true;
+      interruptAgent();
+    };
     /** Newest draft stamp already applied or dismissed here (never re-offered). */
     const lastHandledDraftAtRef = useRef<string | null>(null);
     /** Exact content of the last successful push, so blur cannot spam gxserver. */
@@ -1320,6 +1325,8 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         storedPrefixOfSent: text.startsWith(readStoredSessionChatDraft(sessionKey)),
       });
       sendInFlightRef.current = true;
+      const attempt = { cancelled: false };
+      sendAttemptRef.current = attempt;
       pendingDraftTransfersRef.current += 1;
       const submittedDraft = persistComposerDraft(text, true);
       // Sending closes the maximize overlay: the user's next look is at the
@@ -1345,6 +1352,17 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           traceDraft('sendSaveBegin', { sent: sessionChatDraftFingerprint(text) });
           await draftSync.push(text, submittedDraft.version);
           traceDraft('sendSaveAcknowledged', { sent: sessionChatDraftFingerprint(text) });
+        }
+        /** CDXC:SessionChat 2026-09-16 WHY:
+         * Escape can reach gxserver while this send is still saving its draft, before there is a terminal send to cancel.
+         * Cancel the pending submission here so it cannot start after the interrupt and consume the recovered draft.
+         */
+        if (attempt.cancelled) {
+          throw new GxserverRpcError(
+            'sendCancelled',
+            'The session chat send was cancelled.',
+            '/api/sendSessionChatMessage'
+          );
         }
         traceDraft('deliveryBegin', { sent: sessionChatDraftFingerprint(text) });
         await onSend(text, submittedDraft.version);
@@ -1403,6 +1421,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         })
         .finally(() => {
           sendInFlightRef.current = false;
+          sendAttemptRef.current = null;
           pendingDraftTransfersRef.current -= 1;
           lastPushedDraftRef.current = null;
           if (!draftSyncUnmountedRef.current) {
@@ -2453,15 +2472,16 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
           className={cn('relative min-w-0 gap-2', maximized && 'ghostex-chat-composer-maximized')}
           data-invalid={sendError !== null ? true : undefined}
         >
-          {/* CDXC:SessionChat 2026-09-12 DECISION: User corrected the earlier placement: the working indicator belongs at the very top, above all component cards. The host supplies the top slot; maximized and standalone composers put it before their own cards. */}
-          {!maximized && workingStatusContainer ? (
-            createPortal(
-              <SessionChatWorkingStrip {...(workingStatus ?? { working: isWorking, activity: null })} />,
-              workingStatusContainer
-            )
-          ) : (
-            <SessionChatWorkingStrip {...(workingStatus ?? { working: isWorking, activity: null })} />
-          )}
+          {/* CDXC:SessionChat 2026-09-16 DECISION: User: never show the working indicator, task list, or subagents above the maximized composer. This supersedes the maximized status placement from 2026-09-12; otherwise the working indicator stays above all component cards. */}
+          {!maximized &&
+            (workingStatusContainer ? (
+              createPortal(
+                <SessionChatWorkingStrip {...(workingStatus ?? { working: isWorking, activity: null })} />,
+                workingStatusContainer
+              )
+            ) : (
+              <SessionChatWorkingStrip {...(workingStatus ?? { working: isWorking, activity: null })} />
+            ))}
           {slashOpen ? (
             <div className='ghostex-chat-composer-picker absolute inset-x-0 bottom-full z-10 mb-2 overflow-hidden rounded-2xl border border-input bg-popover shadow-xl'>
               <div
@@ -2638,12 +2658,16 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
               {saveStatus}
             </div>
           ) : null}
-          <SessionChatAgentTasksPanel tasks={agentTasks ?? null} />
-          <SessionChatAgentFleetStrip
-            fleet={agentFleet ?? null}
-            provider={agentFleetProvider}
-            sessionKey={sessionKey}
-          />
+          {!maximized && (
+            <>
+              <SessionChatAgentTasksPanel tasks={agentTasks ?? null} />
+              <SessionChatAgentFleetStrip
+                fleet={agentFleet ?? null}
+                provider={agentFleetProvider}
+                sessionKey={sessionKey}
+              />
+            </>
+          )}
           {incomingDraft ? (
             <SessionChatDraftConflict
               draft={incomingDraft}
