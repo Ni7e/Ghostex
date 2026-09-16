@@ -185,41 +185,40 @@ pub(crate) fn to_agent_resume_input(
         Some(&launch_settings),
     );
     /*
-    CDXC:AgentProviders 2026-08-29:
-    A `custom-…` agent id names a sidebar CONFIGURATION; the CLI family it runs
-    is declared by its icon — the same contract available_draft_agents,
-    session_chat_composer_agent_id, and launch_agent_mismatch read. Resume
-    planning must speak the family: with the raw configuration id,
-    `restorable_agent_id` matched nothing, `build_agent_resume_plan` emitted no
-    startup text, and a custom-agent session whose daemon was gone could never
-    be woken, restored, or forked — clicking it only flashed the row in the
-    sidebar. The configured command (stored `agentCommand` or the custom
-    config's `command`) still wins below, so the family only selects the resume
-    grammar, not the binary.
+    CDXC:AgentProviders 2026-09-16 WHY:
+    A custom agent id names a sidebar configuration; its icon declares the CLI family that supplies resume grammar, while its command selects the launcher.
+    Supersedes the 2026-08-29 note: saved commands from a different known CLI must not win after live identity adoption, which otherwise pairs the old binary with the new family's grammar and conversation id.
+    Commands with no inferable CLI remain usable so custom wrappers keep working; this also repairs previously saved mismatches without modifying the stored row.
     */
     let agent_id = resume_agent_family_id(configured_agent_id, &agent_config, &launch_settings);
     let stored_agent_command = read_text_from_map(&runtime_settings, "agentCommand");
     let configured_agent_command = read_text_from_map(&agent_config, "command");
-    let base_command =
-        if let Some(command) = read_text_from_map(&runtime_settings, "accountCommand") {
-            reusable_account_command(&command, agent_id.as_deref().unwrap_or_default()).ok()
-        } else {
-            stored_agent_command
-                .clone()
-                .filter(|command| !is_one_time_agent_session_command(agent_id.as_deref(), command))
-                .or_else(|| {
-                    configured_agent_command.filter(|command| {
-                        !is_one_time_agent_session_command(agent_id.as_deref(), command)
-                    })
+    let base_command = if let Some(command) =
+        read_text_from_map(&runtime_settings, "accountCommand")
+            .filter(|command| stored_agent_command_matches_family(agent_id.as_deref(), command))
+    {
+        reusable_account_command(&command, agent_id.as_deref().unwrap_or_default()).ok()
+    } else {
+        stored_agent_command
+            .clone()
+            .filter(|command| {
+                !is_one_time_agent_session_command(agent_id.as_deref(), command)
+                    && stored_agent_command_matches_family(agent_id.as_deref(), command)
+            })
+            .or_else(|| {
+                configured_agent_command.filter(|command| {
+                    !is_one_time_agent_session_command(agent_id.as_deref(), command)
+                        && stored_agent_command_matches_family(agent_id.as_deref(), command)
                 })
-                .or_else(|| {
-                    agent_id
-                        .as_deref()
-                        .and_then(default_agent_command)
-                        .map(str::to_string)
-                })
-                .or(stored_agent_command)
-        };
+            })
+            .or_else(|| {
+                agent_id
+                    .as_deref()
+                    .and_then(default_agent_command)
+                    .map(str::to_string)
+            })
+            .or(stored_agent_command)
+    };
     let runtime_command = agent_id
         .as_ref()
         .and_then(|agent_id| {
@@ -292,6 +291,23 @@ fn is_one_time_agent_session_command(agent_id: Option<&str>, command: &str) -> b
                 || token.starts_with("--fork-session=")
         }),
         _ => false,
+    }
+}
+
+/// Whether a candidate base command still belongs to the resume family's CLI.
+/// A command whose CLI is inferable and different is stale metadata left by an
+/// earlier agent that owned the pane; resume must use the family default
+/// instead of that binary. A command no known CLI claims is kept: custom
+/// wrappers and unlisted launchers cannot be second-guessed. A family that is
+/// not a built-in restorable id (a raw `custom-…` fallback) keeps every
+/// command, because there is no family default to fall back to.
+fn stored_agent_command_matches_family(family: Option<&str>, command: &str) -> bool {
+    let Some(inferred) = infer_agent_id_from_command(command) else {
+        return true;
+    };
+    match family.and_then(|family| restorable_agent_id(Some(family))) {
+        Some(family) => family == inferred.as_str(),
+        None => true,
     }
 }
 
