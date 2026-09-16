@@ -7,7 +7,8 @@ const DEFAULT_LOADING_DELAY_MS = 500;
 
 /**
  * CDXC:DesignSystem 2026-09-09 DECISION:
- * User: Quick Access pages and Search by Prompt use the same spinner-and-text loading state, which appears only when work is still pending after 500ms.
+ * User: Quick Access pages use this spinner-and-text loading state, which appears only when work is still pending after 500ms.
+ * Search by Prompt left it on 2026-09-16: the user asked for list and paragraph skeletons there instead (find/find-prompts-skeleton.tsx).
  */
 export function DelayedLoadingIndicator({
   className,

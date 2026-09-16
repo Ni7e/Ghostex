@@ -40,3 +40,38 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .gho
 .ghostex-find-row-prompt {
   white-space: pre;
 }
+
+.ghostex-find-toolbar-button[data-active='true'] {
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+}
+
+.ghostex-find-filter-menu[data-searchable-dropdown][data-slot] {
+  width: max(260px, var(--anchor-width, 0px));
+}
+
+/* Loading skeleton: bars pulse together so the list reads as one placeholder, not a stack of spinners. */
+.ghostex-find-skeleton-bar {
+  display: inline-block;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--foreground) 11%, transparent);
+}
+
+.ghostex-find-skeleton {
+  animation: ghostex-find-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ghostex-find-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghostex-find-skeleton {
+    animation: none;
+  }
+}

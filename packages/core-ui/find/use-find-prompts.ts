@@ -58,6 +58,7 @@ export interface FindPromptsState {
 
 export interface FindPromptsController extends FindPromptsState {
   cancelOverlay(): void;
+  clearAgents(): void;
   closeExpandedPrompt(): void;
   copySelected(): Promise<void>;
   forkSelected(agent: FindPromptAgent): Promise<void>;
@@ -323,6 +324,8 @@ export function useFindPrompts({ acceptAll, transport }: UseFindPromptsOptions):
     });
   }, []);
 
+  const clearAgents = useCallback(() => setAgents(new Set()), []);
+
   const refresh = useCallback(() => setRefreshToken((value) => value + 1), []);
 
   const toggleFavorite = useCallback(async () => {
@@ -438,6 +441,7 @@ export function useFindPrompts({ acceptAll, transport }: UseFindPromptsOptions):
     agentFacets,
     agents,
     cancelOverlay: useCallback(() => setOverlay(null), []),
+    clearAgents,
     closeExpandedPrompt: useCallback(() => setExpandedPrompt(false), []),
     copySelected,
     expandedPrompt,
