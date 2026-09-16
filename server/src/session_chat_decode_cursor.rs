@@ -65,6 +65,42 @@ fn cursor_visible_text(text: &str) -> Option<String> {
     (!visible.is_empty()).then_some(visible)
 }
 
+/// CDXC:SessionChat 2026-09-16 WHY:
+/// Cursor appends a user-role tool catalog during compaction without a user_query envelope; rendering it leaked internal metadata into chat and counting it as a prompt shifted the mirror's reasoning alignment.
+/// Match the complete metadata envelope so actual user queries quoting these tags remain visible.
+pub(crate) fn is_cursor_context_metadata(record: &serde_json::Map<String, Value>) -> bool {
+    if record.get("role").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    let Some(items) = record
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    if items.len() != 1 || items[0].get("type").and_then(Value::as_str) != Some("text") {
+        return false;
+    }
+    let Some(mut text) = items[0].get("text").and_then(Value::as_str) else {
+        return false;
+    };
+    for (open, close) in [
+        ("<available_subagent_types>", "</available_subagent_types>"),
+        (
+            "<available_subagent_models>",
+            "</available_subagent_models>",
+        ),
+        ("<dynamic_tools>", "</dynamic_tools>"),
+    ] {
+        let Some(rest) = strip_cursor_metadata_block(text.trim_start(), open, close) else {
+            return false;
+        };
+        text = rest;
+    }
+    text.trim().is_empty()
+}
+
 /// Blocks plus whether every one of them came from a `thinking` block, which
 /// is what turns the message into a reasoning turn. Thinking blocks are not in
 /// Cursor's raw jsonl; the chat mirror splices them in from the session store
@@ -115,6 +151,9 @@ fn cursor_message_blocks(role: &str, content: Option<&Value>) -> (Vec<SessionCha
 
 pub fn decode_cursor_transcript_line(line: &str, fallback_id: &str) -> Option<SessionChatMessage> {
     let record = parse_json_object(line)?;
+    if is_cursor_context_metadata(&record) {
+        return None;
+    }
     if record.get("type").and_then(Value::as_str) == Some("turn_ended") {
         if record.get("status").and_then(Value::as_str) == Some("success") {
             return None;
