@@ -32,6 +32,10 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         cx.spawn(async move |this, cx| {
+            let previous_pid = cx
+                .background_executor()
+                .spawn(async { gpui_local_gxserver_health_pid() })
+                .await;
             let stop_result = cx
                 .background_executor()
                 .spawn(async {
@@ -42,7 +46,7 @@ impl GhostexGpuiApp {
                     )
                 })
                 .await;
-            let stop_error = match &stop_result {
+            let mut stop_error = match &stop_result {
                 Ok((status_code, _)) if (200..300).contains(status_code) => None,
                 Ok((status_code, _)) => {
                     Some(format!("gxserver stop failed with HTTP {status_code}."))
@@ -64,6 +68,16 @@ impl GhostexGpuiApp {
                         break;
                     }
                 }
+                stop_error = cx
+                    .background_executor()
+                    .spawn(async move {
+                        gpui_wait_for_local_gxserver_process_exit(
+                            previous_pid,
+                            Duration::from_secs(15),
+                        )
+                    })
+                    .await
+                    .err();
             }
             let _ = this.update(cx, |this, cx| {
                 let should_restart = restart_after_stop && stop_error.is_none();
