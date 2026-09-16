@@ -101,10 +101,6 @@ export function scrollToBottomHotkeyLabel(): string {
   return formatSidebarHotkeyLabel(normalizeghostexHotkeySettings({}).scrollChatToBottom ?? '');
 }
 
-/** Terminal-pane parity: the conversation scrollbar fades out this long after
- * the last scroll (session-chat-scrollbar.css keys on data-user-scrolling). */
-const SCROLLBAR_FADE_MS = 2000;
-
 export interface SessionChatMessageListProps extends SessionChatStartupSendActions {
   readHistory?: SessionChatTransport['readHistory'];
   sessionKey?: string;
@@ -792,7 +788,6 @@ export function SessionChatMessageList({
     // streamHoldReleased is read for the resume decision only when the stream ends.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorStreamTop, setViewportScrollTop, streamOnScreen]);
-  const scrollbarFadeTimeoutRef = useRef<number | undefined>(undefined);
   const [markdownToSave, setMarkdownToSave] = useState<string | null>(null);
   const [rewindRequest, setRewindRequest] = useState<SessionChatRewindRequest | null>(null);
   const anchorExpandedAreaTop = useCallback(
@@ -818,15 +813,6 @@ export function SessionChatMessageList({
     viewport?.addEventListener(SESSION_CHAT_HISTORY_NAVIGATION_EVENT, navigateHistory);
     return () => viewport?.removeEventListener(SESSION_CHAT_HISTORY_NAVIGATION_EVENT, navigateHistory);
   }, [navigateHistory]);
-
-  useEffect(
-    () => () => {
-      if (scrollbarFadeTimeoutRef.current !== undefined) {
-        window.clearTimeout(scrollbarFadeTimeoutRef.current);
-      }
-    },
-    []
-  );
 
   /** CDXC:SessionChat 2026-09-13 DECISION:
    * User: keep the latest message visible when working indicators or other components above the composer appear, while preserving history navigation and the streaming hold.
@@ -882,8 +868,7 @@ export function SessionChatMessageList({
 
   // Auto-load older history before the reader reaches the top; the virtualizer's
   // keyed prepend compensation keeps the visible rows in place when the earlier
-  // page lands. Every scroll also stamps the viewport so the scrollbar shows
-  // while scrolling and fades out afterwards (session-chat-scrollbar.css).
+  // page lands.
   const handleScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>): void => {
       const viewport = event.currentTarget;
@@ -907,13 +892,6 @@ export function SessionChatMessageList({
         refreshScrollPolicy((revision) => revision + 1);
       }
       viewport.setAttribute(FOLLOW_BOTTOM_ATTRIBUTE, shouldFollowBottomRef.current ? 'true' : 'false');
-      viewport.setAttribute('data-user-scrolling', 'true');
-      if (scrollbarFadeTimeoutRef.current !== undefined) {
-        window.clearTimeout(scrollbarFadeTimeoutRef.current);
-      }
-      scrollbarFadeTimeoutRef.current = window.setTimeout(() => {
-        viewport.removeAttribute('data-user-scrolling');
-      }, SCROLLBAR_FADE_MS);
       loadEarlierIfNearTop(viewport);
     },
     [loadEarlierIfNearTop]
@@ -1102,6 +1080,7 @@ export function SessionChatMessageList({
               {/* outline-none: Chromium makes scrollers keyboard-focusable and paints
             its default focus ring on them; a transcript is not a control. */}
               <MessageScrollerViewport
+                data-app-scrollbar-owner='chat'
                 className='outline-none'
                 onClickCapture={(event) => {
                   if (
