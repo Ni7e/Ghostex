@@ -84,6 +84,7 @@ impl GpuiTitlebarReadingPanel {
                 "gpui-resources-sleep-inactive",
                 COMMAND_ICON_MOON,
                 "Sleep Inactive",
+                "Sleep Inactive",
                 snapshot.inactive_terminal_sleep_count > 0,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
@@ -106,6 +107,7 @@ impl GpuiTitlebarReadingPanel {
                 } else {
                     "Clean RAM"
                 },
+                "Clean RAM",
                 true,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
                     window.prevent_default();
@@ -238,6 +240,7 @@ impl GpuiTitlebarReadingPanel {
         id: &'static str,
         icon: &'static str,
         label: &'static str,
+        width_label: &'static str,
         enabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
@@ -267,7 +270,29 @@ impl GpuiTitlebarReadingPanel {
                     .opacity(if enabled { 0.78 } else { 0.30 })
                     .into(),
             ))
-            .child(label)
+            .child(
+                div()
+                    .relative()
+                    .whitespace_nowrap()
+                    .child(
+                        div()
+                            .whitespace_nowrap()
+                            .when(label != width_label, |this| this.opacity(0.0))
+                            .child(width_label),
+                    )
+                    .when(label != width_label, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .whitespace_nowrap()
+                                .child(label),
+                        )
+                    }),
+            )
             .into_any_element()
     }
 
