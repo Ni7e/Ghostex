@@ -126,9 +126,9 @@ impl GpuiContextMenu {
                     &[style.to_run(row.label.len())],
                     None,
                 );
-                // PopupMenu adds 8px row insets, 4px outer padding, and a 1px border.
+                // Shared menu geometry: 10px row insets, 6px outer padding, and a 1px border.
                 let check_width = if row.checked { 28.0 } else { 0.0 };
-                line.width.as_f32() + 26.0 + check_width
+                line.width.as_f32() + 34.0 + check_width
             })
             .fold(0.0_f32, f32::max);
         label_width
@@ -183,8 +183,8 @@ impl GpuiContextMenu {
                         .items_center()
                         .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
                         .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
-                        .text_color(titlebar_text_color())
-                        .when(disabled, |row| row.opacity(0.5))
+                        .text_color(titlebar_popup_menu_foreground())
+                        .when(disabled, |row| row.opacity(0.42))
                         .child(label.clone())
                 })
                 .disabled(row.disabled)

@@ -1,3 +1,4 @@
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 import { SessionQuestionIndicator } from './session-question-indicator';
 import {
   IconAlarm,
@@ -3463,7 +3464,7 @@ export function SortableSessionCard({
       ) : null}
       {contextMenuPosition && tagSubmenuPosition && !isProjectSessionListMoreRow
         ? createPortal(
-            <div
+            <AppMenuPanel
               aria-label='Tag as'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
@@ -3482,13 +3483,13 @@ export function SortableSessionCard({
               }}
             >
               {tagMenuContent}
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}
       {contextMenuPosition && postponeSubmenuPosition && canPostponeDelayedSend && !isProjectSessionListMoreRow
         ? createPortal(
-            <div
+            <AppMenuPanel
               aria-label='Postpone by'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
@@ -3540,13 +3541,13 @@ export function SortableSessionCard({
               >
                 Disable delayed send
               </button>
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}
       {contextMenuPosition && snoozeSubmenuPosition && !isProjectSessionListMoreRow
         ? createPortal(
-            <div
+            <AppMenuPanel
               aria-label='Snooze'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
@@ -3559,13 +3560,13 @@ export function SortableSessionCard({
               }}
             >
               {snoozePresetRows}
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}
       {contextMenuPosition && advancedSubmenuPosition && !isProjectSessionListMoreRow
         ? createPortal(
-            <div
+            <AppMenuPanel
               aria-label='Advanced'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
@@ -3609,7 +3610,7 @@ export function SortableSessionCard({
                   </div>
                 </Fragment>
               ))}
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}

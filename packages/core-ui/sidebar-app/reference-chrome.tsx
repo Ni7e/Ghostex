@@ -1,3 +1,4 @@
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -503,7 +504,7 @@ export function SidebarReferenceSettingsDropdown({
    */
   const BulkProjectIcon = bulkProjectActionLabel === 'Collapse All' ? IconArrowsDiagonalMinimize : IconArrowsDiagonal2;
   return (
-    <div className='reference-sidebar-primary-dropdown' role='menu'>
+    <AppMenuPanel className='reference-sidebar-primary-dropdown' role='menu'>
       {onAddProject ? (
         <SidebarReferencePrimaryMenuItem icon={IconPlus} label='Add Project' onSelect={onAddProject} />
       ) : null}
@@ -535,6 +536,7 @@ export function SidebarReferenceSettingsDropdown({
         icon={IconFileSearch}
         label='Search by Prompt'
         onSelect={onSearchPreviousSessionsByPrompt}
+        shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openFindPrompts)}
       />
       <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem icon={IconUsersGroup} label='Agents Hub' onSelect={onOpenAgentsHub} />
@@ -568,7 +570,7 @@ export function SidebarReferenceSettingsDropdown({
         onSelect={onOpenSettings}
         shortcut={formatSidebarMenuHotkeyLabel(hotkeys.openSettings)}
       />
-    </div>
+    </AppMenuPanel>
   );
 }
 
@@ -622,7 +624,7 @@ export function SidebarReferenceKeepAwakeDropdown({
   onStopKeepAwake: () => void;
 }) {
   return (
-    <div className='reference-sidebar-primary-dropdown' role='menu'>
+    <AppMenuPanel className='reference-sidebar-primary-dropdown' role='menu'>
       <SidebarReferencePrimaryMenuItem icon={IconArrowLeft} label='More' onSelect={onBack} />
       <SidebarReferencePrimaryMenuSeparator />
       <div className='reference-sidebar-primary-menu-label'>Keep awake period</div>
@@ -640,7 +642,7 @@ export function SidebarReferenceKeepAwakeDropdown({
       ) : null}
       <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem icon={IconSettings} label='Power Settings' onSelect={onOpenPowerSettings} />
-    </div>
+    </AppMenuPanel>
   );
 }
 
@@ -672,7 +674,7 @@ export function SidebarReferenceSortFilterDropdown({
   const sessionTagCatalogs = useSessionTagCatalogs();
   const tagListItems = normalizeSidebarSessionTagListItems(projectMenu.sessionTagListItems, localCustomSessionTags);
   return (
-    <div className='reference-sidebar-primary-dropdown' role='menu'>
+    <AppMenuPanel className='reference-sidebar-primary-dropdown' role='menu'>
       <SidebarReferencePrimaryMenuItem icon={IconArrowLeft} label='More' onSelect={onBack} />
       <SidebarReferencePrimaryMenuSeparator />
       {onToggleShowHidden ? (
@@ -733,7 +735,7 @@ export function SidebarReferenceSortFilterDropdown({
           />
         );
       })}
-    </div>
+    </AppMenuPanel>
   );
 }
 

@@ -1,8 +1,8 @@
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 import { createPortal } from 'react-dom';
 import {
   useLayoutEffect,
   useRef,
-  useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -112,19 +112,6 @@ function notifySidebarContextMenuClosed(vscode?: WebviewApi): void {
   vscode?.postMessage({ type: 'sidebarContextMenuClosed' });
 }
 
-function getCssPixelValue(value: CSSProperties[keyof CSSProperties]): number | undefined {
-  if (typeof value === 'number') {
-    return value;
-  }
-
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const parsedValue = Number.parseFloat(value);
-  return Number.isFinite(parsedValue) ? parsedValue : undefined;
-}
-
 /**
  * CDXC:ContextMenus 2026-07-30:
  * Exported so submenu panels — which are separate portals stacked above this
@@ -137,46 +124,6 @@ export function getClampedSidebarContextMenuCoordinate(value: number, size: numb
     CONTEXT_MENU_VIEWPORT_MARGIN_PX,
     Math.min(value, viewportSize - size - CONTEXT_MENU_VIEWPORT_MARGIN_PX)
   );
-}
-
-function areMenuStylesEqual(previousStyle: CSSProperties | undefined, nextStyle: CSSProperties): boolean {
-  if (!previousStyle) {
-    return false;
-  }
-
-  const styleKeys = new Set([...Object.keys(previousStyle), ...Object.keys(nextStyle)]);
-  for (const key of styleKeys) {
-    if (previousStyle[key as keyof CSSProperties] !== nextStyle[key as keyof CSSProperties]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function getViewportClampedMenuStyle(menuStyle: CSSProperties | undefined, menuElement: HTMLDivElement): CSSProperties {
-  const bounds = menuElement.getBoundingClientRect();
-  const menuWidth = bounds.width;
-  const menuHeight = bounds.height;
-  const rawLeft = getCssPixelValue(menuStyle?.left) ?? bounds.left;
-  const rawTop = getCssPixelValue(menuStyle?.top) ?? bounds.top;
-  const maxMenuHeight = Math.max(0, window.innerHeight - CONTEXT_MENU_VIEWPORT_MARGIN_PX * 2);
-
-  return {
-    ...menuStyle,
-    /*
-     * CDXC:ContextMenus 2026-05-27-06:19:
-     * Session and project context menus must use their rendered size, not a
-     * pre-render row-count estimate, when opened near the bottom of the sidebar.
-     * Clamp the fixed portal surface inside the viewport so optional rows,
-     * dividers, and submenus cannot be cut off by the webview edge.
-     */
-    bottom: undefined,
-    left: `${getClampedSidebarContextMenuCoordinate(rawLeft, menuWidth, window.innerWidth)}px`,
-    maxHeight: `calc(100vh - ${CONTEXT_MENU_VIEWPORT_MARGIN_PX * 2}px)`,
-    overflowY: menuHeight > maxMenuHeight ? 'auto' : menuStyle?.overflowY,
-    right: undefined,
-    top: `${getClampedSidebarContextMenuCoordinate(rawTop, Math.min(menuHeight, maxMenuHeight), window.innerHeight)}px`,
-  };
 }
 
 export function getSidebarContextMenuBackdropRetarget({
@@ -262,7 +209,6 @@ export function SidebarContextMenuPortal({
   const resolvedMenuClassName = menuClassName.includes('vertical-scroll-fade-mask')
     ? menuClassName
     : `${menuClassName} vertical-scroll-fade-mask`;
-  const [viewportClampedMenuStyle, setViewportClampedMenuStyle] = useState<CSSProperties>();
 
   useLayoutEffect(() => {
     return registerSidebarContextMenuDismissHandler(onDismiss);
@@ -295,31 +241,6 @@ export function SidebarContextMenuPortal({
       notifySidebarContextMenuClosed(vscode);
     };
   }, [vscode]);
-
-  useLayoutEffect(() => {
-    const menuElement = activeMenuRef.current;
-    if (!menuElement) {
-      return undefined;
-    }
-
-    const clampMenu = () => {
-      const nextStyle = getViewportClampedMenuStyle(menuStyle, menuElement);
-      setViewportClampedMenuStyle((previousStyle) =>
-        areMenuStylesEqual(previousStyle, nextStyle) ? previousStyle : nextStyle
-      );
-    };
-
-    clampMenu();
-    window.addEventListener('resize', clampMenu);
-
-    const resizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(clampMenu);
-    resizeObserver?.observe(menuElement);
-
-    return () => {
-      window.removeEventListener('resize', clampMenu);
-      resizeObserver?.disconnect();
-    };
-  }, [activeMenuRef, menuStyle]);
 
   useLayoutEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -373,7 +294,7 @@ export function SidebarContextMenuPortal({
         }}
         type='button'
       />
-      <div
+      <AppMenuPanel
         className={resolvedMenuClassName}
         onClick={(event) => {
           event.stopPropagation();
@@ -384,10 +305,10 @@ export function SidebarContextMenuPortal({
         }}
         ref={activeMenuRef}
         role='menu'
-        style={viewportClampedMenuStyle ?? menuStyle}
+        style={menuStyle}
       >
         {children}
-      </div>
+      </AppMenuPanel>
     </>,
     document.body
   );

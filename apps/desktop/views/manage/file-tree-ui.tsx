@@ -1,4 +1,11 @@
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/packages/components/ui/dropdown-menu';
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
+import {
   type CSSProperties,
   type DragEvent as ReactDragEvent,
   type FormEvent,
@@ -184,7 +191,7 @@ export function ManageSidebarActions({
         <IconMenu2 aria-hidden='true' size={15} stroke={1.8} />
       </button>
       {createMenuOpen ? (
-        <div className='manage-sidebar-menu manage-create-menu' role='menu'>
+        <AppMenuPanel className='manage-sidebar-menu manage-create-menu' role='menu'>
           <button
             className='manage-sidebar-menu-item'
             disabled={isCreating}
@@ -225,10 +232,10 @@ export function ManageSidebarActions({
             <IconEdit aria-hidden='true' size={14} stroke={1.8} />
             {creatingKind === 'excalidraw' ? 'Creating drawing' : 'New drawing'}
           </button>
-        </div>
+        </AppMenuPanel>
       ) : null}
       {menuOpen ? (
-        <div className='manage-sidebar-menu' role='menu'>
+        <AppMenuPanel className='manage-sidebar-menu' role='menu'>
           <button
             className='manage-sidebar-menu-item'
             disabled={isRefreshing}
@@ -252,7 +259,7 @@ export function ManageSidebarActions({
             <IconSettings aria-hidden='true' size={14} stroke={1.8} />
             Configure docs folders
           </button>
-        </div>
+        </AppMenuPanel>
       ) : null}
     </div>
   );
@@ -465,59 +472,52 @@ export function ManageFileContextMenu({
       {canCreateHere ? (
         <>
           <div className='session-context-menu-divider manage-file-context-menu-divider' role='separator' />
-          <button
-            aria-expanded={createFileMenuOpen}
-            className='session-context-menu-item manage-file-context-menu-item'
-            disabled={isBusy}
-            onClick={() => setCreateFileMenuOpen((current) => !current)}
-            role='menuitem'
-            type='button'
-          >
-            <IconFile aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
-            <span>New File Here</span>
-            <span className='manage-file-context-menu-spacer' />
-            <IconChevronRight
-              aria-hidden='true'
-              className='manage-file-context-menu-chevron'
-              data-open={String(createFileMenuOpen)}
-              size={14}
-              stroke={1.8}
-            />
-          </button>
-          {createFileMenuOpen ? (
-            <div className='manage-file-context-menu-nested' role='group'>
-              <button
-                className='session-context-menu-item manage-file-context-menu-item manage-file-context-menu-subitem'
+          <DropdownMenu open={createFileMenuOpen} onOpenChange={setCreateFileMenuOpen} modal={false}>
+            <DropdownMenuTrigger
+              aria-expanded={createFileMenuOpen}
+              role='menuitem'
+              className='session-context-menu-item manage-file-context-menu-item'
+              disabled={isBusy}
+              type='button'
+            >
+              <IconFile aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
+              <span>New File Here</span>
+              <span className='manage-file-context-menu-spacer' />
+              <IconChevronRight
+                aria-hidden='true'
+                className='manage-file-context-menu-chevron'
+                data-open={String(createFileMenuOpen)}
+                size={14}
+                stroke={1.8}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side='right' alignOffset={-6}>
+              <DropdownMenuItem
+                className='session-context-menu-item manage-file-context-menu-item'
                 disabled={isBusy}
                 onClick={() => onCreateFileHere('markdown')}
-                role='menuitem'
-                type='button'
               >
                 <IconMarkdown aria-hidden='true' size={14} stroke={1.8} />
                 {creatingKind === 'markdown' ? 'Creating Markdown' : 'Markdown'}
-              </button>
-              <button
-                className='session-context-menu-item manage-file-context-menu-item manage-file-context-menu-subitem'
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className='session-context-menu-item manage-file-context-menu-item'
                 disabled={isBusy}
                 onClick={() => onCreateFileHere('html')}
-                role='menuitem'
-                type='button'
               >
                 <IconFileTypeHtml aria-hidden='true' size={14} stroke={1.8} />
                 {creatingKind === 'html' ? 'Creating HTML' : 'HTML'}
-              </button>
-              <button
-                className='session-context-menu-item manage-file-context-menu-item manage-file-context-menu-subitem'
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className='session-context-menu-item manage-file-context-menu-item'
                 disabled={isBusy}
                 onClick={() => onCreateFileHere('excalidraw')}
-                role='menuitem'
-                type='button'
               >
                 <IconEdit aria-hidden='true' size={14} stroke={1.8} />
                 {creatingKind === 'excalidraw' ? 'Creating Excalidraw' : 'Excalidraw'}
-              </button>
-            </div>
-          ) : null}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <button
             className='session-context-menu-item manage-file-context-menu-item'
             disabled={isBusy}

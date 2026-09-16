@@ -1588,7 +1588,8 @@ the markdown block) rather than pinned to a tier of its own.
   ):not(.ghostex-chat-markdown-file-chip):not(
     .ghostex-chat-status-line-copy,
     .ghostex-chat-minimap-rail,
-    .ghostex-chat-file-change-card button
+    .ghostex-chat-file-change-card button,
+    .ghostex-menu-panel [role^='menuitem']
   ),
 body[data-session-chat-theme='dark']
   .ghostex-session-chat-popup
@@ -1599,7 +1600,8 @@ body[data-session-chat-theme='dark']
   ):not(.ghostex-chat-markdown-file-chip):not(
     .ghostex-chat-status-line-copy,
     .ghostex-chat-minimap-rail,
-    .ghostex-chat-file-change-card button
+    .ghostex-chat-file-change-card button,
+    .ghostex-menu-panel [role^='menuitem']
   ) {
   background-color: transparent;
   color: var(--chat-primary-foreground);
@@ -1614,7 +1616,8 @@ body[data-session-chat-theme='dark']
     .ghostex-chat-status-line-copy,
     .ghostex-chat-minimap-rail,
     .ghostex-chat-subagent-link,
-    .ghostex-chat-file-change-card button
+    .ghostex-chat-file-change-card button,
+    .ghostex-menu-panel [role^='menuitem']
   ):not(:disabled):hover,
 body[data-session-chat-theme='dark']
   .ghostex-session-chat-popup
@@ -1626,7 +1629,8 @@ body[data-session-chat-theme='dark']
     .ghostex-chat-status-line-copy,
     .ghostex-chat-minimap-rail,
     .ghostex-chat-subagent-link,
-    .ghostex-chat-file-change-card button
+    .ghostex-chat-file-change-card button,
+    .ghostex-menu-panel [role^='menuitem']
   ):not(:disabled):hover {
   background-color: #333333;
 }
@@ -3134,38 +3138,8 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
    here lands on exactly the pixel that was clicked, and staying out of the
    scrolling layer keeps the menu still while a zoomed picture pans. */
 .ghostex-chat-image-menu {
-  background: var(--popover);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
-  color: var(--popover-foreground);
-  display: flex;
-  flex-direction: column;
-  min-width: 9rem;
-  padding: 0.25rem;
   position: fixed;
   z-index: 20;
-}
-
-.ghostex-chat-image-menu-item {
-  background: none;
-  border: none;
-  border-radius: 6px;
-  color: inherit;
-  font-size: 0.8125rem;
-  padding: 0.375rem 0.625rem;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.ghostex-chat-image-menu-item:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.ghostex-chat-image-menu-item:not(:disabled):hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
 }
 
 .ghostex-chat-image-menu-error {
@@ -3261,63 +3235,10 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   scrollbar-width: thin;
 }
 
-/* CDXC:SessionChat 2026-09-07 DECISION:
- * User: hovering a transcript table should reveal its horizontal scrollbar when it overflows, across apps.
- * Explicit Chromium scrollbar geometry overrides the shared hidden-scrollbar reset and macOS overlay auto-hiding.
+/* CDXC:SessionChat 2026-09-16 DECISION:
+ * User: transcript tables use the same 5px floating hover scrollbar and exact theme colors as the rest of chat.
+ * The shared app-scrollbars controller owns this viewport, replacing its separate native scrollbar styling.
  */
-.ghostex-chat-markdown-table-scroll {
-  scrollbar-color: transparent transparent;
-}
-
-.ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll {
-  scrollbar-color: color-mix(in srgb, var(--foreground) 35%, transparent) transparent;
-}
-
-@supports selector(::-webkit-scrollbar) {
-  .ghostex-chat-markdown-table-scroll {
-    scrollbar-color: auto;
-    scrollbar-width: auto;
-  }
-
-  .ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll {
-    scrollbar-color: auto;
-  }
-
-  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar {
-    display: block;
-    height: 6px;
-    width: 6px;
-  }
-
-  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 999px;
-  }
-
-  .ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--foreground) 35%, transparent);
-  }
-}
-
-@media (hover: none) {
-  .ghostex-chat-markdown-table-scroll {
-    scrollbar-color: color-mix(in srgb, var(--foreground) 35%, transparent) transparent;
-  }
-
-  @supports selector(::-webkit-scrollbar) {
-    .ghostex-chat-markdown-table-scroll {
-      scrollbar-color: auto;
-    }
-
-    .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
-      background: color-mix(in srgb, var(--foreground) 35%, transparent);
-    }
-  }
-}
 
 /* `min-width: max-content` is what makes the wrapper scroll instead of the
    columns crushing. The markdown root sets `overflow-wrap: anywhere` for prose,

@@ -931,11 +931,11 @@ pub(crate) const TITLEBAR_DROPDOWN_SCROLLBAR_WIDTH: f32 = 5.0;
 
 pub(crate) const TITLEBAR_POPUP_MENU_GAP: f32 = 6.0;
 
-pub(crate) const TITLEBAR_POPUP_MENU_ROW_HEIGHT: f32 = 30.0;
+pub(crate) const TITLEBAR_POPUP_MENU_ROW_HEIGHT: f32 = 34.0;
 
 pub(crate) const TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE: f32 = 13.0;
 
-pub(crate) const TITLEBAR_POPUP_MENU_ROW_ICON_SIZE: f32 = 16.0;
+pub(crate) const TITLEBAR_POPUP_MENU_ROW_ICON_SIZE: f32 = 14.0;
 
 pub(crate) const TITLEBAR_POPUP_GIT_SECTION_LABEL_HEIGHT: f32 = 22.0;
 
@@ -956,23 +956,17 @@ pub(crate) const TITLEBAR_POPUP_READING_HEADER_BUTTON_ICON_SIZE: f32 = 16.0;
 pub(crate) const TITLEBAR_POPUP_VERTICAL_OFFSET: f32 = 6.0;
 
 /*
-CDXC:Titlebar 2026-07-09:
-The titlebar popup NSPanels are sized before opening, so their height math
-must mirror gpui-component PopupMenu layout exactly or the last menu rows get
-clipped: the popover root adds a 1px border on each side, the items column
-adds 4px vertical padding on each side (10px chrome total), adjacent items
-are separated by a 2px column gap, separators render as a 2px border plus
-2px vertical margins (6px), and every item row is at least 26px tall. All
-menus keep the full 10px vertical chrome; zeroing the bottom item padding
-makes the last row sit flush on the window edge and read as clipped.
+CDXC:ContextMenus 2026-09-16 WHY:
+Popup windows are sized before rendering, so these measurements must match the shared menu appearance: 6px panel padding plus 1px borders (14px chrome), 2px row gaps, and 1px separators with 6px vertical margins (13px).
+Keep the minimum row height at 34px, including label-only context menus, so a content-sized popup never clips its final action or gains a blank scroll range.
 */
-pub(crate) const TITLEBAR_POPUP_MENU_VERTICAL_CHROME: f32 = 10.0;
+pub(crate) const TITLEBAR_POPUP_MENU_VERTICAL_CHROME: f32 = 14.0;
 
 pub(crate) const TITLEBAR_POPUP_MENU_ITEM_GAP: f32 = 2.0;
 
-pub(crate) const TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT: f32 = 6.0;
+pub(crate) const TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT: f32 = 13.0;
 
-pub(crate) const TITLEBAR_POPUP_MENU_MIN_ITEM_HEIGHT: f32 = 26.0;
+pub(crate) const TITLEBAR_POPUP_MENU_MIN_ITEM_HEIGHT: f32 = 34.0;
 
 pub(crate) const TITLEBAR_POPUP_MENU_BORDER_CHROME: f32 = 2.0;
 

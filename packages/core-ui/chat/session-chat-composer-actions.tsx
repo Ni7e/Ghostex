@@ -117,6 +117,8 @@ interface SessionChatComposerActionsProps {
   onShowStashedPrompts?: () => void;
   onStash?: () => void;
   onToggleMaximized: () => void;
+  /** Runs once the More actions menu has finished closing. */
+  onMenuClosed?: () => void;
   onToggleSummary?: () => void;
   onToggleVerbose?: () => void;
   sessionNoteActive: boolean;
@@ -141,6 +143,7 @@ export function SessionChatComposerActions({
   onShowStashedPrompts,
   onStash,
   onToggleMaximized,
+  onMenuClosed,
   onToggleSummary,
   onToggleVerbose,
   sessionNoteActive,
@@ -478,7 +481,15 @@ export function SessionChatComposerActions({
 
   return (
     <div className='ghostex-chat-composer-toolbar' ref={toolbarRef}>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        onOpenChangeComplete={(open) => {
+          if (!open) {
+            onMenuClosed?.();
+          }
+        }}
+      >
         <AppTooltip content={withShortcut('More actions', hostActions?.moreActionsShortcut)}>
           <DropdownMenuTrigger
             render={

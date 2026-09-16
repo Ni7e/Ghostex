@@ -1,3 +1,4 @@
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 // Session chat images. User-authored image references render as thumbnails at
 // their exact position, as do agent-authored pictures. Both click through to a
 // centered overlay at full size (max 75% of the window height, original aspect
@@ -378,10 +379,13 @@ export function SessionChatImageViewerProvider({
   children,
   loadImage,
   locateFile,
+  onClosed,
   saveImageAs,
   sessionTitle,
 }: {
   children: ReactNode;
+  /** Runs after the overlay closes, so the host can hand keyboard focus back. */
+  onClosed?: () => void;
   /** Resolves a machine path to a data URL; omit when the host cannot. */
   loadImage?: (path: string) => Promise<string>;
   locateFile?: (path: string) => void;
@@ -424,9 +428,12 @@ export function SessionChatImageViewerProvider({
   const [menuError, setMenuError] = useState<string | null>(null);
   const [completedAction, setCompletedAction] = useState<'copy-image' | 'copy-path' | 'save-image' | null>(null);
 
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
   const close = useCallback((): void => {
     openSequenceRef.current += 1;
     setState({ status: 'closed' });
+    onClosedRef.current?.();
   }, []);
 
   const api = useMemo<SessionChatImageViewerApi>(() => {
@@ -811,7 +818,7 @@ export function SessionChatImageViewerProvider({
             </div>
           </div>
           {menuAt !== null ? (
-            <div
+            <AppMenuPanel
               className='ghostex-chat-image-menu'
               onClick={(event) => {
                 event.stopPropagation();
@@ -850,7 +857,7 @@ export function SessionChatImageViewerProvider({
               <button className='ghostex-chat-image-menu-item' onClick={saveImage} role='menuitem' type='button'>
                 Save image
               </button>
-            </div>
+            </AppMenuPanel>
           ) : null}
           {menuError !== null ? (
             <div className='ghostex-chat-image-menu-error' role='status'>
