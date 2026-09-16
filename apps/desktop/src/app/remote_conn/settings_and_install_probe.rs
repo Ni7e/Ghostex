@@ -275,7 +275,7 @@ impl GhostexGpuiApp {
                 self.dispatch_gpui_app_modal_toast(
                     "warning",
                     gpui_remote_machine_password_failure_title(has_password),
-                    "Remote SSH password storage is only available on macOS.",
+                    "Remote SSH password storage is unavailable in this build.",
                     cx,
                 );
                 return;
@@ -284,7 +284,7 @@ impl GhostexGpuiApp {
                 self.dispatch_gpui_app_modal_toast(
                     "warning",
                     gpui_remote_machine_password_failure_title(has_password),
-                    "macOS Keychain could not update the SSH password.",
+                    "Secure system storage could not update the SSH password.",
                     cx,
                 );
                 return;
@@ -328,7 +328,7 @@ impl GhostexGpuiApp {
                 "SSH password removed"
             },
             if has_password {
-                "The password is stored in macOS Keychain."
+                "The password is stored in secure system storage."
             } else {
                 "The Keychain password was removed."
             },

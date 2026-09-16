@@ -70,7 +70,7 @@ export const DEFAULT_WORKSPACE_OPEN_TARGET_AVAILABILITY: WorkspaceOpenTargetAvai
  * installed editors and the first-party folder opener so the dropdown does not duplicate Code mode.
  *
  * CDXC:Titlebar 2026-06-04-13:39:
- * The built-in filesystem target remains internally keyed as finder for protocol compatibility, but user-facing labels must say Open Folder so the macOS app copy is OS-agnostic.
+ * The built-in filesystem target remains internally keyed as finder for protocol compatibility, but user-facing labels must say Open File/Folder Location so the macOS app copy is OS-agnostic.
  */
 export const BUILT_IN_WORKSPACE_OPEN_TARGETS: readonly WorkspaceOpenTargetDefinition[] = [
   {
@@ -193,7 +193,8 @@ export const BUILT_IN_WORKSPACE_OPEN_TARGETS: readonly WorkspaceOpenTargetDefini
     launchStyle: 'line-column',
     macOSAppNames: ['WebStorm'],
   },
-  { commands: null, id: 'finder', label: 'Open Folder', launchStyle: 'direct-path' },
+  /** CDXC:OsIntegration 2026-09-16 DECISION: User: file manager actions say Open File/Folder Location on every OS. */
+  { commands: null, id: 'finder', label: 'Open File/Folder Location', launchStyle: 'direct-path' },
 ];
 
 const BUILT_IN_WORKSPACE_OPEN_TARGET_IDS = new Set<string>(BUILT_IN_WORKSPACE_OPEN_TARGETS.map((target) => target.id));

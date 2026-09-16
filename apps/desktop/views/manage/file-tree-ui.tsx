@@ -423,16 +423,6 @@ export function ManageFileContextMenu({
     >
       <button
         className='session-context-menu-item manage-file-context-menu-item'
-        disabled={isBusy}
-        onClick={onRevealInFinder}
-        role='menuitem'
-        type='button'
-      >
-        <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
-        {pendingAction === 'revealInFinder' ? 'Revealing' : 'Reveal in Finder'}
-      </button>
-      <button
-        className='session-context-menu-item manage-file-context-menu-item'
         onClick={onCopyPath}
         role='menuitem'
         type='button'
@@ -449,6 +439,16 @@ export function ManageFileContextMenu({
       >
         <IconCopy aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
         {pendingAction === 'copyFullPath' ? 'Copying Full Path' : 'Copy Full Path'}
+      </button>
+      <button
+        className='session-context-menu-item manage-file-context-menu-item'
+        disabled={isBusy}
+        onClick={onRevealInFinder}
+        role='menuitem'
+        type='button'
+      >
+        <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} stroke={1.8} />
+        {pendingAction === 'revealInFinder' ? 'Opening' : 'Open File/Folder Location'}
       </button>
       {canAddToSessionContext ? (
         <button

@@ -572,6 +572,18 @@ export function RecentProjectsModal({
                     <IconCopy aria-hidden='true' className='session-context-menu-icon' size={14} />
                     Copy Path
                   </button>
+                  {machineId ? (
+                    <button
+                      className='session-context-menu-item'
+                      disabled
+                      role='menuitem'
+                      title='Open File/Folder Location requires a local project on this machine.'
+                      type='button'
+                    >
+                      <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
+                      Open File/Folder Location
+                    </button>
+                  ) : null}
                   <button
                     className='session-context-menu-item'
                     onClick={() => {
@@ -592,7 +604,7 @@ export function RecentProjectsModal({
                     ) : (
                       <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
                     )}
-                    {machineId ? 'Open remote terminal here' : 'Open in Finder'}
+                    {machineId ? 'Open remote terminal here' : 'Open File/Folder Location'}
                   </button>
                   <div className='session-context-menu-divider' role='separator' />
                   <button

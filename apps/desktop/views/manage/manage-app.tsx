@@ -1303,7 +1303,7 @@ export function ManageApp() {
         }
         setFileContextMenu(undefined);
       } catch (revealError) {
-        setError(revealError instanceof Error ? revealError.message : 'Could not reveal item in Finder.');
+        setError(revealError instanceof Error ? revealError.message : 'Could not open the file or folder location.');
       } finally {
         setFileOperation((current) =>
           current?.action === 'revealInFinder' && current.path === entry.path ? undefined : current

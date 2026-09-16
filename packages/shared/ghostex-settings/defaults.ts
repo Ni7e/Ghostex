@@ -554,7 +554,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * its one startup installed-target scan and persists the detected IDE list.
    *
    * CDXC:Titlebar 2026-06-04-13:39:
-   * The default folder target should be described with OS-agnostic Open Folder copy even though the persisted target id remains finder for compatibility.
+   * The default folder target should be described with OS-agnostic Open File/Folder Location copy even though the persisted target id remains finder for compatibility.
    */
   workspaceOpenTargetAvailability: DEFAULT_WORKSPACE_OPEN_TARGET_AVAILABILITY,
   workspaceOpenTargetHiddenIds: [],

@@ -3083,7 +3083,7 @@ export function SessionGroupSection({
                  * Worktree project rows have their own compact context menu: open/reveal/rename first, then destructive worktree-specific actions. Delete removes the Git worktree checkout after confirmation; Remove only drops the Ghostex project row.
                  *
                  * CDXC:Projects 2026-06-04-13:39:
-                 * Project and worktree filesystem menu items should say Open Folder instead of Finder-specific copy so the macOS app presents OS-agnostic action names.
+                 * Project and worktree filesystem menu items should say Open File/Folder Location instead of Finder-specific copy so the macOS app presents OS-agnostic action names.
                  *
                  * CDXC:Projects 2026-06-08-09:19:
                  * Worktree project headings should keep Copy Path but omit Open so the compact menu prioritizes filesystem copy/reveal and worktree-specific rename/delete/remove actions.
@@ -3091,6 +3091,15 @@ export function SessionGroupSection({
                 <button className='session-context-menu-item' onClick={copyProjectPath} role='menuitem' type='button'>
                   <IconCopy aria-hidden='true' className='session-context-menu-icon' size={14} />
                   Copy Path
+                </button>
+                <button
+                  className='session-context-menu-item'
+                  onClick={openProjectInFinder}
+                  role='menuitem'
+                  type='button'
+                >
+                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
+                  Open File/Folder Location
                 </button>
                 {projectGitRemoteOriginUrl ? (
                   <button
@@ -3103,15 +3112,6 @@ export function SessionGroupSection({
                     Copy Remote URL
                   </button>
                 ) : null}
-                <button
-                  className='session-context-menu-item'
-                  onClick={openProjectInFinder}
-                  role='menuitem'
-                  type='button'
-                >
-                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  Open Folder
-                </button>
                 {/*
                  * CDXC:Worktrees 2026-08-10:
                  * Worktree rows deliberately do NOT offer the label-only
@@ -3213,6 +3213,15 @@ export function SessionGroupSection({
                   <IconCopy aria-hidden='true' className='session-context-menu-icon' size={14} />
                   Copy Path
                 </button>
+                <button
+                  className='session-context-menu-item'
+                  onClick={openProjectInFinder}
+                  role='menuitem'
+                  type='button'
+                >
+                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
+                  Open File/Folder Location
+                </button>
                 {projectGitRemoteOriginUrl ? (
                   <button
                     className='session-context-menu-item'
@@ -3224,15 +3233,6 @@ export function SessionGroupSection({
                     Copy Remote URL
                   </button>
                 ) : null}
-                <button
-                  className='session-context-menu-item'
-                  onClick={openProjectInFinder}
-                  role='menuitem'
-                  type='button'
-                >
-                  <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  Open Folder
-                </button>
                 {onCreateProjectCollection && onMoveProjectToCollection ? (
                   <button
                     className='session-context-menu-item'

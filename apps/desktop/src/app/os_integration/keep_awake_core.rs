@@ -143,9 +143,7 @@ impl GhostexGpuiApp {
             let _ = duration_minutes;
             let _ = settings;
             window.push_notification(
-                Notification::warning(
-                    "Keep Awake requires macOS caffeinate and is not supported on this platform.",
-                ),
+                Notification::warning("Keep Awake is not supported on this platform."),
                 cx,
             );
             cx.notify();

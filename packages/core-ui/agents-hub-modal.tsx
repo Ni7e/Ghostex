@@ -549,7 +549,7 @@ function ProfileRow({ profiles, vscode }: { profiles: AgentsHubProfile[]; vscode
    * Profile icon tooltips must keep the same profile label, instruction file path, optional resolved target path, and folder-opening action as the original tooltip, but render them as organized sections instead of a loose preformatted text block so dense path content remains scannable.
    *
    * CDXC:AgentLauncher 2026-06-04-13:39:
-   * Filesystem actions in Agents Hub should use OS-agnostic "Open Folder" language so the shared modal does not expose Finder-specific copy outside macOS implementation details.
+   * Filesystem actions in Agents Hub should use OS-agnostic "Open File/Folder Location" language so the shared modal does not expose Finder-specific copy outside macOS implementation details.
    */
   return (
     <div className='agents-hub-profile-row' aria-label='Profiles using this item'>
@@ -596,7 +596,7 @@ function ProfileRow({ profiles, vscode }: { profiles: AgentsHubProfile[]; vscode
                     <div className='agents-hub-profile-tooltip-path'>{profile.targetPath}</div>
                   </div>
                 ) : null}
-                <div className='agents-hub-profile-tooltip-action'>Click to open folder</div>
+                <div className='agents-hub-profile-tooltip-action'>Click to open file/folder location</div>
               </div>
             </TooltipContent>
           </Tooltip>
@@ -782,7 +782,7 @@ function EditorPane({
         <div className='agents-hub-editor-actions'>
           {/*
            * CDXC:AgentLauncher 2026-06-04-13:39:
-           * The selected file header keeps Open Folder beside the built-in
+           * The selected file header keeps Open File/Folder Location beside the built-in
            * Source action so users can choose filesystem or in-app navigation.
            *
            * CDXC:AgentLauncher 2026-06-04-20:08:

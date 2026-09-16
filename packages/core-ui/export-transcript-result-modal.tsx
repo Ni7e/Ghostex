@@ -414,9 +414,9 @@ export function ExportTranscriptModal({
             <div className='export-transcript-path-row'>
               <code className='export-transcript-path'>{stage.stage === 'done' ? stage.path : ''}</code>
               {stage.stage === 'done' && stage.canReveal && onRevealInFinder ? (
-                <AppTooltip content='Reveal in Finder'>
+                <AppTooltip content='Open File/Folder Location'>
                   <Button
-                    aria-label='Reveal in Finder'
+                    aria-label='Open File/Folder Location'
                     className='export-transcript-reveal-button'
                     onClick={onRevealInFinder}
                     size='icon'

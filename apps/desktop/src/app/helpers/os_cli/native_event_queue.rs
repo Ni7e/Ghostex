@@ -182,7 +182,7 @@ pub(crate) fn gpui_spawn_completion_sound_player(path: &Path) -> Result<(), Stri
         .stderr(std::process::Stdio::null())
         .spawn()
         .map(|_| ())
-        .map_err(|_| "GPUI could not start the macOS sound preview player.".to_string())
+        .map_err(|_| "Could not start the sound preview player.".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -170,7 +170,7 @@ pub(crate) const GPUI_BUILT_IN_OPEN_TARGETS: &[GpuiBuiltInOpenTargetDefinition] 
     },
     GpuiBuiltInOpenTargetDefinition {
         id: "finder",
-        label: "Open Folder",
+        label: "Open File/Folder Location",
         commands: &[],
         base_args: &[],
         macos_app_names: &[],

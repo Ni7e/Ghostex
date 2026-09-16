@@ -470,7 +470,7 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
   {
     action: {
       description:
-        'Install Desktop Control so agents can operate native macOS apps through Ghostex Computer Use. Ghostex handles the installer; macOS may still ask you to grant permissions.',
+        'Install Desktop Control so agents can operate desktop apps through Ghostex Computer Use. Ghostex handles the installer; your operating system may still ask you to grant permissions.',
       eyebrow: 'One-click setup',
     },
     icon: IconTools,
@@ -482,12 +482,12 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
       },
       {
         icon: IconSettings,
-        text: 'Grant Accessibility and Screen Recording when macOS asks; those permissions let the driver see and control desktop apps.',
-        title: 'macOS permissions',
+        text: 'Grant Accessibility and Screen Recording when your operating system asks; those permissions let the driver see and control desktop apps.',
+        title: 'system permissions',
       },
       {
         icon: IconInfoCircle,
-        text: 'You can skip this now. Desktop Control will not work until Cua Driver, the Ghostex Computer Use skill, and the macOS permissions are ready.',
+        text: 'You can skip this now. Desktop Control will not work until Cua Driver, the Ghostex Computer Use skill, and the system permissions are ready.',
         title: 'Optional for now',
       },
       {
@@ -505,7 +505,8 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
     items: [
       {
         icon: IconTerminal2,
-        text: 'Manage multiple CLI coding agent sessions from one native macOS workspace.',
+        /** CDXC:OsIntegration 2026-09-16 DECISION: User: general app copy uses platform-neutral terms such as machine instead of Mac. */
+        text: 'Manage multiple CLI coding agent sessions from one desktop workspace.',
         title: 'Parallel agents',
       },
       {
@@ -574,7 +575,7 @@ const FIRST_LAUNCH_GUIDE_PAGES: readonly FirstLaunchGuidePage[] = [
       eyebrow: 'Remote session commands',
       snippet: [
         '# For CLI debugging, connect to your computer over Tailscale',
-        'ssh madda@my-mac',
+        'ssh user@my-machine',
         '',
         '# List Ghostex sessions and note the left-column alias',
         'gx sessions',
@@ -2191,9 +2192,9 @@ function FirstLaunchPreferencesPage({
         />
         <FirstLaunchCheckboxSetting
           checked={settings.showMacOSAttentionNotifications}
-          description='Show a macOS banner when an agent needs attention.'
+          description='Show a system notification when an agent needs attention.'
           icon={IconBellRinging}
-          label='macOS attention notifications'
+          label='Attention notifications'
           onChange={(checked) => updateSetting('showMacOSAttentionNotifications', checked)}
         />
         <FirstLaunchCheckboxSetting

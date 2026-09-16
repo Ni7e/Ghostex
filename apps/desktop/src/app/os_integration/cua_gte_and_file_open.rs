@@ -472,7 +472,7 @@ impl GhostexGpuiApp {
         action: &'static str,
         cx: &mut gpui::Context<Self>,
     ) {
-        let message = "This System Settings action is only available on macOS.";
+        let message = "This system settings action is unavailable on this platform.";
         self.dispatch_gpui_settings_action_status(action, false, message, cx);
         self.dispatch_open_gpui_app_modal_sidebar_state_payload(
             gpui_ghostex_cli_status_message(Some(message)),

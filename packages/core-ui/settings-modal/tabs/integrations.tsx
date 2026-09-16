@@ -289,7 +289,7 @@ export function IntegrationsSettingsTab({
             {appShotsEnabled ? (
               <>
                 <SettingRow
-                  description='Which Command key press captures the frontmost app window.'
+                  description='Which modifier-key gesture captures the frontmost app window.'
                   htmlFor={appShotsHotkeyId}
                   dependent
                   label='App Shots hotkey'

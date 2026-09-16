@@ -42,7 +42,7 @@ export function FolderStorageStats({
             variant='outline'
           >
             <IconFolderOpen aria-hidden='true' className='size-4' />
-            Open Folder
+            Open File/Folder Location
           </SettingButton>
         </div>
       </SettingsListItem>

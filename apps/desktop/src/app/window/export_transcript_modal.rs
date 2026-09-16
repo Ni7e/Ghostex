@@ -41,7 +41,7 @@ const SELECT_AGENT_PLACEHOLDER: &str = "Select agent";
 const EXPORT_HINT: &str = "The file is saved in the Ghostex exports folder.";
 const INCLUDE: &str = "Include";
 const SAVED_AS_MARKDOWN: &str = "Saved as Markdown";
-const REVEAL_IN_FINDER: &str = "Reveal in Finder";
+const OPEN_FILE_LOCATION: &str = "Open File/Folder Location";
 const EXPORT_FAILED: &str = "The transcript export failed.";
 
 /// What the user wants to do with the written file.
@@ -757,7 +757,9 @@ impl GpuiExportTranscriptModalWindow {
                                 |this, window, cx| this.reveal(window, cx),
                                 cx,
                             )
-                            .tooltip(|window, cx| Tooltip::new(REVEAL_IN_FINDER).build(window, cx)),
+                            .tooltip(|window, cx| {
+                                Tooltip::new(OPEN_FILE_LOCATION).build(window, cx)
+                            }),
                         )
                     }),
             )
