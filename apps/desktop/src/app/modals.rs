@@ -2046,6 +2046,12 @@ impl GhostexGpuiApp {
         let chat_transcript_width_script = format!(
             "window.ghostexSetSessionChatTranscriptWidthPercent?.({chat_transcript_width_percent});undefined;"
         );
+        let code_file_view_available = self.titlebar_mode_available(TitlebarMode::Source)
+            && self.embedded_code_editor_unavailable_reason().is_none();
+        let docs_file_view_available = self.titlebar_mode_available(TitlebarMode::Manage);
+        let chat_file_views_script = format!(
+            "window.ghostexSetSessionChatFileViews?.({code_file_view_available},{docs_file_view_available});undefined;"
+        );
         let chat_file_edit_previews =
             gpui_session_chat_file_edit_previews_from_settings(settings_snapshot.object());
         let chat_file_edit_previews_script = format!(
@@ -2083,6 +2089,7 @@ impl GhostexGpuiApp {
                 surface.refresh_session_chat_zoom();
                 surface.execute_app_owned_script(&account_privacy_script);
                 surface.execute_app_owned_script(&chat_file_edit_previews_script);
+                surface.execute_app_owned_script(&chat_file_views_script);
                 surface.execute_app_owned_script(&chat_simple_mode_script);
                 surface.execute_app_owned_script(&chat_hotkeys_script);
             });
@@ -2478,7 +2485,7 @@ impl GhostexGpuiApp {
             "gpui.host.willTerminate",
             serde_json::json!({ "pid": std::process::id() }),
         );
-        self.persist_shell_layout_state();
+        self.flush_shell_layout_state();
         self.stop_gpui_keep_awake_runtime();
         self.source_code_server_runtime.stop();
         let _ = cx;

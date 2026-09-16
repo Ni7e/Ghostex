@@ -58,6 +58,11 @@ impl GhostexGpuiApp {
         persist_gpui_workspace_shell_state(self);
     }
 
+    /// Synchronous variant for the quit path; see `flush_gpui_workspace_shell_state`.
+    pub(crate) fn flush_shell_layout_state(&self) {
+        flush_gpui_workspace_shell_state(self);
+    }
+
     pub(crate) fn project_scoped_workarea_availability(&self) -> ProjectScopedWorkareaAvailability {
         project_scoped_workarea_availability_from_latest_sidebar_snapshot(
             self.latest_sidebar_project_snapshot.as_ref(),
