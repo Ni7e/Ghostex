@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 9.8.5 - 2026-09-16
+
+**Ghostex 9.8.5 is out.** Agent Sync in the Agents Hub keeps every agent on your computer pointed at one shared set of skills, instructions, and hooks, plus switching a draft between Claude and Codex, annotations that clear after you send them, and fixes to chat and the sidebar.
+
+### 🔗 Agent Sync
+
+- **Keep every agent on one set of skills, instructions, and hooks.** Open the Agents Hub (Cmd+5) and choose Agent Sync to see each agent and profile on your computer, with a dot for Skills, Instructions, and Hooks and a list of problems such as broken links or copied skill folders.
+- **Review a plan before anything changes.** Sync all or sync one agent to preview the links and instruction pointers Ghostex will write; instruction files with other content are backed up first and nothing is deleted.
+- **Run it from the terminal too.** `ghostex agent-sync status`, `plan`, and `apply --yes` do the same scan, plan, and apply.
+
+### 💬 Chat and agents
+
+- **Switch a draft between Claude and Codex before the first message.** Use Switch Agent CLI in the model menu; the new agent picks its account by your Account for new sessions rule, and your unsent text stays in place.
+- **Queued prompts go out after a manual /compact in Claude.** Messages you queued no longer stay held once compaction finishes.
+- **Shift+Enter adds a new line wherever focus is in the chat view.**
+
+### 📝 Annotations
+
+- **Copying or sending annotations clears them.** This applies in the Browser toolbar and in Docs HTML files, and the toolbar's settings panel can turn it off.
+
+### 🗂 Sidebar
+
+- **Reveal Session leaves room around the session.** The revealed row stops 50px from the edge, below any pinned headers.
+- **The selected session blends with tinted sidebars in dark mode.** Its fill is translucent instead of a flat gray block.
+- **Dragging sessions is smoother.** The sidebar does less layout work while you drag.
+- **Search by Prompt stays open when started from Previous Sessions.** Its floating button now matches the chat composer's look.
+
 ## 9.8.0 - 2026-09-16
 
 **Ghostex 9.8.0 is out.** Continue a Codex conversation that is open in another session, animated session sections with a separate dot for pending questions, one menu style across the app, Search by Prompt filters in the toolbar, and a reliable restart of the background server after an update.
@@ -80,7 +107,7 @@
   - Unread notification text is darker in light mode, and session-list dots are visible there.
   - Escape and single-key terminal controls act immediately in chat instead of waiting on your login profile.
   - Workspace state is written off the UI thread, so clicking around no longer waits on a save.
-  - Annotate in the Browser toolbar now opens inside the frame that holds the page content, so a Storybook story or another framed preview can be annotated instead of only the chrome around it. It also shows up again on Ghostex's own development pages, where it used to disappear before appearing. Copying or sending annotations now clears them by default, in the Browser toolbar and in Docs HTML files; the toolbar's settings panel can turn that off.
+  - Annotate in the Browser toolbar now opens inside the frame that holds the page content, so a Storybook story or another framed preview can be annotated instead of only the chrome around it. It also shows up again on Ghostex's own development pages, where it used to disappear before appearing.
   - Sidebar section headings (Pinned, Sessions, Drafts, Browser, Parked, Snoozed) carry an orange dot when a session there is working and a blue dot when one is done or waiting on you, counting rows hidden by collapse or Compact mode, plus a plain dot on the section holding the active session. Section labels are also a little larger.
   - Every sidebar tooltip waits exactly as long as the delay you set in Settings, including project titles, session cards, fixed action buttons, the branch badge, and the question dot. Moving from one label to the next no longer skips the wait.
 
