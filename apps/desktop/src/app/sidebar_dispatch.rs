@@ -2168,7 +2168,7 @@ impl GhostexGpuiApp {
         window.prevent_default();
         cx.stop_propagation();
 
-        let max_width = current_sidebar_max_width(window);
+        let max_width = current_sidebar_max_width(window, self.active_mode);
         let delta = event.position.x.as_f32() - drag.start_x;
         let next_width = clamp_sidebar_width(drag.start_width + delta, max_width);
         if (next_width - self.sidebar_width).abs() >= 0.5 {
@@ -2200,7 +2200,7 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn reset_sidebar_width(&mut self, window: &Window) {
-        let max_width = current_sidebar_max_width(window);
+        let max_width = current_sidebar_max_width(window, self.active_mode);
         let reset_width = read_sidebar_default_width_setting().unwrap_or(SIDEBAR_RESET_WIDTH);
         self.sidebar_width = clamp_sidebar_width(reset_width, max_width);
         self.cancel_sidebar_divider_interaction_state();

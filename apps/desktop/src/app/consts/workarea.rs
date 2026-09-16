@@ -34,6 +34,10 @@ pub(crate) const PROJECT_EDITOR_COMPANION_WIDTH_RATIO: f32 = 0.32;
 
 pub(crate) const PROJECT_EDITOR_COMPANION_MIN_WIDTH: f32 = PANE_RESIZE_MINIMUM_WIDTH;
 
+/// CDXC:Workarea 2026-09-16 DECISION:
+/// User: main panes in non-agent views, including Docs and Browser, have a minimum width of 455px.
+pub(crate) const PROJECT_EDITOR_MAIN_MIN_WIDTH: f32 = 455.0;
+
 pub(crate) const PROJECT_EDITOR_COMPANION_SPLIT_RATIO: f32 = 0.5;
 
 pub(crate) const PROJECT_EDITOR_AWAKE_MODE_CAP: usize = 3;

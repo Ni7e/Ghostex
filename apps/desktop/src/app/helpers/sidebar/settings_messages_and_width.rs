@@ -317,9 +317,14 @@ pub(crate) fn gpui_session_chat_simple_mode_from_settings(
         .unwrap_or(false)
 }
 
-pub(crate) fn current_sidebar_max_width(window: &Window) -> f32 {
+pub(crate) fn current_sidebar_max_width(window: &Window, mode: TitlebarMode) -> f32 {
+    let workspace_min_width = if mode.is_project_editor_mode() {
+        PROJECT_EDITOR_MAIN_MIN_WIDTH
+    } else {
+        WORKSPACE_MIN_WIDTH
+    };
     let max_for_window =
-        window.bounds().size.width.as_f32() - SIDEBAR_DIVIDER_WIDTH - WORKSPACE_MIN_WIDTH;
+        window.bounds().size.width.as_f32() - SIDEBAR_DIVIDER_WIDTH - workspace_min_width;
     SIDEBAR_MAX_WIDTH.min(max_for_window).max(SIDEBAR_MIN_WIDTH)
 }
 

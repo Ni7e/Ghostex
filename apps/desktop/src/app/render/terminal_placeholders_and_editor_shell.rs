@@ -265,7 +265,7 @@ impl GhostexGpuiApp {
                         .flex_shrink_1()
                         .flex_basis(relative(0.0))
                         .h_full()
-                        .min_w(px(WORKSPACE_MIN_WIDTH))
+                        .min_w(px(PROJECT_EDITOR_MAIN_MIN_WIDTH))
                         .min_h_0()
                         .overflow_hidden()
                         .child(
@@ -329,7 +329,7 @@ impl GhostexGpuiApp {
                         .flex_col()
                         .flex_1()
                         .h_full()
-                        .min_w(px(WORKSPACE_MIN_WIDTH))
+                        .min_w(px(PROJECT_EDITOR_MAIN_MIN_WIDTH))
                         .min_h_0()
                         .overflow_hidden()
                         .when(mode != TitlebarMode::Browser, |this| {

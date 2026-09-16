@@ -571,7 +571,8 @@ pub(crate) fn project_editor_companion_width_ratio(ratio: f32) -> f32 {
 pub(crate) fn project_editor_companion_width_ratio_for_span(ratio: f32, content_span: f32) -> f32 {
     let content_span = content_span.max(1.0);
     let companion_min_ratio = (PROJECT_EDITOR_COMPANION_MIN_WIDTH / content_span).clamp(0.10, 0.85);
-    let editor_max_ratio = ((content_span - WORKSPACE_MIN_WIDTH) / content_span).clamp(0.10, 0.85);
+    let editor_max_ratio =
+        ((content_span - PROJECT_EDITOR_MAIN_MIN_WIDTH) / content_span).clamp(0.10, 0.85);
     let ratio = project_editor_companion_width_ratio(ratio);
 
     if companion_min_ratio <= editor_max_ratio {
