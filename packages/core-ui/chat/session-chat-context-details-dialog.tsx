@@ -219,7 +219,7 @@ export function SessionChatContextDetailsDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         className={cn(
-          'ghostex-session-chat-popup ghostex-chat-context-details-dialog w-full rounded-xl sm:max-w-xl font-sans [--radius:0.625rem]',
+          'ghostex-session-chat-popup ghostex-chat-context-details-dialog flex max-h-[calc(100vh-1.5rem)] w-full max-w-[calc(100%-1.5rem)] flex-col gap-4 rounded-xl p-4 font-sans sm:max-h-[calc(100vh-2rem)] sm:max-w-xl sm:gap-6 sm:p-6 [--radius:0.625rem]',
           theme === 'dark' && 'dark'
         )}
       >
@@ -259,7 +259,7 @@ export function SessionChatContextDetailsDialog({
           </DialogDescription>
         </DialogHeader>
         {/* User: the filter bar is rounded, unlike the square inputs elsewhere, so it reads as a search field. */}
-        <InputGroup className='ghostex-chat-context-details-filter h-8 rounded-lg border-border/70 bg-muted/40 dark:bg-muted/25'>
+        <InputGroup className='ghostex-chat-context-details-filter h-8 shrink-0 rounded-lg border-border/70 bg-muted/40 dark:bg-muted/25'>
           <InputGroupAddon className='pl-2.5 text-muted-foreground/80'>
             <IconSearch aria-hidden='true' className='size-3.5' stroke={2} />
           </InputGroupAddon>
@@ -284,7 +284,7 @@ export function SessionChatContextDetailsDialog({
             </InputGroupAddon>
           ) : null}
         </InputGroup>
-        <div className='ghostex-chat-context-details-dialog-body -mx-1 flex max-h-[60vh] flex-col gap-1 overflow-x-hidden overflow-y-auto px-1'>
+        <div className='ghostex-chat-context-details-dialog-body -mx-1 flex max-h-[60vh] min-h-0 shrink flex-col gap-1 overflow-x-hidden overflow-y-auto px-1'>
           {filteredGroups.length === 0 ? (
             <p className='ghostex-chat-context-details-empty px-1 py-6 text-center text-[11px] text-muted-foreground'>
               No rows match “{query.trim()}”.
@@ -346,7 +346,7 @@ export function SessionChatContextDetailsDialog({
         */}
         <section
           aria-label='Status line'
-          className='ghostex-chat-context-details-status-line -mx-1 border-t border-border/60 px-1 pt-3'
+          className='ghostex-chat-context-details-status-line -mx-1 shrink-0 border-t border-border/60 px-1 pt-3'
         >
           <div className='mb-1.5 flex items-baseline justify-between gap-2'>
             <h3 className='text-[10px] font-medium tracking-[0.06em] text-muted-foreground/70 uppercase'>
@@ -366,9 +366,10 @@ export function SessionChatContextDetailsDialog({
             </DragDropProvider>
           ) : null}
         </section>
-        <DialogFooter className='sm:justify-between'>
+        {/* One row at every width: below the `sm` breakpoint the shared footer stacks Cancel/Save above Reset, which reads as three loose lines in a narrow chat pane. */}
+        <DialogFooter className='shrink-0 flex-row flex-wrap items-center justify-between'>
           <Button
-            className='text-muted-foreground'
+            className='-ml-3 text-muted-foreground'
             onClick={() => setDraft(DEFAULT_SESSION_CHAT_CONTEXT_DETAILS_PREFERENCES)}
             size='sm'
             type='button'
@@ -431,6 +432,8 @@ function ContextDetailOptionRow({
     sortable.ref(element);
     sortable.sourceRef(element);
   };
+  const sampleTitle = sample === null ? undefined : formatAccountText(sample);
+  const sampleText = sample === null ? '\u2014' : <AccountText text={sample} />;
 
   return (
     <div
@@ -450,14 +453,23 @@ function ContextDetailOptionRow({
         <IconGripVertical aria-hidden='true' size={14} stroke={1.8} />
       </button>
       <div className='min-w-0 flex-1'>
-        <div className='text-xs text-foreground'>{row.label}</div>
+        {/* In a narrow chat pane the value shares the label line; a third right-hand column would leave the description a few characters. */}
+        <div className='flex items-baseline justify-between gap-2'>
+          <div className='truncate text-xs text-foreground'>{row.label}</div>
+          <div
+            className='max-w-[55%] shrink-0 truncate text-[11px] text-muted-foreground tabular-nums sm:hidden'
+            title={sampleTitle}
+          >
+            {sampleText}
+          </div>
+        </div>
         <div className='truncate text-[11px] text-muted-foreground'>{row.description}</div>
       </div>
       <div
-        className='max-w-[13rem] shrink-0 truncate text-[11px] text-muted-foreground tabular-nums'
-        title={sample === null ? undefined : formatAccountText(sample)}
+        className='hidden max-w-[13rem] shrink-0 truncate text-[11px] text-muted-foreground tabular-nums sm:block'
+        title={sampleTitle}
       >
-        {sample === null ? '\u2014' : <AccountText text={sample} />}
+        {sampleText}
       </div>
       <AppTooltip content={starred ? 'Remove from the status line' : 'Show under the chat box'} side='top'>
         <Button
