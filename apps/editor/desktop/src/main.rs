@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use std::{
     collections::HashMap,
     env, fs, io,
@@ -149,7 +151,7 @@ fn run() -> Result<(), String> {
     let socket_arg = parse_daemon_args(&args)?;
     let endpoint = resolve_socket_endpoint(socket_arg.as_deref())?;
 
-    if ping_existing_daemon(&endpoint.name) {
+    if ping_existing_daemon(&endpoint) {
         return Ok(());
     }
     remove_stale_socket(&endpoint.cleanup_path);
@@ -282,21 +284,7 @@ fn default_socket_path() -> String {
 
 #[cfg(target_os = "windows")]
 fn default_socket_path() -> String {
-    let user = env::var("USERNAME")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "user".to_string());
-    let sanitized: String = user
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    format!(r"\\.\pipe\ghostex-editor-{sanitized}")
+    ghostex_editor_client::default_pipe_path()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -327,8 +315,27 @@ fn set_directory_private(path: &Path) {
 #[cfg(not(unix))]
 fn set_directory_private(_path: &Path) {}
 
-fn ping_existing_daemon(name: &Name<'static>) -> bool {
-    let Ok(mut stream) = Stream::connect(name.clone()) else {
+#[cfg(windows)]
+fn ping_existing_daemon(endpoint: &SocketEndpoint) -> bool {
+    let Ok(mut stream) = ghostex_editor_client::PipeStream::connect(
+        &endpoint.display_path,
+        Duration::from_millis(750),
+    ) else {
+        return false;
+    };
+    if stream.write_all(b"{\"v\":1,\"type\":\"ping\"}\n").is_err() {
+        return false;
+    }
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).is_ok()
+        && serde_json::from_str::<Value>(&line)
+            .ok()
+            .is_some_and(|reply| reply["type"] == "pong")
+}
+
+#[cfg(unix)]
+fn ping_existing_daemon(endpoint: &SocketEndpoint) -> bool {
+    let Ok(mut stream) = Stream::connect(endpoint.name.clone()) else {
         return false;
     };
     let _ = stream.set_recv_timeout(Some(Duration::from_millis(750)));
@@ -1282,7 +1289,18 @@ fn apply_skip_taskbar(builder: WindowBuilder) -> WindowBuilder {
 #[cfg(target_os = "windows")]
 fn apply_skip_taskbar(builder: WindowBuilder) -> WindowBuilder {
     use tao::platform::windows::WindowBuilderExtWindows;
-    builder.with_skip_taskbar(true)
+    let artwork = image::load_from_memory(include_bytes!(
+        "../../../desktop/resources/AppIcon.appiconset/icon_32x32.png"
+    ))
+    .expect("the bundled Ghostex icon must be valid")
+    .into_rgba8();
+    let (width, height) = artwork.dimensions();
+    let icon = tao::window::Icon::from_rgba(artwork.into_raw(), width, height)
+        .expect("the bundled Ghostex icon must contain RGBA pixels");
+    builder
+        .with_window_icon(Some(icon.clone()))
+        .with_taskbar_icon(Some(icon))
+        .with_skip_taskbar(true)
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

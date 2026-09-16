@@ -85,6 +85,7 @@ x11rb = "0.13"
 # drives a message-only pump HWND and child-HWND frame/visibility/focus through
 # windows-sys, pinned to the same major as the cef crate's own Windows dependency.
 [target.'cfg(target_os = "windows")'.dependencies]
+ghostex-editor-client = { path = "../../packages/editor-client" }
 sysinfo = "0.31.4"
 velopack = { version = "1.2.0", features = ["public-utils"] }
 windows-sys = { version = "0.61", features = [

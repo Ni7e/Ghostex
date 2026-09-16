@@ -681,7 +681,7 @@ pub(crate) fn gpui_stop_all_ghostex_background_services() {
     }
     #[cfg(target_os = "macos")]
     gpui_bootout_all_ghostex_launchd_jobs();
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         let _ = gpui_ghostex_editor_daemon_request(&serde_json::json!({
             "v": GHOSTEX_EDITOR_PROTOCOL_VERSION,
