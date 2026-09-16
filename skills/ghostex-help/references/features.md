@@ -52,7 +52,8 @@ in Settings > Extensions and focuses its name field.
   with Agentation in the Browser toolbar; GitHub pages disallow that tool.
   When a page shows its content inside a frame, such as a Storybook story,
   the Annotate toolbar opens inside that frame so the content itself can be
-  selected.
+  selected. Copying or sending annotations clears them afterwards by default;
+  the toolbar's own settings panel (Clear on copy/send) turns that off.
   HTML files in Docs use the same Agentation overlay via Annotate. Markdown
   files use Docs selection comments instead (see Docs below).
 - **Kanban**: the project board backed by the Beads `bd` CLI (see Project
@@ -145,8 +146,9 @@ session replaces that active pane's session and leaves the other pane in place.
 - Width: the sidebar sits on the left; drag the divider to resize,
   double-click it to restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
 - Reveal active session: the hollow-circle titlebar button expands its section and scrolls
-  the active session into view, then blinks its outline twice: pale blue in
-  light mode and white in dark mode. Active sessions also have a slightly
+  the active session into view with 50px of space from the top or bottom edge
+  (below any pinned headers, where scrolling allows), then blinks its outline
+  twice: pale blue in light mode and white in dark mode. Active sessions also have a slightly
   stronger background and border in light mode.
 - Pane memory: the companion and Commands panes are remembered for Agents and,
   separately, for the wide views (Browser, Code, Docs, Kanban, Automate), the
@@ -557,6 +559,10 @@ reset the one whose limit resets first, Most used first keeps draining the
 account already in use, and Same as last session reuses the account of the last
 session. Pick a specific account instead to always start
 with it. When the rule finds no account, new sessions use the current CLI login.
+Before sending a session's first message, use the model menu's Switch Agent CLI
+to change between Claude and Codex. The new agent uses its Account for new
+sessions rule, just like the sidebar agent button, while the terminal and your
+unsent chat text stay in place.
 Sign-in and usage-limit notices in Claude and Codex chats offer Switch account
 beside Open terminal, so you can choose another account directly from those notices.
 In the chat's More actions menu, click Switch Account to open its submenu;
@@ -675,11 +681,29 @@ per-machine default with per-project overrides. Actions (Settings > Actions)
 are saved terminal commands or browser URLs shown on project headers and in
 the titlebar Actions menu; Global Actions apply to every project.
 
-Agents Hub lets you browse and edit agent files in Skills, MDs, Hooks, and
-Configs & MCPs. In MDs, expand Shared agent markdown to see the files in your
-shared agent folder, then select a filename to read or edit it. Expand the
-profile instruction groups the same way. Use Refresh to reload files from
-disk and Save to write your edits.
+Agents Hub lets you browse and edit agent files in Skills, MDs, Hooks,
+Configs & MCPs, and Agent Sync. In MDs, expand Shared agent markdown to see the
+files in your shared agent folder, then select a filename to read or edit it.
+Expand the profile instruction groups the same way. Use Refresh to reload files
+from disk and Save to write your edits.
+
+Agent Sync (the fifth Hub tab, Cmd+5) keeps one source of truth in `~/.agents`
+(skills, `main.md` and the other rule files, hook scripts, `.skill-lock.json`)
+and points every agent on the computer at it. The left list shows each detected
+agent and profile with three dots for Skills, Instructions, and Hooks; the right
+pane shows the problems found (dangling links, copied skill folders, whole-folder
+links, instruction files that do not point at `main.md`, stale lock entries) and
+one agent's details when selected. Sync all or Sync <agent> opens a plan first:
+one relative symlink per skill in every agent's skills folder, whole-folder links
+converted to per-skill links, the one-line pointer written into each agent's
+instruction file (a file with other content is backed up as
+`<name>.pre-sync-<stamp>.bak` first), and the hooks folder and lock file linked
+into Claude Code and Codex. Nothing is deleted; pruning stale lock entries is an
+opt-in group. Agents that read `~/.agents/skills` directly (Amp, Cursor,
+OpenCode) get no links. The same scan, plan, and apply run from the CLI:
+`ghostex agent-sync status`, `ghostex agent-sync plan [--agent <id>]`, and
+`ghostex agent-sync apply --yes [--agent <id>] [--group <group>...]
+[--prune-lock]`; `ghostex agent-sync agents` lists the ids.
 
 Cross-agent orchestration is built in: any agent with the `$ghostex-cli`
 skill installed can run `ghostex` to start other agents and steer them. For
