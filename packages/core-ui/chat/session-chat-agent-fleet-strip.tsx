@@ -5,9 +5,10 @@
  */
 
 import { IconChevronRight } from '@tabler/icons-react';
-import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useState } from 'react';
 import type { SessionChatAgentFleet } from '../../shared/session-chat';
 import { formatSessionChatActivityElapsed, sessionChatActivityElapsedSeconds } from './session-chat-activity-row';
+import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
 import { persistSessionChatInteractions, sessionChatInteractionState } from './session-chat-interaction-state';
 import { SessionChatSimpleModeContext } from './session-chat-simple-mode';
 import { SessionChatSubagentLink } from './session-chat-subagent-link';
@@ -45,19 +46,22 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
     persistSessionChatInteractions(state);
     setOpenOverride(next);
   };
-  const rowsRef = useRef<HTMLDivElement>(null);
+  // A callback ref, not a ref object: the rows mount a render after `open`
+  // flips (the disclosure body mounts them once it starts animating), so an
+  // effect keyed on `open` would run before they exist.
+  const [rowsElement, setRowsElement] = useState<HTMLDivElement | null>(null);
   const [scrollable, setScrollable] = useState(false);
   const agentCount = fleet?.agents.length ?? 0;
   // CDXC:SessionChat 2026-09-10 WHY: Scroll animations can retain their last fade after the roster shrinks to fit; remove the mask when there is no overflow.
   useLayoutEffect(() => {
-    const rows = rowsRef.current;
+    const rows = rowsElement;
     if (!rows) return;
     const measure = () => setScrollable(rows.scrollHeight > rows.clientHeight);
     const observer = new ResizeObserver(measure);
     observer.observe(rows);
     measure();
     return () => observer.disconnect();
-  }, [agentCount, open]);
+  }, [agentCount, rowsElement]);
   const [now, setNow] = useState(() => Date.now());
   const detectedAt = fleet?.detectedAt ?? null;
   const validUntil = fleet?.validUntil ? Date.parse(fleet.validUntil) : null;
@@ -76,6 +80,15 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
   if (!fleet || agents.length === 0) {
     return null;
   }
+
+  const idleCount = agents.filter((agent) => agent.status === 'idle').length;
+  const runningCount = stale ? 0 : agents.length - idleCount;
+  // A stale roster cannot vouch for anything running, so it only carries its size.
+  const countLabel = stale
+    ? `${agents.length}`
+    : [runningCount > 0 ? `${runningCount} running` : null, idleCount > 0 ? `${idleCount} idle` : null]
+        .filter((part) => part !== null)
+        .join(', ');
 
   // Carry the captured roster, not the ticking display clock, so identical
   // agent types can be resolved against the provider's ordered launch records.
@@ -96,29 +109,39 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
       <button
         aria-controls={open ? rowsId : undefined}
         aria-expanded={open}
-        className='ghostex-chat-agent-fleet-header'
+        className='ghostex-chat-agent-fleet-header ghostex-chat-status-card-header'
         onClick={toggleOpen}
         title={open ? 'Minimize subagents' : 'Expand subagents'}
         type='button'
       >
+        {/* CDXC:SessionChat 2026-09-16 DECISION: User: the header has the pending tool card's shape (dot on the left, chevron on the right, same text size) and always says how many subagents are running. The dot and chevron sit in 1lh boxes like session-chat-terminal-tool-row.tsx. */}
+        <span aria-hidden='true' className='flex h-[1lh] shrink-0 items-center'>
+          <span
+            className='ghostex-chat-agent-fleet-pulse'
+            style={
+              runningCount === 0
+                ? { animation: 'none', backgroundColor: 'var(--muted-foreground)', opacity: 0.5 }
+                : undefined
+            }
+          />
+        </span>
         {/* CDXC:SessionChat 2026-09-07 DECISION: User: the title is "Subagents", without a hyphen or all caps. */}
-        <span className='ghostex-chat-card-title ghostex-chat-agent-fleet-title'>Subagents</span>
-        {agents.length > 1 ? (
-          <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ghostex-chat-agent-fleet-count'>
-            {agents.length}
-          </span>
-        ) : null}
-        <IconChevronRight aria-hidden='true' className={`ghostex-chat-disclosure-chevron${open ? ' is-open' : ''}`} />
+        <span className='ghostex-chat-agent-fleet-title'>Subagents</span>
+        <span className='ghostex-chat-agent-fleet-count'>{countLabel}</span>
+        <span aria-hidden='true' className='ghostex-chat-agent-fleet-chevron flex h-[1lh] shrink-0 items-center'>
+          <IconChevronRight
+            className={`ghostex-chat-disclosure-chevron size-3.5 text-muted-foreground${open ? ' is-open' : ''}`}
+          />
+        </span>
       </button>
-      {open && stale ? (
-        <div className='ghostex-chat-card-hint' role='status'>
-          Subagent status unavailable
-        </div>
-      ) : null}
-      {open ? (
+      <SessionChatDisclosureBody open={open} id={rowsId}>
+        {stale ? (
+          <div className='ghostex-chat-card-hint ghostex-chat-agent-fleet-unavailable' role='status'>
+            Subagent status unavailable
+          </div>
+        ) : null}
         <div
-          id={rowsId}
-          ref={rowsRef}
+          ref={setRowsElement}
           className={`ghostex-chat-agent-fleet-rows${scrollable ? ' scroll-fade-y' : ''}`}
           role='list'
         >
@@ -210,7 +233,7 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
             );
           })}
         </div>
-      ) : null}
+      </SessionChatDisclosureBody>
     </div>
   );
 }

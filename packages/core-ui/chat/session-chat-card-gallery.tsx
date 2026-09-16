@@ -8,14 +8,20 @@ import { SessionChatComposerNotReadyNotice } from './session-chat-composer-not-r
 import { SessionChatAgentTasksPanel } from './session-chat-agent-tasks-panel';
 import { SessionChatAgentFleetStrip } from './session-chat-agent-fleet-strip';
 import { SessionChatActivityRow } from './session-chat-activity-row';
+import { SessionChatTerminalToolRow } from './session-chat-terminal-tool-row';
+import { SessionChatWorkingStrip } from './session-chat-working-strip';
+import { SessionChatGoalCard } from './session-chat-goal-card';
+import { SessionChatAgentMessageCard } from './session-chat-agent-message-card';
+import { SessionChatDraftConflict } from './session-chat-draft-conflict';
+import { SessionChatExtensionPanel } from './session-chat-extension-panel';
 import { DETECTED_NOTICE_EXAMPLES } from './session-chat-card-gallery-notices';
 import { DIALOG_EXAMPLES, PICKER_EXAMPLES } from './session-chat-card-gallery-dialogs';
 
 type Outcome = 'success' | 'failure' | 'pending';
 type Act = (label: string) => Promise<void>;
 const AT = new Date().toISOString();
-const APPROVAL: SessionChatInteractivePrompt = { kind: 'approval', tool: 'Bash', summary: 'git diff --stat' };
-const QUESTION = {
+export const APPROVAL: SessionChatInteractivePrompt = { kind: 'approval', tool: 'Bash', summary: 'git diff --stat' };
+export const QUESTION = {
   question: 'Which part should I update first?',
   header: 'Next step',
   multiSelect: false,
@@ -47,7 +53,7 @@ const PROMPTS: { label: string; prompt: SessionChatInteractivePrompt; readOnly?:
   { label: 'Question, input held elsewhere', prompt: { kind: 'question', questions: [QUESTION] }, readOnly: true },
 ];
 
-const DELIVERY_NOTICES: SessionChatTerminalNotice[] = [
+export const DELIVERY_NOTICES: SessionChatTerminalNotice[] = [
   {
     kind: 'deliveryFailed',
     severity: 'error',
@@ -77,10 +83,69 @@ const DELIVERY_NOTICES: SessionChatTerminalNotice[] = [
   actions: [{ id: 'switchToTerminal', label: 'Open terminal', kind: 'switchToTerminal' }],
 })) as SessionChatTerminalNotice[];
 
-function Example({ label, children }: { label: string; children: ReactNode }) {
+export function Example({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
     <div className='ghostex-session-chat-scope grid min-w-0 gap-2' data-gallery-example={label}>
       <p className='text-xs text-muted-foreground'>{label}</p>
+      {note ? (
+        <p className='text-xs text-foreground/70' data-gallery-note>
+          {note}
+        </p>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
+export const PENDING_TOOL_ACTIVITY = {
+  kind: 'claude-tool',
+  label:
+    'Checking whether the session card file was committed by another agent and rerunning the context-menu verification',
+  detail: 'Bash(git log --oneline -3 -- packages/core-ui/chat/session-chat-card-gallery.tsx)',
+  detectedAt: AT,
+};
+
+export const SUBAGENTS_FLEET = {
+  detectedAt: AT,
+  agents: [
+    {
+      name: 'general-purpose',
+      task: 'Reviewing card layouts',
+      elapsedSeconds: 120,
+      tokens: '↓ 12k tokens',
+    },
+    { name: 'explore', task: 'Checking the shared controls', elapsedSeconds: 45, nested: 2 },
+  ],
+};
+
+/*
+Every card that stacks above the composer or in the transcript's status lane,
+grouped by the shell and header pattern it draws today. One family is meant to
+be picked as the basis and the others changed to match, so each family states
+its spec and shows every member that uses it.
+*/
+const STYLE_FAMILIES_INTRO =
+  'Each family below is one distinct shell and header pattern in use today, with every card that draws it. Pick the family to keep; the others get changed to match.';
+
+export function Family({
+  index,
+  title,
+  spec,
+  children,
+}: {
+  index: number;
+  title: string;
+  spec: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className='grid min-w-0 gap-4 rounded-xl border border-dashed border-border/70 p-4' data-style-family={title}>
+      <div className='grid gap-1'>
+        <h3 className='text-sm font-semibold'>
+          Family {index}: {title}
+        </h3>
+        <p className='text-xs text-muted-foreground'>{spec}</p>
+      </div>
       {children}
     </div>
   );
@@ -135,6 +200,7 @@ export function SessionChatCardGallery() {
     'Terminal menus and forms',
     'Input and delivery states',
     'Agent activity',
+    'Style families above the composer',
     ...groups,
   ];
   return (
@@ -286,19 +352,71 @@ export function SessionChatCardGallery() {
             />
           </Example>
           <Example label='Active sub-agents'>
+            <SessionChatAgentFleetStrip fleet={SUBAGENTS_FLEET} sessionKey='gallery-subagents-running' />
+          </Example>
+          <Example label='One sub-agent'>
+            <SessionChatAgentFleetStrip
+              fleet={{ detectedAt: AT, agents: [SUBAGENTS_FLEET.agents[0]!] }}
+              sessionKey='gallery-subagents-one'
+            />
+          </Example>
+          <Example label='Sub-agents with an idle row'>
             <SessionChatAgentFleetStrip
               fleet={{
                 detectedAt: AT,
-                agents: [
-                  {
-                    name: 'general-purpose',
-                    task: 'Reviewing card layouts',
-                    elapsedSeconds: 120,
-                    tokens: '↓ 12k tokens',
-                  },
-                  { name: 'explore', task: 'Checking the shared controls', elapsedSeconds: 45, nested: 2 },
-                ],
+                agents: [SUBAGENTS_FLEET.agents[0]!, { ...SUBAGENTS_FLEET.agents[1]!, status: 'idle' }],
               }}
+              sessionKey='gallery-subagents-idle'
+            />
+          </Example>
+          <Example label='Sub-agents, status unavailable'>
+            <SessionChatAgentFleetStrip
+              fleet={{ ...SUBAGENTS_FLEET, stale: true }}
+              sessionKey='gallery-subagents-stale'
+            />
+          </Example>
+          <Example label='Pending tool card'>
+            <SessionChatTerminalToolRow activity={PENDING_TOOL_ACTIVITY} />
+          </Example>
+          <Example label='Working strip'>
+            <SessionChatWorkingStrip working activity={null} />
+          </Example>
+          <Example label='Codex goal'>
+            <SessionChatGoalCard
+              objective='Unify the composer cards so every header shares the pending tool card shape, then report which cards still differ.'
+              status='active'
+              usage='12% of budget'
+            />
+          </Example>
+          <Example label='Received agent message'>
+            <SessionChatAgentMessageCard
+              body='The card gallery now lists every composer card. The Subagents header matches the pending tool card; the rest are noted for review.'
+              sender='/root/windows_support'
+            />
+          </Example>
+          <Example label='Saved draft notice'>
+            <SessionChatDraftConflict
+              draft={{ content: 'A draft saved from another device.', originClientId: 'gallery', updatedAt: AT }}
+              onDismiss={() => setLastAction('Saved draft: dismissed')}
+              onUse={() => setLastAction('Saved draft: used')}
+            />
+          </Example>
+          <Example label='Chat extension panel, minimized'>
+            <SessionChatExtensionPanel
+              activeExtensionId='session-scratchpad'
+              extensions={[
+                {
+                  id: 'session-scratchpad',
+                  title: 'Session Scratchpad',
+                  iconUrl: '',
+                  url: 'https://session-scratchpad.example.invalid/',
+                },
+              ]}
+              minimized
+              onActiveExtensionChange={() => undefined}
+              onBridgeRequest={async () => null}
+              onClose={() => setLastAction('Extension panel: closed')}
+              onMinimizedChange={() => setLastAction('Extension panel: toggled')}
             />
           </Example>
           <Example label='Compaction progress'>
@@ -317,6 +435,163 @@ export function SessionChatCardGallery() {
               activity={{ kind: 'shells-running', label: '2 monitors still running', detectedAt: AT }}
             />
           </Example>
+        </Section>
+        <Section title='Style families above the composer'>
+          <p className='text-sm text-muted-foreground'>{STYLE_FAMILIES_INTRO}</p>
+          <Family
+            index={1}
+            title='Status card'
+            spec='0.75rem radius, hairline border at 65%, muted fill at 20%, 1rem/0.75rem padding, 0.875rem text at a relaxed line height. Dot on the left in a 1lh box, chevron on the right. Compaction and monitors share the shell but centre a clock on the row and have no chevron.'
+          >
+            <Example label='Pending tool card'>
+              <SessionChatTerminalToolRow activity={PENDING_TOOL_ACTIVITY} />
+            </Example>
+            <Example label='Subagents'>
+              <SessionChatAgentFleetStrip fleet={SUBAGENTS_FLEET} sessionKey='gallery-family-subagents' />
+            </Example>
+            <Example label='Codex goal'>
+              <SessionChatGoalCard
+                objective='Unify the composer cards so every header shares one shape, then report which cards still differ.'
+                status='active'
+                usage='12% of budget'
+              />
+            </Example>
+            <Example label='Received agent message'>
+              <SessionChatAgentMessageCard
+                body='The card gallery now groups every composer card by style family so one can be picked as the basis.'
+                sender='/root/windows_support'
+              />
+            </Example>
+            <Example label='Compaction progress'>
+              <SessionChatActivityRow
+                activity={{
+                  kind: 'compacting',
+                  label: 'Compacting conversation',
+                  detectedAt: AT,
+                  percent: 49,
+                  elapsedSeconds: 60,
+                }}
+              />
+            </Example>
+            <Example label='Background monitors'>
+              <SessionChatActivityRow
+                activity={{ kind: 'shells-running', label: '2 monitors still running', detectedAt: AT }}
+              />
+            </Example>
+          </Family>
+          <Family
+            index={2}
+            title='Panel with a header bar'
+            spec='Card fill with an input border, 1rem radius (0.625rem for the extension panel). A full-width header bar with an icon and a small bold title on the left and icon buttons or a chevron on the right, the body below a divider, edge-to-edge hover on the bar.'
+          >
+            <Example label='Tasks'>
+              <SessionChatAgentTasksPanel
+                tasks={{
+                  tasks: [
+                    { id: '1', subject: 'Inventory card layouts', status: 'completed' },
+                    {
+                      id: '2',
+                      subject: 'Review the gallery',
+                      activeForm: 'Reviewing the gallery',
+                      status: 'in_progress',
+                    },
+                    { id: '3', subject: 'Unify the styles', status: 'pending', blockedBy: ['2'] },
+                  ],
+                }}
+              />
+            </Example>
+            <Example label='Chat extension panel'>
+              <SessionChatExtensionPanel
+                activeExtensionId='session-scratchpad'
+                extensions={[
+                  {
+                    id: 'session-scratchpad',
+                    title: 'Session Scratchpad',
+                    iconUrl: '',
+                    url: 'https://session-scratchpad.example.invalid/',
+                  },
+                ]}
+                minimized
+                onActiveExtensionChange={() => undefined}
+                onBridgeRequest={async () => null}
+                onClose={() => setLastAction('Extension panel: closed')}
+                onMinimizedChange={() => setLastAction('Extension panel: toggled')}
+              />
+            </Example>
+          </Family>
+          <Family
+            index={3}
+            title='Notice card'
+            spec='1rem radius with a severity-tinted border and fill (info, warning, error), 0.75rem/0.625rem padding. 0.875rem weight-500 title with no dot, a dismiss X or a collapse chevron on the right, detail text under the title, actions as outlined buttons.'
+          >
+            <Example label='Composer not ready'>
+              <SessionChatComposerNotReadyNotice
+                reason='The agent is waiting for setup to finish.'
+                onOpenTerminal={() => setLastAction('Open terminal')}
+              />
+            </Example>
+            <Example label='Delivery notice'>
+              <NoticeExample notice={DELIVERY_NOTICES[2]!} act={act} />
+            </Example>
+            <Example label='Detected notice with actions'>
+              <NoticeExample
+                notice={
+                  DETECTED_NOTICE_EXAMPLES.find(({ notice }) => notice.title === 'Claude Code is waiting to continue')!
+                    .notice
+                }
+                act={act}
+              />
+            </Example>
+            <Example label='Terminal menu'>
+              <NoticeExample notice={DIALOG_EXAMPLES[0]!} act={act} />
+            </Example>
+          </Family>
+          <Family
+            index={4}
+            title='Question card'
+            spec='Composer-like shell: 1.5rem radius, input border, card fill. Title row with the tool or question header, option rows or an answer field below, primary and outlined buttons at the bottom.'
+          >
+            <Example label='Command approval'>
+              <SessionChatInteractiveCard
+                prompt={APPROVAL}
+                canSend
+                onAnswer={async () => act('Command approval')}
+                onInterrupt={() => setLastAction('Command approval: dismissed')}
+                onSwitchToTerminal={() => setLastAction('Open terminal')}
+              />
+            </Example>
+            <Example label='Single-choice question'>
+              <SessionChatInteractiveCard
+                prompt={{ kind: 'question', questions: [QUESTION] }}
+                canSend
+                onAnswer={async () => act('Question')}
+                onInterrupt={() => setLastAction('Question: dismissed')}
+                onSwitchToTerminal={() => setLastAction('Open terminal')}
+              />
+            </Example>
+          </Family>
+          <Family
+            index={5}
+            title='Compact bar'
+            spec='0.75rem radius, plain border, 5% foreground fill, 0.3125rem/0.625rem padding, 0.75rem muted text. Icon on the left, inline text buttons on the right, nothing to expand.'
+          >
+            <Example label='Saved draft notice'>
+              <SessionChatDraftConflict
+                draft={{ content: 'A draft saved from another device.', originClientId: 'gallery', updatedAt: AT }}
+                onDismiss={() => setLastAction('Saved draft: dismissed')}
+                onUse={() => setLastAction('Saved draft: used')}
+              />
+            </Example>
+          </Family>
+          <Family
+            index={6}
+            title='Bare line'
+            spec='No shell at all: the spark and a 0.78125rem muted word with 0.375rem side padding, pinned above every card.'
+          >
+            <Example label='Working strip'>
+              <SessionChatWorkingStrip working activity={null} />
+            </Example>
+          </Family>
         </Section>
         {groups.map((group) => (
           <Section key={group} title={group}>

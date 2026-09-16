@@ -12,8 +12,9 @@ import type { KeyboardEvent } from 'react';
 import { IconChevronRight } from '@tabler/icons-react';
 import type { SessionChatTerminalActivity } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
+import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
 
-const clientStorage = storageScope(["terminalExpanded"]);
+const clientStorage = storageScope(['terminalExpanded']);
 
 const TERMINAL_TOOL_EXPANDED_STORAGE_KEY = 'ghostex.sessionChat.terminalToolExpanded';
 
@@ -57,7 +58,7 @@ export function SessionChatTerminalToolRow({ activity }: { activity: SessionChat
   return (
     <div
       aria-live='polite'
-      className='ghostex-chat-terminal-tool-card ghostex-chat-activity-row ghostex-chat-status-card grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3'
+      className='ghostex-chat-terminal-tool-card ghostex-chat-activity-row ghostex-chat-status-card grid rounded-2xl border border-border/65 bg-muted/20 px-4 py-3'
       data-kind={activity.kind}
       role='status'
     >
@@ -67,9 +68,10 @@ export function SessionChatTerminalToolRow({ activity }: { activity: SessionChat
       <div
         aria-expanded={open}
         className={cn(
-          'flex min-w-0 items-start gap-2 text-left leading-relaxed outline-none',
+          'ghostex-chat-status-card-header flex min-w-0 items-start gap-2 text-left leading-relaxed outline-none',
           expandable && 'cursor-pointer'
         )}
+        data-expandable={expandable ? 'true' : undefined}
         onClick={toggle}
         onKeyDown={onKeyDown}
         role='button'
@@ -91,7 +93,9 @@ export function SessionChatTerminalToolRow({ activity }: { activity: SessionChat
           </span>
         ) : null}
       </div>
-      {open ? <pre className='ghostex-chat-tool-body'>{detail}</pre> : null}
+      <SessionChatDisclosureBody open={open}>
+        <pre className='ghostex-chat-tool-body'>{detail}</pre>
+      </SessionChatDisclosureBody>
     </div>
   );
 }

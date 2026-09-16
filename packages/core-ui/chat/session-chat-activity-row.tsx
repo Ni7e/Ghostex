@@ -112,7 +112,7 @@ export function SessionChatActivityRow({ activity, className }: SessionChatActiv
           <span className='ghostex-chat-card-title min-w-0 truncate text-foreground/90'>{activity.label}</span>
           {/* CDXC:SessionChat 2026-09-11 DECISION: User: put the compaction hint in an info-circle tooltip immediately right of the title, replacing the visible hint line. */}
           {activity.kind === 'compacting' ? (
-            <AppTooltip content='Send or queue a message and it will be posted after compaction' side='top'>
+            <AppTooltip content='Send or queue a message & we&apos;ll post it after compaction' side='top'>
               <button
                 type='button'
                 aria-label='Messaging during compaction'
