@@ -50,7 +50,7 @@ const CURSOR_ACTIVITY_SCAN_LINES: usize = 15;
 /// next line; two leaves room for a wrap.
 const ACTIVITY_PERCENT_LOOKAHEAD: usize = 2;
 
-/// Activity kind for Claude Code, Codex and Cursor compaction (manual and automatic).
+/// Activity kind for Claude Code, Codex, Cursor and Grok compaction (manual and automatic).
 pub const SESSION_CHAT_ACTIVITY_COMPACTING: &str = "compacting";
 
 /// Claude Code's current assistant status, not yet flushed to transcript JSONL.
@@ -641,6 +641,38 @@ fn cursor_activity_from_line(line: &str) -> Option<SessionChatTerminalActivity> 
     Some(SessionChatTerminalActivity::new(kind, label))
 }
 
+/// CDXC:AgentScreenDetection 2026-09-16 DECISION:
+/// User: Grok Build's /compact uses the same chat compaction flow as Cursor and Codex, based on its actual terminal status.
+/// The live Braille Compacting… row ends in [stop] immediately above the composer; the transcript's Compacting conversation… and completed notice remain after it finishes.
+fn grok_compacting_activity(screen_text: &str) -> Option<SessionChatTerminalActivity> {
+    let lines = crate::session_chat_agent_fleet::normalized_screen_lines(screen_text);
+    let composer = lines.iter().rposition(|line| line.starts_with("│ ❯"))?;
+    let border = lines.get(composer.checked_sub(1)?)?;
+    if !border.starts_with("╭─") || !border.ends_with('╮') {
+        return None;
+    }
+    let line = lines.get(composer.checked_sub(2)?)?;
+    let mut tokens = line.split_whitespace();
+    let spinner = tokens.next()?;
+    if !spinner
+        .chars()
+        .all(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))
+        || tokens.next()? != "Compacting…"
+        || !line.ends_with(" [stop]")
+    {
+        return None;
+    }
+    let mut activity =
+        SessionChatTerminalActivity::new(SESSION_CHAT_ACTIVITY_COMPACTING, COMPACTING_LABEL);
+    activity.elapsed_seconds = tokens
+        .next()
+        .and_then(|clock| clock.strip_suffix('s'))
+        .and_then(|seconds| seconds.parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map(|seconds| seconds as u64);
+    Some(activity)
+}
+
 /*
 CDXC:AgentScreenDetection 2026-09-02:
 One physical screen row with its layout kept. `normalized_screen_lines` throws
@@ -917,6 +949,9 @@ pub fn detect_session_chat_terminal_activity(
     screen_text: &str,
 ) -> Option<SessionChatTerminalActivity> {
     let agent = session_chat_option_agent(agent)?;
+    if agent == SessionChatOptionAgent::Grok {
+        return grok_compacting_activity(screen_text);
+    }
     if agent == SessionChatOptionAgent::Cursor {
         let lines = crate::session_chat_agent_fleet::normalized_screen_lines(screen_text);
         let composer = lines.iter().rposition(|line| line.starts_with('→'));

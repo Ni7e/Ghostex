@@ -414,29 +414,35 @@ pub fn session_chat_composer_input(agent: &str, screen: &str) -> Option<SessionC
     if agent == "grok" {
         return super::grok_composer_draft(screen).map(|text| {
             // CDXC:AgentScreenDetection 2026-09-09 WHY: Grok's empty composer paints "Type a message..." in RGB 78,78,78 rather than SGR faint. Treating it as a draft held model selections forever; checking its VT style protects real input with the same words.
-            let placeholder = text == "Type a message..."
-                && styled_lines(screen)
-                    .iter()
-                    .rev()
-                    .find(|line| super::is_boxed_marker_line(&line.text, '❯'))
-                    .is_some_and(|line| {
-                        let Some(marker) = line.chars.iter().position(|(ch, _)| *ch == '❯')
-                        else {
-                            return false;
-                        };
-                        let Some(border) = line
-                            .chars
-                            .iter()
-                            .rposition(|(ch, _)| *ch == '│')
-                            .filter(|border| *border > marker)
-                        else {
-                            return false;
-                        };
-                        line.chars[marker + 1..border]
-                            .iter()
-                            .filter(|(ch, _)| !ch.is_whitespace())
-                            .all(|(_, style)| style.foreground_rgb == Some([78, 78, 78]))
-                    });
+            // CDXC:AgentScreenDetection 2026-09-16 WHY:
+            // Grok's unaccepted next-prompt suggestion is italic RGB 88,88,88. Treating it as typed input made verified clearing fail, blocking /compact and queued chat messages even though typing replaces the suggestion.
+            let placeholder = styled_lines(screen)
+                .iter()
+                .rev()
+                .find(|line| super::is_boxed_marker_line(&line.text, '❯'))
+                .is_some_and(|line| {
+                    let Some(marker) = line.chars.iter().position(|(ch, _)| *ch == '❯') else {
+                        return false;
+                    };
+                    let Some(border) = line
+                        .chars
+                        .iter()
+                        .rposition(|(ch, _)| *ch == '│')
+                        .filter(|border| *border > marker)
+                    else {
+                        return false;
+                    };
+                    let input_chars: Vec<_> = line.chars[marker + 1..border]
+                        .iter()
+                        .filter(|(ch, _)| !ch.is_whitespace())
+                        .collect();
+                    !input_chars.is_empty()
+                        && input_chars.iter().all(|(_, style)| {
+                            (text == "Type a message..."
+                                && style.foreground_rgb == Some([78, 78, 78]))
+                                || (style.italic && style.foreground_rgb == Some([88, 88, 88]))
+                        })
+                });
             SessionChatComposerInput {
                 text,
                 rows: 1,

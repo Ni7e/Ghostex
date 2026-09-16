@@ -473,7 +473,11 @@ pub fn is_session_chat_activity_command_text(agent: Option<&str>, text: &str) ->
         return false;
     };
     match session_chat_option_agent(agent) {
-        Some(SessionChatOptionAgent::Claude | SessionChatOptionAgent::Codex) => first == "/compact",
+        Some(
+            SessionChatOptionAgent::Claude
+            | SessionChatOptionAgent::Codex
+            | SessionChatOptionAgent::Grok,
+        ) => first == "/compact",
         Some(SessionChatOptionAgent::Cursor) => matches!(first, "/compact" | "/summarize"),
         _ => false,
     }
