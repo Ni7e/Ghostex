@@ -23,7 +23,7 @@ use sidebar_bridge_manifest::{
     PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME, PROJECT_WORKAREA_BRIDGE_PAYLOAD_MAX_CHARS,
     PROJECT_WORKAREA_MANAGE_DOCS_RESOURCE_BASE_URL,
     PROJECT_WORKAREA_MANAGE_DOCS_RESOURCE_BASE_URL_JS_FIELD, SIDEBAR_BRIDGE_FUNCTION_SPECS,
-    SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS, SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME,
+    sidebar_bridge_payload_max_chars, SIDEBAR_EDITABLE_FOCUS_PROCESS_MESSAGE_NAME,
     SIDEBAR_PROJECT_CONTEXT_JS_NAMESPACE, SidebarBridgeFunctionId,
     WEBKIT_APP_MODAL_HOST_MESSAGE_HANDLER_JS_OBJECT,
     WEBKIT_EXTENSION_HOST_MESSAGE_HANDLER_JS_OBJECT, WEBKIT_JS_OBJECT,
@@ -1049,7 +1049,7 @@ fn send_sidebar_bridge_process_message(process_message_name: &str, payload: &str
     if sidebar_bridge_function_spec_for_process_message(process_message_name).is_none() {
         return false;
     }
-    if payload.chars().count() > SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS {
+    if payload.chars().count() > sidebar_bridge_payload_max_chars(process_message_name) {
         return false;
     }
 

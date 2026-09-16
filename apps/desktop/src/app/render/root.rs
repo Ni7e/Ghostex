@@ -223,6 +223,9 @@ impl Render for GhostexGpuiApp {
             self.titlebar_popup_menu.is_some() || self.titlebar_extension_popup.is_some();
 
         let content = v_flex()
+            .on_action(cx.listener(|this, action: &crate::app::native_sidebar::actions::NativeSidebarAction, window, cx| {
+                this.handle_native_sidebar_action(action, window, cx);
+            }))
             .relative()
             .size_full()
             .bg(workspace_background_color())
@@ -339,7 +342,8 @@ impl Render for GhostexGpuiApp {
             Root key-down forwarding derives its terminal target from app-level shell focus, which intentionally stays on the terminal pane while the Cmd+F search bar is open. If a terminal search input holds GPUI keyboard focus, forwarding here would write every typed character into the focused terminal PTY and consume the event, so macOS never runs the insertText path that feeds the focused input. Keyboard focus on a search input therefore ends root terminal key forwarding (and placeholder wake) for the keystroke; the search input's own dispatch path owns it.
             */
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.terminal_search_input_owns_keyboard_focus(window, cx)
+                if this.native_sidebar_input_owns_focus(window, cx)
+                    || this.terminal_search_input_owns_keyboard_focus(window, cx)
                     || this.browser_find_input_owns_keyboard_focus(window, cx)
                 {
                     return;
@@ -1155,9 +1159,7 @@ impl Render for GhostexGpuiApp {
                                 .h_full()
                                 .border_t_1()
                                 .border_color(titlebar_button_border_color())
-                                .when_some(self.sidebar.clone(), |this, sidebar| {
-                                    this.child(sidebar)
-                                }),
+                                .child(self.render_native_sidebar(cx)),
                         )
                     })
                     .when(sidebar_chrome_visible, |this| {

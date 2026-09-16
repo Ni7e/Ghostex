@@ -2251,47 +2251,9 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         #[cfg(target_os = "macos")]
-        if self.companion_reveal.is_some() {
-            if requested {
-                self.close_floating_companion(cx);
-            } else {
-                self.sync_floating_companion(cx);
-                if self.companion_reveal.is_some() {
-                    return;
-                }
-            }
-        }
+        self.update_native_sidebar_reveal(requested, keep_under_pointer, cx);
         #[cfg(not(target_os = "macos"))]
-        let _ = (requested, keep_under_pointer);
-        /*
-        CDXC:Sidebar 2026-07-05:
-        Sidebar collapse still removes the sidebar and divider from normal GPUI layout on the next render, but the native CEF child view must hide/show immediately at the toggle boundary. This keeps the titlebar button visually instant without adding overlays, zero-width fallbacks, hit-test rerouting, or persisting a collapsed width.
-        */
-        if let Some(sidebar) = self.sidebar.clone() {
-            let expand_companion = sidebar.update(cx, |surface, _| {
-                #[cfg(target_os = "macos")]
-                {
-                    surface.update_sidebar_hover_reveal(
-                        self.parent_ns_view,
-                        self.sidebar_collapsed,
-                        self.sidebar_width,
-                        self.active_mode.is_project_editor_mode()
-                            && !self.project_editor_shell.left_companion_visible,
-                        requested,
-                        keep_under_pointer,
-                    )
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    surface.set_visible(gpui_sidebar_chrome_visible(self.sidebar_collapsed));
-                    false
-                }
-            });
-            if expand_companion {
-                #[cfg(target_os = "macos")]
-                self.open_floating_companion(cx);
-            }
-        }
+        let _ = (requested, keep_under_pointer, cx);
     }
 
     #[cfg(target_os = "macos")]

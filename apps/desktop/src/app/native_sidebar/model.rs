@@ -1,0 +1,195 @@
+use serde::Deserialize;
+use serde_json::Value;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarSnapshot {
+    pub(crate) version: u32,
+    pub(crate) revision: u64,
+    pub(crate) scroll_scope: String,
+    pub(crate) rename_request: Option<NativeSidebarRenameRequest>,
+    pub(crate) reveal_request: Option<NativeSidebarRevealRequest>,
+    pub(crate) ready: bool,
+    pub(crate) empty_state: Value,
+    pub(crate) hud: Value,
+    pub(crate) groups: Vec<NativeSidebarGroup>,
+    pub(crate) selected_machine_id: String,
+    pub(crate) machines: Vec<NativeSidebarMachine>,
+    pub(crate) spaces: Vec<NativeSidebarSpace>,
+    pub(crate) spaces_enabled: bool,
+    pub(crate) collections: Vec<NativeSidebarCollection>,
+    pub(crate) order: Vec<NativeSidebarOrderItem>,
+    pub(crate) more_menu: Value,
+    pub(crate) search_shortcut: Option<String>,
+    pub(crate) commands_shortcut: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarGroup {
+    pub(crate) collection_color: Option<String>,
+    pub(crate) title_tooltip: Option<String>,
+    pub(crate) group_id: String,
+    pub(crate) storage_id: String,
+    pub(crate) summary: Value,
+    pub(crate) collapsed: bool,
+    pub(crate) expanded: bool,
+    pub(crate) hidden_session_count: usize,
+    pub(crate) show_list_toggle: bool,
+    pub(crate) hover_actions_expanded: bool,
+    pub(crate) menu: Value,
+    pub(crate) header_actions: Vec<Value>,
+    pub(crate) sections: Vec<NativeSidebarSection>,
+    pub(crate) title: String,
+    pub(crate) is_active: bool,
+    #[serde(default)]
+    pub(crate) is_chat_collection: bool,
+    #[serde(default)]
+    pub(crate) is_stale: bool,
+    pub(crate) project_context: Option<Value>,
+    pub(crate) remote_machine_context: Option<Value>,
+    pub(crate) sessions: Vec<NativeSidebarSession>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarSection {
+    pub(crate) id: String,
+    pub(crate) collapsed: bool,
+    pub(crate) count: usize,
+    pub(crate) contains_active_session: bool,
+    pub(crate) working_count: usize,
+    pub(crate) attention_count: usize,
+    pub(crate) question_count: usize,
+    pub(crate) session_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarSession {
+    pub(crate) session_id: String,
+    pub(crate) display_title: Option<String>,
+    pub(crate) alias: String,
+    pub(crate) activity: String,
+    pub(crate) agent_icon: Option<String>,
+    pub(crate) kind: Option<String>,
+    pub(crate) session_kind: Option<String>,
+    pub(crate) is_focused: bool,
+    pub(crate) is_visible: bool,
+    #[serde(default)]
+    pub(crate) is_pinned: bool,
+    #[serde(default)]
+    pub(crate) is_parked: bool,
+    #[serde(default)]
+    pub(crate) is_draft: bool,
+    pub(crate) last_interaction_at: Option<String>,
+    pub(crate) lifecycle_state: Option<String>,
+    pub(crate) session_note: Option<String>,
+    pub(crate) favicon_data_url: Option<String>,
+    #[serde(default)]
+    pub(crate) has_composer_draft: bool,
+    #[serde(default)]
+    pub(crate) queued_prompt_count: u64,
+    #[serde(flatten)]
+    pub(crate) details: serde_json::Map<String, Value>,
+}
+
+impl NativeSidebarSession {
+    pub(crate) fn title(&self) -> &str {
+        self.display_title.as_deref().unwrap_or(&self.alias)
+    }
+
+    pub(crate) fn is_browser(&self) -> bool {
+        self.kind.as_deref() == Some("browser") || self.session_kind.as_deref() == Some("browser")
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarMachine {
+    pub(crate) working_count: usize,
+    pub(crate) attention_count: usize,
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) state: String,
+    pub(crate) message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarSpace {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) icon: String,
+    pub(crate) color: String,
+    pub(crate) selected: bool,
+    pub(crate) contains_active_session: bool,
+    pub(crate) working_count: usize,
+    pub(crate) attention_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct NativeSidebarOrderItem {
+    pub(crate) kind: String,
+    pub(crate) id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarCollection {
+    pub(crate) awake_count: u64,
+    pub(crate) collection_id: String,
+    pub(crate) storage_id: String,
+    pub(crate) title: String,
+    pub(crate) color: String,
+    pub(crate) group_ids: Vec<String>,
+    pub(crate) collapsed: bool,
+    pub(crate) contains_active_session: bool,
+    pub(crate) working_count: usize,
+    pub(crate) attention_count: usize,
+    pub(crate) menu: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum NativeSidebarUpdate {
+    Snapshot(NativeSidebarSnapshot),
+    Flash {
+        version: u32,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+    },
+    Menu {
+        version: u32,
+        #[serde(rename = "ownerId")]
+        owner_id: String,
+        items: Vec<Value>,
+        close: bool,
+    },
+    Clock {
+        version: u32,
+        rows: Vec<NativeSidebarClockRow>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarClockRow {
+    pub(crate) session_id: String,
+    pub(crate) timer_label: Option<String>,
+    pub(crate) last_interaction_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarRevealRequest {
+    pub(crate) session_id: String,
+    pub(crate) request_id: u64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NativeSidebarRenameRequest {
+    pub(crate) collection_id: String,
+    pub(crate) request_id: u64,
+}

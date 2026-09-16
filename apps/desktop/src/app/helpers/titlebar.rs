@@ -1461,8 +1461,12 @@ chrome reads as one continuous surface. Solid consumers (popup borders, modal
 host fills) keep `titlebar_background()`.
 */
 pub(crate) fn titlebar_gradient_fill() -> gpui::Background {
+    sidebar_chrome_gradient_fill(90.0)
+}
+
+pub(crate) fn sidebar_chrome_gradient_fill(angle: f32) -> gpui::Background {
     gpui::linear_gradient(
-        90.,
+        angle,
         gpui::linear_color_stop(
             rgb(GPUI_TITLEBAR_GRADIENT_LEFT_RGB.load(Ordering::Relaxed) as u32),
             0.,

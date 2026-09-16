@@ -47,6 +47,7 @@ pub(crate) mod keyboard_owner;
 pub(crate) mod missing_project_folder_modal_lifecycle;
 pub(crate) mod modals;
 pub(crate) mod native_app_modal_lifecycle;
+pub(crate) mod native_sidebar;
 pub(crate) mod new_thread_picker_lifecycle;
 pub(crate) mod os_integration;
 pub(crate) mod portless_setup_modal_lifecycle;

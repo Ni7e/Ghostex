@@ -271,11 +271,16 @@ impl GhostexGpuiApp {
                 sidebar_cef_prepaint_background_color() & 0x00ff_ffff
             ),
         );
+        let sidebar_url = gpui_url_with_query_param(
+            &sidebar_url,
+            "renderer",
+            "gpui",
+        );
         let sidebar_bridge_event_handler = self.sidebar_bridge_event_handler(cx);
         let app_modal_host_bridge_event_handler = self.app_modal_host_bridge_event_handler(cx);
         let sidebar_runtime_settings = self.sidebar_runtime_settings_snapshot.clone();
         let sidebar_gxserver_bootstrap = self.sidebar_gxserver_bootstrap.clone();
-        let sidebar_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
+        let sidebar_visible = false;
         match CefSurface::try_new(
             "gpui-sidebar".to_string(),
             parent_ns_view,
@@ -300,19 +305,6 @@ impl GhostexGpuiApp {
             cx,
         ) {
             Ok(sidebar) => {
-                /*
-                CDXC:Sidebar 2026-08-02:
-                Hand the sidebar's CEF child view to the AppKit sendEvent
-                observer so pointer crossings of its frame, and mouse-downs
-                outside it, become the page's hover-suppression and
-                context-menu-dismissal signals.
-                */
-                #[cfg(target_os = "macos")]
-                if let Some(native_view) =
-                    sidebar.read(cx).native_view_for_sidebar_pointer_tracking()
-                {
-                    cef::set_sidebar_pointer_tracking_view(native_view);
-                }
                 self.sidebar = Some(sidebar);
             }
             Err(error) => {

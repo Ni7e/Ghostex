@@ -518,6 +518,7 @@ impl GhostexGpuiApp {
                 titlebar_tips_sidebar_agent_ids: None,
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
+                native_sidebar: Default::default(),
                 browser_surfaces: HashMap::new(),
                 browser_address_inputs: HashMap::new(),
                 browser_address_input_subscriptions: HashMap::new(),

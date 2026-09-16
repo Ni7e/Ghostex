@@ -150,7 +150,7 @@ wrap_client! {
                 let Some(handler) = self.sidebar_bridge_event_handler.clone() else {
                     return 0;
                 };
-                if payload.chars().count() > SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS {
+                if payload.chars().count() > sidebar_bridge_payload_max_chars(&message_name) {
                     return 1;
                 }
 

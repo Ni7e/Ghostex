@@ -1,0 +1,204 @@
+use super::{appearance::SidebarAppearance, model::NativeSidebarSession};
+use crate::{GhostexGpuiApp, app::helpers::*};
+use gpui::prelude::FluentBuilder;
+use gpui::{
+    AnyElement, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, div, px, rgb,
+};
+use serde_json::{Value, json};
+
+impl GhostexGpuiApp {
+    pub(crate) fn render_native_session_identity(
+        &self,
+        session: &NativeSidebarSession,
+        icon: AnyElement,
+        appearance: &SidebarAppearance,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let delayed = session
+            .details
+            .get("delayedSendDeadlineAt")
+            .and_then(Value::as_str)
+            .is_some()
+            || session
+                .details
+                .get("delayedSendRemainingLabel")
+                .and_then(Value::as_str)
+                .is_some();
+        let closing = session
+            .details
+            .get("closeAfterDone")
+            .and_then(Value::as_bool)
+            == Some(true)
+            || session
+                .details
+                .get("closeAfterDoneDeadlineAt")
+                .and_then(Value::as_str)
+                .is_some();
+        let id = session.session_id.clone();
+        div().id(format!("native-session-identity-{id}")).size(px(15.0 * appearance.scale)).flex_shrink_0().flex().items_center().justify_center().child(icon)
+            .when(delayed || closing, |identity| identity.cursor_pointer().on_click(cx.listener(move |app, _, _, cx| {
+                cx.stop_propagation();
+                if delayed { app.dispatch_native_sidebar_ui(json!({"type": "sessionAction", "sessionId": id, "action": "delayedSend"}), cx); }
+                else { app.dispatch_native_sidebar_command(json!({"type": "toggleCloseAfterDone", "sessionId": id}), cx); }
+            })))
+            .into_any_element()
+    }
+
+    pub(crate) fn render_native_session_decorations(
+        &self,
+        session: &NativeSidebarSession,
+        appearance: &SidebarAppearance,
+        cx: &mut gpui::Context<Self>,
+    ) -> Vec<AnyElement> {
+        let scale = appearance.scale;
+        let id = session.session_id.clone();
+        let pinned = session.is_pinned;
+        let mut decorations = Vec::new();
+        let has_timer = [
+            "delayedSendDeadlineAt",
+            "delayedSendRemainingLabel",
+            "closeAfterDoneDeadlineAt",
+            "closeAfterDoneRemainingLabel",
+        ]
+        .iter()
+        .any(|key| session.details.get(*key).and_then(Value::as_str).is_some())
+            || session
+                .details
+                .get("closeAfterDone")
+                .and_then(Value::as_bool)
+                == Some(true);
+        if !has_timer && !session.is_browser() {
+            decorations.push(
+                div()
+                    .id(format!("native-session-pin-{id}"))
+                    .absolute()
+                    .left(px(-12.0 * scale))
+                    .top(px(9.5 * scale))
+                    .size(px(15.0 * scale))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .opacity(if pinned { 0.5 } else { 0.0 })
+                    .cursor_pointer()
+                    .hover(|button| button.opacity(1.0))
+                    .child(titlebar_svg_icon(
+                        "titlebar/pin.svg",
+                        13.0 * scale,
+                        chrome_color(0xe5e5e5, 0x525252).into(),
+                    ))
+                    .on_click(cx.listener(move |app, _, _, cx| {
+                        cx.stop_propagation();
+                        app.dispatch_native_sidebar_command(
+                            json!({"type": "setSessionPinned", "sessionId": id, "pinned": !pinned}),
+                            cx,
+                        );
+                    }))
+                    .into_any_element(),
+            );
+        }
+        if session
+            .session_note
+            .as_ref()
+            .is_some_and(|note| !note.trim().is_empty())
+        {
+            decorations.push(
+                div()
+                    .absolute()
+                    .left(px((if pinned { -15.0 } else { 0.0 }) * scale))
+                    .top(px(15.0 * scale))
+                    .size(px(4.0 * scale))
+                    .rounded_full()
+                    .bg(chrome_color(0xffffff, 0x262626))
+                    .into_any_element(),
+            );
+        }
+        let queued = session.queued_prompt_count > 0;
+        if session.has_composer_draft {
+            decorations.push(
+                div()
+                    .absolute()
+                    .left(px((if queued { 19.0 } else { 15.0 }) * scale))
+                    .top(px((if queued { 4.5 } else { 8.5 }) * scale))
+                    .size(px(6.0 * scale))
+                    .rounded_full()
+                    .bg(chrome_color(0xffffff, 0x262626))
+                    .into_any_element(),
+            );
+        }
+        if queued {
+            let failed = session
+                .details
+                .get("queuedPromptFailedCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                > 0;
+            decorations.push(
+                div()
+                    .absolute()
+                    .left(px(13.0 * scale))
+                    .top(px(6.5 * scale))
+                    .min_w(px(10.0 * scale))
+                    .h(px(10.0 * scale))
+                    .px(px(2.0 * scale))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .bg(rgb(if failed { 0xff6b6b } else { 0xf6c945 }))
+                    .text_color(rgb(0x1d1704))
+                    .text_size(px(7.0 * scale))
+                    .font_weight(FontWeight::BOLD)
+                    .child(if session.queued_prompt_count > 99 {
+                        "99+".to_owned()
+                    } else {
+                        session.queued_prompt_count.to_string()
+                    })
+                    .into_any_element(),
+            );
+        }
+        decorations
+    }
+}
+
+pub(crate) fn selected_outline(appearance: &SidebarAppearance) -> AnyElement {
+    outline(appearance, appearance.selected_outline)
+}
+
+pub(crate) fn session_outline(appearance: &SidebarAppearance) -> AnyElement {
+    outline(appearance, appearance.session_outline)
+}
+
+fn outline(appearance: &SidebarAppearance, outline: gpui::Hsla) -> AnyElement {
+    let highlight = appearance.selected_highlight;
+    let scale = appearance.scale;
+    gpui::canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            window.paint_quad(gpui::quad(
+                bounds,
+                px(5.0 * scale),
+                gpui::transparent_black(),
+                px(1.0),
+                outline,
+                gpui::BorderStyle::Solid,
+            ));
+            let inset = px(5.0 * scale);
+            let line = gpui::Bounds {
+                origin: gpui::point(bounds.left() + inset, bounds.top() + px(1.0)),
+                size: gpui::size((bounds.size.width - inset * 2.0).max(px(0.0)), px(1.0)),
+            };
+            window.paint_quad(gpui::quad(
+                line,
+                px(0.0),
+                highlight,
+                px(0.0),
+                highlight,
+                gpui::BorderStyle::Solid,
+            ));
+        },
+    )
+    .absolute()
+    .inset_0()
+    .into_any_element()
+}

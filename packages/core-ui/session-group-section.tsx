@@ -1,5 +1,7 @@
-import { SessionQuestionIndicator } from './session-question-indicator';
-import { CollapsibleSessionSection } from './collapsible-session-section';
+import { CollisionPriority } from '@dnd-kit/abstract';
+import { PointerSensor } from '@dnd-kit/dom';
+import { useDroppable } from '@dnd-kit/react';
+import { useSortable } from '@dnd-kit/react/sortable';
 import {
   IconAlertTriangle,
   IconCaretRightFilled,
@@ -9,9 +11,9 @@ import {
   IconChevronRight,
   IconChevronUp,
   IconCopy,
+  IconEyeOff,
   IconFolder,
   IconFolderOpen,
-  IconEyeOff,
   IconGitBranch,
   IconGitPullRequest,
   IconHistory,
@@ -22,24 +24,19 @@ import {
   IconPlayerPlay,
   IconPlus,
   IconRefresh,
-  IconSettings,
   IconStack,
   IconTerminal2,
   IconTrash,
   IconWorld,
   IconX,
 } from '@tabler/icons-react';
-import { CollisionPriority } from '@dnd-kit/abstract';
-import { PointerSensor } from '@dnd-kit/dom';
-import { useDroppable } from '@dnd-kit/react';
-import { useSortable } from '@dnd-kit/react/sortable';
 import {
   Fragment,
   startTransition,
   useCallback,
-  useLayoutEffect,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -48,65 +45,32 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { AppTooltip } from './app-tooltip';
-import { AgentLauncherMenuItems } from './accounts/agent-launcher-menu';
-import { SidebarProjectIcon } from './sidebar-project-icon';
+import { clampProjectSessionListCollapsedCount, DEFAULT_ghostex_SETTINGS } from '../shared/ghostex-settings';
+import type { SidebarProjectDiffStats } from '../shared/project-diff-stats';
 import {
   getSidebarSessionLifecycleState,
   type SidebarSessionItem,
   type SidebarTheme,
 } from '../shared/session-grid-contract';
-import type { SidebarProjectDiffStats } from '../shared/project-diff-stats';
-import type { SidebarAgentButton } from '../shared/sidebar-agents';
-import type { SidebarCommandButton, SidebarCommandScope } from '../shared/sidebar-commands';
-import { DEFAULT_SIDEBAR_COMMAND_ICON } from '../shared/sidebar-command-icons';
-import { SidebarCommandIconGlyph } from './sidebar-command-icon';
-import { DEFAULT_ghostex_SETTINGS, clampProjectSessionListCollapsedCount } from '../shared/ghostex-settings';
 import type { SidebarSessionTagListItem } from '../shared/session-tags';
-import { ConfirmationModal } from './confirmation-modal';
-import {
-  createGroupDropData,
-  createSessionDropTargetData,
-  createSessionDropTargetId,
-  type SidebarGroupDropTarget,
-  type SidebarSessionDropTarget,
-} from './sidebar-dnd';
-import {
-  getAwakeTerminalAndBrowserCount,
-  getGroupSessionSummary,
-  type GroupSessionSummary,
-} from './group-session-summary';
-import { shouldShowSessionGroupConnector } from './session-group-connector';
-import { getGroupStatusAnchorName, getSessionStatusAnchorName } from './session-status-anchor';
-import { useSidebarStore } from './sidebar-store';
-import {
-  type SidebarSessionSelectionChangeRequest,
-  SortableSessionCard,
-  type SortableSessionCardSharedSettings,
-} from './sortable-session-card';
-import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
-import { resolveSidebarSpaceIcon } from './space-filter-row';
-import { createRemoteSidebarSpaceSectionKey, LOCAL_SIDEBAR_SPACE_SECTION_KEY } from './sidebar-app/space-filtering';
-import { getSidebarSpaceIdsContainingProject, type SidebarSpacesState } from './spaces';
-import { useCollapsibleHeight } from './use-collapsible-height';
-import {
-  DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE,
-  getProjectSessionSection,
-  type ProjectSessionSection,
-  type ProjectSessionSectionCollapseStateById,
-} from './sidebar-app/project-session-section-state';
-import { useSidebarCollapsiblePresence } from './sidebar-collapse-animation';
-import type { WebviewApi } from './webview-api';
-import { openAppModal, openQuickAccess } from './app-modal-host-bridge';
-import { getQuickAccessSessionProjectId } from './quick-access-session-scope';
-import { getVisibleProjectSessionIds, type ProjectSessionListExpandedState } from './project-session-list-toggle';
+import type { SidebarAgentButton } from '../shared/sidebar-agents';
+import { DEFAULT_SIDEBAR_COMMAND_ICON } from '../shared/sidebar-command-icons';
+import type { SidebarCommandButton, SidebarCommandScope } from '../shared/sidebar-commands';
 import {
   DEFAULT_WORKSPACE_THEME_COLOR,
   normalizeWorkspaceThemeColor,
   updateWorkspaceThemeColorHistory,
 } from '../shared/workspace-project-appearance';
-import { readWorkspaceThemeColorHistory, writeWorkspaceThemeColorHistory } from './workspace-theme-color-history';
-import { SidebarFixedTooltipButton } from './sidebar-fixed-tooltip-button';
+import { AgentLauncherMenuItems } from './accounts/agent-launcher-menu';
+import { openAppModal, openQuickAccess } from './app-modal-host-bridge';
+import { AppTooltip } from './app-tooltip';
+import { CollapsibleSessionSection } from './collapsible-session-section';
+import { ConfirmationModal } from './confirmation-modal';
+import {
+  getAwakeTerminalAndBrowserCount,
+  getGroupSessionSummary,
+  type GroupSessionSummary,
+} from './group-session-summary';
 import {
   PRIMARY_AGENT_LAUNCHER_CHANGED_EVENT,
   readPrimaryAgentLauncherId,
@@ -114,8 +78,45 @@ import {
   type PrimaryAgentLauncherChangedEvent,
 } from './primary-agent-launcher';
 import { ProjectAgentLauncherIcon } from './project-agent-launcher-icon';
+import { getVisibleProjectSessionIds, type ProjectSessionListExpandedState } from './project-session-list-toggle';
+import { formatCountLabel, formatProjectEditorLineCount, formatProjectTooltipGitStats } from './project-tooltip-model';
+import { getQuickAccessSessionProjectId } from './quick-access-session-scope';
+import { shouldShowSessionGroupConnector } from './session-group-connector';
+import { SessionQuestionIndicator } from './session-question-indicator';
+import { getGroupStatusAnchorName, getSessionStatusAnchorName } from './session-status-anchor';
+import {
+  DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE,
+  getProjectSessionSection,
+  type ProjectSessionSection,
+  type ProjectSessionSectionCollapseStateById,
+} from './sidebar-app/project-session-section-state';
+import { createRemoteSidebarSpaceSectionKey, LOCAL_SIDEBAR_SPACE_SECTION_KEY } from './sidebar-app/space-filtering';
+import { useSidebarCollapsiblePresence } from './sidebar-collapse-animation';
+import { SidebarCommandIconGlyph } from './sidebar-command-icon';
+import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
+import {
+  createGroupDropData,
+  createSessionDropTargetData,
+  createSessionDropTargetId,
+  type SidebarGroupDropTarget,
+  type SidebarSessionDropTarget,
+} from './sidebar-dnd';
+import { SidebarFixedTooltipButton } from './sidebar-fixed-tooltip-button';
+import { SidebarProjectIcon } from './sidebar-project-icon';
 import { getSidebarReorderActivationConstraints } from './sidebar-reorder-activation';
+import { useSidebarStore } from './sidebar-store';
+import {
+  SortableSessionCard,
+  type SidebarSessionSelectionChangeRequest,
+  type SortableSessionCardSharedSettings,
+} from './sortable-session-card';
+import { resolveSidebarSpaceIcon } from './space-filter-row';
+import { getSidebarSpaceIdsContainingProject, type SidebarSpacesState } from './spaces';
 import { useSidebarTooltipDelayMs } from './tooltip-delay';
+import { useCollapsibleHeight } from './use-collapsible-height';
+import type { WebviewApi } from './webview-api';
+import { readWorkspaceThemeColorHistory, writeWorkspaceThemeColorHistory } from './workspace-theme-color-history';
+export { formatProjectTooltipGitStats } from './project-tooltip-model';
 
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 196;
@@ -188,7 +189,6 @@ function isElementTarget(target: EventTarget | null): target is Element {
  * Cap git +/− line counts shown in project headers at four digits so very large
  * diffs stay readable in the sidebar without widening the status label.
  */
-const PROJECT_EDITOR_DISPLAY_MAX_LINES = 9999;
 const PROJECT_CONTEXT_THEME_OPTIONS: ReadonlyArray<{ label: string; value: SidebarTheme }> = [
   /**
    * CDXC:Theming 2026-06-15-01:43:
@@ -389,10 +389,6 @@ function formatProjectEditorFilesCount(files: number): string {
   return String(Math.min(PROJECT_EDITOR_DISPLAY_MAX_FILES, Math.max(0, files)));
 }
 
-function formatProjectEditorLineCount(lines: number): string {
-  return String(Math.min(PROJECT_EDITOR_DISPLAY_MAX_LINES, Math.max(0, lines)));
-}
-
 function ProjectHeaderDiffStats({ showFileCount, stats }: { showFileCount: boolean; stats: SidebarProjectDiffStats }) {
   return (
     <div
@@ -410,32 +406,6 @@ function ProjectHeaderDiffStats({ showFileCount, stats }: { showFileCount: boole
       </span>
     </div>
   );
-}
-
-export function formatProjectTooltipGitStats(stats: SidebarProjectDiffStats): string {
-  if (stats.isLoading) {
-    return 'Git: loading changes';
-  }
-
-  if (!stats.isRepo) {
-    return 'Git: not a repository';
-  }
-
-  const fileCount = Math.max(0, stats.files);
-  const changedLineCount = Math.max(0, stats.additions) + Math.max(0, stats.deletions);
-  /**
-   * CDXC:Git 2026-06-14-16:33:
-   * Project and worktree title tooltips should spell out the file and line
-   * nouns so one changed file or one changed line reads as singular while the
-   * compact inline diff badge can remain numeric-only.
-   */
-  return `${fileCount} ${formatCountLabel(fileCount, 'file')} changed  +${formatProjectEditorLineCount(
-    stats.additions
-  )}  -${formatProjectEditorLineCount(stats.deletions)} ${formatCountLabel(changedLineCount, 'line')}`;
-}
-
-function formatCountLabel(count: number, singular: string): string {
-  return Math.abs(count) === 1 ? singular : `${singular}s`;
 }
 
 function ProjectTitleTooltip({
@@ -2792,7 +2762,9 @@ export function SessionGroupSection({
                                       <div
                                         aria-hidden
                                         className='pinned-session-drop-gap'
-                                        data-active={String(pinnedSessionDropGapKey === getSessionDropGapKeyBefore(sessionId))}
+                                        data-active={String(
+                                          pinnedSessionDropGapKey === getSessionDropGapKeyBefore(sessionId)
+                                        )}
                                         data-edge={sessionIndex === 0 ? 'start' : undefined}
                                       />
                                     ) : null}
@@ -2803,10 +2775,14 @@ export function SessionGroupSection({
                                         (sessionDraggingDisabled &&
                                           !(allowPinnedSessionReorder && sessionsById[sessionId]?.isPinned === true))
                                       }
-                                      dropDisabled={draggingDisabled || (sessionDraggingDisabled && !allowPinnedSessionReorder)}
+                                      dropDisabled={
+                                        draggingDisabled || (sessionDraggingDisabled && !allowPinnedSessionReorder)
+                                      }
                                       groupId={group.groupId}
                                       forcedDropPosition={
-                                        allowPinnedSessionReorder ? undefined : (sessionDropPosition ?? pinnedSessionDropPosition)
+                                        allowPinnedSessionReorder
+                                          ? undefined
+                                          : (sessionDropPosition ?? pinnedSessionDropPosition)
                                       }
                                       hoverActionsExpanded={areSessionCardHoverActionsExpanded}
                                       index={sessionIndex}
@@ -2829,7 +2805,9 @@ export function SessionGroupSection({
                                       }
                                       showGroupDropTargetChrome={!allowPinnedSessionReorder}
                                       showGroupConnector={showSessionGroupConnector}
-                                      showDropPositionIndicator={showSessionDropPositionIndicators && !allowPinnedSessionReorder}
+                                      showDropPositionIndicator={
+                                        showSessionDropPositionIndicators && !allowPinnedSessionReorder
+                                      }
                                       vscode={vscode}
                                     />
                                   </>

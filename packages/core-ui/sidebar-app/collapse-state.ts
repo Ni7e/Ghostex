@@ -7,7 +7,7 @@ import {
   normalizeProjectSessionSectionCollapseState,
   persistedProjectSessionSectionCollapseState,
   type ProjectSessionSectionCollapseStateById,
-} from './project-session-section-state';
+} from './project-session-section-model';
 
 const clientStorage = storageScope(["collapse","keepAwake"]);
 

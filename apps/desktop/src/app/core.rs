@@ -990,6 +990,7 @@ pub struct GhostexGpuiApp {
     pub(crate) titlebar_tips_sidebar_agent_ids: Option<HashSet<String>>,
     pub(crate) agent_hook_status_request_in_flight: bool,
     pub(crate) sidebar: Option<Entity<CefSurface>>,
+    pub(crate) native_sidebar: crate::app::native_sidebar::state::NativeSidebarState,
     pub(crate) browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     pub(crate) browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,
     pub(crate) browser_address_input_subscriptions: HashMap<BrowserPaneId, gpui::Subscription>,
