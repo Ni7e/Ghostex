@@ -6,7 +6,7 @@ use super::resources_style::*;
 use crate::app::helpers::*;
 use crate::notification_feed::{
     GpuiNotificationFeedItem, GpuiNotificationFeedState, NOTIFICATION_ATTENTION_BLUE,
-    notification_feed_relative_time,
+    NOTIFICATION_ATTENTION_BLUE_TEXT_LIGHT, notification_feed_relative_time,
 };
 use crate::*;
 
@@ -577,7 +577,13 @@ impl GpuiTitlebarReadingPanel {
                             .text_size(px(11.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(if unread {
-                                rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.85)
+                                if CHROME_LIGHT_APPEARANCE
+                                    .load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    rgb(NOTIFICATION_ATTENTION_BLUE_TEXT_LIGHT)
+                                } else {
+                                    rgb(NOTIFICATION_ATTENTION_BLUE).opacity(0.85)
+                                }
                             } else {
                                 chrome_ink().opacity(0.45)
                             })
