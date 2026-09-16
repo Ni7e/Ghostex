@@ -34,11 +34,19 @@ export function SessionChatDisclosureBody({ open, children, className, id, role 
   const innerRef = useRef<HTMLDivElement>(null);
   const animationsRef = useRef<[Animation, Animation] | null>(null);
   const [rendered, setRendered] = useState(open);
+  // A body that mounts already open is settled, not opening: no appear animation.
+  const settledRef = useRef(open);
 
   useLayoutEffect(() => {
     if (open && !rendered) {
       setRendered(true);
       return;
+    }
+    if (settledRef.current) {
+      settledRef.current = false;
+      if (open) {
+        return;
+      }
     }
     const element = ref.current;
     const inner = innerRef.current;

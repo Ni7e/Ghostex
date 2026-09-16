@@ -8,11 +8,8 @@ The header shows only the dot on the left, with the expand chevron on the right,
 */
 
 import { useState } from 'react';
-import type { KeyboardEvent } from 'react';
-import { IconChevronRight } from '@tabler/icons-react';
 import type { SessionChatTerminalActivity } from '../../shared/session-chat';
-import { cn } from '@/packages/components/utils';
-import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
+import { SessionChatStatusCard, SessionChatStatusCardDot } from './session-chat-status-card';
 
 const clientStorage = storageScope(['terminalExpanded']);
 
@@ -40,62 +37,25 @@ export function SessionChatTerminalToolRow({ activity }: { activity: SessionChat
   const detail = activity.detail?.trim() ?? '';
   const expandable = detail.length > 0;
   const open = expanded && expandable;
-  const toggle = (): void => {
+  const setOpen = (next: boolean): void => {
     if (!expandable) {
       return;
     }
-    const next = !expanded;
     setExpanded(next);
     writeTerminalToolExpanded(next);
   };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      toggle();
-    }
-  };
 
   return (
-    <div
+    <SessionChatStatusCard
       aria-live='polite'
-      className='ghostex-chat-terminal-tool-card ghostex-chat-activity-row ghostex-chat-status-card grid rounded-2xl border border-border/65 bg-muted/20 px-4 py-3'
+      className='ghostex-chat-terminal-tool-card ghostex-chat-activity-row ghostex-chat-status-card'
       data-kind={activity.kind}
+      lead={<SessionChatStatusCardDot />}
       role='status'
+      title={activity.label}
+      {...(expandable ? { open, onOpenChange: setOpen } : {})}
     >
-      {/* Not a <button>: the chat scope's button rules would give the header
-          their pill outline and hover fill, and it is a disclosure on a card
-          that already has its own border. */}
-      <div
-        aria-expanded={open}
-        className={cn(
-          'ghostex-chat-status-card-header flex min-w-0 items-start gap-2 text-left leading-relaxed outline-none',
-          expandable && 'cursor-pointer'
-        )}
-        data-expandable={expandable ? 'true' : undefined}
-        onClick={toggle}
-        onKeyDown={onKeyDown}
-        role='button'
-        tabIndex={expandable ? 0 : -1}
-      >
-        {/* The dot and chevron sit in boxes exactly one text line tall (1lh,
-            from the row's own line-height) and center inside them, so they stay
-            on the first line's centre whatever font size the label inherits,
-            instead of chasing it with hand-tuned pixel margins. */}
-        <span aria-hidden='true' className='flex h-[1lh] shrink-0 items-center'>
-          <span className='size-1.5 animate-pulse rounded-full bg-primary' />
-        </span>
-        <span className='min-w-0 flex-1 whitespace-pre-wrap break-words text-foreground/90'>{activity.label}</span>
-        {expandable ? (
-          <span aria-hidden='true' className='flex h-[1lh] shrink-0 items-center'>
-            <IconChevronRight
-              className={cn('ghostex-chat-disclosure-chevron size-3.5 text-muted-foreground', open && 'is-open')}
-            />
-          </span>
-        ) : null}
-      </div>
-      <SessionChatDisclosureBody open={open}>
-        <pre className='ghostex-chat-tool-body'>{detail}</pre>
-      </SessionChatDisclosureBody>
-    </div>
+      {expandable ? <pre className='ghostex-chat-tool-body'>{detail}</pre> : null}
+    </SessionChatStatusCard>
   );
 }

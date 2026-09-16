@@ -4,13 +4,13 @@
  * Provider IDs keep repeated names and resumed turns linked to the exact child transcript.
  */
 
-import { IconChevronRight } from '@tabler/icons-react';
-import { useContext, useEffect, useId, useLayoutEffect, useState } from 'react';
+import { IconUsers } from '@tabler/icons-react';
+import { useContext, useEffect, useLayoutEffect, useState } from 'react';
 import type { SessionChatAgentFleet } from '../../shared/session-chat';
 import { formatSessionChatActivityElapsed, sessionChatActivityElapsedSeconds } from './session-chat-activity-row';
-import { SessionChatDisclosureBody } from './session-chat-disclosure-body';
 import { persistSessionChatInteractions, sessionChatInteractionState } from './session-chat-interaction-state';
 import { SessionChatSimpleModeContext } from './session-chat-simple-mode';
+import { SessionChatStatusCard, SessionChatStatusCardLead } from './session-chat-status-card';
 import { SessionChatSubagentLink } from './session-chat-subagent-link';
 import { SessionChatSubagentModel } from './session-chat-subagent-model';
 
@@ -38,7 +38,6 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
     () => sessionChatInteractionState(sessionKey).disclosures[FLEET_DISCLOSURE_KEY]?.open
   );
   const open = openOverride ?? !simpleMode;
-  const rowsId = useId();
   const toggleOpen = () => {
     const next = !open;
     const state = sessionChatInteractionState(sessionKey);
@@ -83,6 +82,7 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
 
   const idleCount = agents.filter((agent) => agent.status === 'idle').length;
   const runningCount = stale ? 0 : agents.length - idleCount;
+  // The header says how many are running; the working pulse lives on each row.
   // A stale roster cannot vouch for anything running, so it only carries its size.
   const countLabel = stale
     ? `${agents.length}`
@@ -100,140 +100,115 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
   }));
 
   return (
-    <div
+    <SessionChatStatusCard
       aria-label='Subagents'
-      className='ghostex-chat-prompt-card ghostex-chat-agent-fleet'
-      role='group'
+      className='ghostex-chat-agent-fleet'
       data-stale={stale || undefined}
+      lead={<SessionChatStatusCardLead icon={IconUsers} />}
+      meta={countLabel}
+      onOpenChange={toggleOpen}
+      open={open}
+      role='group'
+      // CDXC:SessionChat 2026-09-07 DECISION: User: the title is "Subagents", without a hyphen or all caps.
+      title='Subagents'
+      toggleTitle={{ open: 'Minimize subagents', closed: 'Expand subagents' }}
     >
-      <button
-        aria-controls={open ? rowsId : undefined}
-        aria-expanded={open}
-        className='ghostex-chat-agent-fleet-header ghostex-chat-status-card-header'
-        onClick={toggleOpen}
-        title={open ? 'Minimize subagents' : 'Expand subagents'}
-        type='button'
+      {stale ? (
+        <div className='ghostex-chat-card-hint ghostex-chat-agent-fleet-unavailable' role='status'>
+          Subagent status unavailable
+        </div>
+      ) : null}
+      <div
+        ref={setRowsElement}
+        className={`ghostex-chat-agent-fleet-rows${scrollable ? ' scroll-fade-y' : ''}`}
+        role='list'
       >
-        {/* CDXC:SessionChat 2026-09-16 DECISION: User: the header has the pending tool card's shape (dot on the left, chevron on the right, same text size) and always says how many subagents are running. The dot and chevron sit in 1lh boxes like session-chat-terminal-tool-row.tsx. */}
-        <span aria-hidden='true' className='flex h-[1lh] shrink-0 items-center'>
-          <span
-            className='ghostex-chat-agent-fleet-pulse'
-            style={
-              runningCount === 0
-                ? { animation: 'none', backgroundColor: 'var(--muted-foreground)', opacity: 0.5 }
-                : undefined
-            }
-          />
-        </span>
-        {/* CDXC:SessionChat 2026-09-07 DECISION: User: the title is "Subagents", without a hyphen or all caps. */}
-        <span className='ghostex-chat-agent-fleet-title'>Subagents</span>
-        <span className='ghostex-chat-agent-fleet-count'>{countLabel}</span>
-        <span aria-hidden='true' className='ghostex-chat-agent-fleet-chevron flex h-[1lh] shrink-0 items-center'>
-          <IconChevronRight
-            className={`ghostex-chat-disclosure-chevron size-3.5 text-muted-foreground${open ? ' is-open' : ''}`}
-          />
-        </span>
-      </button>
-      <SessionChatDisclosureBody open={open} id={rowsId}>
-        {stale ? (
-          <div className='ghostex-chat-card-hint ghostex-chat-agent-fleet-unavailable' role='status'>
-            Subagent status unavailable
-          </div>
-        ) : null}
-        <div
-          ref={setRowsElement}
-          className={`ghostex-chat-agent-fleet-rows${scrollable ? ' scroll-fade-y' : ''}`}
-          role='list'
-        >
-          {agents.map((agent, index) => {
-            // CDXC:SessionChat 2026-09-12 DECISION: User: Codex rows show the child name/path beside the model and effort in the status column, moving it out of the tooltip; Claude keeps its task text.
-            const statusText = provider === 'codex' ? agent.name : agent.task;
-            const idle = agent.status === 'idle';
-            const working = !stale && !idle;
-            const selector = agent.id ?? `fleet:${JSON.stringify({ agents: roster, index })}`;
-            const transcriptTarget = {
-              name: agent.task ?? agent.name,
-              selector,
-              agentType: agent.name,
-              task: agent.task,
-              model: agent.model,
-              effort: agent.effort,
-            };
-            const elapsed = sessionChatActivityElapsedSeconds(
-              {
-                detectedAt: fleet.detectedAt,
-                ...(agent.elapsedSeconds === undefined ? {} : { elapsedSeconds: agent.elapsedSeconds }),
-              },
-              working ? now : Date.parse(fleet.detectedAt)
-            );
-            return (
-              <div
-                className='ghostex-chat-agent-fleet-row'
-                key={agent.id ?? `${index}:${agent.name}`}
-                role='listitem'
-                data-status={stale ? 'unavailable' : idle ? 'idle' : 'working'}
-              >
-                <span
-                  aria-hidden='true'
-                  className='ghostex-chat-agent-fleet-pulse'
-                  style={
-                    !working
-                      ? { animation: 'none', backgroundColor: 'var(--muted-foreground)', opacity: 0.5 }
-                      : undefined
-                  }
-                />
-                <span className='ghostex-chat-card-content ghostex-chat-agent-fleet-name'>
-                  <SessionChatSubagentLink {...transcriptTarget} showAgentType={provider !== 'codex'}>
-                    <SessionChatSubagentModel info={agent} />
-                  </SessionChatSubagentLink>
-                </span>
-                {/* Task and marker share one cell: `+2` reads as belonging to the
+        {agents.map((agent, index) => {
+          // CDXC:SessionChat 2026-09-12 DECISION: User: Codex rows show the child name/path beside the model and effort in the status column, moving it out of the tooltip; Claude keeps its task text.
+          const statusText = provider === 'codex' ? agent.name : agent.task;
+          const idle = agent.status === 'idle';
+          const working = !stale && !idle;
+          const selector = agent.id ?? `fleet:${JSON.stringify({ agents: roster, index })}`;
+          const transcriptTarget = {
+            name: agent.task ?? agent.name,
+            selector,
+            agentType: agent.name,
+            task: agent.task,
+            model: agent.model,
+            effort: agent.effort,
+          };
+          const elapsed = sessionChatActivityElapsedSeconds(
+            {
+              detectedAt: fleet.detectedAt,
+              ...(agent.elapsedSeconds === undefined ? {} : { elapsedSeconds: agent.elapsedSeconds }),
+            },
+            working ? now : Date.parse(fleet.detectedAt)
+          );
+          return (
+            <div
+              className='ghostex-chat-agent-fleet-row'
+              key={agent.id ?? `${index}:${agent.name}`}
+              role='listitem'
+              data-status={stale ? 'unavailable' : idle ? 'idle' : 'working'}
+            >
+              <span
+                aria-hidden='true'
+                className='ghostex-chat-agent-fleet-pulse'
+                style={
+                  !working ? { animation: 'none', backgroundColor: 'var(--muted-foreground)', opacity: 0.5 } : undefined
+                }
+              />
+              <span className='ghostex-chat-card-content ghostex-chat-agent-fleet-name'>
+                <SessionChatSubagentLink {...transcriptTarget} showAgentType={provider !== 'codex'}>
+                  <SessionChatSubagentModel info={agent} />
+                </SessionChatSubagentLink>
+              </span>
+              {/* Task and marker share one cell: `+2` reads as belonging to the
                   work on its left, and staying out of the clock's column keeps
                   a marked row aligned with every unmarked one. */}
-                <span className='ghostex-chat-agent-fleet-work'>
-                  {/* CDXC:SessionChat 2026-09-10 DECISION: User: put the ‣ separator at the start of the status cell so it aligns across subagent rows regardless of model label width. */}
-                  {statusText || (idle && !stale) || agent.nested ? (
-                    <span aria-hidden='true' className='ghostex-chat-card-content shrink-0'>
-                      ‣
-                    </span>
-                  ) : null}
-                  {idle && !stale ? <span className='ghostex-chat-card-hint'>Idle</span> : null}
-                  <span className='ghostex-chat-card-content ghostex-chat-agent-fleet-task'>
-                    {statusText ? (
-                      <SessionChatSubagentLink {...transcriptTarget} showAgentType={provider !== 'codex'}>
-                        {statusText}
-                      </SessionChatSubagentLink>
-                    ) : (
-                      ''
-                    )}
+              <span className='ghostex-chat-agent-fleet-work'>
+                {/* CDXC:SessionChat 2026-09-10 DECISION: User: put the ‣ separator at the start of the status cell so it aligns across subagent rows regardless of model label width. */}
+                {statusText || (idle && !stale) || agent.nested ? (
+                  <span aria-hidden='true' className='ghostex-chat-card-content shrink-0'>
+                    ‣
                   </span>
-                  {agent.nested ? (
-                    <span
-                      className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ghostex-chat-agent-fleet-nested'
-                      title={`${agent.nested} more agent${agent.nested === 1 ? '' : 's'} under this one`}
-                    >
-                      +{agent.nested}
-                    </span>
-                  ) : null}
+                ) : null}
+                {idle && !stale ? <span className='ghostex-chat-card-hint'>Idle</span> : null}
+                <span className='ghostex-chat-card-content ghostex-chat-agent-fleet-task'>
+                  {statusText ? (
+                    <SessionChatSubagentLink {...transcriptTarget} showAgentType={provider !== 'codex'}>
+                      {statusText}
+                    </SessionChatSubagentLink>
+                  ) : (
+                    ''
+                  )}
                 </span>
-                {/* Counter, separator and clock are three tracks, not one cell:
+                {agent.nested ? (
+                  <span
+                    className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ghostex-chat-agent-fleet-nested'
+                    title={`${agent.nested} more agent${agent.nested === 1 ? '' : 's'} under this one`}
+                  >
+                    +{agent.nested}
+                  </span>
+                ) : null}
+              </span>
+              {/* Counter, separator and clock are three tracks, not one cell:
                   that is what right-aligns every counter on the same edge no
                   matter how long the one above it was. The separator only
                   appears when it has something on both sides of it. */}
-                <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-fleet-tokens'>
-                  {agent.tokens ?? ''}
-                </span>
-                <span aria-hidden='true' className='ghostex-chat-agent-fleet-separator'>
-                  {agent.tokens && elapsed !== null ? '•' : ''}
-                </span>
-                <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-fleet-clock'>
-                  {elapsed === null ? '' : formatSessionChatActivityElapsed(elapsed)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </SessionChatDisclosureBody>
-    </div>
+              <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-fleet-tokens'>
+                {agent.tokens ?? ''}
+              </span>
+              <span aria-hidden='true' className='ghostex-chat-agent-fleet-separator'>
+                {agent.tokens && elapsed !== null ? '•' : ''}
+              </span>
+              <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-fleet-clock'>
+                {elapsed === null ? '' : formatSessionChatActivityElapsed(elapsed)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </SessionChatStatusCard>
   );
 }

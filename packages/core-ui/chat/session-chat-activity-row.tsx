@@ -26,6 +26,7 @@ import { IconInfoCircle, IconLoader2 } from '@tabler/icons-react';
 import type { SessionChatTerminalActivity } from '../../shared/session-chat';
 import { cn } from '@/packages/components/utils';
 import { AppTooltip } from '../app-tooltip';
+import { SessionChatStatusCard, SessionChatStatusCardDot } from './session-chat-status-card';
 
 /** How often the local clock re-renders between server samples. */
 const ACTIVITY_CLOCK_TICK_MS = 1_000;
@@ -93,47 +94,54 @@ export function SessionChatActivityRow({ activity, className }: SessionChatActiv
   const indeterminate = activity.kind === 'compacting' && percent === null;
 
   return (
-    <div
+    <SessionChatStatusCard
       aria-live='polite'
-      className={cn(
-        'ghostex-chat-prompt-card ghostex-chat-activity-row my-2 grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3',
-        className
-      )}
+      className={cn('ghostex-chat-activity-row', className)}
       data-kind={activity.kind}
-      role='status'
-    >
-      <div className='flex min-w-0 items-center gap-2'>
-        {shellsRunning ? (
-          <IconLoader2 aria-hidden='true' className='size-3.5 shrink-0 animate-spin text-primary' stroke={2} />
+      lead={
+        shellsRunning ? (
+          <span aria-hidden='true' className='ghostex-chat-status-card-lead'>
+            <IconLoader2 className='animate-spin text-primary' stroke={2} />
+          </span>
         ) : (
-          <span aria-hidden='true' className='size-1.5 shrink-0 animate-pulse rounded-full bg-primary' />
-        )}
-        <div className='flex min-w-0 flex-1 items-center gap-1.5'>
-          <span className='ghostex-chat-card-title min-w-0 truncate text-foreground/90'>{activity.label}</span>
+          <SessionChatStatusCardDot />
+        )
+      }
+      role='status'
+      title={
+        <>
+          {activity.label}
           {/* CDXC:SessionChat 2026-09-11 DECISION: User: put the compaction hint in an info-circle tooltip immediately right of the title, replacing the visible hint line. */}
           {activity.kind === 'compacting' ? (
-            <AppTooltip content='Send or queue a message & we&apos;ll post it after compaction' side='top'>
+            <AppTooltip content='Send or queue a message and it will be posted after compaction' side='top'>
               <button
                 type='button'
                 aria-label='Messaging during compaction'
-                className='inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20'
+                className='ml-1.5 inline-flex size-5 shrink-0 translate-y-0.5 items-center justify-center rounded-sm align-baseline text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20'
               >
                 <IconInfoCircle aria-hidden='true' className='size-3.5' stroke={1.5} />
               </button>
             </AppTooltip>
           ) : null}
-        </div>
-        {elapsed !== null ? (
-          <span className='ghostex-chat-card-hint shrink-0 text-xs text-muted-foreground tabular-nums'>
-            {formatSessionChatActivityElapsed(elapsed)}
+        </>
+      }
+      trailing={
+        elapsed !== null || percent !== null ? (
+          <span className='ghostex-chat-status-card-lead gap-2'>
+            {elapsed !== null ? (
+              <span className='ghostex-chat-card-hint shrink-0 text-xs text-muted-foreground tabular-nums'>
+                {formatSessionChatActivityElapsed(elapsed)}
+              </span>
+            ) : null}
+            {percent !== null ? (
+              <span className='ghostex-chat-card-hint shrink-0 text-xs font-medium text-foreground/80 tabular-nums'>
+                {percent}%
+              </span>
+            ) : null}
           </span>
-        ) : null}
-        {percent !== null ? (
-          <span className='ghostex-chat-card-hint shrink-0 text-xs font-medium text-foreground/80 tabular-nums'>
-            {percent}%
-          </span>
-        ) : null}
-      </div>
+        ) : undefined
+      }
+    >
       {percent !== null || indeterminate ? (
         <div
           aria-label={activity.label}
@@ -152,6 +160,6 @@ export function SessionChatActivityRow({ activity, className }: SessionChatActiv
           />
         </div>
       ) : null}
-    </div>
+    </SessionChatStatusCard>
   );
 }

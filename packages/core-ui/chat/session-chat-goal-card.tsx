@@ -1,13 +1,18 @@
 /*
 CDXC:SessionChat 2026-09-06 DECISION:
-User: a Codex goal shows as a card in the same shape as the Claude Code status cards (the activity row and the pending tool row): dot on the left, chevron on the right, no outline of its own.
+User: a Codex goal shows as a card in the same shape as the Claude Code status cards (the activity row and the pending tool row), chevron on the right, no outline of its own.
 Collapsed it shows the first three lines of the goal's text; expanding shows the full goal text and nothing else.
+Since 2026-09-16 the shape is the shared status card and the card leads with a target icon instead of the dot (see session-chat-status-card.css).
 */
 
 import { useLayoutEffect, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
-import { IconChevronRight } from '@tabler/icons-react';
+import { IconTarget } from '@tabler/icons-react';
 import { cn } from '@/packages/components/utils';
+import {
+  SessionChatStatusCard,
+  SessionChatStatusCardChevron,
+  SessionChatStatusCardLead,
+} from './session-chat-status-card';
 
 const STATUS_TONES: Record<string, string> = {
   active: 'bg-primary/15 text-primary',
@@ -30,7 +35,6 @@ export function SessionChatGoalCard({ objective, status, usage }: SessionChatGoa
   const [overflows, setOverflows] = useState(false);
   const objectiveRef = useRef<HTMLParagraphElement>(null);
   const text = objective.trim();
-  const active = status === 'active';
 
   // The chevron only appears when the clamp actually hides text.
   useLayoutEffect(() => {
@@ -46,83 +50,57 @@ export function SessionChatGoalCard({ objective, status, usage }: SessionChatGoa
   }, [expanded, text]);
 
   const expandable = expanded || overflows;
-  const toggle = (): void => {
-    if (expandable) {
-      setExpanded((value) => !value);
-    }
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      toggle();
-    }
-  };
 
   return (
-    <div
+    <SessionChatStatusCard
       aria-live='polite'
-      className='ghostex-chat-activity-row ghostex-chat-status-card grid gap-2 rounded-2xl border border-border/65 bg-muted/20 px-4 py-3'
+      className='ghostex-chat-activity-row ghostex-chat-status-card'
       data-kind='codex-goal'
       data-status={status}
+      lead={<SessionChatStatusCardLead icon={IconTarget} />}
       role='status'
-    >
-      {/* Not a <button>: the chat scope's button rules would give the header
-          their pill outline and hover fill, and it is a disclosure on a card
-          that already has its own border. */}
-      <div
-        aria-expanded={expandable ? expanded : undefined}
-        className={cn(
-          'flex min-w-0 items-start gap-2 text-left leading-relaxed outline-none',
-          expandable && 'cursor-pointer'
-        )}
-        onClick={toggle}
-        onKeyDown={onKeyDown}
-        role='button'
-        tabIndex={expandable ? 0 : -1}
-      >
-        {/* One-line-tall (1lh) boxes center the dot and chevron on the first
-            text line for any inherited font size; see session-chat-terminal-tool-row.tsx. */}
-        <span aria-hidden='true' className='flex h-[1lh] shrink-0 items-center'>
+      title={
+        <>
+          Goal
           <span
-            className={cn('size-1.5 rounded-full', active ? 'animate-pulse bg-primary' : 'bg-muted-foreground/60')}
-          />
-        </span>
-        <div className='min-w-0 flex-1'>
-          <div className='flex min-w-0 items-center gap-2'>
-            <span className='font-medium text-foreground'>Goal</span>
-            <span
-              className={cn(
-                'rounded-full px-1.5 py-px text-[11px] leading-4 font-medium',
-                STATUS_TONES[status] ?? 'bg-muted text-muted-foreground'
-              )}
-            >
-              {status}
-            </span>
-            {usage ? (
-              <span className='ml-auto min-w-0 truncate text-xs text-muted-foreground tabular-nums'>{usage}</span>
-            ) : null}
-          </div>
-          {text ? (
-            <p
-              className={cn(
-                'mt-1 whitespace-pre-wrap break-words text-foreground/90',
-                // Three lines of the objective while collapsed.
-                !expanded && 'line-clamp-3'
-              )}
-              ref={objectiveRef}
-            >
-              {text}
-            </p>
-          ) : null}
-        </div>
-        {expandable ? (
-          <span aria-hidden='true' className='flex h-[1lh] shrink-0 items-center'>
-            <IconChevronRight
-              className={cn('ghostex-chat-disclosure-chevron size-3.5 text-muted-foreground', expanded && 'is-open')}
-            />
+            className={cn(
+              'ml-2 rounded-full px-1.5 py-px align-middle text-[11px] leading-4 font-medium',
+              STATUS_TONES[status] ?? 'bg-muted text-muted-foreground'
+            )}
+          >
+            {status}
           </span>
-        ) : null}
-      </div>
-    </div>
+        </>
+      }
+      trailing={
+        <>
+          {usage ? (
+            <span className='ghostex-chat-status-card-lead min-w-0 truncate text-xs text-muted-foreground tabular-nums'>
+              {usage}
+            </span>
+          ) : null}
+          {expandable ? (
+            <SessionChatStatusCardChevron
+              expanded={expanded}
+              label={expanded ? 'Show less of the goal' : 'Show the full goal'}
+              onClick={() => setExpanded((value) => !value)}
+            />
+          ) : null}
+        </>
+      }
+    >
+      {text ? (
+        <p
+          className={cn(
+            'whitespace-pre-wrap break-words text-foreground/90',
+            // Three lines of the objective while collapsed.
+            !expanded && 'line-clamp-3'
+          )}
+          ref={objectiveRef}
+        >
+          {text}
+        </p>
+      ) : null}
+    </SessionChatStatusCard>
   );
 }
