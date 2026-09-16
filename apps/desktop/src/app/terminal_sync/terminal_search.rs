@@ -303,7 +303,8 @@ impl GhostexGpuiApp {
                 };
                 let _ = self.perform_terminal_search_binding_action(runtime_session_id, action, cx);
             }
-            InputEvent::Focus | InputEvent::Blur => {}
+            InputEvent::Focus => self.reclaim_gpui_root_for_chrome_input_focus(),
+            InputEvent::Blur => {}
         }
         #[cfg(not(target_os = "macos"))]
         let _ = (runtime_session_id, input, event, cx);

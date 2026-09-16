@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <stdbool.h>
+#import <stdint.h>
 
 void GhostexGpuiCEFClearActiveNativeView(void);
 void GhostexGpuiCEFRefreshSidebarPointerInside(void);
@@ -135,6 +136,7 @@ static const void *GhostexGpuiSidebarRevealKey = &GhostexGpuiSidebarRevealKey;
 
 bool GhostexGpuiSidebarRevealUpdate(void *sidebarPtr, void *rootPtr,
                                   bool enabled, double width, double titlebarHeight,
+                                  uint32_t backgroundColor,
                                   bool companionHidden, bool requested, bool keepUnderPointer,
                                   bool *expandCompanion) {
   *expandCompanion = false;
@@ -183,13 +185,22 @@ bool GhostexGpuiSidebarRevealUpdate(void *sidebarPtr, void *rootPtr,
     state.panel.hasShadow = YES;
     state.panel.hidesOnDeactivate = YES;
     state.panel.becomesKeyOnlyIfNeeded = YES;
-    state.panel.backgroundColor = [NSColor colorWithWhite:0.08 alpha:1];
     state.panel.acceptsMouseMovedEvents = YES;
     state.panel.collectionBehavior = NSWindowCollectionBehaviorFullScreenAuxiliary;
     state.panel.contentView.autoresizesSubviews = NO;
     state.panel.contentView.wantsLayer = YES;
     state.panel.contentView.layer.masksToBounds = YES;
     objc_setAssociatedObject(sidebar, GhostexGpuiSidebarRevealKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  }
+  // CDXC:Theming 2026-09-15 WHY:
+  // Chromium can leave the panel backing exposed while the sidebar slides or is reparented, so use the live sidebar color before showing it, including after a theme change.
+  NSColor *sidebarBackground = [NSColor
+      colorWithSRGBRed:((backgroundColor >> 16) & 0xff) / 255.0
+                green:((backgroundColor >> 8) & 0xff) / 255.0
+                 blue:(backgroundColor & 0xff) / 255.0
+                alpha:1];
+  if (![state.panel.backgroundColor isEqual:sidebarBackground]) {
+    state.panel.backgroundColor = sidebarBackground;
   }
   if (requested) {
     state.companionTriggerLatched = NO;

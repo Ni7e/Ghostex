@@ -252,7 +252,25 @@ impl GhostexGpuiApp {
             return;
         }
         let parent_ns_view = self.parent_ns_view;
-        let sidebar_url = self.sidebar_url.clone();
+        // CDXC:Theming 2026-09-16 WHY:
+        // The sidebar document paints before CEF delivers saved settings at load-end, so its first background must come from the same resolved palette as the native titlebar.
+        let sidebar_url = gpui_url_with_query_param(
+            &self.sidebar_url,
+            "initialTheme",
+            if CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed) {
+                "light"
+            } else {
+                "dark"
+            },
+        );
+        let sidebar_url = gpui_url_with_query_param(
+            &sidebar_url,
+            "initialBackground",
+            &format!(
+                "{:06x}",
+                sidebar_cef_prepaint_background_color() & 0x00ff_ffff
+            ),
+        );
         let sidebar_bridge_event_handler = self.sidebar_bridge_event_handler(cx);
         let app_modal_host_bridge_event_handler = self.app_modal_host_bridge_event_handler(cx);
         let sidebar_runtime_settings = self.sidebar_runtime_settings_snapshot.clone();

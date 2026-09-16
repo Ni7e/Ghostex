@@ -392,6 +392,7 @@ impl CefSurface {
             collapsed,
             width as f64,
             TITLEBAR_HEIGHT as f64,
+            sidebar_cef_prepaint_background_color(),
             companion_hidden,
             requested,
             keep_under_pointer,
