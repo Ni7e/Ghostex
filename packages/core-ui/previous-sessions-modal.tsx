@@ -1182,8 +1182,9 @@ export function PreviousSessionsModal({
           <button
             className='previous-sessions-find-prompts-button'
             onClick={() => {
-              vscode.postMessage({ actionId: 'openFindPrompts', type: 'runGhostexHotkeyAction' });
+              // Close first, then dispatch. The desktop close message removes whichever app-modal window is open, so posting the open action before closing would take down the Find window it just opened. The command palette orders its rows the same way.
               onClose();
+              vscode.postMessage({ actionId: 'openFindPrompts', type: 'runGhostexHotkeyAction' });
             }}
             type='button'
           >
