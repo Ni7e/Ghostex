@@ -1,8 +1,8 @@
 //! Demo host for the native Session Automations dialog.
 //! States (`GHOSTEX_NATIVE_MODAL_DEMO_STATE`): `active` (an armed 1h 35m timer
 //! with Close after Done on), `agentstops` (armed "when this agent finishes"),
-//! `specific` (armed on a specific awake agent), `noagents` (the awake list
-//! comes back empty), `agenterror` (the awake read fails), `nopicker` (the
+//! `specific` (armed on a specific awake agent), `manyagents` (40 awake agents),
+//! `noagents` (the awake list comes back empty), `agenterror` (the awake read fails), `nopicker` (the
 //! all-agents trigger is unsupported, so no awake picker), `noicon` (no agent
 //! logo and no session title).
 use super::delayed_send_modal::*;
@@ -31,10 +31,11 @@ fn fake_sessions() -> Vec<DelayedSendAgentOption> {
 
 pub(super) fn open(demo: &super::DemoEnv, cx: &mut App) {
     let state = demo.state.clone();
-    let specific = (state == "specific").then(|| DelayedSendAgentReference {
-        project_id: "ghostex".to_string(),
-        session_id: "G7".to_string(),
-    });
+    let specific =
+        matches!(state.as_str(), "specific" | "manyagents").then(|| DelayedSendAgentReference {
+            project_id: "ghostex".to_string(),
+            session_id: "G7".to_string(),
+        });
     let config = DelayedSendModalConfig {
         agent_icon_path: (state != "noicon").then(|| "agent-icons/codex.svg".to_string()),
         close_after_done_active: state == "active",
@@ -70,6 +71,18 @@ pub(super) fn open(demo: &super::DemoEnv, cx: &mut App) {
                     let _ = window.update(cx, |_root, window, cx| {
                         view.update(cx, |modal, cx| {
                             let (sessions, error) = match state.as_str() {
+                                "manyagents" => (
+                                    (1..=40)
+                                        .map(|index| DelayedSendAgentOption {
+                                            reference: DelayedSendAgentReference {
+                                                project_id: "ghostex".to_string(),
+                                                session_id: format!("G{index}"),
+                                            },
+                                            label: format!("Agent session {index:02} (G{index})"),
+                                        })
+                                        .collect(),
+                                    None,
+                                ),
                                 "noagents" => (Vec::new(), None),
                                 "agenterror" => (
                                     Vec::new(),
