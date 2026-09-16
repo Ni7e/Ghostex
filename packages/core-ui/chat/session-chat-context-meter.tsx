@@ -86,8 +86,10 @@ export function SessionChatContextMeter({
   compactDisabledReason,
   details,
   onEditDetails,
+  statusLine,
   inMenu = false,
 }: {
+  statusLine?: string;
   inMenu?: boolean;
   usage: SessionChatContextMeterUsage;
   onCompact?: (() => void) | undefined;
@@ -236,11 +238,13 @@ export function SessionChatContextMeter({
   if (inMenu) {
     return (
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger aria-label={ariaLabel} openOnHover={false}>
-          {ring}
-          Context window
-          {percentageLabel ? <span className='ml-auto text-xs text-muted-foreground'>{percentageLabel}</span> : null}
-        </DropdownMenuSubTrigger>
+        <AppTooltip content={statusLine || ariaLabel}>
+          <DropdownMenuSubTrigger aria-label={ariaLabel} openOnHover={false}>
+            {ring}
+            Context window
+            {percentageLabel ? <span className='ml-auto text-xs text-muted-foreground'>{percentageLabel}</span> : null}
+          </DropdownMenuSubTrigger>
+        </AppTooltip>
         <DropdownMenuSubContent className={contentClassName}>{content}</DropdownMenuSubContent>
       </DropdownMenuSub>
     );
@@ -248,19 +252,21 @@ export function SessionChatContextMeter({
 
   return (
     <Popover>
-      <PopoverTrigger
-        openOnHover={false}
-        render={
-          <Button
-            aria-label={ariaLabel}
-            className='ghostex-chat-footer-control ghostex-chat-context-meter ml-[6px] rounded-full text-muted-foreground hover:text-muted-foreground'
-            size='icon-xs'
-            variant='ghost'
-          />
-        }
-      >
-        {ring}
-      </PopoverTrigger>
+      <AppTooltip content={statusLine || ariaLabel}>
+        <PopoverTrigger
+          openOnHover={false}
+          render={
+            <Button
+              aria-label={ariaLabel}
+              className='ghostex-chat-footer-control ghostex-chat-context-meter ml-[6px] rounded-full text-muted-foreground hover:text-muted-foreground'
+              size='icon-xs'
+              variant='ghost'
+            />
+          }
+        >
+          {ring}
+        </PopoverTrigger>
+      </AppTooltip>
       <PopoverContent align='end' className={contentClassName} side='top' sideOffset={8}>
         {content}
       </PopoverContent>
