@@ -69,6 +69,7 @@ import { postSidebarOrderReproLog } from './sidebar-order-repro-log';
 import { getSidebarReorderActivationConstraints } from './sidebar-reorder-activation';
 import { scrollElementIntoViewIfNeeded } from './scroll-into-view-if-needed';
 import { flashRevealedSession } from './sidebar-app/session-reveal-flash';
+import { scrollRevealedSessionIntoView } from './sidebar-app/session-reveal-scroll';
 import { resetSidebarStore, useSidebarStore } from './sidebar-store';
 import { OTHER_SIDEBAR_SPACE_ID } from '../shared/sidebar-spaces-other';
 import { type SidebarDropData, type SidebarGroupDropTarget, type SidebarSessionDropTarget } from './sidebar-dnd';
@@ -3383,7 +3384,7 @@ export function SidebarApp({
    * Every collapsed container between the sidebar scroller and the row is
    * expanded for real (the same persisted collapse state the chevrons write, so
    * the expansion sticks), including the row's own kind section, and the row
-   * is scrolled into view only if it is off screen.
+   * is scrolled into view when it is outside the padded visible area.
    *
    * The scroll waits for the expand transitions the browser actually created
    * instead of a matching JS timer, exactly like `useSidebarCollapsiblePresence`
@@ -3505,9 +3506,8 @@ export function SidebarApp({
         return;
       }
       pendingSessionRevealScrollRequestIdRef.current = undefined;
-      // CDXC:Sessions 2026-09-07 WHY: A row can be inside the main viewport but clipped by its project's own scroller; native scrollIntoView checks every scroll ancestor.
-      revealedRow.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-      flashRevealedSession(revealedRow);
+      scrollRevealedSessionIntoView(revealedRow, scrollViewport);
+      flashRevealedSession(revealedRow, scrollViewport);
     };
     const animationFrameId = window.requestAnimationFrame(() => {
       if (cancelled) {

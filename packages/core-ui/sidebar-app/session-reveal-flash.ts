@@ -1,3 +1,5 @@
+import { scrollRevealedSessionIntoView } from './session-reveal-scroll';
+
 const pendingFlashes = new WeakMap<HTMLElement, () => void>();
 
 /**
@@ -5,7 +7,7 @@ const pendingFlashes = new WeakMap<HTMLElement, () => void>();
  * User: revealing a session with the titlebar button should blink its outline twice, using #93c5fd in light mode and white in dark mode.
  * Wait for the reveal scroll to settle so both flashes are visible.
  */
-export function flashRevealedSession(row: HTMLElement): void {
+export function flashRevealedSession(row: HTMLElement, viewport: HTMLElement): void {
   pendingFlashes.get(row)?.();
   const ancestors: HTMLElement[] = [];
   for (let ancestor = row.parentElement; ancestor; ancestor = ancestor.parentElement) {
@@ -41,7 +43,7 @@ export function flashRevealedSession(row: HTMLElement): void {
     }
     if (!didFinalScroll) {
       // Section expansion can move the target after the first reveal scroll.
-      row.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      scrollRevealedSessionIntoView(row, viewport);
       didFinalScroll = true;
       stableFrames = 0;
       frameId = window.requestAnimationFrame(waitForScroll);
