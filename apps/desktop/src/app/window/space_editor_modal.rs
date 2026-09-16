@@ -9,8 +9,7 @@ use super::native_modal_kit::*;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Anchor, AnyElement, App, AppContext as _, BoxShadow, ClickEvent, Context, FocusHandle,
-    Focusable as _,
-    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, MouseDownEvent,
+    Focusable as _, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, MouseDownEvent,
     ParentElement as _, Render, Rgba, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
     Window, anchored, deferred, div, point, px, rgb,
 };
@@ -210,8 +209,7 @@ impl GpuiSpaceEditorModalWindow {
         let focus_handle = cx.focus_handle();
         let initial_name = config.initial_name.unwrap_or_default();
         let name = cx.new(|cx| InputState::new(window, cx).default_value(initial_name.clone()));
-        let picker_search =
-            cx.new(|cx| InputState::new(window, cx).placeholder(SEARCH_ICONS));
+        let picker_search = cx.new(|cx| InputState::new(window, cx).placeholder(SEARCH_ICONS));
         let subscriptions = vec![
             cx.subscribe_in(
                 &name,
@@ -715,12 +713,11 @@ impl GpuiSpaceEditorModalWindow {
                             .child(SPACE_EDITOR_ICONS[icon].label),
                     )
                     .when(checked, |this| {
-                        this.child(
-                            div()
-                                .ml_auto()
-                                .flex_shrink_0()
-                                .child(modal_icon(ICON_CHECK, 16.0, p.foreground)),
-                        )
+                        this.child(div().ml_auto().flex_shrink_0().child(modal_icon(
+                            ICON_CHECK,
+                            16.0,
+                            p.foreground,
+                        )))
                     })
                     .into_any_element()
             })
@@ -868,35 +865,38 @@ impl GpuiSpaceEditorModalWindow {
     /// window fit measures header and body the way `modal_shell` expects.
     fn render_body(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
-        v_flex().w_full().gap(px(MODAL_SECTION_GAP)).children([
-            v_flex()
-                .w_full()
-                .gap(px(12.0))
-                .child(self.render_field_label(NAME_LABEL, 16.5))
-                .child(modal_text_input(&p, &self.name, false, window, cx))
-                .into_any_element(),
-            v_flex()
-                .w_full()
-                .gap(px(6.0))
-                .child(self.render_field_label(ICON_LABEL, 17.14))
-                .child(
-                    h_flex()
-                        .w_full()
-                        .on_children_prepainted(capture_child_bounds(
-                            self.picker_trigger_bounds.clone(),
-                            0,
-                        ))
-                        .child(self.render_icon_trigger(cx)),
-                )
-                .into_any_element(),
-            v_flex()
-                .w_full()
-                .gap(px(12.0))
-                .child(self.render_field_label(COLOR_LABEL, 17.14))
-                .child(self.render_color_strip(cx))
-                .into_any_element(),
-        ])
-        .into_any_element()
+        v_flex()
+            .w_full()
+            .gap(px(MODAL_SECTION_GAP))
+            .children([
+                v_flex()
+                    .w_full()
+                    .gap(px(12.0))
+                    .child(self.render_field_label(NAME_LABEL, 16.5))
+                    .child(modal_text_input(&p, &self.name, false, window, cx))
+                    .into_any_element(),
+                v_flex()
+                    .w_full()
+                    .gap(px(6.0))
+                    .child(self.render_field_label(ICON_LABEL, 17.14))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .on_children_prepainted(capture_child_bounds(
+                                self.picker_trigger_bounds.clone(),
+                                0,
+                            ))
+                            .child(self.render_icon_trigger(cx)),
+                    )
+                    .into_any_element(),
+                v_flex()
+                    .w_full()
+                    .gap(px(12.0))
+                    .child(self.render_field_label(COLOR_LABEL, 17.14))
+                    .child(self.render_color_strip(cx))
+                    .into_any_element(),
+            ])
+            .into_any_element()
     }
 
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -912,10 +912,13 @@ impl GpuiSpaceEditorModalWindow {
             cx,
         )];
         if self.mode == SpaceEditorMode::Edit {
-            buttons.push(modal_danger_outline_button(
+            buttons.push(modal_action_button(
                 &p,
                 "space-editor-delete",
                 DELETE,
+                None,
+                ModalButtonTone::Danger,
+                false,
                 |this, window, cx| this.delete(window, cx),
                 cx,
             ));
@@ -1077,9 +1080,7 @@ impl CommandScorer<'_> {
             }
             let previous = found.checked_sub(1).map(|i| self.lower_string[i]);
             let next_abbreviation = self.lower_abbreviation.get(abbreviation_index + 1).copied();
-            if (score < SCORE_TRANSPOSITION
-                && previous.is_some()
-                && previous == next_abbreviation)
+            if (score < SCORE_TRANSPOSITION && previous.is_some() && previous == next_abbreviation)
                 || (next_abbreviation == Some(abbreviation_char)
                     && previous != Some(abbreviation_char))
             {
@@ -1114,9 +1115,15 @@ pub(crate) fn command_score(string: &str, abbreviation: &str) -> f64 {
     let abbreviation_chars: Vec<char> = abbreviation.chars().collect();
     let lower_string = format_input(string);
     let lower_abbreviation = format_input(abbreviation);
-    if lower_string.len() != string_chars.len() || lower_abbreviation.len() != abbreviation_chars.len() {
+    if lower_string.len() != string_chars.len()
+        || lower_abbreviation.len() != abbreviation_chars.len()
+    {
         // A case mapping that changes the length has no cmdk equivalent worth mirroring; fall back to a plain substring match.
-        return if lower_string.iter().collect::<String>().contains(&lower_abbreviation.iter().collect::<String>()) {
+        return if lower_string
+            .iter()
+            .collect::<String>()
+            .contains(&lower_abbreviation.iter().collect::<String>())
+        {
             SCORE_CHARACTER_JUMP
         } else {
             0.0

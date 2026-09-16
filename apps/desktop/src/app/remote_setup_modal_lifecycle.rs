@@ -77,7 +77,9 @@ impl GhostexGpuiApp {
             GpuiAppModalKind::RemoteSetup,
             REMOTE_SETUP_MODAL_WIDTH,
             REMOTE_SETUP_MODAL_INITIAL_HEIGHT,
-            move |window, cx| cx.new(|cx| GpuiRemoteSetupModalWindow::new(config, host, window, cx)),
+            move |window, cx| {
+                cx.new(|cx| GpuiRemoteSetupModalWindow::new(config, host, window, cx))
+            },
             cx,
         );
     }
@@ -90,10 +92,12 @@ impl GhostexGpuiApp {
         let kind = GpuiAppModalKind::RemoteSetup;
         match command {
             RemoteSetupModalCommand::OpenExternalUrl(url) => {
-                self.receive_gpui_titlebar_resources_open_external_url_message(&serde_json::json!({
-                    "type": "openExternalUrl",
-                    "url": url,
-                }));
+                self.receive_gpui_titlebar_resources_open_external_url_message(
+                    &serde_json::json!({
+                        "type": "openExternalUrl",
+                        "url": url,
+                    }),
+                );
             }
             RemoteSetupModalCommand::AndroidLinkCopied => {
                 gpui_play_copy_sound();

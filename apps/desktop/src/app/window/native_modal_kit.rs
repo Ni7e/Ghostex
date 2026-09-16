@@ -203,11 +203,6 @@ impl ModalPalette {
     pub(crate) fn primary_hover(&self) -> Rgba {
         css_mix(self.primary, 0.88, rgb(0xffffff))
     }
-
-    /// `color-mix(in srgb, var(--destructive) 88%, white)` for danger footer buttons.
-    pub(crate) fn destructive_hover(&self) -> Rgba {
-        css_mix(self.destructive, 0.88, rgb(0xffffff))
-    }
 }
 
 /// Dialog title (16px/400, line-height 1.3) and description (13px muted, line-height 1.55), 6px apart.
@@ -350,33 +345,6 @@ pub(crate) fn modal_switch(p: &ModalPalette, checked: bool, disabled: bool) -> A
         .into_any_element()
 }
 
-/// The shadcn checkbox: 16px box, 4px radius, hairline border, primary fill with a check when on.
-pub(crate) fn modal_checkbox(p: &ModalPalette, checked: bool, disabled: bool) -> AnyElement {
-    div()
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .size(px(16.0))
-        .rounded(px(4.0))
-        .border_1()
-        .border_color(hsla(if checked { p.primary } else { p.hairline }))
-        .bg(if checked {
-            hsla(p.primary)
-        } else {
-            transparent()
-        })
-        .when(disabled, |this| this.opacity(0.5))
-        .when(checked, |this| {
-            this.child(modal_icon(
-                "modals/kit/check.svg",
-                12.0,
-                p.primary_foreground,
-            ))
-        })
-        .into_any_element()
-}
-
 /// A rotating loader icon for busy primary buttons.
 pub(crate) fn modal_spinner(color: Rgba) -> AnyElement {
     modal_icon(ICON_LOADER, 15.0, color)
@@ -400,7 +368,8 @@ pub(crate) enum ModalButtonTone {
 }
 
 /// A footer pill button (`.gx-app-modal-action-button`): 32px tall, 8px radius,
-/// outline by default, filled for the primary and danger tones, half opacity when disabled.
+/// outline by default, filled for the primary tone, destructive-tinted outline
+/// for the danger tone, half opacity when disabled.
 pub(crate) fn modal_action_button<V: 'static>(
     p: &ModalPalette,
     id: &'static str,
@@ -420,11 +389,12 @@ pub(crate) fn modal_action_button<V: 'static>(
             p.primary_foreground,
             p.primary_hover(),
         ),
+        // `.gx-app-modal-action-danger`: an outline tint, never a fill.
         ModalButtonTone::Danger => (
-            hsla(p.destructive),
+            transparent(),
+            rgba_of(p.destructive, 0.45),
             p.destructive,
-            rgb(0xffffff),
-            p.destructive_hover(),
+            rgba_of(p.destructive, 0.12),
         ),
     };
     h_flex()
@@ -913,52 +883,6 @@ pub(crate) fn modal_shell<V: Render>(
         .children(overlay)
 }
 
-/// `.gx-app-modal-action-danger`: the neutral pill with a danger tint (border
-/// at 45% destructive, destructive label, 12% destructive fill on hover). The
-/// `Danger` tone of `modal_action_button` fills the pill; the React shell's
-/// `tone='danger'` button is this outline one.
-pub(crate) fn modal_danger_action_button<V: 'static>(
-    p: &ModalPalette,
-    id: &'static str,
-    label: impl Into<SharedString>,
-    leading: Option<AnyElement>,
-    disabled: bool,
-    on_click: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
-    cx: &mut Context<V>,
-) -> AnyElement {
-    let p = *p;
-    let hover = rgba_of(p.destructive, 0.12);
-    h_flex()
-        .id(id)
-        .flex_1()
-        .flex_basis(px(0.0))
-        .min_w_0()
-        .h(px(MODAL_FOOTER_BUTTON_HEIGHT))
-        .px(px(12.0))
-        .gap(px(6.0))
-        .items_center()
-        .justify_center()
-        .rounded(px(MODAL_RADIUS_CONTROL))
-        .border_1()
-        .border_color(hsla(rgba_of(p.destructive, 0.45)))
-        .bg(transparent())
-        .text_size(px(14.0))
-        .line_height(px(20.0))
-        .text_color(hsla(p.destructive))
-        .whitespace_nowrap()
-        .when(disabled, |this| this.opacity(0.5).cursor_default())
-        .when(!disabled, |this| {
-            this.cursor_pointer()
-                .hover(move |this| this.bg(hsla(hover)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    on_click(this, window, cx);
-                }))
-        })
-        .children(leading)
-        .child(label.into())
-        .into_any_element()
-}
-
 /// `color-mix(in srgb, color <weight>, transparent)`: the color at `weight` of its alpha.
 pub(crate) fn css_fade(color: Rgba, weight: f32) -> Rgba {
     css_mix(
@@ -1206,11 +1130,7 @@ pub(crate) fn modal_legacy_text_input(
         .items_center()
         .rounded(px(MODAL_RADIUS_CONTROL))
         .border_1()
-        .border_color(hsla(if focused {
-            lp.focus_border
-        } else {
-            lp.border
-        }))
+        .border_color(hsla(if focused { lp.focus_border } else { lp.border }))
         .bg(hsla(css_fade(lp.raised, 0.82)))
         .when(disabled, |this| this.opacity(0.5))
         .child(
@@ -1471,11 +1391,19 @@ pub(crate) fn modal_searchable_select_menu<V: 'static>(
     } else {
         modal_rgba(0xffffff, 0.12)
     };
-    // `--input` and `bg-input/30` (theme.css, modals-light.css).
+    // `--input` and `bg-input/30` (theme.css, modals-light.css). The fill is
+    // composited over the popup surface because gpui paints the focus-ring
+    // shadow behind the element, where a translucent fill would let it through.
     let (input_border, input_background) = if p.light {
-        (modal_rgba(0x000000, 0.16), modal_rgba(0x000000, 0.16 * 0.3))
+        (
+            modal_rgba(0x000000, 0.16),
+            css_mix(rgb(0x000000), 0.16 * 0.3, p.surface),
+        )
     } else {
-        (modal_rgba(0xffffff, 0.15), modal_rgba(0xffffff, 0.15 * 0.3))
+        (
+            modal_rgba(0xffffff, 0.15),
+            css_mix(rgb(0xffffff), 0.15 * 0.3, p.surface),
+        )
     };
     // `--ring`: oklch(55.6% 0 0) dark, #737373 light.
     let ring = rgb(0x737373);
@@ -1552,7 +1480,11 @@ pub(crate) fn modal_searchable_select_menu<V: 'static>(
         .child(if query.is_empty() {
             div()
                 .flex_shrink_0()
-                .child(modal_icon("modals/kit/search.svg", 16.0, rgba_of(p.muted, 0.5)))
+                .child(modal_icon(
+                    "modals/kit/search.svg",
+                    16.0,
+                    rgba_of(p.muted, 0.5),
+                ))
                 .into_any_element()
         } else {
             div()
@@ -1586,14 +1518,14 @@ pub(crate) fn modal_searchable_select_menu<V: 'static>(
             spread_radius: px(0.0),
             inset: false,
         }])
-        .on_mouse_down_out(cx.listener(
-            move |this, event: &MouseDownEvent, window, cx| {
+        .on_mouse_down_out(
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                 if trigger.contains(&event.position) {
                     return;
                 }
                 on_dismiss(this, window, cx);
-            },
-        ))
+            }),
+        )
         .child(
             div()
                 .w_full()
@@ -1728,7 +1660,11 @@ pub(crate) fn modal_text_area_skinned(
         .py(px(12.0))
         .rounded(px(MODAL_RADIUS_CONTROL))
         .border_1()
-        .border_color(hsla(if focused { skin.focus_border } else { skin.border }))
+        .border_color(hsla(if focused {
+            skin.focus_border
+        } else {
+            skin.border
+        }))
         .bg(hsla(skin.background))
         .when(disabled, |this| this.opacity(0.5))
         .child(
@@ -1794,57 +1730,14 @@ pub(crate) fn modal_shell_inset<V: Render>(
         .children(overlay)
 }
 
-/// `.gx-app-modal-action-button.gx-app-modal-action-danger`: the neutral pill
-/// shape with a destructive tint (text in `--destructive`, border at 45% of it,
-/// transparent fill, 12% destructive fill on hover). `ModalButtonTone::Danger`
-/// is the filled variant, which the React shell never renders in a footer.
-pub(crate) fn modal_danger_outline_button<V: 'static>(
-    p: &ModalPalette,
-    id: &'static str,
-    label: impl Into<SharedString>,
-    on_click: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
-    cx: &mut Context<V>,
-) -> AnyElement {
-    let p = *p;
-    let border = rgba_of(p.destructive, p.destructive.a * 0.45);
-    let hover = rgba_of(p.destructive, p.destructive.a * 0.12);
-    h_flex()
-        .id(id)
-        .flex_1()
-        .flex_basis(px(0.0))
-        .min_w_0()
-        .h(px(MODAL_FOOTER_BUTTON_HEIGHT))
-        .px(px(12.0))
-        .gap(px(6.0))
-        .items_center()
-        .justify_center()
-        .rounded(px(MODAL_RADIUS_CONTROL))
-        .border_1()
-        .border_color(hsla(border))
-        .bg(transparent())
-        .text_size(px(14.0))
-        .line_height(px(20.0))
-        .text_color(hsla(p.destructive))
-        .whitespace_nowrap()
-        .cursor_pointer()
-        .hover(move |this| this.bg(hsla(hover)))
-        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-            on_click(this, window, cx);
-        }))
-        .child(label.into())
-        .into_any_element()
-}
-
-/// Space left between a scrolling modal's window and the display edge, so a
-/// window grown to its content never runs under the menu bar or off the bottom.
-pub(crate) const MODAL_SCROLL_FIT_SCREEN_MARGIN: f32 = 64.0;
+/// Space kept between a scrolling modal's bottom edge and the display's
+/// visible bottom edge (above the Dock or taskbar) when the window grows.
+pub(crate) const MODAL_SCROLL_FIT_SCREEN_MARGIN: f32 = 16.0;
 
 /// The window fit for a modal whose body scrolls (Remote Setup): the window is
-/// sized to the header plus the body's own content, grows only, and never past
-/// the display, so the body scrolls whatever the screen cannot show. The React
-/// twin fitted its child window once and scrolled the body afterwards; here a
-/// taller follow-up state (the Android popover, an error line) grows the
-/// window while the screen allows and scrolls only beyond that.
+/// sized once, on open, to the header plus the body's own content and never
+/// past the display's visible bottom. Anything taller later (the Android
+/// popover, an error line) scrolls inside the body, as in the React twin.
 pub(crate) struct ModalScrollFit {
     requested: Rc<Cell<Option<f32>>>,
     content_height: Rc<Cell<f32>>,
@@ -1884,23 +1777,27 @@ impl ModalScrollFit {
             };
             let content = f32::from(header.size.height) + content_height.get();
             let mut needed = (content + extra_height).round();
+            // gpui can resize a window but not move it, and the resize keeps
+            // the top edge, so the cap is the room below the window's top.
             if let Some(display) = window.display(cx) {
-                let limit =
-                    (f32::from(display.bounds().size.height) - MODAL_SCROLL_FIT_SCREEN_MARGIN).round();
-                needed = needed.min(limit);
+                let visible = display.visible_bounds();
+                let visible_bottom = f32::from(visible.origin.y + visible.size.height);
+                let top = f32::from(window.bounds().origin.y);
+                let limit = (visible_bottom - top - MODAL_SCROLL_FIT_SCREEN_MARGIN).round();
+                if limit > 0.0 {
+                    needed = needed.min(limit);
+                }
             }
             let current = f32::from(window.viewport_size().height).round();
-            let first = requested.get().is_none();
-            if !first && needed <= current {
-                return;
-            }
-            if (needed - current).abs() < 1.0 || requested.get() == Some(needed) {
-                if first {
-                    requested.set(Some(needed));
-                }
+            // CDXC:AppModal 2026-09-16 DECISION:
+            // User: a scrolling modal must not grow when a section expands (Remote Setup's "How to install"); it keeps the height it opened with and the body scrolls instead.
+            if requested.get().is_some() {
                 return;
             }
             requested.set(Some(needed));
+            if (needed - current).abs() < 1.0 {
+                return;
+            }
             let handle = window.window_handle();
             let width = window.viewport_size().width;
             cx.defer(move |cx| {

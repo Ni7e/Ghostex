@@ -2,13 +2,18 @@
 //! States (`GHOSTEX_NATIVE_MODAL_DEMO_STATE`): the default answers the worktree
 //! request after one second with branches and worktrees; `loading` never
 //! answers; `empty` answers with no branches and no worktrees; `error` answers
-//! with a failure; `noagents` opens without any command agent. After the
+//! with a failure (`errorexisting` and `emptyexisting` show those in Open
+//! Existing mode); `noagents` opens without any command agent. After the
 //! answer, `openexisting` switches the mode, `prompt` types a first prompt,
 //! `images` types a prompt and inserts two picked image links, `branchmenu`,
 //! `branchfilter`, `branchempty`, `existingmenu`, `existingfilter` and
-//! `agentmenu` open a picker (with a typed filter where named).
+//! `agentmenu` open a picker (with a typed filter where named). The `key*`
+//! states drive the keyboard contract through `Window::dispatch_keystroke` and
+//! log the outcome: `keyenter` submits a typed prompt, `keyshiftenter` inserts
+//! a newline before submitting, `keyescape` cancels, and `keypick` filters the
+//! branch picker, moves down once and chooses with Enter before submitting.
 use super::create_worktree_modal::*;
-use gpui::{App, AppContext as _, Entity, WindowHandle};
+use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Keystroke, WindowHandle};
 use gpui_component::Root;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -81,7 +86,8 @@ fn apply_preview_state(slot: &Slot, state: &str, cx: &mut App) {
     };
     let _ = window.update(cx, |_root, window, cx| {
         view.update(cx, |modal, cx| match state {
-            "openexisting" | "existingmenu" | "existingfilter" => {
+            "openexisting" | "existingmenu" | "existingfilter" | "errorexisting"
+            | "emptyexisting" => {
                 modal.preview_set_mode(CreateWorktreeMode::OpenExisting, window, cx);
                 match state {
                     "existingmenu" => {
@@ -110,9 +116,49 @@ fn apply_preview_state(slot: &Slot, state: &str, cx: &mut App) {
                 modal.preview_open_picker(CreateWorktreePicker::Branch, "zzz", window, cx)
             }
             "agentmenu" => modal.preview_open_picker(CreateWorktreePicker::Agent, "", window, cx),
+            "keyenter" | "keypick" => {
+                modal.preview_set_prompt("Fix the flaky sidebar test", window, cx);
+                if state == "keypick" {
+                    modal.preview_open_picker(CreateWorktreePicker::Branch, "fea", window, cx);
+                }
+            }
+            "keyshiftenter" => modal.preview_set_prompt("a", window, cx),
             _ => {}
         });
     });
+    match state {
+        "keyenter" => dispatch_keys(slot, &["enter"], cx),
+        "keyshiftenter" => dispatch_keys(slot, &["shift-enter", "b", "enter"], cx),
+        "keyescape" => dispatch_keys(slot, &["escape"], cx),
+        "keypick" => dispatch_keys(slot, &["down", "enter", "enter"], cx),
+        _ => {}
+    }
+}
+
+/// Dispatches keystrokes into the demo window 250ms apart, the way the platform would.
+fn dispatch_keys(slot: &Slot, keys: &'static [&'static str], cx: &mut App) {
+    let slot = slot.clone();
+    cx.spawn(async move |cx| {
+        for key in keys {
+            cx.background_executor()
+                .timer(Duration::from_millis(250))
+                .await;
+            let target = slot.borrow().clone();
+            let Some((window, _view)) = target else {
+                return;
+            };
+            // Through the untyped handle: the typed one leases `Root`, which the
+            // dispatched event re-enters while it re-renders the window.
+            let any_window: AnyWindowHandle = window.into();
+            let _ = cx.update(|cx| {
+                let _ = any_window.update(cx, |_root, window, cx| {
+                    let keystroke = Keystroke::parse(key).expect("a valid demo keystroke");
+                    window.dispatch_keystroke(keystroke, cx);
+                });
+            });
+        }
+    })
+    .detach();
 }
 
 fn deliver_worktrees(slot: &Slot, request_id: &str, state: &str, cx: &mut App) {
@@ -122,7 +168,7 @@ fn deliver_worktrees(slot: &Slot, request_id: &str, state: &str, cx: &mut App) {
     };
     let _ = window.update(cx, |_root, _window, cx| {
         view.update(cx, |modal, cx| match state {
-            "error" => modal.receive_project_worktrees_result(
+            "error" | "errorexisting" => modal.receive_project_worktrees_result(
                 request_id,
                 false,
                 Some(
@@ -133,7 +179,7 @@ fn deliver_worktrees(slot: &Slot, request_id: &str, state: &str, cx: &mut App) {
                 Vec::new(),
                 cx,
             ),
-            "empty" => modal.receive_project_worktrees_result(
+            "empty" | "emptyexisting" => modal.receive_project_worktrees_result(
                 request_id,
                 true,
                 None,

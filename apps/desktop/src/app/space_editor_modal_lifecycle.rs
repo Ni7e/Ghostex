@@ -41,7 +41,9 @@ impl GhostexGpuiApp {
         }
         let context = GpuiSpaceEditorContext {
             mode,
-            space_id: (mode == SpaceEditorMode::Edit).then_some(space_id).flatten(),
+            space_id: (mode == SpaceEditorMode::Edit)
+                .then_some(space_id)
+                .flatten(),
             member_collection_id: (mode == SpaceEditorMode::Create)
                 .then(|| non_empty("memberCollectionId"))
                 .flatten(),
@@ -64,7 +66,9 @@ impl GhostexGpuiApp {
             GpuiAppModalKind::SidebarSpaceEditor,
             SPACE_EDITOR_MODAL_WIDTH,
             SPACE_EDITOR_MODAL_INITIAL_HEIGHT,
-            move |window, cx| cx.new(|cx| GpuiSpaceEditorModalWindow::new(config, host, window, cx)),
+            move |window, cx| {
+                cx.new(|cx| GpuiSpaceEditorModalWindow::new(config, host, window, cx))
+            },
             cx,
         );
     }

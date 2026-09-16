@@ -319,11 +319,12 @@ impl GpuiPortlessSetupModalWindow {
                 |this, window, cx| this.dismiss(window, cx),
                 cx,
             ),
-            modal_danger_action_button(
+            modal_action_button(
                 &p,
                 "portless-setup-disable",
                 DISABLE,
                 None,
+                ModalButtonTone::Danger,
                 false,
                 |this, window, cx| {
                     this.close_window_and_send(PortlessSetupModalCommand::Disable, window, cx)
@@ -347,7 +348,6 @@ impl GpuiPortlessSetupModalWindow {
 impl Render for GpuiPortlessSetupModalWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
-        let copy = copy_for(self.mode);
         let content = vec![self.render_header(), self.render_body()];
         let footer = self.render_footer(cx);
         modal_shell(

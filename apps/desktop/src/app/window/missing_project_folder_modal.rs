@@ -130,11 +130,12 @@ impl GpuiMissingProjectFolderModalWindow {
     fn render_footer(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         modal_footer(vec![
-            modal_danger_action_button(
+            modal_action_button(
                 &p,
                 "missing-project-folder-remove",
                 REMOVE_PROJECT,
                 Some(modal_icon(ICON_TRASH, 15.0, p.destructive).into_any_element()),
+                ModalButtonTone::Danger,
                 false,
                 |this, window, cx| {
                     this.close_window_and_send(MissingProjectFolderModalCommand::Remove, window, cx)

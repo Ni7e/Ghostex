@@ -20,58 +20,58 @@ mod export_transcript_modal;
 #[path = "../app/window/native_modal_kit.rs"]
 mod native_modal_kit;
 // DEMO-MODULES: one `#[path]` include per converted modal, plus its demo module under native_modal_demo/.
-#[path = "../app/window/update_available_modal.rs"]
-mod update_available_modal;
-#[path = "native_modal_demo/update_available.rs"]
-mod update_available_demo;
-#[path = "../app/window/remote_setup_modal.rs"]
-mod remote_setup_modal;
-#[path = "native_modal_demo/remote_setup.rs"]
-mod remote_setup_demo;
-#[path = "../app/window/delayed_send_modal.rs"]
-mod delayed_send_modal;
-#[path = "native_modal_demo/delayed_send.rs"]
-mod delayed_send_demo;
-#[path = "../app/window/space_editor_modal.rs"]
-mod space_editor_modal;
-#[path = "native_modal_demo/space_editor.rs"]
-mod space_editor_demo;
-#[path = "../app/window/create_worktree_modal.rs"]
-mod create_worktree_modal;
-#[path = "native_modal_demo/create_worktree.rs"]
-mod create_worktree_demo;
-#[path = "../app/window/remote_gxserver_install_modal.rs"]
-mod remote_gxserver_install_modal;
-#[path = "native_modal_demo/remote_gxserver_install.rs"]
-mod remote_gxserver_install_demo;
-#[path = "../app/window/portless_setup_modal.rs"]
-mod portless_setup_modal;
-#[path = "native_modal_demo/portless_setup.rs"]
-mod portless_setup_demo;
-#[path = "../app/window/delete_worktree_modal.rs"]
-mod delete_worktree_modal;
-#[path = "native_modal_demo/delete_worktree.rs"]
-mod delete_worktree_demo;
-#[path = "../app/window/rename_worktree_modal.rs"]
-mod rename_worktree_modal;
-#[path = "native_modal_demo/rename_worktree.rs"]
-mod rename_worktree_demo;
-#[path = "../app/window/missing_project_folder_modal.rs"]
-mod missing_project_folder_modal;
-#[path = "native_modal_demo/missing_project_folder.rs"]
-mod missing_project_folder_demo;
-#[path = "../app/window/rename_session_modal.rs"]
-mod rename_session_modal;
-#[path = "native_modal_demo/rename_session.rs"]
-mod rename_session_demo;
-#[path = "../app/window/session_note_modal.rs"]
-mod session_note_modal;
-#[path = "native_modal_demo/session_note.rs"]
-mod session_note_demo;
 #[path = "native_modal_demo/agent_hooks_required.rs"]
 mod agent_hooks_required_demo;
 #[path = "../app/window/agent_hooks_required_modal.rs"]
 mod agent_hooks_required_modal;
+#[path = "native_modal_demo/create_worktree.rs"]
+mod create_worktree_demo;
+#[path = "../app/window/create_worktree_modal.rs"]
+mod create_worktree_modal;
+#[path = "native_modal_demo/delayed_send.rs"]
+mod delayed_send_demo;
+#[path = "../app/window/delayed_send_modal.rs"]
+mod delayed_send_modal;
+#[path = "native_modal_demo/delete_worktree.rs"]
+mod delete_worktree_demo;
+#[path = "../app/window/delete_worktree_modal.rs"]
+mod delete_worktree_modal;
+#[path = "native_modal_demo/missing_project_folder.rs"]
+mod missing_project_folder_demo;
+#[path = "../app/window/missing_project_folder_modal.rs"]
+mod missing_project_folder_modal;
+#[path = "native_modal_demo/portless_setup.rs"]
+mod portless_setup_demo;
+#[path = "../app/window/portless_setup_modal.rs"]
+mod portless_setup_modal;
+#[path = "native_modal_demo/remote_gxserver_install.rs"]
+mod remote_gxserver_install_demo;
+#[path = "../app/window/remote_gxserver_install_modal.rs"]
+mod remote_gxserver_install_modal;
+#[path = "native_modal_demo/remote_setup.rs"]
+mod remote_setup_demo;
+#[path = "../app/window/remote_setup_modal.rs"]
+mod remote_setup_modal;
+#[path = "native_modal_demo/rename_session.rs"]
+mod rename_session_demo;
+#[path = "../app/window/rename_session_modal.rs"]
+mod rename_session_modal;
+#[path = "native_modal_demo/rename_worktree.rs"]
+mod rename_worktree_demo;
+#[path = "../app/window/rename_worktree_modal.rs"]
+mod rename_worktree_modal;
+#[path = "native_modal_demo/session_note.rs"]
+mod session_note_demo;
+#[path = "../app/window/session_note_modal.rs"]
+mod session_note_modal;
+#[path = "native_modal_demo/space_editor.rs"]
+mod space_editor_demo;
+#[path = "../app/window/space_editor_modal.rs"]
+mod space_editor_modal;
+#[path = "native_modal_demo/update_available.rs"]
+mod update_available_demo;
+#[path = "../app/window/update_available_modal.rs"]
+mod update_available_modal;
 
 use export_transcript_modal::*;
 use gpui::{

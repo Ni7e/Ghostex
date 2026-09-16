@@ -9,7 +9,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, FocusHandle, FontWeight, HighlightStyle, InteractiveElement as _,
     IntoElement, KeyDownEvent, ParentElement as _, Render, Rgba, SharedString,
-    StatefulInteractiveElement as _, StyledText, Styled as _, Window, div, px, rgb,
+    StatefulInteractiveElement as _, Styled as _, StyledText, Window, div, px, rgb,
 };
 use gpui_component::{h_flex, v_flex};
 use std::ops::Range;
@@ -555,7 +555,12 @@ impl GpuiUpdateAvailableModalWindow {
             None if depth == 0 => marker
                 .pt(px(DISC_TOP))
                 .pl(px(DISC_INSET))
-                .child(div().size(px(DISC_DIAMETER)).rounded_full().bg(hsla(p.foreground)))
+                .child(
+                    div()
+                        .size(px(DISC_DIAMETER))
+                        .rounded_full()
+                        .bg(hsla(p.foreground)),
+                )
                 .into_any_element(),
             None if depth == 1 => marker
                 .pt(px(CIRCLE_TOP))
@@ -691,7 +696,11 @@ impl GpuiUpdateAvailableModalWindow {
                 Block::List(items) if items.last().is_some_and(|item| !item.children.is_empty())
             );
             let trailing = if index == last {
-                if ends_with_nested_list { BLOCK_MARGIN } else { 0.0 }
+                if ends_with_nested_list {
+                    BLOCK_MARGIN
+                } else {
+                    0.0
+                }
             } else {
                 0.0
             };

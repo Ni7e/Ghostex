@@ -130,6 +130,21 @@ impl GhostexGpuiApp {
             GpuiAppModalKind::RenameWorktree => {
                 self.open_gpui_rename_worktree_modal(open_message, cx);
             }
+            GpuiAppModalKind::DelayedSend => {
+                self.open_gpui_delayed_send_modal(open_message, cx);
+            }
+            GpuiAppModalKind::SidebarSpaceEditor => {
+                self.open_gpui_space_editor_modal(open_message, cx);
+            }
+            GpuiAppModalKind::UpdateAvailable => {
+                self.open_gpui_update_available_modal(open_message, cx);
+            }
+            GpuiAppModalKind::RemoteSetup => {
+                self.open_gpui_remote_setup_modal(open_message, cx);
+            }
+            GpuiAppModalKind::Worktree => {
+                self.open_gpui_create_worktree_modal(open_message, cx);
+            }
             // NATIVE-MODAL-OPEN-ARMS: one arm per converted modal kind.
             _ => return false,
         }
@@ -158,6 +173,12 @@ impl GhostexGpuiApp {
         match kind {
             GpuiAppModalKind::MissingProjectFolder => {
                 self.receive_gpui_missing_project_folder_modal_message(message, cx)
+            }
+            GpuiAppModalKind::DelayedSend => {
+                self.receive_gpui_delayed_send_modal_message(message, cx)
+            }
+            GpuiAppModalKind::Worktree => {
+                self.receive_gpui_create_worktree_modal_message(message, cx)
             }
             // NATIVE-MODAL-MESSAGE-ARMS: one arm per modal kind that receives host messages.
             _ => {

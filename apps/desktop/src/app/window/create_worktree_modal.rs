@@ -303,6 +303,8 @@ impl GpuiCreateWorktreeModalWindow {
             InputState::new(window, cx)
                 .multi_line(true)
                 .auto_grow(1, TEXTAREA_MAX_ROWS)
+                // Plain Enter submits (`handleKeyDown`), Shift+Enter is the editor's newline.
+                .submit_on_enter(true)
                 .placeholder(PROMPT_PLACEHOLDER)
         });
         let existing_filter =
@@ -313,13 +315,10 @@ impl GpuiCreateWorktreeModalWindow {
             cx.subscribe_in(
                 &prompt,
                 window,
-                |_this: &mut Self, _input, event: &InputEvent, _window, cx| {
-                    if matches!(
-                        event,
-                        InputEvent::Change | InputEvent::Focus | InputEvent::Blur
-                    ) {
-                        cx.notify();
-                    }
+                |this: &mut Self, _input, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter { shift: false, .. } => this.submit(window, cx),
+                    InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
+                    InputEvent::PressEnter { .. } => {}
                 },
             ),
             cx.subscribe_in(
@@ -455,6 +454,7 @@ impl GpuiCreateWorktreeModalWindow {
 
     /// Preview hooks for the standalone demo binary: put the dialog into a
     /// mode, a prompt text, or an open picker with a typed filter.
+    #[allow(dead_code)] // used by src/bin/native_modal_demo/create_worktree.rs only
     pub(crate) fn preview_set_mode(
         &mut self,
         mode: CreateWorktreeMode,
@@ -464,6 +464,7 @@ impl GpuiCreateWorktreeModalWindow {
         self.set_mode(mode, window, cx);
     }
 
+    #[allow(dead_code)] // used by src/bin/native_modal_demo/create_worktree.rs only
     pub(crate) fn preview_set_prompt(
         &mut self,
         text: &str,
@@ -472,11 +473,15 @@ impl GpuiCreateWorktreeModalWindow {
     ) {
         self.prompt.update(cx, |prompt, cx| {
             prompt.set_value(text.to_string(), window, cx);
+            // A typed prompt leaves the caret at its end; `set_value` parks it at 0.
+            let end = prompt.value().len();
+            prompt.set_selected_range(end..end, cx);
             prompt.focus(window, cx);
         });
         cx.notify();
     }
 
+    #[allow(dead_code)] // used by src/bin/native_modal_demo/create_worktree.rs only
     pub(crate) fn preview_open_picker(
         &mut self,
         picker: CreateWorktreePicker,
@@ -872,8 +877,13 @@ impl GpuiCreateWorktreeModalWindow {
         match key {
             "escape" => self.cancel(window, cx),
             "enter" => {
-                // Shift+Enter is the editor's newline; plain Enter submits when it can and does nothing otherwise.
-                if event.keystroke.modifiers.shift || event.is_held {
+                // With the prompt focused, gpui runs the editor's Enter action
+                // before this listener, so its `PressEnter` subscription submits
+                // and the propagated key must not submit a second time.
+                if event.keystroke.modifiers.shift
+                    || event.is_held
+                    || self.prompt.read(cx).focus_handle(cx).is_focused(window)
+                {
                     return;
                 }
                 self.submit(window, cx);

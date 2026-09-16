@@ -42,7 +42,8 @@ const ANDROID: &str = "Android";
 const ANDROID_DETAIL: &str = "Install the APK from the latest GitHub release.";
 const HOW_TO_INSTALL: &str = "How to install";
 const IPHONE: &str = "iPhone";
-const IPHONE_DETAIL: &str = "TestFlight only for now. Join the Discord and ask for TestFlight access.";
+const IPHONE_DETAIL: &str =
+    "TestFlight only for now. Join the Discord and ask for TestFlight access.";
 const JOIN_DISCORD: &str = "Join Discord";
 const ANDROID_POPOVER_TITLE: &str = "Install on your Android phone";
 const ANDROID_SCAN_HINT: &str =
@@ -133,7 +134,8 @@ struct QrGrid {
 }
 
 fn qr_grid(text: &str) -> Option<QrGrid> {
-    let code = qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::M).ok()?;
+    let code =
+        qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::M).ok()?;
     let width = code.width();
     let dark = code
         .to_colors()
@@ -220,6 +222,12 @@ impl GpuiRemoteSetupModalWindow {
 
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_window_and_send(RemoteSetupModalCommand::Close, window, cx);
+    }
+
+    /// Preview hook for the standalone demo binary: expand the Android popover after open.
+    #[allow(dead_code)] // used by src/bin/native_modal_demo/remote_setup.rs only
+    pub(crate) fn preview_toggle_android(&mut self, cx: &mut Context<Self>) {
+        self.toggle_android(cx);
     }
 
     fn toggle_android(&mut self, cx: &mut Context<Self>) {
@@ -399,7 +407,9 @@ impl GpuiRemoteSetupModalWindow {
             .gap(px(12.0))
             .px(px(12.0))
             .py(px(10.0))
-            .when(divider, |this| this.border_t_1().border_color(hsla(p.hairline)))
+            .when(divider, |this| {
+                this.border_t_1().border_color(hsla(p.hairline))
+            })
             .child(
                 v_flex()
                     .flex_1()
@@ -637,7 +647,9 @@ impl GpuiRemoteSetupModalWindow {
                         false,
                         install_button,
                     ))
-                    .when(android_open, |this| this.child(self.render_android_popover(cx)))
+                    .when(android_open, |this| {
+                        this.child(self.render_android_popover(cx))
+                    })
                     .child(self.render_row(
                         ICON_BRAND_APPLE,
                         IPHONE,
@@ -888,12 +900,7 @@ impl GpuiRemoteSetupModalWindow {
                     .text_color(hsla(p.muted))
                     .child(EYEBROW),
             )
-            .child(
-                div()
-                    .text_size(px(16.0))
-                    .line_height(px(20.8))
-                    .child(TITLE),
-            )
+            .child(div().text_size(px(16.0)).line_height(px(20.8)).child(TITLE))
             .child(
                 div()
                     .text_size(px(13.0))
