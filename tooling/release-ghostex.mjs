@@ -2052,17 +2052,109 @@ function extractChangelogSectionFromText(changelog, version) {
 
 const LEGACY_RELEASE_NOTE_HEADINGS = ['- Major', '- Minor', '- GPUI'];
 const RELEASE_NOTE_HEADINGS = ['- New Features', '- Major Improvements', '- Minor Improvements', '- Stabilization'];
+const BULLET_RELEASE_NOTE_HEADINGS = [...LEGACY_RELEASE_NOTE_HEADINGS, ...RELEASE_NOTE_HEADINGS];
+const HEADED_RELEASE_NOTE_HEADINGS = [
+  '### ✨ New Features',
+  '### 🚀 Major Improvements',
+  '### 🔧 Minor Improvements',
+  '### 🩹 Stabilization',
+];
+
+function changelogNotesLines(notes) {
+  return notes.split(/\r?\n/).filter((line) => line.trim().length > 0);
+}
+
+/**
+ * Which of the three accepted section shapes `notes` is written in: `headed`
+ * (emoji `###` group headings with flat `- ` items, 9.8.0 and later),
+ * `bullets` (`- New Features` top-level bullets with `  - ` items), or
+ * `legacy` (`- Major` / `- Minor` / `- GPUI`). Any `#` line makes the section
+ * headed so a headed section that also carries bullet headings is reported as
+ * mixed instead of as a malformed bullet section.
+ */
+function changelogNotesFormat(notes) {
+  const lines = changelogNotesLines(notes);
+  if (lines.some((line) => line.startsWith('#'))) {
+    return 'headed';
+  }
+  if (lines.some((line) => LEGACY_RELEASE_NOTE_HEADINGS.includes(line))) {
+    return 'legacy';
+  }
+  return 'bullets';
+}
+
+/** The change items of a section in document order, without their bullet markers, in every accepted format. */
+function changelogNotesItems(notes) {
+  const lines = changelogNotesLines(notes);
+  if (changelogNotesFormat(notes) === 'headed') {
+    return lines.filter((line) => line.startsWith('- ')).map((line) => line.slice(2).trim());
+  }
+  return lines.filter((line) => line.startsWith('  - ')).map((line) => line.slice(4).trim());
+}
+
+function validateHeadedReleaseNotes(lines, version) {
+  const prefix = `CHANGELOG.md section for ${version}`;
+  const headingList = HEADED_RELEASE_NOTE_HEADINGS.join(', ');
+  const mixed = lines.find((line) => BULLET_RELEASE_NOTE_HEADINGS.includes(line));
+  if (mixed) {
+    throw new ReleaseError(`${prefix} must not mix the ${headingList} headings with the \`${mixed}\` bullet heading.`);
+  }
+  if (!lines[0].startsWith('#')) {
+    throw new ReleaseError(`${prefix} must start with one of ${headingList}; its first line is \`${lines[0]}\`.`);
+  }
+  const used = [];
+  let itemsInGroup = 0;
+  for (const line of lines) {
+    if (line.startsWith('#')) {
+      if (!HEADED_RELEASE_NOTE_HEADINGS.includes(line)) {
+        throw new ReleaseError(`${prefix} has an unknown group heading \`${line}\`; use one of ${headingList}.`);
+      }
+      const previous = used.at(-1);
+      if (previous && itemsInGroup === 0) {
+        throw new ReleaseError(`${prefix} has no items under ${previous}.`);
+      }
+      if (used.includes(line)) {
+        throw new ReleaseError(`${prefix} repeats the ${line} heading.`);
+      }
+      if (previous && HEADED_RELEASE_NOTE_HEADINGS.indexOf(line) < HEADED_RELEASE_NOTE_HEADINGS.indexOf(previous)) {
+        throw new ReleaseError(
+          `${prefix} must keep its groups in ${headingList} order; ${line} cannot follow ${previous}.`
+        );
+      }
+      used.push(line);
+      itemsInGroup = 0;
+      continue;
+    }
+    if (!line.startsWith('- ') || line.slice(2).trim().length === 0) {
+      throw new ReleaseError(
+        `${prefix} must keep every change item on one physical \`- \` line at column 0 under ${used.at(-1)}; found \`${line}\`.`
+      );
+    }
+    itemsInGroup += 1;
+  }
+  if (itemsInGroup === 0) {
+    throw new ReleaseError(`${prefix} has no items under ${used.at(-1)}.`);
+  }
+}
 
 function validateMajorMinorReleaseNotes(notes, version) {
   /*
-   * CDXC:Release 2026-09-07 DECISION:
-   * User: changelog sections read as New Features, Major Improvements, Minor
-   * Improvements, and Stabilization, in that order, and stay non-technical.
-   * Sections published before this keep the older Major/Minor/GPUI vocabulary,
-   * so both are accepted and a section may not mix the two.
-   * Enforce this before publishing so GitHub and Sparkle notes stay consistent.
+   * CDXC:Release 2026-09-16 DECISION:
+   * User: "we add emojis and headings dividing the changelog items into
+   * different groups", so a section is `### ✨ New Features`, `### 🚀 Major
+   * Improvements`, `### 🔧 Minor Improvements`, `### 🩹 Stabilization`, in
+   * that order, each at most once, with flat `- ` items and no nesting or
+   * wrapping. This supersedes the 2026-09-07 decision that wrote the same four
+   * groups as `- New Features` top-level bullets with `  - ` items; that shape
+   * and the older Major/Minor/GPUI bullets stay valid because sections up to
+   * 9.7.0 are already published, and a section may not mix formats.
+   * Enforce this before publishing so GitHub, Sparkle, and Velopack notes stay consistent.
    */
-  const lines = notes.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const lines = changelogNotesLines(notes);
+  if (changelogNotesFormat(notes) === 'headed') {
+    validateHeadedReleaseNotes(lines, version);
+    return;
+  }
   const legacy = lines.some((line) => LEGACY_RELEASE_NOTE_HEADINGS.includes(line));
   const current = lines.some((line) => RELEASE_NOTE_HEADINGS.includes(line));
   if (legacy && current) {
@@ -3029,6 +3121,8 @@ async function main() {
 export {
   ReleaseError,
   buildGithubReleaseNotes,
+  changelogNotesFormat,
+  changelogNotesItems,
   extractChangelogSectionFromText,
   isHomebrewHostToolchainVersionError,
   missingRemoteGxserverLinuxPackageResources,

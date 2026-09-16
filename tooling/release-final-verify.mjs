@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
+  changelogNotesFormat,
+  changelogNotesItems,
   extractChangelogSectionFromText,
   onDemandAssetNames,
   releaseBuildVersion,
@@ -544,7 +546,7 @@ async function main() {
   await check('changelog-section', async () => {
     const changelog = await readFile(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
     changelogNotes = extractChangelogSectionFromText(changelog, version);
-    return 'present with Major/Minor bullets';
+    return `present in the ${changelogNotesFormat(changelogNotes)} format with ${changelogNotesItems(changelogNotes).length} items`;
   });
 
   let liveSignature = null;
@@ -580,11 +582,8 @@ async function main() {
     if (!liveSignature) {
       throw new Error('Top enclosure has no EdDSA signature.');
     }
-    const notesProbe = changelogNotes
-      ?.split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.startsWith('- ') && line !== '- Major' && line !== '- Minor' && line !== '- GPUI')
-      ?.slice(2);
+    /* The first change item, never a group heading, in every accepted section format. */
+    const notesProbe = changelogNotes ? changelogNotesItems(changelogNotes)[0] : undefined;
     if (!embeddedNotes.trim()) {
       throw new Error('Top item has empty embedded release notes.');
     }

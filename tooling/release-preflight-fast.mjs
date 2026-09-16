@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
+  changelogNotesFormat,
+  changelogNotesItems,
   extractChangelogSectionFromText,
   releaseBuildVersion,
   validateMajorMinorReleaseNotes,
@@ -312,9 +314,7 @@ async function checkChangelog(options) {
   const changelog = await readFile(path.join(repoRoot, 'CHANGELOG.md'), 'utf8');
   const notes = extractChangelogSectionFromText(changelog, options.version);
   validateMajorMinorReleaseNotes(notes, options.version);
-  return pass(
-    `${notes.split(/\r?\n/).filter((line) => line.trim().startsWith('- ') || line.trim().startsWith('  - ')).length} bullets`
-  );
+  return pass(`${changelogNotesItems(notes).length} items in the ${changelogNotesFormat(notes)} format`);
 }
 
 async function checkSparkleBuildNumber(options) {

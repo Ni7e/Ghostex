@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest';
 import {
   ReleaseError,
   buildGithubReleaseNotes,
+  changelogNotesFormat,
+  changelogNotesItems,
   extractChangelogSectionFromText,
   isHomebrewHostToolchainVersionError,
   missingRemoteGxserverLinuxPackageResources,
@@ -140,6 +142,90 @@ describe('Ghostex release automation helpers', () => {
     );
   });
 
+  test('accepts the emoji-headed changelog format with flat items', () => {
+    const headed = [
+      '### ✨ New Features',
+      '',
+      '- One user-facing sentence per item.',
+      '- Another item.',
+      '',
+      '### 🚀 Major Improvements',
+      '',
+      '- Item.',
+      '',
+      '### 🔧 Minor Improvements',
+      '',
+      '- Item.',
+      '',
+      '### 🩹 Stabilization',
+      '',
+      '- Item.',
+    ].join('\n');
+    expect(() => validateMajorMinorReleaseNotes(headed, '9.8.0')).not.toThrow();
+    expect(() => validateMajorMinorReleaseNotes('### 🩹 Stabilization\n\n- Only a fix.', '9.8.0')).not.toThrow();
+    expect(() =>
+      validateMajorMinorReleaseNotes('### ✨ New Features\n- Feature.\n### 🩹 Stabilization\n- Fix.', '9.8.0')
+    ).not.toThrow();
+    expect(changelogNotesFormat(headed)).toBe('headed');
+    expect(changelogNotesItems(headed)).toEqual([
+      'One user-facing sentence per item.',
+      'Another item.',
+      'Item.',
+      'Item.',
+      'Item.',
+    ]);
+  });
+
+  test('rejects malformed emoji-headed changelog sections with a precise reason', () => {
+    expect(() =>
+      validateMajorMinorReleaseNotes('### 🩹 Stabilization\n- Fix.\n### ✨ New Features\n- Feature.', '9.8.0')
+    ).toThrow(/order; ### ✨ New Features cannot follow ### 🩹 Stabilization/u);
+    expect(() =>
+      validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n### ✨ New Features\n- Two.', '9.8.0')
+    ).toThrow(/repeats the ### ✨ New Features heading/u);
+    expect(() =>
+      validateMajorMinorReleaseNotes('### ✨ New Features\n\n### 🩹 Stabilization\n- Fix.', '9.8.0')
+    ).toThrow(/no items under ### ✨ New Features/u);
+    expect(() => validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n### 🩹 Stabilization', '9.8.0')).toThrow(
+      /no items under ### 🩹 Stabilization/u
+    );
+    expect(() => validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n  - Nested.', '9.8.0')).toThrow(
+      /one physical `- ` line at column 0 under ### ✨ New Features; found `  - Nested\.`/u
+    );
+    expect(() =>
+      validateMajorMinorReleaseNotes('### ✨ New Features\n- Session Chat controls.\n  Includes wrapping.', '9.8.0')
+    ).toThrow(/found `  Includes wrapping\.`/u);
+    expect(() => validateMajorMinorReleaseNotes('### ✨ New Features\n- ', '9.8.0')).toThrow(/found `- `/u);
+    expect(() => validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n- Major\n  - Big.', '9.8.0')).toThrow(
+      /must not mix .* with the `- Major` bullet heading/u
+    );
+    expect(() =>
+      validateMajorMinorReleaseNotes('### ✨ New Features\n- One.\n- Stabilization\n  - Fix.', '9.8.0')
+    ).toThrow(/with the `- Stabilization` bullet heading/u);
+    expect(() => validateMajorMinorReleaseNotes('- Loose item.\n### ✨ New Features\n- One.', '9.8.0')).toThrow(
+      /must start with one of .*; its first line is `- Loose item\.`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes('### New Features\n- One.', '9.8.0')).toThrow(
+      /unknown group heading `### New Features`/u
+    );
+    expect(() => validateMajorMinorReleaseNotes('## ✨ New Features\n- One.', '9.8.0')).toThrow(
+      /unknown group heading `## ✨ New Features`/u
+    );
+  });
+
+  test('keeps both bullet changelog formats valid and lists their items without headings', () => {
+    const bullets = '- New Features\n\n  - Feature one.\n\n- Stabilization\n\n  - Fix one.';
+    expect(() => validateMajorMinorReleaseNotes(bullets, '9.7.0')).not.toThrow();
+    expect(changelogNotesFormat(bullets)).toBe('bullets');
+    expect(changelogNotesItems(bullets)).toEqual(['Feature one.', 'Fix one.']);
+    const legacy = '- Major\n  - Big.\n- Minor\n  - Small.';
+    expect(changelogNotesFormat(legacy)).toBe('legacy');
+    expect(changelogNotesItems(legacy)).toEqual(['Big.', 'Small.']);
+    expect(() => validateMajorMinorReleaseNotes('- New Features\n  - One.\n- Major\n  - Big.', '9.7.0')).toThrow(
+      /must not mix Major\/Minor headings/u
+    );
+  });
+
   test('selects the latest Android build tool without GNU sort', () => {
     expect(
       selectLatestAndroidBuildTool(
@@ -199,6 +285,26 @@ describe('Ghostex release automation helpers', () => {
     const notes = extractChangelogSectionFromText(changelog, '9.9.9');
     expect(notes).toContain('Big improvement.');
     expect(notes).not.toContain('Older change.');
+    /* `###` group headings must not end the section the way `## ` version headings do. */
+    const headed = extractChangelogSectionFromText(
+      [
+        '# Changelog',
+        '',
+        '## 9.8.0 - 2026-09-20',
+        '',
+        '### ✨ New Features',
+        '',
+        '- Feature.',
+        '',
+        '### 🩹 Stabilization',
+        '',
+        '- Fix.',
+        '',
+        ...changelog.split('\n').slice(2),
+      ].join('\n'),
+      '9.8.0'
+    );
+    expect(headed).toBe('### ✨ New Features\n\n- Feature.\n\n### 🩹 Stabilization\n\n- Fix.');
     expect(() => extractChangelogSectionFromText(changelog, '1.0.0')).toThrow(ReleaseError);
     expect(() =>
       extractChangelogSectionFromText(

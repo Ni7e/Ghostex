@@ -19,8 +19,18 @@ import { validateMajorMinorReleaseNotes } from './release-ghostex.mjs';
  CHANGELOG.md: drafting and committing are separate acts, and the operator
  reviews in between.
 
- It is not an oracle and must not be trusted blindly. Major vs Minor here is a
- guess from the conventional-commit type; the real judgement is the operator's.
+ It is not an oracle and must not be trusted blindly. The group each commit
+ lands in (New Features, Minor Improvements, Stabilization) is a guess from the
+ conventional-commit type; the real judgement is the operator's.
+
+ CDXC:Release 2026-09-16 DECISION:
+ User: "we add emojis and headings dividing the changelog items into different
+ groups", so the draft is written in the headed section format (`### ✨ New
+ Features` and its siblings with flat `- ` items) that
+ validateMajorMinorReleaseNotes accepts for 9.8.0 and later, instead of the
+ `- Major` / `- Minor` bullets it emitted before. Empty groups are omitted
+ because the format allows it; only a draft with no classified commit at all
+ keeps a TODO placeholder so the section still validates.
 */
 
 const repoRoot = path.resolve(new URL('..', import.meta.url).pathname);
@@ -36,8 +46,17 @@ const FIELD_SEPARATOR = '\u001f';
 */
 const internalTypes = new Set(['build', 'chore', 'ci', 'docs', 'refactor', 'release', 'revert', 'style', 'test']);
 const internalScopes = new Set(['ci', 'deps', 'release', 'skills', 'tooling']);
-const majorTypes = new Set(['feat']);
-const minorTypes = new Set(['fix', 'perf']);
+const featureTypes = new Set(['feat']);
+const minorTypes = new Set(['perf']);
+const stabilizationTypes = new Set(['fix']);
+
+/* Section groups in the order the validator requires, keyed by draft bucket. */
+const groupHeadings = [
+  ['features', '### ✨ New Features'],
+  ['major', '### 🚀 Major Improvements'],
+  ['minor', '### 🔧 Minor Improvements'],
+  ['stabilization', '### 🩹 Stabilization'],
+];
 
 /* Co-author trailers written by agent tooling, never a human to credit. */
 const toolAuthorPattern = /(cursor|claude|codex|copilot|github-actions|dependabot|renovate|\[bot\])/i;
@@ -297,15 +316,18 @@ function classify(commit) {
     return { bucket: 'omitted', why: 'touches only docs, skills, tooling, or workflow files' };
   }
   if (commit.breaking) {
-    return { bucket: 'major', why: 'marked breaking' };
+    return { bucket: 'features', why: 'marked breaking' };
   }
-  if (commit.type && majorTypes.has(commit.type)) {
-    return { bucket: 'major', why: `${commit.type} commits start in Major` };
+  if (commit.type && featureTypes.has(commit.type)) {
+    return { bucket: 'features', why: `${commit.type} commits start in New Features` };
   }
   if (commit.type && minorTypes.has(commit.type)) {
-    return { bucket: 'minor', why: `${commit.type} commits start in Minor` };
+    return { bucket: 'minor', why: `${commit.type} commits start in Minor Improvements` };
   }
-  return { bucket: 'minor', why: 'unrecognized commit type; parked in Minor for review' };
+  if (commit.type && stabilizationTypes.has(commit.type)) {
+    return { bucket: 'stabilization', why: `${commit.type} commits start in Stabilization` };
+  }
+  return { bucket: 'minor', why: 'unrecognized commit type; parked in Minor Improvements for review' };
 }
 
 function attributionFor(commit, primaryAuthor) {
@@ -323,7 +345,7 @@ function attributionFor(commit, primaryAuthor) {
   return credits;
 }
 
-/* One physical `  - ` line, because validateMajorMinorReleaseNotes rejects wraps. */
+/* One physical `- ` line at column 0, because validateMajorMinorReleaseNotes rejects wraps and nesting. */
 function renderBullet(commit, primaryAuthor) {
   const scope = commit.scope ? `[${commit.scope}] ` : '';
   const summary = summaryParagraph(commit);
@@ -331,7 +353,7 @@ function renderBullet(commit, primaryAuthor) {
   const credits = attributionFor(commit, primaryAuthor);
   const thanks = credits.length > 0 ? `, thanks to ${credits.map((name) => `@${name}`).join(' and ')}` : '';
   const sentence = `${scope}${commit.headline}.${detail}`.replace(/\s+/g, ' ').trim().replace(/\.+$/, '');
-  return `  - ${sentence}${thanks}. (${commit.shortSha})`;
+  return `- ${sentence}${thanks}. (${commit.shortSha})`;
 }
 
 function todayIso() {
@@ -342,19 +364,23 @@ function todayIso() {
 
 export function renderChangelogSection({ commits, date, primaryAuthor, version }) {
   const byScope = (left, right) => (left.scope ?? '~').localeCompare(right.scope ?? '~');
-  const major = commits.filter((commit) => commit.bucket === 'major').sort(byScope);
-  const minor = commits.filter((commit) => commit.bucket === 'minor').sort(byScope);
-  const lines = [`## ${version} - ${date}`, '', '- Major'];
-  if (major.length === 0) {
-    lines.push('  - TODO: no commit was classified as Major. Promote the release headline here before this ships.');
-  } else {
-    lines.push(...major.map((commit) => renderBullet(commit, primaryAuthor)));
+  const lines = [`## ${version} - ${date}`];
+  let groups = 0;
+  for (const [bucket, heading] of groupHeadings) {
+    const members = commits.filter((commit) => commit.bucket === bucket).sort(byScope);
+    if (members.length === 0) {
+      continue;
+    }
+    groups += 1;
+    lines.push('', heading, '', ...members.map((commit) => renderBullet(commit, primaryAuthor)));
   }
-  lines.push('- Minor');
-  if (minor.length === 0) {
-    lines.push('  - TODO: no commit was classified as Minor. Move a supporting change here before this ships.');
-  } else {
-    lines.push(...minor.map((commit) => renderBullet(commit, primaryAuthor)));
+  if (groups === 0) {
+    lines.push(
+      '',
+      groupHeadings[0][1],
+      '',
+      '- TODO: no commit was classified as user-facing. Write the release headline here before this ships.'
+    );
   }
   return lines.join('\n');
 }
@@ -367,11 +393,12 @@ function renderGuidance({ base, commitCount, head, primaryAuthor, version }) {
     'THIS IS A FIRST DRAFT, NOT AN ORACLE. Do not paste it unread.',
     '  - Every bullet is a commit subject plus its body, not release prose. Rewrite',
     '    each one the way a user would describe it, and merge the duplicates.',
-    '  - Major vs Minor is guessed from the conventional-commit type (feat starts in',
-    '    Major, fix and perf start in Minor). That judgement is yours, not the',
-    "    script's - move bullets between the two sections freely.",
-    '  - A "- GPUI" section may follow Minor for cross-platform app work. This draft',
-    '    never invents one; add it by hand when the release warrants it.',
+    '  - The group is guessed from the conventional-commit type (feat starts in New',
+    '    Features, perf in Minor Improvements, fix in Stabilization). That judgement',
+    "    is yours, not the script's - move bullets between the groups freely.",
+    '  - Major Improvements is never guessed: promote the improvements to existing',
+    '    features that deserve the headline into that group by hand. Groups with no',
+    '    items are omitted; the four headings must stay in the printed order.',
     '  - Verify every "thanks to @handle". The handle comes from the commit author',
     '    name, which is not always the GitHub login.',
     '  - Confirm every entry under "omitted - confirm" before accepting the exclusion.',
