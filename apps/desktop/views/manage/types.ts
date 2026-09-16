@@ -107,8 +107,6 @@ export type ManageCommentDraft = {
   quote: string;
 };
 
-export type ManageSidebarSide = 'left' | 'right';
-
 export type ManageArtifactKind = 'excalidraw' | 'html' | 'markdown';
 
 export type ManageFileContextMenuState = {

@@ -58,51 +58,61 @@ export function ManageOpenFilesList({
   };
 
   return (
-    <div aria-label='Open files' aria-orientation='vertical' className='manage-open-files' role='tablist'>
-      {openPaths.map((path) => {
-        const entry = entriesByPath.get(path);
-        const label = entry?.name ?? manageOpenFileLabel(path);
-        const displayPath = entry?.displayPath ?? path;
-        const isSelected = path === selectedPath;
-        const isDirty = dirtyPaths.has(path);
-        const Icon = fileIconForPath(path);
-        return (
-          <div
-            aria-selected={isSelected}
-            className='manage-open-file-row'
-            data-dirty={String(isDirty)}
-            data-selected={String(isSelected)}
-            key={path}
-            onAuxClick={(event) => handleRowAuxClick(event, path)}
-            onClick={() => onSelect(path)}
-            onKeyDown={(event) => handleRowKeyDown(event, path)}
-            role='tab'
-            tabIndex={isSelected ? 0 : -1}
-            title={displayPath}
-          >
-            <Icon aria-hidden='true' className='manage-file-icon' size={15} stroke={1.75} />
-            <span className='manage-open-file-name'>
-              <bdi>{label}</bdi>
-            </span>
-            <AppTooltip content={isDirty ? 'Unsaved changes. Close file' : 'Close file'}>
-              <button
-                aria-label={isDirty ? `Close ${label} (unsaved changes)` : `Close ${label}`}
-                className='manage-open-file-close'
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onClose(path);
-                }}
-                tabIndex={-1}
-                type='button'
-              >
-                <span aria-hidden='true' className='manage-open-file-dot' />
-                <IconX aria-hidden='true' size={14} stroke={1.8} />
-              </button>
-            </AppTooltip>
-          </div>
-        );
-      })}
-    </div>
+    <>
+      <div className='manage-sidebar-section-label' id='manage-open-files-label'>
+        Open Files
+      </div>
+      <div
+        aria-labelledby='manage-open-files-label'
+        aria-orientation='vertical'
+        className='manage-open-files'
+        role='tablist'
+      >
+        {openPaths.map((path) => {
+          const entry = entriesByPath.get(path);
+          const label = entry?.name ?? manageOpenFileLabel(path);
+          const displayPath = entry?.displayPath ?? path;
+          const isSelected = path === selectedPath;
+          const isDirty = dirtyPaths.has(path);
+          const Icon = fileIconForPath(path);
+          return (
+            <div
+              aria-selected={isSelected}
+              className='manage-open-file-row'
+              data-dirty={String(isDirty)}
+              data-selected={String(isSelected)}
+              key={path}
+              onAuxClick={(event) => handleRowAuxClick(event, path)}
+              onClick={() => onSelect(path)}
+              onKeyDown={(event) => handleRowKeyDown(event, path)}
+              role='tab'
+              tabIndex={isSelected ? 0 : -1}
+              title={displayPath}
+            >
+              <Icon aria-hidden='true' className='manage-file-icon' size={15} stroke={1.75} />
+              <span className='manage-open-file-name'>
+                <bdi>{label}</bdi>
+              </span>
+              <AppTooltip content={isDirty ? 'Unsaved changes. Close file' : 'Close file'}>
+                <button
+                  aria-label={isDirty ? `Close ${label} (unsaved changes)` : `Close ${label}`}
+                  className='manage-open-file-close'
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onClose(path);
+                  }}
+                  tabIndex={-1}
+                  type='button'
+                >
+                  <span aria-hidden='true' className='manage-open-file-dot' />
+                  <IconX aria-hidden='true' size={14} stroke={1.8} />
+                </button>
+              </AppTooltip>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 

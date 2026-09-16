@@ -207,10 +207,6 @@ export const MANAGE_STYLES = `
     position: relative;
   }
 
-  .manage-shell[data-sidebar-floating="false"][data-sidebar-side="left"] .manage-sidebar {
-    border-right: 1px solid light-dark(#e5e5e5, #212121);
-  }
-
   .manage-shell[data-sidebar-floating="false"][data-sidebar-side="right"] .manage-sidebar {
     border-left: 1px solid light-dark(#e5e5e5, #212121);
   }
@@ -418,10 +414,6 @@ export const MANAGE_STYLES = `
   .manage-sidebar-restore-button {
     flex: 0 0 var(--manage-sidebar-edge-button-width);
     width: var(--manage-sidebar-edge-button-width);
-  }
-
-  .manage-shell[data-sidebar-side="left"] .manage-sidebar-header .manage-sidebar-edge-button {
-    margin-right: auto;
   }
 
   .manage-sidebar-header .manage-icon-button:not(:disabled):hover,
@@ -667,11 +659,26 @@ export const MANAGE_STYLES = `
     display: flex;
     flex: 0 0 auto;
     flex-direction: column;
-    margin: -4px 0 0;
     max-height: 34%;
     overflow: auto;
-    padding: 3px 0;
+    padding: 0 0 4px;
     scrollbar-width: thin;
+  }
+
+  /*
+   * CDXC:Docs 2026-09-16 DECISION:
+   * User: label the list under Search "Open Files" and the tree below it "Project Docs" so the two lists read as different things.
+   */
+  .manage-sidebar-section-label {
+    color: var(--manage-subtle);
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    line-height: 14px;
+    padding: 8px 14px 3px;
+    user-select: none;
+    white-space: nowrap;
   }
 
   .manage-open-file-row {
@@ -1403,18 +1410,26 @@ export const MANAGE_STYLES = `
    * Keep Meo's single-row toolbar layout, measure before hiding the three secondary right-side utility buttons, and use one Live/Source toggle button instead of a two-option segmented control.
    */
   /*
+   * CDXC:Docs 2026-09-16 DECISION:
+   * User: give the Docs find-and-replace pane the same look and background as the floating formatting bar in light and dark modes so it stands out from the document.
+   */
+  .manage-shell .find-panel,
+  .manage-meo-markdown-editor .mode-toolbar {
+    background: light-dark(#f4f4f5, #0b0b0b);
+    border: 1px solid var(--manage-border);
+    border-radius: 10px;
+    box-shadow:
+      0 8px 24px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.45)),
+      0 1px 2px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.3));
+  }
+
+  /*
    * CDXC:Docs 2026-09-15 DECISION:
    * User: the formatting bar is a floating, rounded bar near the bottom of the document instead of a second header row, and it can collapse to one pill.
    * The bar sits at its content width, centred over the editor, and the editor keeps extra bottom padding so the last lines can scroll out from under it. The inset is MANAGE_FORMATTING_BAR_INSET in constants.ts.
    */
   .manage-meo-markdown-editor .mode-toolbar {
-    background: light-dark(#f4f4f5, #0b0b0b);
-    border: 1px solid var(--manage-border);
-    border-radius: 10px;
     bottom: 14px;
-    box-shadow:
-      0 8px 24px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.45)),
-      0 1px 2px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.3));
     box-sizing: border-box;
     display: flex;
     gap: 8px;
@@ -2585,35 +2600,12 @@ export const MANAGE_STYLES = `
     overflow-wrap: anywhere;
   }
 
+  /*
+   * CDXC:Docs 2026-09-16 WHY:
+   * This block used to reset the header padding below 960px, which outranked the room the header keeps for the sidebar corner button and let the file icon slide under it.
+   * The header no longer changes shape at narrow widths, so only the label collapse remains here.
+   */
   @media (max-width: 960px) {
-    .manage-preview-header {
-      align-items: center;
-      flex-direction: row;
-      gap: 8px;
-      height: 35px;
-      max-height: 35px;
-      min-height: 35px;
-      padding: 0 3px 0 13px;
-    }
-
-    .manage-preview-meta {
-      align-self: auto;
-    }
-
-    .manage-preview-content[data-compact-header="true"] .manage-preview-header {
-      align-items: center;
-      flex-direction: row;
-      gap: 8px;
-      height: 35px;
-      max-height: 35px;
-      min-height: 35px;
-      padding: 0 3px 0 13px;
-    }
-
-    .manage-preview-content[data-compact-header="true"] .manage-preview-meta {
-      align-self: auto;
-    }
-
     .manage-preview-content[data-kind="markdown"] .manage-preview-header-actions button:where(:not(.manage-review-menu button)) span:not(.manage-count-badge):not(.manage-file-change-indicator) {
       display: none;
     }

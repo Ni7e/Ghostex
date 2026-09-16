@@ -25,8 +25,6 @@ import {
   IconFolder,
   IconFolderOpen,
   IconFolderPlus,
-  IconLayoutSidebarLeftCollapse,
-  IconLayoutSidebarRightCollapse,
   IconMarkdown,
   IconMenu2,
   IconMessagePlus,
@@ -48,7 +46,7 @@ import {
   AppModalTitle,
 } from '@/packages/core-ui/app-modal-shell';
 import { SidebarContextMenuPortal } from '@/packages/core-ui/sidebar-context-menu-portal';
-import { ManageArtifactKind, ManageFileContextMenuState, ManageFileOperationState, ManageSidebarSide } from './types';
+import { ManageArtifactKind, ManageFileContextMenuState, ManageFileOperationState } from './types';
 import { ManageTooltipButton } from './manage-tooltip-button';
 import { fileIconForPath } from './file-tree-utils';
 import '@/packages/core-ui/styles/session-overlays.css';
@@ -65,9 +63,7 @@ export function ManageSidebarActions({
   onOpenDocsFoldersSettings,
   onRefresh,
   onRevealOpenFile,
-  onSwitchSide,
   onToggleAllDirectories,
-  sidebarSide,
 }: {
   canRevealOpenFile: boolean;
   creatingKind?: ManageArtifactKind;
@@ -80,9 +76,7 @@ export function ManageSidebarActions({
   onOpenDocsFoldersSettings: () => void;
   onRefresh: () => void;
   onRevealOpenFile: () => void;
-  onSwitchSide: () => void;
   onToggleAllDirectories: () => void;
-  sidebarSide: ManageSidebarSide;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -244,19 +238,6 @@ export function ManageSidebarActions({
           >
             <IconRefresh aria-hidden='true' size={14} stroke={1.8} />
             Refresh
-          </button>
-          <button
-            className='manage-sidebar-menu-item'
-            onClick={() => runMenuAction(onSwitchSide)}
-            role='menuitem'
-            type='button'
-          >
-            {sidebarSide === 'right' ? (
-              <IconLayoutSidebarLeftCollapse aria-hidden='true' size={14} stroke={1.8} />
-            ) : (
-              <IconLayoutSidebarRightCollapse aria-hidden='true' size={14} stroke={1.8} />
-            )}
-            Switch sidebar side
           </button>
           {/*
             CDXC:Docs 2026-06-30-11:42:

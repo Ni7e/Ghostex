@@ -33,7 +33,6 @@ export const MANAGE_SIDEBAR_MIN_WIDTH = 230;
 export const MANAGE_SIDEBAR_MAX_WIDTH = 560;
 /** CDXC:Docs 2026-09-06 DECISION: User: below 800px of Docs viewport width, overlay the files list instead of pushing the file content; supersedes the 690px breakpoint. */
 export const MANAGE_FLOATING_SIDEBAR_MAX_WIDTH = 800;
-export const MANAGE_SIDEBAR_SIDE_STORAGE_KEY = 'ghostex.manage.sidebarSide';
 export const MANAGE_SIDEBAR_WIDTH_STORAGE_KEY = 'ghostex.manage.sidebarWidth';
 export const MANAGE_SIDEBAR_PINNED_STORAGE_KEY = 'ghostex.manage.sidebarPinned';
 export const MANAGE_FORMATTING_BAR_COLLAPSED_STORAGE_KEY = 'ghostex.manage.formattingBarCollapsed';

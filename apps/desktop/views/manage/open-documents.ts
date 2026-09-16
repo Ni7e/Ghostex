@@ -1,10 +1,14 @@
 import { storageScope, storageFailure, subscribeStorage } from '@/packages/client-storage';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { MANAGE_DRAFTS_STORAGE_KEY_PREFIX, MANAGE_OPEN_FILES_STORAGE_KEY_PREFIX } from './constants';
+import {
+  MANAGE_ACTIVE_FILE_STORAGE_KEY_PREFIX,
+  MANAGE_DRAFTS_STORAGE_KEY_PREFIX,
+  MANAGE_OPEN_FILES_STORAGE_KEY_PREFIX,
+} from './constants';
 import { isManageDescendantPath, isManageReviewDocumentPath, remapManagePathByMove } from './file-tree-utils';
 import { isRecord } from './types';
 
-const clientStorage = storageScope(["docsOpenFiles","docsDrafts"]);
+const clientStorage = storageScope(['docsOpenFiles', 'docsDrafts', 'docsActiveFile']);
 
 /** An edited document that is open but not selected: its draft and the disk content it was edited from. */
 export type ManageBackgroundDraft = {
@@ -34,6 +38,15 @@ export function readStoredManageOpenFiles(projectId: string): string[] {
   } catch {
     return [];
   }
+}
+
+/** The file that was showing when Docs last closed, if it is still in the stored open list. */
+export function readStoredManageActiveFile(projectId: string): string | undefined {
+  const storedActivePath = clientStorage.getItem(`${MANAGE_ACTIVE_FILE_STORAGE_KEY_PREFIX}${projectId}`);
+  if (!storedActivePath || !readStoredManageOpenFiles(projectId).includes(storedActivePath)) {
+    return undefined;
+  }
+  return storedActivePath;
 }
 
 export function readStoredManageDrafts(projectId: string): ManageBackgroundDrafts {
@@ -83,7 +96,11 @@ export function manageOpenFileLabel(path: string): string {
  * Open files and drafts are stored per project. A draft is applied to a file the next time it is read, on top of the disk content, so a file saved elsewhere with the same text drops its stale draft on its own.
  */
 export function useManageOpenDocuments(projectId: string) {
-  const persistenceError = useSyncExternalStore(subscribeStorage, () => storageFailure('docsDrafts'), () => undefined);
+  const persistenceError = useSyncExternalStore(
+    subscribeStorage,
+    () => storageFailure('docsDrafts'),
+    () => undefined
+  );
   const [openPaths, setOpenPaths] = useState<string[]>(() => readStoredManageOpenFiles(projectId));
   const [backgroundDrafts, setBackgroundDrafts] = useState<ManageBackgroundDrafts>(() =>
     readStoredManageDrafts(projectId)
@@ -192,7 +209,9 @@ export function useManageOpenDocuments(projectId: string) {
   const backgroundDirtyPaths = useMemo(() => new Set(Object.keys(backgroundDrafts)), [backgroundDrafts]);
 
   return {
-    storageError: persistenceError ? 'Your document edits could not be saved on this computer. Keep this view open until saving succeeds.' : '',
+    storageError: persistenceError
+      ? 'Your document edits could not be saved on this computer. Keep this view open until saving succeeds.'
+      : '',
     backgroundDirtyPaths,
     backgroundDrafts,
     openDocument,

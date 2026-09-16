@@ -15,8 +15,6 @@ import {
   useState,
 } from 'react';
 import {
-  IconLayoutSidebarLeftCollapse,
-  IconLayoutSidebarLeftExpand,
   IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
   IconPin,
@@ -52,7 +50,6 @@ import {
   MANAGE_SIDEBAR_PEEK_OPEN_DELAY_MS,
   MANAGE_SIDEBAR_PINNED_STORAGE_KEY,
   MANAGE_SIDEBAR_REVEAL_DURATION_MS,
-  MANAGE_SIDEBAR_SIDE_STORAGE_KEY,
   MANAGE_SIDEBAR_WIDTH_STORAGE_KEY,
 } from './constants';
 import {
@@ -67,12 +64,16 @@ import {
   ManageFileOperationState,
   ManageRenameDialogState,
   ManageReviewDocument,
-  ManageSidebarSide,
   ManageWebKitWindow,
   isRecord,
 } from './types';
 import { ManageFileContextMenu, ManageRenameDialog, ManageSidebarActions } from './file-tree-ui';
-import { manageOpenFileLabel, useManageOpenDocuments, writeStoredManageDrafts } from './open-documents';
+import {
+  manageOpenFileLabel,
+  readStoredManageActiveFile,
+  useManageOpenDocuments,
+  writeStoredManageDrafts,
+} from './open-documents';
 import { ManageCloseDocumentDialog, ManageOpenFilesList } from './open-files-list';
 import { isManageFindShortcut } from './keyboard';
 import { ManagePreview } from './preview/manage-preview';
@@ -120,7 +121,7 @@ import {
 } from './annotation-store';
 import { type ManageAnnotationFeedbackDocument, formatManageAnnotationFeedback } from './annotation-feedback';
 
-const clientStorage = storageScope(["docsSide","docsWidth","docsPinned","docsActiveFile"]);
+const clientStorage = storageScope(['docsWidth', 'docsPinned', 'docsActiveFile']);
 
 /*
  * CDXC:Docs 2026-06-20-06:14:
@@ -249,7 +250,7 @@ const clientStorage = storageScope(["docsSide","docsWidth","docsPinned","docsAct
  * The macOS Manage editor header should not show an explicit Save button. Keep edited/saved status visible in metadata while retaining the existing bridge-backed save behavior through the keyboard shortcut and editor flows.
  *
  * CDXC:Docs 2026-06-20-17:15:
- * Manage's file-sidebar refresh control is an overflow menu with Refresh and Switch sidebar side actions. A separate adjacent icon hides the file sidebar, and the editor area provides a small restore affordance so hiding is reversible.
+ * Manage's file-sidebar refresh control is an overflow menu with a Refresh action. A separate adjacent icon hides the file sidebar, and the editor area provides a small restore affordance so hiding is reversible. The Switch sidebar side action that used to sit in this menu was removed on 2026-09-16 (see the data-sidebar-side decision on the shell).
  *
  * CDXC:Docs 2026-06-30-01:35:
  * The Docs sidebar overflow dropdown should read as a compact polished popover instead of a flat black rectangle. Inset it from the sidebar edge, round the menu surface, soften the shadow, and keep each action as a clear icon/text row with a visible hover state.
@@ -470,6 +471,10 @@ export function ManageApp() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedPath, setSelectedPath] = useState<string>();
   const selectedPathRef = useRef<string | undefined>(undefined);
+  /* True until the mount effect below has reopened the last active file, so the first frame does not count as "no file open". */
+  const [activeFileRestorePending, setActiveFileRestorePending] = useState(
+    () => readStoredManageActiveFile(projectId) !== undefined
+  );
   const [preview, setPreview] = useState<ManageFilePreview>();
   const [draftContent, setDraftContent] = useState('');
   const [lastSavedContent, setLastSavedContent] = useState('');
@@ -496,7 +501,6 @@ export function ManageApp() {
   const [annotationSendTarget, setAnnotationSendTarget] = useState<ManageAnnotationSendTarget | null>(null);
   const [annotationSendState, setAnnotationSendState] = useState<ManageAnnotationSendState>({ kind: 'idle' });
   const annotationSendStateTimerRef = useRef<number | undefined>(undefined);
-  const [sidebarSide, setSidebarSide] = useState<ManageSidebarSide>(() => readStoredManageSidebarSide());
   const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
   const [sidebarResizing, setSidebarResizing] = useState(false);
   /**
@@ -509,7 +513,13 @@ export function ManageApp() {
   const [sidebarPinned, setSidebarPinned] = useState(() => readStoredManageSidebarPinned());
   const [sidebarTransient, setSidebarTransient] = useState<'peek' | 'drawer'>();
   const [sidebarFloating, setSidebarFloating] = useState(() => window.innerWidth < MANAGE_FLOATING_SIDEBAR_MAX_WIDTH);
-  const sidebarDocked = sidebarPinned && !sidebarFloating;
+  /**
+   * CDXC:Docs 2026-09-16 DECISION:
+   * User: when no file is open the files list must be showing, docked, even in a narrow pane where it would otherwise be a floating drawer, because an empty document area with no list is a dead end.
+   * The forced dock never rewrites the pinned intent, so opening a file returns the list to whatever the user chose for that width.
+   */
+  const sidebarForcedOpen = selectedPath === undefined && !activeFileRestorePending;
+  const sidebarDocked = (sidebarPinned && !sidebarFloating) || sidebarForcedOpen;
   const sidebarVisible = sidebarDocked || sidebarTransient !== undefined;
   const sidebarOverlay = sidebarVisible && !sidebarDocked;
   /**
@@ -677,15 +687,12 @@ export function ManageApp() {
       return;
     }
     restoredActiveFileRef.current = true;
-    const storedActivePath = clientStorage.getItem(`${MANAGE_ACTIVE_FILE_STORAGE_KEY_PREFIX}${projectId}`);
-    if (
-      storedActivePath &&
-      openDocuments.openPaths.includes(storedActivePath) &&
-      selectedPathRef.current === undefined
-    ) {
+    const storedActivePath = readStoredManageActiveFile(projectId);
+    if (storedActivePath !== undefined && selectedPathRef.current === undefined) {
       void readFile(storedActivePath);
     }
-  }, [openDocuments.openPaths, projectId, readFile]);
+    setActiveFileRestorePending(false);
+  }, [projectId, readFile]);
 
   useEffect(() => {
     const key = `${MANAGE_ACTIVE_FILE_STORAGE_KEY_PREFIX}${projectId}`;
@@ -933,10 +940,6 @@ export function ManageApp() {
   }, [refreshFiles]);
 
   useEffect(() => {
-    clientStorage.setItem(MANAGE_SIDEBAR_SIDE_STORAGE_KEY, sidebarSide);
-  }, [sidebarSide]);
-
-  useEffect(() => {
     clientStorage.setItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(sidebarWidth)));
   }, [sidebarWidth]);
 
@@ -1073,9 +1076,8 @@ export function ManageApp() {
       const withinEdgeBand =
         event.clientY >= bounds.top &&
         event.clientY < bounds.bottom &&
-        (sidebarSide === 'right'
-          ? event.clientX >= bounds.right - MANAGE_SIDEBAR_EDGE_REVEAL_WIDTH && event.clientX < bounds.right
-          : event.clientX >= bounds.left && event.clientX < bounds.left + MANAGE_SIDEBAR_EDGE_REVEAL_WIDTH);
+        event.clientX >= bounds.right - MANAGE_SIDEBAR_EDGE_REVEAL_WIDTH &&
+        event.clientX < bounds.right;
       if (!withinEdgeBand && !overRestoreButton) {
         sidebarEdgeRevealArmedRef.current = true;
         cancelScheduledSidebarPeek();
@@ -1088,7 +1090,7 @@ export function ManageApp() {
     };
     window.addEventListener('pointermove', revealSidebarFromEdgeHover);
     return () => window.removeEventListener('pointermove', revealSidebarFromEdgeHover);
-  }, [cancelScheduledSidebarPeek, scheduleSidebarPeek, sidebarSide, sidebarVisible]);
+  }, [cancelScheduledSidebarPeek, scheduleSidebarPeek, sidebarVisible]);
 
   useEffect(() => cancelSidebarPeekTimers, [cancelSidebarPeekTimers]);
 
@@ -1233,10 +1235,6 @@ export function ManageApp() {
     }, 550);
   }, [annotationsByPath, projectEditorId, projectId]);
 
-  const switchSidebarSide = useCallback(() => {
-    setSidebarSide((current) => (current === 'left' ? 'right' : 'left'));
-  }, []);
-
   const dismissFileContextMenu = useCallback(() => {
     setFileContextMenu(undefined);
   }, []);
@@ -1335,17 +1333,13 @@ export function ManageApp() {
     setFileContextMenu(undefined);
   }, []);
 
-  const updateSidebarWidthFromClientX = useCallback(
-    (clientX: number) => {
-      const shellRect = shellRef.current?.getBoundingClientRect();
-      if (!shellRect) {
-        return;
-      }
-      const nextWidth = sidebarSide === 'right' ? shellRect.right - clientX : clientX - shellRect.left;
-      setSidebarWidth(clampManageSidebarWidth(nextWidth, shellRect.width));
-    },
-    [sidebarSide]
-  );
+  const updateSidebarWidthFromClientX = useCallback((clientX: number) => {
+    const shellRect = shellRef.current?.getBoundingClientRect();
+    if (!shellRect) {
+      return;
+    }
+    setSidebarWidth(clampManageSidebarWidth(shellRect.right - clientX, shellRect.width));
+  }, []);
 
   const resizeSidebarBy = useCallback((delta: number) => {
     const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
@@ -1384,15 +1378,15 @@ export function ManageApp() {
 
   const handleSidebarResizeKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      const direction = sidebarSide === 'right' ? -1 : 1;
+      // The sidebar hangs off the right edge, so the left arrow widens it.
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
-        resizeSidebarBy(-12 * direction);
+        resizeSidebarBy(12);
         return;
       }
       if (event.key === 'ArrowRight') {
         event.preventDefault();
-        resizeSidebarBy(12 * direction);
+        resizeSidebarBy(-12);
         return;
       }
       if (event.key === 'Home') {
@@ -1407,7 +1401,7 @@ export function ManageApp() {
         setSidebarWidth(clampManageSidebarWidth(MANAGE_SIDEBAR_MAX_WIDTH, containerWidth));
       }
     },
-    [resizeSidebarBy, sidebarSide]
+    [resizeSidebarBy]
   );
 
   useEffect(
@@ -2658,14 +2652,16 @@ export function ManageApp() {
     [updateAnnotationsForSelectedFile]
   );
 
-  const HideSidebarIcon = sidebarSide === 'right' ? IconLayoutSidebarRightCollapse : IconLayoutSidebarLeftCollapse;
   /*
    * CDXC:Docs 2026-09-12 WHY:
    * The peek replaces the corner button with the sidebar, so the header button on the window-edge side sits on the exact pixels the cursor is already over.
    * One click there pins a peek, closes a drawer, or hides a docked sidebar, without the cursor moving and without a second overlapping control.
+   *
+   * CDXC:Docs 2026-09-16 DECISION:
+   * User: show the pin icon only when the list can actually be pinned. A narrow pane cannot dock the list, so a peek there offers the close control instead of a pin that appears to do nothing.
    */
   const sidebarEdgeButton =
-    sidebarTransient === 'peek' ? (
+    sidebarTransient === 'peek' && !sidebarFloating ? (
       <button
         aria-label='Pin file sidebar'
         className='manage-sidebar-edge-button manage-icon-button'
@@ -2674,14 +2670,14 @@ export function ManageApp() {
       >
         <IconPin aria-hidden='true' size={15} stroke={1.8} />
       </button>
-    ) : sidebarTransient === 'drawer' ? (
+    ) : sidebarTransient !== undefined ? (
       <button
         aria-label='Close file sidebar'
         className='manage-sidebar-edge-button manage-icon-button'
         onClick={closeTransientSidebar}
         type='button'
       >
-        <HideSidebarIcon aria-hidden='true' size={15} stroke={1.8} />
+        <IconLayoutSidebarRightCollapse aria-hidden='true' size={15} stroke={1.8} />
       </button>
     ) : (
       <button
@@ -2690,7 +2686,7 @@ export function ManageApp() {
         onClick={hideSidebar}
         type='button'
       >
-        <HideSidebarIcon aria-hidden='true' size={15} stroke={1.8} />
+        <IconLayoutSidebarRightCollapse aria-hidden='true' size={15} stroke={1.8} />
       </button>
     );
 
@@ -2700,7 +2696,11 @@ export function ManageApp() {
       data-sidebar-floating={String(sidebarOverlay || sidebarClosing)}
       data-sidebar-hidden={String(!sidebarVisible)}
       data-sidebar-motion={sidebarMotion}
-      data-sidebar-side={sidebarSide}
+      /*
+       * CDXC:Docs 2026-09-16 DECISION:
+       * User: the Docs files list always sits on the right; the option to switch it to the left was removed from the sidebar menu.
+       */
+      data-sidebar-side='right'
       ref={shellRef}
       style={{ '--manage-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
     >
@@ -2715,7 +2715,6 @@ export function ManageApp() {
           ref={sidebarRef}
         >
           <div className='manage-sidebar-header' data-root-drop-target={String(dropTarget?.kind === 'root')}>
-            {sidebarSide === 'left' ? sidebarEdgeButton : null}
             <ManageSidebarActions
               canRevealOpenFile={entries.some((entry) => entry.kind === 'file' && entry.path === selectedPath)}
               creatingKind={creatingArtifactKind}
@@ -2728,11 +2727,9 @@ export function ManageApp() {
               onOpenDocsFoldersSettings={() => void openDocsFoldersSettings()}
               onRefresh={() => void refreshFiles()}
               onRevealOpenFile={revealOpenFile}
-              onSwitchSide={switchSidebarSide}
               onToggleAllDirectories={toggleAllDirectories}
-              sidebarSide={sidebarSide}
             />
-            {sidebarSide === 'right' ? sidebarEdgeButton : null}
+            {sidebarForcedOpen ? null : sidebarEdgeButton}
           </div>
           <div
             className='manage-search'
@@ -2783,6 +2780,7 @@ export function ManageApp() {
             openPaths={openDocuments.openPaths}
             selectedPath={selectedPath}
           />
+          <div className='manage-sidebar-section-label'>Project Docs</div>
           <ManageFileTree
             ref={fileTreeRef}
             entries={visibleEntries}
@@ -2814,11 +2812,7 @@ export function ManageApp() {
           onClick={showSidebar}
           type='button'
         >
-          {sidebarSide === 'right' ? (
-            <IconLayoutSidebarRightExpand aria-hidden='true' size={16} stroke={1.8} />
-          ) : (
-            <IconLayoutSidebarLeftExpand aria-hidden='true' size={16} stroke={1.8} />
-          )}
+          <IconLayoutSidebarRightExpand aria-hidden='true' size={16} stroke={1.8} />
         </button>
       )}
       {sidebarVisible && !sidebarOverlay ? (
@@ -2837,7 +2831,11 @@ export function ManageApp() {
         />
       ) : null}
       <section className='manage-preview'>
-        {openDocuments.storageError ? <p role='alert' className='m-2 rounded border border-destructive p-2 text-sm text-destructive'>{openDocuments.storageError}</p> : null}
+        {openDocuments.storageError ? (
+          <p role='alert' className='m-2 rounded border border-destructive p-2 text-sm text-destructive'>
+            {openDocuments.storageError}
+          </p>
+        ) : null}
         <ManagePreview
           annotations={annotationsForSelectedPath}
           draftContent={draftContent}
@@ -2960,10 +2958,6 @@ export function requestManageFiles(
     postMessage: (message) => bridge.postMessage(message),
     timeoutMs: MANAGE_BRIDGE_TIMEOUT_MS,
   });
-}
-
-export function readStoredManageSidebarSide(): ManageSidebarSide {
-  return clientStorage.getItem(MANAGE_SIDEBAR_SIDE_STORAGE_KEY) === 'left' ? 'left' : 'right';
 }
 
 export function readStoredManageSidebarPinned(): boolean {
