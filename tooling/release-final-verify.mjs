@@ -13,7 +13,9 @@ import {
 } from './release-ghostex.mjs';
 import { validateMacosAppBundle } from './validate-macos-app-bundle.mjs';
 import { validateOnDemandManifestV2 } from './release-gpui/on-demand-manifest.mjs';
-import { inspectRelease, verifyPublishedComponent } from './release-gpui/publish-component.mjs';
+import { locateComponentRelease, verifyPublishedComponent } from './release-gpui/publish-component.mjs';
+import { componentDownloadRepo } from './release-gpui/on-demand-manifest.mjs';
+import { LEGACY_COMPONENTS_GITHUB_REPO, componentsGithubRepo } from './release-gpui/components-repo.mjs';
 import { validateWindowsUpdateFeed, windowsUpdateArtifactNames } from './release-gpui/windows-update-feed.mjs';
 import { releaseProvenanceAssetName, validateReleaseProvenance } from './release-gpui/provenance.mjs';
 import { customerDownloadEntries, renderIosAvailabilityNotes } from './release-gpui/customer-downloads.mjs';
@@ -745,13 +747,28 @@ async function main() {
     if (!sealedManifestV2) {
       return { warn: 'Expected difference: legacy release has no manifest v2 component tags to verify.' };
     }
+    /*
+     * Components moved to their own repository on 2026-09-16. A manifest names
+     * the repository per component; releases sealed before the move carry no
+     * per-component repository and still download from the app repository, so
+     * the lookup accepts either place and reports which one served the tag.
+     */
+    const located = [];
     for (const component of Object.values(sealedManifestV2.components)) {
-      verifyPublishedComponent({
+      const { repo, release } = locateComponentRelease({
         component,
-        release: inspectRelease({ repo: githubRepo, tag: component.downloadTag }),
+        repos: [
+          ...new Set([
+            componentDownloadRepo(sealedManifestV2, component),
+            componentsGithubRepo(),
+            LEGACY_COMPONENTS_GITHUB_REPO,
+          ]),
+        ],
       });
+      verifyPublishedComponent({ component, release });
+      located.push(`${component.downloadTag} in ${repo}`);
     }
-    return `${Object.keys(sealedManifestV2.components).length} component tag(s) match sealed digests and sizes`;
+    return `${located.length} component tag(s) match sealed digests and sizes: ${located.join(', ')}`;
   });
 
   await check('component-download-unpack', async () => {
@@ -764,12 +781,25 @@ async function main() {
     );
     const selected = candidates.sort((left, right) => left.asset.sizeBytes - right.asset.sizeBytes)[0];
     if (!selected) throw new Error('Manifest v2 contains no component asset to spot-check.');
+    const { repo: componentRepo, release: componentRelease } = locateComponentRelease({
+      component: selected.component,
+      repos: [
+        ...new Set([
+          componentDownloadRepo(sealedManifestV2, selected.component),
+          componentsGithubRepo(),
+          LEGACY_COMPONENTS_GITHUB_REPO,
+        ]),
+      ],
+    });
+    if (!componentRelease.exists) {
+      throw new Error(`Component tag ${selected.component.downloadTag} was not found in any component repository.`);
+    }
     const temporary = await mkdtemp(path.join(tmpdir(), `ghostex-component-verify-${version}-`));
     const archivePath = path.join(temporary, selected.asset.assetName);
     const extractPath = path.join(temporary, 'unpacked');
     await capture(
       `env -u GH_TOKEN -u GITHUB_TOKEN gh release download ${shellQuote(selected.component.downloadTag)} ` +
-        `--repo ${shellQuote(githubRepo)} --pattern ${shellQuote(selected.asset.assetName)} --dir ${shellQuote(temporary)}`,
+        `--repo ${shellQuote(componentRepo)} --pattern ${shellQuote(selected.asset.assetName)} --dir ${shellQuote(temporary)}`,
       { timeoutMs: 1_800_000 }
     );
     const downloadedSha = await capture(`shasum -a 256 ${shellQuote(archivePath)} | awk '{print $1}'`);
@@ -785,7 +815,7 @@ async function main() {
     await capture(`tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(extractPath)}`);
     if ((await readdir(extractPath)).length === 0)
       throw new Error(`${selected.asset.assetName} unpacked to an empty directory.`);
-    return `${selected.asset.assetName} downloaded, SHA-verified, and unpacked`;
+    return `${selected.asset.assetName} downloaded from ${componentRepo}, SHA-verified, and unpacked`;
   });
 
   await check('android-apk', async () => {

@@ -204,6 +204,7 @@ jobs:
           GHOSTEX_MOBILE_DEPLOY_KEY: ${{ secrets.GHOSTEX_MOBILE_DEPLOY_KEY }}
           WINDOWS_CODE_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
           WINDOWS_CODE_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
         run: node tooling/release-gpui/preflight.mjs "${{ inputs.version }}"
       - name: Verify clean GPUI release reference contract
         if: ${{ inputs.macos || inputs.linux_deb || inputs.linux_rpm || inputs.linux_tar || inputs.windows_x64 || inputs.windows_arm64 }}
@@ -351,6 +352,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: x64
+    secrets: inherit
 
   code_server_arm64:
     if: ${{ needs.prepare.outputs.job_code_server_arm64 != 'skip' }}
@@ -363,6 +365,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: arm64
+    secrets: inherit
 
   # The macOS Code-tab component, built off the macOS job's critical path.
   # The macOS job awaits this job's artifact just in time before staging.
@@ -376,6 +379,7 @@ jobs:
     uses: ./.github/workflows/release-gpui-code-server-macos.yml
     with:
       version: ${{ inputs.version }}
+    secrets: inherit
 
   # The native Windows editor component (VS Code REH for win32), one job per
   # architecture, built off the Windows jobs' critical path. Each Windows job
@@ -391,6 +395,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: x64
+    secrets: inherit
 
   code_server_windows_arm64:
     if: ${{ needs.prepare.outputs.job_code_server_windows_arm64 != 'skip' }}
@@ -403,6 +408,7 @@ jobs:
     with:
       version: ${{ inputs.version }}
       arch: arm64
+    secrets: inherit
 
   reuse:
     if: ${{ needs.prepare.outputs.reuse_count != '0' }}
@@ -445,6 +451,7 @@ jobs:
       packages: ${{ needs.prepare.outputs.linux_packages }}
       runtime_artifacts_ready: true
       plan: ${{ needs.prepare.outputs.plan }}
+    secrets: inherit
 
   gxserver_wsl_windows_x64:
     if: ${{ needs.prepare.outputs.job_wsl_x64 == 'build' }}

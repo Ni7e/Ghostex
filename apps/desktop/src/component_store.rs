@@ -58,7 +58,19 @@ pub struct ComponentDefinition {
     pub name: String,
     pub component_version: String,
     pub download_tag: String,
+    /// CDXC:Release 2026-09-16 WHY:
+    /// Component tags are published to a separate repository (maddada/ghostex-components) while the manifest's top-level `githubRepo` still names the app release that serves the version-scoped `assets`.
+    /// Manifests sealed before the move carry no per-component repository and keep downloading from the top-level one, so `None` must resolve to `OnDemandManifest::github_repo`.
+    /// SEE-ALSO: tooling/release-gpui/components-repo.mjs, tooling/release-gpui/on-demand-manifest.mjs.
+    pub github_repo: Option<String>,
     pub platforms: HashMap<String, ComponentPlatformAsset>,
+}
+
+impl ComponentDefinition {
+    /// The repository this component downloads from.
+    pub fn download_repo<'a>(&'a self, manifest_repo: &'a str) -> &'a str {
+        self.github_repo.as_deref().unwrap_or(manifest_repo)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -337,6 +349,21 @@ impl OnDemandManifest {
                 component.get("downloadTag"),
                 &format!("components.{key}.downloadTag"),
             )?;
+            let component_github_repo = component
+                .get("githubRepo")
+                .map(|value| {
+                    let repo =
+                        nonempty_string(Some(value), &format!("components.{key}.githubRepo"))?;
+                    if repo.matches('/').count() != 1
+                        || repo.split('/').any(|part| !valid_identifier(part))
+                    {
+                        return Err(format!(
+                            "Malformed sealed on-demand manifest: components.{key}.githubRepo must have owner/repository form"
+                        ));
+                    }
+                    Ok(repo)
+                })
+                .transpose()?;
             let raw_platforms = object(
                 component
                     .get("platforms")
@@ -406,6 +433,7 @@ impl OnDemandManifest {
                     name,
                     component_version,
                     download_tag,
+                    github_repo: component_github_repo,
                     platforms,
                 },
             );
@@ -574,7 +602,7 @@ impl ComponentStore {
             previous_path.clone(),
         ]);
         let url = download_url(
-            &self.manifest.github_repo,
+            component.download_repo(&self.manifest.github_repo),
             &component.download_tag,
             &asset.asset_name,
         );
@@ -610,7 +638,7 @@ impl ComponentStore {
         verify_file(&archive_path, &asset.sha256, asset.size_bytes)?;
         if let Some(sidecar_name) = &asset.sha256_sidecar_name {
             let sidecar_url = download_url(
-                &self.manifest.github_repo,
+                component.download_repo(&self.manifest.github_repo),
                 &component.download_tag,
                 sidecar_name,
             );
@@ -725,6 +753,7 @@ impl ComponentStore {
             name: asset_key.to_string(),
             component_version: self.manifest.version.clone(),
             download_tag: format!("v{}", self.manifest.version),
+            github_repo: None,
             platforms: HashMap::new(),
         };
         let platform = current_platform()?;

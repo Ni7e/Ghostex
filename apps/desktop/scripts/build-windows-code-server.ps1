@@ -174,14 +174,17 @@ if (!$ComponentOnly -and !$SkipCompile -and $TreeClean -and (Get-Command gh -Err
     $ComponentVersion = Get-ComponentVersion
     $Tag = "code-server-$ComponentVersion"
     $ArchiveName = "code-server-$ComponentVersion-$ComponentPlatform.tar.gz"
-    $Published = @(& gh release view $Tag --repo maddada/Ghostex --json assets --jq '.assets[].name' 2>$null | ForEach-Object { "$_" })
+    # Component tags live in the components repository (GHOSTEX_COMPONENTS_REPO, resolved by components-repo.mjs).
+    $ComponentsRepo = (& node (Join-Path $RepoRoot "tooling/release-gpui/components-repo.mjs")).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $ComponentsRepo) { throw "Could not resolve the components repository." }
+    $Published = @(& gh release view $Tag --repo $ComponentsRepo --json assets --jq '.assets[].name' 2>$null | ForEach-Object { "$_" })
     if ($LASTEXITCODE -eq 0 -and ($Published -contains $ArchiveName) -and ($Published -contains "$ArchiveName.sha256")) {
         $DownloadDir = Join-Path $RepoRoot "build/on-demand-components/$ComponentPlatform-editor-download"
         if (Test-Path $DownloadDir) { Remove-Item -Recurse -Force $DownloadDir }
         New-Item -ItemType Directory -Force $DownloadDir | Out-Null
         Invoke-Checked "gh" @(
             "release", "download", $Tag,
-            "--repo", "maddada/Ghostex",
+            "--repo", $ComponentsRepo,
             "--pattern", $ArchiveName,
             "--pattern", "$ArchiveName.sha256",
             "--dir", $DownloadDir,

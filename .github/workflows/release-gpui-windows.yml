@@ -140,6 +140,18 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      # Component tags are published to a separate repository that
+      # github.token cannot write; fail before any build work when the PAT is
+      # missing (see tooling/release-gpui/components-repo-setup.md).
+      - name: Require the components publishing token
+        shell: bash
+        env:
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "$COMPONENTS_GITHUB_TOKEN" ]]; then
+            echo "::error::COMPONENTS_GITHUB_TOKEN is not configured; component tags are published to $(node tooling/release-gpui/components-repo.mjs) and github.token cannot write there. See tooling/release-gpui/components-repo-setup.md."
+            exit 1
+          fi
       - name: Restore code-server source identity input
         run: git submodule update --init --depth=1 -- .dependencies/code-server
       - name: Set up the pinned native editor Node.js
@@ -461,6 +473,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
           GHOSTEX_WINDOWS_SIGNING_PFX: ${{ runner.temp }}\ghostex-code-signing.pfx
           GHOSTEX_WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
           GHOSTEX_WINDOWS_REQUIRE_SIGNING: ${{ inputs.sign && '1' || '0' }}
