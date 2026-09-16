@@ -2,11 +2,6 @@
 
 ## Unreleased
 
-- Stabilization
-
-  - Annotate in the Browser toolbar now opens inside the frame that holds the page content, so a Storybook story or another framed preview can be annotated instead of only the chrome around it. It also shows up again on Ghostex's own development pages, where it used to disappear before appearing.
-  - Pairing a phone with Easy Connect works again with the current Easy Connect helper. The phone app now tunnels with the same tailcat version the computer serves, so update the phone app and scan the code on the computer again.
-
 ## 9.7.0 - 2026-09-16
 
 - New Features
@@ -45,6 +40,7 @@
   - Unread notification text is darker in light mode, and session-list dots are visible there.
   - Escape and single-key terminal controls act immediately in chat instead of waiting on your login profile.
   - Workspace state is written off the UI thread, so clicking around no longer waits on a save.
+  - Annotate in the Browser toolbar now opens inside the frame that holds the page content, so a Storybook story or another framed preview can be annotated instead of only the chrome around it. It also shows up again on Ghostex's own development pages, where it used to disappear before appearing.
 
 - Stabilization
 
@@ -58,7 +54,7 @@
   - Clicking the find bar, the address bar, or terminal search while the page has focus sends your keys to that field instead of the page.
   - The Clean RAM button keeps its width while it says Copied.
   - A macOS accessibility update no longer dismisses an open popup.
-  - Phones pair again with the current Easy Connect helper.
+  - Pairing a phone with Easy Connect works again with the current Easy Connect helper. The phone app now tunnels with the same tailcat version the computer serves, so update the phone app and scan the code on the computer again.
 
 ## 9.6.0 - 2026-09-15
 
