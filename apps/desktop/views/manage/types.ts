@@ -85,6 +85,8 @@ export type ManageAnnotationStore = {
 };
 
 export type ManageSelectionAnchor = {
+  /** Bottom edge of the selection, so a toolbar that cannot fit above the text can sit below it. */
+  bottom: number;
   left: number;
   top: number;
 };

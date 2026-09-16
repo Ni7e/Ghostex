@@ -1,3 +1,4 @@
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 import { AppTooltip } from '@/packages/core-ui/app-tooltip';
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import {
@@ -12,9 +13,9 @@ import { Bold as MeoBoldIcon } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import {
   MANAGE_COMMENT_ANNOTATION_COLOR,
-  MANAGE_DISMISS_TOOLBAR_COLOR,
   MANAGE_MEO_HEADING_COLOR,
   MANAGE_QUICK_LABELS,
+  MANAGE_REMOVE_TOOLBAR_COLOR,
 } from '../constants';
 import {
   ManageAnnotation,
@@ -33,6 +34,7 @@ import {
   clampManageSelectionToolbarLeft,
   commentPopoverStyle,
   manageAnnotationColor,
+  manageAnnotationToolbarTop,
   manageToolbarActionStyle,
   renderManageQuickLabelIcon,
 } from '../annotation-store';
@@ -47,22 +49,26 @@ const QUICK_LABEL_LIGHT_ICON_COLORS: Record<ManageQuickLabel['id'], string> = {
 export function ManageAnnotationToolbar({
   anchor,
   onComment,
-  onDismiss,
   onFormatting,
   onQuickLabel,
+  onRemove,
 }: {
   anchor: ManageSelectionAnchor;
   onComment: () => void;
-  onDismiss: () => void;
   onFormatting: () => void;
   onQuickLabel: (label: ManageQuickLabel) => void;
+  /**
+   * CDXC:Docs 2026-09-16 DECISION:
+   * User: the X button in the annotation toolbar adds a "Remove this" note for the selected text (the same redline the D key adds), not dismiss the toolbar. Unselecting the text is how the toolbar goes away.
+   */
+  onRemove: () => void;
 }) {
   return createPortal(
     <div
       className='manage-markdown-selection-toolbar'
       style={{
         left: clampManageSelectionToolbarLeft(anchor.left),
-        top: Math.max(8, anchor.top - 46),
+        top: manageAnnotationToolbarTop(anchor),
       }}
     >
       <AppTooltip content='Comment' side='top'>
@@ -97,11 +103,11 @@ export function ManageAnnotationToolbar({
           </button>
         </AppTooltip>
       ))}
-      <AppTooltip content='Dismiss' side='top'>
+      <AppTooltip content='Remove this' side='top'>
         <button
-          aria-label='Dismiss'
-          onClick={onDismiss}
-          style={manageToolbarActionStyle(MANAGE_DISMISS_TOOLBAR_COLOR, '#dc2626')}
+          aria-label='Remove this'
+          onClick={onRemove}
+          style={manageToolbarActionStyle(MANAGE_REMOVE_TOOLBAR_COLOR, '#dc2626')}
           type='button'
         >
           <IconX aria-hidden='true' size={15} />
@@ -181,7 +187,7 @@ export function ManageCommentPopover({
   /**
    * CDXC:Docs 2026-09-15 DECISION:
    * User: the composer button says "Add" while annotating, not "Submit", because a note is added to the list of annotations and only the Send action submits them to the agent.
-   * The button shows the OS chord (Cmd+Enter, Ctrl+Enter on Windows and Linux) that adds the note, and stays "Save" when editing an existing note.
+   * The OS chord (Cmd+Enter, Ctrl+Enter on Windows and Linux) that adds the note is shown to the left of the button, outside it, and the button itself is a plain neutral button, not a colored one. The label stays "Save" when editing an existing note.
    */
   submitLabel?: string;
 }) {
@@ -256,10 +262,12 @@ export function ManageCommentPopover({
          *   Image
          * </button>
          */}
+        <kbd aria-label={`Shortcut ${submitChordLabel}`} className='manage-comment-popover-submit-chord'>
+          {submitChordLabel}
+        </kbd>
         <button className='manage-comment-popover-submit' disabled={!canSubmit} onClick={onSubmit} type='button'>
           <IconMessagePlus aria-hidden='true' size={14} />
           {submitLabel}
-          <kbd aria-label={`Shortcut ${submitChordLabel}`}>{submitChordLabel}</kbd>
         </button>
       </div>
       <input
@@ -411,7 +419,7 @@ export function ManageReviewMenu({
     },
   ];
   return (
-    <div
+    <AppMenuPanel
       aria-label='Review actions'
       className='manage-annotation-dropdown manage-review-menu'
       id='manage-markdown-review-menu'
@@ -436,6 +444,6 @@ export function ManageReviewMenu({
           </button>
         ))}
       </div>
-    </div>
+    </AppMenuPanel>
   );
 }

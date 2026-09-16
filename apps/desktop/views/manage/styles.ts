@@ -968,29 +968,9 @@ export const MANAGE_STYLES = `
     color: currentColor;
   }
 
-  .manage-file-context-menu-nested {
-    display: grid;
-    gap: 2px;
-  }
-
-  .manage-file-context-menu-subitem {
-    padding-left: 28px;
-  }
-
   .manage-file-context-menu-spacer {
     flex: 1 1 auto;
     min-width: 10px;
-  }
-
-  .manage-file-context-menu-item .manage-file-context-menu-chevron {
-    height: 13px;
-    transform: rotate(0deg);
-    transition: transform 120ms ease;
-    width: 13px;
-  }
-
-  .manage-file-context-menu-item .manage-file-context-menu-chevron[data-open="true"] {
-    transform: rotate(90deg);
   }
 
   .manage-file-context-menu-item:disabled {
@@ -2491,9 +2471,21 @@ export const MANAGE_STYLES = `
   }
 
   .manage-comment-popover-actions {
+    align-items: center;
     display: flex;
     gap: 8px;
     justify-content: flex-end;
+  }
+
+  .manage-comment-popover-actions .manage-comment-popover-submit-chord {
+    background: light-dark(rgba(0, 0, 0, 0.055), rgba(255, 255, 255, 0.07));
+    border: 1px solid var(--manage-border);
+    border-radius: 4px;
+    color: var(--manage-muted);
+    font: inherit;
+    font-size: 11px;
+    line-height: 1;
+    padding: 3px 5px;
   }
 
   .manage-comment-popover-actions button {
@@ -2509,32 +2501,14 @@ export const MANAGE_STYLES = `
   }
 
   .manage-comment-popover-actions .manage-comment-popover-submit {
-    background: light-dark(#166534, #86efac);
-    border-color: transparent;
-    color: light-dark(#ffffff, #052e16);
-  }
-
-  .manage-comment-popover-actions .manage-comment-popover-submit:not(:disabled):hover,
-  .manage-comment-popover-actions .manage-comment-popover-submit:not(:disabled):focus-visible {
-    background: light-dark(#14532d, #bbf7d0);
-    border-color: transparent;
-    color: light-dark(#ffffff, #052e16);
+    background: light-dark(rgba(0, 0, 0, 0.055), rgba(255, 255, 255, 0.055));
+    border-color: var(--manage-border-strong);
   }
 
   .manage-comment-popover-actions .manage-comment-popover-submit:disabled {
     background: var(--manage-panel-raised);
     border-color: var(--manage-border);
     color: var(--manage-subtle);
-  }
-
-  .manage-comment-popover-actions .manage-comment-popover-submit kbd {
-    background: color-mix(in srgb, currentColor 14%, transparent);
-    border-radius: 4px;
-    font: inherit;
-    font-size: 11px;
-    line-height: 1;
-    margin-left: 2px;
-    padding: 3px 5px;
   }
 
   .manage-hidden-file-input {

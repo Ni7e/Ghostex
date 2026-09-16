@@ -818,12 +818,9 @@ export function ManagePreview({
             <ManageAnnotationToolbar
               anchor={selection.anchor}
               onComment={openCommentForSelection}
-              onDismiss={() => {
-                setSelectionToolbarMode('annotations');
-                setSelection(undefined);
-              }}
               onFormatting={() => setSelectionToolbarMode('formatting')}
               onQuickLabel={addQuickLabel}
+              onRemove={addSelectedRedline}
             />
           ) : null}
           {commentDraft ? (
