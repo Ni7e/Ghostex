@@ -6,6 +6,59 @@
 
   - Pairing a phone with Easy Connect works again with the current Easy Connect helper. The phone app now tunnels with the same tailcat version the computer serves, so update the phone app and scan the code on the computer again.
 
+## 9.7.0 - 2026-09-16
+
+- New Features
+
+  - Compact before you send. Press Option+Enter on macOS or Alt+Enter on Windows and Linux in the chat box, or right-click Send and choose Compact & Send, and Ghostex sends `/compact` first and queues your written prompt to go out the moment compaction finishes. Cursor's `/summarize` and Grok Build's compaction now use the same flow, with the same compaction card above the input and the same hold on queued messages, so nothing is delivered mid-compaction.
+  - Open File/Folder Location is back, everywhere a path can be copied. Right-click a file reference or file-change path in chat, an image preview, a changed file in the Git row or the commit dialog, a project, or a Docs entry and reveal it in your computer's file manager. Image previews also say Copy Path or Copy URL depending on what the picture actually is.
+  - File references open in Code or Docs with one click from composer pills and transcript paths, using the same view preference in both places. Double-click a composer pill to edit its text, and a view that is switched off simply leaves the menu instead of offering a dead action.
+  - Delayed Send can wait for a specific date and time. Session Automations gains a Specific time choice beside After a delay on desktop, web, and mobile, using the local time of the device you set it on. The Postpone by submenu now also has Edit delayed send and Disable delayed send, and the web sidebar can cancel a pending send.
+  - Projects you add join the Space that is open at the time and appear at its top, whether you add them from the More menu, the Add Project button on an empty list or empty Space, or the empty sidebar area's right-click menu. Add a project while Other is selected to keep it out of every Space.
+  - Debugging is its own Settings page, above About. It starts with Show debug UI controls, and only with that on does it load the diagnostic logging scenarios, session debugging controls, Storage usage by feature with a way to clear disposable caches, and on-disk Ghostex folder sizes with Refresh and Open Folder. The storage inspector works from any open Ghostex page, not only the one that owns the data.
+  - Docs keeps the files you have not saved yet in an Open Files list beside the tree, under the same section label, so switching between them no longer risks losing work.
+  - Installing the Claude Code hooks keeps your Claude transcripts on disk instead of letting Claude delete them after 30 days. A retention value you set yourself is left exactly as it is.
+  - App dialogs are native windows built from one shared modal kit, so every dialog has the same controls, spacing, and theming, and the New Thread picker has been restyled to match it, with centered key-hint chips.
+
+- Major Improvements
+
+  - Ghostex speaks about your computer, not your Mac. Settings, notifications, remote machines, Computer Use, the first-launch guide, Agents Hub, the Docs file menu, the export dialog, and the terminal font presets no longer name Finder, the Keychain, Launch Services, Low Power Mode, or "This Mac", and describe the same things in words that fit macOS, Linux, and Windows.
+  - Every shortcut hint is written in your platform's notation. Tips, the model picker, Settings, the prompt editor, Find, Add Project, Docs, saved prompts, slash commands, and session notes all render the same chord the same way: compact glyphs on macOS, key names on Windows and Linux.
+  - Long conversations open faster. Completed turns before the latest prompt arrive already collapsed and expand on demand, a page hidden for a moment is kept instead of rebuilt, and switching sessions runs one reconcile instead of several.
+  - Changing the app, system, or terminal theme repaints every open terminal at once, including idle terminals and terminals in parked projects, and a light window no longer flashes the dark sidebar at startup.
+  - Status cards above the composer and in the transcript share one shell and one motion: compact headers, the whole header as the hover target, animated open and close, and Subagents wearing the same pending-tool card as everything else.
+  - The Windows prompt editor (Ctrl+G) ships inside Windows builds again and talks to the app over a named pipe, and its window no longer shows the generic Windows icon.
+  - The main pane in Code, Browser, Kanban, Automate, and Docs keeps a minimum width of 455px, and the sidebar respects that floor when you drag it.
+  - Hover the model or effort to see the Model & Effort Picker shortcut, and hover the context circle to read the agent's terminal status line.
+  - Clean RAM tells you what it did: a toast confirms that the diagnosis prompt is on your clipboard and asks you to paste it into an agent session.
+
+- Minor Improvements
+
+  - Get Started agent tiles wrap onto new rows instead of squeezing.
+  - The account switch submenu closes as soon as you pick an account, and the switch backdrop covers the whole chat pane until the new account is ready.
+  - Chat popups keep the chat theme, so a light chat inside a dark app shows a light menu; the scroll-to-bottom pill takes the composer's border, fill, and text color; and a disabled image menu item looks disabled.
+  - Generate Name comes before Rename in the rename dialogs.
+  - Context details stay usable in a narrow pane, with a real height cap and a one-row footer.
+  - The sidebar shows more loading bars while a large project inventory is still arriving.
+  - The collapsed composer leaves room beside More actions instead of crowding it.
+  - Unread notification text is darker in light mode, and session-list dots are visible there.
+  - Escape and single-key terminal controls act immediately in chat instead of waiting on your login profile.
+  - Workspace state is written off the UI thread, so clicking around no longer waits on a save.
+
+- Stabilization
+
+  - A cancelled Claude message that was never accepted returns its text to the composer, Rewind to here does the same, and Escape can no longer let a cancelled send slip through after the text comes back.
+  - Maximized composers no longer show working, tasks, or subagents cards on top of the overlay.
+  - Claude completion notifications wait while Claude still reports background work running.
+  - Loading earlier history survives overlapping snapshots, and the pinned section keeps its drop gap when headings are collapsed.
+  - Grok's always-approve composer row is no longer mistaken for a permission card, and Cursor's compaction tool catalog stays out of the transcript.
+  - A file diff deep inside a Claude Bash result can no longer become a status card's heading.
+  - Worktrees whose registered parent is a bare repository now list their first linked checkout.
+  - Clicking the find bar, the address bar, or terminal search while the page has focus sends your keys to that field instead of the page.
+  - The Clean RAM button keeps its width while it says Copied.
+  - A macOS accessibility update no longer dismisses an open popup.
+  - Phones pair again with the current Easy Connect helper.
+
 ## 9.6.0 - 2026-09-15
 
 - New Features
