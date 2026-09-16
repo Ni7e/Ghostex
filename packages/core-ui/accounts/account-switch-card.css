@@ -542,16 +542,15 @@ body[data-session-chat-theme='light'] .ghostex-session-chat-popup .gx-account-sw
 }
 
 /*
- * CDXC:AgentProviders 2026-09-15 DECISION:
- * User: the switch card has a dark backdrop behind it, like a modal. The overlay dims the transcript above the composer band and takes the pointer while a switch is in flight or finishing, so the conversation underneath cannot be clicked until the second account is ready.
- * A failed switch lets the pointer through again: its card stays until Retry or a new switch, and the transcript must remain readable and scrollable behind it.
- * The composer band below the overlay is untouched: the draft stays editable, and Send is dimmed by the composer's own block reason.
+ * CDXC:AgentProviders 2026-09-16 DECISION:
+ * User: the switch card has a dark backdrop behind it, like a modal, and the backdrop must cover the composer too, not only the transcript. The overlay spans the whole chat pane, stacks above the composer band (z-20 in session-chat-view.tsx), and takes the pointer while a switch is in flight or finishing, so nothing underneath can be used until the second account is ready. This supersedes the 2026-09-15 layout that stopped at the composer's top edge.
+ * A failed switch lets the pointer through again: its card stays until Retry or a new switch, and the transcript and composer must remain usable behind it.
  */
 .gx-account-switch-overlay {
   --as-backdrop: rgba(0, 0, 0, 0.58);
   position: absolute;
-  inset: 0 0 var(--ghostex-chat-composer-overlay, 0px);
-  z-index: 15;
+  inset: 0;
+  z-index: 30;
   display: flex;
   background: var(--as-backdrop);
   pointer-events: auto;
