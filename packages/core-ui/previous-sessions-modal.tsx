@@ -8,7 +8,7 @@ import {
 } from '@/packages/components/ui/command';
 import { Popover, PopoverTrigger } from '@/packages/components/ui/popover';
 import { SearchableDropdownContent } from '@/packages/components/ui/searchable-dropdown';
-import { IconFilter2 } from '@tabler/icons-react';
+import { IconFileSearch, IconFilter2 } from '@tabler/icons-react';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/packages/components/ui/button';
@@ -53,6 +53,7 @@ import {
   SESSIONS_SCOPE_TOGGLE_HOTKEY,
 } from './quick-access-session-scope';
 import { formatSidebarHotkeyLabel } from './hotkey-label';
+import { normalizeghostexHotkeySettings } from '../shared/ghostex-hotkeys';
 
 const PREVIOUS_SESSIONS_PAGE_SIZE = 80;
 const PREVIOUS_SESSIONS_QUERY_DEBOUNCE_MS = 200;
@@ -174,6 +175,11 @@ export function PreviousSessionsModal({
   const sessionsById = useSidebarStore((state) => state.sessionsById);
   const showDebugSessionNumbers = useSidebarStore((state) => state.hud.debuggingMode);
   const sidebarSessionTagListItems = useSidebarStore((state) => state.hud.settings?.sidebarSessionTagListItems);
+  const hotkeySettings = useSidebarStore((state) => state.hud.settings?.hotkeys);
+  const findPromptsHotkey = useMemo(
+    () => normalizeghostexHotkeySettings(hotkeySettings).openFindPrompts,
+    [hotkeySettings]
+  );
   const localCustomSessionTags = useSidebarStore((state) => state.customSessionTags);
   const sessionTagCatalogs = useSessionTagCatalogs();
   const previousSessionTagFilterItems = useMemo(
@@ -1169,9 +1175,24 @@ export function PreviousSessionsModal({
             )}
           </div>
           {/*
-           * CDXC:Sessions 2026-06-13-01:09:
-           * Previous Sessions is now a browse, filter, restore, and delete modal only. Do not render footer launch buttons here, and do not expose the removed agent-prompt search workflow from this surface.
+           * CDXC:Sessions 2026-09-16 DECISION:
+           * User: a floating "Search by Prompt" button sits over the bottom-right of the Sessions list and opens Search by Prompt. This supersedes the 2026-06-13 decision that kept this modal free of launch buttons; that decision still applies to the old footer launch row and the removed text-search terminal, neither of which returns here.
+           * The button dispatches the shared openFindPrompts hotkey action, the same route the command palette uses, so every host opens the native Find surface.
            */}
+          <button
+            className='previous-sessions-find-prompts-button'
+            onClick={() => {
+              vscode.postMessage({ actionId: 'openFindPrompts', type: 'runGhostexHotkeyAction' });
+              onClose();
+            }}
+            type='button'
+          >
+            <IconFileSearch aria-hidden='true' size={15} stroke={1.8} />
+            <span>Search by Prompt</span>
+            {findPromptsHotkey ? (
+              <kbd className='previous-sessions-find-prompts-hotkey'>{formatSidebarHotkeyLabel(findPromptsHotkey)}</kbd>
+            ) : null}
+          </button>
         </div>
       </div>
     </TooltipProvider>,

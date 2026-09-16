@@ -550,7 +550,43 @@ html:has(body.app-modal-host-native-window-body) {
   overflow: hidden;
   padding: var(--previous-sessions-modal-padding-top) var(--previous-sessions-modal-padding-x)
     var(--previous-sessions-modal-padding-bottom);
+  position: relative;
   width: min(654px, 100%);
+}
+
+.previous-sessions-find-prompts-button {
+  align-items: center;
+  background: var(--app-dropdown-background, var(--app-modal-background));
+  border: 1px solid color-mix(in srgb, var(--foreground) 18%, transparent);
+  border-radius: 999px;
+  bottom: 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  color: var(--foreground, var(--app-foreground));
+  cursor: default;
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  gap: 7px;
+  height: 32px;
+  line-height: 20px;
+  padding: 0 14px 0 12px;
+  position: absolute;
+  right: 18px;
+  z-index: 2;
+}
+
+.previous-sessions-find-prompts-button:hover,
+.previous-sessions-find-prompts-button:focus-visible {
+  background: color-mix(in srgb, var(--foreground) 9%, var(--app-dropdown-background, var(--app-modal-background)));
+  border-color: color-mix(in srgb, var(--foreground) 30%, transparent);
+  outline: none;
+}
+
+.previous-sessions-find-prompts-hotkey {
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  opacity: 0.58;
 }
 
 .app-modal-host-body .confirm-modal-root:has(.previous-sessions-modal) {
