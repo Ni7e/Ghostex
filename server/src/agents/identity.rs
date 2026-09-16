@@ -92,6 +92,17 @@ pub(crate) fn apply_session_state_update(
     identity_update_source: SessionIdentityUpdateSource,
 ) -> Result<(Map<String, Value>, Value), DomainStateError> {
     let session = require_session(repository, lifecycle)?;
+    if draft_agent_switch_in_progress(&lifecycle.project_id, &lifecycle.session_id) {
+        return Ok((
+            object_from_value(json!({
+                "changed": false,
+                "projection": project_session_title_projection(&session),
+                "reason": "draft-agent-switch-in-progress",
+                "session": session.clone(),
+            })),
+            session,
+        ));
+    }
     let project = require_project(repository, &lifecycle.project_id)?;
     let mut project_sessions = LazyProjectSessions::new(repository, &lifecycle.project_id);
     let observed_identity = align_observed_identity_with_launch_profile(

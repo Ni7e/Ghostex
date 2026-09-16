@@ -597,6 +597,8 @@ pub(crate) fn switch_draft_agent(
     // re-read before the rewrite below builds its update out of it.
     let session = require_session(repository, &lifecycle)?;
 
+    let switch_guard = DraftAgentSwitch::begin(&lifecycle.project_id, &lifecycle.session_id)?;
+
     /*
     Everything the OLD agent owns has to go before the new plan is built, or
     `create_agent_session_params_for_project` would resolve the new agent id
@@ -617,6 +619,7 @@ pub(crate) fn switch_draft_agent(
         "accountId",
         "accountName",
         "accountColor",
+        "accountSlot",
         "accountProvider",
         "accountBaseCommand",
         "accountCommand",
@@ -639,6 +642,7 @@ pub(crate) fn switch_draft_agent(
         "acceptAllMode",
         "agentCommand",
         "agentLaunchPlan",
+        "agentResumePlan",
         "icon",
         "runtimeRelevant",
     ] {
@@ -660,7 +664,9 @@ pub(crate) fn switch_draft_agent(
         "runtimeSettings".to_string(),
         Value::Object(runtime_settings),
     );
-    let resolved = create_agent_session_params_for_project(db, &project, &create_params)?;
+    // CDXC:AgentProviders 2026-09-16 DECISION:
+    // User: switching Codex to Claude or Claude to Codex must choose the same account as launching the target agent from the sidebar button.
+    let mut resolved = create_agent_session_params_for_project(db, &project, &create_params)?;
     /*
     The line the live pane will be typed, read out BEFORE the row is written so
     a plan that somehow carries no command leaves the draft exactly as it was
@@ -669,6 +675,15 @@ pub(crate) fn switch_draft_agent(
     let reuse_command = provider_exists
         .then(|| draft_switch_reuse_command(&resolved))
         .transpose()?;
+    if provider_exists {
+        if let Some(launch_settings) =
+            crate::zmx::launch_settings_with_consumed_agent_launch_startup_text(&Value::Object(
+                resolved.clone(),
+            ))
+        {
+            resolved.insert("launchSettings".to_string(), Value::Object(launch_settings));
+        }
+    }
 
     let mut update = lifecycle_update(&lifecycle);
     update.insert("agentId".to_string(), json!(agent_id.clone()));
@@ -734,13 +749,15 @@ pub(crate) fn switch_draft_agent(
             &lifecycle.project_id,
             &lifecycle.session_id,
         );
-        crate::session_chat_send::enqueue_session_write_sequence(
+        let completion = crate::session_chat_send::enqueue_session_write_sequence_with_completion(
             &updated,
             &lifecycle.project_id,
             &lifecycle.session_id,
             DRAFT_AGENT_SWITCH_SEND_SOURCE,
             build_draft_agent_switch_steps(&command),
+            None,
         )?;
+        switch_guard.finish_after(completion);
         return Ok(AgentEndpointOutput {
             presentation_session: Some((
                 lifecycle.project_id.clone(),
@@ -781,11 +798,7 @@ const DRAFT_SWITCH_INTERRUPT: &str = "\u{3}";
 /// Spacing between the interrupts. Wide enough that each is its own stdin
 /// chunk, narrow enough that all three land inside the CLIs' one-second window.
 const DRAFT_SWITCH_INTERRUPT_SPACING_MS: u64 = 150;
-/// Time the interrupted pane gets to become a login shell before the new
-/// agent's line is typed into it. This settles a SHELL start (`exec $SHELL -l`
-/// is the last line of the provider script), not a TUI repaint, which is why it
-/// is several times the chat path's settles.
-const DRAFT_SWITCH_SHELL_SETTLE_MS: u64 = 800;
+const DRAFT_SWITCH_EXIT_TIMEOUT_MS: u64 = 15_000;
 
 /// The new agent's launch line, taken from the rebuilt plan's `startupText` —
 /// already leading-space prefixed so the login shell keeps it out of atuin
@@ -818,9 +831,8 @@ person sitting at that pane would type them, as one indivisible job.
 
 Three interrupts, not one: every chat-supported CLI reads a single Ctrl+C as
 "cancel this turn" and only a repeat inside its own short window as "exit", so
-one would be swallowed. The burst spans 300ms — comfortably inside the second
-those CLIs measure — and the third interrupt's spacing simply folds into the
-shell settle that follows it.
+one would be swallowed. The burst spans 300ms, inside the second those CLIs
+measure, then the process check waits for the old CLI to exit.
 
 The command and its Enter are separate writes for the reason every server-side
 writer of an agent pty keeps them separate (see SESSION_CHAT_CLEAR_INPUT_SETTLE_MS
@@ -832,15 +844,22 @@ pub(crate) fn build_draft_agent_switch_steps(
 ) -> Vec<crate::session_chat_send::SessionChatSendStep> {
     use crate::session_chat_send::SessionChatSendStep;
     let mut steps = Vec::new();
-    for _ in 0..3 {
+    for interrupt in 0..3 {
         steps.push(SessionChatSendStep::Write(
             DRAFT_SWITCH_INTERRUPT.to_string(),
         ));
-        steps.push(SessionChatSendStep::SleepMs(
-            DRAFT_SWITCH_INTERRUPT_SPACING_MS,
-        ));
+        if interrupt < 2 {
+            steps.push(SessionChatSendStep::SleepMs(
+                DRAFT_SWITCH_INTERRUPT_SPACING_MS,
+            ));
+        }
     }
-    steps.push(SessionChatSendStep::SleepMs(DRAFT_SWITCH_SHELL_SETTLE_MS));
+    // CDXC:Drafts 2026-09-16 WHY:
+    // A fixed 800ms delay both held up fast exits and typed the launch command into slow CLIs. Reuse the account-switch process check so the command follows the actual exit.
+    steps.push(SessionChatSendStep::WaitForAgentExit {
+        home_dir: crate::paths::get_gxserver_paths(None).home_dir,
+        timeout_ms: DRAFT_SWITCH_EXIT_TIMEOUT_MS,
+    });
     steps.push(SessionChatSendStep::Write(command.to_string()));
     steps.push(SessionChatSendStep::SleepMs(
         crate::session_chat_send::SESSION_CHAT_SUBMIT_DELAY_MS,
