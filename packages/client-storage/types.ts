@@ -17,6 +17,8 @@ export interface StoreDefinition<T = unknown> {
   readonly version: number;
   readonly key: string;
   readonly collection: boolean;
+  /** A dependency writes these keys itself through the browser Storage API; the development guard forwards and meters those writes instead of rejecting them. */
+  readonly external: boolean;
   readonly maxEntryBytes: number;
   readonly maxBytes: number;
   readonly maxEntries: number;

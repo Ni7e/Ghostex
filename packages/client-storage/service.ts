@@ -9,7 +9,7 @@ import {
   lastStorageFailure,
 } from './diagnostics';
 import {
-  installBrowserGuard,
+  installBrowserGuard as guardBrowserStorage,
   readBrowser,
   scanBrowser,
   subscribeBrowser,
@@ -148,6 +148,17 @@ function loadBrowser(): void {
     }
     emit({ key, store: definition.id, raw, revision: 0 });
   });
+}
+
+/** Direct Storage writes reach here only from the development guard; keys of a registered external store take the ordinary metered path. */
+function forwardExternalWrite(backend: BrowserBackend, key: string, raw: string | null): boolean {
+  const definition = definitionForKey(key);
+  if (!definition?.external || definition.backend !== backend) return false;
+  writeManaged(definition, key, raw);
+  return true;
+}
+export function installBrowserGuard(): void {
+  guardBrowserStorage(forwardExternalWrite);
 }
 
 export function initializeClientStorage(): Promise<void> {
@@ -526,4 +537,4 @@ async function clearLocalCache(id: StoreId): Promise<void> {
     for (const key of managedKeys([id])) writeManaged(definition, key, null);
   });
 }
-export { subscribeStorage, installBrowserGuard };
+export { subscribeStorage };

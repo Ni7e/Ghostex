@@ -43,6 +43,9 @@ without closing Ghostex.
   skill. Web links from terminals, chat, and detected dev servers open here or
   in the system browser depending on Open links in. Annotate the current page
   with Agentation in the Browser toolbar; GitHub pages disallow that tool.
+  When a page shows its content inside a frame, such as a Storybook story,
+  the Annotate toolbar opens inside that frame so the content itself can be
+  selected.
   HTML files in Docs use the same Agentation overlay via Annotate. Markdown
   files use Docs selection comments instead (see Docs below).
 - **Kanban**: the project board backed by the Beads `bd` CLI (see Project

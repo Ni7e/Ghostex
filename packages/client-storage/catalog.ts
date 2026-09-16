@@ -21,6 +21,7 @@ function define<T>(
     backend: 'local',
     policy: 'preference',
     collection: false,
+    external: false,
     maxEntryBytes: 64 * KiB,
     maxBytes: 128 * KiB,
     maxEntries: 1,
@@ -532,6 +533,52 @@ export const storageCatalog = Object.freeze({
     'ghostex.agentModelCatalog.v1',
     objectCodec,
     { ...cache, collection: false, maxEntries: 1 }
+  ),
+  /**
+   * CDXC:Browser 2026-09-16 DECISION:
+   * User: Agentation's own storage keys are registered as owned stores and the development guard forwards and meters those writes instead of throwing, so Annotate in the Browser toolbar works on Storybook and on Ghostex's own development pages.
+   * Agentation writes these keys itself inside React effects, and the guard's throw unmounted the whole tool before its toolbar appeared.
+   * The session-backed singleton is listed before the `agentation-` collection because key lookup takes the first owner.
+   * SEE-ALSO: packages/client-storage/adapters/browser.ts, apps/desktop/src/app/helpers/browser.rs.
+   */
+  agentationToolbar: define(
+    'agentationToolbar',
+    'Agentation toolbar state',
+    desktop + 'src/app/helpers/browser.rs',
+    'feedback-toolbar-',
+    textCodec,
+    { ...collection, external: true, maxEntries: 8, maxEntryBytes: 4 * KiB, maxBytes: 16 * KiB }
+  ),
+  agentationAnnotations: define(
+    'agentationAnnotations',
+    'Agentation annotations',
+    desktop + 'src/app/helpers/browser.rs',
+    'feedback-annotations-',
+    textCodec,
+    {
+      ...collection,
+      external: true,
+      policy: 'protected',
+      maxEntries: 500,
+      maxEntryBytes: 64 * KiB,
+      maxBytes: 512 * KiB,
+    }
+  ),
+  agentationHidden: define(
+    'agentationHidden',
+    'Agentation toolbar hidden',
+    desktop + 'src/app/helpers/browser.rs',
+    'agentation-session-toolbar-hidden',
+    enumCodec(['1']),
+    { backend: 'session', external: true, maxEntryBytes: KiB, maxBytes: KiB }
+  ),
+  agentationModes: define(
+    'agentationModes',
+    'Agentation page modes',
+    desktop + 'src/app/helpers/browser.rs',
+    'agentation-',
+    textCodec,
+    { ...collection, external: true, maxEntries: 500, maxEntryBytes: 64 * KiB, maxBytes: 256 * KiB }
   ),
   webSettings: define(
     'webSettings',

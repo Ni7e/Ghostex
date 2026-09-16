@@ -4,6 +4,7 @@
 
 - Stabilization
 
+  - Annotate in the Browser toolbar now opens inside the frame that holds the page content, so a Storybook story or another framed preview can be annotated instead of only the chrome around it. It also shows up again on Ghostex's own development pages, where it used to disappear before appearing.
   - Pairing a phone with Easy Connect works again with the current Easy Connect helper. The phone app now tunnels with the same tailcat version the computer serves, so update the phone app and scan the code on the computer again.
 
 ## 9.7.0 - 2026-09-16

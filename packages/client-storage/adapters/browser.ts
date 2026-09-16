@@ -49,12 +49,20 @@ export function subscribeBrowser(callback: (backend: BrowserBackend, key: string
     else if (event.storageArea === area('session')) callback('session', event.key);
   });
 }
-/** A dependency cannot bypass budgets with Storage.prototype.setItem in development. */
-export function installBrowserGuard(): void {
+export type BrowserWriteForwarder = (backend: BrowserBackend, key: string, raw: string | null) => boolean;
+/**
+ * A dependency cannot bypass budgets with Storage.prototype.setItem in development.
+ * CDXC:Settings 2026-09-16 WHY:
+ * Agentation persists its toolbar state with direct Storage calls inside a React effect, and a throw there unmounts the whole tool.
+ * Writes that `forward` accepts (keys of a registered external store) take the metered path; every other direct write is still rejected.
+ */
+export function installBrowserGuard(forward: BrowserWriteForwarder): void {
   if (state.guarded || typeof window === 'undefined') return;
   area('local');
   area('session');
   state.guarded = true;
+  const backendOf = (storage: unknown): BrowserBackend | undefined =>
+    storage === state.areas.local ? 'local' : storage === state.areas.session ? 'session' : undefined;
   const reject = (operation: string, key?: string): never => {
     recordStorageEvent({ store: key ?? 'unknown', operation: 'unexpected', bytes: 0, reason: 'unregistered' });
     throw new ClientStorageError(
@@ -63,10 +71,14 @@ export function installBrowserGuard(): void {
       `Direct browser storage ${operation} is forbidden. Register a store in packages/client-storage/catalog.ts.`
     );
   };
-  Storage.prototype.setItem = function (key) {
+  Storage.prototype.setItem = function (this: Storage, key: string, value: string) {
+    const backend = backendOf(this);
+    if (backend && forward(backend, String(key), String(value))) return;
     reject('write', String(key));
   };
-  Storage.prototype.removeItem = function (key) {
+  Storage.prototype.removeItem = function (this: Storage, key: string) {
+    const backend = backendOf(this);
+    if (backend && forward(backend, String(key), null)) return;
     reject('remove', String(key));
   };
   Storage.prototype.clear = function () {

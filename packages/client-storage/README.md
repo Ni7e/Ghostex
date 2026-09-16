@@ -46,4 +46,4 @@ Storage usage lives on Settings > Debugging, above About. The page starts with S
 
 Diagnostic events contain metadata, not stored values. The event history is bounded to 200 in-memory events; write-rate counters retain 60 one-second buckets per registered store. A disk sink must apply the host's existing debug switch and expiring scenario gate. There is no automatic routine disk logging.
 
-The development guard rejects direct Storage methods, named-property writes, and IndexedDB factory calls, including calls from dependencies. Fix the caller or register a deliberately owned store; do not add bypasses to the adapter allowlist.
+The development guard rejects direct Storage methods, named-property writes, and IndexedDB factory calls, including calls from dependencies. Fix the caller or register a deliberately owned store; do not add bypasses to the adapter allowlist. A dependency that must write browser storage itself (Agentation's toolbar state and annotations) is registered as an `external` store: the guard forwards its declared key prefixes through the same budget, diagnostics, and inspector path instead of rejecting them, and still rejects every other key.
