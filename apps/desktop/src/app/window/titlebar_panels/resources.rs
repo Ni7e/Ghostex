@@ -94,11 +94,9 @@ impl GpuiTitlebarReadingPanel {
                 }),
             ))
             /*
-            CDXC:Resources 2026-09-04 DECISION:
-            User: drop the expand/collapse-all button and Sleep All ("who would
-            sleep running terminals"); in Sleep All's place put Clean RAM, a
-            wrench button that copies a prompt asking an agent to diagnose the
-            RAM this panel shows and how to bring it down.
+            CDXC:Resources 2026-09-16 DECISION:
+            User: keep Clean RAM, and on click "show a toast telling the user that they need to paste this into an agent session to reduce ram use".
+            This keeps the 2026-09-04 wrench button in Sleep All's place that copies a diagnosis prompt, and adds the toast so the clipboard copy is not silent.
             */
             .child(self.render_resource_text_button(
                 "gpui-resources-clean-ram",
@@ -153,19 +151,39 @@ impl GpuiTitlebarReadingPanel {
     }
 
     fn copy_clean_ram_prompt(&mut self, cx: &mut gpui::Context<Self>) {
-        let GpuiTitlebarReadingPanelState::Resources {
-            clean_ram_copied,
-            snapshot,
-            ..
-        } = &mut self.state
-        else {
-            return;
+        let prompt = {
+            let GpuiTitlebarReadingPanelState::Resources { snapshot, .. } = &self.state else {
+                return;
+            };
+            gpui_resources_clean_ram_prompt(snapshot)
         };
-        let prompt = gpui_resources_clean_ram_prompt(snapshot);
         cx.write_to_clipboard(ClipboardItem::new_string(prompt));
         gpui_play_copy_sound();
-        *clean_ram_copied = true;
+        if let GpuiTitlebarReadingPanelState::Resources {
+            clean_ram_copied, ..
+        } = &mut self.state
+        {
+            *clean_ram_copied = true;
+        }
         cx.notify();
+        let _ = self.main_app.update_in(cx, |app, _window, cx| {
+            app.upsert_gpui_app_toast(
+                GpuiAppToast {
+                    id: "gpui-resources-clean-ram-copied".to_string(),
+                    level: GpuiAppToastLevel::Info,
+                    title: "Clean RAM prompt copied".to_string(),
+                    description: Some(
+                        "Paste it into an agent session to reduce RAM use.".to_string(),
+                    ),
+                    copy_text: None,
+                    loading: false,
+                    persistent: false,
+                    duration_ms: GPUI_APP_TOAST_DEFAULT_DURATION_MS,
+                    epoch: 0,
+                },
+                cx,
+            );
+        });
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(2))
