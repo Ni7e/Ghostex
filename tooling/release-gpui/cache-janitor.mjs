@@ -27,6 +27,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -34,7 +35,8 @@ const execFileAsync = promisify(execFile);
 const GB = 1_000_000_000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
-const DELETE_CONCURRENCY = 4;
+const DELETE_INTERVAL_MS = 1000;
+const MAX_RATE_LIMIT_RETRIES = 4;
 const WARM_WORKFLOW_FILE = 'warm-rust-build-cache.yml';
 
 /*
@@ -394,26 +396,60 @@ async function latestWarmRunStart(repo) {
   return runs.length === 0 ? null : { id: runs[0].databaseId, startedAt: Date.parse(runs[0].createdAt) };
 }
 
+/*
+ * CDXC:Release 2026-09-16 WHY:
+ * Four parallel deletion workers caused 972 HTTP 429 failures in one janitor run.
+ * GitHub requires serial mutations with a one-second pause; rate-limit responses must pause the entire queue, including until the hourly token budget resets.
+ * https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api
+ */
+function rateLimitDelay(error, attempt) {
+  const response = String(error?.stdout ?? '');
+  const status = /^HTTP\/\S+\s+(\d+)/mu.exec(response)?.[1];
+  const header = (name) => new RegExp(`^${name}:\\s*([^\\r\\n]+)`, 'imu').exec(response)?.[1].trim();
+  const retryAfter = header('retry-after');
+  const exhausted = header('x-ratelimit-remaining') === '0';
+  if (
+    status !== '429' &&
+    !(status === '403' && (retryAfter !== undefined || exhausted || /rate limit/iu.test(response)))
+  ) {
+    return null;
+  }
+  const resetMs = exhausted ? Number(header('x-ratelimit-reset')) * 1000 - Date.now() + 1000 : 0;
+  return Math.max(
+    60_000 * 2 ** attempt,
+    Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : 0,
+    Number.isFinite(resetMs) ? resetMs : 0
+  );
+}
+
 async function deleteEntries(repo, deletions, print) {
   let done = 0;
-  const failures = [];
-  const queue = [...deletions];
-  const worker = async () => {
-    for (let entry = queue.shift(); entry !== undefined; entry = queue.shift()) {
+  for (const entry of deletions) {
+    if (done > 0) await delay(DELETE_INTERVAL_MS);
+    for (let attempt = 0; ; attempt += 1) {
       try {
-        await gh(['cache', 'delete', String(entry.id), '--repo', repo]);
+        await gh(['api', '--include', '--method', 'DELETE', `repos/${repo}/actions/caches/${entry.id}`]);
+        break;
       } catch (error) {
+        const waitMs = rateLimitDelay(error, attempt);
+        if (waitMs !== null && attempt < MAX_RATE_LIMIT_RETRIES) {
+          print(
+            `rate limited; waiting ${Math.ceil(waitMs / 1000)} s before retrying cache ${entry.id} (${attempt + 1}/${MAX_RATE_LIMIT_RETRIES})`
+          );
+          await delay(waitMs);
+          continue;
+        }
         const reason = String(error?.stderr || error?.message || error)
           .trim()
           .split('\n')[0];
-        failures.push(`${entry.id} ${entry.key}: ${reason}`);
+        throw new Error(
+          `Stopped after deleting ${done}/${deletions.length}; cache ${entry.id} ${entry.key}: ${reason}`
+        );
       }
-      done += 1;
-      if (done % 200 === 0 || done === deletions.length) print(`deleted ${done - failures.length}/${deletions.length}`);
     }
-  };
-  await Promise.all(Array.from({ length: DELETE_CONCURRENCY }, worker));
-  return failures;
+    done += 1;
+    if (done % 50 === 0 || done === deletions.length) print(`deleted ${done}/${deletions.length}`);
+  }
 }
 
 async function main() {
@@ -453,9 +489,8 @@ async function main() {
   for (const line of formatDeletions(selection)) print(line);
   if (!options.apply || selection.deletions.length === 0) return 0;
   print('');
-  const failures = await deleteEntries(options.repo, selection.deletions, print);
-  for (const failure of failures) console.error(`FAIL  ${failure}`);
-  return failures.length === 0 ? 0 : 1;
+  await deleteEntries(options.repo, selection.deletions, print);
+  return 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -42,7 +42,8 @@ permissions:
 jobs:
   janitor:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Thousands of paced deletions can span hourly GITHUB_TOKEN quota resets.
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v6
         with:
