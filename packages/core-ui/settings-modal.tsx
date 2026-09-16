@@ -278,6 +278,7 @@ export type SettingsModalProps = {
   initialRemoteSection?: SettingsRemoteSection;
   /** Agents tab card to scroll to (consumed by the Agents tab). */
   initialAgentsSection?: SettingsAgentsSection;
+  initialCustomViewId?: string;
   initialTab?: SettingsModalTab;
   isOpen: boolean;
   presentation?: SettingsModalPresentation;
@@ -365,6 +366,7 @@ export function SettingsModal({
   initialRemoteMachineId,
   initialRemoteSection,
   initialAgentsSection,
+  initialCustomViewId,
   initialTab = 'settings',
   isOpen,
   onChange,
@@ -641,8 +643,8 @@ export function SettingsModal({
   }, [initialTab, isOpen]);
 
   useEffect(() => {
-    if (isOpen && initialAgentsSection) setSettingsSearchQuery('');
-  }, [isOpen, initialAgentsSection]);
+    if (isOpen && (initialAgentsSection || initialCustomViewId)) setSettingsSearchQuery('');
+  }, [isOpen, initialAgentsSection, initialCustomViewId]);
 
   useEffect(() => {
     if (activeTab !== 'osIntegration' || showOSIntegrationSettingsTab) {
@@ -2931,6 +2933,7 @@ export function SettingsModal({
                 {!isFirstLaunchSetup ? (
                   <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='extensions'>
                     <ExtensionsSettingsTab
+                      initialCustomViewId={initialCustomViewId}
                       spaces={projectViewSpaces}
                       isActive={isOpen && activeTab === 'extensions'}
                       onRequestStatus={onRequestPluginSettingsStatus}

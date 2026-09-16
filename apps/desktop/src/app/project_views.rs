@@ -57,6 +57,9 @@ impl GhostexGpuiApp {
             .take()?;
         owned.matches_runtime_url(url).then_some(owned)
     }
+    /// CDXC:Extensions 2026-09-16 DECISION:
+    /// User: keep Start / Restart and Stop removed, but restore Configure view and make it open the clicked view's editor.
+    /// This supersedes the earlier removal of Configure view.
     pub(crate) fn show_project_view_menu(
         &self,
         id: ExtensionId,
@@ -64,22 +67,22 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        let mut menu = self.titlebar_view_lifecycle_menu(TitlebarMode::Extension(id));
-        for (label, operation) in [
-            ("Start / Restart", "restart"),
-            ("Stop", "stop"),
-            ("Command output", "output"),
-            ("Configure view", "configure"),
-        ] {
-            menu = menu.menu(
-                label,
+        self.titlebar_view_lifecycle_menu(TitlebarMode::Extension(id))
+            .menu(
+                "Command output",
                 Box::new(ProjectViewCommand {
                     id: id.as_str().into(),
-                    operation: operation.into(),
+                    operation: "output".into(),
                 }),
-            );
-        }
-        menu.separator()
+            )
+            .menu(
+                "Configure view",
+                Box::new(ProjectViewCommand {
+                    id: id.as_str().into(),
+                    operation: "configure".into(),
+                }),
+            )
+            .separator()
             .menu("Extensions", Box::new(OpenGpuiExtensionsModal))
             .show(position, window, cx);
     }
@@ -202,7 +205,22 @@ impl GhostexGpuiApp {
             return;
         };
         if action.operation == "configure" {
-            self.open_gpui_settings_extensions_page(Some(window), cx);
+            let modal = GpuiAppModalKind::Settings;
+            let sidebar_state_message =
+                self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+            self.open_gpui_app_modal_window(
+                modal,
+                json!({
+                    "initialTab": "extensions",
+                    "initialCustomViewId": id.as_str(),
+                    "modal": modal.modal_id(),
+                    "type": "open",
+                    "latestSidebarStateMessage": sidebar_state_message.clone(),
+                }),
+                sidebar_state_message,
+                Some(window),
+                cx,
+            );
             return;
         }
         if action.operation == "output" {

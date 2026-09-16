@@ -23,7 +23,7 @@ import {
  */
 import { DragDropProvider, type DragDropEventHandlers } from '@dnd-kit/react';
 import { isSortableOperation, useSortable } from '@dnd-kit/react/sortable';
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
 import { cn } from '@/packages/components/utils';
 import { Button } from '@/packages/components/ui/button';
 import { Switch } from '@/packages/components/ui/switch';
@@ -123,6 +123,7 @@ const OFFICIAL_TITLEBAR_EXTENSIONS = GHOSTEX_OFFICIAL_EXTENSIONS.filter(
 );
 
 export function ExtensionsSettingsTab({
+  initialCustomViewId,
   spaces = [],
   isActive,
   onRequestStatus,
@@ -135,6 +136,7 @@ export function ExtensionsSettingsTab({
   statusLoading,
   vscode,
 }: {
+  initialCustomViewId?: string;
   spaces?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewSpace[];
   isActive: boolean;
   onRequestStatus?: () => void;
@@ -150,6 +152,28 @@ export function ExtensionsSettingsTab({
   const [customViewEditor, setCustomViewEditor] = useState<CustomViewEditorState>();
   const [choosingTemplate, setChoosingTemplate] = useState(false);
   const [viewOrderOpen, setViewOrderOpen] = useState(false);
+  const customViewEditorRef = useRef<HTMLDivElement>(null);
+  const targetedCustomViewId = useRef<string | undefined>(undefined);
+  const focusCustomViewEditor = useRef(false);
+
+  /**
+   * CDXC:Extensions 2026-09-16 WHY:
+   * Configure view used to open the general Extensions page without identifying the clicked view. Carry its ID through the modal host and open its editor once, preserving edits during settings updates.
+   * SEE-ALSO: apps/desktop/src/app/project_views.rs, apps/desktop/views/modal-host.tsx, packages/core-ui/settings-modal.tsx.
+   */
+  useEffect(() => {
+    if (!isActive || !initialCustomViewId) {
+      targetedCustomViewId.current = undefined;
+      return;
+    }
+    if (targetedCustomViewId.current === initialCustomViewId) return;
+    const view = settings.customViews.find((candidate) => candidate.id === initialCustomViewId);
+    if (!view) return;
+    targetedCustomViewId.current = initialCustomViewId;
+    focusCustomViewEditor.current = true;
+    setChoosingTemplate(false);
+    setCustomViewEditor({ draft: { ...view }, id: view.id });
+  }, [initialCustomViewId, isActive, settings.customViews]);
   const statusById = new Map(status?.plugins.map((plugin) => [plugin.id, plugin]));
   const cef = statusById.get('cef');
   /*
@@ -275,6 +299,18 @@ export function ExtensionsSettingsTab({
     const viewport = contentRef.current?.closest('[data-slot="scroll-area-viewport"]');
     if (viewport) viewport.scrollTop = detailOpen ? 0 : listScrollTop.current;
   }, [detailOpen]);
+
+  useLayoutEffect(() => {
+    if (!isActive || !focusCustomViewEditor.current || !customViewEditorRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const editor = customViewEditorRef.current;
+      if (!editor) return;
+      focusCustomViewEditor.current = false;
+      editor.scrollIntoView({ block: 'start' });
+      editor.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [customViewEditor?.id, detailOpen, isActive, search.tab.isSearching]);
 
   return (
     <SettingsNativeScrollArea className='h-full min-h-0' onScrollCapture={handleScrollCapture}>
@@ -437,6 +473,7 @@ export function ExtensionsSettingsTab({
                     {orderedCustomViews.map((view, index) =>
                       customViewEditor?.id === view.id ? (
                         <CustomViewEditor
+                          editorRef={customViewEditorRef}
                           spaces={spaces}
                           editor={customViewEditor}
                           key={view.id}

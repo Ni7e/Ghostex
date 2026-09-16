@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type Ref } from 'react';
 import { IconCheck, IconTemplate, IconX } from '@tabler/icons-react';
 import { Checkbox } from '@/packages/components/ui/checkbox';
 import { Button } from '@/packages/components/ui/button';
@@ -16,6 +16,7 @@ export type CustomViewEditorState = { draft: GhostexCustomView; id?: string; err
  */
 export function CustomViewEditor({
   editor,
+  editorRef,
   spaces,
   onChange,
   onSave,
@@ -23,6 +24,7 @@ export function CustomViewEditor({
   onSaveTemplate,
 }: {
   editor: CustomViewEditorState;
+  editorRef?: Ref<HTMLDivElement>;
   spaces: import('@/packages/shared/ghostex-settings/project-views').ProjectViewSpace[];
   onChange: (editor: CustomViewEditorState) => void;
   onSave: () => void;
@@ -42,7 +44,7 @@ export function CustomViewEditor({
     onChange({ ...editor, draft: { ...view, ...patch }, error: undefined });
   const updateSource = (patch: Partial<ProjectViewSource>) => update({ source: { ...source, ...patch } });
   return (
-    <div className='settings-list-panel py-3'>
+    <div className='settings-list-panel py-3' ref={editorRef}>
       <TextField label='Name' value={view.name} onChange={(name) => update({ name })} placeholder='Titlebar name' />
       <SettingRow label='Source' htmlFor={`${id}-source`}>
         <SegmentedControl
