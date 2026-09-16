@@ -13,7 +13,6 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 // RefCell backs cross-platform runtime state (window frame persistence), not
@@ -345,13 +344,6 @@ pub struct GhostexGpuiApp {
     /// An agent reply waiting to open in the Docs review (JSON payload for
     /// `window.ghostexOpenDocsReview`), parked like `pending_docs_file_open`.
     pub(crate) pending_docs_review_open: Option<String>,
-    /*
-    Bounded filesystem authority for the one external or out-of-tree document
-    explicitly opened from chat. The Docs bridge and HTML resource loader share
-    it, while the project id prevents cross-project reuse.
-    */
-    pub(crate) session_chat_docs_file_authorization:
-        Arc<Mutex<Option<GpuiSessionChatDocsFileAuthorization>>>,
     /*
     CDXC:Workarea 2026-06-24-10:12:
     Source, Kanban, Automate, and Manage real CEF panes now have permanent app-owned runtime surface storage keyed by the safe workarea slot. The map owns Entity<CefSurface> plus the process-local direct runtime URL identity required to reject stale slot reuse; it must not store project names/paths, page titles, bridge payloads, file contents, tokens, cookies, shell text, or fallback navigation state, and creation is allowed only through a helper that receives a real runtime URL value.

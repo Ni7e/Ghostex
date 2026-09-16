@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 // RefCell backs cross-platform runtime state (window frame persistence), not
@@ -225,7 +224,6 @@ impl GhostexGpuiApp {
                 pending_source_file_open: None,
                 pending_docs_file_open: None,
                 pending_docs_review_open: None,
-                session_chat_docs_file_authorization: Arc::new(Mutex::new(None)),
                 startup_restore_wake_pending,
                 remote_workspace_attach_pending: HashSet::new(),
                 project_view_states_by_project: shell_layout_state.project_view_states_by_project,

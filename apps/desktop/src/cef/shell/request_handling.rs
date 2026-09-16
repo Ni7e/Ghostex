@@ -37,7 +37,7 @@ of the same daemon lookup, so neither can be answered before it.
 pub(crate) type ManageDocsLocalRootResolver =
     Arc<dyn Fn() -> Option<Vec<ManageDocsResourceRoot>> + Send + Sync>;
 pub(crate) type ManageDocsDynamicRootResolver =
-    Arc<dyn Fn() -> Option<ManageDocsResourceRoot> + Send + Sync>;
+    Arc<dyn Fn(&str) -> Option<ManageDocsResourceRoot> + Send + Sync>;
 
 /// One mounted Docs root as the resource scope sees it: the reserved first path
 /// segment that addresses it (empty for the project root, which owns bare
@@ -162,7 +162,7 @@ pub(crate) fn open_manage_docs_resource(
                 }
                 resolved.clone()?
             };
-            if let Some(dynamic_root) = resolve_dynamic_root() {
+            if let Some(dynamic_root) = resolve_dynamic_root(relative_path) {
                 mounts.retain(|mount| mount.mount_segment != dynamic_root.mount_segment);
                 mounts.push(dynamic_root);
             }

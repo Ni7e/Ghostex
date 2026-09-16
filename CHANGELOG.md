@@ -55,6 +55,7 @@
   - The Clean RAM button keeps its width while it says Copied.
   - A macOS accessibility update no longer dismisses an open popup.
   - Pairing a phone with Easy Connect works again with the current Easy Connect helper. The phone app now tunnels with the same tailcat version the computer serves, so update the phone app and scan the code on the computer again.
+  - A file opened into Docs from a chat link keeps working after a reload, and opening a Code link or another chat file no longer takes its access away. Two files with the same name in different folders also stay separate.
 
 ## 9.6.0 - 2026-09-15
 

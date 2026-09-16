@@ -1271,9 +1271,6 @@ impl GhostexGpuiApp {
                     || manage_is_root_artifact_file_relative_path(relative)
             });
             let relative_path = if let Some(relative_path) = normal_docs_path {
-                if let Ok(mut authorization) = self.session_chat_docs_file_authorization.lock() {
-                    *authorization = None;
-                }
                 relative_path
             } else {
                 let Some(project_id) = session_project_id else {
@@ -1285,33 +1282,13 @@ impl GhostexGpuiApp {
                     );
                     return;
                 };
-                let Some(parent) = file_path.parent().map(Path::to_path_buf) else {
-                    self.report_session_chat_file_open_failure(
-                        "That document has no containing folder.",
-                        cx,
-                    );
-                    return;
-                };
-                let Some(file_name) = file_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                else {
-                    self.report_session_chat_file_open_failure("That path is not a file.", cx);
-                    return;
-                };
-                let Ok(mut authorization) = self.session_chat_docs_file_authorization.lock() else {
-                    self.report_session_chat_file_open_failure(
-                        "Docs could not authorize that file.",
-                        cx,
-                    );
-                    return;
-                };
-                *authorization = Some(GpuiSessionChatDocsFileAuthorization {
-                    file_name: file_name.clone(),
-                    project_id,
-                    root: parent,
-                });
-                format!("{MANAGE_DOCS_CHAT_FILE_MOUNT_SEGMENT}/{file_name}")
+                match authorize_manage_chat_file(&project_id, &file_path) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        self.report_session_chat_file_open_failure(&error, cx);
+                        return;
+                    }
+                }
             };
             self.report_session_chat_file_opening("Docs view", &file_path, cx);
             self.pending_docs_file_open = Some(relative_path);
@@ -1322,9 +1299,6 @@ impl GhostexGpuiApp {
                 self.schedule_pending_docs_file_open_delivery(cx);
             }
             return;
-        }
-        if let Ok(mut authorization) = self.session_chat_docs_file_authorization.lock() {
-            *authorization = None;
         }
         self.report_session_chat_file_opening("Code view", &file_path, cx);
         self.pending_source_file_open = Some(PendingSourceFileOpen {
