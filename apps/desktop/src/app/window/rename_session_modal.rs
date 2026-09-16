@@ -512,7 +512,7 @@ impl GpuiRenameSessionModalWindow {
             |this, window, cx| this.generate_name(window, cx),
             cx,
         );
-        modal_footer(vec![rename, generate])
+        modal_footer(vec![generate, rename])
     }
 }
 
