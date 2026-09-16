@@ -344,7 +344,15 @@ pub(crate) fn claude_dialog_steps(
             steps.push(SessionChatSendStep::Write(payload.to_string()));
         }
     }
-    steps.push(SessionChatSendStep::SleepMs(250));
+    // CDXC:SessionChat 2026-09-16 DECISION: User requested prompt Escape and terminal controls; single-key actions must not hold the send queue for a fixed post-send delay.
+    if params.contains_key("choiceIndex")
+        || matches!(
+            params.get("dialogAction").and_then(Value::as_str),
+            Some("text" | "submit")
+        )
+    {
+        steps.push(SessionChatSendStep::SleepMs(250));
+    }
     Ok(steps)
 }
 

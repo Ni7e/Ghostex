@@ -434,8 +434,8 @@ pub(crate) enum ZmxShellProfileMode {
     /// Sources the user's login profile. Required whenever the script hands the
     /// user their own shell or runs user-authored terminal content.
     Login,
-    /// Skips the login profile. Only for probe/snapshot pipelines that run the
-    /// bundled zmx binary, `ps`, and shell builtins.
+    /// Skips the login profile for bundled terminal controls and probe/snapshot
+    /// pipelines that run the bundled zmx binary, `ps`, and shell builtins.
     Profileless,
 }
 
@@ -460,8 +460,8 @@ pub(crate) fn run_zmx_probe_script(
 }
 
 /// `run_zmx_interaction_command`'s error contract on a profile-free spawn, for
-/// probe reads that only run the bundled zmx binary.
-pub(crate) fn run_zmx_probe_command(
+/// controls and probes that only run the bundled zmx binary.
+pub(crate) fn run_zmx_profileless_command(
     script: String,
     options: ZmxCommandOptions,
 ) -> ZmxEndpointResult<ZmxCommandResult> {
