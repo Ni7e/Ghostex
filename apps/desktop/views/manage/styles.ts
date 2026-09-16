@@ -1995,18 +1995,11 @@ export const MANAGE_STYLES = `
 
   .manage-preview-header-actions .manage-send-feedback-button {
     color: light-dark(#0f766e, #8ed3f3);
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     gap: 5px;
-    max-width: min(360px, 42vw);
     padding: 0 8px;
-  }
-
-  .manage-preview-header-actions .manage-send-feedback-button > span {
-    display: inline-block;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+    width: auto;
   }
 
   .manage-preview-header-actions .manage-send-feedback-button:not(:disabled):hover,
@@ -2604,14 +2597,26 @@ export const MANAGE_STYLES = `
    * CDXC:Docs 2026-09-16 WHY:
    * This block used to reset the header padding below 960px, which outranked the room the header keeps for the sidebar corner button and let the file icon slide under it.
    * The header no longer changes shape at narrow widths, so only the label collapse remains here.
+   * Send keeps "Send 5" / "Copy 5" until 560px; other header labels still collapse here.
    */
   @media (max-width: 960px) {
-    .manage-preview-content[data-kind="markdown"] .manage-preview-header-actions button:where(:not(.manage-review-menu button)) span:not(.manage-count-badge):not(.manage-file-change-indicator) {
+    .manage-preview-content[data-kind="markdown"] .manage-preview-header-actions button:where(:not(.manage-review-menu button):not(.manage-send-feedback-button)) span:not(.manage-count-badge):not(.manage-file-change-indicator) {
       display: none;
     }
 
     .manage-markdown-review {
       grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 560px) {
+    .manage-preview-header-actions .manage-send-feedback-button {
+      padding: 0;
+      width: var(--manage-header-button-size);
+    }
+
+    .manage-preview-header-actions .manage-send-feedback-button > span {
+      display: none;
     }
   }
 

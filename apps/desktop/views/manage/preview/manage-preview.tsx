@@ -654,9 +654,9 @@ export function ManagePreview({
               <span>Comment</span>
             </ManageTooltipButton>
             {/*
-              CDXC:Docs 2026-09-15 DECISION:
-              User: feedback goes straight to the agent. The Send button names where it will land before it is pressed (the agent and session last clicked in the sidebar, and whether that lands in its chat or its terminal), and reads "Copy" when the app would put it on the clipboard instead.
-              The Review menu beside it carries Resend all and, with notes in several files, Send new across all files. There is no Finish review, Undo finish, or Archive: Docs is a side pane, not a review session (this supersedes the same-day Herdr Annotate review loop).
+              CDXC:Docs 2026-09-16 DECISION:
+              User: do not show the long destination on the Send button; keep that in the tooltip. The button reads "Send 5" or "Copy 5" when there is room, and is icon-only below 560px.
+              This supersedes the 2026-09-15 button-label decision that put the agent and session on the button itself. Feedback still goes straight to the agent. The Review menu beside it carries Resend all and, with notes in several files, Send new across all files. There is no Finish review, Undo finish, or Archive: Docs is a side pane, not a review session.
             */}
             <ManageTooltipButton
               aria-label={sendLabel.tooltip}
@@ -852,9 +852,9 @@ export function ManagePreview({
 }
 
 /**
- * The Send button always says where feedback will land before it is pressed:
- * the agent and session last clicked in the sidebar, or the clipboard when the
- * app has no session it can hand the text to.
+ * The Send button reads "Send 5" or "Copy 5". The tooltip names where that
+ * count will land: the agent and session last clicked in the sidebar, or the
+ * clipboard when the app has no session it can hand the text to.
  */
 export function manageSendButtonLabel(
   sendState: ManageAnnotationSendState,
@@ -885,24 +885,25 @@ export function manageSendButtonLabel(
   }
   const resend = counts.pending === 0;
   const count = resend ? counts.sent : counts.pending;
-  const what = resend ? `${count} again` : `${count} new`;
+  const verb = sendTarget ? 'Send' : 'Copy';
+  const text = `${verb} ${count}`;
   const noun = `annotation${count === 1 ? '' : 's'}`;
+  const what = `${text} ${resend ? '' : 'new '}${noun}${resend ? ' again' : ''}`;
   if (!sendTarget) {
     return {
-      text: `Copy ${what}`,
+      text,
       tooltip:
         count === 0
           ? 'No annotations to send'
-          : `No agent session is selected in the sidebar, so the ${resend ? '' : 'new '}${noun} will be copied to the clipboard`,
+          : `${what} to the clipboard. No agent session is selected in the sidebar`,
     };
   }
   const surface = sendTarget.surface === 'chat' ? 'chat' : 'terminal';
-  const verb = resend ? 'Resend' : 'Send';
   return {
-    text: `${verb} ${what} \u25B8 ${sendTarget.agentLabel} in ${sendTarget.sessionTitle}`,
+    text,
     tooltip:
       count === 0
         ? 'No annotations to send'
-        : `${resend ? 'Add all' : 'Add'} ${count} ${resend ? '' : 'new '}${noun} ${resend ? 'again ' : ''}to the ${surface} of ${sendTarget.agentLabel} in ${sendTarget.sessionTitle} (${formatSidebarHotkeyLabel('cmd+enter')})`,
+        : `${what} to the ${surface} of ${sendTarget.agentLabel} in ${sendTarget.sessionTitle} (${formatSidebarHotkeyLabel('cmd+enter')})`,
   };
 }
