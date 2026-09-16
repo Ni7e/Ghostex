@@ -19,6 +19,10 @@ static SHOW_ACTIVE_PANE_OUTLINE: std::sync::atomic::AtomicBool =
 static ACTIVE_PANE_OUTLINE_RGB: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0x3b82f6);
 
+/// CDXC:Theming 2026-09-16 DECISION:
+/// User: the stacked companion separator and resize drag-area backgrounds are #F3F4F6 in light mode, superseding the earlier #C9C9C9 choice.
+pub(crate) const LIGHT_RESIZE_HANDLE_RGB: u32 = 0xf3f4f6;
+
 pub(crate) fn show_active_pane_outline() -> bool {
     SHOW_ACTIVE_PANE_OUTLINE.load(Ordering::Relaxed)
 }
@@ -80,6 +84,16 @@ pub(crate) fn refresh_gpui_visual_settings(
 ) {
     let object = settings.object();
     CHROME_LIGHT_APPEARANCE.store(sidebar_uses_light_theme(object), Ordering::Relaxed);
+    GPUI_MENU_DARK_BACKGROUND_RGB.store(
+        match object
+            .get("sidebarTheme")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("dark-1") | Some("system") | None => 0x191919,
+            _ => 0x0e0e0e,
+        },
+        Ordering::Relaxed,
+    );
     SHOW_ACTIVE_PANE_OUTLINE.store(
         object
             .get("showActivePaneOutline")
@@ -729,7 +743,7 @@ pub(crate) fn project_editor_companion_border_color_for_state(
 }
 
 pub(crate) fn workspace_split_handle_color() -> Hsla {
-    chrome_color(0x0c0c0c, 0xffffff).into()
+    chrome_color(0x0c0c0c, LIGHT_RESIZE_HANDLE_RGB).into()
 }
 
 pub(crate) fn workspace_split_separator_color() -> Hsla {
@@ -741,7 +755,11 @@ pub(crate) fn project_editor_shell_background_color() -> Hsla {
 }
 
 pub(crate) fn project_editor_companion_divider_background_color() -> Hsla {
-    rgb(0x000000).opacity(0.0).into()
+    if CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed) {
+        rgb(LIGHT_RESIZE_HANDLE_RGB).into()
+    } else {
+        rgb(0x000000).opacity(0.0).into()
+    }
 }
 
 pub(crate) fn project_editor_companion_divider_line_color() -> Hsla {
@@ -986,15 +1004,15 @@ pub(crate) fn command_pane_sticky_active_tab_border_color() -> Hsla {
 pub(crate) fn command_pane_split_handle_color() -> Hsla {
     /*
     CDXC:CommandPane 2026-06-25-13:19:
-    Native pane split rails are transparent five-pixel hit regions; pane borders provide visible separation until hover feedback appears.
+    In dark mode, native pane split rails are transparent five-pixel hit regions; pane borders provide visible separation until hover feedback appears.
     */
-    rgb(0x000000).opacity(0.0).into()
+    project_editor_companion_divider_background_color()
 }
 
 pub(crate) fn command_pane_split_separator_color() -> Hsla {
     /*
     CDXC:CommandPane 2026-06-25-13:19:
-    Command split handles should not draw a persistent center separator because native resize rails are transparent in their normal state.
+    Command split handles should not draw a persistent center separator because pane borders provide visible separation.
     */
     rgb(0x000000).opacity(0.0).into()
 }
