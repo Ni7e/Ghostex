@@ -185,44 +185,19 @@ pub(crate) fn to_agent_resume_input(
         Some(&launch_settings),
     );
     /*
-    CDXC:AgentProviders 2026-09-16:
-    A `custom-…` agent id names a sidebar CONFIGURATION; the CLI family it runs
-    is declared by its icon — the same contract available_draft_agents,
-    session_chat_composer_agent_id, and launch_agent_mismatch read. Resume
-    planning must speak the family: with the raw configuration id,
-    `restorable_agent_id` matched nothing, `build_agent_resume_plan` emitted no
-    startup text, and a custom-agent session whose daemon was gone could never
-    be woken, restored, or forked — clicking it only flashed the row in the
-    sidebar. The configured command (stored `agentCommand` or the custom
-    config's `command`) still wins below, so the family only selects the resume
-    grammar, not the binary.
-
-    Supersedes the 2026-08-29 note: a stored command that names a DIFFERENT
-    known CLI than the family no longer wins. Live identity adoption rebrands a
-    pane's row without touching its saved command, so the stale binary was
-    resumed with the new family's grammar and session id — a Codex-launched pane
-    adopted by ZCode woke as `codex --yolo --resume "sess_…"`, and a
-    Kiro-launched pane woke with a `ghostex`-looking command line. A command no
-    inferable CLI claims still wins unchanged, so custom wrappers keep working.
-    Existing affected rows are repaired at read time without mutating their
-    saved metadata.
+    CDXC:AgentProviders 2026-09-16 WHY:
+    A custom agent id names a sidebar configuration; its icon declares the CLI family that supplies resume grammar, while its command selects the launcher.
+    Supersedes the 2026-08-29 note: saved commands from a different known CLI must not win after live identity adoption, which otherwise pairs the old binary with the new family's grammar and conversation id.
+    Commands with no inferable CLI remain usable so custom wrappers keep working; this also repairs previously saved mismatches without modifying the stored row.
     */
     let agent_id = resume_agent_family_id(configured_agent_id, &agent_config, &launch_settings);
     let stored_agent_command = read_text_from_map(&runtime_settings, "agentCommand");
     let configured_agent_command = read_text_from_map(&agent_config, "command");
     let base_command = if let Some(command) =
         read_text_from_map(&runtime_settings, "accountCommand")
+            .filter(|command| stored_agent_command_matches_family(agent_id.as_deref(), command))
     {
-        match reusable_account_command(&command, agent_id.as_deref().unwrap_or_default()) {
-            Ok(resolved) if stored_agent_command_matches_family(agent_id.as_deref(), &resolved) => {
-                Some(resolved)
-            }
-            Ok(_) => agent_id
-                .as_deref()
-                .and_then(default_agent_command)
-                .map(str::to_string),
-            Err(_) => None,
-        }
+        reusable_account_command(&command, agent_id.as_deref().unwrap_or_default()).ok()
     } else {
         stored_agent_command
             .clone()

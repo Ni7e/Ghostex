@@ -163,21 +163,10 @@ pub(crate) fn apply_session_state_update(
     if identity_update_source == SessionIdentityUpdateSource::VerifiedRewind {
         insert_optional_from_params(&mut runtime_settings, params, "codexRewindProcessId");
     }
-    /*
-    CDXC:AgentProviders 2026-09-16 WHY:
-    Live identity adoption rewrites the row's agent family without going through
-    a Switch Agent flow, so the previous CLI's saved launch metadata survived it
-    and the next wake resumed the stale binary with the new family's grammar and
-    session id — a Codex-launched pane adopted by ZCode woke as
-    `codex --yolo --resume "sess_…"`, and a Kiro-launched pane woke as
-    `kiro-cli chat --agent ghostex --resume …`. Drop the old CLI's command and
-    policy keys when the resolved family changes — the command keys of the set
-    the Switch Agent flows clear (identity keys stay owned by this update) —
-    so the row and its saved command agree again. The resume planner
-    additionally repairs already-poisoned rows at read time (see
-    `stored_agent_command_matches_family` in resume_plan.rs).
-    SEE-ALSO server/src/agents/resume_plan.rs, server/src/agents/switch_account.rs.
-    */
+    // CDXC:AgentProviders 2026-09-16 WHY:
+    // Live identity adoption can replace the CLI without a Switch Agent flow, leaving the previous binary paired with the new family's resume grammar and conversation id.
+    // Clear its launch and account metadata together so account validation and automatic recovery cannot reuse the previous provider's login.
+    // SEE-ALSO: server/src/agents/resume_plan.rs, server/src/agents/switch_account.rs.
     let family_changed = {
         let previous = normalize_agent_id(current_identity.agent_id.as_deref());
         let next = normalize_agent_id(identity.agent_id.as_deref());
@@ -188,12 +177,18 @@ pub(crate) fn apply_session_state_update(
     if family_changed {
         for key in [
             "agentCommand",
+            "accountId",
+            "accountName",
+            "accountColor",
+            "accountSlot",
+            "accountProvider",
             "accountBaseCommand",
             "accountCommand",
             "accountSwitch",
             "accountRecovery",
             "accountRecoverySuppressed",
             "accountPolicyOverride",
+            "accountPolicyDefault",
         ] {
             runtime_settings.remove(key);
         }
@@ -1344,41 +1339,62 @@ pub(crate) fn align_observed_identity_with_launch_profile(
     identity
 }
 
+/// Infer the first known CLI from shell words, preserving quoted paths on every host.
+/// CDXC:AgentProviders 2026-09-16 WHY:
+/// Resume validation must recognize quoted Unix paths and Windows launchers, including account wrappers, or a stale command can evade the family check.
 pub(crate) fn infer_agent_id_from_command(command: &str) -> Option<String> {
     let command = command.to_ascii_lowercase();
-    for (agent, needle) in [
-        ("cursor", "cursor-agent"),
-        ("hermes-agent", "hermes"),
-        ("codebuddy", "codebuddy"),
-        ("antigravity", "agy"),
-        ("opencode", "opencode"),
-        ("omp", "omp"),
-        ("rovodev", "rovodev"),
-        ("qoder", "qodercli"),
-        ("command-code", "commandcode"),
-        ("openclaude", "openclaude"),
-        ("mastra", "mastracode"),
-        ("devin", "devin"),
-        ("kimi", "kimi"),
-        ("kiro", "kiro-cli"),
-        ("claude", "claude"),
-        ("copilot", "copilot"),
-        ("gemini", "gemini"),
-        ("codex", "codex"),
-        ("zcode", "zcode"),
-        ("droid", "droid"),
-        ("grok", "grok"),
-        ("amp", "amp"),
-        ("pi", "pi"),
-    ] {
-        if command
-            .split(|char: char| {
-                char.is_whitespace() || matches!(char, ';' | '&' | '|' | '(' | ')' | '/')
-            })
-            .any(|token| token == needle)
-        {
-            return Some(agent.to_string());
+    let mut quote = None;
+    let tokens = command.split(|character: char| {
+        if quote == Some(character) {
+            quote = None;
+        } else if quote.is_none() {
+            if matches!(character, '\'' | '"') {
+                quote = Some(character);
+            } else {
+                return character.is_whitespace()
+                    || matches!(character, ';' | '&' | '|' | '(' | ')');
+            }
         }
+        false
+    });
+    for token in tokens {
+        let token = token.trim_matches(['\'', '"']);
+        if token.is_empty() || token.contains('=') || token.starts_with('-') {
+            continue;
+        }
+        let basename = token.rsplit(['/', '\\']).next().unwrap_or(token);
+        let executable = [".exe", ".cmd", ".bat", ".ps1"]
+            .iter()
+            .find_map(|suffix| basename.strip_suffix(suffix))
+            .unwrap_or(basename);
+        let agent = match executable {
+            "cursor-agent" => "cursor",
+            "hermes" => "hermes-agent",
+            "codebuddy" => "codebuddy",
+            "agy" => "antigravity",
+            "opencode" => "opencode",
+            "omp" => "omp",
+            "rovodev" => "rovodev",
+            "qodercli" => "qoder",
+            "commandcode" => "command-code",
+            "openclaude" => "openclaude",
+            "mastracode" => "mastra",
+            "devin" => "devin",
+            "kimi" => "kimi",
+            "kiro-cli" => "kiro",
+            "claude" | "cswap" => "claude",
+            "copilot" => "copilot",
+            "gemini" => "gemini",
+            "codex" | "xswap" => "codex",
+            "zcode" | "zcode-cli" => "zcode",
+            "droid" => "droid",
+            "grok" => "grok",
+            "amp" => "amp",
+            "pi" => "pi",
+            _ => continue,
+        };
+        return Some(agent.to_string());
     }
     None
 }
