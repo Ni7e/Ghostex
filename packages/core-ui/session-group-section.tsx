@@ -1,4 +1,5 @@
 import { SessionQuestionIndicator } from './session-question-indicator';
+import { CollapsibleSessionRow } from './collapsible-session-row';
 import {
   IconAlertTriangle,
   IconCaretRightFilled,
@@ -533,7 +534,11 @@ export type SessionGroupSectionProps = {
 
 /**
  * CDXC:Sidebar 2026-09-16 DECISION:
- * User: section headers show orange/blue dots for working/done sessions and a separate plain circle for the section containing the active session, white on dark sidebars and #474747 on light sidebars.
+ * User: section headers show orange/blue dots for working/done sessions; collapsed headers show their count at the right edge without a separator and a muted gray hollow circle when they contain the active session.
+ * This replaces the always-visible filled active-session dot and its white/#474747 colors.
+ * User: pending agent questions get a separate pink dot, replacing their inclusion in the blue done dot; working and question dots can appear together.
+ * User: keep status dots stationary when toggling sections, put the active-session circle last, and replace all dots with the hover chevron in the same space.
+ * User: increase the section-label font and header indicators by another 2px (12px labels, 8px status dots, and a 9px active-session circle).
  */
 function ProjectSessionSectionToggle({
   containsActiveSession,
@@ -548,19 +553,21 @@ function ProjectSessionSectionToggle({
   isCollapsed: boolean;
   label: string;
   onToggle: () => void;
-  summary: GroupSessionSummary;
+  summary: Pick<GroupSessionSummary, 'workingCount' | 'attentionCount'> & { questionCount: number };
 }) {
+  const showActiveSessionIndicator = isCollapsed && containsActiveSession;
   const statusLabel = [
-    containsActiveSession ? 'Contains active session' : '',
+    showActiveSessionIndicator ? 'Contains active session' : '',
     summary.workingCount > 0 ? `${summary.workingCount} working` : '',
-    summary.attentionCount > 0 ? `${summary.attentionCount} done or awaiting attention` : '',
+    summary.attentionCount > 0 ? `${summary.attentionCount} done` : '',
+    summary.questionCount > 0 ? `${summary.questionCount} awaiting an answer` : '',
   ]
     .filter(Boolean)
     .join(', ');
   return (
     <button
       aria-expanded={!isCollapsed}
-      aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${label}${statusLabel ? `, ${statusLabel}` : ''}`}
+      aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${label}${isCollapsed ? `, ${count} sessions` : ''}${statusLabel ? `, ${statusLabel}` : ''}`}
       className='session-kind-toggle'
       onClick={(event) => {
         event.preventDefault();
@@ -569,26 +576,27 @@ function ProjectSessionSectionToggle({
       }}
       type='button'
     >
-      <span>
-        {label}
-        {isCollapsed ? ` ⋅ ${count}` : null}
+      <span>{label}</span>
+      <span className='session-kind-affordance'>
+        {statusLabel ? (
+          <AppTooltip content={statusLabel}>
+            <span aria-hidden='true' className='session-kind-indicators'>
+              {summary.workingCount > 0 ? <span className='session-kind-dot' data-status='working' /> : null}
+              {summary.attentionCount > 0 ? <span className='session-kind-dot' data-status='attention' /> : null}
+              {summary.questionCount > 0 ? <span className='session-kind-dot' data-status='question' /> : null}
+              {showActiveSessionIndicator ? <span className='session-kind-dot' data-status='active' /> : null}
+            </span>
+          </AppTooltip>
+        ) : null}
+        <IconChevronRight
+          aria-hidden='true'
+          className='session-kind-toggle-chevron'
+          data-expanded={String(!isCollapsed)}
+          size={12}
+          stroke={2}
+        />
       </span>
-      {statusLabel ? (
-        <AppTooltip content={statusLabel}>
-          <span aria-hidden='true' className='session-kind-indicators'>
-            {containsActiveSession ? <span className='session-kind-dot' data-status='active' /> : null}
-            {summary.workingCount > 0 ? <span className='session-kind-dot' data-status='working' /> : null}
-            {summary.attentionCount > 0 ? <span className='session-kind-dot' data-status='attention' /> : null}
-          </span>
-        </AppTooltip>
-      ) : null}
-      <IconChevronRight
-        aria-hidden='true'
-        className='session-kind-toggle-chevron'
-        data-expanded={String(!isCollapsed)}
-        size={12}
-        stroke={2}
-      />
+      {isCollapsed ? <span className='session-kind-count'>{count}</span> : null}
     </button>
   );
 }
@@ -1083,7 +1091,18 @@ export function SessionGroupSection({
     containsActiveSession:
       group?.isActive === true && projectSessionSections[section].some((session) => session.isFocused),
     count: projectSessionSections[section].length,
-    summary: getGroupSessionSummary(projectSessionSections[section]),
+    summary: projectSessionSections[section].reduce(
+      (summary, session) => {
+        if (session.activity === 'working') summary.workingCount += 1;
+        if ((session.pendingQuestionCount ?? 0) > 0) {
+          summary.questionCount += 1;
+        } else if (session.activity === 'attention') {
+          summary.attentionCount += 1;
+        }
+        return summary;
+      },
+      { attentionCount: 0, questionCount: 0, workingCount: 0 }
+    ),
   });
   const shouldRenderSessionKindLabels =
     renderedBrowserSessionIds.length > 0 && renderedBrowserSessionIds.length < renderedSessionIds.length;
@@ -2725,15 +2744,15 @@ export function SessionGroupSection({
                         {!projectContext && shouldRenderSessionKindLabels && sessionId === firstTerminalSessionId ? (
                           <div className='session-kind-label'>Sessions</div>
                         ) : null}
-                        {!isPinnedSectionEndGap && isVisibleSessionRow && shouldRenderSessionRowGaps ? (
-                          <div
-                            aria-hidden
-                            className='pinned-session-drop-gap'
-                            data-active={String(pinnedSessionDropGapKey === getSessionDropGapKeyBefore(sessionId))}
-                            data-edge={sessionIndex === 0 ? 'start' : undefined}
-                          />
-                        ) : null}
-                        {isVisibleSessionRow ? (
+                        <CollapsibleSessionRow visible={isVisibleSessionRow}>
+                          {!isPinnedSectionEndGap && shouldRenderSessionRowGaps ? (
+                            <div
+                              aria-hidden
+                              className='pinned-session-drop-gap'
+                              data-active={String(pinnedSessionDropGapKey === getSessionDropGapKeyBefore(sessionId))}
+                              data-edge={sessionIndex === 0 ? 'start' : undefined}
+                            />
+                          ) : null}
                           <SortableSessionCard
                             completionFlashNonce={completionFlashNonceBySessionId?.[sessionId] ?? 0}
                             dragDisabled={
@@ -2770,7 +2789,7 @@ export function SessionGroupSection({
                             showDropPositionIndicator={showSessionDropPositionIndicators && !allowPinnedSessionReorder}
                             vscode={vscode}
                           />
-                        ) : null}
+                        </CollapsibleSessionRow>
                         {!projectContext &&
                         !isProjectSessionSectionCollapsed &&
                         sessionsById[sessionId]?.isPinned === true &&

@@ -1265,7 +1265,7 @@ button.group-agent-menu-account-button {
 
 .session-kind-label {
   color: var(--app-text-color);
-  font-size: calc(10px * var(--sidebar-density-scale));
+  font-size: calc(12px * var(--sidebar-density-scale));
   font-weight: 500;
   letter-spacing: 0.04em;
   line-height: calc(14px * var(--sidebar-density-scale));
@@ -1279,33 +1279,60 @@ button.group-agent-menu-account-button {
 
 /*
  * Project browser tabs, pinned sessions, and regular sessions are independent
- * disclosures. Keep the heading's hit target limited to its visible content,
- * and reveal the chevron beside the label instead of reserving a trailing
- * full-row control.
+ * disclosures. The heading spans the row to align collapsed counts at the
+ * right edge; the hover chevron replaces the status indicators beside the label.
  */
 .session-kind-toggle {
   align-items: center;
   background: transparent;
   border: 0;
+  border-radius: 0;
+  box-sizing: border-box;
   color: color-mix(in srgb, var(--app-text-color) 34%, transparent);
   cursor: pointer;
   display: flex;
-  font-size: calc(10px * var(--sidebar-density-scale));
+  font-size: calc(12px * var(--sidebar-density-scale));
   font-weight: 500;
   gap: 5px;
   letter-spacing: 0.04em;
   line-height: calc(14px * var(--sidebar-density-scale));
   margin: 0;
-  padding: calc(3px * var(--sidebar-density-scale)) calc(10px * var(--sidebar-density-scale)) 0
+  min-width: 0;
+  padding: calc(3px * var(--sidebar-density-scale))
+    calc(10px * var(--sidebar-density-scale) + var(--session-kind-end-bleed, 0px)) 0
     calc(5px * var(--sidebar-density-scale));
   text-transform: uppercase;
   user-select: none;
-  width: max-content;
+  width: calc(100% + var(--session-kind-end-bleed, 0px));
 }
 
 .session-kind-toggle:hover,
 .session-kind-toggle:focus-visible {
+  /* CDXC:Sidebar 2026-09-16 DECISION: User: section headers get a subtle hover background with square corners. */
+  background: color-mix(in srgb, var(--app-foreground) 6%, transparent);
   color: color-mix(in srgb, var(--app-text-color) 58%, transparent);
+}
+
+.session-section-row {
+  min-width: 0;
+}
+
+.session-kind-affordance {
+  align-items: center;
+  display: grid;
+  flex: none;
+  min-height: 12px;
+  min-width: 12px;
+}
+
+.session-kind-affordance > * {
+  grid-area: 1 / 1;
+}
+
+.session-kind-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
 }
 
 .session-kind-indicators {
@@ -1318,12 +1345,16 @@ button.group-agent-menu-account-button {
 .session-kind-dot {
   border-radius: 50%;
   flex: none;
-  height: 6px;
-  width: 6px;
+  height: 8px;
+  width: 8px;
 }
 
 .session-kind-dot[data-status='active'] {
-  background: light-dark(#474747, #ffffff);
+  background: transparent;
+  border: 1.5px solid light-dark(#858585, #a3a3a3);
+  box-sizing: border-box;
+  height: 9px;
+  width: 9px;
 }
 
 .session-kind-dot[data-status='working'] {
@@ -1332,6 +1363,10 @@ button.group-agent-menu-account-button {
 
 .session-kind-dot[data-status='attention'] {
   background: var(--done-attention-color, #95d7f6);
+}
+
+.session-kind-dot[data-status='question'] {
+  background: #f472b6;
 }
 
 .session-kind-toggle-chevron {
@@ -1350,6 +1385,11 @@ button.group-agent-menu-account-button {
 .session-kind-toggle:hover .session-kind-toggle-chevron,
 .session-kind-toggle:focus-visible .session-kind-toggle-chevron {
   opacity: 1;
+}
+
+.session-kind-toggle:hover .session-kind-indicators,
+.session-kind-toggle:focus-visible .session-kind-indicators {
+  visibility: hidden;
 }
 /*
  * CDXC:Sessions 2026-06-02-20:35:

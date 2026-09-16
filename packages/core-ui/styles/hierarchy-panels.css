@@ -411,6 +411,7 @@ section.project-collection[data-collapsed='true'][data-contains-active-session='
 .sidebar-reference-layout[data-reference-sidebar='true']
   .reference-project-group-list
   > .group[data-project-group='true'] {
+  --session-kind-end-bleed: 8px;
   margin-left: 18px;
   margin-right: 5px;
   width: calc(100% - 23px);
@@ -418,6 +419,14 @@ section.project-collection[data-collapsed='true'][data-contains-active-session='
 
 .sidebar-reference-layout[data-reference-sidebar='true'] .group[data-project-group='true'] .group-sessions {
   padding: 0 3px 3px;
+}
+
+/* CDXC:Sidebar 2026-09-16 DECISION:
+ * User: section headers must toggle when clicking anywhere to their right, through the sidebar's right edge.
+ * Include the session-list padding and the top-level project's right margin in the button; matching inner padding keeps the count aligned with session rows.
+ */
+.sidebar-reference-layout[data-reference-sidebar='true'] .group[data-project-group='true'] {
+  --session-kind-end-bleed: 3px;
 }
 
 .sidebar-reference-layout[data-reference-sidebar='true'] .group[data-project-group='true'][data-collapsed='false'] {
@@ -547,7 +556,7 @@ section.project-collection[data-collapsed='true'][data-contains-active-session='
 
 .session-kind-label {
   color: color-mix(in srgb, var(--app-foreground) 88%, transparent);
-  font-size: 10.5px;
+  font-size: 12.5px;
   font-weight: 650;
   letter-spacing: 0.12em;
   opacity: 0.96;
