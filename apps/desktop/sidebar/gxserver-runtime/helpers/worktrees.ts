@@ -355,6 +355,11 @@ export function normalizeGpuiExistingWorktreeOptions(
   });
 }
 
+/**
+ * CDXC:Worktrees 2026-09-16 WHY:
+ * Git lists the main repository first, including a bare repository. Skipping bare entries when identifying it hides the first linked checkout instead.
+ * SEE-ALSO: server/src/server/worktree_ops/projects.rs, server/src/domain/git_worktree.rs.
+ */
 export function createGpuiExistingWorktreeOptions(
   worktrees: GxserverTypedOperationResult['worktrees'],
   parentProject: GxserverProjectDomainState,
@@ -368,7 +373,7 @@ export function createGpuiExistingWorktreeOptions(
   path: string;
 }> {
   const entries = worktrees ?? [];
-  const mainEntry = entries.find((entry) => entry.bare !== true);
+  const mainEntry = entries[0];
   const mainPath = normalizeGpuiProjectPath(mainEntry?.path) ?? normalizeGpuiProjectPath(parentProject.path);
   const sourcePath = normalizeGpuiProjectPath(sourceProject.path);
   const registeredPaths = new Set(
