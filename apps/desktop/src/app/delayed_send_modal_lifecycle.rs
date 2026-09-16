@@ -4,7 +4,9 @@ use crate::app::helpers::*;
 use crate::app::window::*;
 use crate::*;
 
-fn delayed_send_agent_reference(value: Option<&serde_json::Value>) -> Option<DelayedSendAgentReference> {
+fn delayed_send_agent_reference(
+    value: Option<&serde_json::Value>,
+) -> Option<DelayedSendAgentReference> {
     let value = value?;
     let text = |key: &str| {
         value
@@ -68,7 +70,9 @@ impl GhostexGpuiApp {
                             .and_then(serde_json::Value::as_array)?
                             .iter()
                             .find(|indicator| {
-                                indicator.get("sessionId").and_then(serde_json::Value::as_str)
+                                indicator
+                                    .get("sessionId")
+                                    .and_then(serde_json::Value::as_str)
                                     == Some(session_id.as_str())
                             })
                             .and_then(|indicator| indicator.get("closeAfterDone"))
@@ -87,7 +91,9 @@ impl GhostexGpuiApp {
                     .and_then(serde_json::Value::as_str),
             ),
             delayed_send_remaining_label: text("delayedSendRemainingLabel"),
-            send_when_all_project_sessions_stop_active: flag("sendWhenAllProjectSessionsStopActive"),
+            send_when_all_project_sessions_stop_active: flag(
+                "sendWhenAllProjectSessionsStopActive",
+            ),
             send_when_agent_stops_active: flag("sendWhenAgentStopsActive"),
             send_when_specific_agent_finishes: delayed_send_agent_reference(
                 message.get("sendWhenSpecificAgentFinishes"),
@@ -107,7 +113,9 @@ impl GhostexGpuiApp {
             GpuiAppModalKind::DelayedSend,
             DELAYED_SEND_MODAL_WIDTH,
             DELAYED_SEND_MODAL_INITIAL_HEIGHT,
-            move |window, cx| cx.new(|cx| GpuiDelayedSendModalWindow::new(config, host, window, cx)),
+            move |window, cx| {
+                cx.new(|cx| GpuiDelayedSendModalWindow::new(config, host, window, cx))
+            },
             cx,
         );
     }

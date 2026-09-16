@@ -2,14 +2,16 @@
 //! `DelayedSendModal` in packages/core-ui/delayed-send-modal.tsx.
 //!
 //! CDXC:DelayedSend 2026-09-15 DECISION:
-//! User: the React app modals are being rebuilt in GPUI one at a time and each native dialog must match its React twin 1 to 1: the same layout, copy, colors, states and behaviour in both appearances. Session Automations keeps every React rule verbatim: one trigger per send, whole hours and minutes (remaining deadlines rounded up to the next minute), the awake-agent picker polled every 3 seconds while the dialog is open, and the reserved trigger detail slot so switching triggers never moves the footer.
+//! User: the React app modals are being rebuilt in GPUI one at a time and each native dialog must match its React twin 1 to 1: the same layout, copy, colors, states and behaviour in both appearances. Session Automations keeps one trigger per send, whole hours and minutes for After a delay (remaining deadlines rounded up to the next minute), the awake-agent picker polled every 3 seconds while the dialog is open, and the reserved trigger detail slot so switching triggers never moves the footer.
 //! SEE-ALSO: packages/core-ui/delayed-send-modal.tsx and the `.delayed-send-*` rules in packages/core-ui/styles/modals.css and modals-light.css (the React twin), apps/desktop/views/delayed-send-agents.ts (the awake-agent polling mirrored here), apps/desktop/src/app/window/native_modal_kit.rs (shared chrome and controls), apps/desktop/src/app/delayed_send_modal_lifecycle.rs (open, bridge commands, agent replies), apps/desktop/src/bin/native_modal_demo/delayed_send.rs (standalone preview).
 use super::native_modal_kit::*;
+use chrono::{Local, NaiveTime, TimeZone as _};
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, FocusHandle, FontWeight, InteractiveElement as _,
-    IntoElement, KeyDownEvent, ParentElement as _, Render, Rgba, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
+    AnyElement, App, AppContext as _, ClickEvent, Context, FocusHandle, FontWeight,
+    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render, Rgba,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, rgb,
 };
+use gpui_component::date_picker::{DatePicker, DatePickerEvent, DatePickerState};
 use gpui_component::input::{Escape, InputEvent, InputState};
 use gpui_component::{h_flex, v_flex};
 use std::rc::Rc;
@@ -25,10 +27,8 @@ const MINUTE_MS: u64 = 60_000;
 const HOUR_MS: u64 = 60 * MINUTE_MS;
 /// `useDesktopDelayedSendAgents` re-requests the awake list 3 seconds after each reply.
 const AGENTS_POLL_INTERVAL: Duration = Duration::from_secs(3);
-/// `.delayed-send-trigger-detail-slot` min-height, and the taller reservation
-/// `.delayed-send-has-agent-picker` adds when the awake-agent picker is offered.
-const TRIGGER_DETAIL_SLOT_MIN_HEIGHT: f32 = 70.0;
-const TRIGGER_DETAIL_SLOT_MIN_HEIGHT_WITH_AGENT_PICKER: f32 = 112.0;
+/// `.delayed-send-trigger-detail-slot` reserves room for the date/time and agent pickers.
+const TRIGGER_DETAIL_SLOT_MIN_HEIGHT: f32 = 112.0;
 /// `var(--ghostex-accent, #86d3f8)`: the armed Send Enter status color in the dark appearance.
 const DARK_STATUS_ACCENT: u32 = 0x86d3f8;
 
@@ -43,6 +43,7 @@ const STATUS_AGENT_ACTIVE: &str = "Active when this agent finishes working.";
 const STATUS_IDLE: &str = "Press Enter later using the selected trigger.";
 const TRIGGER_LABEL: &str = "Trigger";
 const TRIGGER_AFTER_DELAY: &str = "After a delay";
+const TRIGGER_SPECIFIC_TIME: &str = "Specific time";
 const TRIGGER_AGENT_STOPS: &str = "When this agent finishes";
 const TRIGGER_SPECIFIC_AGENT_STOPS: &str = "When a specific agent finishes";
 const TRIGGER_ALL_AGENTS_STOP: &str = "When all agents finish";
@@ -52,8 +53,7 @@ const AGENT_SESSION_LABEL: &str = "Agent session";
 const AGENTS_LOADING: &str = "Loading agent sessions...";
 const AGENTS_SELECT: &str = "Select an agent session";
 const AGENTS_EMPTY: &str = "No agent sessions available";
-const SPECIFIC_AGENT_DESCRIPTION: &str =
-    "Ghostex will send Enter after the selected agent finishes working and remains idle for 10 seconds.";
+const SPECIFIC_AGENT_DESCRIPTION: &str = "Ghostex will send Enter after the selected agent finishes working and remains idle for 10 seconds.";
 const AGENT_STOPS_DESCRIPTION: &str = "Ghostex will send Enter automatically after this agent finishes working and remains idle for 10 seconds.";
 const ALL_AGENTS_STOP_DESCRIPTION: &str = "Ghostex will send Enter automatically after every agent in this project finishes working and remains idle for 10 seconds.";
 const CLOSE_TITLE: &str = "Close session after Done";
@@ -65,6 +65,7 @@ const SAVE_CHANGES: &str = "Save changes";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DelayedSendTrigger {
     AfterDelay,
+    SpecificTime,
     AgentStops,
     AllAgentsStop,
     SpecificAgentStops,
@@ -74,6 +75,7 @@ impl DelayedSendTrigger {
     fn label(self) -> &'static str {
         match self {
             Self::AfterDelay => TRIGGER_AFTER_DELAY,
+            Self::SpecificTime => TRIGGER_SPECIFIC_TIME,
             Self::AgentStops => TRIGGER_AGENT_STOPS,
             Self::AllAgentsStop => TRIGGER_ALL_AGENTS_STOP,
             Self::SpecificAgentStops => TRIGGER_SPECIFIC_AGENT_STOPS,
@@ -179,6 +181,8 @@ pub(crate) struct GpuiDelayedSendModalWindow {
     request_counter: u64,
     hours: gpui::Entity<InputState>,
     minutes: gpui::Entity<InputState>,
+    specific_date: gpui::Entity<DatePickerState>,
+    specific_time: gpui::Entity<InputState>,
     send_enter_enabled: bool,
     trigger: DelayedSendTrigger,
     specific_agent: Option<DelayedSendAgentReference>,
@@ -201,8 +205,11 @@ impl GpuiDelayedSendModalWindow {
         focus_handle.focus(window, cx);
         let hours = cx.new(|cx| InputState::new(window, cx));
         let minutes = cx.new(|cx| InputState::new(window, cx));
+        let specific_date = cx.new(|cx| DatePickerState::new(window, cx).date_format("%Y-%m-%d"));
+        let specific_time = cx.new(|cx| InputState::new(window, cx).placeholder("HH:MM"));
         let mut subscriptions = Vec::new();
-        for state in [&hours, &minutes] {
+        subscriptions.push(cx.subscribe(&specific_date, |_, _, _: &DatePickerEvent, cx| cx.notify()));
+        for state in [&hours, &minutes, &specific_time] {
             subscriptions.push(cx.subscribe_in(
                 state,
                 window,
@@ -261,6 +268,8 @@ impl GpuiDelayedSendModalWindow {
             request_counter: 0,
             hours,
             minutes,
+            specific_date,
+            specific_time,
             send_enter_enabled: true,
             trigger: DelayedSendTrigger::AfterDelay,
             specific_agent: None,
@@ -272,6 +281,22 @@ impl GpuiDelayedSendModalWindow {
             _subscriptions: subscriptions,
         };
         this.reset_from_open_state(window, cx);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                if this
+                    .update(cx, |this, cx| {
+                        if this.send_enter_enabled && this.trigger == DelayedSendTrigger::SpecificTime {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         if this.awake.is_some() {
             this.request_agents(cx);
         }
@@ -293,6 +318,18 @@ impl GpuiDelayedSendModalWindow {
         });
         self.minutes.update(cx, |input, cx| {
             input.set_value(minutes.to_string(), window, cx);
+        });
+        let initial_ms = Local::now().timestamp_millis()
+            + if remaining_ms > 0 { remaining_ms as i64 } else { 5 * MINUTE_MS as i64 };
+        let initial = Local
+            .timestamp_millis_opt(((initial_ms + MINUTE_MS as i64 - 1) / MINUTE_MS as i64) * MINUTE_MS as i64)
+            .single()
+            .unwrap();
+        self.specific_date.update(cx, |picker, cx| {
+            picker.set_date(initial.date_naive(), window, cx);
+        });
+        self.specific_time.update(cx, |input, cx| {
+            input.set_value(initial.format("%H:%M").to_string(), window, cx);
         });
         let should_send_when_all_project_sessions_stop = self
             .supports_send_when_all_project_sessions_stop
@@ -386,7 +423,7 @@ impl GpuiDelayedSendModalWindow {
     }
 
     fn trigger_options(&self) -> Vec<DelayedSendTrigger> {
-        let mut options = vec![DelayedSendTrigger::AfterDelay];
+        let mut options = vec![DelayedSendTrigger::AfterDelay, DelayedSendTrigger::SpecificTime];
         if self.supports_send_when_agent_stops {
             options.push(DelayedSendTrigger::AgentStops);
         }
@@ -426,7 +463,18 @@ impl GpuiDelayedSendModalWindow {
             .position(|session| session.reference == *key)
     }
 
+    /// CDXC:DelayedSend 2026-09-16 DECISION:
+    /// User: Specific time belongs in the GPUI, React, and React Native Session Automations dialogs and must calculate the wait to reuse After a delay.
+    /// Resolve local date/time on Save as well as render, so time spent editing does not move the deadline.
     fn delay_ms(&self, cx: &App) -> Option<u64> {
+        if self.trigger == DelayedSendTrigger::SpecificTime {
+            let date = self.specific_date.read(cx).date().start()?;
+            let time = NaiveTime::parse_from_str(
+                self.specific_time.read(cx).value().trim(), "%H:%M",
+            ).ok()?;
+            let deadline = Local.from_local_datetime(&date.and_time(time)).earliest()?;
+            return (deadline - Local::now()).num_milliseconds().try_into().ok();
+        }
         get_delay_ms(
             self.hours.read(cx).value().as_ref(),
             self.minutes.read(cx).value().as_ref(),
@@ -434,12 +482,20 @@ impl GpuiDelayedSendModalWindow {
     }
 
     fn is_valid_delay(&self, cx: &App) -> bool {
+        let minimum = if self.trigger == DelayedSendTrigger::SpecificTime {
+            1
+        } else {
+            MINUTE_MS
+        };
         self.delay_ms(cx)
-            .is_some_and(|delay_ms| (MINUTE_MS..=MAX_DELAY_MS).contains(&delay_ms))
+            .is_some_and(|delay_ms| (minimum..=MAX_DELAY_MS).contains(&delay_ms))
     }
 
     fn has_status_trigger(&self) -> bool {
-        self.trigger != DelayedSendTrigger::AfterDelay
+        !matches!(
+            self.trigger,
+            DelayedSendTrigger::AfterDelay | DelayedSendTrigger::SpecificTime
+        )
     }
 
     fn is_valid_schedule(&self, cx: &App) -> bool {
@@ -529,7 +585,7 @@ impl GpuiDelayedSendModalWindow {
         self.close_window_and_send(command, window, cx);
     }
 
-    /// Enter inside Hours or Minutes submits the form when the delay is valid.
+    /// Enter inside a duration or time input submits the form when the delay is valid.
     fn submit_from_duration_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.send_enter_enabled || self.has_status_trigger() || !self.is_valid_delay(cx) {
             return;
@@ -574,7 +630,6 @@ impl GpuiDelayedSendModalWindow {
     }
 
     fn toggle_trigger_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        eprintln!("DEBUG toggle_trigger_menu options={} open={} bounds={:?}", self.trigger_options().len(), self.trigger_select.open, self.trigger_select.trigger_bounds.get());
         if self.trigger_options().len() == 1 {
             return;
         }
@@ -639,7 +694,10 @@ impl GpuiDelayedSendModalWindow {
             }
             ModalSelectKey::Ignored => {}
         }
-        match self.agent_select.handle_key(key, self.awake_sessions().len()) {
+        match self
+            .agent_select
+            .handle_key(key, self.awake_sessions().len())
+        {
             ModalSelectKey::Consumed => {
                 cx.notify();
                 cx.stop_propagation();
@@ -671,12 +729,7 @@ impl GpuiDelayedSendModalWindow {
         v_flex()
             .w_full()
             .gap(px(6.0))
-            .child(
-                div()
-                    .text_size(px(16.0))
-                    .line_height(px(20.8))
-                    .child(TITLE),
-            )
+            .child(div().text_size(px(16.0)).line_height(px(20.8)).child(TITLE))
             .child(
                 v_flex()
                     .w_full()
@@ -698,16 +751,12 @@ impl GpuiDelayedSendModalWindow {
                             .line_height(px(16.25))
                             .text_color(hsla(p.foreground))
                             .children(self.agent_icon_path.clone().map(|path| {
-                                div()
-                                    .flex_shrink_0()
-                                    .size(px(14.0))
-                                    .opacity(0.78)
-                                    .child(
-                                        gpui::svg()
-                                            .path(path)
-                                            .size(px(14.0))
-                                            .text_color(hsla(p.foreground)),
-                                    )
+                                div().flex_shrink_0().size(px(14.0)).opacity(0.78).child(
+                                    gpui::svg()
+                                        .path(path)
+                                        .size(px(14.0))
+                                        .text_color(hsla(p.foreground)),
+                                )
                             }))
                             .child(
                                 div()
@@ -829,6 +878,34 @@ impl GpuiDelayedSendModalWindow {
             .into_any_element()
     }
 
+    fn render_specific_time(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.palette;
+        v_flex()
+            .w_full()
+            .gap(px(12.0))
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap(px(10.0))
+                    .child(
+                        v_flex().flex_1().min_w_0().gap(px(12.0))
+                            .child(self.render_field_label("Date"))
+                            .child(DatePicker::new(&self.specific_date)),
+                    )
+                    .child(
+                        v_flex().flex_1().min_w_0().gap(px(12.0))
+                            .child(self.render_field_label("Time (24-hour)"))
+                            .child(modal_text_input(&p, &self.specific_time, false, window, cx)),
+                    ),
+            )
+            .child(self.render_trigger_description(if self.is_valid_delay(cx) {
+                "Uses your local time."
+            } else {
+                "Choose a future date and time within 24 days."
+            }))
+            .into_any_element()
+    }
+
     fn render_agent_field(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let (placeholder, disabled): (&'static str, bool) = match &self.awake {
@@ -872,13 +949,9 @@ impl GpuiDelayedSendModalWindow {
     }
 
     fn render_trigger_detail(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let min_height = if self.awake.is_some() {
-            TRIGGER_DETAIL_SLOT_MIN_HEIGHT_WITH_AGENT_PICKER
-        } else {
-            TRIGGER_DETAIL_SLOT_MIN_HEIGHT
-        };
         let detail = match self.trigger {
             DelayedSendTrigger::AfterDelay => self.render_duration_grid(window, cx),
+            DelayedSendTrigger::SpecificTime => self.render_specific_time(window, cx),
             DelayedSendTrigger::SpecificAgentStops => self.render_agent_field(cx),
             DelayedSendTrigger::AgentStops => {
                 self.render_trigger_description(AGENT_STOPS_DESCRIPTION)
@@ -889,7 +962,7 @@ impl GpuiDelayedSendModalWindow {
         };
         v_flex()
             .w_full()
-            .min_h(px(min_height))
+            .min_h(px(TRIGGER_DETAIL_SLOT_MIN_HEIGHT))
             .justify_center()
             .child(detail)
             .into_any_element()
