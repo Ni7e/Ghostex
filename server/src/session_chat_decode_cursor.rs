@@ -149,6 +149,16 @@ fn cursor_message_blocks(role: &str, content: Option<&Value>) -> (Vec<SessionCha
     (blocks, reasoning_only)
 }
 
+fn cursor_record_id(record: &serde_json::Map<String, Value>, fallback_id: &str) -> String {
+    match (
+        record.get("ghostexId").and_then(Value::as_str),
+        fallback_id.rsplit_once(':'),
+    ) {
+        (Some(id), Some((path, _))) => format!("{path}:{id}"),
+        _ => fallback_id.to_string(),
+    }
+}
+
 pub fn decode_cursor_transcript_line(line: &str, fallback_id: &str) -> Option<SessionChatMessage> {
     let record = parse_json_object(line)?;
     if is_cursor_context_metadata(&record) {
@@ -161,12 +171,12 @@ pub fn decode_cursor_transcript_line(line: &str, fallback_id: &str) -> Option<Se
         let text = extract_string(record.get("error"))
             .unwrap_or_else(|| INTERRUPTED_STATUS_TEXT.to_string());
         return Some(SessionChatMessage {
-            id: fallback_id.to_string(),
+            id: cursor_record_id(&record, fallback_id),
             role: SessionChatRole::System,
             blocks: vec![text_block(text)],
             timestamp: None,
             source: SessionChatSource::Transcript,
-            turn_id: Some(fallback_id.to_string()),
+            turn_id: Some(cursor_record_id(&record, fallback_id)),
             byte_offset: None,
             async_questions: None,
             queued: false,
@@ -186,7 +196,7 @@ pub fn decode_cursor_transcript_line(line: &str, fallback_id: &str) -> Option<Se
         _ => return None,
     };
     Some(SessionChatMessage {
-        id: fallback_id.to_string(),
+        id: cursor_record_id(&record, fallback_id),
         role,
         blocks,
         timestamp: None,
@@ -213,7 +223,7 @@ pub fn decode_cursor_turn_lifecycle(
     };
     Some(SessionChatTurnLifecycle {
         state,
-        turn_id: fallback_id.to_string(),
+        turn_id: cursor_record_id(&record, fallback_id),
         timestamp: None,
     })
 }

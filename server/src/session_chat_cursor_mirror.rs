@@ -13,8 +13,8 @@ ordered UI steps in field 2 — text (field 1), tool (field 2) and thinking
 
 This module keeps the jsonl as the spine (it alone knows turn lifecycle) and
 materializes `<gxserver state dir>/cursor-chat-mirror/<id>.jsonl`: the raw
-lines, byte-for-byte, with a `thinking` line spliced in wherever the store
-places a thinking step. Placement is by walking both in lockstep per turn —
+lines, with stable source identities and a `thinking` line spliced in wherever
+the store places a thinking step. Placement is by walking both in lockstep per turn —
 each assistant record consumes its text step (matched by content) and one tool
 step per `tool_use`; thinking steps met on the way are emitted before the
 record. A jsonl text block that IS a thinking summary (Claude's quirk) is
@@ -396,7 +396,7 @@ fn push_raw_line(out: &mut Vec<u8>, line: &[u8]) {
     out.push(b'\n');
 }
 
-fn push_thinking_line(out: &mut Vec<u8>, step: &CursorStep) {
+fn push_thinking_line(out: &mut Vec<u8>, step: &CursorStep, turn: usize, index: usize) {
     let CursorStep::Thinking {
         text,
         duration_ms,
@@ -416,6 +416,7 @@ fn push_thinking_line(out: &mut Vec<u8>, step: &CursorStep) {
         "role": "assistant",
         "message": { "content": [block] },
         "origin": "cursor-store",
+        "ghostexId": format!("thinking:{turn}:{index}"),
     });
     out.extend_from_slice(line.to_string().as_bytes());
     out.push(b'\n');
@@ -467,6 +468,7 @@ fn push_record_line(out: &mut Vec<u8>, line: &[u8], record: Map<String, Value>, 
 }
 
 struct TurnWalk<'a> {
+    turn: usize,
     steps: &'a [CursorStep],
     index: usize,
 }
@@ -478,7 +480,7 @@ impl<'a> TurnWalk<'a> {
 
     fn flush_thinking(&mut self, out: &mut Vec<u8>) {
         while let Some(step @ CursorStep::Thinking { .. }) = self.peek() {
-            push_thinking_line(out, step);
+            push_thinking_line(out, step, self.turn, self.index);
             self.index += 1;
         }
     }
@@ -495,7 +497,7 @@ impl<'a> TurnWalk<'a> {
         let rewritable = text_block_count == 1;
         let mut remaining_text = text;
         let mut rewrite = RecordText::Keep;
-        let mut deferred: Vec<&'a CursorStep> = Vec::new();
+        let mut deferred: Vec<(usize, &'a CursorStep)> = Vec::new();
 
         // Thinking that precedes the record, then the record's own text step.
         while let Some(step) = self.peek() {
@@ -510,7 +512,7 @@ impl<'a> TurnWalk<'a> {
                         remaining_text = None;
                         rewrite = RecordText::Remove;
                     }
-                    push_thinking_line(out, step);
+                    push_thinking_line(out, step, self.turn, self.index);
                     self.index += 1;
                 }
                 CursorStep::Text(step_text) => {
@@ -524,7 +526,7 @@ impl<'a> TurnWalk<'a> {
                                 if same_text(&rest, text) {
                                     // Summary glued onto the text: split it back out.
                                     rewrite = RecordText::Replace(step_text.clone());
-                                    deferred.push(next);
+                                    deferred.push((self.index, next));
                                     self.index += 1;
                                 }
                             }
@@ -546,7 +548,7 @@ impl<'a> TurnWalk<'a> {
                     needed -= 1;
                 }
                 Some(step @ CursorStep::Thinking { .. }) => {
-                    deferred.push(step);
+                    deferred.push((self.index, step));
                     self.index += 1;
                 }
                 Some(CursorStep::Other) => self.index += 1,
@@ -555,12 +557,16 @@ impl<'a> TurnWalk<'a> {
         }
 
         push_record_line(out, line, record, rewrite);
-        for step in deferred {
-            push_thinking_line(out, step);
+        for (index, step) in deferred {
+            push_thinking_line(out, step, self.turn, index);
         }
     }
 }
 
+/// CDXC:SessionChat 2026-09-16 WHY:
+/// Late Cursor thinking rewrites the mirror, so its byte offsets cannot identify send boundaries or transcript rows across snapshots.
+/// Keep raw-record identities tied to the source log and thinking identities tied to their store turn/step; pagination still uses mirror offsets.
+///
 /// The mirror's full content for a raw jsonl and the store's turns. Only
 /// newline-terminated raw lines are consumed; a trailing partial line waits
 /// for the next sync so it is never emitted as a truncated record.
@@ -571,18 +577,31 @@ fn merge_cursor_transcript(raw: &[u8], turns: &[Vec<CursorStep>]) -> Vec<u8> {
         .rposition(|byte| *byte == b'\n')
         .map_or(0, |at| at + 1);
     let mut walk = TurnWalk {
+        turn: 0,
         steps: &[],
         index: 0,
     };
     let mut turn_index = 0usize;
+    let mut raw_offset = 0usize;
     for line in raw[..complete_end].split(|byte| *byte == b'\n') {
+        let offset = raw_offset;
+        raw_offset += line.len() + 1;
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
+        let identified =
+            serde_json::from_slice::<Map<String, Value>>(line)
+                .ok()
+                .map(|mut record| {
+                    record.insert("ghostexId".into(), json!(format!("raw:{offset}")));
+                    Value::Object(record).to_string().into_bytes()
+                });
+        let line = identified.as_deref().unwrap_or(line);
         match classify_raw_line(line) {
             RawLine::User(line) => {
                 walk.flush_thinking(&mut out);
                 walk = TurnWalk {
+                    turn: turn_index,
                     steps: turns.get(turn_index).map(Vec::as_slice).unwrap_or(&[]),
                     index: 0,
                 };
