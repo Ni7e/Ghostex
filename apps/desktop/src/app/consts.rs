@@ -32,10 +32,15 @@ pub(crate) const GPUI_SESSION_CHAT_QUEUE_COUNT_POLL_INTERVAL: Duration = Duratio
 
 pub(crate) const GPUI_SESSION_CHAT_QUEUE_COUNT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Confirmed idle, empty pages enter the reusable renderer pool immediately.
+/// Confirmed idle, empty pages enter the reusable renderer pool once they have been hidden for `GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE`.
 /// Age and count limits apply to unused pooled renderers; protected session bindings stay mounted until their fresh release probe succeeds.
 pub(crate) const GPUI_AGENTS_CHAT_SURFACE_HIDDEN_EVICT_AFTER: Duration =
     Duration::from_secs(5 * 60);
+
+/// CDXC:SessionChat 2026-09-16 WHY:
+/// A page was pooled 50 to 120 ms after it stopped being visible, so any momentary hide (a reconcile pass during a tab drag, an activation still pending, a pane briefly not rendered) cost a fresh generation, a new activation and a full snapshot re-render on the very next pass.
+/// A short grace keeps a just-hidden page bound to its session; switching back inside it re-shows the page without any activation, and the spare-page count and five-minute expiry are unchanged.
+pub(crate) const GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE: Duration = Duration::from_secs(2);
 
 /// CDXC:SessionChat 2026-09-13 DECISION:
 /// User approved app-wide shared chat state and renderer ownership tied to visible panes, retaining the three spare pages and five-minute expiry.
