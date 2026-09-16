@@ -1654,6 +1654,7 @@ export function SessionChatView({
           tabIndex={-1}
         >
           <SessionChatImageViewerProvider
+            {...(hostLinks?.locateFile ? { locateFile: hostLinks.locateFile } : {})}
             {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
             {...(saveImageAs ? { saveImageAs } : {})}
             {...(sessionTitle ? { sessionTitle } : {})}

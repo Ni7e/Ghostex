@@ -1,4 +1,4 @@
-import { IconBrowser, IconCode, IconCopy, IconExternalLink, IconFileText } from '@tabler/icons-react';
+import { IconBrowser, IconCode, IconCopy, IconExternalLink, IconFileText, IconFolderOpen } from '@tabler/icons-react';
 import { ContextMenuItem } from '@/packages/components/ui/context-menu';
 import {
   classifySessionChatLinkHref,
@@ -9,8 +9,8 @@ import { playCopySound } from '../copy-sound';
 import { sessionChatReferenceKind } from './session-chat-reference-pills';
 
 /**
- * CDXC:SessionChat 2026-09-12 DECISION:
- * User: keep Copy Path and remove Locate File from reference menus, superseding the September 9 menu choice.
+ * CDXC:SessionChat 2026-09-16 DECISION:
+ * User: every path-copy context menu offers Open File/Folder Location directly below Copy Path, superseding the September 12 removal.
  * URLs offer Copy URL and opening in the embedded or external browser.
  */
 export function SessionChatReferenceMenuItems(reference: { href: string } | { filePath: string }) {
@@ -67,6 +67,10 @@ export function SessionChatReferenceMenuItems(reference: { href: string } | { fi
       <ContextMenuItem onClick={() => copy(target.path)}>
         <IconCopy aria-hidden='true' />
         Copy Path
+      </ContextMenuItem>
+      <ContextMenuItem disabled={!links?.locateFile} onClick={() => links?.locateFile?.(target.path)}>
+        <IconFolderOpen aria-hidden='true' />
+        Open File/Folder Location
       </ContextMenuItem>
     </>
   );
