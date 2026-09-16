@@ -50,7 +50,7 @@ const CURSOR_ACTIVITY_SCAN_LINES: usize = 15;
 /// next line; two leaves room for a wrap.
 const ACTIVITY_PERCENT_LOOKAHEAD: usize = 2;
 
-/// Activity kind for Claude Code and Codex compaction (manual and automatic).
+/// Activity kind for Claude Code, Codex and Cursor compaction (manual and automatic).
 pub const SESSION_CHAT_ACTIVITY_COMPACTING: &str = "compacting";
 
 /// Claude Code's current assistant status, not yet flushed to transcript JSONL.
@@ -599,11 +599,15 @@ optional token counter:
 
     ⠠⠜ Thinking 73 tokens
     ⠋ Composing 1.2K tokens
+    ⠠⠜ Summarizing 42.61k tokens
 
-The spinner is required so assistant prose containing either word cannot be
+The spinner is required so assistant prose containing these labels cannot be
 mistaken for live activity. The token count is intentionally not projected:
 it is throughput metadata, not stable reasoning content.
 */
+/// CDXC:AgentScreenDetection 2026-09-16 DECISION:
+/// User: Cursor's /summarize and /compact use the same chat compaction flow as Codex, detected from its live Summarizing spinner row.
+/// Cursor reports tokens, not completion percentage, so the shared compaction card uses a looping bar and holds queued prompts until summarizing ends.
 fn cursor_activity_from_line(line: &str) -> Option<SessionChatTerminalActivity> {
     let mut tokens = line.split_whitespace();
     let spinner = tokens.next()?;
@@ -615,7 +619,7 @@ fn cursor_activity_from_line(line: &str) -> Option<SessionChatTerminalActivity> 
         return None;
     }
     let label = tokens.next()?;
-    if label != "Thinking" && label != "Composing" {
+    if !matches!(label, "Thinking" | "Composing" | "Summarizing") {
         return None;
     }
     let remaining: Vec<_> = tokens.collect();
@@ -623,16 +627,18 @@ fn cursor_activity_from_line(line: &str) -> Option<SessionChatTerminalActivity> 
         && (remaining.len() != 2
             || remaining[1] != "tokens"
             || !remaining[0]
-                .trim_end_matches(['K', 'M'])
+                .trim_end_matches(['k', 'K', 'm', 'M'])
                 .chars()
                 .all(|ch| ch.is_ascii_digit() || ch == '.'))
     {
         return None;
     }
-    Some(SessionChatTerminalActivity::new(
-        SESSION_CHAT_ACTIVITY_CURSOR_THINKING,
-        label,
-    ))
+    let (kind, label) = if label == "Summarizing" {
+        (SESSION_CHAT_ACTIVITY_COMPACTING, "Compacting conversation")
+    } else {
+        (SESSION_CHAT_ACTIVITY_CURSOR_THINKING, label)
+    };
+    Some(SessionChatTerminalActivity::new(kind, label))
 }
 
 /*
@@ -913,11 +919,18 @@ pub fn detect_session_chat_terminal_activity(
     let agent = session_chat_option_agent(agent)?;
     if agent == SessionChatOptionAgent::Cursor {
         let lines = crate::session_chat_agent_fleet::normalized_screen_lines(screen_text);
-        return lines
+        let composer = lines.iter().rposition(|line| line.starts_with('→'));
+        let summarizing_live =
+            composer.is_some_and(|index| lines[index].ends_with("ctrl+c to stop"));
+        let status_lines = composer.map_or(lines.as_slice(), |index| &lines[..index]);
+        return status_lines
             .iter()
             .rev()
             .take(CURSOR_ACTIVITY_SCAN_LINES)
-            .find_map(|line| cursor_activity_from_line(line));
+            .find_map(|line| cursor_activity_from_line(line))
+            .filter(|activity| {
+                activity.kind != SESSION_CHAT_ACTIVITY_COMPACTING || summarizing_live
+            });
     }
     if agent == SessionChatOptionAgent::Codex {
         return screen_text.lines().rev().find_map(|line| {
