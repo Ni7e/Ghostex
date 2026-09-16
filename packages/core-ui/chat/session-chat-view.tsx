@@ -15,7 +15,7 @@ import { SessionAccountsPanel } from '@/packages/core-ui/accounts/session-panel'
 // the composer while showing. Hosts inject a SessionChatTransport; everything
 // else is derived by useSessionChat.
 
-import { IconBlockquote, IconBrowser, IconCopy, IconExternalLink } from '@tabler/icons-react';
+import { IconBlockquote, IconCopy } from '@tabler/icons-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent, RefObject } from 'react';
 import {
@@ -60,6 +60,7 @@ import {
 } from './session-chat-links';
 import { SessionChatInteractiveCard, sessionChatCardDismissKey } from './session-chat-interactive-card';
 import { SessionChatMessageList } from './session-chat-message-list';
+import { SessionChatReferenceMenuItems } from './session-chat-reference-menu-items';
 import { SessionChatNotePanel } from './session-chat-note-panel';
 import { SessionChatSearch, type SessionChatHostSearchBridge } from './session-chat-search';
 import {
@@ -1373,6 +1374,7 @@ export function SessionChatView({
   caret at the end and the composer focused.
   */
   const holdRewoundPromptInComposer = useCallback((prompt: string): void => {
+    chatRefresh();
     const composer = composerRef.current;
     if (composer === null || prompt === '') {
       return;
@@ -1382,7 +1384,7 @@ export function SessionChatView({
       composer.clearDraft(draft);
     }
     composer.appendText(prompt);
-  }, []);
+  }, [chatRefresh]);
 
   // A command the user types themselves reconciles the pills (§1.4), so the
   // Model pill follows a hand-typed "/model opus" without a second dispatch.
@@ -1580,26 +1582,6 @@ export function SessionChatView({
     );
   }, []);
 
-  const copyTranscriptFilePath = useCallback((): void => {
-    if (transcriptFilePath === null) {
-      return;
-    }
-    playCopySound();
-    void navigator.clipboard.writeText(transcriptFilePath).catch((error: unknown) => {
-      console.error('[session-chat] file path clipboard write failed', error);
-    });
-  }, [transcriptFilePath]);
-
-  const copyTranscriptWebUrl = useCallback((): void => {
-    if (transcriptWebUrl === null) {
-      return;
-    }
-    playCopySound();
-    void navigator.clipboard.writeText(transcriptWebUrl).catch((error: unknown) => {
-      console.error('[session-chat] URL clipboard write failed', error);
-    });
-  }, [transcriptWebUrl]);
-
   const copyTranscriptSelection = useCallback((): void => {
     if (transcriptSelection === '') {
       return;
@@ -1785,39 +1767,10 @@ export function SessionChatView({
                             <ContextMenuContent>
                               <ContextMenuGroup>
                                 {transcriptFilePath !== null ? (
-                                  <ContextMenuItem onClick={copyTranscriptFilePath}>
-                                    <IconCopy aria-hidden='true' />
-                                    Copy Path
-                                  </ContextMenuItem>
+                                  <SessionChatReferenceMenuItems filePath={transcriptFilePath} />
                                 ) : null}
                                 {transcriptWebUrl !== null ? (
-                                  <>
-                                    <ContextMenuItem onClick={copyTranscriptWebUrl}>
-                                      <IconCopy aria-hidden='true' />
-                                      Copy URL
-                                    </ContextMenuItem>
-                                    {hostLinks?.openUrl ? (
-                                      <>
-                                        <ContextMenuItem
-                                          onClick={() =>
-                                            hostLinks.openUrl?.(transcriptWebUrl, {
-                                              external: false,
-                                              forceEmbedded: true,
-                                            })
-                                          }
-                                        >
-                                          <IconBrowser aria-hidden='true' />
-                                          Open in Embedded Browser
-                                        </ContextMenuItem>
-                                        <ContextMenuItem
-                                          onClick={() => hostLinks.openUrl?.(transcriptWebUrl, { external: true })}
-                                        >
-                                          <IconExternalLink aria-hidden='true' />
-                                          Open in External Browser
-                                        </ContextMenuItem>
-                                      </>
-                                    ) : null}
-                                  </>
+                                  <SessionChatReferenceMenuItems href={transcriptWebUrl} />
                                 ) : null}
                                 {(transcriptFilePath === null && transcriptWebUrl === null) ||
                                 transcriptSelection !== '' ? (
