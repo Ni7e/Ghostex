@@ -6,6 +6,7 @@
  */
 import { type Dispatch, type SetStateAction } from 'react';
 import {
+  IconBug,
   IconCloud,
   IconCodeDots,
   IconDeviceDesktop,
@@ -161,6 +162,7 @@ export function createSettingsSidebarPages({
     ...(showOSIntegrationSettingsTab
       ? [{ icon: IconDeviceDesktop, id: 'osIntegration' as const, title: 'OS Integration' }]
       : []),
+    { icon: IconBug, id: 'debugging', title: 'Debugging' },
     { icon: IconInfoCircle, id: 'about', title: 'About' },
   ];
   const settingsSidebarPages: SettingsSidebarPage[] = allSettingsSidebarPages.filter((page) =>

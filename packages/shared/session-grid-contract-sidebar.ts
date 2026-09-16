@@ -1273,11 +1273,9 @@ export type SidebarGhostexFolderStat = {
 };
 
 /**
- * CDXC:Settings 2026-05-09-15:25
- * Settings exposes Ghostex data-directory usage only after the user scrolls to the
- * bottom of the modal. The native sidebar sends per-folder byte counts back as
- * a sidebar message so the full-window modal can render stats without owning
- * filesystem access or accepting client-provided paths.
+ * CDXC:Diagnostics 2026-09-16 SEE-ALSO:
+ * packages/core-ui/settings-modal/tabs/debugging.tsx gates folder-size requests on Show debug UI controls.
+ * The native sidebar returns folder sizes so the Settings page does not own filesystem access or accept client-provided paths.
  */
 export type SidebarGhostexFolderStatsMessage = {
   errorMessage?: string;

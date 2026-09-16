@@ -38,6 +38,7 @@ const SETTINGS_MODAL_TABS: &[&str] = &[
     "actions",
     "openTargets",
     "hotkeys",
+    "debugging",
     "about",
 ];
 

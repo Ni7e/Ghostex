@@ -70,8 +70,8 @@ export function useHotkeySettings({
     ) as HotkeySettingsSectionSearches;
   }, [draft.expandCollapsedProjectsOnJump, hotkeyDefinitionsById, settingsSearchQuery]);
   const extraSettingsTabSearches = useMemo(
-    () => getExtraSettingsTabSearches(settingsSearchQuery),
-    [settingsSearchQuery]
+    () => getExtraSettingsTabSearches(settingsSearchQuery, draft.debuggingMode),
+    [settingsSearchQuery, draft.debuggingMode]
   );
   const isSettingsSearching = !isFirstLaunchSetup && settingsSearchQuery.trim().length > 0;
   const hotkeySectionRefs: HotkeySettingsSectionRefs = {

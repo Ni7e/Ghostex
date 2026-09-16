@@ -142,7 +142,6 @@ export type MainSettingsScrollTargetId =
   | 'appIcon'
   | 'sidebarTags'
   | 'sessionCards'
-  | 'debugging'
   | 'terminalBehavior'
   | 'terminalScrolling'
   | 'terminalDevServers'
@@ -155,20 +154,6 @@ export type MainSettingsScrollTargetId =
   | 'beta';
 
 export type MainSettingsSectionRefs = Record<MainSettingsScrollTargetId, RefObject<HTMLDivElement | null>>;
-
-/*
- * CDXC:Diagnostics 2026-06-28-18:14:
- * Show debug UI controls is the visibility and routine-logging gate for the
- * support/debugging settings below it. When off, hide diagnostic scenario
- * logging and session context-menu debug utilities instead of leaving disabled
- * rows on screen.
- */
-export const DEBUGGING_MODE_DEPENDENT_SETTING_KEYS = [
-  'diagnosticLogging',
-  'showSessionCommandCopyActions',
-  'showSessionDetailsCopyAction',
-] as const;
-export const DEBUGGING_MODE_DEPENDENT_SETTING_KEY_SET = new Set<string>(DEBUGGING_MODE_DEPENDENT_SETTING_KEYS);
 
 export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, readonly string[]> = {
   agents: ['agentAcceptAllEnabled'],
@@ -341,11 +326,7 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
     'keepAwakeDeactivateOnLowPowerMode',
     'keepAwakeDeactivateOnUserSwitch',
   ],
-  /*
-   * CDXC:Diagnostics 2026-06-15-21:34:
-   * Debugging controls belong in a dedicated bottom Settings section so support-oriented logging and session metadata copy actions are grouped away from everyday Workspace and Session Cards preferences.
-   */
-  advanced: ['showBetaFeatures', 'debuggingMode', ...DEBUGGING_MODE_DEPENDENT_SETTING_KEYS],
+  advanced: ['showBetaFeatures'],
 };
 
 export const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
@@ -366,7 +347,6 @@ export const MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS = {
   appIcon: ['appIconSourceId'],
   sidebarTags: ['sidebarSessionTagListItems'],
   sessionCards: ['sessionCardHoverButtons', 'showSessionCardHoverButtonsInContextMenu'],
-  debugging: ['debuggingMode', ...DEBUGGING_MODE_DEPENDENT_SETTING_KEYS],
   terminalBehavior: [
     'terminalScrollbackLimitMb',
     'terminalCopyOnSelect',
@@ -426,7 +406,6 @@ export type MainSettingsSubsectionId =
   | 'autoSleep'
   | 'beta'
   | 'browser'
-  | 'debugging'
   | 'editor'
   | 'fileOpening'
   | 'power'
@@ -455,10 +434,7 @@ export type MainSettingsSubsectionNavigationItem = {
 export const MAIN_SETTINGS_SUBSECTION_NAVIGATION: Partial<
   Record<MainSettingsSectionId, readonly MainSettingsSubsectionNavigationItem[]>
 > = {
-  advanced: [
-    { id: 'beta', title: 'Experimental' },
-    { id: 'debugging', title: 'Debugging' },
-  ],
+  advanced: [{ id: 'beta', title: 'Experimental' }],
   appearance: [
     { id: 'theming', title: 'Theme' },
     { id: 'appIcon', title: 'App Icon' },
@@ -468,11 +444,6 @@ export const MAIN_SETTINGS_SUBSECTION_NAVIGATION: Partial<
     { id: 'sessionCards', title: 'Session Cards' },
     { id: 'sidebarTags', title: 'Sidebar Tags' },
   ],
-  /**
-   * CDXC:Settings 2026-09-12 DECISION:
-   * User: hide the Storage section in the main Settings screen and disable its functionality.
-   * Storage has no navigation/search entry or folder-size scan effect.
-   */
   system: [
     { id: 'autoSleep', title: 'Auto Sleep' },
     { id: 'power', title: 'Power' },
@@ -666,10 +637,6 @@ export const ADVANCED_MAIN_SETTING_KEYS = new Set<string>([
   'keepAwakeDeactivateOnUserSwitch',
   'attentionNotificationActions',
   'showBetaFeatures',
-  'debuggingMode',
-  'diagnosticLogging',
-  'showSessionCommandCopyActions',
-  'showSessionDetailsCopyAction',
 ]);
 
 export type HotkeySettingsSectionId =

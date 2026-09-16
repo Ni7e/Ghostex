@@ -19,7 +19,6 @@ import {
   type SettingsSearchSections,
 } from './search-catalog';
 import {
-  DEBUGGING_MODE_DEPENDENT_SETTING_KEY_SET,
   MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS,
   MAIN_SETTINGS_SECTION_SETTING_KEYS,
   MAIN_SETTINGS_SUBSECTION_NAVIGATION,
@@ -80,7 +79,6 @@ export function createMainSettingsVisibility({
     );
   const visibleFirstLaunchMainSettings = firstLaunchSetupVisibleSettings ?? FIRST_LAUNCH_SETUP_VISIBLE_MAIN_SETTINGS;
   const keepAwakeSettingsVisible = isFirstLaunchSetup || draft.showBetaFeatures;
-  const debuggingModeDependentSettingsVisible = draft.debuggingMode;
   const mainSettingVisible = (sectionResult: SettingsSectionSearchResult, settingKey: string) => {
     if (isFirstLaunchSetup) {
       return isFirstLaunchSetupMainSettingVisible(
@@ -93,12 +91,6 @@ export function createMainSettingsVisibility({
     }
     return shouldShowSetting(sectionResult, settingKey, showAdvancedSettings);
   };
-  const debuggingSettingVisible = (settingKey: string) => {
-    if (!debuggingModeDependentSettingsVisible && DEBUGGING_MODE_DEPENDENT_SETTING_KEY_SET.has(settingKey)) {
-      return false;
-    }
-    return mainSettingVisible(settingsSearch.debugging, settingKey);
-  };
   const mainSectionVisible = (sectionId: MainSettingsSectionId, sectionResult: SettingsSectionSearchResult) => {
     /*
      * CDXC:KeepAwake 2026-06-19-13:13:
@@ -106,12 +98,6 @@ export function createMainSettingsVisibility({
      * the Power section until Enable Experimental Features is enabled, while
      * preserving the first-launch lid-close preference required by onboarding.
      */
-    if (sectionId === 'advanced' && !isFirstLaunchSetup && !debuggingModeDependentSettingsVisible) {
-      return (
-        shouldShowSettingsSection(settingsSearch.beta, showAdvancedSettings) ||
-        shouldShowSetting(settingsSearch.debugging, 'debuggingMode', showAdvancedSettings)
-      );
-    }
     if (isFirstLaunchSetup) {
       return MAIN_SETTINGS_SECTION_SETTING_KEYS[sectionId].some((settingKey) =>
         isFirstLaunchSetupMainSettingVisible(
@@ -129,12 +115,6 @@ export function createMainSettingsVisibility({
     if (sectionId === 'appIcon' && appIconPickerUnavailable) {
       return false;
     }
-    if (sectionId === 'debugging' && !isFirstLaunchSetup && !debuggingModeDependentSettingsVisible) {
-      return (
-        subsectionMatchesGroupedSectionTitle(sectionId) ||
-        shouldShowSetting(sectionResult, 'debuggingMode', showAdvancedSettings)
-      );
-    }
     if (isFirstLaunchSetup) {
       return MAIN_SETTINGS_SCROLL_TARGET_SETTING_KEYS[sectionId].some((settingKey) =>
         isFirstLaunchSetupMainSettingVisible(
@@ -150,7 +130,6 @@ export function createMainSettingsVisibility({
   };
 
   return {
-    debuggingSettingVisible,
     mainSectionVisible,
     mainSettingVisible,
     mainSubsectionVisible,

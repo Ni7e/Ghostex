@@ -1,4 +1,4 @@
-import { StorageInspector } from './settings-modal/storage-inspector';
+import { DebuggingSettingsTab } from './settings-modal/tabs/debugging';
 import { WindowsTerminalFields } from './settings-modal/tabs/windows-terminal-fields';
 import { useSystemColorScheme } from './use-system-color-scheme';
 import {
@@ -72,7 +72,6 @@ import {
   SIDEBAR_SPACE_SWITCH_BEHAVIOR_OPTIONS,
   SIDEBAR_VISIBILITY_MEMORY_OPTIONS,
   WEB_LINK_OPEN_TARGET_OPTIONS,
-  areDiagnosticLoggingSettingsEqual,
   COMMANDS_PANEL_SIDE_OPTIONS,
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
   MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
@@ -122,7 +121,6 @@ import {
   ActionButtonPairField,
   AppIconPickerField,
   ColorField,
-  DiagnosticLoggingSettingsField,
   PetPickerField,
   PreferredAgentInterfaceField,
   SelectField,
@@ -375,6 +373,7 @@ export function SettingsModal({
   onOpenAccessibilityPreferences,
   onOpenMacOSNotificationSettings,
   onOpenScreenRecordingPreferences,
+  onOpenGhostexFolder,
   onGhosttySettingsAction,
   onInstallCliSkill,
   onInstallBrowserControl,
@@ -395,6 +394,7 @@ export function SettingsModal({
   onUninstallBundledAgentSkills,
   onRequestAgentHookStatus,
   onRequestGhostexCliStatus,
+  onRequestGhostexFolderStats,
   onRequestOSIntegrationStatus,
   onRequestPluginSettingsStatus,
   onReinstallPlugin,
@@ -409,6 +409,8 @@ export function SettingsModal({
   vscode,
   ghostexCliStatus,
   ghostexCliStatusLoading = false,
+  ghostexFolderStats,
+  ghostexFolderStatsLoading = false,
   osIntegrationStatus,
   osIntegrationStatusLoading = false,
   pluginSettingsStatus,
@@ -483,7 +485,6 @@ export function SettingsModal({
   const powerSectionRef = useRef<HTMLDivElement>(null);
   const statusIndicatorsSectionRef = useRef<HTMLDivElement>(null);
   const sessionCardsSectionRef = useRef<HTMLDivElement>(null);
-  const debuggingSectionRef = useRef<HTMLDivElement>(null);
   const betaSectionRef = useRef<HTMLDivElement>(null);
   const agentsOnboardingSectionRef = useRef<HTMLDivElement>(null);
   const sidebarSectionRef = useRef<HTMLDivElement>(null);
@@ -775,7 +776,7 @@ export function SettingsModal({
   const settingsSearch = getSettingsSearchSections(settingsSearchQuery, draft);
   const mainSettingsGroupSearch = getMainSettingsGroupSearch(settingsSearchQuery, settingsSearch);
   const mainSettingsSectionNavigation = getMainSettingsSectionNavigation(mainSettingsGroupSearch);
-  const { debuggingSettingVisible, mainSectionVisible, mainSettingVisible, mainSubsectionVisible } =
+  const { mainSectionVisible, mainSettingVisible, mainSubsectionVisible } =
     createMainSettingsVisibility({
       appIconPickerUnavailable,
       draft,
@@ -796,7 +797,6 @@ export function SettingsModal({
     fileOpening: fileOpeningSectionRef,
     browser: browserSectionRef,
     chat: chatSectionRef,
-    debugging: debuggingSectionRef,
     editor: editorSectionRef,
     notifications: soundsSectionRef,
     power: powerSectionRef,
@@ -878,7 +878,6 @@ export function SettingsModal({
     betaSectionRef,
     browserSectionRef,
     chatSectionRef,
-    debuggingSectionRef,
     dialogContentRef,
     editorSectionRef,
     fileOpeningSectionRef,
@@ -2856,79 +2855,6 @@ export function SettingsModal({
                           </SettingsSection>
                         ) : null}
 
-                        {mainSubsectionVisible('debugging', settingsSearch.debugging) ? (
-                          <SettingsSection sectionRef={debuggingSectionRef} title='Debugging'>
-                            {draft.debuggingMode ? <StorageInspector /> : null}
-                            {debuggingSettingVisible('debuggingMode') ? (
-                              <ToggleField
-                                checked={draft.debuggingMode}
-                                description={
-                                  draft.debuggingMode
-                                    ? 'Shows debug-only UI controls and allows the enabled diagnostic scenarios below to write routine logs.'
-                                    : 'Turn on to reveal debug-only controls and allow routine diagnostic logging. Important warnings, errors, and crashes remain captured.'
-                                }
-                                label='Show debug UI controls'
-                                {...getSettingModificationProps('debuggingMode')}
-                                onChange={(checked) => updateDraft('debuggingMode', checked)}
-                              />
-                            ) : null}
-                            {debuggingSettingVisible('diagnosticLogging') ? (
-                              <DiagnosticLoggingSettingsField
-                                dependent
-                                isModified={
-                                  !areDiagnosticLoggingSettingsEqual(
-                                    draft.diagnosticLogging,
-                                    DEFAULT_ghostex_SETTINGS.diagnosticLogging
-                                  )
-                                }
-                                onChange={updateDiagnosticLoggingScenario}
-                                onResetToDefault={() =>
-                                  updateDraft('diagnosticLogging', DEFAULT_ghostex_SETTINGS.diagnosticLogging)
-                                }
-                                value={draft.diagnosticLogging}
-                              />
-                            ) : null}
-                            {debuggingSettingVisible('showSessionCommandCopyActions') ? (
-                              <>
-                                {/*
-                                 * CDXC:ContextMenus 2026-06-09-23:17:
-                                 * Copy resume and Copy attach command are advanced session-card context-menu utilities. Keep both hidden unless this Settings toggle is enabled so the default menu stays focused on normal session actions.
-                                 *
-                                 * CDXC:Diagnostics 2026-06-15-21:34:
-                                 * Command copy actions are support-oriented session-card context-menu controls and should appear in the bottom Debugging section rather than the everyday Session Cards section.
-                                 */}
-                                <ToggleField
-                                  checked={draft.showSessionCommandCopyActions}
-                                  description='Show Copy resume and Copy attach command in session context menus.'
-                                  dependent
-                                  label='Show command copy actions'
-                                  {...getSettingModificationProps('showSessionCommandCopyActions')}
-                                  onChange={(checked) => updateDraft('showSessionCommandCopyActions', checked)}
-                                />
-                              </>
-                            ) : null}
-                            {debuggingSettingVisible('showSessionDetailsCopyAction') ? (
-                              <>
-                                {/*
-                                 * CDXC:ContextMenus 2026-06-11-23:08:
-                                 * Copy details is separate from command-copy actions because it copies metadata, not executable shell commands. Keep it opt-in so users choose when session ids and project paths appear in context menus.
-                                 *
-                                 * CDXC:Diagnostics 2026-06-15-21:34:
-                                 * Copy details can expose support metadata in the context menu, so Settings groups it with Debugging rather than normal session-card appearance controls.
-                                 */}
-                                <ToggleField
-                                  checked={draft.showSessionDetailsCopyAction}
-                                  description='Show Copy Details in session context menus.'
-                                  dependent
-                                  label='Show Copy Details option'
-                                  {...getSettingModificationProps('showSessionDetailsCopyAction')}
-                                  onChange={(checked) => updateDraft('showSessionDetailsCopyAction', checked)}
-                                />
-                              </>
-                            ) : null}
-                          </SettingsSection>
-                        ) : null}
-
                         {!isFirstLaunchSetup && !hasVisibleMainSettings ? (
                           <SettingsSearchNoMatchesNotice
                             activeTab={activeTab}
@@ -3164,6 +3090,24 @@ export function SettingsModal({
                         updateDraft('showLessForExpandedProjectJumps', checked)
                       }
                     />
+                  </TabsContent>
+                ) : null}
+                {!isFirstLaunchSetup ? (
+                  <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='debugging'>
+                    {isOpen && activeTab === 'debugging' ? (
+                      <DebuggingSettingsTab
+                        settings={draft}
+                        search={extraSettingsTabSearches.debugging}
+                        searchEmptyState={settingsSearchEmptyState}
+                        onChange={updateDraft}
+                        getModificationProps={getSettingModificationProps}
+                        onChangeDiagnosticScenario={updateDiagnosticLoggingScenario}
+                        folderStats={ghostexFolderStats}
+                        folderStatsLoading={ghostexFolderStatsLoading}
+                        onRequestFolderStats={onRequestGhostexFolderStats}
+                        onOpenFolder={onOpenGhostexFolder}
+                      />
+                    ) : null}
                   </TabsContent>
                 ) : null}
                 {!isFirstLaunchSetup ? (

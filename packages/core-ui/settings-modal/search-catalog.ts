@@ -10,7 +10,6 @@ import {
   CHAT_FILE_OPEN_VIEW_OPTIONS,
   COMMANDS_PANEL_SIDE_OPTIONS,
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
-  DIAGNOSTIC_LOGGING_SCENARIOS,
   GHOSTTY_CONFIRM_CLOSE_SURFACE_OPTIONS,
   GHOSTTY_COPY_ON_SELECT_OPTIONS,
   GHOSTTY_SCROLLBAR_OPTIONS,
@@ -912,51 +911,6 @@ export function getSettingsSearchSectionDefinitions() {
         },
       ],
     },
-    debugging: {
-      title: 'Debugging',
-      settings: [
-        /*
-         * CDXC:Diagnostics 2026-06-06-07:09:
-         * Show debug UI controls is the global gate for routine diagnostic disk
-         * logging as well as debug-only UI. Scenario controls narrow which
-         * routine log area writes while the global gate is on; important
-         * warnings, errors, and crashes remain available independently.
-         *
-         * CDXC:Diagnostics 2026-06-15-21:34:
-         * The Debugging section owns support and diagnostic toggles at the bottom of Settings, including command copy actions and Copy details, so users can find debug-only context-menu features together.
-         *
-         * CDXC:Diagnostics 2026-06-27-22:07:
-         * Disk logging needs exact scenario controls. Search should match both
-         * the scenario labels and their support-bundle file names so a user can
-         * enable only the requested repro log without browsing every Debugging row.
-         */
-        {
-          key: 'debuggingMode',
-          subtitle: 'Show debug-only controls, inspect storage usage and budgets, and allow enabled routine diagnostic logs.',
-          title: 'Show debug UI controls',
-        },
-        {
-          key: 'diagnosticLogging',
-          options: DIAGNOSTIC_LOGGING_SCENARIOS.flatMap((scenario) => [
-            { label: scenario.label, value: scenario.id },
-            ...scenario.logFiles.map((logFile) => ({ label: logFile, value: logFile })),
-          ]),
-          subtitle:
-            'Choose routine repro log areas while Show debug UI controls is on. Important warnings, errors, and crashes remain captured when it is off.',
-          title: 'Diagnostic disk logging scenarios',
-        },
-        {
-          key: 'showSessionCommandCopyActions',
-          subtitle: 'Show Copy resume and Copy attach command in session context menus.',
-          title: 'Show command copy actions',
-        },
-        {
-          key: 'showSessionDetailsCopyAction',
-          subtitle: 'Show Copy Details in session context menus.',
-          title: 'Show Copy Details option',
-        },
-      ],
-    },
   } satisfies Record<string, SettingsSearchSectionDefinition>;
 
   return settingsSearchSections;
@@ -1003,7 +957,7 @@ export const MAIN_SETTINGS_GROUP_SECTIONS: Record<
   statusIndicators: { sections: ['statusIndicators'], title: 'Status Indicators' },
   notifications: { sections: ['sounds'], title: 'Notifications' },
   system: { sections: ['autoSleep', 'power'], title: 'System' },
-  advanced: { sections: ['beta', 'debugging'], title: 'Advanced' },
+  advanced: { sections: ['beta'], title: 'Advanced' },
 };
 
 export function getMainSettingsGroupSearch(settingsSearchQuery: string, settingsSearch: SettingsSearchSections) {
