@@ -15,6 +15,7 @@ mod cef_component_window;
 mod component_store;
 mod ghostty_kit;
 mod ghostty_vt;
+mod hotkey_label;
 mod navigation_history;
 mod notification_feed;
 mod plugins_modal;

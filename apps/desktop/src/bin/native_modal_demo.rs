@@ -17,6 +17,8 @@ actions quit the demo.
 mod assets;
 #[path = "../app/window/export_transcript_modal.rs"]
 mod export_transcript_modal;
+#[path = "../hotkey_label.rs"]
+mod hotkey_label;
 #[path = "../app/window/native_modal_kit.rs"]
 mod native_modal_kit;
 // DEMO-MODULES: one `#[path]` include per converted modal, plus its demo module under native_modal_demo/.

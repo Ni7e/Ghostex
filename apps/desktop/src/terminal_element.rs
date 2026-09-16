@@ -630,6 +630,8 @@ pub struct TerminalView {
     zmx_visibility_claims_enabled: bool,
 }
 
+pub(crate) use crate::hotkey_label::terminal_overlay_hotkey_chord_label;
+
 impl TerminalView {
     /// Spawn the configured process and start pumping model events onto the
     /// gpui foreground. Every Wakeup takes one snapshot and notifies.
@@ -2673,62 +2675,6 @@ fn terminal_overlay_platform_hotkey<'a>(action_id: &str, key: &'a str) -> &'a st
         }
         _ => key,
     }
-}
-
-pub(crate) fn terminal_overlay_hotkey_chord_label(chord: &str) -> String {
-    let parts = chord
-        .split('+')
-        .map(|part| part.trim().to_ascii_lowercase())
-        .collect::<Vec<_>>();
-    let has_primary_modifier = parts
-        .iter()
-        .any(|part| matches!(part.as_str(), "cmd" | "command" | "meta"));
-    let has_option_modifier = parts
-        .iter()
-        .any(|part| matches!(part.as_str(), "alt" | "opt" | "option"));
-    let mut labels = Vec::with_capacity(parts.len());
-    for part in parts {
-        let label = if cfg!(target_os = "macos") {
-            match part.as_str() {
-                "cmd" | "command" | "meta" => "⌘".to_string(),
-                "ctrl" | "control" => "⌃".to_string(),
-                "alt" | "opt" | "option" => "⌥".to_string(),
-                "shift" => "⇧".to_string(),
-                "up" | "arrowup" => "↑".to_string(),
-                "right" | "arrowright" => "→".to_string(),
-                "down" | "arrowdown" => "↓".to_string(),
-                "left" | "arrowleft" => "←".to_string(),
-                "tab" => "Tab".to_string(),
-                "enter" | "return" => "Enter".to_string(),
-                "ß" if has_option_modifier => "S".to_string(),
-                value if value.len() == 1 => value.to_uppercase(),
-                value if value.starts_with('f') => value.to_uppercase(),
-                value => value.to_string(),
-            }
-        } else {
-            match part.as_str() {
-                "cmd" | "command" | "meta" => "Ctrl".to_string(),
-                "ctrl" | "control" if has_primary_modifier => "Alt".to_string(),
-                "ctrl" | "control" => "Ctrl".to_string(),
-                "alt" | "opt" | "option" => "Alt".to_string(),
-                "shift" => "Shift".to_string(),
-                "up" | "arrowup" => "↑".to_string(),
-                "right" | "arrowright" => "→".to_string(),
-                "down" | "arrowdown" => "↓".to_string(),
-                "left" | "arrowleft" => "←".to_string(),
-                "tab" => "Tab".to_string(),
-                "enter" | "return" => "Enter".to_string(),
-                "ß" if has_option_modifier => "S".to_string(),
-                value if value.len() == 1 => value.to_uppercase(),
-                value if value.starts_with('f') => value.to_uppercase(),
-                value => value.to_string(),
-            }
-        };
-        if labels.last() != Some(&label) {
-            labels.push(label);
-        }
-    }
-    labels.join(if cfg!(target_os = "macos") { "" } else { "+" })
 }
 
 fn terminal_scroll_button_glyph(edge: TerminalScrollEdge, light_theme: bool) -> impl IntoElement {

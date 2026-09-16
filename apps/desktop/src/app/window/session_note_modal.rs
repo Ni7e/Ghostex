@@ -195,7 +195,7 @@ impl GpuiSessionNoteModalWindow {
         } else {
             format!(
                 "Press {} to save.",
-                crate::terminal_element::terminal_overlay_hotkey_chord_label("cmd+enter")
+                crate::hotkey_label::terminal_overlay_hotkey_chord_label("cmd+enter")
             )
         };
         v_flex()
