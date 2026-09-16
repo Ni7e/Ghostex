@@ -40,6 +40,10 @@ mod delete_worktree_modal;
 mod missing_project_folder_demo;
 #[path = "../app/window/missing_project_folder_modal.rs"]
 mod missing_project_folder_modal;
+#[path = "../app/window/new_thread_picker.rs"]
+mod new_thread_picker;
+#[path = "native_modal_demo/new_thread_picker.rs"]
+mod new_thread_picker_demo;
 #[path = "native_modal_demo/portless_setup.rs"]
 mod portless_setup_demo;
 #[path = "../app/window/portless_setup_modal.rs"]
@@ -134,6 +138,7 @@ fn open_modal_window<V: Render>(
         is_resizable: false,
         is_minimizable: false,
         titlebar: None,
+        window_background: gpui::WindowBackgroundAppearance::Transparent,
         ..Default::default()
     };
     let slot: Rc<RefCell<Option<Entity<V>>>> = Rc::new(RefCell::new(None));
@@ -269,6 +274,7 @@ fn main() {
             match demo.modal.as_str() {
                 "export-transcript" => open_export_transcript(&demo, cx),
                 // DEMO-ARMS: one arm per converted modal.
+                "new-thread-picker" => new_thread_picker_demo::open(&demo, cx),
                 "update-available" => update_available_demo::open(&demo, cx),
                 "remote-setup" => remote_setup_demo::open(&demo, cx),
                 "delayed-send" => delayed_send_demo::open(&demo, cx),
