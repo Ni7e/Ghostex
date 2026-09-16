@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { storageScope } from '@/packages/client-storage';
 /*
 CDXC:AgentScreenDetection 2026-08-19:
@@ -268,7 +269,7 @@ export function SessionChatTerminalNoticeCard({
   const screenTailRef = useRef<HTMLPreElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const isMac = detectghostexHotkeyPlatform() === 'mac';
-  const primaryShortcutLabel = isMac ? '⌘ Enter' : 'Ctrl Enter';
+  const primaryShortcutLabel = formatSidebarHotkeyLabel('cmd+enter');
 
   const noticeKey = sessionChatTerminalNoticeDismissKey(notice);
   const dismiss = (): void => {

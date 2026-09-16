@@ -24,7 +24,6 @@ const DESCRIPTION_WITHOUT_TITLE: &str =
 const FIELD_NOTE: &str = "Note";
 const PLACEHOLDER: &str = "What to pick up when you come back…";
 const DESCRIPTION_CLEAR_HINT: &str = "Save an empty note to clear it.";
-const DESCRIPTION_SAVE_HINT: &str = "Press ⌘/Ctrl + Enter to save.";
 const CANCEL: &str = "Cancel";
 const SAVE: &str = "Save";
 const CLEAR_NOTE: &str = "Clear Note";
@@ -178,7 +177,7 @@ impl GpuiSessionNoteModalWindow {
     }
 
     /// `[data-slot='field-description']`: 14px muted copy at line-height 1.5.
-    fn render_field_description(&self, text: &'static str) -> AnyElement {
+    fn render_field_description(&self, text: String) -> AnyElement {
         div()
             .text_size(px(14.0))
             .line_height(px(21.0))
@@ -192,9 +191,12 @@ impl GpuiSessionNoteModalWindow {
     fn render_body(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = self.palette;
         let hint = if self.has_existing_note {
-            DESCRIPTION_CLEAR_HINT
+            DESCRIPTION_CLEAR_HINT.to_string()
         } else {
-            DESCRIPTION_SAVE_HINT
+            format!(
+                "Press {} to save.",
+                crate::terminal_element::terminal_overlay_hotkey_chord_label("cmd+enter")
+            )
         };
         v_flex()
             .w_full()

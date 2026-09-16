@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 /*
  * CDXC:RepoStructure 2026-08-23:
  * Settings search metadata, the grouped page search, and the main-settings
@@ -41,8 +42,7 @@ import {
 
 export const IS_WINDOWS_HOST = typeof navigator !== 'undefined' && /Windows/iu.test(navigator.userAgent);
 
-export const PASTE_PREVIEWABLE_IMAGES_DESCRIPTION =
-  'Paste clipboard images as previewable Markdown links with Cmd+V or Ctrl+V. Hold Cmd over the linked path to preview it in the terminal, and see the same image preview in the Ctrl+G Rich Prompt Editor.';
+export const PASTE_PREVIEWABLE_IMAGES_DESCRIPTION = `Paste clipboard images as previewable Markdown links with ${formatSidebarHotkeyLabel('cmd+v')}. Hold ${formatSidebarHotkeyLabel('cmd')} over the linked path to preview it in the terminal, and see the same image preview in the ${formatSidebarHotkeyLabel('ctrl+g')} Rich Prompt Editor.`;
 
 export type SettingsSearchSectionDefinition = {
   settings: readonly SettingSearchDefinition[];
@@ -66,7 +66,7 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'appIconSourceId',
           subtitle:
-            'Choose the macOS Dock and app-switcher icon. The app file icon may also change when macOS allows it.',
+            'Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.',
           title: 'App Icon',
         },
       ],
@@ -245,7 +245,7 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'keepAwakeDeactivateOnLowPowerMode',
-          subtitle: 'Stop preventing sleep when macOS Low Power Mode is enabled.',
+          subtitle: 'Stop preventing sleep when Low Power Mode is enabled.',
           title: 'Deactivate in Low Power Mode',
         },
         {
@@ -627,12 +627,12 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'showMacOSAttentionNotifications',
-          subtitle: 'Show a macOS banner when a session needs attention.',
-          title: 'macOS Attention Notifications',
+          subtitle: 'Show a system notification when a session needs attention.',
+          title: 'Attention Notifications',
         },
         {
           key: 'attentionNotificationActions',
-          subtitle: 'Test the current completion alert settings or open macOS Notification Settings.',
+          subtitle: 'Test the current completion alert settings or open Notification Settings.',
           title: 'Agent Completion Alert Test',
         },
         {
@@ -786,8 +786,7 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'showQuickModelPickerInTerminal',
-          subtitle:
-            'Use the model picker shortcut (Option+P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.',
+          subtitle: `Use the model picker shortcut (${formatSidebarHotkeyLabel('alt+p')} by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.`,
           title: 'Show quick model & effort picker for Claude and Codex in terminal view',
         },
         {
@@ -803,8 +802,8 @@ export function getSettingsSearchSectionDefinitions() {
         {
           key: 'promptEditorBackend',
           options: PROMPT_EDITOR_BACKEND_OPTIONS,
-          subtitle: 'Choose which editor Ctrl+G uses when a terminal prompt asks for $EDITOR.',
-          title: 'Ctrl+G prompt editor',
+          subtitle: `Choose which editor ${formatSidebarHotkeyLabel('ctrl+g')} uses when a terminal prompt asks for $EDITOR.`,
+          title: `${formatSidebarHotkeyLabel('ctrl+g')} prompt editor`,
         },
       ],
     },

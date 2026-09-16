@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { getDefaultSidebarAgentById } from '@/packages/shared/sidebar-agents';
@@ -477,8 +478,7 @@ export function SessionChatModelPicker({
           <footer ref={setControls} className='model-picker-footer'>
             <div className='model-picker-help'>
               <span className='model-picker-open-hint' data-key-pressed={cancelRequested ? '' : undefined}>
-                <kbd>⌥</kbd>
-                <kbd>P</kbd>
+                <kbd>{formatSidebarHotkeyLabel('alt+p')}</kbd>
                 <span>Close</span>
               </span>
               <span>

@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { importDraftRecovery, dismissDraftRecovery } from './chat/session-chat-draft-recovery';
 import { SearchableDropdownContent } from '../components/ui/searchable-dropdown';
 import { SessionChatRecoveredHistory } from './chat/session-chat-recovered-history';
@@ -93,7 +94,7 @@ export type StashedPromptsModalProps = {
 };
 
 const TOOLTIP_LINE_COUNT = 30;
-const STASH_PROMPT_HINT = "Press Option + S while you're using an agent to stash your prompt (Local only for now)";
+const STASH_PROMPT_HINT = `Press ${formatSidebarHotkeyLabel('alt+s')} while you're using an agent to stash your prompt (Local only for now)`;
 
 /*
  * CDXC:SavedPrompts 2026-08-23:

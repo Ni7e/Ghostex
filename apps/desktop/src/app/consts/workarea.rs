@@ -49,7 +49,11 @@ pub(crate) const GPUI_NATIVE_TITLEBAR_TIPS: &[GpuiNativeTitlebarTip] = &[
         body: "Search for project actions, pane splits and moves, session controls, settings shortcuts, and other Ghostex actions.",
         icon_path: COMMAND_ICON_COMMAND,
         id: "command-palette-all-actions",
-        title: "Press Cmd Shift P anywhere to open Ghostex Quick Access",
+        title: if cfg!(target_os = "macos") {
+            "Press ⌘⇧P anywhere to open Ghostex Quick Access"
+        } else {
+            "Press Ctrl+Shift+P anywhere to open Ghostex Quick Access"
+        },
     },
     GpuiNativeTitlebarTip {
         body: "Open Settings to customize sidebar presets, visible details, agents, actions, project tools, and workspace open targets.",
@@ -70,7 +74,7 @@ pub(crate) const GPUI_NATIVE_TITLEBAR_TIPS: &[GpuiNativeTitlebarTip] = &[
         title: "Run the same project in a worktree",
     },
     GpuiNativeTitlebarTip {
-        body: "Configure Ghostex Computer Use in Settings, then ask agents to use /ghostex-computer-use for native macOS app control.",
+        body: "Configure Ghostex Computer Use in Settings, then ask agents to use /ghostex-computer-use for desktop app control.",
         icon_path: TITLEBAR_ICON_DEVICE_DESKTOP,
         id: "use-ghostex-computer-use-skill",
         title: "Use /ghostex-computer-use for desktop control",

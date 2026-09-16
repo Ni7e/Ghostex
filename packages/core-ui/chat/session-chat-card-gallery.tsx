@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { useState, type ReactNode } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import { Textarea } from '@/packages/components/ui/textarea';
@@ -259,7 +260,7 @@ export function SessionChatCardGallery() {
                 <Textarea
                   aria-label='Resume picker draft'
                   className='rounded-lg'
-                  placeholder='Keep typing here. Use Command+Enter (Control+Enter on Windows/Linux) for the left action, or Escape for the second.'
+                  placeholder={`Keep typing here. Use ${formatSidebarHotkeyLabel('cmd+enter')} for the left action, or Escape for the second.`}
                 />
               ) : null}
             </Example>

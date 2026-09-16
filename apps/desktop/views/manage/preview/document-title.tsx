@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/packages/core-ui/app-tooltip';
 import { writeTextToClipboard } from '../annotation-store';
@@ -69,7 +70,7 @@ export function ManageDocumentTitle({
           : copyState === 'error'
             ? 'Could not copy file name'
             : dirty
-              ? 'Unsaved changes. Press ⌘S or Ctrl+S to save. Click to copy file name'
+              ? `Unsaved changes. Press ${formatSidebarHotkeyLabel('cmd+s')} to save. Click to copy file name`
               : 'Copy file name'}
       </TooltipContent>
     </Tooltip>

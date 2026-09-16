@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '../hotkey-label';
 import { type SidebarThemeSetting } from '../session-grid-contract-core';
 import { type SessionChatThemeSetting } from '../session-chat';
 import { GHOSTTY_THEME_OPTIONS } from '../ghostty-theme-options';
@@ -62,11 +63,11 @@ export const APP_SHOTS_HOTKEY_OPTIONS: ReadonlyArray<{
   label: string;
   value: AppShotsHotkey;
 }> = [
-  { label: 'Both Command keys', value: 'both-command' },
-  { label: 'Both Shift keys', value: 'both-shift' },
-  { label: 'Both Option keys', value: 'both-option' },
-  { label: 'Double-tap Left Shift', value: 'double-left-shift' },
-  { label: 'Double-tap Left Option', value: 'double-left-option' },
+  { label: `Both ${formatSidebarHotkeyLabel('cmd')} keys`, value: 'both-command' },
+  { label: `Both ${formatSidebarHotkeyLabel('shift')} keys`, value: 'both-shift' },
+  { label: `Both ${formatSidebarHotkeyLabel('alt')} keys`, value: 'both-option' },
+  { label: `Double-tap Left ${formatSidebarHotkeyLabel('shift')}`, value: 'double-left-shift' },
+  { label: `Double-tap Left ${formatSidebarHotkeyLabel('alt')}`, value: 'double-left-option' },
 ];
 
 export const DEFAULT_EDITOR_COMMAND_OPTIONS: ReadonlyArray<{

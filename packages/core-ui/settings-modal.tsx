@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { DebuggingSettingsTab } from './settings-modal/tabs/debugging';
 import { WindowsTerminalFields } from './settings-modal/tabs/windows-terminal-fields';
 import { useSystemColorScheme } from './use-system-color-scheme';
@@ -1321,7 +1322,7 @@ export function SettingsModal({
                          */}
                         {mainSubsectionVisible('appIcon', settingsSearch.appIcon) ? (
                           <SettingsSection
-                            description='Changes the Dock and app-switcher icon. The app file icon may also change when macOS allows it.'
+                            description='Changes the Dock and app-switcher icon. The app file icon may also change when the operating system allows it.'
                             sectionRef={appIconSectionRef}
                             title='App Icon'
                           >
@@ -2048,7 +2049,7 @@ export function SettingsModal({
                                     The Ghostty controls also apply to your external Ghostty terminal because this
                                     Ghostty terminal uses the same settings file. ghostex reloads its embedded Ghostty
                                     terminal about 3 seconds after you stop changing these controls; external Ghostty
-                                    windows may still need Cmd+Shift+, to reload. Theme overrides and the terminal light
+                                    windows may still need {formatSidebarHotkeyLabel('cmd+shift+,')} to reload. Theme overrides and the terminal light
                                     palette apply only to Ghostex.
                                   </p>
                                 </div>
@@ -2712,7 +2713,7 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.power, 'keepAwakeDeactivateOnLowPowerMode') ? (
                               <ToggleField
                                 checked={draft.keepAwakeDeactivateOnLowPowerMode}
-                                description='Stop preventing sleep when macOS Low Power Mode is enabled.'
+                                description='Stop preventing sleep when Low Power Mode is enabled.'
                                 label='Deactivate in Low Power Mode'
                                 {...getSettingModificationProps('keepAwakeDeactivateOnLowPowerMode')}
                                 onChange={(checked) => updateDraft('keepAwakeDeactivateOnLowPowerMode', checked)}
@@ -2739,8 +2740,8 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.sounds, 'showMacOSAttentionNotifications') ? (
                               <ToggleField
                                 checked={draft.showMacOSAttentionNotifications}
-                                description='Show a macOS banner when a session needs attention.'
-                                label='macOS Attention Notifications'
+                                description='Show a system notification when a session needs attention.'
+                                label='Attention Notifications'
                                 {...getSettingModificationProps('showMacOSAttentionNotifications')}
                                 onChange={(checked) => {
                                   updateDraft('showMacOSAttentionNotifications', checked);
@@ -2793,11 +2794,11 @@ export function SettingsModal({
                                     onClick: () => onTestAgentTaskCompletion?.(),
                                   },
                                   {
-                                    label: 'macOS Notification Settings',
+                                    label: 'Notification Settings',
                                     onClick: () => onOpenMacOSNotificationSettings?.(),
                                   },
                                 ]}
-                                description='Run the current completion sound and notification flow, or open macOS notification permissions.'
+                                description='Run the current completion sound and notification flow, or open system notification permissions.'
                                 label='Completion Alerts'
                               />
                             ) : null}
@@ -3375,10 +3376,10 @@ function PromptEditorBackendField({
   return (
     <SettingRow
       advanced={advanced}
-      description='Choose which editor new terminals use when Ctrl+G asks the shell to edit prompt text.'
+      description={`Choose which editor new terminals use when ${formatSidebarHotkeyLabel('ctrl+g')} asks the shell to edit prompt text.`}
       htmlFor={id}
       isModified={isModified}
-      label='Ctrl+G prompt editor'
+      label={`${formatSidebarHotkeyLabel('ctrl+g')} prompt editor`}
       onResetToDefault={onResetToDefault}
     >
       <SettingsSelect onValueChange={(value) => onChange(value as PromptEditorBackend)} value={backend}>

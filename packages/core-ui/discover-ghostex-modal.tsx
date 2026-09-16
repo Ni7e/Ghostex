@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/packages/components/ui/dialog';
@@ -106,9 +107,9 @@ type DiscoverGhostexFeature = {
 const DISCOVER_GHOSTEX_FEATURES: readonly DiscoverGhostexFeature[] = [
   {
     id: 'rich-prompt-editor',
-    title: 'Rich Prompt Editor with Ctrl + G',
+    title: `Rich Prompt Editor with ${formatSidebarHotkeyLabel('ctrl+g')}`,
     description: 'Edit your agent prompts with full hotkeys support and even image previews!',
-    imageAlt: 'Ghostex Rich Prompt Editor with Ctrl + G',
+    imageAlt: `Ghostex Rich Prompt Editor with ${formatSidebarHotkeyLabel('ctrl+g')}`,
     imageSrc: richPromptEditorImage,
   },
   {

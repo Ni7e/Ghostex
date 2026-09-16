@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import Fuse from 'fuse.js';
 import { Command } from '@/packages/components/ui/command';
 import {
@@ -501,8 +502,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
           {
             key: 'titlebarViewOrder',
             title: 'Arrange titlebar views',
-            subtitle:
-              'Reorder built-in, extension, and custom views. Option Alt numbered view shortcuts follow the visible order.',
+            subtitle: `Reorder built-in, extension, and custom views. ${formatSidebarHotkeyLabel('alt+1')} through ${formatSidebarHotkeyLabel('alt+9')} follow the visible order.`,
           },
         ],
         title: 'Titlebar views',
@@ -593,7 +593,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
         settings: [
           {
             key: 'setDefaultEditor',
-            subtitle: 'Make Ghostex the default macOS editor for supported file types.',
+            subtitle: 'Make Ghostex the default editor for supported file types.',
             title: 'Set as Default Editor',
           },
           {
@@ -603,7 +603,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
           },
           {
             key: 'setScriptRunner',
-            subtitle: 'Make Ghostex the default macOS script runner.',
+            subtitle: 'Make Ghostex the default script runner.',
             title: 'Set Script Runner',
           },
           {
@@ -630,9 +630,8 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
         settings: [
           {
             key: 'handlerStatus',
-            subtitle:
-              'Check macOS Launch Services registration for editor defaults, script runner, and ghostex:// links.',
-            title: 'macOS handler status',
+            subtitle: 'Check system registration for editor defaults, script runner, and ghostex:// links.',
+            title: 'File and link handler status',
           },
         ],
         title: 'Diagnostics',

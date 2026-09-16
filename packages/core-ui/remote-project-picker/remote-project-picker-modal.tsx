@@ -1,3 +1,5 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
+import { detectghostexHotkeyPlatform } from '@/packages/shared/ghostex-hotkeys';
 import { IconArrowBackUp, IconFolder, IconFolderPlus } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '@/packages/components/ui/button';
@@ -148,9 +150,8 @@ export function RemoteProjectPickerModal({
     !hasHighlightedBrowseItem &&
     (hasTrailingPathSeparator(query) ? !browseResult : exactEntry === null);
   const submitActionLabel = willCreateProjectPath ? `Create & ${actionLabel}` : actionLabel;
-  const useMetaForMod = platform.toLowerCase().includes('mac');
-  const submitModifierLabel = useMetaForMod ? '\u2318' : 'Ctrl';
-  const addShortcutLabel = hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : 'Enter';
+  const useMetaForMod = detectghostexHotkeyPlatform() === 'mac';
+  const addShortcutLabel = hasHighlightedBrowseItem ? formatSidebarHotkeyLabel('cmd+enter') : 'Enter';
 
   const browseGroups = buildBrowseGroups({
     browseEntries: filteredEntries,

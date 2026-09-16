@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from './hotkey-label';
 import {
   DEFAULT_AGENT_MANAGER_ZOOM_PERCENT,
   DEFAULT_MAIN_GROUP_ID,
@@ -408,7 +409,7 @@ export function getSlotLabel(row: number, column: number): string {
 
 export function getSessionShortcutLabel(slotIndex: number, platform: 'default' | 'mac'): string {
   const shortcutNumber = Math.max(1, Math.floor(slotIndex) + 1);
-  return platform === 'mac' ? `⌘⌥${shortcutNumber}` : `⌃⌥${shortcutNumber}`;
+  return formatSidebarHotkeyLabel(`cmd+alt+${shortcutNumber}`, platform === 'mac' ? 'mac' : 'linux');
 }
 
 export function createSessionAlias(sessionNumber: number, slotIndex: number, displayId?: string | number): string {

@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 // Per-agent slash-command catalogs for the composer's "/" picker.
 // Re-verified 2026-09-05 against Codex 0.153.4 and Claude Code 2.1.260. They are a curated snapshot, not discovered at runtime,
 // so update them when an agent CLI adds commands. The names also feed
@@ -128,7 +129,7 @@ const CLAUDE_CODE_SLASH_COMMANDS: readonly SessionChatSlashCommand[] = [
   { name: 'tasks', description: 'View and manage everything running in the background' },
   { name: 'team-onboarding', description: 'Create a team onboarding guide from your usage' },
   { name: 'teleport', description: 'Send this session to the cloud' },
-  { name: 'terminal-setup', description: 'Install the Shift+Enter key binding' },
+  { name: 'terminal-setup', description: `Install the ${formatSidebarHotkeyLabel('shift+enter')} key binding` },
   { name: 'theme', description: 'Change the theme' },
   { name: 'tui', description: 'Set the terminal UI renderer' },
   { name: 'ultrareview', description: 'Start a paid cloud review to find and verify bugs' },

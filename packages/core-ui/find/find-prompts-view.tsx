@@ -1,3 +1,4 @@
+import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 /*
 CDXC:PromptSearch 2026-08-20:
@@ -395,10 +396,13 @@ export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: 
                 onClick={() => runAction({ type: hint.action })}
                 onKeyDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.preventDefault()}
-                title={`${hint.label} (${hint.key})`}
+                title={`${hint.label} (${formatSidebarHotkeyLabel(hint.key.replace('^', 'ctrl+'))})`}
                 type='button'
               >
-                <span className='font-medium text-foreground/70'>{hint.key}</span> {hint.label}
+                <span className='font-medium text-foreground/70'>
+                  {formatSidebarHotkeyLabel(hint.key.replace('^', 'ctrl+'))}
+                </span>{' '}
+                {hint.label}
               </button>
             );
           })}
