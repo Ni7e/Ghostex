@@ -208,7 +208,8 @@ impl GpuiDelayedSendModalWindow {
         let specific_date = cx.new(|cx| DatePickerState::new(window, cx).date_format("%Y-%m-%d"));
         let specific_time = cx.new(|cx| InputState::new(window, cx).placeholder("HH:MM"));
         let mut subscriptions = Vec::new();
-        subscriptions.push(cx.subscribe(&specific_date, |_, _, _: &DatePickerEvent, cx| cx.notify()));
+        subscriptions
+            .push(cx.subscribe(&specific_date, |_, _, _: &DatePickerEvent, cx| cx.notify()));
         for state in [&hours, &minutes, &specific_time] {
             subscriptions.push(cx.subscribe_in(
                 state,
@@ -286,7 +287,9 @@ impl GpuiDelayedSendModalWindow {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 if this
                     .update(cx, |this, cx| {
-                        if this.send_enter_enabled && this.trigger == DelayedSendTrigger::SpecificTime {
+                        if this.send_enter_enabled
+                            && this.trigger == DelayedSendTrigger::SpecificTime
+                        {
                             cx.notify();
                         }
                     })
@@ -320,9 +323,15 @@ impl GpuiDelayedSendModalWindow {
             input.set_value(minutes.to_string(), window, cx);
         });
         let initial_ms = Local::now().timestamp_millis()
-            + if remaining_ms > 0 { remaining_ms as i64 } else { 5 * MINUTE_MS as i64 };
+            + if remaining_ms > 0 {
+                remaining_ms as i64
+            } else {
+                5 * MINUTE_MS as i64
+            };
         let initial = Local
-            .timestamp_millis_opt(((initial_ms + MINUTE_MS as i64 - 1) / MINUTE_MS as i64) * MINUTE_MS as i64)
+            .timestamp_millis_opt(
+                ((initial_ms + MINUTE_MS as i64 - 1) / MINUTE_MS as i64) * MINUTE_MS as i64,
+            )
             .single()
             .unwrap();
         self.specific_date.update(cx, |picker, cx| {
@@ -423,7 +432,10 @@ impl GpuiDelayedSendModalWindow {
     }
 
     fn trigger_options(&self) -> Vec<DelayedSendTrigger> {
-        let mut options = vec![DelayedSendTrigger::AfterDelay, DelayedSendTrigger::SpecificTime];
+        let mut options = vec![
+            DelayedSendTrigger::AfterDelay,
+            DelayedSendTrigger::SpecificTime,
+        ];
         if self.supports_send_when_agent_stops {
             options.push(DelayedSendTrigger::AgentStops);
         }
@@ -469,9 +481,9 @@ impl GpuiDelayedSendModalWindow {
     fn delay_ms(&self, cx: &App) -> Option<u64> {
         if self.trigger == DelayedSendTrigger::SpecificTime {
             let date = self.specific_date.read(cx).date().start()?;
-            let time = NaiveTime::parse_from_str(
-                self.specific_time.read(cx).value().trim(), "%H:%M",
-            ).ok()?;
+            let time =
+                NaiveTime::parse_from_str(self.specific_time.read(cx).value().trim(), "%H:%M")
+                    .ok()?;
             let deadline = Local.from_local_datetime(&date.and_time(time)).earliest()?;
             return (deadline - Local::now()).num_milliseconds().try_into().ok();
         }
@@ -888,12 +900,18 @@ impl GpuiDelayedSendModalWindow {
                     .w_full()
                     .gap(px(10.0))
                     .child(
-                        v_flex().flex_1().min_w_0().gap(px(12.0))
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(12.0))
                             .child(self.render_field_label("Date"))
                             .child(DatePicker::new(&self.specific_date)),
                     )
                     .child(
-                        v_flex().flex_1().min_w_0().gap(px(12.0))
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(12.0))
                             .child(self.render_field_label("Time (24-hour)"))
                             .child(modal_text_input(&p, &self.specific_time, false, window, cx)),
                     ),
