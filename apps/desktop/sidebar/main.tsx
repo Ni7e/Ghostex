@@ -8,14 +8,16 @@ import { reportSidebarNativeScrollGestureBegan } from '@/packages/core-ui/space-
 import { createGpuiSidebarRuntime } from './gxserver-runtime';
 import './sidebar.css';
 import { installSessionChatRuntimeBroker } from './session-chat-runtime/broker';
+import { currentGpuiRuntimeSettings } from './gxserver-runtime/helpers/bootstrap';
+import { createGpuiSidebarHudState } from './gxserver-runtime/helpers/command-pane';
+import type { GpuiSidebarRuntimeSettings } from './gxserver-runtime/types-and-protocol';
 
 /*
 CDXC:StateSync 2026-06-24-11:00:
 GPUI sidebar production runtime mounts the shared SidebarApp directly and feeds it through the local gxserver message source. Storybook fixtures are not a runtime fallback; missing or invalid Rust/CEF gxserver bootstrap publishes the explicit gxserver-unavailable sidebar state until real presentation data arrives.
 */
-document.body.dataset.sidebarTheme = 'plain-dark';
 // Reuse the native sidebar edge contract so reference-sidebar bleed stays inside the GPUI viewport.
-document.body.classList.add('vscode-dark', 'native-sidebar-body');
+document.body.classList.add('native-sidebar-body');
 
 /*
 CDXC:Sidebar 2026-07-09:
@@ -83,7 +85,23 @@ window.ghostexGpui.onNativeScrollGestureBegan = () => {
   reportSidebarNativeScrollGestureBegan();
 };
 
-bootClientStorage(() => {
+/**
+ * CDXC:Theming 2026-09-16 WHY:
+ * CEF delivers saved settings at load-end, after this module can run. Seed the store before mounting so the loading skeleton never renders with default System/dark settings while the app is explicitly light.
+ */
+const initialRuntimeSettings = new Promise<GpuiSidebarRuntimeSettings>((resolve) => {
+  const settings = currentGpuiRuntimeSettings();
+  if (settings) {
+    resolve(settings);
+  } else {
+    window.ghostexGpui!.onRuntimeSettingsChanged = resolve;
+  }
+});
+
+bootClientStorage(async () => {
+const runtimeSettings = await initialRuntimeSettings;
+const initialHud = createGpuiSidebarHudState({ runtimeSettings });
+delete document.body.dataset.sidebarStarting;
 installSessionChatRuntimeBroker();
 const gpuiSidebarRuntime = createGpuiSidebarRuntime();
 const root = createRoot(rootElement);
@@ -112,6 +130,7 @@ root.render(
     <main className='native-sidebar-main'>
       <SidebarApp
         enableProjectCollections={true}
+        initialHud={initialHud}
         messageSource={gpuiSidebarRuntime.messageSource}
         nativeHostEventSource={null}
         onStartGxserver={() => gpuiSidebarRuntime.startLocalGxserver()}

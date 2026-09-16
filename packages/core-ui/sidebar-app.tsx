@@ -27,6 +27,7 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   type ApplySidebarSpaceEditorResultMessage,
   type ExtensionToSidebarMessage,
+  type SidebarHudState,
   type SidebarAssignAddedProjectToSelectedSpaceMessage,
   type SidebarPreviousSessionItem,
 } from '../shared/session-grid-contract';
@@ -249,6 +250,7 @@ import { playCopySound } from './copy-sound';
 
 export type SidebarAppProps = {
   enableProjectCollections?: boolean;
+  initialHud?: SidebarHudState;
   messageSource?: SidebarEventSource;
   nativeHostEventSource?: SidebarEventSource | null;
   onStartGxserver?: () => void;
@@ -329,6 +331,7 @@ function readSidebarProjectJumpEventDetail(event: Event): SidebarProjectJumpEven
 
 export function SidebarApp({
   enableProjectCollections = false,
+  initialHud,
   messageSource = window,
   nativeHostEventSource = window,
   onStartGxserver,
@@ -494,6 +497,13 @@ export function SidebarApp({
 
   if (!didResetStoreRef.current) {
     resetSidebarStore();
+    if (initialHud) {
+      useSidebarStore.getState().applyHudChangedMessage({
+        type: 'sidebarHudChanged',
+        revision: 0,
+        hud: initialHud,
+      });
+    }
     didResetStoreRef.current = true;
   }
 
