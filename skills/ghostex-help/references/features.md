@@ -191,6 +191,12 @@ session replaces that active pane's session and leaves the other pane in place.
   mode. The sidebar is the only scroller, and a project's header stays pinned
   at the top while you scroll through its rows. Setting:
   `projectSessionListCollapsedCount`.
+- Sidebar section headings (Pinned, Sessions, Drafts, Browser, Parked, and
+  Snoozed) show an orange dot when a session is working and a blue dot when
+  a session is done or awaiting attention, including rows hidden by collapse
+  or Compact mode. Both dots appear when both states are present. A separate
+  plain dot marks the section containing the active session: white on dark
+  sidebars and dark gray on light sidebars. No setting is required.
 - New sessions appear at the top of Sessions for 10 minutes. After that,
   a session with unsent text that has not received its first message moves
   into Drafts, below Pinned and above Sessions. Drafts starts collapsed;

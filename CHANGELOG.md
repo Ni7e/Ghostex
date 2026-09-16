@@ -41,6 +41,7 @@
   - Escape and single-key terminal controls act immediately in chat instead of waiting on your login profile.
   - Workspace state is written off the UI thread, so clicking around no longer waits on a save.
   - Annotate in the Browser toolbar now opens inside the frame that holds the page content, so a Storybook story or another framed preview can be annotated instead of only the chrome around it. It also shows up again on Ghostex's own development pages, where it used to disappear before appearing.
+  - Sidebar section headings (Pinned, Sessions, Drafts, Browser, Parked, Snoozed) carry an orange dot when a session there is working and a blue dot when one is done or waiting on you, counting rows hidden by collapse or Compact mode, plus a plain dot on the section holding the active session. Section labels are also a little larger.
 
 - Stabilization
 
