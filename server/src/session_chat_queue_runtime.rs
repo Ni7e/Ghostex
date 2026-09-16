@@ -121,11 +121,73 @@ struct SessionQueueGate {
     /// First moment this session looked stopped without looking busy since.
     /// `None` means the window has not started (or was just reset).
     stopped_since: Option<DateTime<Utc>>,
-    /// `(agent, agentSessionId, agentSessionPath)` the cached path was resolved
-    /// for. Re-resolving can scan agent home directories, which must not happen
-    /// once per second.
-    transcript_identity: String,
-    transcript_path: Option<PathBuf>,
+    transcript: SessionChatTranscriptGate,
+}
+
+/// CDXC:DelayedSend 2026-09-16 WHY:
+/// Hooks and titles can look stopped before a turn finishes. Conditional delayed sends and queued prompts must both check the transcript before starting their stability window.
+#[derive(Default)]
+pub(crate) struct SessionChatTranscriptGate {
+    /// Cache resolution by agent and conversation identity; resolving can scan agent homes.
+    identity: String,
+    path: Option<PathBuf>,
+}
+
+impl SessionChatTranscriptGate {
+    pub(crate) fn is_working(&mut self, session: &Value) -> bool {
+        let agent = session_text(session, "agentId").or_else(|| runtime_text(session, "agentName"));
+        let agent_icon = session
+            .get("launchSettings")
+            .and_then(Value::as_object)
+            .and_then(|settings| settings.get("icon"))
+            .and_then(Value::as_str);
+        let resolved_agent = agent
+            .as_deref()
+            .filter(|value| resolve_session_chat_transcript_agent(Some(value)).is_some())
+            .or(agent_icon);
+        let Some(transcript_agent) = resolve_session_chat_transcript_agent(resolved_agent) else {
+            return false;
+        };
+        let agent_session_id = runtime_text(session, "agentSessionId");
+        let agent_session_path = runtime_text(session, "agentSessionPath");
+        let identity = format!(
+            "{}|{}|{}",
+            resolved_agent.unwrap_or_default(),
+            agent_session_id.clone().unwrap_or_default(),
+            agent_session_path.clone().unwrap_or_default(),
+        );
+        let cached = (self.identity == identity)
+            .then(|| self.path.clone())
+            .flatten()
+            .filter(|path| path.is_file());
+        let path = match cached {
+            Some(path) => Some(path),
+            None => resolve_session_chat_transcript_path(
+                transcript_agent,
+                agent_session_id.as_deref(),
+                agent_session_path.as_deref(),
+            ),
+        };
+        self.identity = identity;
+        self.path = path.clone();
+        let Some(path) = path else {
+            // No transcript on disk yet: agent hooks are the only signal, and
+            // they already said idle.
+            return false;
+        };
+        match read_session_chat_tail_page(
+            transcript_agent,
+            &path,
+            SESSION_CHAT_QUEUE_LIFECYCLE_TAIL_LIMIT,
+            None,
+        ) {
+            Ok(SessionChatTailPage::Page {
+                lifecycle: Some(lifecycle),
+                ..
+            }) => lifecycle.state == SessionChatTurnLifecycleState::Working,
+            _ => false,
+        }
+    }
 }
 
 struct ReadyDelivery {
@@ -454,73 +516,15 @@ impl SessionChatQueueRuntime {
         self.finish_delivery(&key);
     }
 
-    /*
-    The second readiness signal. Agent hooks (presentation activity) know a turn
-    started before the transcript flushes, and the transcript knows a turn is
-    still running when hooks are missing or stale — the queue needs BOTH to be
-    quiet. Read from the same bounded reverse tail the chat surfaces use; the
-    resolved path is cached per session because resolving it can scan agent home
-    directories.
-    */
     fn transcript_lifecycle_is_working(&self, key: &str, session: &Value) -> bool {
-        let agent = session_text(session, "agentId").or_else(|| runtime_text(session, "agentName"));
-        let agent_icon = session
-            .get("launchSettings")
-            .and_then(Value::as_object)
-            .and_then(|settings| settings.get("icon"))
-            .and_then(Value::as_str);
-        let resolved_agent = agent
-            .as_deref()
-            .filter(|value| resolve_session_chat_transcript_agent(Some(value)).is_some())
-            .or(agent_icon);
-        let Some(transcript_agent) = resolve_session_chat_transcript_agent(resolved_agent) else {
-            return false;
+        let Ok(mut gates) = self.gates.lock() else {
+            return true;
         };
-        let agent_session_id = runtime_text(session, "agentSessionId");
-        let agent_session_path = runtime_text(session, "agentSessionPath");
-        let identity = format!(
-            "{}|{}|{}",
-            resolved_agent.unwrap_or_default(),
-            agent_session_id.clone().unwrap_or_default(),
-            agent_session_path.clone().unwrap_or_default(),
-        );
-        let cached = self.gates.lock().ok().and_then(|gates| {
-            gates
-                .get(key)
-                .filter(|gate| gate.transcript_identity == identity)
-                .and_then(|gate| gate.transcript_path.clone())
-                .filter(|path| path.is_file())
-        });
-        let path = match cached {
-            Some(path) => Some(path),
-            None => resolve_session_chat_transcript_path(
-                transcript_agent,
-                agent_session_id.as_deref(),
-                agent_session_path.as_deref(),
-            ),
-        };
-        if let Ok(mut gates) = self.gates.lock() {
-            let gate = gates.entry(key.to_string()).or_default();
-            gate.transcript_identity = identity;
-            gate.transcript_path = path.clone();
-        }
-        let Some(path) = path else {
-            // No transcript on disk yet: agent hooks are the only signal, and
-            // they already said idle.
-            return false;
-        };
-        match read_session_chat_tail_page(
-            transcript_agent,
-            &path,
-            SESSION_CHAT_QUEUE_LIFECYCLE_TAIL_LIMIT,
-            None,
-        ) {
-            Ok(SessionChatTailPage::Page {
-                lifecycle: Some(lifecycle),
-                ..
-            }) => lifecycle.state == SessionChatTurnLifecycleState::Working,
-            _ => false,
-        }
+        gates
+            .entry(key.to_string())
+            .or_default()
+            .transcript
+            .is_working(session)
     }
 
     fn stability_window_elapsed(&self, key: &str, now: DateTime<Utc>) -> bool {
