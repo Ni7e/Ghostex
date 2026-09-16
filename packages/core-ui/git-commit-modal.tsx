@@ -94,6 +94,7 @@ export type GitCommitModalProps = {
   fileDiffDraft?: GitFileDiffModalDraft;
   onMultipleCommits: (requestId: string, agentId?: string) => void;
   onOpenFileDiff: (filePath: string, requestId: string) => void;
+  onOpenFileLocation?: (filePath: string, requestId: string) => void;
   onPromptAgentIdChange?: (agentId: string) => void;
   promptAgentId?: string;
   theme?: SidebarTheme;
@@ -109,6 +110,7 @@ export function GitCommitModal({
   fileDiffDraft,
   onMultipleCommits,
   onOpenFileDiff,
+  onOpenFileLocation,
   onPromptAgentIdChange,
   promptAgentId,
   theme = 'dark-1',
@@ -414,6 +416,9 @@ export function GitCommitModal({
                         });
                       }}
                       onOpenFile={openInlineFileDiff}
+                      onOpenFileLocation={
+                        onOpenFileLocation ? (path) => onOpenFileLocation(path, draft.requestId) : undefined
+                      }
                       selectedPath={inlineDiffMode === 'file' ? selectedDiffFilePath : undefined}
                     />
                   </div>

@@ -2980,6 +2980,7 @@ export type SidebarToExtensionMessage =
       groupId?: string;
       projectId?: string;
       requestId?: string;
+      openLocation?: boolean;
       type: 'openSidebarGitChangedFile';
     }
   | {

@@ -331,7 +331,9 @@ impl GhostexGpuiApp {
                 &["agentId", "message", "requestId"]
             }
             "runSidebarGitMultipleCommits" => &["agentId", "requestId"],
-            "openSidebarGitChangedFileDiff" => &["filePath", "requestId"],
+            "openSidebarGitChangedFileDiff" | "openSidebarGitChangedFile" => {
+                &["filePath", "requestId"]
+            }
             "cancelSidebarGitCommit" => &["requestId"],
             _ => return false,
         };
@@ -340,6 +342,14 @@ impl GhostexGpuiApp {
         for field in allowed_string_fields {
             if let Some(value) = command.get(*field).and_then(serde_json::Value::as_str) {
                 message.insert((*field).to_string(), serde_json::json!(value));
+            }
+        }
+        if command_type == "openSidebarGitChangedFile" {
+            if let Some(value) = command
+                .get("openLocation")
+                .and_then(serde_json::Value::as_bool)
+            {
+                message.insert("openLocation".to_string(), serde_json::json!(value));
             }
         }
         if matches!(

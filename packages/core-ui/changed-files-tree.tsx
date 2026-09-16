@@ -18,6 +18,7 @@ export type ChangedFilesTreeProps = {
   files: ReadonlyArray<SidebarGitChangedFile>;
   isEditing?: boolean;
   onOpenFile?: (filePath: string) => void;
+  onOpenFileLocation?: (filePath: string) => void;
   onToggleFile?: (filePath: string) => void;
   selectedPath?: string;
 };
@@ -35,6 +36,7 @@ export function ChangedFilesTree({
   files,
   isEditing = false,
   onOpenFile,
+  onOpenFileLocation,
   onToggleFile,
   selectedPath,
 }: ChangedFilesTreeProps) {
@@ -175,9 +177,22 @@ export function ChangedFilesTree({
           }}
           onDismiss={() => setFilePathContextMenu(undefined)}
         >
-          <button className='session-context-menu-item' onClick={copyContextMenuFilePath} type='button'>
+          <button className='session-context-menu-item' onClick={copyContextMenuFilePath} role='menuitem' type='button'>
             <IconCopy aria-hidden='true' className='session-context-menu-icon' size={14} />
-            Copy path
+            Copy Path
+          </button>
+          <button
+            className='session-context-menu-item'
+            disabled={!onOpenFileLocation}
+            onClick={() => {
+              onOpenFileLocation?.(filePathContextMenu.path);
+              setFilePathContextMenu(undefined);
+            }}
+            role='menuitem'
+            type='button'
+          >
+            <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
+            Open File/Folder Location
           </button>
         </SidebarContextMenuPortal>
       ) : null}

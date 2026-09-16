@@ -2048,6 +2048,7 @@ impl GhostexGpuiApp {
             | "confirmSidebarGitDirectMerge"
             | "runSidebarGitMultipleCommits"
             | "openSidebarGitChangedFileDiff"
+            | "openSidebarGitChangedFile"
             | "cancelSidebarGitCommit" => {
                 self.forward_gpui_git_commit_modal_command_to_sidebar(command_type, command, cx);
             }

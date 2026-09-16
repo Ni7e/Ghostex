@@ -4750,6 +4750,18 @@ export function SidebarApp({
                 setGitFileDiffDraft(undefined);
                 vscode.postMessage({ agentId, requestId, type: 'runSidebarGitMultipleCommits' });
               }}
+              onOpenFileLocation={
+                runsInsideGhostexDesktop()
+                  ? (filePath, requestId) => {
+                      vscode.postMessage({
+                        filePath,
+                        requestId,
+                        openLocation: true,
+                        type: 'openSidebarGitChangedFile',
+                      });
+                    }
+                  : undefined
+              }
               onOpenFileDiff={(filePath, requestId) => {
                 vscode.postMessage({ filePath, requestId, type: 'openSidebarGitChangedFileDiff' });
               }}

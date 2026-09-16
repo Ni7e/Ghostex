@@ -80,6 +80,12 @@ export function parseGpuiGitCommitModalCommand(payload: unknown): GpuiGitCommitM
     }
     case 'runSidebarGitMultipleCommits':
       return { agentId, requestId, type: 'runSidebarGitMultipleCommits' };
+    case 'openSidebarGitChangedFile': {
+      const filePath = stringField('filePath', 1024);
+      return filePath
+        ? { filePath, requestId, openLocation: record.openLocation === true, type: record.type }
+        : undefined;
+    }
     case 'openSidebarGitChangedFileDiff': {
       const filePath = stringField('filePath', 1024);
       return filePath ? { filePath, requestId, type: 'openSidebarGitChangedFileDiff' } : undefined;

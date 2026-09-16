@@ -518,6 +518,7 @@ export type GpuiSidebarNativeProjectPathAction =
   | 'openActiveWorkspaceProjectInZed'
   | 'openExistingPullRequestInBrowser'
   | 'openSidebarGitChangedFileInIde'
+  | 'revealSidebarGitChangedFile'
   | 'copyRemoteProjectPath'
   | 'openRemoteProjectTerminal'
   | 'openRemoteWorkspaceProjectInIde'
@@ -699,6 +700,7 @@ export type GpuiGitCommitModalCommand =
   | Extract<SidebarToExtensionMessage, { type: 'confirmSidebarGitDirectMerge' }>
   | Extract<SidebarToExtensionMessage, { type: 'runSidebarGitMultipleCommits' }>
   | Extract<SidebarToExtensionMessage, { type: 'openSidebarGitChangedFileDiff' }>
+  | Extract<SidebarToExtensionMessage, { type: 'openSidebarGitChangedFile' }>
   | Extract<SidebarToExtensionMessage, { type: 'cancelSidebarGitCommit' }>;
 
 export type GpuiCreatedProjectAgentSessionRecord = {

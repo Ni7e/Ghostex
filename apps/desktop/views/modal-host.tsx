@@ -2289,6 +2289,9 @@ function AppModalHost() {
           vscode.postMessage({ agentId, requestId, type: 'runSidebarGitMultipleCommits' });
           closeModal();
         }}
+        onOpenFileLocation={(filePath, requestId) => {
+          vscode.postMessage({ filePath, requestId, openLocation: true, type: 'openSidebarGitChangedFile' });
+        }}
         onOpenFileDiff={(filePath, requestId) => {
           vscode.postMessage({ filePath, requestId, type: 'openSidebarGitChangedFileDiff' });
         }}
