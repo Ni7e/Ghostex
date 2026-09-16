@@ -861,6 +861,8 @@ impl EditorApp {
         let window = builder
             .build(target)
             .map_err(|error| format!("unable to create window: {error}"))?;
+        #[cfg(target_os = "windows")]
+        hide_windows_titlebar_icon(&window)?;
         let window_id = window.id();
         let proxy = self.proxy.clone();
         let web_root = self.web_root.clone();
@@ -1289,18 +1291,51 @@ fn apply_skip_taskbar(builder: WindowBuilder) -> WindowBuilder {
 #[cfg(target_os = "windows")]
 fn apply_skip_taskbar(builder: WindowBuilder) -> WindowBuilder {
     use tao::platform::windows::WindowBuilderExtWindows;
-    let artwork = image::load_from_memory(include_bytes!(
-        "../../../desktop/resources/AppIcon.appiconset/icon_32x32.png"
-    ))
-    .expect("the bundled Ghostex icon must be valid")
-    .into_rgba8();
-    let (width, height) = artwork.dimensions();
-    let icon = tao::window::Icon::from_rgba(artwork.into_raw(), width, height)
-        .expect("the bundled Ghostex icon must contain RGBA pixels");
-    builder
-        .with_window_icon(Some(icon.clone()))
-        .with_taskbar_icon(Some(icon))
-        .with_skip_taskbar(true)
+    builder.with_skip_taskbar(true)
+}
+
+/// CDXC:PromptEditor 2026-09-16 DECISION:
+/// User: hide the Windows prompt editor's titlebar icon, superseding the earlier request for a better icon.
+/// The dialog frame suppresses Windows' generic icon when no window icons are assigned.
+#[cfg(target_os = "windows")]
+fn hide_windows_titlebar_icon(window: &Window) -> Result<(), String> {
+    use tao::platform::windows::WindowExtWindows;
+    use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_EX_DLGMODALFRAME,
+    };
+
+    // SAFETY: this newly created HWND belongs to the current UI thread and remains alive throughout.
+    unsafe {
+        let hwnd = window.hwnd() as _;
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetLastError(0);
+        if SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_DLGMODALFRAME as isize) == 0
+            && GetLastError() != 0
+        {
+            return Err(format!(
+                "unable to hide editor titlebar icon: {}",
+                io::Error::last_os_error()
+            ));
+        }
+        if SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        ) == 0
+        {
+            return Err(format!(
+                "unable to update editor titlebar: {}",
+                io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

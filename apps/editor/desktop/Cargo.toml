@@ -23,4 +23,4 @@ wry = "0.55"
 
 [target.'cfg(windows)'.dependencies]
 ghostex-editor-client = { path = "../../../packages/editor-client" }
-image = { version = "0.25", default-features = false, features = ["png"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
