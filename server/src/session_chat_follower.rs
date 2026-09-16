@@ -640,7 +640,10 @@ fn emit_snapshot_frame(
             let mut frame = session_chat_frame(config, frame_type, epoch, seq);
             frame.insert(
                 "messages".to_string(),
-                serde_json::to_value(&tail.messages).unwrap_or(Value::Array(Vec::new())),
+                Value::Array(crate::session_chat_history::collapse_snapshot_messages(
+                    &tail.messages,
+                    tail.before_offset,
+                )),
             );
             insert_optional_lifecycle(&mut frame, tail.lifecycle.as_ref());
             frame.insert("hasMore".to_string(), json!(tail.has_more));
