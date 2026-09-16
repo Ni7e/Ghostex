@@ -1,5 +1,5 @@
 import { SessionQuestionIndicator } from './session-question-indicator';
-import { CollapsibleSessionRow } from './collapsible-session-row';
+import { CollapsibleSessionSection } from './collapsible-session-section';
 import {
   IconAlertTriangle,
   IconCaretRightFilled,
@@ -510,6 +510,8 @@ export type SessionGroupSectionProps = {
   spaceMemberProjectId?: string;
   spaces?: SidebarSpacesState;
   onHideGroup?: () => void;
+  /** The session to focus in place of this project's when Close Project parks it; see sidebar-app/close-project-successor.ts. */
+  resolveCloseProjectSuccessorSessionId?: () => string | undefined;
   onSessionSelectionChange?: (request: SidebarSessionSelectionChangeRequest) => void;
   orderedSessionIds?: readonly string[];
   selectedSearchSessionId?: string;
@@ -753,6 +755,7 @@ export function SessionGroupSection({
   spaceMemberProjectId,
   spaces,
   onHideGroup,
+  resolveCloseProjectSuccessorSessionId,
   onSessionSelectionChange,
   orderedSessionIds: orderedSessionIdsProp,
   selectedSearchSessionId,
@@ -1055,6 +1058,29 @@ export function SessionGroupSection({
           isSessionInCollapsedSection(sessionId)
       )
     : orderedSessionIds;
+  const renderedSessionSections: Array<{
+    key: string;
+    section: ProjectSessionSection;
+    sessionIds: string[];
+    startIndex: number;
+  }> = [];
+  const sectionBlockCounts = new Map<ProjectSessionSection, number>();
+  for (const [sessionIndex, sessionId] of renderedSessionIds.entries()) {
+    const section = getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs);
+    const previous = renderedSessionSections.at(-1);
+    if (previous?.section === section) {
+      previous.sessionIds.push(sessionId);
+    } else {
+      const blockIndex = sectionBlockCounts.get(section) ?? 0;
+      sectionBlockCounts.set(section, blockIndex + 1);
+      renderedSessionSections.push({
+        key: `${section}:${blockIndex}`,
+        section,
+        sessionIds: [sessionId],
+        startIndex: sessionIndex,
+      });
+    }
+  }
   const renderedBrowserSessionIds = renderedSessionIds.filter((sessionId) => {
     return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'browser';
   });
@@ -1841,8 +1867,10 @@ export function SessionGroupSection({
     }
 
     setContextMenuPosition(undefined);
+    const successorSessionId = resolveCloseProjectSuccessorSessionId?.();
     vscode.postMessage({
       groupId: group.groupId,
+      ...(successorSessionId ? { successorSessionId } : {}),
       type: 'closeWorkspaceProjectForGroup',
     });
   };
@@ -2636,51 +2664,19 @@ export function SessionGroupSection({
               ) : null}
               {orderedSessionIds.length > 0 ? (
                 <>
-                  {renderedSessionIds.map((sessionId, sessionIndex) => {
-                    const session = sessionsById[sessionId];
-                    const projectSessionSection = getProjectSessionSection(
-                      session,
-                      enableSessionParking,
-                      sessionListNowMs
-                    );
-                    const isProjectSessionSectionCollapsed =
-                      (Boolean(projectContext) ||
-                        (isChatCollection &&
-                          (projectSessionSection === 'drafts' ||
-                            projectSessionSection === 'parked' ||
-                            projectSessionSection === 'snoozed'))) &&
-                      collapsedProjectSessionSections[projectSessionSection];
-                    /*
-                     * CDXC:Sessions 2026-09-15 WHY:
-                     * The gap after the last pinned row is keyed to the next session, but belongs above that session's section heading, even when the next section is collapsed.
-                     * Resolve the gap key against renderedSessionIds, matching this loop: visibleSessionIds skips collapsed and Compact-hidden rows that still own headings, which moved the line below Drafts and Sessions.
-                     */
+                  {renderedSessionSections.map(({ key, section, sessionIds, startIndex }) => {
+                    const sessionId = sessionIds[0];
                     const isPinnedSectionEndGap =
                       Boolean(projectContext) &&
-                      sessionIndex > 0 &&
-                      projectSessionSection !== 'pinned' &&
+                      startIndex > 0 &&
+                      section !== 'pinned' &&
                       getProjectSessionSection(
-                        sessionsById[renderedSessionIds[sessionIndex - 1]],
+                        sessionsById[renderedSessionIds[startIndex - 1]],
                         enableSessionParking,
                         sessionListNowMs
                       ) === 'pinned';
-                    const isVisibleSessionRow = visibleSessionIdSet.has(sessionId);
-                    const sessionIdsBelowStartIndex = (visibleSessionIndexById.get(sessionId) ?? -1) + 1;
-                    const sessionDropPosition =
-                      sessionDropIndicator?.kind === 'session' &&
-                      sessionDropIndicator.groupId === group.groupId &&
-                      sessionDropIndicator.sessionId === sessionId
-                        ? sessionDropIndicator.position
-                        : undefined;
-                    const pinnedSessionDropPosition =
-                      pinnedSessionDropIndicator?.kind === 'session' &&
-                      pinnedSessionDropIndicator.groupId === group.groupId &&
-                      pinnedSessionDropIndicator.sessionId === sessionId
-                        ? pinnedSessionDropIndicator.position
-                        : undefined;
-
                     return (
-                      <Fragment key={sessionId}>
+                      <Fragment key={key}>
                         {isPinnedSectionEndGap &&
                         !collapsedProjectSessionSections.pinned &&
                         shouldRenderSessionRowGaps ? (
@@ -2744,59 +2740,111 @@ export function SessionGroupSection({
                         {!projectContext && shouldRenderSessionKindLabels && sessionId === firstTerminalSessionId ? (
                           <div className='session-kind-label'>Sessions</div>
                         ) : null}
-                        <CollapsibleSessionRow visible={isVisibleSessionRow}>
-                          {!isPinnedSectionEndGap && shouldRenderSessionRowGaps ? (
-                            <div
-                              aria-hidden
-                              className='pinned-session-drop-gap'
-                              data-active={String(pinnedSessionDropGapKey === getSessionDropGapKeyBefore(sessionId))}
-                              data-edge={sessionIndex === 0 ? 'start' : undefined}
-                            />
-                          ) : null}
-                          <SortableSessionCard
-                            completionFlashNonce={completionFlashNonceBySessionId?.[sessionId] ?? 0}
-                            dragDisabled={
-                              draggingDisabled ||
-                              (sessionDraggingDisabled &&
-                                !(allowPinnedSessionReorder && sessionsById[sessionId]?.isPinned === true))
-                            }
-                            dropDisabled={draggingDisabled || (sessionDraggingDisabled && !allowPinnedSessionReorder)}
-                            groupId={group.groupId}
-                            forcedDropPosition={
-                              allowPinnedSessionReorder ? undefined : (sessionDropPosition ?? pinnedSessionDropPosition)
-                            }
-                            hoverActionsExpanded={areSessionCardHoverActionsExpanded}
-                            index={sessionIndex}
-                            isSearchSelected={selectedSearchSessionId === sessionId}
-                            onFocusRequested={onFocusRequested}
-                            onHoverActionsExpandedChange={setSessionCardHoverActionsExpanded}
-                            onSessionSelectionChange={onSessionSelectionChange}
-                            sessionCardSettings={sessionCardSettings}
-                            sessionGroup={group}
-                            sessionTagListItems={sessionTagListItems}
-                            sessionIdsBelowSource={visibleSessionIds}
-                            sessionIdsBelowStartIndex={sessionIdsBelowStartIndex}
-                            sessionId={sessionId}
-                            selectedSessionIds={selectedSessionIds}
-                            shouldKeepLastProjectSessionVisibleOnClose={
+                        <CollapsibleSessionSection visible={!isSessionInCollapsedSection(sessionId)}>
+                          {sessionIds.map((sessionId, indexInSection) => {
+                            const sessionIndex = startIndex + indexInSection;
+                            const session = sessionsById[sessionId];
+                            const projectSessionSection = getProjectSessionSection(
+                              session,
+                              enableSessionParking,
+                              sessionListNowMs
+                            );
+                            const isProjectSessionSectionCollapsed =
+                              (Boolean(projectContext) ||
+                                (isChatCollection &&
+                                  (projectSessionSection === 'drafts' ||
+                                    projectSessionSection === 'parked' ||
+                                    projectSessionSection === 'snoozed'))) &&
+                              collapsedProjectSessionSections[projectSessionSection];
+                            /*
+                             * CDXC:Sessions 2026-09-15 WHY:
+                             * The gap after the last pinned row is keyed to the next session, but belongs above that session's section heading, even when the next section is collapsed.
+                             * Resolve the gap key against renderedSessionIds, matching this loop: visibleSessionIds skips collapsed and Compact-hidden rows that still own headings, which moved the line below Drafts and Sessions.
+                             */
+                            const isPinnedSectionEndGap =
                               Boolean(projectContext) &&
-                              !isChatCollection &&
-                              storedSessionIds.length === 1 &&
-                              storedSessionIds[0] === sessionId
-                            }
-                            showGroupDropTargetChrome={!allowPinnedSessionReorder}
-                            showGroupConnector={showSessionGroupConnector}
-                            showDropPositionIndicator={showSessionDropPositionIndicators && !allowPinnedSessionReorder}
-                            vscode={vscode}
-                          />
-                        </CollapsibleSessionRow>
-                        {!projectContext &&
-                        !isProjectSessionSectionCollapsed &&
-                        sessionsById[sessionId]?.isPinned === true &&
-                        orderedSessionIds[sessionIndex + 1] !== undefined &&
-                        sessionsById[orderedSessionIds[sessionIndex + 1]]?.isPinned !== true ? (
-                          <div aria-hidden className='pinned-sessions-divider' />
-                        ) : null}
+                              sessionIndex > 0 &&
+                              projectSessionSection !== 'pinned' &&
+                              getProjectSessionSection(
+                                sessionsById[renderedSessionIds[sessionIndex - 1]],
+                                enableSessionParking,
+                                sessionListNowMs
+                              ) === 'pinned';
+                            const isVisibleSessionRow = visibleSessionIdSet.has(sessionId);
+                            const sessionIdsBelowStartIndex = (visibleSessionIndexById.get(sessionId) ?? -1) + 1;
+                            const sessionDropPosition =
+                              sessionDropIndicator?.kind === 'session' &&
+                              sessionDropIndicator.groupId === group.groupId &&
+                              sessionDropIndicator.sessionId === sessionId
+                                ? sessionDropIndicator.position
+                                : undefined;
+                            const pinnedSessionDropPosition =
+                              pinnedSessionDropIndicator?.kind === 'session' &&
+                              pinnedSessionDropIndicator.groupId === group.groupId &&
+                              pinnedSessionDropIndicator.sessionId === sessionId
+                                ? pinnedSessionDropIndicator.position
+                                : undefined;
+                            return (
+                              <Fragment key={sessionId}>
+                                {isVisibleSessionRow ? (
+                                  <>
+                                    {!isPinnedSectionEndGap && shouldRenderSessionRowGaps ? (
+                                      <div
+                                        aria-hidden
+                                        className='pinned-session-drop-gap'
+                                        data-active={String(pinnedSessionDropGapKey === getSessionDropGapKeyBefore(sessionId))}
+                                        data-edge={sessionIndex === 0 ? 'start' : undefined}
+                                      />
+                                    ) : null}
+                                    <SortableSessionCard
+                                      completionFlashNonce={completionFlashNonceBySessionId?.[sessionId] ?? 0}
+                                      dragDisabled={
+                                        draggingDisabled ||
+                                        (sessionDraggingDisabled &&
+                                          !(allowPinnedSessionReorder && sessionsById[sessionId]?.isPinned === true))
+                                      }
+                                      dropDisabled={draggingDisabled || (sessionDraggingDisabled && !allowPinnedSessionReorder)}
+                                      groupId={group.groupId}
+                                      forcedDropPosition={
+                                        allowPinnedSessionReorder ? undefined : (sessionDropPosition ?? pinnedSessionDropPosition)
+                                      }
+                                      hoverActionsExpanded={areSessionCardHoverActionsExpanded}
+                                      index={sessionIndex}
+                                      isSearchSelected={selectedSearchSessionId === sessionId}
+                                      onFocusRequested={onFocusRequested}
+                                      onHoverActionsExpandedChange={setSessionCardHoverActionsExpanded}
+                                      onSessionSelectionChange={onSessionSelectionChange}
+                                      sessionCardSettings={sessionCardSettings}
+                                      sessionGroup={group}
+                                      sessionTagListItems={sessionTagListItems}
+                                      sessionIdsBelowSource={visibleSessionIds}
+                                      sessionIdsBelowStartIndex={sessionIdsBelowStartIndex}
+                                      sessionId={sessionId}
+                                      selectedSessionIds={selectedSessionIds}
+                                      shouldKeepLastProjectSessionVisibleOnClose={
+                                        Boolean(projectContext) &&
+                                        !isChatCollection &&
+                                        storedSessionIds.length === 1 &&
+                                        storedSessionIds[0] === sessionId
+                                      }
+                                      showGroupDropTargetChrome={!allowPinnedSessionReorder}
+                                      showGroupConnector={showSessionGroupConnector}
+                                      showDropPositionIndicator={showSessionDropPositionIndicators && !allowPinnedSessionReorder}
+                                      vscode={vscode}
+                                    />
+                                  </>
+                                ) : null}
+                                {!projectContext &&
+                                !isProjectSessionSectionCollapsed &&
+                                sessionsById[sessionId]?.isPinned === true &&
+                                orderedSessionIds[sessionIndex + 1] !== undefined &&
+                                sessionsById[orderedSessionIds[sessionIndex + 1]]?.isPinned !== true ? (
+                                  <div aria-hidden className='pinned-sessions-divider' />
+                                ) : null}
+                              </Fragment>
+                            );
+                          })}
+                        </CollapsibleSessionSection>
                       </Fragment>
                     );
                   })}

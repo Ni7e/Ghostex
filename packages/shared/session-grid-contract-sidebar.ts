@@ -2381,8 +2381,18 @@ export type SidebarToExtensionMessage =
        * drawer instead of deleting their stored sessions. Remove remains the
        * explicit project-delete path.
        */
-      type: 'closeWorkspaceProjectForGroup' | 'removeWorkspaceProjectForGroup';
+      type: 'removeWorkspaceProjectForGroup';
       groupId: string;
+    }
+  | {
+      type: 'closeWorkspaceProjectForGroup';
+      groupId: string;
+      /**
+       * CDXC:Projects 2026-09-16 DECISION:
+       * User: closing a project in a Space stays in that Space and selects a non-sleeping session from the next project in the list.
+       * SidebarApp resolves that session from the rows the user sees (see sidebar-app/close-project-successor.ts) and the host focuses it BEFORE parking the project, so the active project never falls back to one outside the Space.
+       */
+      successorSessionId?: string;
     }
   | {
       /**

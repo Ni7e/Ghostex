@@ -3,6 +3,7 @@ import { useSystemColorScheme } from './use-system-color-scheme';
 import { resolveSidebarTheme } from '@/packages/shared/session-grid-contract';
 import { ImportSessionsCard, useImportSessionsIntro } from './sidebar-app/import-sessions-card';
 import { SidebarProjectsLoading } from './sidebar-app/projects-loading';
+import { resolveCloseProjectSuccessorSessionId } from './sidebar-app/close-project-successor';
 import {
   clampSidebarAddProjectContextMenuPosition,
   SidebarAddProjectContextMenu,
@@ -4051,6 +4052,18 @@ export function SidebarApp({
             current.includes(groupId) ? current.filter((id) => id !== groupId) : [...current, groupId]
           )
         }
+        resolveCloseProjectSuccessorSessionId={() =>
+          groupIdsContainingActiveSession.has(groupId)
+            ? resolveCloseProjectSuccessorSessionId({
+                closingGroupId: groupId,
+                orderedGroupIds: displayedProjectCollectionItems.flatMap((item) =>
+                  item.kind === 'project' ? [item.groupId] : item.groupIds
+                ),
+                sessionIdsByGroup: effectiveSessionIdsByGroup,
+                sessionsById,
+              })
+            : undefined
+        }
         onSessionSelectionChange={handleSidebarSessionSelectionChange}
         sessionListNowMs={sessionListNowMs}
         orderedSessionIds={displayedWorkspaceSessionIdsByGroup[groupId] ?? []}
@@ -4456,6 +4469,20 @@ export function SidebarApp({
                                             ? current.filter((id) => id !== groupId)
                                             : [...current, groupId]
                                         )
+                                      }
+                                      resolveCloseProjectSuccessorSessionId={() =>
+                                        groupIdsContainingActiveSession.has(groupId)
+                                          ? resolveCloseProjectSuccessorSessionId({
+                                              closingGroupId: groupId,
+                                              orderedGroupIds: machineCollectionItems
+                                                ? machineCollectionItems.flatMap((item) =>
+                                                    item.kind === 'project' ? [item.groupId] : item.groupIds
+                                                  )
+                                                : machineProjectGroupIds,
+                                              sessionIdsByGroup: effectiveSessionIdsByGroup,
+                                              sessionsById,
+                                            })
+                                          : undefined
                                       }
                                       onSessionSelectionChange={handleSidebarSessionSelectionChange}
                                       sessionListNowMs={sessionListNowMs}

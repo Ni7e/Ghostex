@@ -1562,7 +1562,7 @@ export class GpuiSidebarRuntime {
         }
         return;
       case 'closeWorkspaceProjectForGroup':
-        await this.closeProjectForGroup(message.groupId);
+        await this.closeProjectForGroup(message.groupId, message.successorSessionId);
         return;
       case 'copyWorkspaceProjectPathForGroup':
         this.postProjectPathActionForGroup('copyWorkspaceProjectPath', message.groupId, message);

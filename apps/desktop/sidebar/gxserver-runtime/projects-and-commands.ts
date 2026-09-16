@@ -74,7 +74,7 @@ export interface GpuiSidebarRuntimeProjectAndCommandMethods {
   removeProject(projectId: string): Promise<void>;
   restoreRecentProject(projectId: string): Promise<void>;
   removeRecentProject(projectId: string): Promise<void>;
-  closeProjectForGroup(groupId: string): Promise<void>;
+  closeProjectForGroup(groupId: string, successorSessionId?: string): Promise<void>;
   removeProjectForGroup(groupId: string): Promise<void>;
   resolveProjectIdForGroup(groupId: string): string | undefined;
   activeDomainProject(): GxserverProjectDomainState | undefined;
@@ -643,7 +643,15 @@ export const gpuiSidebarRuntimeProjectAndCommandMethods = {
     this.publishHudPatch();
   },
 
-  async closeProjectForGroup(this: GpuiSidebarRuntime, groupId: string): Promise<void> {
+  async closeProjectForGroup(this: GpuiSidebarRuntime, groupId: string, successorSessionId?: string): Promise<void> {
+    /*
+    CDXC:Projects 2026-09-16 DECISION:
+    User: closing a project in a Space stays in that Space and selects a non-sleeping session from the next project in the list.
+    SidebarApp picks that session from the Space the user is in; it is focused before the park so the active project moves straight to it and never passes through the "no active project" state, which is what used to let the host land on a project outside the Space.
+    */
+    if (successorSessionId) {
+      await this.focusSession(successorSessionId, { sessionId: successorSessionId, type: 'focusSession' });
+    }
     const remoteScope = this.resolveRemotePresentationProjectScope({ groupId });
     if (parseGpuiRemotePresentationGroupId(groupId)) {
       if (!remoteScope) {
