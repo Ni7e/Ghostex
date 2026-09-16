@@ -594,7 +594,9 @@ describe('reference sidebar group spacing styles', () => {
      * visible-id source and the row's next index so context-menu actions can
      * materialize the slice only when the menu opens.
      */
-    const rowLoopStart = sessionGroupSectionSource.indexOf('{renderedSessionIds.map((sessionId, sessionIndex) => {');
+    const rowLoopStart = sessionGroupSectionSource.indexOf(
+      '{renderedSessionSections.map(({ key, section, sessionIds, startIndex }) => {'
+    );
     const rowLoopEnd = sessionGroupSectionSource.indexOf('{projectSessionListHiddenCount > 0 ? (', rowLoopStart);
     const rowLoopSource = sessionGroupSectionSource.slice(rowLoopStart, rowLoopEnd);
 
