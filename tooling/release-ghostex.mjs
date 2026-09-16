@@ -2262,7 +2262,7 @@ async function buildGithubReleaseNotes(
       '',
       'The app downloads these automatically when first needed (remote Linux machines, Project board) and verifies them against checksums sealed inside the signed app:',
       '',
-      ...onDemandAssets.map((asset) => `- \`${asset.name}\` — SHA256: \`${asset.sha256}\``),
+      ...onDemandAssets.map((asset) => `- \`${asset.name}\` - SHA256: \`${asset.sha256}\``),
       ''
     );
   }
