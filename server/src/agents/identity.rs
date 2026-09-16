@@ -163,6 +163,52 @@ pub(crate) fn apply_session_state_update(
     if identity_update_source == SessionIdentityUpdateSource::VerifiedRewind {
         insert_optional_from_params(&mut runtime_settings, params, "codexRewindProcessId");
     }
+    /*
+    CDXC:AgentProviders 2026-09-16 WHY:
+    Live identity adoption rewrites the row's agent family without going through
+    a Switch Agent flow, so the previous CLI's saved launch metadata survived it
+    and the next wake resumed the stale binary with the new family's grammar and
+    session id — a Codex-launched pane adopted by ZCode woke as
+    `codex --yolo --resume "sess_…"`, and a Kiro-launched pane woke as
+    `kiro-cli chat --agent ghostex --resume …`. Drop the old CLI's command and
+    policy keys when the resolved family changes — the command keys of the set
+    the Switch Agent flows clear (identity keys stay owned by this update) —
+    so the row and its saved command agree again. The resume planner
+    additionally repairs already-poisoned rows at read time (see
+    `stored_agent_command_matches_family` in resume_plan.rs).
+    SEE-ALSO server/src/agents/resume_plan.rs, server/src/agents/switch_account.rs.
+    */
+    let family_changed = {
+        let previous = normalize_agent_id(current_identity.agent_id.as_deref());
+        let next = normalize_agent_id(identity.agent_id.as_deref());
+        previous.is_some() && next.is_some() && previous != next
+    };
+    let mut stale_launch_metadata_cleared = 0;
+    let mut launch_settings = object_field(&session, "launchSettings");
+    if family_changed {
+        for key in [
+            "agentCommand",
+            "accountBaseCommand",
+            "accountCommand",
+            "accountSwitch",
+            "accountRecovery",
+            "accountRecoverySuppressed",
+            "accountPolicyOverride",
+        ] {
+            runtime_settings.remove(key);
+        }
+        for key in [
+            "acceptAllMode",
+            "agentCommand",
+            "agentLaunchPlan",
+            "agentResumePlan",
+            "icon",
+        ] {
+            if launch_settings.remove(key).is_some() {
+                stale_launch_metadata_cleared += 1;
+            }
+        }
+    }
     if let Some(dropped_activity) = stored_runtime_settings
         .get("agentActivity")
         .filter(|_| runtime_settings.get("agentActivity").is_none())
@@ -248,7 +294,14 @@ pub(crate) fn apply_session_state_update(
         Value::Object(runtime_settings.clone()),
     );
     update.insert("title".to_string(), json!(title));
+    if stale_launch_metadata_cleared > 0 {
+        update.insert(
+            "launchSettings".to_string(),
+            Value::Object(launch_settings.clone()),
+        );
+    }
     let needs_update = update.get("title") != session.get("title")
+        || stale_launch_metadata_cleared > 0
         || next_agent != read_text_value(&session, "agentId")
         || (should_promote_agent && session.get("kind").and_then(Value::as_str) != Some("agent"))
         || runtime_settings.get("agentName")
@@ -1299,6 +1352,7 @@ pub(crate) fn infer_agent_id_from_command(command: &str) -> Option<String> {
         ("codebuddy", "codebuddy"),
         ("antigravity", "agy"),
         ("opencode", "opencode"),
+        ("omp", "omp"),
         ("rovodev", "rovodev"),
         ("qoder", "qodercli"),
         ("command-code", "commandcode"),
@@ -1306,6 +1360,7 @@ pub(crate) fn infer_agent_id_from_command(command: &str) -> Option<String> {
         ("mastra", "mastracode"),
         ("devin", "devin"),
         ("kimi", "kimi"),
+        ("kiro", "kiro-cli"),
         ("claude", "claude"),
         ("copilot", "copilot"),
         ("gemini", "gemini"),
