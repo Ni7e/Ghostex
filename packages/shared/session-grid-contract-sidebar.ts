@@ -1,3 +1,4 @@
+import type { AgentSyncApplyResult, AgentSyncPlan, AgentSyncReport } from './agent-sync';
 import type { DelayedSendAgentReference } from '@/packages/shared/delayed-send';
 import type { CompletionSoundSetting } from './completion-sound';
 import type { BundledGhostexAgentSkillId } from './ghostex-agent-skills';
@@ -62,7 +63,14 @@ export type SidebarTitleObservationState = {
   status: 'active' | 'failed' | 'retrying' | 'starting';
 };
 
-export type AgentsHubTab = 'mds' | 'skills' | 'hooks' | 'configs';
+/** The four file-catalog tabs of the Agents Hub. */
+export type AgentsHubFileTab = 'mds' | 'skills' | 'hooks' | 'configs';
+/**
+ * CDXC:AgentSync 2026-09-16 WHY:
+ * Agent Sync is a Hub tab that lists agents instead of files, so it is a separate member: the
+ * catalog message and every per-tab file map stay keyed by the file tabs only.
+ */
+export type AgentsHubTab = AgentsHubFileTab | 'sync';
 
 export type AgentsHubProfile = {
   agentIcon: SidebarAgentIcon;
@@ -91,7 +99,7 @@ export type AgentsHubGroup = {
 
 export type AgentsHubCatalogMessage = {
   generatedAt: string;
-  groupsByTab: Record<AgentsHubTab, AgentsHubGroup[]>;
+  groupsByTab: Record<AgentsHubFileTab, AgentsHubGroup[]>;
   type: 'agentsHubCatalog';
 };
 
@@ -101,6 +109,19 @@ export type AgentsHubFileContentMessage = {
   filePath: string;
   requestId: string;
   type: 'agentsHubFileContent';
+};
+
+/**
+ * CDXC:AgentSync 2026-09-16 WHY:
+ * The three Agent Sync replies carry the JSON the shared ghostex-agent-sync crate serializes,
+ * so the payload types live in packages/shared/agent-sync.ts next to their Rust source of truth
+ * and the contract only names the envelopes.
+ */
+export type AgentSyncReportMessage = AgentSyncReport & { errorMessage?: string; type: 'agentSyncReport' };
+export type AgentSyncPlanMessage = AgentSyncPlan & { errorMessage?: string; type: 'agentSyncPlan' };
+export type AgentSyncApplyResultMessage = AgentSyncApplyResult & {
+  errorMessage?: string;
+  type: 'agentSyncApplyResult';
 };
 
 export type SidebarAgentHookStatus = 'installed' | 'missing' | 'cliMissing' | 'notRequired' | 'updateRequired';
@@ -1523,6 +1544,9 @@ export type ExtensionToSidebarMessage =
   | SidebarGpuiProjectSlotHotkeyMessage
   | AgentsHubCatalogMessage
   | AgentsHubFileContentMessage
+  | AgentSyncReportMessage
+  | AgentSyncPlanMessage
+  | AgentSyncApplyResultMessage
   | SidebarSessionPresentationChangedMessage
   | SidebarGroupsChangedMessage
   | SidebarProjectCollectionsChangedMessage
@@ -1992,6 +2016,28 @@ export type SidebarToExtensionMessage =
        * native process-result bridge.
        */
       type: 'requestAgentsHubCatalog';
+    }
+  | {
+      /**
+       * CDXC:AgentSync 2026-09-16 WHY:
+       * The Agent Sync tab asks native for a fresh scan on open and after every apply; the scan
+       * is metadata only and runs on the background executor.
+       */
+      type: 'requestAgentSyncReport';
+    }
+  | {
+      /** `all` or one agent id from the report. */
+      scope: string;
+      type: 'requestAgentSyncPlan';
+    }
+  | {
+      /**
+       * Native recomputes the plan from a fresh scan right before applying, so the groups the
+       * user left enabled are the only input; the reply carries the executed plan and failures.
+       */
+      groups: string[];
+      scope: string;
+      type: 'applyAgentSyncPlan';
     }
   | {
       /**

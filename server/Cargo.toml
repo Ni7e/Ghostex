@@ -15,6 +15,7 @@ futures-util = "0.3"
 ghostex-paths = { path = "../packages/paths" }
 ghostex-docs = { path = "../packages/project-docs" }
 ghostex-find = { path = "../packages/find" }
+ghostex-agent-sync = { path = "../packages/agent-sync" }
 libc = "0.2"
 md-5 = "0.10"
 portable-pty = "0.9"

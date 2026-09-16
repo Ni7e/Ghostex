@@ -1,11 +1,11 @@
-import type { AgentsHubGroup, AgentsHubTab } from './session-grid-contract-sidebar';
+import type { AgentsHubFileTab, AgentsHubGroup } from './session-grid-contract-sidebar';
 
-const agentsHubTabs: AgentsHubTab[] = ['configs', 'hooks', 'mds', 'skills'];
+const agentsHubTabs: AgentsHubFileTab[] = ['configs', 'hooks', 'mds', 'skills'];
 
 export function applySavedAgentsHubContents(
-  groupsByTab: Record<AgentsHubTab, AgentsHubGroup[]>,
+  groupsByTab: Record<AgentsHubFileTab, AgentsHubGroup[]>,
   savedContentsByPath: Record<string, string>
-): Record<AgentsHubTab, AgentsHubGroup[]> {
+): Record<AgentsHubFileTab, AgentsHubGroup[]> {
   const savedPaths = new Set(Object.keys(savedContentsByPath));
   if (savedPaths.size === 0) {
     return groupsByTab;
@@ -21,6 +21,6 @@ export function applySavedAgentsHubContents(
         ),
       })),
     }),
-    {} as Record<AgentsHubTab, AgentsHubGroup[]>
+    {} as Record<AgentsHubFileTab, AgentsHubGroup[]>
   );
 }

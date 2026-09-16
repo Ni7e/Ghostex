@@ -1,5 +1,6 @@
 mod account_login;
 pub mod actions;
+pub mod agent_sync;
 pub mod args;
 pub mod attach;
 pub mod automations;
@@ -307,6 +308,7 @@ fn is_known_command(name: &str) -> bool {
         "move-codex-session",
         "install-move-codex-session-skill",
         "guide",
+        "agent-sync",
         "notify",
         "install-help-skill",
         "settings",
@@ -782,6 +784,7 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             skills::install_move_codex_session_skill_command(args)
         }
         "guide" => guide::guide_command(args),
+        "agent-sync" => agent_sync::agent_sync_command(args),
         "install-help-skill" => skills::install_help_skill_command(args),
         "settings" => settings::settings_command(args),
         "toggle-sidebar" => run_bridge_action("toggleSidebarCollapsed", Parser::None, plain, args),

@@ -2628,6 +2628,46 @@ impl GhostexGpuiApp {
             "saveAgentsHubFile" => {
                 self.handle_gpui_save_agents_hub_file_command(command, cx);
             }
+            "requestAgentSyncReport" => {
+                /*
+                CDXC:AgentSync 2026-09-16 WHY:
+                Agent Sync scans, plans, and applies through the shared ghostex-agent-sync crate on the background executor, and the JSON it returns is posted to the Hub through the same sidebarState path as the catalog, so the tab needs no new bridge.
+                */
+                self.run_gpui_app_modal_sidebar_status_task(gpui_agent_sync_report_message, cx);
+            }
+            "requestAgentSyncPlan" => {
+                let scope = command
+                    .get("scope")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("all")
+                    .to_string();
+                self.run_gpui_app_modal_sidebar_status_task(
+                    move || gpui_agent_sync_plan_message(scope),
+                    cx,
+                );
+            }
+            "applyAgentSyncPlan" => {
+                let scope = command
+                    .get("scope")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("all")
+                    .to_string();
+                let groups: Vec<String> = command
+                    .get("groups")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.run_gpui_app_modal_sidebar_status_task(
+                    move || gpui_agent_sync_apply_message(scope, groups),
+                    cx,
+                );
+            }
             "openAgentsHubPathInFinder" => {
                 self.open_gpui_agents_hub_path_in_finder(command, cx);
             }
