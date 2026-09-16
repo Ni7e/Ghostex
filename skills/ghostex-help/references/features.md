@@ -271,7 +271,8 @@ Fork starts the new session as `Fork: <original name>` and saves that name
 through the agent's own rename command so it survives reopening the conversation.
 
 - Sleeping frees RAM; Auto Sleep does it after idle minutes; Resources in the
-  titlebar sleeps many at once and shows CPU and RAM per session.
+  titlebar sleeps many at once and shows CPU and RAM per session. Clean RAM
+  copies a diagnosis prompt; paste it into an agent session to reduce RAM use.
   Sleeping sidebar sessions keep their normal title color and show a dimmer
   last-active time on the right; awake sessions show a stronger timestamp. Use `ghostex sleep|wake <selector>` to
   sleep or wake a session.
@@ -405,7 +406,7 @@ During `/compact`, Claude, Codex, Cursor, and Grok Build show a compaction card 
 Cursor's `/summarize` uses the same flow. Claude shows its reported progress;
 Codex, Cursor, and Grok Build show a looping bar. Messages sent or queued during compaction
 wait until it finishes without a delivery warning.
-To compact before sending a new prompt, press Option/Alt+Enter in the chat box
+To compact before sending a new prompt, press `⌥Enter` on macOS or `Alt+Enter` on Windows and Linux in the chat box,
 or right-click Send and choose Compact & Send. Ghostex sends `/compact` first,
 then puts your written prompt in the queue above the input to send after compaction.
 In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
@@ -449,8 +450,11 @@ pill. Folder links in desktop chat open the folder in your system file explorer.
 File reference pills in the composer also open with one click using the same
 Code/Docs preferences as transcript links. Double-click a composer pill to edit
 its reference text. Right-click a file reference or file-change path for Open in
-Code, Open in Docs (Markdown, HTML, and Excalidraw), or Copy Path. Disabled views
-are omitted from the menu.
+Code, Open in Docs (Markdown, HTML, and Excalidraw), Copy Path, or Open File/Folder
+Location. Open File/Folder Location appears directly below the path-copy actions
+in chat, image previews, Git changed files, projects, and Docs menus, and opens
+the location in the machine’s file manager. It requires a local desktop path.
+Disabled Code and Docs views are omitted from the menu.
 Hosts without an editor copy the path on click.
 Click the card background, circle, or change counts to expand or collapse the full diff.
 Only clicks directly on the path or filename open the file. The
@@ -588,8 +592,9 @@ Terminal theme can override the app with Light, Dark, or System. The palette
 selectors show your existing Ghostty theme names, including separate light and
 dark selections when configured. A single Ghostty theme is used for both appearances
 unless you select a separate light palette. Without a configured theme, the defaults
-are GitHub Light and GitHub Dark. Already-open terminals update when the app or system
-appearance changes. The appearance override and light palette apply to Ghostex only.
+are GitHub Light and GitHub Dark. All open terminals refresh automatically when their
+app, system, or terminal theme changes, including idle terminals and terminals in
+inactive projects. The appearance override and light palette apply to Ghostex only.
 
 Terminal links (`ghostex://terminal`) without a folder open in the active local
 project. A folder supplied in the link takes precedence.

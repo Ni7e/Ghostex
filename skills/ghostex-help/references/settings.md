@@ -30,7 +30,7 @@ How to use this file:
 - **Sidebar background color (derived)** `customSidebarTitlebarBackgroundColor` (text, default #0b0b0b) [not agent-writable]: Derived from Background Contrast and Background Tint; change those instead.
 #### App Icon
 
-- **App Icon** `appIconSourceId` (text, default (empty)) [advanced]: Choose the macOS Dock and app-switcher icon. The app file icon may also change when macOS allows it.
+- **App Icon** `appIconSourceId` (text, default (empty)) [advanced]: Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.
 ### Sidebar
 
 #### Sidebar
@@ -123,10 +123,10 @@ How to use this file:
 - **Cursor blink** `terminalCursorStyleBlink` (boolean, default true) [advanced]: Blink the terminal cursor.
 - **Click to Wake Sleeping Panes** `clickToWakeSleepingSessions` (boolean, default true) [advanced]: Select sleeping pane tabs without waking them until the empty pane is clicked.
 - **Show tabs bar when not split** `showAgentsPaneTabBarWhenUnsplit` (boolean, default false): Keep the tabs bar above the agents pane even when the screen is not split.
-- **Show quick model & effort picker for Claude and Codex in terminal view** `showQuickModelPickerInTerminal` (boolean, default true): Use the model picker shortcut (Option+P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.
+- **Show quick model & effort picker for Claude and Codex in terminal view** `showQuickModelPickerInTerminal` (boolean, default true): Use the model picker shortcut (⌥P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.
 - **Show session id in terminal panes** `showSessionIdInTerminalPanes` (boolean, default false) [advanced]: Show the provider session id in the top-right corner of terminal panes.
 - **Show notification on terminal bell** `showNotificationOnTerminalBell` (boolean, default false): Treat terminal bell events as session attention.
-- **Ctrl+G prompt editor** `promptEditorBackend` (one of monaco | inherit; default monaco) [advanced]: Choose which editor Ctrl+G uses when a terminal prompt asks for $EDITOR. Option labels: monaco = Ghostex editor, inherit = Use default from this machine.
+- **⌃G prompt editor** `promptEditorBackend` (one of monaco | inherit; default monaco) [advanced]: Choose which editor ⌃G uses when a terminal prompt asks for $EDITOR. Option labels: monaco = Ghostex editor, inherit = Use default from this machine.
 - **Windows Environment** `windowsTerminalBackend` (one of powershell | wsl; default powershell): Windows only. PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex. Option labels: powershell = PowerShell (native Windows), wsl = WSL (Linux).
 - **WSL distribution** `windowsWslDistribution` (text, default (empty)): Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.
 #### Terminal Behavior
@@ -136,7 +136,7 @@ How to use this file:
 - **Confirm close** `terminalConfirmCloseSurface` (one of true | always | false; default true) [advanced]: Confirm before closing terminal surfaces. Option labels: true = Smart confirmation, always = Always confirm, false = Do not confirm.
 - **Trim trailing spaces on copy** `terminalClipboardTrimTrailingSpaces` (boolean, default true) [advanced]: Trim trailing whitespace when copying terminal text.
 - **Paste protection** `terminalClipboardPasteProtection` (boolean, default true) [advanced]: Ask before pasting text Ghostty considers unsafe.
-- **Paste previewable images** `terminalPastePreviewableImages` (boolean, default true) [advanced]: Paste clipboard images as previewable Markdown links with Cmd+V or Ctrl+V. Hold Cmd over the linked path to preview it in the terminal, and see the same image preview in the Ctrl+G Rich Prompt Editor.
+- **Paste previewable images** `terminalPastePreviewableImages` (boolean, default true) [advanced]: Paste clipboard images as previewable Markdown links with ⌘V. Hold ⌘ over the linked path to preview it in the terminal, and see the same image preview in the ⌃G Rich Prompt Editor.
 - **Hide mouse while typing** `terminalMouseHideWhileTyping` (boolean, default false) [advanced]: Hide the pointer while typing in the terminal.
 - **Scrollbar** `terminalScrollbar` (one of system | never; default system) [advanced]: Control whether Ghostty shows its native scrollback scrollbar. Option labels: system = System, never = Never.
 #### Terminal Scrolling
@@ -165,15 +165,15 @@ How to use this file:
 - **Activate on external display** `keepAwakeActivateOnExternalDisplay` (boolean, default false) [advanced]: Start preventing sleep when an external display is connected.
 - **Keep awake for working sessions** `keepAwakeWhileWorkingSessions` (boolean, default false) [advanced]: Keep the computer awake while sessions are working and for 20 minutes after.
 - **Battery threshold** `keepAwakeBatteryThresholdPercent` (number one of 0 | 10 | 15 | 20 | 25 | 30 | 35 | 40 | 45 | 50 | 55 | 60 | 65 | 70 | 75 | 80 | 85 | 90; default 0) [advanced]: Stop preventing sleep below this battery level, or turn the rule off. Option labels: 0 = Off, 10 = 10%, 15 = 15%, 20 = 20%, 25 = 25%, 30 = 30%, 35 = 35%, 40 = 40%, 45 = 45%, 50 = 50%, 55 = 55%, 60 = 60%, 65 = 65%, 70 = 70%, 75 = 75%, 80 = 80%, 85 = 85%, 90 = 90%.
-- **Deactivate in Low Power Mode** `keepAwakeDeactivateOnLowPowerMode` (boolean, default false) [advanced]: Stop preventing sleep when macOS Low Power Mode is enabled.
+- **Deactivate in Low Power Mode** `keepAwakeDeactivateOnLowPowerMode` (boolean, default false) [advanced]: Stop preventing sleep when Low Power Mode is enabled.
 - **Deactivate on user switch** `keepAwakeDeactivateOnUserSwitch` (boolean, default false) [advanced]: Stop preventing sleep when this user session is no longer active.
 ### Notifications
 
 #### Sounds
 
 - **Completion Sound** `completionSound` (one of off | ping | pingdouble | glass | glimmer | shamisen | shamisenreverb | arcade | arcadeboost | confirmation-001 | confirmation-002 | confirmation-003 | confirmation-004 | notification-pop | success-chime | high-up | high-down | low-three-tone | tone-1 | three-tone-1 | three-tone-2 | two-tone-1 | two-tone-2 | power-up-5 | power-up-6 | power-up-8 | coin-collect | phaser-up-5 | zap-two-tone | voiceover-pack-male-mission-completed | voiceover-pack-female-mission-completed | voiceover-pack-male-you-win | voiceover-pack-female-congratulations | flawless-victory; default arcade): Sound for terminal completions, or Off. Option labels: off = Off, ping = Ping, pingdouble = Ping Double, glass = Glass, glimmer = Glimmer, shamisen = Shamisen, shamisenreverb = Shamisen Reverb, arcade = Arcade, arcadeboost = Arcade Boost, confirmation-001 = Confirmation 001, confirmation-002 = Confirmation 002, confirmation-003 = Confirmation 003, confirmation-004 = Confirmation 004, notification-pop = Notification Pop, success-chime = Success Chime, high-up = High Up, high-down = High Down, low-three-tone = Low Three Tone, tone-1 = Tone 1, three-tone-1 = Three Tone 1, three-tone-2 = Three Tone 2, two-tone-1 = Two Tone 1, two-tone-2 = Two Tone 2, power-up-5 = Power Up 5, power-up-6 = Power Up 6, power-up-8 = Power Up 8, coin-collect = Coin Collect, phaser-up-5 = Phaser Up 5, zap-two-tone = Zap Two Tone, voiceover-pack-male-mission-completed = Mission Completed (Male), voiceover-pack-female-mission-completed = Mission Completed (Female), voiceover-pack-male-you-win = You Win (Male), voiceover-pack-female-congratulations = Congratulations (Female), flawless-victory = Flawless Victory.
-- **macOS Attention Notifications** `showMacOSAttentionNotifications` (boolean, default true): Show a macOS banner when a session needs attention.
-- **Agent Completion Alert Test** `attentionNotificationActions` (Settings UI row without a settings key; use `ghostex settings open`) [advanced]: Test the current completion alert settings or open macOS Notification Settings.
+- **Attention Notifications** `showMacOSAttentionNotifications` (boolean, default true): Show a system notification when a session needs attention.
+- **Agent Completion Alert Test** `attentionNotificationActions` (Settings UI row without a settings key; use `ghostex settings open`) [advanced]: Test the current completion alert settings or open Notification Settings.
 - **Action Completion Sound** `actionCompletionSound` (one of ping | pingdouble | glass | glimmer | shamisen | shamisenreverb | arcade | arcadeboost | confirmation-001 | confirmation-002 | confirmation-003 | confirmation-004 | notification-pop | success-chime | high-up | high-down | low-three-tone | tone-1 | three-tone-1 | three-tone-2 | two-tone-1 | two-tone-2 | power-up-5 | power-up-6 | power-up-8 | coin-collect | phaser-up-5 | zap-two-tone | voiceover-pack-male-mission-completed | voiceover-pack-female-mission-completed | voiceover-pack-male-you-win | voiceover-pack-female-congratulations | flawless-victory; default shamisen): Sound for action completions. Option labels: ping = Ping, pingdouble = Ping Double, glass = Glass, glimmer = Glimmer, shamisen = Shamisen, shamisenreverb = Shamisen Reverb, arcade = Arcade, arcadeboost = Arcade Boost, confirmation-001 = Confirmation 001, confirmation-002 = Confirmation 002, confirmation-003 = Confirmation 003, confirmation-004 = Confirmation 004, notification-pop = Notification Pop, success-chime = Success Chime, high-up = High Up, high-down = High Down, low-three-tone = Low Three Tone, tone-1 = Tone 1, three-tone-1 = Three Tone 1, three-tone-2 = Three Tone 2, two-tone-1 = Two Tone 1, two-tone-2 = Two Tone 2, power-up-5 = Power Up 5, power-up-6 = Power Up 6, power-up-8 = Power Up 8, coin-collect = Coin Collect, phaser-up-5 = Phaser Up 5, zap-two-tone = Zap Two Tone, voiceover-pack-male-mission-completed = Mission Completed (Male), voiceover-pack-female-mission-completed = Mission Completed (Female), voiceover-pack-male-you-win = You Win (Male), voiceover-pack-female-congratulations = Congratulations (Female), flawless-victory = Flawless Victory.
 - **Copy Sound** `copySound` (boolean, default false): Play a short sound when copying to the clipboard, including text from the chat composer.
 ### Advanced
@@ -184,7 +184,7 @@ How to use this file:
 ### App Shots (beta)
 
 - **App Shots** `appShotsEnabled` (boolean, default false): Enable App Shots: press the App Shots hotkey to capture a window screenshot into the prompt.
-- **App Shots hotkey** `appShotsHotkey` (one of both-command | both-shift | both-option | double-left-shift | double-left-option; default both-command): Which modifier chord captures an App Shot. Option labels: both-command = Both Command keys, both-shift = Both Shift keys, both-option = Both Option keys, double-left-shift = Double-tap Left Shift, double-left-option = Double-tap Left Option.
+- **App Shots hotkey** `appShotsHotkey` (one of both-command | both-shift | both-option | double-left-shift | double-left-option; default both-command): Which modifier chord captures an App Shot. Option labels: both-command = Both ⌘ keys, both-shift = Both ⇧ keys, both-option = Both ⌥ keys, double-left-shift = Double-tap Left ⇧, double-left-option = Double-tap Left ⌥.
 - **App Shots metadata** `appShotsMetadataEnabled` (boolean, default false): Also paste window metadata with the App Shot image link.
 ### Settings window
 
@@ -274,7 +274,7 @@ How to use this file:
 
 ### Titlebar views
 
-- **Arrange titlebar views** `titlebarViewOrder` (structured value; change it in Settings, not with `ghostex settings set`): Reorder built-in, extension, and custom views. Option Alt numbered view shortcuts follow the visible order.
+- **Arrange titlebar views** `titlebarViewOrder` (structured value; change it in Settings, not with `ghostex settings set`): Reorder built-in, extension, and custom views. ⌥1 through ⌥9 follow the visible order.
 - **Hide Code view** `codeViewTabHidden` (boolean, default false): Hide the Code view tab from the titlebar.
 - **Hide Browser view** `browserViewTabHidden` (boolean, default false): Hide the Browser view tab from the titlebar.
 - **Hide Kanban view** `kanbanViewTabHidden` (boolean, default false): Hide the Kanban view tab from the titlebar.
@@ -339,7 +339,7 @@ How to use this file:
 - **RubyMine** `builtin:rubymine` (Settings UI row without a settings key; use `ghostex settings open`): Show or hide this app on session Open In menus.
 - **RustRover** `builtin:rustrover` (Settings UI row without a settings key; use `ghostex settings open`): Show or hide this app on session Open In menus.
 - **WebStorm** `builtin:webstorm` (Settings UI row without a settings key; use `ghostex settings open`): Show or hide this app on session Open In menus.
-- **Open Folder** `builtin:finder` (Settings UI row without a settings key; use `ghostex settings open`): Show or hide this app on session Open In menus.
+- **Open File/Folder Location** `builtin:finder` (Settings UI row without a settings key; use `ghostex settings open`): Show or hide this app on session Open In menus.
 ### Custom Open Targets
 
 - **Add target** `addTarget` (Settings UI row without a settings key; use `ghostex settings open`): Add a custom command Ghostex uses to open workspaces.
@@ -351,16 +351,16 @@ How to use this file:
 
 ### Defaults
 
-- **Set as Default Editor** `setDefaultEditor` (Settings UI row without a settings key; use `ghostex settings open`): Make Ghostex the default macOS editor for supported file types.
+- **Set as Default Editor** `setDefaultEditor` (Settings UI row without a settings key; use `ghostex settings open`): Make Ghostex the default editor for supported file types.
 - **Set Terminal Links** `setTerminalLinks` (Settings UI row without a settings key; use `ghostex settings open`): Make Ghostex the handler for ghostex:// terminal links.
-- **Set Script Runner** `setScriptRunner` (Settings UI row without a settings key; use `ghostex settings open`): Make Ghostex the default macOS script runner.
+- **Set Script Runner** `setScriptRunner` (Settings UI row without a settings key; use `ghostex settings open`): Make Ghostex the default script runner.
 - **Set All** `setAll` (Settings UI row without a settings key; use `ghostex settings open`): Set Ghostex as default editor, terminal-link handler, and script runner.
 ### CLI
 
 - **ghostex command line** `cliCommands` (Settings UI row without a settings key; use `ghostex settings open`): Command-line examples: ghostex open, ghostex edit, ghostex terminal.
 ### Diagnostics
 
-- **macOS handler status** `handlerStatus` (Settings UI row without a settings key; use `ghostex settings open`): Check macOS Launch Services registration for editor defaults, script runner, and ghostex:// links.
+- **File and link handler status** `handlerStatus` (Settings UI row without a settings key; use `ghostex settings open`): Check system registration for editor defaults, script runner, and ghostex:// links.
 ## Projects (tab `projects`)
 
 ### Docs

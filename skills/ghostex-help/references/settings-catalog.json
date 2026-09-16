@@ -4140,7 +4140,7 @@
     {
       "key": "appIconSourceId",
       "title": "App Icon",
-      "subtitle": "Choose the macOS Dock and app-switcher icon. The app file icon may also change when macOS allows it.",
+      "subtitle": "Choose the application and app-switcher icon. The app file icon may also change when the operating system allows it.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -5585,7 +5585,7 @@
     {
       "key": "showQuickModelPickerInTerminal",
       "title": "Show quick model & effort picker for Claude and Codex in terminal view",
-      "subtitle": "Use the model picker shortcut (Option+P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.",
+      "subtitle": "Use the model picker shortcut (⌥P by default) in Claude and Codex terminal sessions. Turn off to use terminal bindings.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "terminal",
@@ -5627,8 +5627,8 @@
     },
     {
       "key": "promptEditorBackend",
-      "title": "Ctrl+G prompt editor",
-      "subtitle": "Choose which editor Ctrl+G uses when a terminal prompt asks for $EDITOR.",
+      "title": "⌃G prompt editor",
+      "subtitle": "Choose which editor ⌃G uses when a terminal prompt asks for $EDITOR.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "terminal",
@@ -5794,7 +5794,7 @@
     {
       "key": "terminalPastePreviewableImages",
       "title": "Paste previewable images",
-      "subtitle": "Paste clipboard images as previewable Markdown links with Cmd+V or Ctrl+V. Hold Cmd over the linked path to preview it in the terminal, and see the same image preview in the Ctrl+G Rich Prompt Editor.",
+      "subtitle": "Paste clipboard images as previewable Markdown links with ⌘V. Hold ⌘ over the linked path to preview it in the terminal, and see the same image preview in the ⌃G Rich Prompt Editor.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "terminal",
@@ -6377,7 +6377,7 @@
     {
       "key": "keepAwakeDeactivateOnLowPowerMode",
       "title": "Deactivate in Low Power Mode",
-      "subtitle": "Stop preventing sleep when macOS Low Power Mode is enabled.",
+      "subtitle": "Stop preventing sleep when Low Power Mode is enabled.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "system",
@@ -6558,8 +6558,8 @@
     },
     {
       "key": "showMacOSAttentionNotifications",
-      "title": "macOS Attention Notifications",
-      "subtitle": "Show a macOS banner when a session needs attention.",
+      "title": "Attention Notifications",
+      "subtitle": "Show a system notification when a session needs attention.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "notifications",
@@ -6573,7 +6573,7 @@
     {
       "key": "attentionNotificationActions",
       "title": "Agent Completion Alert Test",
-      "subtitle": "Test the current completion alert settings or open macOS Notification Settings.",
+      "subtitle": "Test the current completion alert settings or open Notification Settings.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "notifications",
@@ -6785,23 +6785,23 @@
       "default": "both-command",
       "options": [
         {
-          "label": "Both Command keys",
+          "label": "Both ⌘ keys",
           "value": "both-command"
         },
         {
-          "label": "Both Shift keys",
+          "label": "Both ⇧ keys",
           "value": "both-shift"
         },
         {
-          "label": "Both Option keys",
+          "label": "Both ⌥ keys",
           "value": "both-option"
         },
         {
-          "label": "Double-tap Left Shift",
+          "label": "Double-tap Left ⇧",
           "value": "double-left-shift"
         },
         {
-          "label": "Double-tap Left Option",
+          "label": "Double-tap Left ⌥",
           "value": "double-left-option"
         }
       ],
@@ -8032,23 +8032,23 @@
       "type": "ui",
       "options": [
         {
-          "label": "Both Command keys",
+          "label": "Both ⌘ keys",
           "value": "both-command"
         },
         {
-          "label": "Both Shift keys",
+          "label": "Both ⇧ keys",
           "value": "both-shift"
         },
         {
-          "label": "Both Option keys",
+          "label": "Both ⌥ keys",
           "value": "both-option"
         },
         {
-          "label": "Double-tap Left Shift",
+          "label": "Double-tap Left ⇧",
           "value": "double-left-shift"
         },
         {
-          "label": "Double-tap Left Option",
+          "label": "Double-tap Left ⌥",
           "value": "double-left-option"
         }
       ],
@@ -8068,7 +8068,7 @@
     {
       "key": "titlebarViewOrder",
       "title": "Arrange titlebar views",
-      "subtitle": "Reorder built-in, extension, and custom views. Option Alt numbered view shortcuts follow the visible order.",
+      "subtitle": "Reorder built-in, extension, and custom views. ⌥1 through ⌥9 follow the visible order.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
@@ -8666,7 +8666,7 @@
     },
     {
       "key": "builtin:finder",
-      "title": "Open Folder",
+      "title": "Open File/Folder Location",
       "subtitle": "Show or hide this app on session Open In menus.",
       "tab": "openTargets",
       "tabTitle": "Open In",
@@ -8751,7 +8751,7 @@
     {
       "key": "setDefaultEditor",
       "title": "Set as Default Editor",
-      "subtitle": "Make Ghostex the default macOS editor for supported file types.",
+      "subtitle": "Make Ghostex the default editor for supported file types.",
       "tab": "osIntegration",
       "tabTitle": "OS Integration",
       "section": "defaults",
@@ -8773,7 +8773,7 @@
     {
       "key": "setScriptRunner",
       "title": "Set Script Runner",
-      "subtitle": "Make Ghostex the default macOS script runner.",
+      "subtitle": "Make Ghostex the default script runner.",
       "tab": "osIntegration",
       "tabTitle": "OS Integration",
       "section": "defaults",
@@ -8805,8 +8805,8 @@
     },
     {
       "key": "handlerStatus",
-      "title": "macOS handler status",
-      "subtitle": "Check macOS Launch Services registration for editor defaults, script runner, and ghostex:// links.",
+      "title": "File and link handler status",
+      "subtitle": "Check system registration for editor defaults, script runner, and ghostex:// links.",
       "tab": "osIntegration",
       "tabTitle": "OS Integration",
       "section": "diagnostics",
