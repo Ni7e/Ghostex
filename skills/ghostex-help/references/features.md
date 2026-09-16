@@ -138,7 +138,8 @@ session replaces that active pane's session and leaves the other pane in place.
   a floating panel; in a wide view with the companion hidden, the lower half
   of that edge reveals the companion instead.
 - Pane width: agent panes and chat companion sidepanes have a minimum resize
-  width of 388px.
+  width of 388px. In the desktop app, the main pane in Code, Browser, Kanban,
+  Automate, and Docs has a minimum width of 455px.
 - Presets: Settings > General > Sidebar > Preset switches groups of card
   details at once; the individual rows below it are marked Advanced.
 - Timed Delayed Send: open **Delayed Send** from an agent's right-click menu
@@ -400,10 +401,13 @@ Unrecorded model values are labelled Model not recorded.
 Slash commands sent from chat stay in the conversation after a reload, together
 with any captured output. Long command output expands when clicked; model, effort,
 Fast mode, and compaction results keep their status rows.
-During `/compact`, Claude, Codex, and Cursor show a compaction card above the input.
+During `/compact`, Claude, Codex, Cursor, and Grok Build show a compaction card above the input.
 Cursor's `/summarize` uses the same flow. Claude shows its reported progress;
-Codex and Cursor show a looping bar. Messages sent or queued during compaction
+Codex, Cursor, and Grok Build show a looping bar. Messages sent or queued during compaction
 wait until it finishes without a delivery warning.
+To compact before sending a new prompt, press Option/Alt+Enter in the chat box
+or right-click Send and choose Compact & Send. Ghostex sends `/compact` first,
+then puts your written prompt in the queue above the input to send after compaction.
 In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
 While Claude Code writes a reply, the chat shows the text as it appears in the
 terminal, updated about once a second, and swaps in the saved message the moment
