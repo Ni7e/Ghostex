@@ -863,6 +863,9 @@ whether the bullet is drawn or not. What sits above a gutter is a tool only
 when it is a bullet row or an indented row: the spinner's `⎿ Tip:` and a
 prompt's `⎿ Referenced file` hang under marker and prompt rows and are not.
 */
+/// CDXC:AgentScreenDetection 2026-09-16 WHY:
+/// Claude's Bash results can include file diffs followed by another output gutter, even for changes made by another session.
+/// A clipped or blank-separated diff tail used to become the shared chat card's heading; a heading cannot sit deeper than the output gutter it owns.
 fn claude_tool_activity(rows: &[ScreenRow], gutter: usize) -> Option<SessionChatTerminalActivity> {
     if gutter == 0 || rows[gutter].after_blank {
         return None;
@@ -894,6 +897,7 @@ fn claude_tool_activity(rows: &[ScreenRow], gutter: usize) -> Option<SessionChat
     // above the whole stack.
     if row.text.starts_with(CLAUDE_TOOL_OUTPUT_MARKER)
         || (!bullet && row.indent < CLAUDE_STATUS_CONTINUATION_INDENT)
+        || row.indent > rows[gutter].indent
     {
         return None;
     }
