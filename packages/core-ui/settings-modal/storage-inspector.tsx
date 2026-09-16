@@ -97,7 +97,7 @@ export function StorageInspector() {
                     {size(entry.bytes)} · {entry.key}
                   </p>
                 ))}
-                {store.policy === 'cache' && store.entries > 0 ? (
+                {store.policy === 'cache' && (store.entries > 0 || store.pending > 0) ? (
                   <Button
                     className='mt-1 w-fit'
                     size='sm'

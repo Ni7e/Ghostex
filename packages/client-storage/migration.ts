@@ -9,10 +9,15 @@ import {
 } from './adapters/database';
 import { recordStorageEvent } from './diagnostics';
 import { storageBytes } from './budgets';
-import type { StoreDefinition } from './types';
+import type { StorageInspection, StoreDefinition } from './types';
+const unmigratedLegacy: StorageInspection['unknown'] = [];
+export function legacyStorageIssues(): StorageInspection['unknown'] {
+  return unmigratedLegacy.slice();
+}
 
 /** Copy raw values unchanged; retire a source only after a strict commit and an exact read-back. */
 export async function migrateStorage(): Promise<void> {
+  unmigratedLegacy.length = 0;
   const candidates: Mutation[] = [];
   for (const [key, raw] of scanBrowser('local')) {
     const definition = definitionForKey(key);
@@ -20,7 +25,13 @@ export async function migrateStorage(): Promise<void> {
       candidates.push({ key, raw, store: definition.id as StoreId, onlyIfAbsent: true });
   }
   if (candidates.length) {
-    await commitDatabase(candidates, true);
+    // One bounded receipt per legacy namespace prevents a second renderer from replaying a stale import after its destination was acknowledged or removed.
+    for (const store of new Set(candidates.map((entry) => entry.store)))
+      await commitDatabase(
+        candidates.filter((entry) => entry.store === store),
+        true,
+        `local:${store}`
+      );
     const saved = new Map((await readDatabase()).map((entry) => [entry.key, entry.raw]));
     for (const entry of candidates) {
       if (saved.get(entry.key) !== entry.raw || readBrowser('local', entry.key) !== entry.raw) continue;
@@ -57,10 +68,17 @@ export async function migrateStorage(): Promise<void> {
       ),
       onlyIfAbsent: true,
     }));
-    await commitDatabase(entries, true);
+    await commitDatabase(entries, true, `database:${legacy.database}`);
     const saved = new Map((await readDatabase()).map((entry) => [entry.key, entry.raw]));
     // Preserve an older independent copy when the destination has a different revision payload.
-    if (entries.every((entry) => saved.get(entry.key) === entry.raw)) await source.retire();
+    const matched = entries.flatMap((entry, index) => (saved.get(entry.key) === entry.raw ? [index] : []));
+    for (const entry of entries.filter((entry) => saved.get(entry.key) !== entry.raw))
+      unmigratedLegacy.push({
+        backend: 'indexeddb',
+        key: `${legacy.database}/${legacy.table}/${entry.key}`,
+        bytes: storageBytes(entry.key, entry.raw),
+      });
+    if (matched.length) await source.retire(matched);
     source.close();
     recordStorageEvent({
       store: legacy.store,

@@ -44,6 +44,14 @@ const desktop = 'apps/desktop/';
  * Every namespace declares its owner, schema, budget and retention here; protected user work has no automatic eviction.
  */
 export const storageCatalog = Object.freeze({
+  migrationReceipts: define(
+    'migrationReceipts',
+    'Legacy migration receipts',
+    'packages/client-storage/migration.ts',
+    'ghostex.storage.imported.',
+    enumCodec(['1']),
+    { ...protectedDisk, maxEntryBytes: KiB, maxBytes: 64 * KiB, maxEntries: 500 }
+  ),
   addRepository: define(
     'addRepository',
     'Add repository',
@@ -418,7 +426,7 @@ export const storageCatalog = Object.freeze({
     desktop + 'views/manage/file-index.ts',
     'ghostex-docs-index-v1:',
     objectCodec,
-    { ...cache, backend: 'session', maxEntryBytes: 512 * KiB, maxBytes: MiB, maxEntries: 2 }
+    { ...cache, backend: 'session', maxAgeMs: null, maxEntryBytes: 512 * KiB, maxBytes: MiB, maxEntries: 2 }
   ),
   docsOpenFiles: define(
     'docsOpenFiles',

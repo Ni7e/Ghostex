@@ -6,13 +6,17 @@ import { ClientStorageError, type StorageChange, type StorageRecord } from '../t
 export type Mutation = { key: string; store: StoreId; raw: string | null; onlyIfAbsent?: boolean };
 type Usage = { bytes: number; entries: number };
 let opening: Promise<IDBDatabase> | undefined;
-let nativeOpen: IDBFactory['open'] | undefined;
+const factoryKey = Symbol.for('ghostex.client-storage.database-adapter');
+const globals = globalThis as typeof globalThis & { [factoryKey]?: { open?: IDBFactory['open']; guarded: boolean } };
+const factory = (globals[factoryKey] ??= { guarded: false });
 function openNative(name: string, version?: number): IDBOpenDBRequest {
-  nativeOpen ??= indexedDB.open.bind(indexedDB);
-  return nativeOpen(name, version);
+  factory.open ??= indexedDB.open.bind(indexedDB);
+  return factory.open(name, version);
 }
 export function installDatabaseGuard(): void {
-  nativeOpen ??= indexedDB.open.bind(indexedDB);
+  if (factory.guarded) return;
+  factory.guarded = true;
+  factory.open ??= indexedDB.open.bind(indexedDB);
   const reject = (name: string): never => {
     recordStorageEvent({ store: name, operation: 'unexpected', bytes: 0, reason: 'unregistered' });
     throw new ClientStorageError(
@@ -180,13 +184,18 @@ async function apply(
 }
 
 /** All pages share this strict transaction and its usage counters. No key enumeration on ordinary protected writes. */
-export async function commitDatabase(mutations: readonly Mutation[], migration = false): Promise<StorageChange[]> {
-  return transactionDatabase(() => mutations, [], migration);
+export async function commitDatabase(
+  mutations: readonly Mutation[],
+  migration = false,
+  importSource?: string
+): Promise<StorageChange[]> {
+  return transactionDatabase(() => mutations, [], migration, importSource);
 }
 export async function transactionDatabase(
   action: (rows: StorageRecord[]) => readonly Mutation[],
   ids: readonly StoreId[],
-  migration = false
+  migration = false,
+  importSource?: string
 ): Promise<StorageChange[]> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
@@ -200,12 +209,16 @@ export async function transactionDatabase(
       failure ??= transaction.error;
     };
     void (async () => {
+      const receiptKey = importSource ? storageCatalog.migrationReceipts.key + importSource : undefined;
+      if (receiptKey && (await request(transaction.objectStore('records').get(receiptKey)))) return;
       const rows: StorageRecord[] = [];
       for (const id of ids)
         rows.push(
           ...((await request(transaction.objectStore('records').index('store').getAll(id))) as StorageRecord[])
         );
-      result = await apply(transaction, action(rows), migration);
+      const mutations = [...action(rows)];
+      if (receiptKey) mutations.push({ key: receiptKey, store: 'migrationReceipts', raw: '1' });
+      result = await apply(transaction, mutations, migration);
     })().catch((error: unknown) => {
       failure = error;
       transaction.abort();
@@ -217,7 +230,7 @@ export async function transactionDatabase(
 export async function readLegacyDatabase(
   name: string,
   store: string
-): Promise<{ rows: unknown[]; close: () => void; retire: () => Promise<void> } | undefined> {
+): Promise<{ rows: unknown[]; close: () => void; retire: (indices?: readonly number[]) => Promise<void> } | undefined> {
   const db = await new Promise<IDBDatabase | undefined>((resolve, reject) => {
     const value = openNative(name);
     let absent = false;
@@ -240,11 +253,11 @@ export async function readLegacyDatabase(
   return {
     rows,
     close: () => db.close(),
-    retire: () =>
+    retire: (indices = rows.map((_, index) => index)) =>
       new Promise<void>((resolve, reject) => {
         const removal = db.transaction(store, 'readwrite', { durability: 'strict' });
         const records = removal.objectStore(store);
-        for (let index = 0; index < rows.length; index++) {
+        for (const index of indices) {
           const current = records.get(keys[index]!);
           current.onsuccess = () => {
             if (JSON.stringify(current.result) === JSON.stringify(rows[index])) records.delete(keys[index]!);

@@ -23,7 +23,15 @@ import {
   transactionDatabase,
   type Mutation,
 } from './adapters/database';
-import { migrateStorage, upgradeStorageSchemas } from './migration';
+import { migrateStorage, upgradeStorageSchemas, legacyStorageIssues } from './migration';
+import {
+  connectStoragePeers,
+  publishStorageStatus,
+  requestStoragePeerStatus,
+  peerStorageUsage,
+  retryStoragePeers,
+  clearStoragePeerCache,
+} from './peers';
 import {
   ClientStorageError,
   type StorageChange,
@@ -144,6 +152,7 @@ function loadBrowser(): void {
 
 export function initializeClientStorage(): Promise<void> {
   if (initialized) return initialized;
+  if (process.env.NODE_ENV !== 'production') installBrowserGuard();
   loadBrowser();
   initialized = (async () => {
     await migrateStorage();
@@ -160,6 +169,7 @@ export function initializeClientStorage(): Promise<void> {
       channel.onmessage = (message: MessageEvent<StorageChange[]>) => {
         if (Array.isArray(message.data)) for (const event of message.data) accept(event);
       };
+      connectStoragePeers(channel, pendingUsage, retryLocalStorage, clearLocalCache);
     }
     const resync = () => {
       void readDatabaseSnapshot()
@@ -178,7 +188,8 @@ export function initializeClientStorage(): Promise<void> {
     window.addEventListener('pageshow', (event) => {
       if (event.persisted) resync();
     });
-    window.addEventListener('online', retryClientStorage);
+    resync();
+    window.addEventListener('online', retryLocalStorage);
     window.addEventListener('pagehide', () => {
       void flushClientStorage().catch(() => {});
     });
@@ -283,6 +294,7 @@ export function writeManaged(definition: StoreDefinition, key: string, raw: stri
           rows.delete(name);
           durableRows.delete(name);
         }
+        if (removals.includes(key)) raw = null;
       } else writeBrowser(definition.backend, key, null);
       if (raw === null) durableRows.delete(key);
       else durableRows.set(key, row(key, raw, definition));
@@ -292,7 +304,10 @@ export function writeManaged(definition: StoreDefinition, key: string, raw: stri
         operation: raw === null ? 'remove' : 'write',
         bytes: raw === null ? 0 : storageBytes(key, raw),
       });
-    } else pending.set(key, mutation);
+    } else {
+      pending.set(key, mutation);
+      publishStorageStatus();
+    }
     if (raw === null) rows.delete(key);
     else rows.set(key, row(key, raw, definition));
     emit({ key, raw, store: definition.id, revision: 0 });
@@ -341,11 +356,12 @@ async function drain(): Promise<void> {
     }
   }
   notifyStorage();
+  publishStorageStatus();
   if (firstError) {
     if (!retryTimer)
       retryTimer = setTimeout(() => {
         retryTimer = undefined;
-        retryClientStorage();
+        retryLocalStorage();
       }, retryDelay);
     retryDelay = Math.min(30_000, retryDelay * 2);
     throw firstError;
@@ -359,10 +375,14 @@ export function flushClientStorage(ids?: readonly StoreId[]): Promise<void> {
     if (!ids || ids.some((id) => failures.has(id))) throw error;
   });
 }
-export function retryClientStorage(): void {
+function retryLocalStorage(): void {
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = undefined;
   void flushClientStorage().catch(() => {});
+}
+export function retryClientStorage(): void {
+  retryStoragePeers();
+  retryLocalStorage();
 }
 export function isStoragePending(id: StoreId, key?: string): boolean {
   return failures.has(id) || (key ? pending.has(key) : [...pending.values()].some((entry) => entry.store === id));
@@ -394,23 +414,49 @@ export async function atomicStorage(ids: readonly StoreId[], action: () => void)
       atomicView = undefined;
       atomicMutations = undefined;
     }
-  }, ids);
-  for (const event of committed) accept(event);
+  }, ids).catch((error: unknown) => {
+    throw failure(storageCatalog[ids[0] ?? 'drafts'], error);
+  });
+  for (const event of committed) {
+    accept(event);
+    recordStorageEvent({
+      store: event.store,
+      operation: event.raw === null ? 'remove' : 'write',
+      bytes: event.raw === null ? 0 : storageBytes(event.key, event.raw),
+    });
+  }
   channel?.postMessage(committed);
+}
+
+function pendingUsage() {
+  const usage = new Map<StoreId, { store: StoreId; count: number; bytes: number }>();
+  for (const entry of pending.values()) {
+    const total = usage.get(entry.store) ?? { store: entry.store, count: 0, bytes: 0 };
+    total.count++;
+    total.bytes += entry.raw === null ? 0 : storageBytes(entry.key, entry.raw);
+    usage.set(entry.store, total);
+  }
+  return [...usage.values()];
 }
 
 export function inspectClientStorage(): StorageInspection {
   loadBrowser();
+  requestStoragePeerStatus();
   const events = storageEvents();
-  const unknown: StorageInspection['unknown'] = [];
+  const unknown: StorageInspection['unknown'] = legacyStorageIssues();
   const totals: StorageInspection['totals'] = {
     local: { bytes: 0, budget: STORAGE_BUDGETS.local },
     session: { bytes: 0, budget: STORAGE_BUDGETS.session },
     indexeddb: { bytes: 0, budget: STORAGE_BUDGETS.indexeddb },
   };
+  totals.indexeddb.bytes = unknown.reduce((sum, entry) => sum + entry.bytes, 0);
   for (const backend of ['local', 'session'] as const) {
     try {
-      for (const [key, raw] of scanBrowser(backend)) {
+      const current = scanBrowser(backend);
+      const names = new Set(current.map(([key]) => key));
+      for (const [key, entry] of durableRows)
+        if (storageCatalog[entry.store as StoreId]?.backend === backend && !names.has(key)) durableRows.delete(key);
+      for (const [key, raw] of current) {
         const bytes = storageBytes(key, raw);
         totals[backend].bytes += bytes;
         const definition = definitionForKey(key);
@@ -427,6 +473,7 @@ export function inspectClientStorage(): StorageInspection {
       totals.indexeddb.bytes += entry.bytes;
     }
   const stores = definitions.map((definition) => {
+    const peers = peerStorageUsage(definition.id);
     const entries = [...durableRows.values()].filter((entry) => entry.store === definition.id);
     const bytes = entries.reduce((sum, entry) => sum + entry.bytes, 0);
     if (definition.backend === 'indexeddb') totals.indexeddb.bytes += bytes;
@@ -435,11 +482,13 @@ export function inspectClientStorage(): StorageInspection {
       schema: `${definition.codec.schema} v${definition.version}`,
       bytes,
       entries: entries.length,
-      pending: [...pending.values()].filter((entry) => entry.store === definition.id).length,
-      pendingBytes: [...pending.values()]
-        .filter((entry) => entry.store === definition.id)
-        .reduce((sum, entry) => sum + (entry.raw === null ? 0 : storageBytes(entry.key, entry.raw)), 0),
-      writesPerMinute: writesInLastMinute(definition.id),
+      pending: peers.pending + [...pending.values()].filter((entry) => entry.store === definition.id).length,
+      pendingBytes:
+        peers.pendingBytes +
+        [...pending.values()]
+          .filter((entry) => entry.store === definition.id)
+          .reduce((sum, entry) => sum + (entry.raw === null ? 0 : storageBytes(entry.key, entry.raw)), 0),
+      writesPerMinute: peers.writesPerMinute + writesInLastMinute(definition.id),
       lastFailure: lastStorageFailure(definition.id),
       largest: entries
         .sort((a, b) => b.bytes - a.bytes)
@@ -451,8 +500,30 @@ export function inspectClientStorage(): StorageInspection {
 }
 export async function clearDisposableStorage(id: StoreId): Promise<void> {
   const definition = storageCatalog[id];
-  if (definition.policy !== 'cache') throw new Error('Only disposable caches can be cleared here.');
-  for (const key of managedKeys([id])) writeManaged(definition, key, null);
-  await flushClientStorage();
+  if (definition?.policy !== 'cache') throw new Error('Only disposable caches can be cleared here.');
+  clearStoragePeerCache(id);
+  await clearLocalCache(id);
+}
+async function clearLocalCache(id: StoreId): Promise<void> {
+  const definition = storageCatalog[id];
+  if (definition.backend !== 'indexeddb') {
+    for (const [key] of scanBrowser(definition.backend)) if (owns(definition, key)) writeManaged(definition, key, null);
+    return;
+  }
+  for (const [key, mutation] of pending) {
+    if (mutation.store !== id) continue;
+    pending.delete(key);
+    const durable = durableRows.get(key);
+    if (durable) rows.set(key, durable);
+    else rows.delete(key);
+    emit({ key, store: id, raw: durable?.raw ?? null, revision: 0 });
+  }
+  failures.delete(id);
+  publishStorageStatus();
+  await tail.catch(() => {});
+  failures.delete(id);
+  await atomicStorage([id], () => {
+    for (const key of managedKeys([id])) writeManaged(definition, key, null);
+  });
 }
 export { subscribeStorage, installBrowserGuard };

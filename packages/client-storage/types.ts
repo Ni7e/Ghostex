@@ -48,6 +48,7 @@ export class ClientStorageError extends Error {
   }
 }
 export type StorageEvent = {
+  id: string;
   at: number;
   store: string;
   operation: 'write' | 'remove' | 'migrate' | 'expire' | 'failure' | 'unexpected';
