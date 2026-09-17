@@ -281,10 +281,19 @@ impl RemoteSitesPanel {
                                 && browser_url_origin_key(&tab.url) == origin
                         });
                     if let Some(tab) = tab {
+                        /*
+                        CDXC:Browser 2026-09-18 WHY:
+                        A tab title that equals the tab's URL-host fallback is
+                        not a page title ("localhost" from an error page, or
+                        from a title cached by older builds) and must not
+                        override the title this panel just probed from the live
+                        server.
+                        */
                         if let Some(title) = tab
                             .runtime_page_title
                             .as_deref()
                             .and_then(sanitize_browser_tab_cached_title)
+                            .filter(|title| *title != browser_tab_title_for_url(&tab.url))
                         {
                             site.title = Some(title);
                         }
