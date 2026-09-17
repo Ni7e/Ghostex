@@ -126,10 +126,9 @@ export function AutomationComingSoonOverlay({ surfaceName }: { surfaceName: stri
         <div className='flex size-12 items-center justify-center rounded-xl border border-border/80 bg-foreground/[0.04] text-muted-foreground'>
           <IconCalendarTime aria-hidden='true' className='size-6' />
         </div>
-        <span className='text-xs text-muted-foreground'>Experimental</span>
         <h2 className='text-base font-normal text-foreground'>{surfaceName} is coming very soon</h2>
         <p className='max-w-sm text-sm leading-relaxed text-muted-foreground'>
-          Enable Experimental Features in Settings to preview Automations Overview and project Automate pages before
+          Enable Experimental Features in Settings to preview All Automations and project Automate pages before
           launch.
         </p>
       </div>

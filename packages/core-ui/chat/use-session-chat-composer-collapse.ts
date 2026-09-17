@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import {
+  COMPOSER_SCROLL_THRESHOLD_PX as SCROLL_GESTURE_THRESHOLD_PX,
+  COMPOSER_SCROLL_RESET_MS as SCROLL_GESTURE_RESET_MS,
+  COMPOSER_BOTTOM_THRESHOLD_PX as BOTTOM_THRESHOLD_PX,
   createSessionChatComposerScrollGesture,
   recordSessionChatComposerScrollGesture,
   resetSessionChatComposerScrollGesture,
   suppressSessionChatComposerScrollGesture,
-} from './session-chat-composer-scroll-gesture';
+} from '@/packages/shared/session-chat-presentation/composer-scroll';
 import { useSessionChatComposerTransition } from './use-session-chat-composer-transition';
 
-const SCROLL_GESTURE_THRESHOLD_PX = 24;
-const SCROLL_GESTURE_RESET_MS = 120;
-const BOTTOM_THRESHOLD_PX = 10;
 
 /**
  * CDXC:SessionChat 2026-09-05 DECISION:

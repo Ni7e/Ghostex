@@ -16,7 +16,7 @@ pub(crate) enum GpuiAutomationBoardNavigation {
 }
 
 pub(crate) const GPUI_QUICK_AUTOMATIONS_PROJECT_ID: &str = "quick-automations";
-pub(crate) const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE: &str = "Automations Overview";
+pub(crate) const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE: &str = "All Automations";
 
 pub(crate) fn gpui_automation_gxserver_endpoint_for_board_action(
     action: &str,

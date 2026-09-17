@@ -648,7 +648,7 @@ describe('command palette source contracts', () => {
      *
      * CDXC:CommandPalette 2026-06-18-03:46:
      * Main-window buttons Add Project, Search by Text, Quick Terminal, Quick
-     * Browser Tab, Automations, Open Current Project in Finder, and visible
+     * Browser Tab, All Automations, Open Current Project in Finder, and visible
      * Open In targets should be command-palette rows too. Mobile, Discord,
      * Recent Projects, and section collapse controls are intentionally omitted.
      *

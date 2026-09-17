@@ -106,6 +106,10 @@ pub(crate) fn refresh(
             && matches!(payload["type"].as_str(), Some("error" | "stream_error"))
         {
             payload["message"].as_str().map(str::to_owned)
+        } else if record["type"] == "event_msg" && payload["type"] == "task_complete" {
+            // CDXC:AgentProviders 2026-09-17 WHY:
+            // Codex also records usage limits in task_complete.error, without a separate error event. Missing that record leaves a fresh limit hidden by the previous account switch or mistaken for an error the agent already recovered from.
+            payload["error"]["message"].as_str().map(str::to_owned)
         } else if record["isApiErrorMessage"] == true {
             record["message"]["content"].as_array().map(|blocks| {
                 blocks

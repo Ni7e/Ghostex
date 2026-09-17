@@ -95,6 +95,16 @@ impl NativeChatView {
             }
         }
         if this.snapshot["questionCard"]["visible"] == true {
+            let editing = this.input.iter().chain(this.answer_input.iter().map(|(_, input)| input))
+                .any(|input| input.read(cx).focus_handle(cx).is_focused(window));
+            let collapsed = this.collapsed.contains(&format!("question:{}", this.snapshot["prompt"]));
+            if !editing && !collapsed && !key.modifiers.platform && !key.modifiers.control && !key.modifiers.alt
+                && let Ok(digit @ 1..=9) = key.key.parse::<usize>()
+            {
+                this.invoke(json!({"type":"questionOption","index":digit - 1}), cx);
+                cx.stop_propagation();
+                window.prevent_default();
+            }
             return;
         }
         let Some(input) = this.input.clone() else {

@@ -74,7 +74,7 @@ impl NativeChatView {
             .gap(px(6.0 * p.scale))
             .child(self.host_button("moreActions", "titlebar/dots.svg", p, cx));
         for (id, action, _, icon) in COMPOSER_CONTROLS {
-            if self.composer_control_overflowed(id) {
+            if self.composer_collapsed() || self.composer_control_overflowed(id) {
                 continue;
             }
             let icon = if id == "maximize" && self.maximized_window.is_some() {

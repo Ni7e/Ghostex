@@ -997,7 +997,7 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     CDXC:Automations 2026-07-08:
     Mirror macOS `createQuickAutomationsSidebarSession` and
     `isQuickAutomationsSidebarReference`: the overview is one synthetic Quick
-    row named Automations Overview, scoped to project id `quick-automations`,
+    row named All Automations, scoped to project id `quick-automations`,
     and removed from the session-local runtime projection when closed.
     */
     return {

@@ -2837,14 +2837,14 @@ export function SettingsModal({
                                  * CDXC:Automations 2026-07-26:
                                  * GPUI has graduated project Automate from this gate. The
                                  * shared macOS host still inventories Automate here, while
-                                 * GPUI lists only the Quick Automations Overview preview.
+                                 * GPUI lists only the Quick All Automations preview.
                                  */}
                                 <ToggleField
                                   checked={draft.showBetaFeatures}
                                   description={
                                     automateIsExperimental
-                                      ? 'Show experimental settings, Automations and Automate pages, and the Keep Awake title-bar button.'
-                                      : 'Show experimental settings, Automations Overview, and the Keep Awake title-bar button.'
+                                      ? 'Show experimental settings, All Automations and Automate pages, and the Keep Awake title-bar button.'
+                                      : 'Show experimental settings, All Automations, and the Keep Awake title-bar button.'
                                   }
                                   label='Enable Experimental Features'
                                   {...getSettingModificationProps('showBetaFeatures')}
@@ -2856,8 +2856,8 @@ export function SettingsModal({
                                     <li>OS Integration settings tab</li>
                                     <li>
                                       {automateIsExperimental
-                                        ? 'Automations Overview and project Automate pages'
-                                        : 'Automations Overview'}
+                                        ? 'All Automations and project Automate pages'
+                                        : 'All Automations'}
                                     </li>
                                     <li>Title bar and Power settings: Keep Awake</li>
                                   </ul>

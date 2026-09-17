@@ -53,6 +53,8 @@ export function foldSessionChatState(
     lifecycle: incoming.lifecycle ?? (stateOnly ? previous?.lifecycle : undefined),
     working: incoming.working ?? previous?.working,
     prompt: incoming.prompt,
+    asyncQuestionsSince:
+      incoming.asyncQuestionsSince !== undefined ? incoming.asyncQuestionsSince : previous?.asyncQuestionsSince,
     terminalNotice: incoming.terminalNotice,
     terminalActivity: incoming.terminalActivity,
     agentFleet: incoming.agentFleet,

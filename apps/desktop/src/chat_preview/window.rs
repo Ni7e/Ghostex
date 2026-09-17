@@ -1,20 +1,19 @@
 use crate::app::model::TerminalSessionId;
 use crate::app::native_chat::state::{NativeChatConfig, NativeChatView};
-use gpui::StatefulInteractiveElement as _;
 use gpui::{
-    App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
-    Styled, Window, WindowBounds, WindowOptions, div, px, size,
+    App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
+    WindowBounds, WindowOptions, div, px, size,
 };
 use serde_json::Value;
 use std::{path::PathBuf, time::Duration};
 
 pub(super) fn open(path: PathBuf, cx: &mut App) {
-    let bounds = gpui::Bounds::centered(None, size(px(720.0), px(850.0)), cx);
+    let bounds = gpui::Bounds::centered(None, size(px(1440.0), px(850.0)), cx);
     cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(gpui::TitlebarOptions {
-                title: Some("Ghostex Chat Lab · GPUI".into()),
+                title: Some("Ghostex Chat Lab · GPUI / React".into()),
                 ..Default::default()
             }),
             focus: false,
@@ -28,13 +27,26 @@ pub(super) fn open(path: PathBuf, cx: &mut App) {
     .expect("open chat preview");
 }
 
-struct PreviewWindow {
-    path: PathBuf,
-    config: Value,
+pub(super) struct PreviewWindow {
+    pub(super) path: PathBuf,
+    pub(super) config: Value,
     chat: Entity<NativeChatView>,
+    reference: Option<Entity<crate::CefSurface>>,
+    pub(super) error: Option<String>,
     _watch: gpui::Task<()>,
 }
 impl PreviewWindow {
+    pub(super) fn apply_config(
+        &mut self,
+        config: Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat.update(cx, |chat, cx| chat.close_maximized(cx));
+        self.chat = Self::chat(&config, window, cx);
+        self.config = config;
+        cx.notify();
+    }
     fn chat(config: &Value, window: &mut Window, cx: &mut Context<Self>) -> Entity<NativeChatView> {
         gpui_component::Theme::change(
             if config["theme"] == "light" {
@@ -73,6 +85,16 @@ impl PreviewWindow {
                     .await;
                 if this
                     .update_in(cx, |this, window, cx| {
+                        if this.reference.is_none() && crate::cef::context_initialized() {
+                            match super::reference::create(window, cx) {
+                                Ok(reference) => {
+                                    this.reference = Some(reference);
+                                    this.error = None;
+                                }
+                                Err(error) => this.error = Some(error),
+                            }
+                            cx.notify();
+                        }
                         let Some(config) = std::fs::read(&this.path)
                             .ok()
                             .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
@@ -80,12 +102,7 @@ impl PreviewWindow {
                             return;
                         };
                         if config != this.config {
-                            this.chat.update(cx, |chat, cx| {
-                                chat.close_maximized(cx);
-                            });
-                            this.chat = Self::chat(&config, window, cx);
-                            this.config = config;
-                            cx.notify();
+                            this.apply_config(config, window, cx);
                         }
                     })
                     .is_err()
@@ -98,41 +115,81 @@ impl PreviewWindow {
             path,
             config,
             chat,
+            reference: None,
+            error: None,
             _watch: watch,
         }
     }
 }
 impl Render for PreviewWindow {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let light = self.config["theme"] == "light";
+        let pane = || {
+            div()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .h_full()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+        };
+        let label = |text: &str| {
+            div()
+                .h(px(30.0))
+                .flex_shrink_0()
+                .px_3()
+                .flex()
+                .items_center()
+                .text_size(px(12.0))
+                .border_b_1()
+                .border_color(gpui::rgb(0x444444))
+                .child(text.to_owned())
+        };
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(gpui::rgb(if light { 0xfcfcfc } else { 0x0d0d0d }))
             .text_color(gpui::rgb(if light { 0x3f3f46 } else { 0xfcfcfc }))
+            .child(self.controls(cx))
             .child(
                 div()
-                    .flex_shrink_0()
-                    .p_3()
-                    .border_b_1()
-                    .border_color(gpui::rgb(0x444444))
-                    .text_size(px(12.0))
-                    .child(format!(
-                        "Chat Lab · GPUI    {} · {}%",
-                        self.config["scenario"].as_str().unwrap_or(""),
-                        self.config["zoom"]
-                    ))
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .w_full()
+                    .child(
+                        pane()
+                            .child(label("GPUI"))
+                            .child(div().flex_1().min_h_0().child(self.chat.clone())),
+                    )
                     .child(
                         div()
-                            .id("open-react-preview")
-                            .cursor_pointer()
-                            .mt_1()
-                            .text_color(gpui::rgb(0x8ab4f8))
-                            .child("Open React comparison and sample controls ↗")
-                            .on_click(|_, _, cx| cx.open_url("http://127.0.0.1:5188")),
-                    ),
+                            .w(px(1.0))
+                            .h_full()
+                            .flex_shrink_0()
+                            .bg(gpui::rgb(0x444444)),
+                    )
+                    .child(pane().child(label("React")).child(
+                        if let Some(reference) = &self.reference {
+                            div()
+                                .relative()
+                                .flex_1()
+                                .min_h_0()
+                                .child(reference.clone())
+                                .into_any_element()
+                        } else {
+                            div()
+                                .p_4()
+                                .child(
+                                    self.error
+                                        .clone()
+                                        .unwrap_or_else(|| "Loading React reference…".into()),
+                                )
+                                .into_any_element()
+                        },
+                    )),
             )
-            .child(div().flex_1().min_h_0().child(self.chat.clone()))
     }
 }

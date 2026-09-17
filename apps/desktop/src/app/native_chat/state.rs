@@ -99,6 +99,19 @@ impl NativeChatView {
         });
         let list = gpui::ListState::new(0, gpui::ListAlignment::Bottom, gpui::px(400.0));
         list.set_follow_mode(gpui::FollowMode::Tail);
+        let chat = cx.weak_entity();
+        list.set_scroll_handler(move |event, _, cx| {
+            if !event.is_scrolled {
+                let chat = chat.clone();
+                cx.defer(move |cx| {
+                    let _ = chat.update(cx, |chat, cx| {
+                        if chat.snapshot["composerCollapsed"] == true {
+                            chat.invoke(json!({"type":"composerExpand"}), cx);
+                        }
+                    });
+                });
+            }
+        });
         Self {
             draft_id: format!(
                 "{}-{}",
@@ -178,13 +191,17 @@ impl NativeChatView {
                         if draft == this.draft {
                             return;
                         }
+                        this.invoke(json!({"type":"composerExpand","editor":true}), cx);
                         this.draft = draft;
                         this.draft_revision += 1;
                         this.persist_draft(cx);
                         cx.emit(NativeChatEvent::DraftState(this.draft.is_empty()));
                         cx.notify();
                     }
-                    InputEvent::Focus => cx.emit(NativeChatEvent::ComposerFocused),
+                    InputEvent::Focus => {
+                        this.invoke(json!({"type":"composerExpand","editor":true}), cx);
+                        cx.emit(NativeChatEvent::ComposerFocused);
+                    }
                     InputEvent::Blur => this.save_draft(cx),
                     _ => {}
                 },

@@ -153,6 +153,9 @@ export function computeSessionChat(
   );
   const [lifecycle, setLifecycle] = useState<SessionChatTurnLifecycle | null>(null);
   const [prompt, setPrompt] = useState<SessionChatInteractivePrompt | null>(null);
+  const [asyncQuestionsSince, setAsyncQuestionsSince] = useState<number | null>(
+    () => transport.getCachedSnapshot?.()?.asyncQuestionsSince ?? null
+  );
   const [agent, setAgent] = useState<string | null>(() => retainedPresentation?.agent ?? null);
   const [agentSessionId, setAgentSessionId] = useState<string | null>(
     () => retainedPresentation?.agentSessionId ?? null
@@ -351,6 +354,7 @@ export function computeSessionChat(
         selectedOptionsRef.current = null;
         setSelectedOptions(null);
         setScreenProbed(false);
+        setAsyncQuestionsSince(null);
       }
       const next = { ...previous };
       if (patch.agent !== undefined) {
@@ -564,6 +568,7 @@ export function computeSessionChat(
         beforeOffset: number;
         status: SessionChatStatus;
         prompt?: SessionChatInteractivePrompt;
+        asyncQuestionsSince?: number | null;
         agent?: string;
         agentSessionId?: string;
         error?: string;
@@ -643,6 +648,7 @@ export function computeSessionChat(
         applyAgentIdentity({ agent: result.agent, agentSessionId: result.agentSessionId });
         applySelectedOptions(result.selectedOptions);
       }
+      if (result.asyncQuestionsSince !== undefined) setAsyncQuestionsSince(result.asyncQuestionsSince);
       setTerminalNotice(result.terminalNotice ?? null);
       applyTerminalActivity(result.terminalActivity);
       setAgentFleet(result.agentFleet ?? null);
@@ -847,6 +853,7 @@ export function computeSessionChat(
       setServerStatus('loading');
       setLifecycle(null);
       setPrompt(null);
+      setAsyncQuestionsSince(null);
       setAgent(presentation?.agent ?? null);
       setAgentSessionId(presentation?.agentSessionId ?? null);
       setError(null);
@@ -1009,6 +1016,7 @@ export function computeSessionChat(
       }
       setPrompt(event.prompt ?? null);
       applyAgentIdentity({ agentSessionId: event.agentSessionId });
+      if (event.asyncQuestionsSince !== undefined) setAsyncQuestionsSince(event.asyncQuestionsSince);
       applySelectedOptions(event.selectedOptions);
       setTerminalNotice(event.terminalNotice ?? null);
       applyTerminalActivity(event.terminalActivity);
@@ -1359,9 +1367,21 @@ export function computeSessionChat(
       tail.push(visibleTerminalTool);
     }
     tail.push(...pendingMessages);
-    return [...transcript, ...tail];
+    return [...transcript, ...tail].map((message) => {
+      if (
+        asyncQuestionsSince !== null &&
+        message.timestamp !== null &&
+        message.timestamp < asyncQuestionsSince &&
+        message.asyncQuestions
+      ) {
+        const { asyncQuestions: _expired, ...historicalMessage } = message;
+        return historicalMessage;
+      }
+      return message;
+    });
   }, [
     appCommands,
+    asyncQuestionsSince,
     boundaried,
     compactionRecords,
     markers,

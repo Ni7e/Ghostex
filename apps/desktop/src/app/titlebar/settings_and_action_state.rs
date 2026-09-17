@@ -75,6 +75,22 @@ impl GhostexGpuiApp {
         self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, window, cx);
     }
 
+    pub(crate) fn open_gpui_settings_accounts_page(
+        &mut self,
+        window: Option<&mut Window>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let modal = GpuiAppModalKind::Settings;
+        let sidebar_state_message = self.gpui_app_modal_sidebar_state_message_for_open(modal, cx);
+        let mut open_message = serde_json::json!({
+            "initialTab": "accounts",
+            "modal": modal.modal_id(),
+            "type": "open",
+        });
+        open_message["latestSidebarStateMessage"] = sidebar_state_message.clone();
+        self.open_gpui_app_modal_window(modal, open_message, sidebar_state_message, window, cx);
+    }
+
     pub(crate) fn run_gpui_titlebar_tips_header_action(
         &mut self,
         action_index: usize,

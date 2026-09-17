@@ -172,6 +172,7 @@ impl NativeChatView {
     ) -> AnyElement {
         let s = p.scale;
         let maximized = self.maximized_window.is_some();
+        let collapsed = self.composer_collapsed();
         let input = self.input.as_ref().unwrap().clone();
         let mut footer = div()
             .w_full()
@@ -208,7 +209,8 @@ impl NativeChatView {
         }
         if !maximized {
             if let Some(strip) = self.render_working_strip(p) {
-                footer = footer.child(strip);
+                // React's status portal and composer each contribute an 8px grid gap.
+                footer = footer.child(div().mb(px(8.0 * s)).child(strip));
             }
         }
         if let Some(error) = self.snapshot["operationError"].as_str() {
@@ -284,20 +286,43 @@ impl NativeChatView {
                 .py(px(10.0 * s))
                 .gap(px(6.0 * s))
                 .when(maximized, |this| this.flex_1().min_h_0())
+                .when(collapsed, |this| {
+                    this.flex_row()
+                        .items_center()
+                        .gap(px(12.0 * s))
+                        .py(px(8.0 * s))
+                })
                 .children(self.render_queue(p, cx))
                 .child(
-                    Input::new(&input)
-                        .disabled(!self.composer_ready)
-                        .appearance(false)
-                        .bordered(false)
-                        .focus_bordered(false)
+                    div()
+                        .id("composer-editor")
+                        .min_w_0()
                         .w_full()
-                        .p_0()
-                        .text_size(px(14.0 * s))
-                        .text_color(p.primary)
-                        .line_height(px(24.0 * s))
-                        .when(!maximized, |this| this.max_h(px(160.0 * s)))
-                        .when(maximized, |this| this.h_full().flex_1().min_h_0()),
+                        .when(collapsed, |this| {
+                            this.flex_1().h(px(32.0 * s)).overflow_hidden()
+                        })
+                        .when(maximized, |this| this.flex_1().h_full().min_h_0())
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                this.invoke(json!({"type":"composerExpand","editor":true}), cx);
+                            }),
+                        )
+                        .child(
+                            Input::new(&input)
+                                .disabled(!self.composer_ready)
+                                .appearance(false)
+                                .bordered(false)
+                                .focus_bordered(false)
+                                .w_full()
+                                .p_0()
+                                .text_size(px(14.0 * s))
+                                .text_color(p.foreground)
+                                .line_height(px(if collapsed { 32.0 } else { 24.0 } * s))
+                                .when(collapsed, |this| this.h(px(32.0 * s)).max_h(px(32.0 * s)))
+                                .when(!collapsed && !maximized, |this| this.max_h(px(160.0 * s)))
+                                .when(maximized, |this| this.h_full().flex_1().min_h_0()),
+                        ),
                 )
                 .child(
                     div()
@@ -306,9 +331,11 @@ impl NativeChatView {
                         .items_center()
                         .justify_between()
                         .gap(px(8.0 * s))
-                        .child(self.render_option_pills(&model, &effort, p, cx))
+                        .when(!collapsed, |this| {
+                            this.child(self.render_option_pills(&model, &effort, p, cx))
+                        })
                         .child(self.render_toolbar(p, cx))
-                        .child(measurement),
+                        .when(!collapsed, |this| this.child(measurement)),
                 ),
         );
         if self.snapshot["contextMeter"]["hasConfiguredItems"] == true

@@ -29,9 +29,9 @@ impl ChatAppearance {
         let enabled = |name| settings.get(name).and_then(serde_json::Value::as_bool) == Some(true);
         Self {
             background: color(0x0d0d0d, 0xfcfcfc),
-            foreground: color(0xfcfcfc, 0x3f3f46),
-            primary: color(0xb4b8c0, 0x626267),
-            muted: color(0x9e9e9e, 0x71717a),
+            foreground: color(0xfcfcfc, 0x27272a),
+            primary: color(0xb4b8c0, 0x4d4d50),
+            muted: color(0x9e9e9e, 0x71717b),
             border: color(0x1c1c1c, 0xe4e4e7),
             input: color(0x141414, 0xf4f4f5),
             composer_border: color(0x202020, 0xebebeb),

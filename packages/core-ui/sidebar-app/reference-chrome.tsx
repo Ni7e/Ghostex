@@ -230,7 +230,7 @@ export function SidebarReferenceTopChrome({
    * Sidebar Automations opens the Quick-level all-project page. Project-specific automation access moved to the titlebar Automate view so the sidebar shortcut does not hijack the active project's Kanban/Project surface.
    *
    * CDXC:Automations 2026-06-30-12:51:
-   * The sidebar shortcut tooltip should use the full page name, Automations Overview, so users can distinguish it from the per-project Automate titlebar view.
+   * The sidebar shortcut tooltip should use the full page name, All Automations, so users can distinguish it from the per-project Automate titlebar view.
    *
    * CDXC:Sidebar 2026-06-16-01:23:
    * Plugins should no longer consume a primary sidebar row.
@@ -540,7 +540,7 @@ export function SidebarReferenceSettingsDropdown({
       />
       <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem icon={IconUsersGroup} label='Agents Hub' onSelect={onOpenAgentsHub} />
-      <SidebarReferencePrimaryMenuItem icon={IconClock} label='Automations Overview' onSelect={onOpenAutomations} />
+      <SidebarReferencePrimaryMenuItem icon={IconClock} label='All Automations' onSelect={onOpenAutomations} />
       <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem icon={IconDevices} label='Mobile & Remote' onSelect={onOpenRemoteSetup} />
       {PET_CONTROLS_VISIBLE ? (

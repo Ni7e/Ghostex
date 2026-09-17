@@ -10,6 +10,7 @@ import {
 } from '@/packages/shared/session-chat-preview/fixture';
 import '@/packages/core-ui/styles.css';
 import './preview.css';
+const embedded = new URLSearchParams(location.search).has('embedded');
 
 function Conversation({ config }: { config: ChatPreviewConfig }) {
   const transport = useMemo(() => new ChatPreviewBackend(config).transport(), []);
@@ -67,60 +68,62 @@ function Preview() {
   };
   return (
     <div className='comparison-app' data-theme={config.theme}>
-      <header className='comparison-controls'>
-        <strong>Chat Lab · React</strong>
-        <label>
-          Sample{' '}
-          <select
-            value={config.scenario}
-            onChange={(event) => void update({ scenario: event.target.value as ChatPreviewConfig['scenario'] })}
-          >
-            {PREVIEW_SCENARIOS.map((scenario) => (
-              <option key={scenario}>{scenario}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Theme{' '}
-          <select
-            value={config.theme}
-            onChange={(event) => void update({ theme: event.target.value as 'dark' | 'light' })}
-          >
-            <option>dark</option>
-            <option>light</option>
-          </select>
-        </label>
-        <label>
-          Zoom{' '}
-          <select value={config.zoom} onChange={(event) => void update({ zoom: Number(event.target.value) })}>
-            {[70, 85, 100, 125, 150, 200].map((zoom) => (
-              <option key={zoom} value={zoom}>
-                {zoom}%
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <input
-            type='checkbox'
-            checked={config.verbose}
-            onChange={(event) => void update({ verbose: event.target.checked })}
-          />{' '}
-          Verbose
-        </label>
-        <label>
-          <input
-            type='checkbox'
-            checked={config.simple}
-            onChange={(event) => void update({ simple: event.target.checked })}
-          />{' '}
-          Simple
-        </label>
-        <button onClick={() => void update({})}>Reset both</button>
-        <span className='comparison-help'>Controls update both windows. Sends are simulated independently.</span>
-        {error && <span role='alert'>{error}</span>}
-      </header>
-      <Conversation key={config.revision} config={config} />
+      {!embedded && (
+        <header className='comparison-controls'>
+          <strong>Chat Lab · React</strong>
+          <label>
+            Sample{' '}
+            <select
+              value={config.scenario}
+              onChange={(event) => void update({ scenario: event.target.value as ChatPreviewConfig['scenario'] })}
+            >
+              {PREVIEW_SCENARIOS.map((scenario) => (
+                <option key={scenario}>{scenario}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Theme{' '}
+            <select
+              value={config.theme}
+              onChange={(event) => void update({ theme: event.target.value as 'dark' | 'light' })}
+            >
+              <option>dark</option>
+              <option>light</option>
+            </select>
+          </label>
+          <label>
+            Zoom{' '}
+            <select value={config.zoom} onChange={(event) => void update({ zoom: Number(event.target.value) })}>
+              {[70, 85, 100, 125, 150, 200].map((zoom) => (
+                <option key={zoom} value={zoom}>
+                  {zoom}%
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type='checkbox'
+              checked={config.verbose}
+              onChange={(event) => void update({ verbose: event.target.checked })}
+            />{' '}
+            Verbose
+          </label>
+          <label>
+            <input
+              type='checkbox'
+              checked={config.simple}
+              onChange={(event) => void update({ simple: event.target.checked })}
+            />{' '}
+            Simple
+          </label>
+          <button onClick={() => void update({})}>Reset both</button>
+          <span className='comparison-help'>Controls update both panes. Sends are simulated independently.</span>
+          {error && <span role='alert'>{error}</span>}
+        </header>
+      )}
+      <Conversation key={JSON.stringify(config)} config={config} />
     </div>
   );
 }

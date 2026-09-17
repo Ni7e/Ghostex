@@ -788,6 +788,8 @@ export interface SessionChatSubagentInfo {
 }
 
 export interface GxserverReadSessionChatResult {
+  /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
+  asyncQuestionsSince?: number | null;
   /** Present only for a child transcript read, independent of the main chat stream. */
   subagent?: SessionChatSubagentInfo;
   messages: SessionChatMessage[];
@@ -1164,6 +1166,8 @@ interface SessionChatFrameBase {
 }
 
 export interface GxserverSessionChatSnapshotEvent extends SessionChatFrameBase {
+  /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
+  asyncQuestionsSince?: number | null;
   type: 'sessionChatSnapshot';
   messages: SessionChatMessage[];
   lifecycle?: SessionChatTurnLifecycle;
@@ -1246,6 +1250,8 @@ export interface GxserverSessionChatAppendedEvent extends SessionChatFrameBase {
 }
 
 export interface GxserverSessionChatReplacedEvent extends SessionChatFrameBase {
+  /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
+  asyncQuestionsSince?: number | null;
   type: 'sessionChatReplaced';
   messages: SessionChatMessage[];
   lifecycle?: SessionChatTurnLifecycle;
@@ -1306,6 +1312,8 @@ export interface GxserverSessionChatReplacedEvent extends SessionChatFrameBase {
 }
 
 export interface GxserverSessionChatStateEvent extends SessionChatFrameBase {
+  /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
+  asyncQuestionsSince?: number | null;
   type: 'sessionChatState';
   status: SessionChatStatus;
   lifecycle?: SessionChatTurnLifecycle;

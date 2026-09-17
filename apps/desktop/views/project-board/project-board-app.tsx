@@ -193,7 +193,7 @@ export function ProjectBoardApp() {
   const [experimentalFeaturesEnabled, setExperimentalFeaturesEnabled] = useState(() =>
     readExperimentalFeaturesEnabled(urlSearchParams)
   );
-  const automationSurfaceName = isAutomationGlobalScope ? 'Automations Overview' : 'Automate';
+  const automationSurfaceName = isAutomationGlobalScope ? 'All Automations' : 'Automate';
   const displayKey = normalizeDisplayIssueKey(urlSearchParams.get('beadsDisplayKey') ?? projectName);
   const issuePrefix = normalizeIssuePrefix(projectName || projectPath.split('/').filter(Boolean).at(-1) || displayKey);
   /*
@@ -2358,8 +2358,8 @@ export function ProjectBoardApp() {
        * CDXC:ProjectBoard 2026-06-29-03:49:
        * Remove the Board, Automations, Runs, and Triage tabs from the Kanban board header so disabled future surfaces do not occupy board chrome.
        *
-       * CDXC:Automations 2026-06-30-12:51:
-       * The Quick-level all-project page is named Automations Overview and should not repeat "Automations" in both the eyebrow and page title. Keep the project-scoped Automate surface eyebrow explicit while the overview uses only "Experimental" above the title.
+       * CDXC:Automations 2026-09-17 DECISION:
+       * User: rename Automations Overview to All Automations, drop the Experimental label, and use Overview as the all-project page eyebrow. The project Automate surface still uses Automations so the page title is not repeated. This supersedes the 2026-06-30 eyebrow copy.
        */}
       {/*
        * CDXC:ProjectBoard 2026-08-23:
@@ -2373,13 +2373,7 @@ export function ProjectBoardApp() {
       >
         <div className='min-w-0 justify-self-start'>
           <div className='text-xs font-normal text-muted-foreground'>
-            {activeSurfaceTab !== 'board'
-              ? automationIsExperimental
-                ? isAutomationGlobalScope
-                  ? 'Experimental'
-                  : 'Automations (Experimental)'
-                : 'Automations'
-              : 'Project'}
+            {activeSurfaceTab !== 'board' ? (isAutomationGlobalScope ? 'Overview' : 'Automations') : 'Project'}
           </div>
           <h1 className='m-0 truncate text-[15px] font-normal text-foreground'>{projectName}</h1>
         </div>

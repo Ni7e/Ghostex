@@ -24,6 +24,7 @@ impl Render for NativeChatView {
         .flex_1()
         .min_h_0()
         .w_full();
+        let transcript = self.scrollable_transcript(transcript, cx);
         let composer = if self.maximized_window.is_none() {
             self.render_composer(&p, window, cx)
         } else {

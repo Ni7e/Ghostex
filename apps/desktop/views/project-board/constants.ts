@@ -36,7 +36,7 @@ export const NATIVE_SETTINGS_STORAGE_KEY = 'ghostex-native-settings';
  * CDXC:Automations 2026-07-26:
  * GPUI's project-scoped Automate workarea is a released surface. Its
  * first-party URL explicitly opts out of the experimental gate, while macOS
- * Automate and the Quick Automations Overview keep their existing policy.
+ * Automate and All Automations keep their existing policy.
  */
 export function readExperimentalFeaturesEnabled(searchParams: URLSearchParams): boolean {
   if (searchParams.get('automationExperimental') === 'false') {

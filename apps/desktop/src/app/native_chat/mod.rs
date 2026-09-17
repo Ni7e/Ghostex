@@ -9,6 +9,8 @@ mod actions;
 mod attachments;
 mod binding;
 mod cards;
+mod question;
+mod composer_scroll;
 mod fonts;
 mod note;
 mod queue;

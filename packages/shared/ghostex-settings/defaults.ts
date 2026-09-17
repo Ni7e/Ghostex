@@ -106,8 +106,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    * surfaces hidden until the user enables Enable Experimental Features from
    * Advanced Settings.
    *
-   * CDXC:Automations 2026-07-01-03:24:
-   * Automations Overview and project Automate start hidden behind their
+   * CDXC:Automations 2026-09-17:
+   * All Automations and project Automate start hidden behind their
    * coming-soon overlay until Enable Experimental Features is on.
    */
   showBetaFeatures: false,

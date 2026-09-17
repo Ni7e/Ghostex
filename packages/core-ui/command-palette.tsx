@@ -281,8 +281,8 @@ const SIDEBAR_MESSAGE_PALETTE_COMMANDS = [
     hotkey: '',
     kind: 'sidebarMessage',
     message: { type: 'openAutomationsPage' },
-    searchText: 'Automations schedules agents timers dates recurring',
-    title: 'Automations',
+    searchText: 'All Automations schedules agents timers dates recurring',
+    title: 'All Automations',
   },
   {
     /*
@@ -496,7 +496,7 @@ export function CommandPalette({
      *
      * CDXC:CommandPalette 2026-06-18-03:46:
      * The palette also needs the main-window command buttons Add Project,
-     * Search by Text, Quick Terminal, Quick Browser Tab, Automations, Open
+     * Search by Text, Quick Terminal, Quick Browser Tab, All Automations, Open
      * Current Project in Finder, and visible Open In editor targets. Keep
      * context-dependent modals out of this list unless their required
      * session, draft, file, or target payload is available.

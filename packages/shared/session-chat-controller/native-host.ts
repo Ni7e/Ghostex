@@ -1,3 +1,6 @@
+import { COMPOSER_SCROLL_RESET_MS, COMPOSER_SCROLL_THRESHOLD_PX, COMPOSER_BOTTOM_THRESHOLD_PX,
+  createSessionChatComposerScrollGesture, resetSessionChatComposerScrollGesture,
+  recordSessionChatComposerScrollGesture, suppressSessionChatComposerScrollGesture } from '../session-chat-presentation/composer-scroll';
 import { ChatPreviewBackend } from '../session-chat-preview/backend';
 import type { ChatPreviewConfig } from '../session-chat-preview/fixture';
 import { computeSessionChatActivity } from './activity';
@@ -27,7 +30,7 @@ import { SESSION_CHAT_QUEUE_LONG_PRESS_MS, isSessionChatQueueRowBusy, sessionCha
 import { EMPTY_SESSION_CHAT_COMPOSER_HISTORY, recallPreviousSessionChatDraft, recallNextSessionChatDraft, resetSessionChatComposerHistoryIndex } from '@/packages/core-ui/chat/session-chat-composer-state';
 import { GxserverRpcError, gxserverRpcErrorCode } from '../gxserver-rpc-error';
 import type { GxserverRpcErrorCode } from '../gxserver-protocol';
-import { sessionChatCardDismissKey, selectQuestionOption, type QuestionDraft } from '../session-chat-presentation/interactive';
+import { sessionChatCardDismissKey, selectQuestionOption, questionAnswerControls, type QuestionDraft } from '../session-chat-presentation/interactive';
 import { chatHostActionDefinitions, COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS, AGENT_HOST_ACTION_IDS } from '../session-chat-presentation/actions';
 import { insertChatReference, nativePathReference } from '../session-chat-presentation/references';
 import { flushSessionNote } from './note';
@@ -53,6 +56,8 @@ let transcriptItems: unknown[] = [];
 let sentTranscriptItems: unknown[] | undefined;
 const presentation = new NativeChatPresentation();
 const suggestions = new NativeComposerSuggestions();
+const composerScrollGesture = createSessionChatComposerScrollGesture();
+let composerCollapsed = false;
 let detailRevision = 0;
 type NativeChatState = { workingStrip: ReturnType<typeof computeSessionChatWorkingStrip> & { presentation: ReturnType<typeof computeSessionChatActivity> } } & UseSessionChatResult & ReturnType<typeof computeNativeChatControls> & ReturnType<typeof computeNativeChatOptions> & ReturnType<typeof computeNativeChatContext> & ReturnType<typeof computeSessionChatSkills> & ReturnType<typeof computeSessionChatFiles>;
 let optionPersistence: ReturnType<typeof nativeOptionPersistence>;
@@ -179,11 +184,12 @@ function publish(state: NativeChatState): void {
     summaryMode,
     verboseOverride,
     composerOverflow,
+    composerCollapsed,
     historyActive: composerHistory.index !== null,
     interaction: { queueLongPressMs: SESSION_CHAT_QUEUE_LONG_PRESS_MS, stopButtonCooldownMs: SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS },
     incomingDraft,
     note: { ...note },
-    questionCard: { visible: promptKey !== null && promptKey !== dismissedPrompt && !(state.prompt?.kind === 'approval' && state.terminalNotice?.kind === 'permissionPrompt' && (!!state.terminalNotice.choices?.length || !!state.terminalNotice.dialog) && `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey), questionIndex, drafts: questionDrafts, answering, busy: answering || questionTransition, loading: questionDraftsLoading },
+    questionCard: { visible: promptKey !== null && promptKey !== dismissedPrompt && !(state.prompt?.kind === 'approval' && state.terminalNotice?.kind === 'permissionPrompt' && (!!state.terminalNotice.choices?.length || !!state.terminalNotice.dialog) && `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey), questionIndex, controls: questionAnswerControls(questionDrafts, questionIndex, state.prompt?.kind === 'question' ? state.prompt.questions.length : 0, answering), drafts: questionDrafts, answering, busy: answering || questionTransition, loading: questionDraftsLoading },
     finalIds: projection.finalIds,
   };
   revision++;
@@ -267,6 +273,26 @@ function startController(config: { clientId: string; initialSnapshot?: any; init
 async function action(command: { type: string; [key: string]: any }): Promise<void> {
   if (!controller) { if (command.type === 'retry') start(bootConfig); return; }
   const chat = controller.current();
+  if (command.type === 'composerScroll' || command.type === 'composerExpand') {
+    const now = Date.now();
+    const previous = composerCollapsed;
+    if (now - composerScrollGesture.lastEventAt > COMPOSER_SCROLL_RESET_MS) resetSessionChatComposerScrollGesture(composerScrollGesture);
+    if (command.type === 'composerExpand') {
+      if (command.editor) suppressSessionChatComposerScrollGesture(composerScrollGesture, now, COMPOSER_SCROLL_RESET_MS);
+      composerCollapsed = false;
+    } else {
+      const atBottom = command.distanceToEnd <= COMPOSER_BOTTOM_THRESHOLD_PX;
+      if (recordSessionChatComposerScrollGesture(composerScrollGesture, {
+        now, deltaPx: Math.abs(command.delta), collapseThresholdPx: COMPOSER_SCROLL_THRESHOLD_PX,
+        collapseEligible: command.eligible && !composerCollapsed,
+        canScrollInGestureDirection: command.canScroll,
+        scrollsTowardLogicalEnd: command.delta < 0 && atBottom,
+      })) composerCollapsed = true;
+      if (!command.eligible || (command.delta < 0 && atBottom)) composerCollapsed = false;
+    }
+    if (previous !== composerCollapsed) publish(chat);
+    return;
+  }
   const clearedError = operationError !== undefined;
   if (!['restoreSubmission','composerSelection','suggestionHighlight','measureComposer','measureContextStatus'].includes(command.type)) operationError = undefined;
   try {

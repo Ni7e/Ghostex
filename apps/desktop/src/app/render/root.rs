@@ -797,6 +797,9 @@ impl Render for GhostexGpuiApp {
                 */
                 this.open_gpui_settings_extensions_page(Some(window), cx);
             }))
+            .on_action(cx.listener(|this, _: &OpenGpuiAccountsModal, window, cx| {
+                this.open_gpui_settings_accounts_page(Some(window), cx);
+            }))
             .on_action(
                 cx.listener(|this, _: &OpenGpuiPreviousSessionsModal, window, cx| {
                     this.open_gpui_app_modal_from_titlebar(

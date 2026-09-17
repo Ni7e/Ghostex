@@ -77,6 +77,14 @@ impl NativeChatView {
                     cx,
                 ),
             );
+            row = row.child(
+                div()
+                    .h(px(1.0))
+                    .mt(px(2.0 * s))
+                    .mb(px(8.0 * s))
+                    .w_full()
+                    .bg(p.border),
+            );
             if expanded {
                 for message in item["work"].as_array().into_iter().flatten() {
                     row = row.child(self.message_row(message, &p, window, cx));

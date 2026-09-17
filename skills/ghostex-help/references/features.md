@@ -761,7 +761,8 @@ Related settings: Settings > Projects (beads directory and display key),
 
 ## Automations
 
-The Automate view schedules agent work per project: a name, an agent, a
+The sidebar All Automations page lists scheduled work across projects. The
+Automate view schedules agent work per project: a name, an agent, a
 prompt, a schedule (timer, once, interval, daily, weekly, or cron with a
 timezone), and an execution mode (local checkout, a fresh worktree with an
 optional setup command, or an existing agent thread). Runs are listed with
@@ -897,9 +898,10 @@ docs directory), `hideProjectHeaderDiffStats`,
   it. These are the same per-account stars available in Settings > Accounts.
   Claude buttons show the two tightest of the weekly, five-hour, and Fable
   limits, so the Fable limit is never hidden when it is running out; launcher
-  and picker rows and the Accounts figures use the same two numbers. Each
+  and picker rows and the Accounts figures use the same two numbers.   Each
   button opens that login's live limits, reset times, and extra usage or rate
-  limit resets, with the Fable limit as a main bar for Claude. Click the same
+  limit resets, with the Fable limit as a main bar for Claude. Right-click a
+  usage button for Extensions and Accounts. Click the same
   usage button again to close its dropdown. Click another titlebar dropdown's
   button to close the current dropdown and open that one in a single click.
   Clicking outside, including in

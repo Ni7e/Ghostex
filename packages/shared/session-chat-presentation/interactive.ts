@@ -2,6 +2,18 @@ import type { SessionChatInteractivePrompt } from '../session-chat';
 
 export type QuestionDraft = { indices: number[]; other: string };
 
+/** The same answer gate and labels drive both chat renderers. */
+export function questionAnswerControls(drafts: readonly QuestionDraft[], index: number, count: number, submitting: boolean) {
+  const answered = (draft: QuestionDraft | undefined) => !!draft && (draft.indices.length > 0 || draft.other.trim().length > 0);
+  const last = index >= count - 1;
+  const hasAnswer = drafts.some(answered);
+  return {
+    hasAnswer,
+    disabled: submitting || (last && !hasAnswer),
+    label: submitting ? 'Sending…' : last ? 'Send answer' : answered(drafts[index]) ? 'Next' : 'Skip',
+  };
+}
+
 export function sessionChatCardDismissKey(prompt: SessionChatInteractivePrompt | null): string | null {
   if (!prompt) return null;
   return prompt.kind === 'question'

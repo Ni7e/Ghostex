@@ -91,7 +91,7 @@ export function createNativeNavigation(ui: NativeSidebarUiState) {
     runtime('Search by Prompt', 'file-search', { type: 'searchPreviousSessionsByText' }),
     { separator: true },
     intent('Agents Hub', 'users-group', 'agentsHub'),
-    runtime('Automations Overview', 'clock', { type: 'openAutomationsPage' }),
+    runtime('All Automations', 'clock', { type: 'openAutomationsPage' }),
     { separator: true },
     intent('Mobile & Remote', 'devices', 'remoteSetup')
   );

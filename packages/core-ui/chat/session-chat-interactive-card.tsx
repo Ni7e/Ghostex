@@ -41,7 +41,7 @@ import { useSessionChatQuestionDrafts } from './session-chat-question-drafts';
 import { SessionChatAnswerInput } from './session-chat-answer-input';
 import type { SaveSessionChatImage } from './session-chat-image-attachments';
 
-import { sessionChatCardDismissKey, selectQuestionOption } from '@/packages/shared/session-chat-presentation/interactive';
+import { sessionChatCardDismissKey, selectQuestionOption, questionAnswerControls } from '@/packages/shared/session-chat-presentation/interactive';
 export { sessionChatCardDismissKey };
 
 const DELIVERY_FAILED_NOTICE = "Couldn't deliver the answer. Switch to Terminal View to answer there.";
@@ -353,12 +353,8 @@ export function SessionChatInteractiveCard({
   const isLastQuestion = questionIndex >= questions.length - 1;
   const customAnswerActive = draft.other.trim().length > 0;
 
-  const questionAnswered = (index: number): boolean => {
-    const entry = drafts[index];
-    return entry !== undefined && (entry.indices.length > 0 || entry.other.trim().length > 0);
-  };
-
-  const hasAnswer = drafts.some((entry) => entry.indices.length > 0 || entry.other.trim().length > 0);
+  const answerControls = questionAnswerControls(drafts, questionIndex, questions.length, submitting);
+  const hasAnswer = answerControls.hasAnswer;
 
   const advance = (): void => {
     if (readOnly || submitting || savingImages) {
@@ -376,13 +372,7 @@ export function SessionChatInteractiveCard({
   // Trailing button cycles Skip → Next → Send answer → Sending… (§2.6).
   // Single-select options advance immediately, including submitting the final
   // question; multi-select questions keep the explicit trailing action.
-  const trailingLabel = submitting
-    ? 'Sending…'
-    : isLastQuestion
-      ? 'Send answer'
-      : questionAnswered(questionIndex)
-        ? 'Next'
-        : 'Skip';
+  const trailingLabel = answerControls.label;
   const counter = questions.length > 1 ? `question ${questionIndex + 1} of ${questions.length}` : undefined;
   const canDismiss = !(readOnly || savingImages);
 
@@ -437,7 +427,7 @@ export function SessionChatInteractiveCard({
           <Button
             className='min-w-24'
             data-chat-answer-control=''
-            disabled={readOnly || submitting || savingImages || (isLastQuestion && !hasAnswer)}
+            disabled={readOnly || savingImages || answerControls.disabled}
             onClick={advance}
             size='sm'
             variant='outline'
