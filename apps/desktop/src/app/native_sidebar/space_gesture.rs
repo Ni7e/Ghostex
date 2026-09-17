@@ -141,7 +141,9 @@ impl GhostexGpuiApp {
             destination,
             phase,
         });
-        window.request_animation_frame();
+        // CDXC:Spaces 2026-09-17 WHY:
+        // Wheel callbacks have no current render view, so request_animation_frame panics there.
+        // Notify starts the redraw; update_native_space_transition schedules subsequent frames during prepaint.
         cx.notify();
     }
 
