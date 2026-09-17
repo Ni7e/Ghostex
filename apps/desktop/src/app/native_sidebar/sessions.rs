@@ -1,4 +1,5 @@
 use super::drag::SidebarDrag;
+use super::drag::SidebarDropTarget;
 use gpui::AppContext;
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -42,9 +43,9 @@ impl GhostexGpuiApp {
             scale: appearance.scale,
         };
         let can_drag = !session.is_browser()
-            && (session.is_pinned
-                || (group.remote_machine_context.is_none()
-                    && hud["activeSessionsSortMode"] == "manual"));
+            && !group.is_stale
+            && group.remote_machine_context.is_none()
+            && (session.is_pinned || hud["activeSessionsSortMode"] == "manual");
         let selected = session
             .details
             .get("isMultiSelected")
@@ -118,8 +119,7 @@ impl GhostexGpuiApp {
                 .when(hovered, |row| row.child(self.render_native_session_hover_actions(group, session, appearance, cx)))
                 .when(question, |row| row.child(super::status::question_indicator(session.activity == "working", scale)))
                 .when(can_drag && self.native_sidebar.menu.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
-                .on_drag_move::<SidebarDrag>(cx.listener(move |app, event, _, cx| app.update_native_sidebar_drop(event, "session", &drag_id, Some(&drag_group_id), cx)))
-                .on_drop::<SidebarDrag>(cx.listener(|app, _, _, cx| app.finish_native_sidebar_drop(cx)))
+.sidebar_drop_target("session", drag_id, Some(drag_group_id), cx)
                 .on_click(cx.listener(move |app, event: &gpui::ClickEvent, _, cx| {
                     cx.stop_propagation();
                     if event.click_count() == 2 && double_click_rename {

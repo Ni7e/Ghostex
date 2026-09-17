@@ -19,13 +19,18 @@ export function reorderNativeSidebar(
     const sourceGroup = state.groupOrder.find((id) => state.sessionIdsByGroup[id]?.includes(command.sessionId));
     const source = sourceGroup ? state.groupsById[sourceGroup] : undefined;
     const target = state.groupsById[command.groupId];
-    if (!source || !target || source.remoteMachineContext?.machineId !== target.remoteMachineContext?.machineId) return;
+    if (!source || !target || source.remoteMachineContext || target.remoteMachineContext) return;
     const sourceSession = state.sessionsById[command.sessionId];
-    const targetSession = state.sessionsById[command.targetSessionId];
-    if (!sourceSession || !targetSession || sourceSession.sessionKind === 'browser' || sourceSession.kind === 'browser')
+    const targetSession = command.targetSessionId ? state.sessionsById[command.targetSessionId] : undefined;
+    if (
+      !sourceSession ||
+      (command.targetSessionId && !targetSession) ||
+      sourceSession.sessionKind === 'browser' ||
+      sourceSession.kind === 'browser'
+    )
       return;
     if (sourceSession.isPinned) {
-      if (sourceGroup !== command.groupId || !targetSession.isPinned) return;
+      if (sourceGroup !== command.groupId || !command.targetSessionId || !targetSession?.isPinned) return;
       const ids = state.sessionIdsByGroup[command.groupId] ?? [];
       const pinned = ids.filter((id) => state.sessionsById[id]?.isPinned && id !== command.sessionId);
       const targetIndex = pinned.indexOf(command.targetSessionId);
@@ -37,12 +42,22 @@ export function reorderNativeSidebar(
       return;
     }
     if (source.remoteMachineContext || state.hud.activeSessionsSortMode !== 'manual') return;
-    const next = moveSessionIdsByDropTarget(state.sessionIdsByGroup, command.sessionId, {
-      kind: 'session',
-      groupId: command.groupId,
-      sessionId: command.targetSessionId,
-      position: command.position,
-    });
+    const next = moveSessionIdsByDropTarget(
+      state.sessionIdsByGroup,
+      command.sessionId,
+      command.targetSessionId
+        ? {
+            kind: 'session',
+            groupId: command.groupId,
+            sessionId: command.targetSessionId,
+            position: command.position,
+          }
+        : {
+            kind: 'group',
+            groupId: command.groupId,
+            position: command.position === 'after' ? 'end' : 'start',
+          }
+    );
     if (sourceGroup !== command.groupId) {
       post({
         type: 'moveSessionToGroup',

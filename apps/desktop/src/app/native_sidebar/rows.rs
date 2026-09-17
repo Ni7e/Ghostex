@@ -1,3 +1,4 @@
+use super::drag::SidebarDropTarget;
 use super::{appearance::SidebarAppearance, model::NativeSidebarGroup};
 use crate::GhostexGpuiApp;
 use gpui::prelude::FluentBuilder;
@@ -42,7 +43,9 @@ impl GhostexGpuiApp {
                                     .items_center()
                                     .rounded(px(5.0 * scale))
                                     .hover(|row| row.bg(appearance.hover))
+                                    .relative()
                                     .child("New Session")
+                                    .sidebar_drop_target("session-group", id.clone(), None, cx)
                                     .on_click(cx.listener(move |app, _, _, cx| {
                                         cx.stop_propagation();
                                         app.dispatch_native_sidebar_command(

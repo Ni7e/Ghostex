@@ -1,3 +1,4 @@
+use super::drag::SidebarDropTarget;
 use super::{
     appearance::SidebarAppearance,
     model::{NativeSidebarCollection, NativeSidebarSnapshot},
@@ -125,8 +126,7 @@ impl GhostexGpuiApp {
                     cx.notify();
                 }))
                 .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-                .on_drag_move::<super::drag::SidebarDrag>(cx.listener(move |app, event, _, cx| app.update_native_sidebar_drop(event, "collection", &drop_id, None, cx)))
-                .on_drop::<super::drag::SidebarDrag>(cx.listener(|app, _, _, cx| app.finish_native_sidebar_drop(cx)))
+.sidebar_drop_target("collection", drop_id, None, cx)
                 .on_mouse_down(MouseButton::Right, move |event, window, cx| { cx.stop_propagation(); Self::show_native_sidebar_menu(&menu, event.position, scale, window, cx); })
                 .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({ "type": "collectionAction", "collectionId": id, "action": "toggle" }), cx); })))
             .when(self.native_sidebar.disclosures.present(&format!("collection:{}", collection.collection_id), collection.collapsed), |column| {

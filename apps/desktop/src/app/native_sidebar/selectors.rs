@@ -1,4 +1,5 @@
 use super::drag::SidebarDrag;
+use super::drag::SidebarDropTarget;
 use gpui::AppContext;
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -109,8 +110,7 @@ impl GhostexGpuiApp {
                 .when(space.attention_count > 0, |row| row.child(div().text_color(rgb(0x95d7f6)).child(space.attention_count.to_string())))))
             .when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.tooltip_show_delay(appearance.tooltip_delay).tooltip(move |window, cx| titlebar_tooltip(name.clone(), window, cx)))
             .when(id != "other", |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
-                .on_drag_move::<SidebarDrag>(cx.listener(move |app, event, _, cx| app.update_native_sidebar_drop(event, "space", &drag_id, None, cx)))
-                .on_drop::<SidebarDrag>(cx.listener(|app, _, _, cx| app.finish_native_sidebar_drop(cx)))
+            .sidebar_drop_target("space", drag_id, None, cx)
             .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({"type": "selectSpace", "spaceId": id}), cx); }))
             .on_mouse_down(MouseButton::Right, cx.listener(move |_, event: &gpui::MouseDownEvent, window, cx| {
                 cx.stop_propagation();

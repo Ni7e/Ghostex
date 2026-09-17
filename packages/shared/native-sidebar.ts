@@ -157,7 +157,7 @@ export type NativeSidebarCommand =
     }
   | { type: 'batch'; clearSelection?: boolean; messages: SidebarToExtensionMessage[] }
   | { type: 'selectSession'; sessionId: string; mode: 'clear' | 'focus' | 'additive' | 'range' }
-  | { type: 'moveSession'; sessionId: string; groupId: string; targetSessionId: string; position: 'before' | 'after' }
+  | { type: 'moveSession'; sessionId: string; groupId: string; targetSessionId?: string; position: 'before' | 'after' }
   | { type: 'moveGroup'; groupId: string; targetGroupId: string; position: 'before' | 'after' }
   | { type: 'moveToSpace'; sourceKind: 'group' | 'collection'; sourceId: string; spaceId: string }
   | { type: 'moveToCollection'; sourceKind: 'group'; sourceId: string; collectionId?: string }

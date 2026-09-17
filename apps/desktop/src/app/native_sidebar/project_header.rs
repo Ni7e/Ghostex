@@ -1,3 +1,4 @@
+use super::drag::SidebarDropTarget;
 use super::{appearance::SidebarAppearance, drag::SidebarDrag, model::NativeSidebarGroup};
 use crate::{
     GhostexGpuiApp,
@@ -269,10 +270,7 @@ impl GhostexGpuiApp {
                 Self::show_native_sidebar_menu(&menu, event.position, scale, window, cx);
             })
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .on_drag_move::<SidebarDrag>(cx.listener(move |app, event, _, cx| {
-                app.update_native_sidebar_drop(event, "group", &drag_id, None, cx)
-            }))
-            .on_drop::<SidebarDrag>(cx.listener(|app, _, _, cx| app.finish_native_sidebar_drop(cx)))
+            .sidebar_drop_target("group", drag_id, None, cx)
             .on_click(cx.listener(move |app, _, _, cx| {
                 cx.stop_propagation();
                 app.dispatch_native_sidebar_ui(json!({"type": "toggleGroup", "groupId": id}), cx);

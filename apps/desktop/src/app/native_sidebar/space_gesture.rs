@@ -65,7 +65,11 @@ impl GhostexGpuiApp {
         else {
             return;
         };
-        if self.native_sidebar.menu.is_some() {
+        if event.modifiers.control
+            || event.modifiers.shift
+            || cx.has_active_drag()
+            || self.native_sidebar.menu.is_some()
+        {
             return;
         }
         let gesture = &mut self.native_sidebar.space_gesture;

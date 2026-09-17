@@ -1,3 +1,4 @@
+use super::drag::SidebarDropTarget;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, FontWeight, InteractiveElement, IntoElement, ParentElement,
@@ -167,16 +168,7 @@ impl GhostexGpuiApp {
                                     .h(px(24.0 * appearance.scale))
                                     .w_full()
                                     .flex_shrink_0()
-                                    .on_drag_move::<super::drag::SidebarDrag>(cx.listener(
-                                        |app, event, _, cx| {
-                                            app.update_native_sidebar_drop(
-                                                event, "ungroup", "", None, cx,
-                                            )
-                                        },
-                                    ))
-                                    .on_drop::<super::drag::SidebarDrag>(cx.listener(
-                                        |app, _, _, cx| app.finish_native_sidebar_drop(cx),
-                                    )),
+                                    .sidebar_drop_target("ungroup", String::new(), None, cx),
                             ),
                     ),
             )

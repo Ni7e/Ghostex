@@ -1,6 +1,7 @@
 use crate::{GhostexGpuiApp, app::helpers::*};
 use gpui::{
-    AnyElement, Context, DragMoveEvent, IntoElement, ParentElement, Render, Styled, Window, div, px,
+    AnyElement, Bounds, Context, DragMoveEvent, InteractiveElement, IntoElement, ParentElement,
+    Pixels, Point, Render, Styled, Window, div, px,
 };
 use serde_json::{Value, json};
 
@@ -38,13 +39,42 @@ impl GhostexGpuiApp {
         group_id: Option<&str>,
         cx: &mut Context<Self>,
     ) {
-        let source = event.drag(cx);
+        let source = event.drag(cx).clone();
+        self.resolve_native_sidebar_drop(
+            &source,
+            event.event.position,
+            event.bounds,
+            target_kind,
+            target_id,
+            group_id,
+            cx,
+        );
+    }
+
+    fn resolve_native_sidebar_drop(
+        &mut self,
+        source: &SidebarDrag,
+        position: Point<Pixels>,
+        bounds: Bounds<Pixels>,
+        target_kind: &str,
+        target_id: &str,
+        group_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        // CDXC:Sidebar 2026-09-17 WHY:
+        // GPUI broadcasts drag moves even outside a target. Only the row under the pointer may choose the drop command; otherwise later rows overwrite it.
+        if !bounds.contains(&position)
+            || (target_kind != "space" && !self.native_sidebar.scroll.bounds().contains(&position))
+        {
+            return;
+        }
         if source.kind == target_kind && source.id == target_id {
             self.native_sidebar.drop_command = None;
             cx.notify();
             return;
         }
-        if target_kind == "session" {
+        if source.kind == "session" && matches!(target_kind, "session" | "group" | "session-group")
+        {
             let Some(snapshot) = self.native_sidebar.snapshot.as_ref() else {
                 return;
             };
@@ -56,11 +86,17 @@ impl GhostexGpuiApp {
                     .map(|session| (group, session))
             });
             let target = snapshot.groups.iter().find_map(|group| {
-                group
-                    .sessions
-                    .iter()
-                    .find(|session| session.session_id == target_id)
-                    .map(|session| (group, session))
+                if target_kind != "session" && group.group_id == target_id {
+                    Some((group, None))
+                } else if target_kind == "session" {
+                    group
+                        .sessions
+                        .iter()
+                        .find(|session| session.session_id == target_id)
+                        .map(|session| (group, Some(session)))
+                } else {
+                    None
+                }
             });
             let valid = match (origin, target) {
                 (Some((origin, session)), Some((target, target_session))) => {
@@ -68,7 +104,9 @@ impl GhostexGpuiApp {
                         && !origin.is_stale
                         && !target.is_stale
                         && if session.is_pinned {
-                            origin.group_id == target.group_id && target_session.is_pinned
+                            origin.remote_machine_context.is_none()
+                                && origin.group_id == target.group_id
+                                && target_session.is_some_and(|session| session.is_pinned)
                         } else {
                             origin.remote_machine_context.is_none()
                                 && target.remote_machine_context.is_none()
@@ -84,12 +122,16 @@ impl GhostexGpuiApp {
             }
         }
         let after = if target_kind == "space" {
-            event.event.position.x > event.bounds.center().x
+            position.x > bounds.center().x
         } else {
-            event.event.position.y > event.bounds.center().y
+            position.y > bounds.center().y
         };
         let position = if after { "after" } else { "before" };
-        let command = if target_kind == "space" && matches!(source.kind, "group" | "collection") {
+        let command = if source.kind == "session"
+            && matches!(target_kind, "group" | "session-group")
+        {
+            json!({"type": "moveSession", "sessionId": source.id, "groupId": target_id, "position": "before"})
+        } else if target_kind == "space" && matches!(source.kind, "group" | "collection") {
             json!({"type": "moveToSpace", "sourceKind": source.kind, "sourceId": source.id, "spaceId": target_id})
         } else if source.kind == "group" && matches!(target_kind, "collection" | "ungroup") {
             json!({"type": "moveToCollection", "sourceKind": source.kind, "sourceId": source.id, "collectionId": if target_kind == "collection" { Some(target_id) } else { None }})
@@ -148,3 +190,47 @@ pub(super) fn drop_line(position: &str, scale: f32) -> AnyElement {
     }
     line.into_any_element()
 }
+
+pub(super) trait SidebarDropTarget:
+    ParentElement + InteractiveElement + Styled + Sized
+{
+    fn sidebar_drop_target(
+        self,
+        kind: &'static str,
+        id: String,
+        group: Option<String>,
+        cx: &mut Context<GhostexGpuiApp>,
+    ) -> Self {
+        let bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
+        let painted_bounds = bounds.clone();
+        let move_id = id.clone();
+        let move_group = group.clone();
+        self.relative()
+            .child(
+                gpui::canvas(
+                    move |bounds, _, _| painted_bounds.set(bounds),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .on_drag_move::<SidebarDrag>(cx.listener(move |app, event, _, cx| {
+                app.update_native_sidebar_drop(event, kind, &move_id, move_group.as_deref(), cx);
+            }))
+            .on_drop::<SidebarDrag>(cx.listener(move |app, source, window, cx| {
+                // Resolve again at release: a fast drag can cross its start threshold on the final move before mouse-up.
+                app.native_sidebar.drop_command = None;
+                app.resolve_native_sidebar_drop(
+                    source,
+                    window.mouse_position(),
+                    bounds.get(),
+                    kind,
+                    &id,
+                    group.as_deref(),
+                    cx,
+                );
+                app.finish_native_sidebar_drop(cx);
+            }))
+    }
+}
+impl<T: ParentElement + InteractiveElement + Styled> SidebarDropTarget for T {}
