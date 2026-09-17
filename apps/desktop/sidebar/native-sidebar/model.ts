@@ -1,7 +1,6 @@
 import { getGroupSessionSummary } from '@/packages/core-ui/group-session-summary';
 import { nativeTagPresentation } from './tag-presentation';
 import { createNativeEmptyState } from './empty-state';
-import { createNativeBulkMenu } from './bulk-menu';
 import { applyNativeSidebarReveal } from './reveal';
 import { createNativeCollections } from './collections';
 import {
@@ -130,7 +129,6 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
     workspaceGroupIds: state.workspaceGroupIds,
   });
   ui.selectedSessionIds = ui.selectedSessionIds.filter((id) => state.sessionsById[id]);
-  const bulkMenu = createNativeBulkMenu(ui);
   const groups = layout.groupIds.flatMap((groupId) => {
     const group = state.groupsById[groupId];
     if (
@@ -179,8 +177,6 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
       ui,
       settings
     );
-    const visible = new Set(projected.sections.flatMap((section) => (section.collapsed ? [] : section.sessionIds)));
-    const visibleIds = sessions.filter((id) => visible.has(id));
     projected.sessions = projected.sessions.map((session) => ({
       ...session,
       ...createNativeSessionActions(
@@ -190,9 +186,9 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
         group.remoteMachineContext
           ? state.remoteCustomSessionTagsByMachineId[group.remoteMachineContext.machineId]
           : state.customSessionTags,
-        visibleIds.slice(visibleIds.indexOf(session.sessionId) + 1).map((id) => state.sessionsById[id]!)
+        [],
+        false
       ),
-      ...(bulkMenu && ui.selectedSessionIds.includes(session.sessionId) ? { menu: bulkMenu } : {}),
     }));
     return [projected];
   });

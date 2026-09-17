@@ -12,11 +12,12 @@ pub(crate) struct NativeSidebarState {
     pub(crate) completion_flashes: std::collections::HashMap<String, std::time::Instant>,
     pub(crate) bounds: gpui::Bounds<gpui::Pixels>,
     pub(crate) menu: Option<super::menu_state::SidebarMenuState>,
+    pub(crate) next_menu_request: u64,
     #[cfg(target_os = "macos")]
     pub(crate) reveal: Option<super::reveal::NativeSidebarReveal>,
     /// CDXC:Sidebar 2026-09-17 WHY:
     /// A frame profile found snapshot and session deep copies dominating the UI thread during redraws.
-    /// Share immutable snapshots with row callbacks; only incoming clock updates need copy-on-write mutation.
+    /// Share immutable snapshots with row callbacks; incoming patches and clock updates use copy-on-write mutation.
     pub(crate) snapshot: Option<Arc<NativeSidebarSnapshot>>,
     pub(crate) scroll: ScrollHandle,
     pub(crate) scroll_offsets: std::collections::HashMap<String, gpui::Point<gpui::Pixels>>,
@@ -60,6 +61,25 @@ impl GhostexGpuiApp {
                 );
                 return;
             }
+        };
+        let update = match update {
+            NativeSidebarUpdate::Patch(patch) if patch.version == 1 => {
+                let Some(previous) = self.native_sidebar.snapshot.as_ref() else {
+                    return;
+                };
+                match patch.apply(previous) {
+                    Ok(snapshot) => NativeSidebarUpdate::Snapshot(snapshot),
+                    Err(error) => {
+                        crate::support_logs::append(
+                            crate::support_logs::GpuiSupportLog::SidebarRefresh,
+                            "gpui.sidebar.native.invalidPatch",
+                            serde_json::json!({"error": error.to_string()}),
+                        );
+                        return;
+                    }
+                }
+            }
+            update => update,
         };
         match update {
             NativeSidebarUpdate::Snapshot(snapshot) if snapshot.version == 1 => {

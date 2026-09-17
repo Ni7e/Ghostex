@@ -104,6 +104,13 @@ impl GhostexGpuiApp {
         let Some(service) = self.sidebar.clone() else {
             return;
         };
+        if command["type"] == "selectSession" && command["mode"] == "focus" {
+            crate::support_logs::append(
+                crate::support_logs::GpuiSupportLog::SidebarRefresh,
+                "gpui.sidebar.focusRequested",
+                json!({"sessionId": command["sessionId"], "epochMs": crate::support_logs::temporary_epoch_ms()}),
+            );
+        }
         let script = format!("window.ghostexGpui.onNativeSidebarCommand({command}); undefined;");
         service.update(cx, |surface, _| {
             surface.execute_app_owned_script(&script);

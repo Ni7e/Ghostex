@@ -156,6 +156,7 @@ pub(crate) struct NativeSidebarCollection {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(crate) enum NativeSidebarUpdate {
     Snapshot(NativeSidebarSnapshot),
+    Patch(super::updates::NativeSidebarPatch),
     Flash {
         version: u32,
         #[serde(rename = "sessionId")]

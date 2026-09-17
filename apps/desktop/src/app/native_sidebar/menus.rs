@@ -19,7 +19,7 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::App,
     ) {
-        let Some(items) = items.as_array().filter(|items| !items.is_empty()).cloned() else {
+        let Some(mut items) = items.as_array().filter(|items| !items.is_empty()).cloned() else {
             return;
         };
         let app = window.root::<Root>().flatten().and_then(|root| {
@@ -53,6 +53,16 @@ impl GhostexGpuiApp {
                     let previous_focus = window.focused(cx);
                     let focus = cx.focus_handle();
                     focus.focus(window, cx);
+                    if items
+                        .first()
+                        .is_some_and(|item| item["onOpen"]["type"] == "sessionMenu")
+                    {
+                        app.native_sidebar.next_menu_request += 1;
+                        let owner =
+                            format!("session-menu:{}", app.native_sidebar.next_menu_request);
+                        items[0]["menuOwner"] = Value::String(owner.clone());
+                        items[0]["onOpen"]["ownerId"] = Value::String(owner);
+                    }
                     let account_panel = items
                         .first()
                         .and_then(|item| item["menuOwner"].as_str())

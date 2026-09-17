@@ -104,6 +104,12 @@ export type NativeSidebarCommand =
       action: 'load' | 'root' | 'accounts' | 'retry' | 'launch';
       agentId?: string;
     }
+  | {
+      type: 'sessionMenu';
+      sessionId: string;
+      ownerId: string;
+      action?: import('./session-card-hover-actions').SessionCardHoverAction;
+    }
   | { type: 'sessionAccounts'; sessionId: string; action: 'load' | 'retry' | 'select'; accountId?: string }
   | {
       type: 'projectMembership';
@@ -207,3 +213,17 @@ export type NativeSidebarMenuItem = {
 
 export type NativeSidebarClockRow = { sessionId: string; timerLabel?: string; lastInteractionLabel?: string };
 export type NativeSidebarClockUpdate = { kind: 'clock'; version: 1; rows: NativeSidebarClockRow[] };
+
+export type NativeSidebarPatch = {
+  kind: 'patch';
+  version: 1;
+  hud: Record<string, unknown>;
+  fields: Record<string, unknown>;
+  groupOrder?: string[];
+  groups: {
+    groupId: string;
+    fields: Record<string, unknown>;
+    sessionOrder?: string[];
+    sessions: { sessionId: string; fields: Record<string, unknown> }[];
+  }[];
+};

@@ -33,7 +33,8 @@ export function createNativeSessionActions(
   settings: ghostexSettings,
   group: Omit<SidebarSessionGroup, 'sessions'>,
   customTags?: CustomSessionTagsState,
-  below: SidebarSessionItem[] = []
+  below: SidebarSessionItem[] = [],
+  includeMenu = true
 ) {
   const id = session.sessionId;
   const caps = getSidebarSessionContextMenuEligibility({
@@ -58,19 +59,31 @@ export function createNativeSessionActions(
     customTags,
     includeTags: tag ? [tag] : [],
   });
-  const tags: NativeSidebarMenuItem[] = tagSections.flatMap((section, index) => [
-    ...(index ? [{ separator: true } as NativeSidebarMenuItem] : []),
-    ...section.options.map((option) => ({
-      ...nativeTagPresentation(option.value),
-      ...runtime(option.label, nativeTagPresentation(option.value)?.icon ?? 'tag', {
-        type: 'setSessionTag',
-        sessionId: id,
-        sessionTag: tag === option.value ? null : option.value,
-      }),
-      checked: tag === option.value,
-    })),
-  ]);
-  if (!group.remoteMachineContext)
+  const lazyMenu = (action?: SessionCardHoverAction): NativeSidebarMenuItem[] => [
+    {
+      label: 'Loading…',
+      disabled: true,
+      menuOwner: `session:${id}`,
+      onOpen: { type: 'sessionMenu', sessionId: id, action, ownerId: `session:${id}` },
+    },
+  ];
+  const tags: NativeSidebarMenuItem[] = !includeMenu
+    ? tagSections.some((section) => section.options.length) || !group.remoteMachineContext
+      ? lazyMenu('tag')
+      : []
+    : tagSections.flatMap((section, index) => [
+        ...(index ? [{ separator: true } as NativeSidebarMenuItem] : []),
+        ...section.options.map((option) => ({
+          ...nativeTagPresentation(option.value),
+          ...runtime(option.label, nativeTagPresentation(option.value)?.icon ?? 'tag', {
+            type: 'setSessionTag',
+            sessionId: id,
+            sessionTag: tag === option.value ? null : option.value,
+          }),
+          checked: tag === option.value,
+        })),
+      ]);
+  if (includeMenu && !group.remoteMachineContext)
     tags.push(
       { separator: true },
       { label: 'New tag…', icon: 'plus', command: { type: 'sidebarAction', action: 'newTag' } }
@@ -82,45 +95,49 @@ export function createNativeSessionActions(
     parked: !parked,
   });
   if (!parked && settings.showTagMenuWhenParking && caps.canTagSession && tags.length) {
-    park.children = [
-      runtime('No tag change', 'tag-off', { type: 'setSessionParked', sessionId: id, parked: true }),
-      { separator: true },
-      ...tags.map((item) =>
-        item.command?.type === 'command'
-          ? {
-              ...item,
-              command: {
-                type: 'batch' as const,
-                messages: [
-                  item.command.message.type === 'setSessionTag'
-                    ? { ...item.command.message, sessionTag: item.command.message.sessionTag ?? tag ?? null }
-                    : item.command.message,
-                  { type: 'setSessionParked' as const, sessionId: id, parked: true },
-                ],
-              },
-            }
-          : item
-      ),
-    ];
+    park.children = !includeMenu
+      ? lazyMenu('park')
+      : [
+          runtime('No tag change', 'tag-off', { type: 'setSessionParked', sessionId: id, parked: true }),
+          { separator: true },
+          ...tags.map((item) =>
+            item.command?.type === 'command'
+              ? {
+                  ...item,
+                  command: {
+                    type: 'batch' as const,
+                    messages: [
+                      item.command.message.type === 'setSessionTag'
+                        ? { ...item.command.message, sessionTag: item.command.message.sessionTag ?? tag ?? null }
+                        : item.command.message,
+                      { type: 'setSessionParked' as const, sessionId: id, parked: true },
+                    ],
+                  },
+                }
+              : item
+          ),
+        ];
     delete park.command;
   }
-  const snoozePresets: NativeSidebarMenuItem[] = SESSION_SNOOZE_PRESETS.map((preset) => {
-    const command = { type: 'sessionAction' as const, sessionId: id, action: 'snooze' as const, preset };
-    return settings.showTagMenuWhenParking && caps.canTagSession && tags.length
-      ? {
-          label: SESSION_SNOOZE_PRESET_LABELS[preset],
-          children: [
-            { label: 'No tag change', icon: 'alarm', command },
-            { separator: true },
-            ...tags.map((item) =>
-              item.command?.type === 'command' && item.command.message.type === 'setSessionTag'
-                ? { ...item, command: { ...command, sessionTag: item.command.message.sessionTag ?? tag ?? null } }
-                : item
-            ),
-          ],
-        }
-      : { label: SESSION_SNOOZE_PRESET_LABELS[preset], command };
-  });
+  const snoozePresets: NativeSidebarMenuItem[] = !includeMenu
+    ? lazyMenu('snooze')
+    : SESSION_SNOOZE_PRESETS.map((preset) => {
+        const command = { type: 'sessionAction' as const, sessionId: id, action: 'snooze' as const, preset };
+        return settings.showTagMenuWhenParking && caps.canTagSession && tags.length
+          ? {
+              label: SESSION_SNOOZE_PRESET_LABELS[preset],
+              children: [
+                { label: 'No tag change', icon: 'alarm', command },
+                { separator: true },
+                ...tags.map((item) =>
+                  item.command?.type === 'command' && item.command.message.type === 'setSessionTag'
+                    ? { ...item, command: { ...command, sessionTag: item.command.message.sessionTag ?? tag ?? null } }
+                    : item
+                ),
+              ],
+            }
+          : { label: SESSION_SNOOZE_PRESET_LABELS[preset], command };
+      });
   const sleep = getSidebarSessionLifecycleState(session) === 'sleeping';
   const rows: Partial<Record<SessionCardHoverAction, NativeSidebarMenuItem>> = {
     close: { ...runtime('Close', 'x', { type: 'closeSession', sessionId: id }), danger: true },
@@ -158,6 +175,12 @@ export function createNativeSessionActions(
       : {}),
   };
   const strip = splitSessionCardHoverButtons(settings.sessionCardHoverButtons);
+  const hover = {
+    hoverBefore: strip.before.flatMap((action) => (rows[action] ? [rows[action]!] : [])),
+    hoverAfter: strip.after.flatMap((action) => (rows[action] ? [rows[action]!] : [])),
+    hoverChevron: strip.chevron,
+  };
+  if (!includeMenu) return { menu: lazyMenu(), ...hover };
   const enabled = [...strip.before, ...strip.after];
   const mirror = settings.showSessionCardHoverButtonsInContextMenu
     ? caps.isBrowserSession
@@ -263,8 +286,6 @@ export function createNativeSessionActions(
   if (!enabled.includes('close')) menu.push({ separator: true }, rows.close!);
   return {
     menu,
-    hoverBefore: strip.before.flatMap((action) => (rows[action] ? [rows[action]!] : [])),
-    hoverAfter: strip.after.flatMap((action) => (rows[action] ? [rows[action]!] : [])),
-    hoverChevron: strip.chevron,
+    ...hover,
   };
 }

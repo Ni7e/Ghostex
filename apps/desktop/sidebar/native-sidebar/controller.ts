@@ -20,6 +20,9 @@ import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import type { createGpuiSidebarRuntime } from '../gxserver-runtime';
 import { applyNativeSidebarMessage, createNativeSidebarSnapshot } from './model';
 import { NativeSidebarUiState } from './ui-state';
+import { createNativeSidebarPublisher } from './updates';
+import { resolveNativeSessionMenu } from './menu-request';
+import { isDiagnosticLoggingScenarioEnabled } from '@/packages/shared/ghostex-settings/diagnostic-logging';
 
 export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSidebarRuntime>): () => void {
   const ui = new NativeSidebarUiState();
@@ -27,6 +30,7 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
   if (!bridge?.postNativeSidebarSnapshot) {
     throw new Error('The native sidebar snapshot bridge is not installed.');
   }
+  const publisher = createNativeSidebarPublisher((payload) => bridge.postNativeSidebarSnapshot!(payload));
   let pendingPublish: number | undefined;
   let disposed = false;
   const publish = () => {
@@ -36,7 +40,23 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     // Publish once per frame after the shared controller has applied the incoming changes.
     pendingPublish = window.requestAnimationFrame(() => {
       pendingPublish = undefined;
-      if (!disposed) bridge.postNativeSidebarSnapshot!(JSON.stringify(createNativeSidebarSnapshot(ui)));
+      if (disposed) return;
+      const started = Date.now();
+      const snapshot = createNativeSidebarSnapshot(ui);
+      const projected = Date.now();
+      const metrics = publisher.publish(snapshot);
+      if (
+        metrics &&
+        snapshot.hud.debuggingMode &&
+        isDiagnosticLoggingScenarioEnabled(snapshot.hud.settings?.diagnosticLogging, 'native.sidebar.refresh')
+      ) {
+        runtime.vscode.postMessage({
+          type: 'sidebarDebugLog',
+          scenarioId: 'native.sidebar.refresh',
+          event: 'nativeSidebar.publish',
+          details: { ...metrics, projectionMs: projected - started, publishMs: Date.now() - projected },
+        });
+      }
     });
   };
   const post = (message: Parameters<typeof runtime.vscode.postMessage>[0]) => {
@@ -87,6 +107,13 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     publish();
   };
   bridge.onNativeSidebarCommand = (command) => {
+    if (command.type === 'sessionMenu') {
+      const items = resolveNativeSessionMenu(ui, publisher.snapshot, command);
+      bridge.postNativeSidebarSnapshot!(
+        JSON.stringify({ kind: 'menu', version: 1, ownerId: command.ownerId, items, close: !items.length })
+      );
+      return;
+    }
     if (command.type === 'command') post(command.message);
     else if (command.type === 'machineAction') {
       const state = sidebarStore.getState();
