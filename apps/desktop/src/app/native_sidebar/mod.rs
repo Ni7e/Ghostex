@@ -4,6 +4,7 @@ mod collections;
 mod decorations;
 mod disclosure;
 pub(crate) mod drag;
+mod drag_source;
 mod empty;
 pub(crate) mod hover_actions;
 pub(crate) mod icons;
@@ -21,6 +22,7 @@ mod rename;
 pub(crate) mod render;
 #[cfg(target_os = "macos")]
 pub(crate) mod reveal;
+mod row_drag;
 pub(crate) mod rows;
 mod scroll;
 mod sections;

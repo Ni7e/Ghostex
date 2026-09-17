@@ -1,4 +1,5 @@
 use super::drag::SidebarDropTarget;
+use super::drag_source::SidebarDragSource;
 use super::{appearance::SidebarAppearance, drag::SidebarDrag, model::NativeSidebarGroup};
 use crate::{
     GhostexGpuiApp,
@@ -6,7 +7,7 @@ use crate::{
 };
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, AppContext, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
     StatefulInteractiveElement, Styled, div, img, px,
 };
 use gpui_component::h_flex;
@@ -29,13 +30,6 @@ impl GhostexGpuiApp {
         let menu = group.menu.clone();
         let scale = appearance.scale;
         let hovered = self.native_sidebar.hovered_group.as_ref() == Some(&id);
-        let dragged = SidebarDrag {
-            kind: "group",
-            space: None,
-            id: id.clone(),
-            title: group.title.clone(),
-            scale,
-        };
         let icon_image = group
             .project_context
             .as_ref()
@@ -46,6 +40,21 @@ impl GhostexGpuiApp {
             })
             .and_then(Value::as_str)
             .and_then(super::images::sidebar_image);
+        let dragged = SidebarDrag {
+            kind: "group",
+            preview: super::drag::SidebarDragPreview::Row(super::row_drag::RowDragPreview {
+                identity: super::row_drag::RowDragIdentity::Project {
+                    image: icon_image.clone(),
+                    show_icon: hud["settings"]["showProjectIcons"].as_bool() != Some(false),
+                },
+                appearance: appearance.clone(),
+                width: px(0.0),
+                pointer_x: px(0.0),
+            }),
+            id: id.clone(),
+            title: group.title.clone(),
+            scale,
+        };
         let tooltip = group.title_tooltip.clone();
         let title = if let Some(editor) = self
             .native_sidebar
@@ -270,7 +279,7 @@ impl GhostexGpuiApp {
                 cx.stop_propagation();
                 Self::show_native_sidebar_menu(&menu, event.position, scale, window, cx);
             })
-            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            .sidebar_drag_source(dragged, cx)
             .sidebar_drop_target("group", drag_id, None, cx)
             .on_click(cx.listener(move |app, _, _, cx| {
                 cx.stop_propagation();

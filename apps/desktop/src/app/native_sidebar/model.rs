@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,7 +49,8 @@ pub(crate) struct NativeSidebarGroup {
     pub(crate) is_stale: bool,
     pub(crate) project_context: Option<Value>,
     pub(crate) remote_machine_context: Option<Value>,
-    pub(crate) sessions: Vec<NativeSidebarSession>,
+    #[serde(deserialize_with = "deserialize_sessions")]
+    pub(crate) sessions: Vec<Arc<NativeSidebarSession>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -192,4 +194,11 @@ pub(crate) struct NativeSidebarRevealRequest {
 pub(crate) struct NativeSidebarRenameRequest {
     pub(crate) collection_id: String,
     pub(crate) request_id: u64,
+}
+
+fn deserialize_sessions<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<Arc<NativeSidebarSession>>, D::Error> {
+    Vec::<NativeSidebarSession>::deserialize(deserializer)
+        .map(|sessions| sessions.into_iter().map(Arc::new).collect())
 }

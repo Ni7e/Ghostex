@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use crate::app::helpers::*;
 
+#[derive(Clone)]
 pub(crate) struct SidebarAppearance {
     pub(crate) light: bool,
     pub(crate) session_selected: Hsla,

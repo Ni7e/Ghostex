@@ -13,6 +13,23 @@ pub(crate) fn session_icon(
     appearance: &SidebarAppearance,
     hovered: bool,
 ) -> AnyElement {
+    render_session_icon(session, hud, appearance, hovered, false)
+}
+
+pub(crate) fn session_drag_icon(
+    session: &NativeSidebarSession,
+    appearance: &SidebarAppearance,
+) -> AnyElement {
+    render_session_icon(session, &Value::Null, appearance, false, true)
+}
+
+fn render_session_icon(
+    session: &NativeSidebarSession,
+    hud: &Value,
+    appearance: &SidebarAppearance,
+    hovered: bool,
+    dragging: bool,
+) -> AnyElement {
     let scale = appearance.scale;
     let settings = &hud["settings"];
     let delayed = session
@@ -58,7 +75,7 @@ pub(crate) fn session_icon(
             .as_str()
             .and_then(|value| u32::from_str_radix(value.trim_start_matches('#'), 16).ok())
             .unwrap_or(0xb4b8c0);
-        let light = settings.as_object().is_some_and(sidebar_uses_light_theme);
+        let light = appearance.light;
         let color = if light
             && session.details.get("effectiveTag").and_then(Value::as_str) == Some("favorite")
         {
@@ -109,8 +126,11 @@ pub(crate) fn session_icon(
     } else {
         0.48
     };
-    if settings.as_object().is_some_and(sidebar_uses_light_theme) {
+    if appearance.light {
         opacity = (opacity * 1.3).min(1.0);
+    }
+    if dragging {
+        opacity = 1.0;
     }
     let image = session
         .favicon_data_url

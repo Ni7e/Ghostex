@@ -1,4 +1,5 @@
 use gpui::ScrollHandle;
+use std::sync::Arc;
 
 use super::model::{NativeSidebarSnapshot, NativeSidebarUpdate};
 use crate::GhostexGpuiApp;
@@ -13,7 +14,10 @@ pub(crate) struct NativeSidebarState {
     pub(crate) menu: Option<super::menu_state::SidebarMenuState>,
     #[cfg(target_os = "macos")]
     pub(crate) reveal: Option<super::reveal::NativeSidebarReveal>,
-    pub(crate) snapshot: Option<NativeSidebarSnapshot>,
+    /// CDXC:Sidebar 2026-09-17 WHY:
+    /// A frame profile found snapshot and session deep copies dominating the UI thread during redraws.
+    /// Share immutable snapshots with row callbacks; only incoming clock updates need copy-on-write mutation.
+    pub(crate) snapshot: Option<Arc<NativeSidebarSnapshot>>,
     pub(crate) scroll: ScrollHandle,
     pub(crate) scroll_offsets: std::collections::HashMap<String, gpui::Point<gpui::Pixels>>,
     pub(crate) pending_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
@@ -22,7 +26,7 @@ pub(crate) struct NativeSidebarState {
     pub(crate) handled_reveal: Option<u64>,
     pub(crate) scroll_animation: Option<super::scroll::SidebarScrollAnimation>,
     pub(crate) reveal_flash: Option<(String, std::time::Instant)>,
-    pub(crate) dragging_space: Option<String>,
+    pub(crate) dragging: Option<(&'static str, String)>,
     pub(crate) drop_command: Option<serde_json::Value>,
     pub(crate) name_editor: Option<super::rename::SidebarNameEditor>,
     pub(crate) pointer_inside: bool,
@@ -30,6 +34,14 @@ pub(crate) struct NativeSidebarState {
     pub(crate) hovered_section: Option<String>,
     pub(crate) hovered_group: Option<String>,
     pub(crate) hovered_session: Option<String>,
+}
+
+impl NativeSidebarState {
+    pub(crate) fn is_dragging(&self, kind: &str, id: &str) -> bool {
+        self.dragging
+            .as_ref()
+            .is_some_and(|(drag_kind, drag_id)| *drag_kind == kind && drag_id == id)
+    }
 }
 
 impl GhostexGpuiApp {
@@ -80,7 +92,7 @@ impl GhostexGpuiApp {
                 if let Some(menu) = self.native_sidebar.menu.as_mut() {
                     menu.refresh(&snapshot);
                 }
-                self.native_sidebar.snapshot = Some(snapshot);
+                self.native_sidebar.snapshot = Some(Arc::new(snapshot));
             }
             NativeSidebarUpdate::Flash {
                 version: 1,
@@ -119,6 +131,7 @@ impl GhostexGpuiApp {
                 let Some(snapshot) = self.native_sidebar.snapshot.as_mut() else {
                     return;
                 };
+                let snapshot = Arc::make_mut(snapshot);
                 let rows: std::collections::HashMap<_, _> = rows
                     .into_iter()
                     .map(|row| (row.session_id.clone(), row))
@@ -129,6 +142,7 @@ impl GhostexGpuiApp {
                     .flat_map(|group| group.sessions.iter_mut())
                 {
                     if let Some(row) = rows.get(&session.session_id) {
+                        let session = Arc::make_mut(session);
                         session.details.insert(
                             "timerLabel".into(),
                             row.timer_label

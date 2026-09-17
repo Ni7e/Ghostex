@@ -1,6 +1,6 @@
 use super::drag::SidebarDrag;
 use super::drag::SidebarDropTarget;
-use gpui::AppContext;
+use super::drag_source::SidebarDragSource;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
@@ -82,7 +82,6 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let id = space.id.clone();
         let menu_id = id.clone();
-        let drag_view = cx.entity().downgrade();
         let drag_id = id.clone();
         let name = space.name.clone();
         let scale = appearance.scale;
@@ -96,7 +95,7 @@ impl GhostexGpuiApp {
             id: id.clone(),
             title: space.name.clone(),
             scale,
-            space: Some(super::space_drag::SpaceDragPreview {
+            preview: super::drag::SidebarDragPreview::Space(super::space_drag::SpaceDragPreview {
                 visible_ids: visible_ids.to_vec(),
                 icon: space.icon.clone(),
                 color,
@@ -125,7 +124,7 @@ impl GhostexGpuiApp {
             .text_color(color)
             .opacity(if has_status { 0.8 } else { 1.0 });
         v_flex().id(format!("native-sidebar-space-{id}")).relative().size(px(28.0 * scale)).flex_shrink_0().items_center().justify_center().rounded(px(6.0 * scale)).border_1().border_color(gpui::transparent_black()).cursor_pointer()
-            .when(self.native_sidebar.dragging_space.as_ref() == Some(&id), |row| row.opacity(0.3))
+            .when(self.native_sidebar.is_dragging("space", &id), |row| row.opacity(0.3))
             .when(space.contains_active_session && !space.selected, |row| row.bg(appearance.selected).border_color(appearance.selected_outline))
             .when(space.selected, |row| row.bg(appearance.foreground.opacity(0.12)).border_color(appearance.foreground.opacity(0.16)))
             .hover(|row| row.bg(appearance.hover))
@@ -135,7 +134,7 @@ impl GhostexGpuiApp {
                 .when(space.working_count > 0, |row| row.child(div().text_color(rgb(0xf8ad07)).child(space.working_count.to_string())))
                 .when(space.attention_count > 0, |row| row.child(div().text_color(rgb(0x95d7f6)).child(space.attention_count.to_string())))))
             .when(self.native_sidebar.pointer_inside && self.native_sidebar.menu.is_none() && !cx.has_active_drag(), |row| row.tooltip_show_delay(appearance.tooltip_delay).tooltip(move |window, cx| titlebar_tooltip(name.clone(), window, cx)))
-            .when(id != "other", |row| row.on_drag(dragged, move |dragged, _, window, cx| { let _ = drag_view.update(cx, |app, cx| { app.native_sidebar.dragging_space = Some(dragged.id.clone()); cx.notify(); }); let mut preview = dragged.clone(); if let Some(space) = &mut preview.space { space.pointer_y = window.mouse_position().y; } cx.new(|_| preview) }))
+            .when(id != "other", |row| row.sidebar_drag_source(dragged, cx))
             .sidebar_drop_target("space", drag_id, None, cx)
             .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({"type": "selectSpace", "spaceId": id}), cx); }))
             .on_mouse_down(MouseButton::Right, cx.listener(move |_, event: &gpui::MouseDownEvent, window, cx| {

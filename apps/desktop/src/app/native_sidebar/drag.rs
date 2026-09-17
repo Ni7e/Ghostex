@@ -1,4 +1,4 @@
-use crate::{GhostexGpuiApp, app::helpers::*};
+use crate::GhostexGpuiApp;
 use gpui::{
     AnyElement, Bounds, Context, DragMoveEvent, InteractiveElement, IntoElement, ParentElement,
     Pixels, Point, Render, Styled, Window, div, px,
@@ -11,26 +11,21 @@ pub(crate) struct SidebarDrag {
     pub(crate) id: String,
     pub(crate) title: String,
     pub(crate) scale: f32,
-    pub(crate) space: Option<super::space_drag::SpaceDragPreview>,
+    pub(crate) preview: SidebarDragPreview,
+}
+
+#[derive(Clone)]
+pub(crate) enum SidebarDragPreview {
+    Space(super::space_drag::SpaceDragPreview),
+    Row(super::row_drag::RowDragPreview),
 }
 
 impl Render for SidebarDrag {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> AnyElement {
-        if let Some(space) = &self.space {
-            return space.render(self.scale, window);
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        match &self.preview {
+            SidebarDragPreview::Space(space) => space.render(self.scale, window),
+            SidebarDragPreview::Row(row) => row.render(&self.title, window),
         }
-        div()
-            .h(px(34.0 * self.scale))
-            .px(px(8.0 * self.scale))
-            .flex()
-            .items_center()
-            .max_w(px(260.0 * self.scale))
-            .rounded(px(5.0 * self.scale))
-            .bg(titlebar_background())
-            .text_color(chrome_color(0xb4b8c0, 0x262626))
-            .text_size(px(15.55 * self.scale))
-            .child(self.title.clone())
-            .into_any_element()
     }
 }
 
@@ -77,16 +72,17 @@ impl GhostexGpuiApp {
             return;
         }
         if source.kind == "space" && matches!(target_kind, "space" | "space-row") {
-            let command = source.space.as_ref().and_then(|space| {
-                space.drop_command(
-                    &source.id,
-                    target_kind,
-                    target_id,
-                    position,
-                    bounds,
-                    source.scale,
-                )
-            });
+            let SidebarDragPreview::Space(space) = &source.preview else {
+                return;
+            };
+            let command = space.drop_command(
+                &source.id,
+                target_kind,
+                target_id,
+                position,
+                bounds,
+                source.scale,
+            );
             if self.native_sidebar.drop_command != command {
                 self.native_sidebar.drop_command = command;
                 cx.notify();

@@ -1,6 +1,6 @@
 use super::drag::SidebarDrag;
 use super::drag::SidebarDropTarget;
-use gpui::AppContext;
+use super::drag_source::SidebarDragSource;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
@@ -20,7 +20,7 @@ impl GhostexGpuiApp {
     pub(crate) fn render_native_sidebar_session(
         &self,
         group: &NativeSidebarGroup,
-        session: &NativeSidebarSession,
+        session: &std::sync::Arc<NativeSidebarSession>,
         hud: &Value,
         appearance: &SidebarAppearance,
         cx: &mut gpui::Context<Self>,
@@ -38,7 +38,14 @@ impl GhostexGpuiApp {
         let drag_group_id = group_id.clone();
         let dragged = SidebarDrag {
             kind: "session",
-            space: None,
+            preview: super::drag::SidebarDragPreview::Row(super::row_drag::RowDragPreview {
+                identity: super::row_drag::RowDragIdentity::Session {
+                    session: session.clone(),
+                },
+                appearance: appearance.clone(),
+                width: px(0.0),
+                pointer_x: px(0.0),
+            }),
             id: session_id.clone(),
             title: session.title().to_owned(),
             scale: appearance.scale,
@@ -63,7 +70,7 @@ impl GhostexGpuiApp {
             == Some(true)
             && !session.is_browser();
         let context_id = session_id.clone();
-        let menu = session.details.get("menu").cloned().unwrap_or(Value::Null);
+        let context_session = session.clone();
         let tooltip = session
             .details
             .get("titleTooltip")
@@ -97,6 +104,7 @@ impl GhostexGpuiApp {
                 .relative().h(px(34.0 * scale)).w_full().min_w_0().pl(px(5.0 * scale)).pr(px(6.0 * scale)).gap(px(6.0 * scale)).rounded(px(5.0 * scale))
                 .cursor_default()
                 .when(stale, |row| row.opacity(0.55))
+                .when(self.native_sidebar.is_dragging("session", &session_id), |row| row.opacity(0.2))
                 .when_some(completion, |row, start| row.opacity(super::status::completion_opacity(start)))
                 .when(session.is_visible && !session.is_focused, |row| row.bg(appearance.visible))
                 .when(session.is_focused, |row| row.bg(appearance.session_selected))
@@ -119,7 +127,7 @@ impl GhostexGpuiApp {
                 .when(!hovered && !question && (timer.is_some() || (show_time && session.activity != "working" && session.activity != "attention")), |row| row.child(div().text_size(px(13.55 * scale)).text_color(if sleeping { chrome_color(0x686868, 0x959595) } else { chrome_color(0xa6a6a6, 0x424242) }).child(time)))
                 .when(hovered, |row| row.child(self.render_native_session_hover_actions(group, session, appearance, cx)))
                 .when(question, |row| row.child(super::status::question_indicator(session.activity == "working", scale)))
-                .when(can_drag && self.native_sidebar.menu.is_none(), |row| row.on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone())))
+                .when(can_drag && self.native_sidebar.menu.is_none(), |row| row.sidebar_drag_source(dragged, cx))
 .sidebar_drop_target("session", drag_id, Some(drag_group_id), cx)
                 .on_click(cx.listener(move |app, event: &gpui::ClickEvent, _, cx| {
                     cx.stop_propagation();
@@ -135,7 +143,7 @@ impl GhostexGpuiApp {
                 .on_mouse_down(MouseButton::Right, cx.listener(move |app, event: &gpui::MouseDownEvent, window, cx| {
                     cx.stop_propagation();
                     if !selected { app.dispatch_native_sidebar_ui(json!({"type": "selectSession", "mode": "clear", "sessionId": context_id}), cx); }
-                    Self::show_native_sidebar_menu(&menu, event.position, scale, window, cx);
+                    Self::show_native_sidebar_menu(context_session.details.get("menu").unwrap_or(&Value::Null), event.position, scale, window, cx);
                 })))
             .into_any_element()
     }

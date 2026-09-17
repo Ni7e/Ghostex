@@ -131,6 +131,10 @@ impl GhostexGpuiApp {
                 self.render_native_disclosure(key, content.into_any_element(), cx)
             });
         v_flex()
+            .when(
+                self.native_sidebar.is_dragging("group", &group.group_id),
+                |row| row.opacity(0.18),
+            )
             .on_children_prepainted(move |bounds, _, cx| {
                 if let (Some(first), Some(last)) = (bounds.first(), bounds.last()) {
                     let bounds = gpui::Bounds {

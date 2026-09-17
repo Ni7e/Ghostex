@@ -1,4 +1,5 @@
 use super::drag::SidebarDropTarget;
+use super::drag_source::SidebarDragSource;
 use super::{
     appearance::SidebarAppearance,
     model::{NativeSidebarCollection, NativeSidebarSnapshot},
@@ -9,8 +10,8 @@ use crate::{
 };
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, AppContext, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, StatefulInteractiveElement, Styled, div, px, rgb,
+    AnyElement, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    StatefulInteractiveElement, Styled, div, px, rgb,
 };
 use gpui_component::{
     h_flex,
@@ -38,13 +39,6 @@ impl GhostexGpuiApp {
             .is_some_and(|command| command["collectionId"] == id);
         let rename_id = id.clone();
         let drop_id = id.clone();
-        let dragged = super::drag::SidebarDrag {
-            kind: "collection",
-            space: None,
-            id: id.clone(),
-            title: collection.title.clone(),
-            scale: appearance.scale,
-        };
         let bulk_id = id.clone();
         let menu = collection.menu.clone();
         let scale = appearance.scale;
@@ -55,6 +49,27 @@ impl GhostexGpuiApp {
         let style = snapshot.hud["settings"]["sidebarProjectGroupStyle"]
             .as_str()
             .unwrap_or("branched");
+        let dragged = super::drag::SidebarDrag {
+            kind: "collection",
+            preview: super::drag::SidebarDragPreview::Row(super::row_drag::RowDragPreview {
+                identity: super::row_drag::RowDragIdentity::Collection {
+                    color,
+                    background: if style == "branched" {
+                        color.opacity(0.18)
+                    } else if style == "header" {
+                        color.opacity(0.12)
+                    } else {
+                        gpui::transparent_black()
+                    },
+                },
+                appearance: appearance.clone(),
+                width: px(0.0),
+                pointer_x: px(0.0),
+            }),
+            id: id.clone(),
+            title: collection.title.clone(),
+            scale: appearance.scale,
+        };
         let rail_width = if style == "quiet" {
             1.0
         } else if style == "branched" {
@@ -105,7 +120,7 @@ impl GhostexGpuiApp {
                 )
                 .into_any_element(),
         };
-        v_flex().relative().flex_shrink_0().ml(px(3.0 * scale)).mr(px(5.0 * scale)).mb(px(10.0 * scale)).pb(px(5.0 * scale)).pl(px((rail_width + 10.0) * scale))
+        v_flex().relative().when(self.native_sidebar.is_dragging("collection", &id), |row| row.opacity(0.28)).flex_shrink_0().ml(px(3.0 * scale)).mr(px(5.0 * scale)).mb(px(10.0 * scale)).pb(px(5.0 * scale)).pl(px((rail_width + 10.0) * scale))
             .child(div().absolute().left_0().top(px(if style == "branched" { 0.0 } else { scale })).bottom(px(5.0 * scale)).w(px(rail_width * scale)).bg(rail_color))
             .child(h_flex().id(format!("native-collection-{id}")).relative().ml(px(if style == "branched" { -10.0 } else { -9.0 } * scale)).h(px(30.0 * scale)).pl(px(5.0 * scale)).pr(px(8.0 * scale)).gap(px(5.0 * scale))
                 .when(style == "header", |row| row.bg(color.opacity(0.12)))
@@ -126,7 +141,7 @@ impl GhostexGpuiApp {
                     else if app.native_sidebar.hovered_collection.as_ref() == Some(&hover_id) { app.native_sidebar.hovered_collection = None; }
                     cx.notify();
                 }))
-                .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                .sidebar_drag_source(dragged, cx)
 .sidebar_drop_target("collection", drop_id, None, cx)
                 .on_mouse_down(MouseButton::Right, move |event, window, cx| { cx.stop_propagation(); Self::show_native_sidebar_menu(&menu, event.position, scale, window, cx); })
                 .on_click(cx.listener(move |app, _, _, cx| { cx.stop_propagation(); app.dispatch_native_sidebar_ui(json!({ "type": "collectionAction", "collectionId": id, "action": "toggle" }), cx); })))
