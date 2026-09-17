@@ -133,6 +133,11 @@ pub fn start_board_work(
         Value::String("workspace".to_string()),
     );
     create_params.insert("requireLaunchCommand".to_string(), Value::Bool(true));
+    for key in ["agentModel", "agentEffort"] {
+        if let Some(value) = read_trimmed(params, key) {
+            create_params.insert(key.to_string(), Value::String(value));
+        }
+    }
     let mut launch_settings = Map::new();
     if let Some(command) = agent_button.and_then(|button| button.get("command")) {
         launch_settings.insert("agentCommand".to_string(), command.clone());

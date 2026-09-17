@@ -58,6 +58,13 @@ pub(crate) fn create_agent_session_params_for_project(
         .or_else(|| read_text_from_map(&launch_settings, "icon"));
     let configured_command = read_text_from_map(&agent_config, "command")
         .or_else(|| read_text_from_map(&launch_settings, "agentCommand"));
+    let configured_command = apply_requested_agent_model(
+        &agent_id,
+        &agent_config,
+        &launch_settings,
+        params,
+        configured_command,
+    )?;
     if let Some(command) = configured_command.as_ref() {
         runtime_settings
             .entry("accountBaseCommand")
@@ -252,6 +259,47 @@ pub(crate) fn project_agent_session_default_title(project: &Value, session: &Val
         read_text_from_map(&agent_config, "name").as_deref(),
         agent_id.as_deref(),
     )
+}
+
+/// CDXC:AgentProviders 2026-09-17 DECISION:
+/// User: an agent spawning another agent sets that worker's model and effort for the session only, for Claude and Codex only, and a resumed worker keeps them.
+/// Typing `/model` or `/effort` into Claude Code saves the choice as the default for every new session, so the choice travels as launch flags instead.
+/// The flags live in the session's saved base command, which resume, fork and account wrapping all rebuild from.
+/// SEE-ALSO: server/src/ghostex_cli/actions.rs (create-agent), server/src/ghostex_cli/board.rs and server/src/board_start_work.rs (board start-work).
+fn apply_requested_agent_model(
+    agent_id: &str,
+    agent_config: &Map<String, Value>,
+    launch_settings: &Map<String, Value>,
+    params: &Map<String, Value>,
+    command: Option<String>,
+) -> Result<Option<String>, DomainStateError> {
+    let model = read_text(params, "agentModel");
+    let effort = read_text(params, "agentEffort");
+    if model.is_none() && effort.is_none() {
+        return Ok(command);
+    }
+    for value in model.iter().chain(effort.iter()) {
+        let valid = value.len() <= 160
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-._[]():/".contains(&byte));
+        if !valid {
+            return Err(DomainStateError::bad_request(format!(
+                "\"{value}\" is not a valid model or effort."
+            )));
+        }
+    }
+    let family = resume_agent_family_id(Some(agent_id.to_string()), agent_config, launch_settings)
+        .filter(|family| matches!(family.as_str(), "claude" | "codex"))
+        .ok_or_else(|| {
+            DomainStateError::bad_request(
+                "A launch model or effort can only be set for Claude and Codex agents.",
+            )
+        })?;
+    let base = command
+        .or_else(|| default_agent_command(&family).map(str::to_string))
+        .unwrap_or_else(|| family.clone());
+    with_agent_model_options(&base, &family, model.as_deref(), effort.as_deref()).map(Some)
 }
 
 pub(crate) fn create_agent_session_default_title(

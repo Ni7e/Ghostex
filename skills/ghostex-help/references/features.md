@@ -729,6 +729,10 @@ Cross-agent orchestration also works through the `$ghostex-cli` skill. For
    `ghostex send-message <selector> "<text>"`, read output with
    `ghostex read-text` or `ghostex read-session-chat`, and wait with
    `ghostex wait-for-text`.
+   To pick the worker's model and effort, add `--model <model> --effort <level>`
+   to `create-agent` or `board start-work` (Claude and Codex). The choice
+   applies to that session only, survives a resume, and leaves your default
+   model unchanged.
 3. The optional Fable 5.6 Orchestration skill (`$ghostex-fable-56-orchestration`)
    packages a plan-with-Claude, implement-with-Codex, verify-with-Claude
    pipeline.

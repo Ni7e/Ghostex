@@ -916,6 +916,19 @@ fn create_gxserver_agent_session(payload: &Value, flags: &Flags) -> CliResult<Va
     let mut params = Map::new();
     params.insert("agentId".to_string(), json!(agent_id));
     params.insert("projectId".to_string(), json!(project_id));
+    for (key, flag) in [("agentModel", "--model"), ("agentEffort", "--effort")] {
+        match payload.get(key) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(value)) => {
+                params.insert(key.to_string(), json!(value));
+            }
+            Some(_) => {
+                return Err(CliError::Other(format!(
+                    "create-agent {flag} needs a value."
+                )))
+            }
+        }
+    }
     // CDXC:SessionChat 2026-09-09 SEE-ALSO:
     // Mobile uses --defer-start to open the durable draft immediately; its background attach owns provider startup.
     if flags.truthy("deferStart") {
@@ -1568,6 +1581,8 @@ fn parse_agent(rest: &[String], flags: &Flags) -> Value {
         flag_json(flags, "firstInputDraft"),
     );
     set_or_remove(&mut map, "groupId", flag_json(flags, "groupId"));
+    set_or_remove(&mut map, "agentModel", flag_json(flags, "model"));
+    set_or_remove(&mut map, "agentEffort", flag_json(flags, "effort"));
     Value::Object(map)
 }
 
