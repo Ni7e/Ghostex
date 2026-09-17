@@ -2127,6 +2127,15 @@ export function SessionGroupSection({
           style={groupHeaderStyle}
         >
           <div className='group-title-wrap'>
+            {projectContext && !isChatCollection ? (
+              <IconChevronRight
+                aria-hidden='true'
+                className='project-disclosure-chevron'
+                data-collapsed={String(isCollapsed)}
+                size={16}
+                stroke={2}
+              />
+            ) : null}
             {isEditing ? (
               <input
                 className='group-title-input'

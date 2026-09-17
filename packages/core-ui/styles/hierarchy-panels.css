@@ -500,34 +500,21 @@ section.project-collection[data-collapsed='true'][data-contains-active-session='
   margin-left: 10px;
 }
 
-/* Branched mode adds a short visual link from the group rail to each project. */
-.sidebar-reference-layout[data-project-group-style='branched']
-  .project-collection-projects
-  > .group[data-project-group='true']
-  .group-title-wrap::before {
-  background: var(--project-group-rail-color);
-  content: '';
-  height: 2px;
-  left: -43px;
+/* CDXC:Projects 2026-09-17 DECISION:
+ * User: expanded projects show the same right-facing chevron rotated down, shifted 2px left.
+ * The disclosure replaces the short branch marker beside the project icon.
+ */
+.project-disclosure-chevron {
+  color: #a6adb6;
+  left: -23px;
   pointer-events: none;
   position: absolute;
-  top: calc(50% - 1px);
-  width: 39px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
-/* Top-level projects keep the same branch marker without inventing a parent rail. */
-.sidebar-reference-layout[data-project-group-style='branched']
-  .reference-project-group-list
-  > .group[data-project-group='true']
-  .group-title-wrap::before {
-  background: color-mix(in srgb, var(--workspace-project-theme-color, var(--app-foreground)) 18%, transparent);
-  content: '';
-  height: 2px;
-  left: -21px;
-  pointer-events: none;
-  position: absolute;
-  top: calc(50% - 1px);
-  width: 13px;
+.project-disclosure-chevron[data-collapsed='false'] {
+  transform: translateY(-50%) rotate(90deg);
 }
 
 /* Non-reference contexts (Storybook grid stories, legacy layouts). */

@@ -14,6 +14,8 @@ use gpui_component::h_flex;
 use serde_json::{Value, json};
 
 impl GhostexGpuiApp {
+    /// CDXC:Projects 2026-09-17 DECISION:
+    /// User: expanded projects show the same right-facing chevron rotated down, shifted 2px left.
     pub(crate) fn render_native_project_header(
         &self,
         group: &NativeSidebarGroup,
@@ -102,14 +104,6 @@ impl GhostexGpuiApp {
                 })
                 .into_any_element()
         };
-        let branch_color = group
-            .collection_color
-            .as_ref()
-            .and_then(|color| u32::from_str_radix(color.trim_start_matches('#'), 16).ok())
-            .map(gpui::rgb)
-            .map(gpui::Hsla::from)
-            .unwrap_or(appearance.foreground)
-            .opacity(0.18);
         let mut actions = group.header_actions.clone();
         if group.show_list_toggle {
             actions.insert(0, json!({ "label": if group.expanded { "Compact" } else { "Full" }, "icon": if group.expanded { "chevron-up" } else { "chevron-down" }, "command": { "type": "toggleList", "groupId": group.storage_id } }));
@@ -124,49 +118,20 @@ impl GhostexGpuiApp {
             .cursor_default()
             .when(group.is_stale, |row| row.opacity(0.55))
             .hover(|row| row.bg(appearance.hover))
-            .when(hovered || group.collapsed, |row| {
-                row.child(
-                    div()
-                        .absolute()
-                        .left(px(-13.0 * scale))
-                        .top(px(7.0 * scale))
-                        .child(titlebar_svg_icon(
-                            if group.collapsed {
-                                COMMAND_ICON_CHEVRON_RIGHT
-                            } else {
-                                COMMAND_ICON_CHEVRON_DOWN
-                            },
-                            16.0 * scale,
-                            appearance.muted,
-                        )),
-                )
-            })
-            .when(
-                !hovered
-                    && !group.collapsed
-                    && hud["settings"]["sidebarProjectGroupStyle"]
-                        .as_str()
-                        .unwrap_or("branched")
-                        == "branched",
-                |row| {
-                    row.child(
-                        div()
-                            .absolute()
-                            .left(px(if group.collection_color.is_some() {
-                                -35.0
-                            } else {
-                                -13.0
-                            } * scale))
-                            .top(px(14.0 * scale))
-                            .w(px(if group.collection_color.is_some() {
-                                39.0
-                            } else {
-                                13.0
-                            } * scale))
-                            .h(px(2.0 * scale))
-                            .bg(branch_color),
-                    )
-                },
+            .child(
+                div()
+                    .absolute()
+                    .left(px(-15.0 * scale))
+                    .top(px(7.0 * scale))
+                    .child(
+                        gpui::svg()
+                            .path(COMMAND_ICON_CHEVRON_RIGHT)
+                            .size(px(16.0 * scale))
+                            .text_color(appearance.muted)
+                            .with_transformation(gpui::Transformation::rotate(gpui::percentage(
+                                if group.collapsed { 0.0 } else { 0.25 },
+                            ))),
+                    ),
             )
             .when(
                 hud["settings"]["showProjectIcons"].as_bool() != Some(false),

@@ -49,54 +49,12 @@ impl GhostexGpuiApp {
         &self,
         session: &NativeSidebarSession,
         appearance: &SidebarAppearance,
-        cx: &mut gpui::Context<Self>,
+        _cx: &mut gpui::Context<Self>,
     ) -> Vec<AnyElement> {
         let scale = appearance.scale;
-        let id = session.session_id.clone();
-        let pinned = session.is_pinned;
         let mut decorations = Vec::new();
-        let has_timer = [
-            "delayedSendDeadlineAt",
-            "delayedSendRemainingLabel",
-            "closeAfterDoneDeadlineAt",
-            "closeAfterDoneRemainingLabel",
-        ]
-        .iter()
-        .any(|key| session.details.get(*key).and_then(Value::as_str).is_some())
-            || session
-                .details
-                .get("closeAfterDone")
-                .and_then(Value::as_bool)
-                == Some(true);
-        if !has_timer && !session.is_browser() {
-            decorations.push(
-                div()
-                    .id(format!("native-session-pin-{id}"))
-                    .absolute()
-                    .left(px(-12.0 * scale))
-                    .top(px(9.5 * scale))
-                    .size(px(15.0 * scale))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .opacity(if pinned { 0.5 } else { 0.0 })
-                    .cursor_pointer()
-                    .hover(|button| button.opacity(1.0))
-                    .child(titlebar_svg_icon(
-                        "titlebar/pin.svg",
-                        13.0 * scale,
-                        chrome_color(0xe5e5e5, 0x525252).into(),
-                    ))
-                    .on_click(cx.listener(move |app, _, _, cx| {
-                        cx.stop_propagation();
-                        app.dispatch_native_sidebar_command(
-                            json!({"type": "setSessionPinned", "sessionId": id, "pinned": !pinned}),
-                            cx,
-                        );
-                    }))
-                    .into_any_element(),
-            );
-        }
+        // CDXC:Sessions 2026-09-17 DECISION:
+        // User: remove the sidebar row's floating pin and unpin icons.
         if session
             .session_note
             .as_ref()
@@ -105,7 +63,7 @@ impl GhostexGpuiApp {
             decorations.push(
                 div()
                     .absolute()
-                    .left(px((if pinned { -15.0 } else { 0.0 }) * scale))
+                    .left(px(0.0))
                     .top(px(15.0 * scale))
                     .size(px(4.0 * scale))
                     .rounded_full()
