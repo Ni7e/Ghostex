@@ -71,6 +71,7 @@ impl GhostexGpuiApp {
             == Some(true)
             && !session.is_browser();
         let context_id = session_id.clone();
+        let close_id = session_id.clone();
         let context_session = session.clone();
         let tooltip = session
             .details
@@ -130,6 +131,19 @@ impl GhostexGpuiApp {
                 .when(question, |row| row.child(super::status::question_indicator(session.activity == "working", scale)))
                 .when(can_drag && self.native_sidebar.menu.is_none(), |row| row.sidebar_drag_source(dragged, cx))
 .sidebar_drop_target("session", drag_id, Some(drag_group_id), cx)
+                .on_mouse_down(MouseButton::Middle, |_, window, _| {
+                    window.prevent_default();
+                })
+                .on_aux_click(cx.listener(move |app, event: &gpui::ClickEvent, window, cx| {
+                    if !event.is_middle_click() { return; }
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    app.close_native_sidebar_menu(window, cx);
+                    app.dispatch_native_sidebar_command(
+                        json!({"type": "closeSession", "sessionId": close_id}),
+                        cx,
+                    );
+                }))
                 .on_click(cx.listener(move |app, event: &gpui::ClickEvent, _, cx| {
                     cx.stop_propagation();
                     if event.click_count() == 2 && double_click_rename {
