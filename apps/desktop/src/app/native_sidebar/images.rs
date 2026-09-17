@@ -1,6 +1,19 @@
 use crate::app::helpers::*;
 use gpui::{Image, ImageFormat};
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+
+#[derive(Default)]
+struct ImageCache {
+    images: HashMap<String, Arc<Image>>,
+    order: VecDeque<String>,
+    source_bytes: usize,
+}
+
+thread_local! {
+    static IMAGES: RefCell<[ImageCache; 2]> = RefCell::default();
+}
 
 pub(crate) fn sidebar_image(value: &str) -> Option<Arc<Image>> {
     image(value, false)
@@ -30,6 +43,28 @@ fn image(value: &str, monochrome: bool) -> Option<Arc<Image>> {
     if value.len() > 4 * 1024 * 1024 {
         return None;
     }
+    // CDXC:Sidebar 2026-09-17 WHY:
+    // Scroll and spinner frames reuse the same icon data; decoding and hashing new GPUI images on every row render wastes UI-thread time.
+    // Bound retained source data and entries independently, including separate light-theme artwork.
+    IMAGES.with_borrow_mut(|caches| {
+        let cache = &mut caches[usize::from(monochrome)];
+        if let Some(image) = cache.images.get(value) {
+            return Some(image.clone());
+        }
+        let image = decode_image(value, monochrome)?;
+        while cache.images.len() >= 128 || cache.source_bytes + value.len() > 4 * 1024 * 1024 {
+            let oldest = cache.order.pop_front()?;
+            cache.source_bytes -= oldest.len();
+            cache.images.remove(&oldest);
+        }
+        cache.source_bytes += value.len();
+        cache.order.push_back(value.to_owned());
+        cache.images.insert(value.to_owned(), image.clone());
+        Some(image)
+    })
+}
+
+fn decode_image(value: &str, monochrome: bool) -> Option<Arc<Image>> {
     let (metadata, payload) = value.strip_prefix("data:")?.split_once(',')?;
     let (format, encoded) = if metadata.split(';').next()? == "image/svg+xml" {
         (

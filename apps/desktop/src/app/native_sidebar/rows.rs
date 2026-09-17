@@ -68,21 +68,24 @@ impl GhostexGpuiApp {
                             .disclosures
                             .present(&key, section.collapsed)
                             .then(|| {
-                                let rows = v_flex().w_full().children(
+                                let sessions = group
+                                    .sessions
+                                    .iter()
+                                    .map(|session| (session.session_id.as_str(), session))
+                                    .collect::<std::collections::HashMap<_, _>>();
+                                let rows = self.render_native_session_list(
+                                    group,
                                     ids.iter()
                                         .filter_map(|id| {
-                                            group
-                                                .sessions
-                                                .iter()
-                                                .find(|session| &session.session_id == id)
+                                            sessions
+                                                .get(id.as_str())
+                                                .map(|session| (*session).clone())
                                         })
-                                        .map(|session| {
-                                            self.render_native_sidebar_session(
-                                                group, session, hud, appearance, cx,
-                                            )
-                                        }),
+                                        .collect(),
+                                    appearance,
+                                    cx,
                                 );
-                                self.render_native_disclosure(key, rows.into_any_element(), cx)
+                                self.render_native_disclosure(key, rows, cx)
                             });
                         v_flex()
                             .w_full()

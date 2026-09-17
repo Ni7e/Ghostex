@@ -1,6 +1,7 @@
 use super::drag::SidebarDrag;
 use super::drag::SidebarDropTarget;
 use super::drag_source::SidebarDragSource;
+use super::session_list::{SESSION_HEIGHT, SESSION_SPACING};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
@@ -98,10 +99,10 @@ impl GhostexGpuiApp {
             })
             .unwrap_or("")
             .to_owned();
-        div().on_children_prepainted(move |bounds, window, cx| { if completion.is_some_and(|start| start.elapsed().as_secs_f32() < 3.0) { window.request_animation_frame(); cx.notify(view.entity_id()); } if let Some(bounds) = bounds.first() { view.update(cx, |app, cx| app.reveal_native_session_bounds(&reveal_id, *bounds, scale, window, cx)); } }).w_full().pb(px(scale)).px(px(3.0 * scale))
+        div().on_children_prepainted(move |bounds, window, cx| { if completion.is_some_and(|start| start.elapsed().as_secs_f32() < 3.0) { window.request_animation_frame(); cx.notify(view.entity_id()); } if let Some(bounds) = bounds.first() { view.update(cx, |app, cx| app.reveal_native_session_bounds(&reveal_id, *bounds, scale, window, cx)); } }).w_full().pb(px(SESSION_SPACING * scale)).px(px(3.0 * scale))
             .child(h_flex()
                 .id(format!("native-sidebar-session-{session_id}"))
-                .relative().h(px(34.0 * scale)).w_full().min_w_0().pl(px(5.0 * scale)).pr(px(6.0 * scale)).gap(px(6.0 * scale)).rounded(px(5.0 * scale))
+                .relative().h(px(SESSION_HEIGHT * scale)).w_full().min_w_0().pl(px(5.0 * scale)).pr(px(6.0 * scale)).gap(px(6.0 * scale)).rounded(px(5.0 * scale))
                 .cursor_default()
                 .when(stale, |row| row.opacity(0.55))
                 .when(self.native_sidebar.is_dragging("session", &session_id), |row| row.opacity(0.2))
