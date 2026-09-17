@@ -17,6 +17,29 @@ impl NativeChatView {
         actions: Vec<AnyElement>,
         p: &ChatAppearance,
     ) -> AnyElement {
+        let header = div()
+            .flex()
+            .items_start()
+            .gap(px(8.0 * p.scale))
+            .child(
+                gpui::svg()
+                    .path(icon)
+                    .size(px(14.0 * p.scale))
+                    .mt(px(4.0 * p.scale))
+                    .flex_shrink_0(),
+            )
+            .child(div().flex_1().child(title))
+            .into_any_element();
+        self.status_card_with_header(header, body, actions, p)
+    }
+
+    pub(crate) fn status_card_with_header(
+        &self,
+        header: AnyElement,
+        body: Vec<AnyElement>,
+        actions: Vec<AnyElement>,
+        p: &ChatAppearance,
+    ) -> AnyElement {
         let s = p.scale;
         div()
             .w_full()
@@ -36,20 +59,7 @@ impl NativeChatView {
                     .px(px(16.0 * s))
                     .py(px(12.0 * s))
                     .bg(gpui::rgb(if p.light { 0xfdfdfd } else { 0x1e1e1e }))
-                    .child(
-                        div()
-                            .flex()
-                            .items_start()
-                            .gap(px(8.0 * s))
-                            .child(
-                                gpui::svg()
-                                    .path(icon)
-                                    .size(px(14.0 * s))
-                                    .mt(px(4.0 * s))
-                                    .flex_shrink_0(),
-                            )
-                            .child(div().flex_1().child(title)),
-                    )
+                    .child(header)
                     .children(body),
             )
             .when(!actions.is_empty(), |this| {

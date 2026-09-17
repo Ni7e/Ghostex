@@ -3,7 +3,8 @@ use crate::*;
 
 impl GhostexGpuiApp {
     /// CDXC:SessionChat 2026-09-17 DECISION:
-    /// User: the desktop app uses native GPUI chat exclusively; retain the React implementation for mobile and keep both on the shared chat controller.
+    /// User: desktop chat defaults to React; a GPUI/React toggle opts into GPUI, superseding the earlier GPUI-only decision. Both renderers retain the shared chat controller.
+    /// The renderer is selected at startup so changing the flag cannot destroy an active unsent draft.
     pub(crate) fn ensure_native_chat(
         &mut self,
         session_id: TerminalSessionId,
@@ -41,7 +42,8 @@ impl GhostexGpuiApp {
             session_id: server_session_id,
             sidebar_session_id,
             shell_session_id: session_id,
-            app: cx.weak_entity(),
+            app: Some(cx.weak_entity()),
+            preview: None,
             parent_native_view: self.parent_ns_view,
             client_id: format!("native-desktop-{}", std::process::id()),
             remote,

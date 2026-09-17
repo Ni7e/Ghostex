@@ -349,6 +349,8 @@ Related settings: `autoSleep*`, `clickToWakeSleepingSessions`,
 
 ## Session Chat
 
+In Settings > Chat, **Use GPUI chat** selects the desktop chat renderer. It is off by default, so desktop uses React chat. Turn it on to try and compare the native GPUI version. Restart the desktop app after changing it. Mobile and web keep their existing chat renderer (`sessionChatUseGpui`).
+
 Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
 agent stops, transcript with thinking, tool, and edit cards, subagent

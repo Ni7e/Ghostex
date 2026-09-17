@@ -1,3 +1,6 @@
+import { ChatPreviewBackend } from '../session-chat-preview/backend';
+import type { ChatPreviewConfig } from '../session-chat-preview/fixture';
+import { computeSessionChatActivity } from './activity';
 import { computeSessionChatWorkingStrip } from './working-strip';
 import { NativeComposerSuggestions } from './native-suggestions';
 import { computeSessionChatSkills } from './skills';
@@ -40,6 +43,7 @@ import type { GxserverSessionChatEvent, SessionChatMessage } from '../session-ch
 
 type HostRequest = { id?: number; kind: string; method: string; params: Record<string, unknown> };
 const requests: HostRequest[] = [];
+let preview: ChatPreviewBackend | undefined;
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
 const timers = new Map<number, { at: number; interval: number; callback: () => void }>();
 let sequence = 0;
@@ -50,7 +54,7 @@ let sentTranscriptItems: unknown[] | undefined;
 const presentation = new NativeChatPresentation();
 const suggestions = new NativeComposerSuggestions();
 let detailRevision = 0;
-type NativeChatState = { workingStrip: ReturnType<typeof computeSessionChatWorkingStrip> } & UseSessionChatResult & ReturnType<typeof computeNativeChatControls> & ReturnType<typeof computeNativeChatOptions> & ReturnType<typeof computeNativeChatContext> & ReturnType<typeof computeSessionChatSkills> & ReturnType<typeof computeSessionChatFiles>;
+type NativeChatState = { workingStrip: ReturnType<typeof computeSessionChatWorkingStrip> & { presentation: ReturnType<typeof computeSessionChatActivity> } } & UseSessionChatResult & ReturnType<typeof computeNativeChatControls> & ReturnType<typeof computeNativeChatOptions> & ReturnType<typeof computeNativeChatContext> & ReturnType<typeof computeSessionChatSkills> & ReturnType<typeof computeSessionChatFiles>;
 let optionPersistence: ReturnType<typeof nativeOptionPersistence>;
 let controller: ChatComputation<NativeChatState>;
 let retiredNoticeKey: string | null = null;
@@ -100,12 +104,14 @@ Object.assign(globalThis, {
 });
 
 function rpc<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  if (preview) return preview.rpc<T>(method, params);
   const id = ++sequence;
   requests.push({ id, kind: 'rpc', method, params });
   return new Promise<T>((resolve, reject) => pending.set(id, { resolve, reject }));
 }
 
 function composer(operation: string, params: Record<string, unknown> = {}): Promise<any> {
+  if (preview) return preview.composer(operation, params);
   const id = ++sequence;
   requests.push({ id, kind: 'broker', method: 'composer', params: { composer: { operation, ...params } } });
   return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
@@ -153,6 +159,7 @@ function publish(state: NativeChatState): void {
   const { messages: _messages, skills: _skills, files: _files, requestSkills: _requestSkills, requestFiles: _requestFiles, ...viewState } = state;
   snapshot = {
     ...viewState,
+    ...(preview ? { previewSettings: { sessionChatTheme: preview.config.theme, sessionChatZoomPercent: preview.config.zoom, sessionChatVerboseMode: preview.config.verbose, sessionChatSimpleMode: preview.config.simple } } : {}),
     modelPicker: modelPicker?.projection() ?? null,
     contextStatusRows,
     suggestions: suggestions.projection(state),
@@ -182,7 +189,8 @@ function publish(state: NativeChatState): void {
   revision++;
 }
 
-function start(config: { clientId: string; initialSnapshot?: any; initialPresentation?: any }): void {
+function start(config: { clientId: string; initialSnapshot?: any; initialPresentation?: any; preview?: ChatPreviewConfig }): void {
+  if (config.preview) preview = new ChatPreviewBackend(config.preview);
   bootConfig = config;
   if (booting) return;
   booting = true;
@@ -213,7 +221,7 @@ function onUnconfirmedOptions(): void {
 
 function startController(config: { clientId: string; initialSnapshot?: any; initialPresentation?: any }): void {
   transport = {
-    getCachedSnapshot: () => config.initialSnapshot ?? undefined,
+    getCachedSnapshot: () => preview?.snapshot ?? config.initialSnapshot ?? undefined,
     presentation: createSessionChatPresentationStore(config.initialPresentation ?? undefined, (state) => requests.push({ kind: 'broker', method: 'presentation', params: { state } })),
     read: (params) => rpc('readSessionChat', params),
     readSkills: () => rpc('readSessionChatSkills'),
@@ -221,6 +229,7 @@ function startController(config: { clientId: string; initialSnapshot?: any; init
     readHistory: (params) => rpc('readSessionChat', { ...params, historyMode: params.detail ? 'detail' : 'turns' }),
     subscribe: ({ onEvent, currentLimit }) => {
       eventListener = onEvent;
+      if (preview) return preview.subscribe(onEvent);
       requests.push({ kind: 'broker', method: 'subscribe', params: { limit: currentLimit?.() ?? 120, catalog: true } });
       return () => { eventListener = undefined; requests.push({ kind: 'broker', method: 'unsubscribe', params: {} }); };
     },
@@ -248,7 +257,8 @@ function startController(config: { clientId: string; initialSnapshot?: any; init
     const context = computeNativeChatContext(chat, options.sessionOptions.catalog?.modelIcon, controls.accounts, lifecycle);
     const skills = computeSessionChatSkills(transport, chat.sessionAgentId, lifecycle);
     const files = computeSessionChatFiles(transport, lifecycle);
-    const workingStrip = computeSessionChatWorkingStrip(!controls.accountStatus.busy && chat.sessionWorking, controls.accountStatus.busy ? null : chat.terminalActivity, lifecycle);
+    const strip = computeSessionChatWorkingStrip(!controls.accountStatus.busy && chat.sessionWorking, controls.accountStatus.busy ? null : chat.terminalActivity, lifecycle);
+    const workingStrip = { ...strip, presentation: computeSessionChatActivity(strip.activity, lifecycle) };
     return { ...chat, ...controls, ...options, ...context, ...skills, ...files, workingStrip };
   }, publish);
   controller.run();

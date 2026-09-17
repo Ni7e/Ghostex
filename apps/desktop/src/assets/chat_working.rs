@@ -26,7 +26,9 @@ pub(crate) static VISUAL: LazyLock<WorkingStripVisual> = LazyLock::new(|| {
 pub(crate) fn asset(key: &str) -> Option<String> {
     let path = &VISUAL.spark_path;
     if key == "spark" {
-        return Some(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}"/></svg>"#));
+        return Some(format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="{path}"/></svg>"#
+        ));
     }
     let (color, step) = key.split_once('-')?;
     let step = step.parse::<u8>().ok().filter(|step| *step <= 32)?;
@@ -38,5 +40,7 @@ pub(crate) fn asset(key: &str) -> Option<String> {
     };
     let inset = (96.0 - VISUAL.spark_size) / 2.0;
     let scale = VISUAL.spark_size / 24.0;
-    Some(format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><filter id="blur" x="0" y="0" width="96" height="96" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="{blur}"/></filter></defs><g filter="url(#blur)"><path transform="translate({inset} {inset}) scale({scale})" d="{path}"/></g></svg>"#))
+    Some(format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><filter id="blur" x="0" y="0" width="96" height="96" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="{blur}"/></filter></defs><g filter="url(#blur)"><path transform="translate({inset} {inset}) scale({scale})" d="{path}"/></g></svg>"#
+    ))
 }

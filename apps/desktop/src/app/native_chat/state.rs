@@ -13,7 +13,8 @@ pub(crate) struct NativeChatConfig {
     pub(crate) shell_session_id: TerminalSessionId,
     pub(crate) client_id: String,
     pub(crate) remote: Option<GpuiRemoteGxserverRequestTarget>,
-    pub(crate) app: gpui::WeakEntity<crate::GhostexGpuiApp>,
+    pub(crate) app: Option<gpui::WeakEntity<crate::GhostexGpuiApp>>,
+    pub(crate) preview: Option<Value>,
     pub(crate) parent_native_view: *mut std::ffi::c_void,
     pub(crate) initial_snapshot: Option<Value>,
     pub(crate) initial_presentation: Option<Value>,
@@ -84,7 +85,7 @@ impl NativeChatView {
         super::fonts::register(cx);
         super::keyboard::register(cx);
         let runtime = ChatRuntime::new(
-            &json!({"clientId":config.client_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation}),
+            &json!({"clientId":config.client_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
         );
         let (runtime, error) = match runtime {
             Ok(value) => (Some(value), None),

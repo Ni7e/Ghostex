@@ -206,13 +206,14 @@ impl NativeChatView {
             .gap(px(8.0 * s));
         if message["role"] == "user" && message["suppressed"].is_null() {
             let copy = text(message, "copyText");
+            // The prompt renders as markdown like the React bubble, which also makes it a selectable TextView; a plain string child cannot be selected.
             let bubble = div()
                 .max_w(relative(0.8))
                 .min_w_0()
                 .rounded(px(16.0 * s))
                 .p(px(12.0 * s))
                 .bg(p.input)
-                .child(body.clone());
+                .child(self.markdown(format!("user:{id}"), body.clone(), p));
             return row
                 .when(message["queued"] == true, |this| {
                     this.child(

@@ -23,7 +23,7 @@ pub(crate) struct ChatAppearance {
 impl ChatAppearance {
     pub(crate) fn current(state: &serde_json::Value) -> Self {
         let snapshot = crate::shared_settings::shared_sidebar_settings_snapshot();
-        let settings = snapshot.object();
+        let settings = state["previewSettings"].as_object().unwrap_or_else(|| snapshot.object());
         let light = gpui_session_chat_uses_light_theme(settings);
         let color = |dark, light_color| rgb(if light { light_color } else { dark }).into();
         let enabled = |name| settings.get(name).and_then(serde_json::Value::as_bool) == Some(true);

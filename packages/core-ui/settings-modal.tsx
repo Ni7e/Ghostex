@@ -1765,6 +1765,15 @@ export function SettingsModal({
 
                         {mainSectionVisible('chat', settingsSearch.chat) ? (
                           <SettingsSection sectionRef={chatSectionRef} title='Chat'>
+                            {mainSettingVisible(settingsSearch.chat, 'sessionChatUseGpui') ? (
+                              <ToggleField
+                                checked={draft.sessionChatUseGpui}
+                                description='Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.'
+                                label='Use GPUI chat'
+                                {...getSettingModificationProps('sessionChatUseGpui')}
+                                onChange={(checked) => updateDraft('sessionChatUseGpui', checked)}
+                              />
+                            ) : null}
                             {mainSettingVisible(settingsSearch.chat, 'preferredAgentInterface') ? (
                               <PreferredAgentInterfaceField
                                 description='Chat switches on automatically as soon as Ghostex detects a compatible agent. The terminal stays live in the background, and you can switch back at any time. Settings > Agents can override this for one agent at a time.'

@@ -144,7 +144,7 @@ impl Render for NativeChatView {
                                 composer_ready,
                                 pane_focused,
                                 || {
-                                    app.upgrade().is_some_and(|app| {
+                                    app.as_ref().and_then(|app| app.upgrade()).is_some_and(|app| {
                                         app.read(cx).focused_agents_or_companion_shell_session_id()
                                             == Some(shell_session_id)
                                     })

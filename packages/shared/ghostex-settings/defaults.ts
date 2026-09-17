@@ -401,6 +401,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   /** CDXC:Theming 2026-09-14 DECISION: User: default App theme to System, with Chat and Terminal on Follow app. Existing saved theme selections remain unchanged. */
   sidebarTheme: 'system',
   sessionChatTheme: 'app',
+  sessionChatUseGpui: false,
   sessionChatFontFamily: '',
   sessionChatZoomPercent: DEFAULT_SESSION_CHAT_ZOOM_PERCENT,
   sessionChatCustomTranscriptWidthEnabled: false,

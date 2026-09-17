@@ -550,6 +550,11 @@ export function getSettingsSearchSectionDefinitions() {
       title: 'Chat',
       settings: [
         {
+          key: 'sessionChatUseGpui',
+          subtitle: 'Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.',
+          title: 'Use GPUI chat',
+        },
+        {
           key: 'preferredAgentInterface',
           options: PREFERRED_AGENT_INTERFACE_OPTIONS,
           subtitle: 'Automatically switch to chat as soon as Ghostex detects that an agent session supports it.',

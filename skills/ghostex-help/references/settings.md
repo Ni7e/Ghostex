@@ -74,6 +74,7 @@ How to use this file:
 
 #### Chat
 
+- **Use GPUI chat** `sessionChatUseGpui` (boolean, default false): Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.
 - **Default view for compatible agents** `preferredAgentInterface` (one of terminal | chat; default chat): Automatically switch to chat as soon as Ghostex detects that an agent session supports it. Option labels: terminal = Terminal, chat = Chat.
 - **Chat font family** `sessionChatFontFamily` (text, default (empty)): Use any installed font in chat messages and the prompt composer.
 - **Default chat zoom (%)** `sessionChatZoomPercent` (number 70 to 200 step 5 default 100): Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.

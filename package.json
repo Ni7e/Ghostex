@@ -7,6 +7,7 @@
   "packageManager": "bun@1.4.0",
   "scripts": {
     "start": "bun tooling/start-gpui.mjs",
+    "chat:lab": "bun tooling/chat-preview.mjs",
     "start:isolated": "bun tooling/start-gpui.mjs --isolated",
     "gx:isolated": "bun tooling/isolated-gpui.mjs",
     "start:web": "bun run web:build && cd server && cargo run --quiet --bin ghostex -- web --dist-dir ../apps/web/dist",

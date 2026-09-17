@@ -28,46 +28,11 @@ import { cn } from '@/packages/components/utils';
 import { AppTooltip } from '../app-tooltip';
 import { SessionChatStatusCard, SessionChatStatusCardDot } from './session-chat-status-card';
 
-/** How often the local clock re-renders between server samples. */
-const ACTIVITY_CLOCK_TICK_MS = 1_000;
-const SHELLS_RUNNING_ACTIVITY_KIND = 'shells-running';
-
-export function formatSessionChatActivityElapsed(totalSeconds: number): string {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(seconds / 3_600);
-  const minutes = Math.floor((seconds % 3_600) / 60);
-  const rest = seconds % 60;
-  if (hours > 0) {
-    return `${hours}h ${minutes}m ${rest}s`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${rest}s`;
-  }
-  return `${rest}s`;
-}
-
-/**
- * Seconds to show now: what the CLI last reported, plus the time since that
- * sample was taken. `detectedAt` anchors the whole run, so this keeps counting
- * smoothly across probes instead of snapping backwards on each one.
- *
- * Takes the two fields rather than the activity so the background-agent strip
- * can share it: its clocks anchor on the FLEET's `detectedAt` while the seconds
- * come off each row.
- */
-export function sessionChatActivityElapsedSeconds(
-  activity: { elapsedSeconds?: number; detectedAt: string },
-  now: number
-): number | null {
-  if (activity.elapsedSeconds === undefined) {
-    return null;
-  }
-  const anchor = Date.parse(activity.detectedAt);
-  if (Number.isNaN(anchor)) {
-    return activity.elapsedSeconds;
-  }
-  return activity.elapsedSeconds + Math.max(0, (now - anchor) / 1_000);
-}
+import { computeSessionChatActivity } from '@/packages/shared/session-chat-controller/activity';
+export {
+  formatSessionChatActivityElapsed,
+  sessionChatActivityElapsedSeconds,
+} from '@/packages/shared/session-chat-controller/activity';
 
 export interface SessionChatActivityRowProps {
   activity: SessionChatTerminalActivity;
@@ -75,23 +40,10 @@ export interface SessionChatActivityRowProps {
 }
 
 export function SessionChatActivityRow({ activity, className }: SessionChatActivityRowProps) {
-  const [now, setNow] = useState(() => Date.now());
-  const shellsRunning = activity.kind === SHELLS_RUNNING_ACTIVITY_KIND;
-
-  // Only run a timer when there is a clock to advance.
-  const hasClock = activity.elapsedSeconds !== undefined;
-  useEffect(() => {
-    if (!hasClock) {
-      return;
-    }
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), ACTIVITY_CLOCK_TICK_MS);
-    return () => clearInterval(timer);
-  }, [activity.detectedAt, hasClock]);
-
-  const elapsed = sessionChatActivityElapsedSeconds(activity, now);
-  const percent = activity.percent === undefined ? null : Math.min(100, Math.max(0, Math.round(activity.percent)));
-  const indeterminate = activity.kind === 'compacting' && percent === null;
+  const { elapsedLabel, percent, indeterminate, shellsRunning, hint } = computeSessionChatActivity(activity, {
+    useState,
+    useEffect,
+  })!;
 
   return (
     <SessionChatStatusCard
@@ -113,7 +65,7 @@ export function SessionChatActivityRow({ activity, className }: SessionChatActiv
           {activity.label}
           {/* CDXC:SessionChat 2026-09-11 DECISION: User: put the compaction hint in an info-circle tooltip immediately right of the title, replacing the visible hint line. */}
           {activity.kind === 'compacting' ? (
-            <AppTooltip content='Send or queue a message and it will be posted after compaction' side='top'>
+            <AppTooltip content={hint!} side='top'>
               <button
                 type='button'
                 aria-label='Messaging during compaction'
@@ -126,11 +78,11 @@ export function SessionChatActivityRow({ activity, className }: SessionChatActiv
         </>
       }
       trailing={
-        elapsed !== null || percent !== null ? (
+        elapsedLabel !== null || percent !== null ? (
           <span className='ghostex-chat-status-card-lead gap-2'>
-            {elapsed !== null ? (
+            {elapsedLabel !== null ? (
               <span className='ghostex-chat-card-hint shrink-0 text-xs text-muted-foreground tabular-nums'>
-                {formatSessionChatActivityElapsed(elapsed)}
+                {elapsedLabel}
               </span>
             ) : null}
             {percent !== null ? (

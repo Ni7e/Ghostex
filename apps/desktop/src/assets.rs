@@ -4,6 +4,7 @@ use rust_embed::RustEmbed;
 use std::borrow::Cow;
 use std::{collections::BTreeMap, sync::LazyLock};
 
+#[path = "assets/chat_working.rs"]
 pub(crate) mod chat_working;
 
 static MODEL_PICKER_ARTWORK: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {

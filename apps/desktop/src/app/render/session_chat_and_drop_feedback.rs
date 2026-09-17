@@ -51,6 +51,11 @@ impl GhostexGpuiApp {
         if let Some(view) = self.native_chat_views.get(&session_id).filter(|_| switching.is_none()) {
             return div().id(format!("native-chat-{}", session_id.0)).size_full().min_w_0().min_h_0().overflow_hidden().child(view.clone()).into_any_element();
         }
+        if let Some(surface) = self.agents_chat_surfaces.get(&session_id).filter(|_| switching.is_none()) {
+            return div().id(format!("react-chat-{}", session_id.0))
+                .relative().size_full().min_w_0().min_h_0().overflow_hidden()
+                .child(surface.clone()).into_any_element();
+        }
         {
             let bootstrap_missing = self.sidebar_gxserver_bootstrap.is_none();
             let (title, message) = if let Some(progress) = switching {

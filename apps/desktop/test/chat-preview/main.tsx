@@ -1,0 +1,128 @@
+import { useEffect, useMemo, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { initializeClientStorage } from '@/packages/client-storage';
+import { SessionChatView } from '@/packages/core-ui/chat/session-chat-view';
+import { ChatPreviewBackend } from '@/packages/shared/session-chat-preview/backend';
+import {
+  DEFAULT_CHAT_PREVIEW,
+  PREVIEW_SCENARIOS,
+  type ChatPreviewConfig,
+} from '@/packages/shared/session-chat-preview/fixture';
+import '@/packages/core-ui/styles.css';
+import './preview.css';
+
+function Conversation({ config }: { config: ChatPreviewConfig }) {
+  const transport = useMemo(() => new ChatPreviewBackend(config).transport(), []);
+  return (
+    <div className='comparison-conversation' style={{ zoom: config.zoom / 100 }}>
+      <SessionChatView
+        transport={transport}
+        sessionKey={`chat-preview:${config.revision}`}
+        sessionTitle='Sample conversation'
+        theme={config.theme}
+        verboseMode={config.verbose}
+        simpleMode={config.simple}
+        canSend
+        sendOnEnter
+      />
+    </div>
+  );
+}
+function Preview() {
+  const [config, setConfig] = useState(DEFAULT_CHAT_PREVIEW);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let disposed = false;
+    const read = async () => {
+      try {
+        const response = await fetch('/__preview/state');
+        if (!response.ok) throw new Error(await response.text());
+        const next = await response.json();
+        if (!disposed) {
+          setConfig((old) => (JSON.stringify(old) === JSON.stringify(next) ? old : next));
+          setError('');
+        }
+      } catch (error) {
+        if (!disposed) setError(String(error));
+      }
+    };
+    void read();
+    const timer = setInterval(read, 500);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, []);
+  const update = async (patch: Partial<ChatPreviewConfig>) => {
+    const response = await fetch('/__preview/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...config, ...patch }),
+    });
+    if (!response.ok) {
+      setError(await response.text());
+      return;
+    }
+    setConfig(await response.json());
+  };
+  return (
+    <div className='comparison-app' data-theme={config.theme}>
+      <header className='comparison-controls'>
+        <strong>Chat Lab · React</strong>
+        <label>
+          Sample{' '}
+          <select
+            value={config.scenario}
+            onChange={(event) => void update({ scenario: event.target.value as ChatPreviewConfig['scenario'] })}
+          >
+            {PREVIEW_SCENARIOS.map((scenario) => (
+              <option key={scenario}>{scenario}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Theme{' '}
+          <select
+            value={config.theme}
+            onChange={(event) => void update({ theme: event.target.value as 'dark' | 'light' })}
+          >
+            <option>dark</option>
+            <option>light</option>
+          </select>
+        </label>
+        <label>
+          Zoom{' '}
+          <select value={config.zoom} onChange={(event) => void update({ zoom: Number(event.target.value) })}>
+            {[70, 85, 100, 125, 150, 200].map((zoom) => (
+              <option key={zoom} value={zoom}>
+                {zoom}%
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <input
+            type='checkbox'
+            checked={config.verbose}
+            onChange={(event) => void update({ verbose: event.target.checked })}
+          />{' '}
+          Verbose
+        </label>
+        <label>
+          <input
+            type='checkbox'
+            checked={config.simple}
+            onChange={(event) => void update({ simple: event.target.checked })}
+          />{' '}
+          Simple
+        </label>
+        <button onClick={() => void update({})}>Reset both</button>
+        <span className='comparison-help'>Controls update both windows. Sends are simulated independently.</span>
+        {error && <span role='alert'>{error}</span>}
+      </header>
+      <Conversation key={config.revision} config={config} />
+    </div>
+  );
+}
+await initializeClientStorage();
+createRoot(document.getElementById('root')!).render(<Preview />);

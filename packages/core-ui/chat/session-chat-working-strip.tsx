@@ -34,16 +34,23 @@ export function SessionChatWorkingStrip({ working, activity }: SessionChatWorkin
   if (!status.label) return null;
 
   return (
-    <div aria-live='polite' className='ghostex-chat-working-strip' role='status' style={{
-      '--working-min-height': `${visual.minHeight / 16}rem`,
-      '--working-padding-x': `${visual.paddingX / 16}rem`,
-      '--working-gap': `${visual.gap / 16}rem`,
-      '--working-spark-box': `${visual.sparkBox / 16}rem`,
-      '--working-spark-size': `${visual.sparkSize / 16}rem`,
-      '--working-font-size': `${visual.fontSize / 16}rem`,
-      '--working-pulse': `${visual.pulseMs}ms`,
-      '--working-spin': `${visual.spinMs}ms`,
-    } as CSSProperties}>
+    <div
+      aria-live='polite'
+      className='ghostex-chat-working-strip'
+      role='status'
+      style={
+        {
+          '--working-min-height': `${visual.minHeight / 16}rem`,
+          '--working-padding-x': `${visual.paddingX / 16}rem`,
+          '--working-gap': `${visual.gap / 16}rem`,
+          '--working-spark-box': `${visual.sparkBox / 16}rem`,
+          '--working-spark-size': `${visual.sparkSize / 16}rem`,
+          '--working-font-size': `${visual.fontSize / 16}rem`,
+          '--working-pulse': `${visual.pulseMs}ms`,
+          '--working-spin': `${visual.spinMs}ms`,
+        } as CSSProperties
+      }
+    >
       <div className='ghostex-chat-working-strip-row'>
         <span aria-hidden='true' className='ghostex-chat-working-strip-spark'>
           <svg viewBox='0 0 24 24'>

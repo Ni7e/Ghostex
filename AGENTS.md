@@ -298,7 +298,7 @@ gxserver installs the bundled skills under `skills/` (Ghostex CLI, Ghostex Help,
 
 ### Chat and sidebar parity across GPUI and React
 
-- The desktop chat and sidebar render with GPUI. Keep their React implementations in the repository for React consumers, including the mobile app's embedded chat page. Do not mount React chat in the GPUI app.
+- Desktop chat defaults to React, with the persisted `sessionChatUseGpui` feature flag opting into GPUI chat when enabled. The flag applies after an app restart. Preserve both desktop mounting paths and the shared controller. The sidebar remains GPUI; React chat is also retained for mobile and web.
 - Chat and sidebar behavior runs in shared TypeScript through QuickJS on desktop. Their rendering, background controllers, subscriptions, timers, and persistence must work without a CEF page. A future Rust migration is a separate change.
 - Put chat behavior in `packages/shared/session-chat-controller/` and transcript presentation decisions in `packages/shared/session-chat-presentation/`. React and GPUI must consume the same rules for messages, streaming, tool grouping, questions, approvals, drafts, queues, errors, and settings. Platform adapters own I/O; renderers own layout and input.
 - Every chat feature, bug fix, setting, interaction, or visual change must update both `packages/core-ui/chat/` and `apps/desktop/src/app/native_chat/` as needed in the same change. A shared change must be checked in both consumers. Never declare one implementation complete while the other has different behavior or missing controls.

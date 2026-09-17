@@ -923,11 +923,14 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) -> Option<Entity<CefSurface>> {
-        self.ensure_native_chat(session_id, cx);
-        None
+        if self.session_chat_use_gpui {
+            self.ensure_native_chat(session_id, cx);
+            None
+        } else {
+            self.create_legacy_react_chat_surface(session_id, cx)
+        }
     }
 
-    #[allow(dead_code)]
     fn create_legacy_react_chat_surface(
         &mut self,
         session_id: TerminalSessionId,

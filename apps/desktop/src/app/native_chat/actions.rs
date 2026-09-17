@@ -18,7 +18,7 @@ impl NativeChatView {
     ) {
         let enabled = self.composer_ready && !self.pending_send && !self.draft.trim().is_empty();
         let can_queue = enabled && self.snapshot["queue"]["capabilities"]["canQueue"] == true;
-        if let Some(app) = self.config.app.upgrade() {
+        if let Some(app) = self.config.app.as_ref().and_then(|app| app.upgrade()) {
             GpuiContextMenu::new()
                 .menu_with_disabled(
                     "Compact & Send",

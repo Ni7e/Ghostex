@@ -565,6 +565,8 @@ export type ghostexSettings = {
   sidebarTheme: SidebarThemeSetting;
   /** Follow the app theme, or override chat with Light, Dark, or System. */
   sessionChatTheme: SessionChatThemeSetting;
+  /** Desktop renderer feature flag, applied when the app starts. */
+  sessionChatUseGpui: boolean;
   /** CSS font-family used by chat messages and the prompt composer. */
   sessionChatFontFamily: string;
   /** Default zoom percentage for the desktop chat interface. */
