@@ -412,6 +412,10 @@ pub fn usage() -> String {
             "Show general Ghostex CLI discovery and agent skill setup",
         ),
         format_help_command(
+            "agents --help",
+            "Communicate and coordinate with other agents",
+        ),
+        format_help_command(
             "fable-5.6-orchestration --help",
             "Show Ghostex Fable 5.6 Orchestration skill setup",
         ),

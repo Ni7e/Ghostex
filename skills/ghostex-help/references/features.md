@@ -705,8 +705,18 @@ OpenCode) get no links. The same scan, plan, and apply run from the CLI:
 `ghostex agent-sync apply --yes [--agent <id>] [--group <group>...]
 [--prune-lock]`; `ghostex agent-sync agents` lists the ids.
 
-Cross-agent orchestration is built in: any agent with the `$ghostex-cli`
-skill installed can run `ghostex` to start other agents and steer them. For
+Use `ghostex agents --help` to create, message, and close other agent sessions.
+`ghostex agents whoami --json` identifies the caller; `agents types` lists
+configured agent IDs; `agents create <agent-id> --task "<task>"` starts one in
+the caller's project (`--project-id` selects another). `agents list` finds
+sessions, and `agents send <session-ref> "<text>"` attaches the sender's identity
+and reply reference automatically. Use `--body-file` for multiline messages,
+`--interrupt` for an urgent correction, or `--queue` to wait until the current
+turn finishes. `agents close <session-ref>` ends that session, including any
+unfinished work. `ghostex read-session-chat` and `ghostex read-text` read replies.
+On older versions without `agents`, use the existing commands below.
+
+Cross-agent orchestration also works through the `$ghostex-cli` skill. For
 "make Claude Code control Codex":
 
 1. Install the Ghostex CLI skill (Settings > Integrations, or
