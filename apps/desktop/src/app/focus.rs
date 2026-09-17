@@ -158,34 +158,13 @@ impl GhostexGpuiApp {
         let previous_companion_slot = self.project_editor_companion_focused_terminal_slot;
 
         match self.first_responder_target {
-            FirstResponderTarget::CefSurface(FirstResponderCefSurface::SessionChat(session_id))
-                if self.active_mode == TitlebarMode::Agents =>
-            {
-                let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) else {
-                    return false;
-                };
-                if self.agents_workspace.active_session_in_pane(pane_id) != Some(session_id) {
-                    return false;
-                }
-                self.agents_workspace.focus_pane(pane_id);
-                self.set_shell_focus(ShellFocusTarget::AgentsPane(pane_id));
-            }
-            FirstResponderTarget::CefSurface(FirstResponderCefSurface::SessionChat(session_id))
-                if self.active_mode.is_project_editor_mode()
-                    && self.project_editor_companion_is_visible() =>
-            {
-                if self.project_editor_companion_terminal_session_id == Some(session_id) {
-                    self.project_editor_companion_focused_terminal_slot =
-                        ProjectEditorCompanionTerminalSlot::Top;
-                } else if self.project_editor_companion_secondary_terminal_session_id
-                    == Some(session_id)
+            FirstResponderTarget::CefSurface(FirstResponderCefSurface::SessionChat(session_id)) => {
+                if self
+                    .record_shell_focus_for_session_chat(session_id)
+                    .is_none()
                 {
-                    self.project_editor_companion_focused_terminal_slot =
-                        ProjectEditorCompanionTerminalSlot::Bottom;
-                } else {
                     return false;
                 }
-                self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(self.active_mode));
             }
             FirstResponderTarget::CefSurface(FirstResponderCefSurface::BrowserTab(tab_id))
                 if self.active_mode == TitlebarMode::Browser =>
@@ -237,6 +216,46 @@ impl GhostexGpuiApp {
             || self.browser_tabs.focused_pane != previous_browser_pane
             || self.browser_tabs.active_tab != previous_browser_tab
             || self.project_editor_companion_focused_terminal_slot != previous_companion_slot
+    }
+
+    /// Records shell focus for the pane that shows `session_id`'s chat, the Agents pane or the companion slot, without a keyboard handoff.
+    /// Shared by the CEF responder observation and the native composer's focus edge.
+    /// Returns `None` when no visible pane shows that chat, otherwise whether shell focus or the companion slot changed.
+    pub(crate) fn record_shell_focus_for_session_chat(
+        &mut self,
+        session_id: TerminalSessionId,
+    ) -> Option<bool> {
+        let previous_focus = self.shell_focus;
+        let previous_companion_slot = self.project_editor_companion_focused_terminal_slot;
+        if self.active_mode == TitlebarMode::Agents {
+            let pane_id = self.agents_workspace.pane_id_for_session(session_id)?;
+            if self.agents_workspace.active_session_in_pane(pane_id) != Some(session_id) {
+                return None;
+            }
+            self.agents_workspace.focus_pane(pane_id);
+            self.set_shell_focus(ShellFocusTarget::AgentsPane(pane_id));
+        } else if self.active_mode.is_project_editor_mode()
+            && self.project_editor_companion_is_visible()
+        {
+            if self.project_editor_companion_terminal_session_id == Some(session_id) {
+                self.project_editor_companion_focused_terminal_slot =
+                    ProjectEditorCompanionTerminalSlot::Top;
+            } else if self.project_editor_companion_secondary_terminal_session_id
+                == Some(session_id)
+            {
+                self.project_editor_companion_focused_terminal_slot =
+                    ProjectEditorCompanionTerminalSlot::Bottom;
+            } else {
+                return None;
+            }
+            self.set_shell_focus(ShellFocusTarget::ProjectEditorCompanion(self.active_mode));
+        } else {
+            return None;
+        }
+        Some(
+            self.shell_focus != previous_focus
+                || self.project_editor_companion_focused_terminal_slot != previous_companion_slot,
+        )
     }
 
     #[cfg(target_os = "macos")]

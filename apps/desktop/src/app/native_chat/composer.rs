@@ -206,8 +206,10 @@ impl NativeChatView {
                     )),
             );
         }
-        if !maximized && self.snapshot["sessionWorking"] == true {
-            footer = footer.child(div().text_color(p.muted).child("Working…"));
+        if !maximized {
+            if let Some(strip) = self.render_working_strip(p) {
+                footer = footer.child(strip);
+            }
         }
         if let Some(error) = self.snapshot["operationError"].as_str() {
             footer = footer.child(

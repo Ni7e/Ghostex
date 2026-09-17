@@ -63,6 +63,13 @@ impl GhostexGpuiApp {
                             .into();
                         this.relay_session_chat_runtime_request(generation, &message, cx);
                     }
+                    NativeChatEvent::ComposerFocused => {
+                        this.reclaim_gpui_root_for_chrome_input_focus();
+                        if this.record_shell_focus_for_session_chat(session_id) == Some(true) {
+                            this.persist_shell_layout_state();
+                            cx.notify();
+                        }
+                    }
                     NativeChatEvent::DraftState(empty) => {
                         if this
                             .agents_chat_page_states

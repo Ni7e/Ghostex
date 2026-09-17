@@ -24,6 +24,8 @@ pub(crate) enum NativeChatEvent {
     Broker(Value),
     Host(Value),
     DraftState(bool),
+    /// The composer input took GPUI focus by any route (click, handoff, draft insert).
+    ComposerFocused,
 }
 
 pub(crate) struct NativeChatView {
@@ -181,6 +183,7 @@ impl NativeChatView {
                         cx.emit(NativeChatEvent::DraftState(this.draft.is_empty()));
                         cx.notify();
                     }
+                    InputEvent::Focus => cx.emit(NativeChatEvent::ComposerFocused),
                     InputEvent::Blur => this.save_draft(cx),
                     _ => {}
                 },

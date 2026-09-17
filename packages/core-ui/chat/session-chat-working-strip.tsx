@@ -17,7 +17,9 @@ strip and the sidebar always agree.
 import { useEffect, useState } from 'react';
 import type { SessionChatTerminalActivity } from '../../shared/session-chat';
 import { SessionChatActivityRow } from './session-chat-activity-row';
-import { pickSessionChatWorkingWord } from './session-chat-working-words';
+import { computeSessionChatWorkingStrip } from '@/packages/shared/session-chat-controller/working-strip';
+import visual from '@/packages/shared/session-chat-presentation/working-strip.json';
+import type { CSSProperties } from 'react';
 
 export interface SessionChatWorkingStripProps {
   working: boolean;
@@ -25,33 +27,30 @@ export interface SessionChatWorkingStripProps {
 }
 
 export function SessionChatWorkingStrip({ working, activity }: SessionChatWorkingStripProps) {
-  // One whimsical word per working stint: re-picked on each false→true edge,
-  // stable for the whole stint so the label doesn't churn mid-turn.
-  const [word, setWord] = useState(pickSessionChatWorkingWord);
-  useEffect(() => {
-    if (working) {
-      setWord(pickSessionChatWorkingWord());
-    }
-  }, [working]);
-
-  // An activity keeps the strip visible even when the session isn't "working"
-  // in the sidebar sense, and it replaces the whimsical word entirely.
-  if (activity) {
-    return <SessionChatActivityRow activity={activity} className='my-0' />;
+  const status = computeSessionChatWorkingStrip(working, activity, { useEffect, useState });
+  if (status.activity) {
+    return <SessionChatActivityRow activity={status.activity} className='my-0' />;
   }
-  if (!working) {
-    return null;
-  }
+  if (!status.label) return null;
 
   return (
-    <div aria-live='polite' className='ghostex-chat-working-strip' role='status'>
+    <div aria-live='polite' className='ghostex-chat-working-strip' role='status' style={{
+      '--working-min-height': `${visual.minHeight / 16}rem`,
+      '--working-padding-x': `${visual.paddingX / 16}rem`,
+      '--working-gap': `${visual.gap / 16}rem`,
+      '--working-spark-box': `${visual.sparkBox / 16}rem`,
+      '--working-spark-size': `${visual.sparkSize / 16}rem`,
+      '--working-font-size': `${visual.fontSize / 16}rem`,
+      '--working-pulse': `${visual.pulseMs}ms`,
+      '--working-spin': `${visual.spinMs}ms`,
+    } as CSSProperties}>
       <div className='ghostex-chat-working-strip-row'>
         <span aria-hidden='true' className='ghostex-chat-working-strip-spark'>
           <svg viewBox='0 0 24 24'>
-            <path d='M12 0.8c.5 4.6 1.8 7.4 3.6 9.1 1.6 1.6 4.2 2.5 7.6 2.1-3.4-.4-6 .5-7.6 2.1-1.8 1.7-3.1 4.5-3.6 9.1-.5-4.6-1.8-7.4-3.6-9.1C6.8 12.5 4.2 11.6.8 12c3.4.4 6-.5 7.6-2.1C10.2 8.2 11.5 5.4 12 .8z' />
+            <path d={visual.sparkPath} />
           </svg>
         </span>
-        <span className='ghostex-chat-working-strip-text'>{word}…</span>
+        <span className='ghostex-chat-working-strip-text'>{status.label}</span>
       </div>
     </div>
   );

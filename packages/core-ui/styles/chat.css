@@ -4058,35 +4058,35 @@ reduced-motion turns both off and keeps the static glyph.
 .ghostex-chat-working-strip {
   display: grid;
   gap: 0.375rem;
-  min-height: 1.5rem;
-  padding: 0 0.375rem;
+  min-height: var(--working-min-height);
+  padding: 0 var(--working-padding-x);
   user-select: none;
 }
 
 .ghostex-chat-working-strip-row {
   align-items: center;
   display: flex;
-  gap: 0.5rem;
+  gap: var(--working-gap);
   min-width: 0;
 }
 
 .ghostex-chat-working-strip-spark {
   align-items: center;
-  animation: ghostex-chat-working-spark-pulse 1.6s ease-in-out infinite;
+  animation: ghostex-chat-working-spark-pulse var(--working-pulse) ease-in-out infinite;
   display: flex;
   flex: none;
-  height: 1rem;
+  height: var(--working-spark-box);
   justify-content: center;
-  width: 1rem;
+  width: var(--working-spark-box);
   will-change: transform, opacity, filter;
 }
 
 .ghostex-chat-working-strip-spark svg {
-  animation: ghostex-chat-working-spark-spin 9s linear infinite;
+  animation: ghostex-chat-working-spark-spin var(--working-spin) linear infinite;
   display: block;
   fill: var(--foreground);
-  height: 0.875rem;
-  width: 0.875rem;
+  height: var(--working-spark-size);
+  width: var(--working-spark-size);
 }
 
 @keyframes ghostex-chat-working-spark-pulse {
@@ -4114,7 +4114,7 @@ reduced-motion turns both off and keeps the static glyph.
 
 .ghostex-chat-working-strip-text {
   color: var(--muted-foreground);
-  font-size: 0.78125rem;
+  font-size: var(--working-font-size);
   letter-spacing: 0.01em;
   min-width: 0;
   overflow: hidden;

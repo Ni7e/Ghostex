@@ -6,6 +6,8 @@ use gpui::AnyElement;
 use gpui::FontWeight;
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
+use gpui::MouseButton;
+use gpui::MouseDownEvent;
 use gpui::ParentElement as _;
 use gpui::Styled as _;
 use gpui::canvas;
@@ -173,6 +175,20 @@ impl GhostexGpuiApp {
             .w_full()
             .overflow_hidden()
             .bg(gpui_session_chat_background_color())
+            /*
+            CDXC:FocusRouting 2026-09-17 WHY:
+            The native chat composer stops mouse-down propagation, so a bubble-phase listener here never sees a click on the composer itself.
+            Capture the click like the composited terminal body does: claim the pane and hand the keyboard off right away, before the composer or an answer field takes its own GPUI focus from the same click.
+            */
+            .capture_any_mouse_down(
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if event.button != MouseButton::Left {
+                        return;
+                    }
+                    this.focus_agents_pane(pane_id, cx);
+                    this.drain_pending_keyboard_handoff(window, cx);
+                }),
+            )
             .on_drag_move::<DraggedWorkspaceTab>(cx.listener(
                 move |this, event: &gpui::DragMoveEvent<DraggedWorkspaceTab>, _window, cx| {
                     this.update_workspace_pane_drag_feedback(event, pane_id, cx);

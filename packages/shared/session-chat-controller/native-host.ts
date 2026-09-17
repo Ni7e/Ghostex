@@ -1,3 +1,4 @@
+import { computeSessionChatWorkingStrip } from './working-strip';
 import { NativeComposerSuggestions } from './native-suggestions';
 import { computeSessionChatSkills } from './skills';
 import { computeSessionChatFiles } from './files';
@@ -49,7 +50,7 @@ let sentTranscriptItems: unknown[] | undefined;
 const presentation = new NativeChatPresentation();
 const suggestions = new NativeComposerSuggestions();
 let detailRevision = 0;
-type NativeChatState = UseSessionChatResult & ReturnType<typeof computeNativeChatControls> & ReturnType<typeof computeNativeChatOptions> & ReturnType<typeof computeNativeChatContext> & ReturnType<typeof computeSessionChatSkills> & ReturnType<typeof computeSessionChatFiles>;
+type NativeChatState = { workingStrip: ReturnType<typeof computeSessionChatWorkingStrip> } & UseSessionChatResult & ReturnType<typeof computeNativeChatControls> & ReturnType<typeof computeNativeChatOptions> & ReturnType<typeof computeNativeChatContext> & ReturnType<typeof computeSessionChatSkills> & ReturnType<typeof computeSessionChatFiles>;
 let optionPersistence: ReturnType<typeof nativeOptionPersistence>;
 let controller: ChatComputation<NativeChatState>;
 let retiredNoticeKey: string | null = null;
@@ -247,7 +248,8 @@ function startController(config: { clientId: string; initialSnapshot?: any; init
     const context = computeNativeChatContext(chat, options.sessionOptions.catalog?.modelIcon, controls.accounts, lifecycle);
     const skills = computeSessionChatSkills(transport, chat.sessionAgentId, lifecycle);
     const files = computeSessionChatFiles(transport, lifecycle);
-    return { ...chat, ...controls, ...options, ...context, ...skills, ...files };
+    const workingStrip = computeSessionChatWorkingStrip(!controls.accountStatus.busy && chat.sessionWorking, controls.accountStatus.busy ? null : chat.terminalActivity, lifecycle);
+    return { ...chat, ...controls, ...options, ...context, ...skills, ...files, workingStrip };
   }, publish);
   controller.run();
 }

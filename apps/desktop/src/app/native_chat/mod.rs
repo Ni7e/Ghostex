@@ -34,3 +34,6 @@ mod context_editor;
 mod suggestions;
 
 mod clipboard;
+
+mod working_strip;
+mod working_spark;

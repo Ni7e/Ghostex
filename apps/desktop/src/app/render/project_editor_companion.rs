@@ -504,9 +504,12 @@ impl GhostexGpuiApp {
                     })
             })
             .bg(gpui_session_chat_background_color())
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+            // Capture phase: the native chat composer stops mouse-down propagation, so a bubble listener never sees a click on the composer itself.
+            .capture_any_mouse_down(
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if event.button != MouseButton::Left {
+                        return;
+                    }
                     this.focus_project_editor_companion_terminal_session(
                         mode, session_id, window, cx,
                     );

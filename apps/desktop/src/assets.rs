@@ -4,6 +4,8 @@ use rust_embed::RustEmbed;
 use std::borrow::Cow;
 use std::{collections::BTreeMap, sync::LazyLock};
 
+pub(crate) mod chat_working;
+
 static MODEL_PICKER_ARTWORK: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
     serde_json::from_str(include_str!(
         "../../../packages/shared/session-chat-presentation/model-picker-artwork.json"
@@ -28,6 +30,11 @@ impl AssetSource for GhostexAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if path.is_empty() {
             return Ok(None);
+        }
+        if let Some(key) = path.strip_prefix("chat-working/") {
+            return chat_working::asset(key)
+                .map(|svg| Some(Cow::Owned(svg.into_bytes())))
+                .ok_or_else(|| anyhow!("unknown working strip asset {key:?}"));
         }
         if let Some(key) = path.strip_prefix("model-picker/") {
             return MODEL_PICKER_ARTWORK
