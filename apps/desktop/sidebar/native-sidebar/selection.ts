@@ -25,16 +25,27 @@ export function renderedNativeSidebarSessionIds(snapshot: NativeSidebarSnapshot)
 
 export function selectNativeSidebarSession(
   ui: NativeSidebarUiState,
-  snapshot: NativeSidebarSnapshot,
+  getSnapshot: () => NativeSidebarSnapshot,
   command: Extract<NativeSidebarCommand, { type: 'selectSession' }>,
   post: SidebarPostMessage
 ): void {
   const state = sidebarStore.getState();
-  const visibleSessionIds = renderedNativeSidebarSessionIds(snapshot);
   if (command.mode === 'clear') {
     ui.selectedSessionIds = [];
     return;
   }
+  if (command.mode === 'focus') {
+    // CDXC:Sidebar 2026-09-17 WHY:
+    // A normal row click only needs its owning group, not a rebuild of every display row and context menu.
+    const groupId = state.groupOrder.find((id) => state.sessionIdsByGroup[id]?.includes(command.sessionId));
+    ui.selectedSessionIds = [];
+    closeAppModal('SettingsDismissal:focusSession');
+    state.clearFocusedSessionScrollSuppression();
+    if (groupId) state.applyLocalFocus(groupId, command.sessionId);
+    post({ type: 'focusSession', sessionId: command.sessionId });
+    return;
+  }
+  const visibleSessionIds = renderedNativeSidebarSessionIds(getSnapshot());
   if (command.mode === 'additive') {
     ui.selectedSessionIds = resolveRenderedSidebarSessionAdditiveSelection({
       clickedSessionId: command.sessionId,
@@ -47,14 +58,5 @@ export function selectNativeSidebarSession(
       activeSessionId: Object.values(state.sessionsById).find((session) => session.isFocused)?.sessionId,
       visibleSessionIds,
     });
-  } else {
-    ui.selectedSessionIds = [];
-    closeAppModal('SettingsDismissal:focusSession');
-    const groupId = snapshot.groups.find((group) =>
-      group.sessions.some((session) => session.sessionId === command.sessionId)
-    )?.groupId;
-    state.clearFocusedSessionScrollSuppression();
-    if (groupId) state.applyLocalFocus(groupId, command.sessionId);
-    post({ type: 'focusSession', sessionId: command.sessionId });
   }
 }

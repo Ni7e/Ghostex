@@ -27,13 +27,15 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
   if (!bridge?.postNativeSidebarSnapshot) {
     throw new Error('The native sidebar snapshot bridge is not installed.');
   }
-  let pendingPublish = false;
+  let pendingPublish: number | undefined;
   let disposed = false;
   const publish = () => {
-    if (pendingPublish || disposed) return;
-    pendingPublish = true;
-    queueMicrotask(() => {
-      pendingPublish = false;
+    if (pendingPublish !== undefined || disposed) return;
+    // CDXC:Sidebar 2026-09-17 WHY:
+    // Full snapshots took 80-200ms and microtasks rebuilt one after each event in a burst, delaying pane focus.
+    // Publish once per frame after the shared controller has applied the incoming changes.
+    pendingPublish = window.requestAnimationFrame(() => {
+      pendingPublish = undefined;
       if (!disposed) bridge.postNativeSidebarSnapshot!(JSON.stringify(createNativeSidebarSnapshot(ui)));
     });
   };
@@ -103,7 +105,7 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     } else if (command.type === 'agentAccounts') void launcher(command);
     else if (command.type === 'sessionAccounts') void accounts(command);
     else if (command.type === 'selectSession')
-      selectNativeSidebarSession(ui, createNativeSidebarSnapshot(ui), command, post);
+      selectNativeSidebarSession(ui, () => createNativeSidebarSnapshot(ui), command, post);
     else if (command.type === 'moveToSpace' || command.type === 'moveToCollection' || command.type === 'moveCollection')
       runNativeProjectDrop(ui, command, post);
     else if (command.type === 'moveSession' || command.type === 'moveGroup' || command.type === 'moveSpace')
@@ -135,6 +137,7 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
   publish();
   return () => {
     disposed = true;
+    if (pendingPublish !== undefined) window.cancelAnimationFrame(pendingPublish);
     window.clearInterval(clock);
     unsubscribe();
     runtime.messageSource.removeEventListener('message', receive);

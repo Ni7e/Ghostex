@@ -35,7 +35,7 @@ export function runNativeSidebarHotkey(ui: NativeSidebarUiState, actionId: strin
             })
           : resolveVisibleSidebarSessionSlotId({ focusedSessionId, slotNumber: action.slotNumber, visibleSessionIds });
       if (sessionId) {
-        selectNativeSidebarSession(ui, snapshot, { type: 'selectSession', sessionId, mode: 'focus' }, post);
+        selectNativeSidebarSession(ui, () => snapshot, { type: 'selectSession', sessionId, mode: 'focus' }, post);
         ui.requestReveal(sessionId);
       }
       break;
@@ -94,7 +94,7 @@ export function runNativeProjectSlotHotkey(ui: NativeSidebarUiState, slotNumber:
   if (session) {
     selectNativeSidebarSession(
       ui,
-      snapshot,
+      () => snapshot,
       { type: 'selectSession', sessionId: session.sessionId, mode: 'focus' },
       post
     );
