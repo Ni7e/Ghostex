@@ -7,7 +7,7 @@ import {
   type SidebarSessionTagFilter,
 } from '../shared/session-tags';
 import { getSessionHistoryCardTitle } from './session-history-card-title';
-import { getSessionTagCatalogs } from './session-tag-ui';
+import { getSessionTagCatalogs } from './session-tag-catalogs';
 
 export type PreviousSessionsModalDayGroup = {
   dayLabel: string;

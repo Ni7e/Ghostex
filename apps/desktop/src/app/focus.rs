@@ -537,13 +537,6 @@ impl GhostexGpuiApp {
         responder: *mut std::ffi::c_void,
         cx: &mut gpui::Context<Self>,
     ) -> Option<FirstResponderCefSurface> {
-        if self
-            .sidebar
-            .as_ref()
-            .is_some_and(|surface| surface.read(cx).native_view_contains_responder(responder))
-        {
-            return Some(FirstResponderCefSurface::Sidebar);
-        }
         if let Some(tab_id) = self.browser_surfaces.iter().find_map(|(tab_id, surface)| {
             surface
                 .read(cx)

@@ -30,9 +30,8 @@ impl GhostexGpuiApp {
         /*
         CDXC:SessionChat 2026-07-31:
         Chat owns the same normal-layout workspace body rectangle as a
-        terminal: a per-session CefSurface child
-        plus ordinary placeholder layout children. No terminal mount canvas,
-        native geometry probe, overlay, or hidden hit region participates.
+        terminal: a per-session GPUI child plus ordinary placeholder layout children.
+        The native chat remains inside its workspace pane's layout frame.
         */
         let content = self.render_session_chat_surface_content(session_id);
         self.render_agents_session_chat_body_frame(pane_id, session_id, content, cx)
@@ -47,22 +46,10 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let switching = self.session_account_switch_placeholder_progress(session_id);
         self.record_session_chat_render(session_id);
-        let surface = self
-            .agents_chat_surfaces
-            .get(&session_id)
-            .filter(|_| switching.is_none())
-            .cloned();
-        if let Some(surface) = surface {
-            div()
-                .id(format!("ghostex-gpui-session-chat-cef-{}", session_id.0))
-                .relative()
-                .size_full()
-                .min_w_0()
-                .min_h_0()
-                .overflow_hidden()
-                .child(surface)
-                .into_any_element()
-        } else {
+        if let Some(view) = self.native_chat_views.get(&session_id).filter(|_| switching.is_none()) {
+            return div().id(format!("native-chat-{}", session_id.0)).size_full().min_w_0().min_h_0().overflow_hidden().child(view.clone()).into_any_element();
+        }
+        {
             let bootstrap_missing = self.sidebar_gxserver_bootstrap.is_none();
             let (title, message) = if let Some(progress) = switching {
                 (progress.title.as_str(), progress.email.as_str())

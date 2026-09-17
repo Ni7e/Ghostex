@@ -101,6 +101,20 @@ impl GhostexGpuiApp {
         finish_request: bool,
         cx: &mut gpui::Context<Self>,
     ) {
+        if let Some(view) = self.native_chat_for_generation(generation) {
+            if finish_request {
+                for state in self.agents_chat_page_states.values_mut().chain(
+                    self.parked_agents_chat_runtimes_by_project.values_mut().flat_map(|parked| parked.page_states.values_mut())
+                ) {
+                    if state.generation == generation {
+                        state.pending_native_requests = state.pending_native_requests.saturating_sub(1);
+                        break;
+                    }
+                }
+            }
+            view.update(cx, |view, cx| view.receive_callback(callback, payload, cx));
+            return;
+        }
         let active_id = self
             .agents_chat_page_states
             .iter()

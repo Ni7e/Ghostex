@@ -441,6 +441,7 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_chat_eviction_retry_scheduled: bool,
     pub(crate) agents_chat_reconcile_scheduled: bool,
     pub(crate) agents_chat_eviction_requested: bool,
+    pub(crate) native_chat_views: HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,
     pub(crate) agents_chat_surfaces: HashMap<TerminalSessionId, Entity<CefSurface>>,
     pub(crate) session_chat_broker_endpoints: HashMap<String, (String, String)>,
     pub(crate) session_chat_broker_epoch: Option<String>,
@@ -989,7 +990,7 @@ pub struct GhostexGpuiApp {
     /// Built-in agent ids the sidebar launchers map to; `None` until the first HUD read completes.
     pub(crate) titlebar_tips_sidebar_agent_ids: Option<HashSet<String>>,
     pub(crate) agent_hook_status_request_in_flight: bool,
-    pub(crate) sidebar: Option<Entity<CefSurface>>,
+    pub(crate) sidebar: Option<Entity<crate::app::native_service::NativeService>>,
     pub(crate) native_sidebar: crate::app::native_sidebar::state::NativeSidebarState,
     pub(crate) browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     pub(crate) browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,

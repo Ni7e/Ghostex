@@ -1,0 +1,380 @@
+use super::super::{appearance::ChatAppearance, state::NativeChatView};
+use gpui::{
+    AppContext as _, Bounds, Context, Entity, FocusHandle, Pixels, Point, ScrollHandle,
+    Styled as _, Subscription, Window, WindowBounds, WindowOptions, px, size,
+};
+use gpui_component::Root;
+use serde_json::Value;
+use std::sync::Arc;
+
+pub(in crate::app::native_chat) struct ChatOptionMenu {
+    pub(super) chat: gpui::WeakEntity<NativeChatView>,
+    pub(super) source: gpui::AnyWindowHandle,
+    pub(super) source_focus: Option<FocusHandle>,
+    pub(super) source_bounds: Bounds<Pixels>,
+    pub(super) appearance: ChatAppearance,
+    pub(super) windows: Vec<gpui::WindowHandle<Root>>,
+    pub(super) opening: bool,
+    pub(super) closed: bool,
+    parent: *mut std::ffi::c_void,
+}
+
+pub(super) struct ChatOptionMenuPanel {
+    pub(super) menu: Entity<ChatOptionMenu>,
+    pub(super) depth: usize,
+    pub(super) rows: Arc<Vec<Value>>,
+    pub(super) heights: Vec<f32>,
+    pub(super) focus: FocusHandle,
+    pub(super) selected: Option<usize>,
+    pub(super) scroll: ScrollHandle,
+    pub(super) child: Option<usize>,
+    pub(super) hover_task: Option<gpui::Task<()>>,
+    was_active: bool,
+    _activation: Subscription,
+    _chat_subscription: Option<Subscription>,
+}
+
+impl ChatOptionMenu {
+    pub(super) fn close(&mut self, command: Option<Value>, cx: &mut Context<Self>) {
+        self.close_with_focus(command, true, cx);
+    }
+
+    fn close_with_focus(
+        &mut self,
+        command: Option<Value>,
+        restore_focus: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        let windows = std::mem::take(&mut self.windows);
+        let source = self.source;
+        let focus = self.source_focus.clone();
+        let chat = self.chat.clone();
+        let identity = cx.entity_id();
+        cx.defer(move |cx| {
+            for handle in windows.into_iter().rev() {
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+            }
+            let _ = source.update(cx, |_, window, cx| {
+                if restore_focus {
+                    window.activate_window();
+                    if let Some(focus) = focus {
+                        focus.focus(window, cx);
+                    }
+                }
+                let _ = chat.update(cx, |chat, cx| {
+                    if chat
+                        .option_menu
+                        .as_ref()
+                        .is_some_and(|menu| menu.entity_id() == identity)
+                    {
+                        chat.option_menu = None;
+                    }
+                    if let Some(command) = command {
+                        chat.handle_action(
+                            &super::super::actions::NativeChatAction { command },
+                            window,
+                            cx,
+                        );
+                    }
+                    cx.notify();
+                });
+            });
+        });
+    }
+
+    fn check_active(&mut self, cx: &mut Context<Self>) {
+        if self.opening || self.closed {
+            return;
+        }
+        if !self.windows.iter().any(|handle| {
+            handle
+                .update(cx, |_, window, _| window.is_window_active())
+                .unwrap_or(false)
+        }) {
+            self.close_with_focus(None, false, cx);
+        }
+    }
+
+    pub(super) fn truncate(&mut self, depth: usize, focus_parent: bool, cx: &mut Context<Self>) {
+        if self.windows.len() <= depth {
+            return;
+        }
+        let windows = self.windows.split_off(depth);
+        let parent = self.windows.last().copied();
+        cx.defer(move |cx| {
+            for handle in windows.into_iter().rev() {
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+            }
+            if focus_parent && let Some(parent) = parent {
+                let _ = parent.update(cx, |_, window, _| window.activate_window());
+            }
+        });
+    }
+
+    pub(super) fn open_panel(
+        &mut self,
+        mut rows: Vec<Value>,
+        anchor: Bounds<Pixels>,
+        width: f32,
+        depth: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if self.closed || rows.is_empty() {
+            return;
+        }
+        for row in &mut rows {
+            if let Some(action) = row["hotkeyAction"].as_str() {
+                row["detail"] = crate::app::hotkeys::gpui_configured_hotkey_label(action).into();
+            }
+        }
+        self.truncate(depth, false, cx);
+        let scale = self.appearance.scale;
+        let available = self.source_bounds;
+        let width = px(width * scale).min(available.size.width - px(24.0 * scale));
+        let heights = match super::geometry::measure_rows(
+            &rows,
+            f32::from(width) / scale,
+            &self.appearance,
+            cx,
+        ) {
+            Ok(heights) => heights,
+            Err(error) => {
+                let _ = self.chat.update(cx, |chat, cx| {
+                    chat.error = Some(error.to_string());
+                    cx.notify();
+                });
+                return;
+            }
+        };
+        let height = px((14.0
+            + heights.iter().sum::<f32>()
+            + 2.0 * (rows.len().saturating_sub(1)) as f32)
+            * scale)
+        .min(available.size.height - px(24.0 * scale));
+        let margin = px(12.0 * scale);
+        let x = if depth == 0 {
+            anchor.right() - width
+        } else if anchor.right() + px(4.0 * scale) + width < available.right() - margin {
+            anchor.right() + px(4.0 * scale)
+        } else {
+            anchor.left() - width - px(4.0 * scale)
+        };
+        let y = if depth == 0 {
+            if anchor.bottom() + px(4.0 * scale) + height < available.bottom() - margin {
+                anchor.bottom() + px(4.0 * scale)
+            } else {
+                anchor.top() - height - px(4.0 * scale)
+            }
+        } else {
+            anchor.top()
+        };
+        let bounds = Bounds::new(
+            Point::new(
+                x.max(available.left() + margin)
+                    .min(available.right() - width - margin),
+                y.max(available.top() + margin)
+                    .min(available.bottom() - height - margin),
+            ),
+            size(width, height),
+        );
+        let menu = cx.entity();
+        let parent = self.parent;
+        self.opening = true;
+        cx.defer(move |cx| {
+            let result = cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: None,
+                    focus: true,
+                    show: true,
+                    is_movable: false,
+                    is_resizable: false,
+                    is_minimizable: false,
+                    app_id: crate::gpui_platform_window_app_id(),
+                    icon: crate::gpui_platform_window_icon(),
+                    window_background: gpui::WindowBackgroundAppearance::Transparent,
+                    ..Default::default()
+                },
+                {
+                    let menu = menu.clone();
+                    move |window, cx| {
+                        crate::app::window::attach_gpui_app_modal_window_to_main_window(
+                            window, parent,
+                        );
+                        let panel = cx.new(|cx| {
+                            let focus = cx.focus_handle();
+                            focus.focus(window, cx);
+                            let activation = cx.observe_window_activation(
+                                window,
+                                |panel: &mut ChatOptionMenuPanel, window, cx| {
+                                    if window.is_window_active() {
+                                        panel.was_active = true;
+                                    } else if panel.was_active {
+                                        let menu = panel.menu.clone();
+                                        cx.defer(move |cx| {
+                                            menu.update(cx, |menu, cx| menu.check_active(cx))
+                                        });
+                                    }
+                                },
+                            );
+                            let chat_subscription = if rows
+                                .first()
+                                .is_some_and(|row| row["context"].is_object())
+                            {
+                                menu.read(cx).chat.upgrade().map(|chat| {
+                                    cx.observe_in(
+                                        &chat,
+                                        window,
+                                        |panel: &mut ChatOptionMenuPanel, chat, window, cx| {
+                                            let next = &chat.read(cx).snapshot["contextMeter"];
+                                            if panel
+                                                .rows
+                                                .first()
+                                                .is_some_and(|row| &row["context"] == next)
+                                            {
+                                                return;
+                                            }
+                                            let next = next.clone();
+                                            panel.rows =
+                                                Arc::new(vec![serde_json::json!({"context":next})]);
+                                            let appearance = &panel.menu.read(cx).appearance;
+                                            let height = match super::context::height(
+                                                &next,
+                                                window.bounds().size.width.as_f32()
+                                                    / appearance.scale,
+                                                appearance,
+                                                cx,
+                                            ) {
+                                                Ok(height) => height,
+                                                Err(error) => {
+                                                    let chat = panel.menu.read(cx).chat.clone();
+                                                    cx.defer(move |cx| {
+                                                        let _ = chat.update(cx, |chat, cx| {
+                                                            chat.error = Some(error.to_string());
+                                                            cx.notify();
+                                                        });
+                                                    });
+                                                    return;
+                                                }
+                                            };
+                                            panel.heights = vec![height];
+                                            let available = panel.menu.read(cx).source_bounds;
+                                            let desired = px((height + 14.0) * appearance.scale);
+                                            window.resize(size(
+                                                window.bounds().size.width,
+                                                desired.min(
+                                                    available.bottom()
+                                                        - window.bounds().top()
+                                                        - px(12.0 * appearance.scale),
+                                                ),
+                                            ));
+                                            cx.notify();
+                                        },
+                                    )
+                                })
+                            } else {
+                                None
+                            };
+                            ChatOptionMenuPanel {
+                                menu,
+                                depth,
+                                rows: Arc::new(rows),
+                                heights,
+                                focus,
+                                selected: None,
+                                scroll: Default::default(),
+                                child: None,
+                                hover_task: None,
+                                was_active: window.is_window_active(),
+                                _activation: activation,
+                                _chat_subscription: chat_subscription,
+                            }
+                        });
+                        cx.new(|cx| Root::new(panel, window, cx).bg(gpui::transparent_black()))
+                    }
+                },
+            );
+            menu.update(cx, |menu, cx| {
+                menu.opening = false;
+                match result {
+                    Ok(handle) if !menu.closed => menu.windows.push(handle),
+                    Ok(handle) => {
+                        let _ = handle.update(cx, |_, window, _| window.remove_window());
+                    }
+                    Err(error) => {
+                        let _ = menu.chat.update(cx, |chat, cx| {
+                            chat.error = Some(error.to_string());
+                            cx.notify();
+                        });
+                        menu.close(None, cx);
+                    }
+                }
+            });
+        });
+    }
+}
+
+impl NativeChatView {
+    pub(in crate::app::native_chat) fn show_option_menu(
+        &mut self,
+        kind: &str,
+        trigger: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(rows) = self.snapshot["optionMenus"][kind]
+            .as_array()
+            .filter(|rows| !rows.is_empty())
+            .cloned()
+        else {
+            return;
+        };
+        self.show_chat_menu(
+            rows,
+            trigger,
+            if kind == "model" { 256.0 } else { 240.0 },
+            window,
+            cx,
+        );
+    }
+
+    pub(in crate::app::native_chat) fn show_chat_menu(
+        &mut self,
+        rows: Vec<Value>,
+        trigger: Bounds<Pixels>,
+        width: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if rows.is_empty() {
+            return;
+        }
+        if let Some(menu) = self.option_menu.take() {
+            menu.update(cx, |menu, cx| menu.close_with_focus(None, false, cx));
+        }
+        let appearance = ChatAppearance::current(&self.snapshot);
+        let source_bounds = window.bounds();
+        let chat = cx.weak_entity();
+        let source = window.window_handle();
+        let source_focus = window.focused(cx);
+        let parent = self.config.parent_native_view;
+        let menu = cx.new(|_| ChatOptionMenu {
+            chat,
+            source,
+            source_focus,
+            source_bounds,
+            appearance,
+            windows: vec![],
+            opening: false,
+            closed: false,
+            parent,
+        });
+        let anchor = Bounds::new(source_bounds.origin + trigger.origin, trigger.size);
+        menu.update(cx, |menu, cx| menu.open_panel(rows, anchor, width, 0, cx));
+        self.option_menu = Some(menu);
+    }
+}

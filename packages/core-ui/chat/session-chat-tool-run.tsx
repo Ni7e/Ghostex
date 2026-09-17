@@ -244,7 +244,7 @@ export function SessionChatToolRun({
   if (simpleMode && !showAllRows) {
     const work = pairs.map((pair, index) => ({ pair, index })).filter(({ index }) => exchanges[index] === null);
     const count = work.filter(({ pair }) => pair.call).length;
-    const label = count === 0 ? 'Tool output' : `${count} tool ${count === 1 ? 'call' : 'calls'}`;
+    const label = sessionChatToolCountLabel(count);
     return (
       <div className='ghostex-chat-tool-run'>
         {work.length > 0 ? (
@@ -301,3 +301,4 @@ export function SessionChatToolRun({
     </div>
   );
 }
+import { sessionChatToolCountLabel } from '@/packages/shared/session-chat-presentation/simple';

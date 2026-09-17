@@ -41,6 +41,8 @@
     "gxserver:remote-linux:arm64": "node server/package-remote-linux.mjs --arch arm64",
     "history": "cargo run --quiet --manifest-path apps/history-cli/Cargo.toml --",
     "history:list": "cargo run --quiet --manifest-path apps/history-cli/Cargo.toml -- --list",
+    "debug:sessions": "bun apps/session-tui/src/main.ts",
+    "debug:sessions:build": "bun apps/session-tui/build.ts",
     "build:sidebar-css": "tailwindcss -i packages/core-ui/styles/shadcn.css -o packages/core-ui/styles/shadcn.generated.css --minify",
     "build:mobile-chat": "node tooling/build-mobile-chat.mjs",
     "build:mobile-find": "node tooling/build-mobile-find.mjs",

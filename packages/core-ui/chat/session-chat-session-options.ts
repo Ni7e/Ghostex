@@ -21,7 +21,7 @@ import {
   type AgentModelCatalogGroup,
   type AgentModelCatalogModel,
 } from '../../shared/agent-model-catalog';
-import { currentAgentModelCatalog } from '../../shared/agent-model-catalog-store';
+import { currentAgentModelCatalog } from '../../shared/agent-model-catalog-state';
 import type { SessionChatDetectedChoice, SessionChatSendKey } from '../../shared/session-chat';
 import type { SidebarAgentIcon } from '../../shared/sidebar-agents';
 
@@ -1103,6 +1103,11 @@ they are handed; the scheme itself — and why a non-draft session keeps the bar
 session key — is documented at that call site.
 */
 const STORAGE_PREFIX = 'ghostex.sessionChat.options.';
+
+export function storedSessionChatOptionKeys(sessionKey: string): string[] {
+  return clientStorage.keys().filter(key => key === `${STORAGE_PREFIX}${sessionKey}` || key.startsWith(`${STORAGE_PREFIX}${sessionKey}#`))
+    .map(key => key.slice(STORAGE_PREFIX.length));
+}
 
 function storage(): ScopedStorage | null {
   try {

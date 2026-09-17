@@ -1,3 +1,8 @@
+import { computeSessionChatFiles } from '@/packages/shared/session-chat-controller/files';
+import { queuedModelSelection } from '@/packages/shared/session-chat-controller/model-selection';
+import { sendSessionChatOptionAware } from '@/packages/shared/session-chat-controller/option-command';
+import { terminalNoticeChoiceAnswer } from '@/packages/shared/session-chat-presentation/terminal-prompts';
+import { sessionChatSendBlockedReason } from '@/packages/shared/session-chat-controller/composer-policy';
 import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { AccountSwitchCard } from '../accounts/account-switch-card';
 import { useAccountSwitchStatus } from '../accounts/use-account-switch-status';
@@ -765,36 +770,9 @@ export function SessionChatView({
   use and the answer is cached for the rest of the mount; `undefined` means
   "not listed yet" and keeps the picker in its loading state.
   */
-  const [files, setFiles] = useState<readonly string[] | undefined>(undefined);
-  const [filesLoading, setFilesLoading] = useState(false);
-  const filesRequestedRef = useRef(false);
-  useEffect(() => {
-    filesRequestedRef.current = false;
-    setFiles(undefined);
-    setFilesLoading(false);
-  }, [transport]);
-  const requestFiles = useCallback(() => {
-    if (filesRequestedRef.current) {
-      return;
-    }
-    filesRequestedRef.current = true;
-    const readFiles = transport.readFiles?.bind(transport);
-    if (!readFiles) {
-      setFiles([]);
-      return;
-    }
-    setFilesLoading(true);
-    void readFiles()
-      .then((result) => {
-        setFiles(result.files);
-      })
-      .catch(() => {
-        setFiles([]);
-      })
-      .finally(() => {
-        setFilesLoading(false);
-      });
-  }, [transport]);
+  const { files, filesLoading, requestFiles } = computeSessionChatFiles(transport, {
+    useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect,
+  });
   const sessionOptions = useSessionChatSessionOptions({
     agent: resolvedAgentLabel,
     /*
@@ -1219,9 +1197,7 @@ export function SessionChatView({
     async (choiceIndex: number): Promise<void> => {
       try {
         await chatAnswerPrompt(
-          chat.terminalNotice?.dialog
-            ? { choiceIndex, kind: 'terminalDialog', dialogId: chat.terminalNotice.dialog.id }
-            : { choiceIndex, kind: 'terminalChoice' }
+          terminalNoticeChoiceAnswer(chat.terminalNotice, choiceIndex)
         );
         if (chat.terminalNotice?.kind === 'permissionPrompt' && chat.prompt?.kind === 'approval') {
           setAnsweredApprovalKey(sessionChatCardDismissKey(chat.prompt));
@@ -1307,19 +1283,14 @@ export function SessionChatView({
   reason as `sendBlockedReason`, keeps the draft editable, dims Send, and
   raises a red toast with this sentence when a send is attempted.
   */
-  const composerSendBlockedReason = !canSend
-    ? 'Input is held by another device.'
-    : accountSwitch.busy
-      ? 'Wait for the account switch to complete.'
-      : chat.terminalNotice?.conversationLock
-        ? 'This conversation is open elsewhere. Use Continue here or close it in the other app and retry.'
-        : terminalChoicePending
-          ? noticeCardVisible
-            ? 'Answer the question above first.'
-            : 'Your answer is still being applied. Try again in a moment.'
-          : sessionOptionSwitching
-            ? 'Claude is still switching mode. Try again in a moment.'
-            : null;
+  const composerSendBlockedReason = sessionChatSendBlockedReason({
+    canSend,
+    accountSwitchBusy: accountSwitch.busy,
+    conversationLocked: !!chat.terminalNotice?.conversationLock,
+    terminalChoicePending,
+    noticeCardVisible,
+    sessionOptionSwitching,
+  });
   /*
   CDXC:SessionChat 2026-09-02:
   The transcript's "Rewind to here" action. Three gates, all of which have to
@@ -1359,22 +1330,7 @@ export function SessionChatView({
     return select &&
       chat.pendingModelSelection !== undefined &&
       modelPickerProvider(readStateAgent ?? undefined) !== undefined
-      ? async (params: {
-          model: string;
-          effort: string;
-          options?: import('@/packages/shared/session-chat').SessionChatSelectionOptions;
-        }) => {
-          const result = await select({ ...params, defer: true });
-          if (!result.queued || !result.pendingModelSelection)
-            throw new Error('The server has not accepted this selection into its queue.');
-          if (
-            Object.entries(params.options ?? {}).some(
-              ([key, value]) => result.pendingModelSelection?.options?.[key as 'mode' | 'fastMode'] !== value
-            )
-          )
-            throw new Error('Waiting for the server to support queued mode changes.');
-          return result.pendingModelSelection;
-        }
+      ? queuedModelSelection(select)
       : undefined;
   }, [readStateAgent, transport, chat.pendingModelSelection !== undefined]);
   /*
@@ -1411,8 +1367,12 @@ export function SessionChatView({
   const isDraft = draftAgents !== null;
   const send = useCallback(
     async (text: string, draftVersion?: SessionChatDraftVersion): Promise<void> => {
-      reconcileTypedCommand(text);
-      await chatSend(text, undefined, draftVersion);
+      await sendSessionChatOptionAware(text, draftVersion, {
+        reconcileTypedCommand,
+        send: (text, version) => chatSend(text, undefined, version),
+        isDraft,
+        refresh: chatRefresh,
+      });
       /*
       CDXC:Drafts 2026-08-28:
       A delivered prompt PROMOTES a draft server-side (option commands like
@@ -1421,9 +1381,6 @@ export function SessionChatView({
       draft is followed by a read, which is what retires the "Agents" section
       once the conversation exists.
       */
-      if (isDraft) {
-        chatRefresh();
-      }
     },
     [chatRefresh, chatSend, isDraft, reconcileTypedCommand]
   );

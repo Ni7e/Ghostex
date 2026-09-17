@@ -1,5 +1,18 @@
-import { storageScope } from '@/packages/client-storage';
-import { lazy, Suspense, useEffect, useRef, useState, type RefObject } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
+import {
+  computeModelSelectionOutbox,
+  modelSelectionUnchanged,
+} from '@/packages/shared/session-chat-controller/model-selection';
 import { useSidebarStore } from '@/packages/core-ui/sidebar-store';
 import {
   normalizeghostexHotkeySettings,
@@ -9,12 +22,11 @@ import {
 import { useAgentModelCatalog } from '@/packages/shared/agent-model-catalog-store';
 import { createModelPickerRequest, modelPickerProvider } from './session-chat-model-picker-request';
 import type { SessionChatSessionOptionPillsProps } from './session-chat-option-pills';
-import type { SessionChatOptionDispatchReceipt } from './session-chat-option-state';
 import type { SessionChatSelectionOptions } from '@/packages/shared/session-chat';
 import type { ModelPickerRequest, ModelPickerSelection } from './session-chat-model-picker';
 import { QUICK_MODEL_PICKER_ENABLED } from './session-chat-model-picker-platform';
 
-const clientStorage = storageScope(["modelOutbox"]);
+const lifecycle = { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState };
 
 // Keep the build-time condition at the import so esbuild never traverses the mobile picker asset graph.
 const SessionChatModelPicker =
@@ -22,35 +34,15 @@ const SessionChatModelPicker =
     ? lazy(() => import('./session-chat-model-picker').then((module) => ({ default: module.SessionChatModelPicker })))
     : null;
 
-const deliveries = new Map<string, Promise<unknown>>();
-
 export interface ModelPickerActions {
   open: () => void;
   select: (selection: ModelPickerSelection) => void;
   selectOptions: (options: SessionChatSelectionOptions) => void;
 }
-interface OutboxSelection extends ModelPickerSelection {
-  id: string;
-  options?: SessionChatSelectionOptions;
-}
-
-function readOutbox(key: string): OutboxSelection | null {
-  try {
-    const value = JSON.parse(clientStorage.getItem(key) ?? 'null');
-    return value && typeof value.id === 'string' && typeof value.model === 'string' && typeof value.effort === 'string'
-      ? value
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * CDXC:SessionChat 2026-09-05 DECISION:
- * User: Option+P and model selection always work, including while the agent is working; an undeliverable selection waits for the next opportunity.
  * User: do not show the model/effort/queued status sentence in the chat box.
- * Opening uses the focused chat pane, not composer focus or current-value detection. The local outbox covers disconnects until gxserver accepts the durable intent.
- * SEE-ALSO: server/src/session_chat_model_selection.rs owns delivery, coalescing and retries after the client closes.
+ * Opening uses the focused chat pane, not composer focus or current-value detection.
  */
 export function SessionChatModelPickerLauncher(
   props: Pick<SessionChatSessionOptionPillsProps, 'controller' | 'onQueueModel' | 'pendingModelSelection'> & {
@@ -58,82 +50,31 @@ export function SessionChatModelPickerLauncher(
   }
 ) {
   const catalog = useAgentModelCatalog();
-  const storageKey = `ghostex.model-selection-outbox.${props.controller.sessionKey ?? ''}`;
-  const [outbox, setOutbox] = useState<OutboxSelection | null>(() => readOutbox(storageKey));
+  const selection = computeModelSelectionOutbox(
+    {
+      sessionKey: props.controller.sessionKey,
+      pending: props.pendingModelSelection,
+      beginDispatch: props.controller.beginDispatch,
+      deliver: props.onQueueModel,
+    },
+    lifecycle
+  );
+  const { desired } = selection;
   const [request, setRequest] = useState<ModelPickerRequest | null>(null);
   const [cancelRequested, setCancelRequested] = useState(false);
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const anchor = useRef<HTMLSpanElement>(null);
   const requestRef = useRef<ModelPickerRequest | null>(null);
   const latest = useRef(props);
-  const latestOutbox = useRef(outbox);
+  const latestSelection = useRef(selection);
   const openedSession = useRef(props.controller.sessionKey);
-  const receipt = useRef<{ id: string; value: SessionChatOptionDispatchReceipt } | null>(null);
   latest.current = props;
-  latestOutbox.current = outbox;
-  const desired = outbox ?? props.pendingModelSelection;
+  latestSelection.current = selection;
 
   useEffect(() => {
-    setOutbox(readOutbox(storageKey));
     requestRef.current = null;
     setRequest(null);
-    receipt.current = null;
-  }, [storageKey]);
-
-  useEffect(() => {
-    if (desired) {
-      if (receipt.current?.id !== desired.id) {
-        // The next intent can cover different controls; release fields it no longer owns.
-        receipt.current?.value.complete();
-        receipt.current = {
-          id: desired.id,
-          value: props.controller.beginDispatch({
-            ...(desired.model ? { model: desired.model } : {}),
-            ...(desired.effort ? { effort: desired.effort } : {}),
-            ...desired.options,
-          }),
-        };
-      }
-    } else if (receipt.current) {
-      receipt.current.value.complete();
-      receipt.current = null;
-    }
-  }, [desired, props.controller]);
-
-  useEffect(() => {
-    if (!outbox || !props.onQueueModel) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const deliver = async () => {
-      try {
-        const previous = deliveries.get(storageKey);
-        const operation = (async () => {
-          await previous?.catch(() => undefined);
-          if (cancelled || latestOutbox.current?.id !== outbox.id) return;
-          return props.onQueueModel!(outbox);
-        })();
-        deliveries.set(storageKey, operation);
-        let accepted;
-        try {
-          accepted = await operation;
-        } finally {
-          if (deliveries.get(storageKey) === operation) deliveries.delete(storageKey);
-        }
-        if (!accepted) return;
-        if (readOutbox(storageKey)?.id === outbox.id) clientStorage.removeItem(storageKey);
-        if (cancelled || latestOutbox.current?.id !== outbox.id) return;
-        setOutbox(null);
-      } catch {
-        if (cancelled) return;
-        timer = setTimeout(() => void deliver(), 5000);
-      }
-    };
-    void deliver();
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [outbox, props.onQueueModel, storageKey]);
+  }, [props.controller.sessionKey]);
 
   useEffect(() => {
     const open = () => {
@@ -143,7 +84,7 @@ export function SessionChatModelPickerLauncher(
       if (requestRef.current || !provider) return;
       const pane = anchor.current?.closest<HTMLElement>('.ghostex-session-chat-scope');
       if (!pane) return;
-      const desired = latestOutbox.current ?? current.pendingModelSelection;
+      const desired = latestSelection.current.desired;
       const next = createModelPickerRequest(
         catalog,
         provider,
@@ -183,22 +124,10 @@ export function SessionChatModelPickerLauncher(
       event.stopImmediatePropagation();
       toggle();
     };
-    const persist = (selection: ModelPickerSelection, options?: SessionChatSelectionOptions) => {
-      const key = `ghostex.model-selection-outbox.${latest.current.controller.sessionKey ?? ''}`;
-      const next = { ...selection, options: { ...latestOutbox.current?.options, ...options }, id: crypto.randomUUID() };
-      try {
-        clientStorage.setItem(key, JSON.stringify(next));
-      } catch {
-        // Keep the in-memory intent until the connection accepts it.
-      }
-      latestOutbox.current = next;
-      setOutbox(next);
-    };
     props.actionsRef.current = {
       open,
-      select: (selection) => persist(selection),
-      selectOptions: (options) =>
-        persist({ model: latestOutbox.current?.model ?? '', effort: latestOutbox.current?.effort ?? '' }, options),
+      select: (value) => latestSelection.current.select(value),
+      selectOptions: (options) => latestSelection.current.selectOptions(options),
     };
     if (!QUICK_MODEL_PICKER_ENABLED) {
       return () => {
@@ -219,22 +148,19 @@ export function SessionChatModelPickerLauncher(
     requestRef.current = null;
     setRequest(null);
     if (openedSession.current !== props.controller.sessionKey) return;
-    if (desired?.model === selection.model && desired.effort === selection.effort) return;
     if (
-      !desired &&
-      selection.model === props.controller.state.model?.value &&
-      (selection.effort === (props.controller.state.effort?.value ?? '') ||
-        request?.models.find((entry) => entry.value === selection.model)?.efforts.length === 0)
+      modelSelectionUnchanged(
+        selection,
+        desired,
+        {
+          model: props.controller.state.model?.value,
+          effort: props.controller.state.effort?.value,
+        },
+        request
+      )
     )
       return;
-    const next = { ...selection, options: latestOutbox.current?.options, id: crypto.randomUUID() };
-    try {
-      clientStorage.setItem(storageKey, JSON.stringify(next));
-    } catch {
-      // Keep the in-memory intent until the connection accepts it.
-    }
-    latestOutbox.current = next;
-    setOutbox(next);
+    latestSelection.current.select(selection);
   };
   return (
     <>

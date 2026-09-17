@@ -529,6 +529,11 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         self.cancel_session_chat_eviction_probe(session_id);
+        if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
+            view.update(cx, |view, cx| { view.focus_requested = true; view.ensure_input(window, cx); });
+            if let Some(content) = self.pending_session_chat_composer_insert.remove(&session_id) { self.insert_prompt_into_session_chat(session_id, &content, cx); }
+            return;
+        }
         let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
             return;
         };

@@ -1,3 +1,4 @@
+import { terminalDialogPresentation } from '@/packages/shared/session-chat-presentation/terminal-prompts';
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { IconTerminal2 } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
@@ -12,27 +13,6 @@ import {
 } from './session-chat-status-card';
 
 type DialogAnswer = Omit<GxserverAnswerSessionChatPromptParams, 'projectId' | 'sessionId'>;
-const ACTION_LABELS: Record<string, string> = {
-  up: '↑ Previous',
-  down: '↓ Next',
-  left: '← Left',
-  right: 'Right →',
-  pageUp: 'Page up',
-  pageDown: 'Page down',
-  home: 'First',
-  end: 'Last',
-  tab: 'Next field',
-  toggle: 'Toggle selected',
-  confirm: 'Confirm',
-  cancel: 'Back / Cancel',
-  sessionOnly: 'Use for this session',
-  sort: 'Change sort',
-  reset: 'Reset to auto',
-  day: 'Day view',
-  week: 'Week view',
-  projects: 'Toggle all projects',
-  branch: 'Toggle current branch',
-};
 
 /** The agent owns the choices and settings; this card mirrors its current dialog. */
 export function SessionChatTerminalDialogCard({
@@ -113,39 +93,7 @@ export function SessionChatTerminalDialogCard({
       </SessionChatStatusCard>
     );
   }
-  const submitLabel =
-    dialog.title === 'Ready to code?'
-      ? 'Request changes'
-      : dialog.title.startsWith('Tell us more (')
-        ? 'Send feedback'
-        : dialog.title === 'Custom review instructions'
-          ? 'Start review'
-          : dialog.title === 'Add marketplace'
-            ? 'Add marketplace'
-            : dialog.footer.includes('Enter to continue')
-              ? 'Continue'
-              : dialog.footer.includes('Enter to add')
-                ? 'Add directory'
-                : dialog.footer.includes('submit')
-                  ? 'Submit'
-                  : 'Save';
-  const multilineInput =
-    dialog.input === 'text' &&
-    (dialog.title.startsWith('Tell us more (') ||
-      dialog.title === 'Custom review instructions' ||
-      dialog.title === 'Submit feedback / bug report');
-  /**
-   * CDXC:SessionChat 2026-09-08 DECISION:
-   * User: always show the exit action at the bottom beside the other buttons for /usage and similar agent dialogs, so leaving them never requires switching to the terminal.
-   */
-  const visibleActions = dialog.actions.filter((action) => dialog.input !== 'text' || action !== 'confirm');
-  const cancelLabel = dialog.footer.toLowerCase().includes('esc to clear')
-    ? 'Clear / Back'
-    : dialog.footer.includes('go back')
-      ? 'Back'
-      : dialog.footer.includes('close') || dialog.footer.includes('q to quit')
-        ? 'Close'
-        : 'Cancel';
+  const { submitLabel, multilineInput, cancelLabel, actions: visibleActions } = terminalDialogPresentation(dialog);
   const body = dialog.body ? (
     <pre className='max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/30 p-3 text-xs leading-relaxed'>
       {dialog.body.split(/(https?:\/\/[^\s<>]+)/g).map((part, index) =>
@@ -250,7 +198,7 @@ export function SessionChatTerminalDialogCard({
   const actions =
     visibleActions.length > 0 ? (
       <SessionChatStatusCardActions>
-        {visibleActions.map((action) => (
+        {visibleActions.map(({ action, label }) => (
           <Button
             key={action}
             disabled={disabled}
@@ -258,11 +206,7 @@ export function SessionChatTerminalDialogCard({
             variant='outline'
             onClick={() => void run({ dialogAction: action })}
           >
-            {action === 'cancel'
-              ? cancelLabel
-              : action === 'confirm' && dialog.footer.includes('set as default')
-                ? 'Set as default'
-                : (ACTION_LABELS[action] ?? action)}
+            {label}
           </Button>
         ))}
       </SessionChatStatusCardActions>

@@ -105,6 +105,9 @@ impl GhostexGpuiApp {
             return;
         };
         if command["type"] == "selectSession" && command["mode"] == "focus" {
+            if let Some(session_id) = command["sessionId"].as_str() {
+                crate::app::native_chat::diagnostics::focus_requested(session_id);
+            }
             crate::support_logs::append(
                 crate::support_logs::GpuiSupportLog::SidebarRefresh,
                 "gpui.sidebar.focusRequested",

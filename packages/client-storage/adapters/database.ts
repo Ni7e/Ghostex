@@ -1,3 +1,4 @@
+import { applyDatabaseMutations } from './database-transaction';
 import { recordStorageEvent } from '../diagnostics';
 import { definitionForKey, definitions, storageCatalog, type StoreId } from '../catalog';
 import { admission, storageBytes, STORAGE_BUDGETS } from '../budgets';
@@ -79,110 +80,6 @@ export async function readDatabase(): Promise<StorageRecord[]> {
   return (await readDatabaseSnapshot()).rows;
 }
 
-async function apply(
-  transaction: IDBTransaction,
-  mutations: readonly Mutation[],
-  migration: boolean
-): Promise<StorageChange[]> {
-  const records = transaction.objectStore('records');
-  const metadata = transaction.objectStore('metadata');
-  let revision = ((await request(metadata.get('revision'))) as number | undefined) ?? 0;
-  let total = ((await request(metadata.get('total'))) as number | undefined) ?? 0;
-  const changes: StorageChange[] = [];
-  for (const mutation of mutations) {
-    const definition = storageCatalog[mutation.store];
-    if (definitionForKey(mutation.key)?.id !== definition.id || definition.backend !== 'indexeddb')
-      throw new ClientStorageError('unregistered', definition.id, 'This store does not own the requested key.');
-    const previous = (await request(records.get(mutation.key))) as StorageRecord | undefined;
-    if (mutation.onlyIfAbsent && previous) continue;
-    if (
-      (previous?.raw === mutation.raw && previous?.schemaVersion === definition.version) ||
-      (!previous && mutation.raw === null)
-    )
-      continue;
-    const usage = ((await request(metadata.get(definition.id))) as Usage | undefined) ?? empty();
-    const now = Date.now();
-    let next =
-      mutation.raw === null
-        ? null
-        : {
-            key: mutation.key,
-            store: definition.id,
-            raw: mutation.raw,
-            bytes: storageBytes(mutation.key, mutation.raw),
-            updatedAt: now,
-            revision: ++revision,
-            schemaVersion: definition.version,
-          };
-    if (next && definition.retainedAt) {
-      const timestamp = definition.retainedAt(next.raw);
-      if (Number.isFinite(timestamp)) next.updatedAt = timestamp;
-    }
-    if (next && !migration) {
-      if (total - (previous?.bytes ?? 0) + next.bytes > STORAGE_BUDGETS.indexeddb) {
-        const disposable: StorageRecord[] = [];
-        for (const cache of definitions.filter(
-          (entry) => entry.backend === 'indexeddb' && entry.policy === 'cache' && entry.id !== definition.id
-        ))
-          disposable.push(...((await request(records.index('store').getAll(cache.id))) as StorageRecord[]));
-        for (const entry of disposable.sort((a, b) => a.updatedAt - b.updatedAt)) {
-          if (total - (previous?.bytes ?? 0) + next.bytes <= STORAGE_BUDGETS.indexeddb) break;
-          const cacheUsage = (await request(metadata.get(entry.store))) as Usage;
-          records.delete(entry.key);
-          cacheUsage.bytes -= entry.bytes;
-          cacheUsage.entries--;
-          total -= entry.bytes;
-          metadata.put(cacheUsage, entry.store);
-          changes.push({ key: entry.key, store: entry.store, raw: null, revision: ++revision });
-        }
-      }
-      let removals: string[] = [];
-      if (definition.policy === 'cache') {
-        const rows: StorageRecord[] = await request(records.index('store').getAll(definition.id));
-        removals = admission(definition, next, rows, total, now);
-        if (removals.includes(next.key)) {
-          removals = removals.filter((key) => key !== next!.key);
-          next = null;
-        }
-      } else {
-        // Existing protected data may exceed a new budget. Shrinking it must still work.
-        const grows = next.bytes > (previous?.bytes ?? 0);
-        if (
-          (next.bytes > definition.maxEntryBytes ||
-            usage.bytes - (previous?.bytes ?? 0) + next.bytes > definition.maxBytes ||
-            usage.entries + (previous ? 0 : 1) > definition.maxEntries ||
-            total - (previous?.bytes ?? 0) + next.bytes > STORAGE_BUDGETS.indexeddb) &&
-          grows
-        )
-          throw new ClientStorageError('budget', definition.id, `${definition.owner} has reached its storage budget.`);
-      }
-      for (const key of removals) {
-        const row = (await request(records.get(key))) as StorageRecord;
-        records.delete(key);
-        total -= row.bytes;
-        usage.bytes -= row.bytes;
-        usage.entries--;
-        changes.push({ key, store: definition.id, raw: null, revision: ++revision });
-      }
-    }
-    total -= previous?.bytes ?? 0;
-    usage.bytes -= previous?.bytes ?? 0;
-    if (previous) usage.entries--;
-    if (next) {
-      next.revision = ++revision;
-      records.put(next);
-      total += next.bytes;
-      usage.bytes += next.bytes;
-      usage.entries++;
-    } else records.delete(mutation.key);
-    metadata.put(usage, definition.id);
-    changes.push({ key: mutation.key, store: definition.id, raw: next?.raw ?? null, revision: ++revision });
-  }
-  metadata.put(total, 'total');
-  metadata.put(revision, 'revision');
-  return changes;
-}
-
 /** All pages share this strict transaction and its usage counters. No key enumeration on ordinary protected writes. */
 export async function commitDatabase(
   mutations: readonly Mutation[],
@@ -218,7 +115,17 @@ export async function transactionDatabase(
         );
       const mutations = [...action(rows)];
       if (receiptKey) mutations.push({ key: receiptKey, store: 'migrationReceipts', raw: '1' });
-      result = await apply(transaction, mutations, migration);
+      const table = transaction.objectStore('records');
+      const metadata = transaction.objectStore('metadata');
+      result = await applyDatabaseMutations({
+        get: (key) => request(table.get(key)),
+        byStore: (store) => request(table.index('store').getAll(store)),
+        put: (row) => request(table.put(row)),
+        delete: (key) => request(table.delete(key)),
+      }, {
+        get: (key) => request(metadata.get(key)),
+        put: (value, key) => request(metadata.put(value, key)),
+      }, mutations, migration);
     })().catch((error: unknown) => {
       failure = error;
       transaction.abort();

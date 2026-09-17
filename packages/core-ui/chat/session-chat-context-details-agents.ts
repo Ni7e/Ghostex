@@ -12,7 +12,7 @@ import {
   formatSessionChatContextPercentage,
   formatSessionChatContextTokens,
   resolveSessionChatContextMeterUsage,
-} from './session-chat-context-meter';
+} from '@/packages/shared/session-chat-presentation/context-usage';
 import type { SessionChatContextDetailRowDefinition } from './session-chat-context-details';
 import { formatSessionChatDuration } from './session-chat-duration';
 

@@ -41,15 +41,8 @@ import { useSessionChatQuestionDrafts } from './session-chat-question-drafts';
 import { SessionChatAnswerInput } from './session-chat-answer-input';
 import type { SaveSessionChatImage } from './session-chat-image-attachments';
 
-export function sessionChatCardDismissKey(prompt: SessionChatInteractivePrompt | null): string | null {
-  if (!prompt) {
-    return null;
-  }
-  if (prompt.kind === 'question') {
-    return `question:${prompt.questions.length}:${prompt.questions[0]?.question ?? ''}`;
-  }
-  return `approval:${prompt.tool}:${prompt.summary ?? ''}`;
-}
+import { sessionChatCardDismissKey, selectQuestionOption } from '@/packages/shared/session-chat-presentation/interactive';
+export { sessionChatCardDismissKey };
 
 const DELIVERY_FAILED_NOTICE = "Couldn't deliver the answer. Switch to Terminal View to answer there.";
 const READ_ONLY_NOTICE = 'Switch to Terminal to answer';
@@ -230,21 +223,7 @@ export function SessionChatInteractiveCard({
       if (!question || readOnly || submitting || savingImages) {
         return;
       }
-      const nextDrafts = drafts.map((entry, index) => {
-        if (index !== questionIndex) {
-          return entry;
-        }
-        if (question.multiSelect) {
-          const selected = entry.indices.includes(optionIndex);
-          return {
-            ...entry,
-            indices: selected
-              ? entry.indices.filter((value) => value !== optionIndex)
-              : [...entry.indices, optionIndex].sort((a, b) => a - b),
-          };
-        }
-        return { ...entry, indices: [optionIndex] };
-      });
+      const nextDrafts = selectQuestionOption(drafts, questionIndex, question.multiSelect, optionIndex);
       setDrafts(nextDrafts);
 
       if (question.multiSelect) {

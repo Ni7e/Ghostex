@@ -262,6 +262,7 @@ impl GhostexGpuiApp {
                 agents_chat_eviction_retry_scheduled: false,
                 agents_chat_reconcile_scheduled: false,
                 agents_chat_eviction_requested: false,
+                native_chat_views: HashMap::new(),
                 agents_chat_surfaces: HashMap::new(),
                 session_chat_broker_endpoints: HashMap::new(),
                 session_chat_broker_epoch: None,

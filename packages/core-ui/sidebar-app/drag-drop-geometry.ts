@@ -1,7 +1,7 @@
 import type { SidebarActiveSessionsSortMode } from '../../shared/session-grid-contract';
 import { moveProjectsWithWorktrees, type ProjectWorktreeOrderItem } from '../../shared/project-worktree-order';
 import type { SidebarProjectCollectionsState } from '../project-collections';
-import { SIDEBAR_REORDER_DISTANCE_PX } from '../sidebar-reorder-activation';
+import { SIDEBAR_REORDER_DISTANCE_PX } from '@/packages/shared/sidebar-gestures';
 import {
   canonicalizeSidebarSessionDropTarget,
   getClientPoint,

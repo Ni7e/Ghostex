@@ -70,6 +70,7 @@ impl GhostexGpuiApp {
                     | "reconnect"
                     | "endpoint"
                     | "adoptDrafts"
+                    | "composer"
             )
         }) else {
             return;
@@ -135,6 +136,11 @@ impl GhostexGpuiApp {
                 "drafts".to_string(),
                 serde_json::Value::Array(drafts.clone()),
             );
+        }
+        if method == "composer" {
+            let composer = &message["params"]["composer"];
+            if !composer.is_object() || composer.to_string().len() > 4 * 1024 * 1024 { return; }
+            params.insert("composer".into(), composer.clone());
         }
         let client_id = message["clientId"]
             .as_str()
