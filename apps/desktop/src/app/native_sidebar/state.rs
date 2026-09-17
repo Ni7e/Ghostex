@@ -22,6 +22,7 @@ pub(crate) struct NativeSidebarState {
     pub(crate) handled_reveal: Option<u64>,
     pub(crate) scroll_animation: Option<super::scroll::SidebarScrollAnimation>,
     pub(crate) reveal_flash: Option<(String, std::time::Instant)>,
+    pub(crate) dragging_space: Option<String>,
     pub(crate) drop_command: Option<serde_json::Value>,
     pub(crate) name_editor: Option<super::rename::SidebarNameEditor>,
     pub(crate) pointer_inside: bool,

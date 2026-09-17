@@ -168,7 +168,13 @@ export type NativeSidebarCommand =
       targetId: string;
       position: 'before' | 'after';
     }
-  | { type: 'moveSpace'; spaceId: string; targetSpaceId: string; position: 'before' | 'after' };
+  | {
+      type: 'moveSpace';
+      spaceId: string;
+      targetSpaceId: string;
+      visibleSpaceIds: string[];
+      position: 'before' | 'after';
+    };
 
 export type NativeSidebarBridge = {
   postNativeSidebarSnapshot?: (snapshot: string) => void;

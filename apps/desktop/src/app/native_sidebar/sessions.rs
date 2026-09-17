@@ -38,6 +38,7 @@ impl GhostexGpuiApp {
         let drag_group_id = group_id.clone();
         let dragged = SidebarDrag {
             kind: "session",
+            space: None,
             id: session_id.clone(),
             title: session.title().to_owned(),
             scale: appearance.scale,

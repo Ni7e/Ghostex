@@ -13,6 +13,7 @@ impl GhostexGpuiApp {
     pub(crate) fn render_native_sidebar(&mut self, cx: &mut gpui::Context<Self>) -> AnyElement {
         if !cx.has_active_drag() {
             self.native_sidebar.drop_command = None;
+            self.native_sidebar.dragging_space = None;
         }
         let Some(snapshot) = self.native_sidebar.snapshot.clone() else {
             return div().size_full().into_any_element();

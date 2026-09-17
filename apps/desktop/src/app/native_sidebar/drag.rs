@@ -11,10 +11,14 @@ pub(crate) struct SidebarDrag {
     pub(crate) id: String,
     pub(crate) title: String,
     pub(crate) scale: f32,
+    pub(crate) space: Option<super::space_drag::SpaceDragPreview>,
 }
 
 impl Render for SidebarDrag {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> AnyElement {
+        if let Some(space) = &self.space {
+            return space.render(self.scale, window);
+        }
         div()
             .h(px(34.0 * self.scale))
             .px(px(8.0 * self.scale))
@@ -64,8 +68,29 @@ impl GhostexGpuiApp {
         // CDXC:Sidebar 2026-09-17 WHY:
         // GPUI broadcasts drag moves even outside a target. Only the row under the pointer may choose the drop command; otherwise later rows overwrite it.
         if !bounds.contains(&position)
-            || (target_kind != "space" && !self.native_sidebar.scroll.bounds().contains(&position))
+            || (!matches!(target_kind, "space" | "space-row")
+                && !self.native_sidebar.scroll.bounds().contains(&position))
         {
+            return;
+        }
+        if target_kind == "space-row" && source.kind != "space" {
+            return;
+        }
+        if source.kind == "space" && matches!(target_kind, "space" | "space-row") {
+            let command = source.space.as_ref().and_then(|space| {
+                space.drop_command(
+                    &source.id,
+                    target_kind,
+                    target_id,
+                    position,
+                    bounds,
+                    source.scale,
+                )
+            });
+            if self.native_sidebar.drop_command != command {
+                self.native_sidebar.drop_command = command;
+                cx.notify();
+            }
             return;
         }
         if source.kind == target_kind && source.id == target_id {
@@ -144,9 +169,6 @@ impl GhostexGpuiApp {
                 }
                 "group" => {
                     json!({"type": "moveGroup", "groupId": source.id, "targetGroupId": target_id, "position": position})
-                }
-                "space" => {
-                    json!({"type": "moveSpace", "spaceId": source.id, "targetSpaceId": target_id, "position": position})
                 }
                 _ => return,
             }

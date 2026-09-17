@@ -1,3 +1,4 @@
+import { applySidebarSpaceRowReorder } from '@/packages/core-ui/sidebar-space-order';
 import { updateNativeProjectDropMembership } from './project-drag';
 import { moveProjectsWithWorktrees } from '@/packages/shared/project-worktree-order';
 import { moveSessionIdsByDropTarget } from '@/packages/core-ui/sidebar-dnd';
@@ -95,10 +96,16 @@ export function reorderNativeSidebar(
   } else {
     const spaces = ui.metadata.spaces[ui.selectedMachineId];
     if (!spaces || command.spaceId === command.targetSpaceId) return;
-    const order = spaces.order.filter((id) => id !== command.spaceId);
+    const visible = command.visibleSpaceIds.filter((id) => spaces.order.includes(id));
+    if (!visible.includes(command.spaceId)) return;
+    const order = visible.filter((id) => id !== command.spaceId);
     const index = order.indexOf(command.targetSpaceId);
     if (index < 0) return;
     order.splice(index + (command.position === 'after' ? 1 : 0), 0, command.spaceId);
-    ui.metadata.updateSpaces(ui.selectedMachineId, reorderSidebarSpaces(spaces, order), post);
+    ui.metadata.updateSpaces(
+      ui.selectedMachineId,
+      reorderSidebarSpaces(spaces, applySidebarSpaceRowReorder(spaces.order, visible, order)),
+      post
+    );
   }
 }

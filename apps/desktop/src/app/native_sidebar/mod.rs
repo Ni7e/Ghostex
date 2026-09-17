@@ -26,6 +26,7 @@ mod scroll;
 mod sections;
 pub(crate) mod selectors;
 pub(crate) mod sessions;
+mod space_drag;
 mod space_gesture;
 pub(crate) mod state;
 mod status;

@@ -31,6 +31,7 @@ impl GhostexGpuiApp {
         let hovered = self.native_sidebar.hovered_group.as_ref() == Some(&id);
         let dragged = SidebarDrag {
             kind: "group",
+            space: None,
             id: id.clone(),
             title: group.title.clone(),
             scale,

@@ -40,6 +40,7 @@ impl GhostexGpuiApp {
         let drop_id = id.clone();
         let dragged = super::drag::SidebarDrag {
             kind: "collection",
+            space: None,
             id: id.clone(),
             title: collection.title.clone(),
             scale: appearance.scale,
