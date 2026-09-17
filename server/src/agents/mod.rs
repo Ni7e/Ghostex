@@ -15,6 +15,7 @@ pub mod terminal_title;
 #[cfg(test)]
 mod tests;
 pub mod title_reconcile;
+pub mod zcode_titles;
 
 pub(crate) use accept_all::*;
 pub(crate) use activity::*;
@@ -31,3 +32,4 @@ pub(crate) use settings::*;
 pub(crate) use switch_account::*;
 pub(crate) use terminal_title::*;
 pub(crate) use title_reconcile::*;
+pub(crate) use zcode_titles::*;

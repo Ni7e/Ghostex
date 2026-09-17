@@ -290,6 +290,9 @@ custom tag by name. Claude and Codex name their own sessions; Ghostex
 syncs those names without running a first-prompt title job or blocking terminal
 input. Pi and OMP use the Title Generation Agent for first-prompt names.
 Manual Generate Name and `/rename` in chat remain available for Claude and Codex.
+ZCode sessions rename from the sidebar and `ghostex rename-command` too: the name
+is saved in ZCode's own session store, and ZCode's automatic naming will not
+replace it.
 Fork starts the new session as `Fork: <original name>` and saves that name
 through the agent's own rename command so it survives reopening the conversation.
 
