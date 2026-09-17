@@ -271,7 +271,21 @@ pub(crate) fn apply_session_state_update(
             &identity,
         )? {
             title = candidate.title;
-            runtime_settings.insert("titleSource".to_string(), json!(candidate.title_source));
+            /*
+            CDXC:SessionTitles 2026-09-17 DECISION:
+            User: save donated titles with a non-user source. A candidate that only
+            matched by store path (never by conversation id) must not land as
+            "user", because a user-sourced title outranks terminal-auto and the
+            agent's own later names could never replace it. Weak matches are
+            recorded as terminal-auto, so the conversation's real title replaces
+            them; id-confirmed candidates keep the donor's source.
+            */
+            let title_source = if candidate.title_source == "user" && !candidate.same_conversation {
+                "terminal-auto".to_string()
+            } else {
+                candidate.title_source
+            };
+            runtime_settings.insert("titleSource".to_string(), json!(title_source));
             reason = candidate.reason;
         } else if next_agent.is_some() {
             /*
@@ -840,6 +854,11 @@ pub(crate) struct TrustedTitleCandidate {
     title: String,
     title_source: String,
     updated_at: Option<String>,
+    /// True when the candidate provably belongs to this session's own
+    /// conversation (matched by agent session id, or the event carried it).
+    /// Path-only matches are NOT proof for agents whose store is one shared
+    /// file, so their titles must never pin as user-sourced.
+    same_conversation: bool,
 }
 
 /// `project_sessions` is only hydrated once the event itself carried no trusted
@@ -853,7 +872,7 @@ pub(crate) fn select_trusted_title_for_identity(
     identity: &ResolvedIdentity,
 ) -> Result<Option<TrustedTitleCandidate>, DomainStateError> {
     if let Some(candidate) =
-        create_trusted_title_candidate(event_title, event_title_source, "event-title", None)
+        create_trusted_title_candidate(event_title, event_title_source, "event-title", None, true)
     {
         return Ok(Some(candidate));
     }
@@ -864,7 +883,8 @@ pub(crate) fn select_trusted_title_for_identity(
     `live_process_identity_update_is_noop` deliberately re-runs this pass on
     every poll while the title is still a placeholder, so this hunt must not
     hydrate the whole project. The rows are narrowed in SQL to the ones that
-    share the agent session id or path; `identities_match` still decides.
+    share the agent session id or path; `identities_match_strength` still
+    decides, including the shared-store carve-out.
     */
     let identity_sessions = project_sessions.matching_identity(identity)?;
     let live_candidate = select_newest_candidate(
@@ -879,9 +899,10 @@ pub(crate) fn select_trusted_title_for_identity(
                     agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
                     agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
                 };
-                if !identities_match(identity, &candidate_identity) {
+                let Some(match_strength) = identities_match_strength(identity, &candidate_identity)
+                else {
                     return None;
-                }
+                };
                 let title = trusted_resume_title(session)?;
                 Some(TrustedTitleCandidate {
                     reason: format!(
@@ -897,6 +918,7 @@ pub(crate) fn select_trusted_title_for_identity(
                     updated_at: read_text_value(session, "lastActiveAt")
                         .or_else(|| read_text_value(session, "updatedAt")),
                     title,
+                    same_conversation: match_strength == IdentityMatchStrength::ConversationId,
                 })
             })
             .collect(),
@@ -951,9 +973,10 @@ pub(crate) fn create_history_title_candidate(
                 hidden_record.and_then(|item| read_text_from_record(item, "agentSessionPath"))
             }),
     };
-    if !identities_match(identity, &candidate_identity) {
+    let Some(match_strength) = identities_match_strength(identity, &candidate_identity) else {
         return None;
-    }
+    };
+    let same_conversation = match_strength == IdentityMatchStrength::ConversationId;
 
     let updated_at = read_text_from_record(record, "lastInteractionAt")
         .or_else(|| read_text_from_record(record, "closedAt"));
@@ -963,6 +986,7 @@ pub(crate) fn create_history_title_candidate(
             session_record.get("titleSource"),
             "previous-session-record-title",
             updated_at.clone(),
+            same_conversation,
         ) {
             return Some(candidate);
         }
@@ -980,6 +1004,7 @@ pub(crate) fn create_history_title_candidate(
         })),
         "previous-session-primary-title",
         updated_at.clone(),
+        same_conversation,
     )
     .or_else(|| {
         create_trusted_title_candidate(
@@ -987,6 +1012,7 @@ pub(crate) fn create_history_title_candidate(
             Some(&json!("terminal-auto")),
             "previous-session-terminal-title",
             updated_at,
+            same_conversation,
         )
     })
 }
@@ -996,6 +1022,7 @@ pub(crate) fn create_trusted_title_candidate(
     title_source: Option<&Value>,
     reason: &str,
     updated_at: Option<String>,
+    same_conversation: bool,
 ) -> Option<TrustedTitleCandidate> {
     let normalized_title = get_visible_terminal_title(title?.as_str()?)?
         .trim()
@@ -1013,6 +1040,7 @@ pub(crate) fn create_trusted_title_candidate(
         title: normalized_title,
         title_source: normalized_source,
         updated_at,
+        same_conversation,
     })
 }
 
@@ -1051,21 +1079,48 @@ pub(crate) fn read_text_from_record(record: &Map<String, Value>, key: &str) -> O
         .map(str::to_string)
 }
 
-pub(crate) fn identities_match(left: &ResolvedIdentity, right: &ResolvedIdentity) -> bool {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IdentityMatchStrength {
+    /// Both sides carry the same agent session id: provably one conversation.
+    ConversationId,
+    /// Only the session store path matched. For per-conversation transcript
+    /// files (Claude, Codex) that still means the same conversation; for
+    /// shared-store agents it means nothing.
+    StorePath,
+}
+
+/// CDXC:SessionTitles 2026-09-17 DECISION:
+/// User: for zcode, only accept a trusted-title sibling match when the conversation id matches too, and save donated titles with a non-user source.
+/// zcode keeps every conversation in ONE SQLite database, so agentSessionPath is identical for all zcode sessions; the old path-only fallback let a fresh unbound pane adopt a sibling's user-pinned title ("111") and record it as user, which permanently outranked zcode's own titles.
+/// Hermes stores its conversations in one state.db too, but the identity path carries its per-conversation mirror file (`hermes-chat-mirror/<id>.jsonl`), so its path fallback stays safe; add an agent here if its identity path ever becomes a shared multi-conversation store.
+fn identity_uses_shared_session_store(agent: Option<&str>) -> bool {
+    normalize_agent_id(agent).as_deref() == Some("zcode")
+}
+
+pub(crate) fn identities_match_strength(
+    left: &ResolvedIdentity,
+    right: &ResolvedIdentity,
+) -> Option<IdentityMatchStrength> {
     let left_agent = normalize_agent_id(left.agent_id.as_deref());
     let right_agent = normalize_agent_id(right.agent_id.as_deref());
     if left_agent.is_some() && right_agent.is_some() && left_agent != right_agent {
-        return false;
+        return None;
     }
     if left.agent_session_id.is_some()
         && right.agent_session_id.is_some()
         && left.agent_session_id == right.agent_session_id
     {
-        return true;
+        return Some(IdentityMatchStrength::ConversationId);
     }
-    left.agent_session_path.is_some()
+    let shared_store = identity_uses_shared_session_store(left_agent.as_deref())
+        || identity_uses_shared_session_store(right_agent.as_deref());
+    if shared_store {
+        return None;
+    }
+    (left.agent_session_path.is_some()
         && right.agent_session_path.is_some()
-        && left.agent_session_path == right.agent_session_path
+        && left.agent_session_path == right.agent_session_path)
+        .then_some(IdentityMatchStrength::StorePath)
 }
 
 pub(crate) fn normalize_codex_session_id(value: &str) -> Option<String> {
