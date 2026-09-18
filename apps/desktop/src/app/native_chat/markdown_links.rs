@@ -40,8 +40,9 @@ fn blended(hex: &str, appearance: &ChatAppearance) -> Option<Hsla> {
     } else {
         VISUAL.dark_white_mix
     };
-    let channel =
-        |shift: u32| (((color >> shift) & 255u32) as f32 * (1.0 - mix) + 255.0 * mix).round() as u32;
+    let channel = |shift: u32| {
+        (((color >> shift) & 255u32) as f32 * (1.0 - mix) + 255.0 * mix).round() as u32
+    };
     Some(rgb(channel(16) << 16 | channel(8) << 8 | channel(0)).into())
 }
 

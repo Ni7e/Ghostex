@@ -96,8 +96,8 @@ pub(super) fn replacements(
 ///
 /// CDXC:SessionChat 2026-09-18 DECISION:
 /// User (2026-09-09, React composer): a double click expands a pill back into its editable
-/// markdown source. The marker suppresses the pill so the same text stays visible while it is
-/// edited, and it is stripped again on send.
+/// markdown source. The marker is what suppresses the pill, so the source stays visible for as
+/// long as it is there; the shared parser skips any label that ends with it.
 pub(super) fn revealed(draft: &str, reference: &ComposerReference) -> Option<(String, usize)> {
     let source = draft.get(reference.range.clone())?;
     let label_end = source.find("](")?;
