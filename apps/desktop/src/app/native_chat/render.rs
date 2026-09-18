@@ -10,6 +10,7 @@ use serde_json::json;
 impl Render for NativeChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         super::scroll_bottom::register(cx);
+        super::search::register(cx);
         self.last_render = Some(std::time::Instant::now());
         self.main_window = Some(window.window_handle());
         if self.maximized_window.is_none() {
@@ -17,6 +18,26 @@ impl Render for NativeChatView {
         }
         let p = ChatAppearance::current(&self.snapshot);
         let s = p.scale;
+        self.sync_search_scroll();
+        /*
+        CDXC:SessionChat 2026-09-18 WHY:
+        React's maximized composer is a fixed overlay across the whole chat pane, so nothing of the
+        conversation is left around it. The native one is a pane-sized child window over a
+        translucent scrim, which leaves this pane painting underneath it: the transcript's rails,
+        minimap and fork strip showed through the margins. While it is up, the pane behind renders
+        its background only.
+        */
+        let maximized = self.maximized_window.is_some();
+        let search_bar = if maximized {
+            None
+        } else {
+            self.render_search_bar(&p, window, cx)
+        };
+        let fork_branch_strip = if maximized {
+            None
+        } else {
+            self.render_fork_branch_strip(&p, cx)
+        };
         let state = self.snapshot.clone();
         let error = self.error.clone();
         let transcript = list(
@@ -45,6 +66,8 @@ impl Render for NativeChatView {
         let app = self.config.app.clone();
         let pane_focused = self.pane_focused;
         let composer_ready = self.composer_ready;
+        let account_switch_card = self.render_account_switch_card(&p, cx);
+        let subagent_viewer = self.render_subagent_viewer(&p, window, cx);
         div()
             .id("native-session-chat")
             .size_full()
@@ -63,6 +86,7 @@ impl Render for NativeChatView {
                 super::focus::reclaim_keyboard_focus(window);
             })
             .capture_action(cx.listener(Self::scroll_bottom_action))
+            .capture_action(cx.listener(Self::open_search_action))
             .capture_key_down(cx.listener(Self::composer_key_down))
             .composer_input_actions(cx)
             .capture_key_up(cx.listener(|chat, _, _, _| chat.composer_held_key = None))
@@ -84,28 +108,39 @@ impl Render for NativeChatView {
                         .child(error),
                 )
             })
-            .when(state["hasMore"] == true, |this| {
-                this.child(
-                    div().flex().justify_center().child(
-                        self.chat_button(
-                            "load-earlier".into(),
-                            if state["loadingEarlier"] == true {
-                                "Loading…"
-                            } else {
-                                "Load earlier messages"
-                            }
-                            .into(),
-                            json!({"type":"loadEarlier"}),
-                            &p,
-                            cx,
+            // Only React's one manual case: a transcript with no rows yet. A filled
+            // one pages itself near the top and keeps its anchor (pagination.rs).
+            .when(
+                !maximized && state["hasMore"] == true && self.list.item_count() == 0,
+                |this| {
+                    this.child(
+                        div().flex().justify_center().child(
+                            self.chat_button(
+                                "load-earlier".into(),
+                                if state["loadingEarlier"] == true {
+                                    "Loading earlier turns…"
+                                } else {
+                                    "Load earlier turns"
+                                }
+                                .into(),
+                                json!({"type":"loadEarlier"}),
+                                &p,
+                                cx,
+                            ),
                         ),
-                    ),
-                )
-            })
-            .when(self.list.item_count() == 0, |this| {
+                    )
+                },
+            )
+            // The search bar is a sibling region above the list, never an overlay on it.
+            .when_some(search_bar, |this, bar| this.child(bar))
+            // The fork branch switcher owns its own strip above the list, the same way.
+            .when_some(fork_branch_strip, |this, strip| this.child(strip))
+            .when(!maximized && self.list.item_count() == 0, |this| {
                 this.child(self.render_empty_transcript_region(&state, &p, cx))
             })
-            .when(self.list.item_count() > 0, |this| this.child(transcript))
+            .when(!maximized && self.list.item_count() > 0, |this| {
+                this.child(transcript)
+            })
             .child(composer)
             .child(
                 gpui::canvas(
@@ -136,5 +171,8 @@ impl Render for NativeChatView {
                 .absolute()
                 .size_full(),
             )
+            .when_some(account_switch_card, |this, card| this.child(card))
+            // The subagent transcript is a modal over the whole pane, like the account-switch card.
+            .when_some(subagent_viewer, |this, viewer| this.child(viewer))
     }
 }

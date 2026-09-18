@@ -1,19 +1,18 @@
 import { useState, type MouseEvent } from 'react';
 import { useSessionChatVirtualScroller } from './session-chat-virtual-scroller';
+import {
+  sessionChatMinimapDashWidth,
+  sessionChatMinimapIndexAt,
+  sessionChatMinimapPreviewText as previewText,
+  sessionChatMinimapRailHeight,
+  sessionChatMinimapVisible,
+} from '@/packages/shared/session-chat-presentation/minimap';
 import type { SessionChatMessage } from '@/packages/shared/session-chat';
 import './session-chat-minimap.css';
 
 interface SessionChatMinimapTurn {
   user: SessionChatMessage;
   final: SessionChatMessage | null;
-}
-
-function previewText(message: SessionChatMessage | null): string {
-  return (message?.blocks ?? [])
-    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 /**
@@ -35,15 +34,14 @@ export function SessionChatMinimap({
   const activeTurn = turns[activeIndex];
   const visibleIds = new Set(visibleMessageIds);
 
-  if (turns.length < 2) {
+  if (!sessionChatMinimapVisible(turns.length)) {
     return null;
   }
 
   const topPercent = (index: number): number => (index / (turns.length - 1)) * 100;
   const pointerIndex = (event: MouseEvent<HTMLButtonElement>): number => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const progress = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-    return Math.round(progress * (turns.length - 1));
+    return sessionChatMinimapIndexAt((event.clientY - rect.top) / rect.height, turns.length);
   };
   const select = (index: number): void => {
     const turn = turns[index];
@@ -109,7 +107,7 @@ export function SessionChatMinimap({
         onMouseDown={(event) => event.preventDefault()}
         onMouseLeave={() => setActiveId(null)}
         onMouseMove={(event) => move(pointerIndex(event))}
-        style={{ height: `calc(${(turns.length - 1) * 8}px * var(--ghostex-chat-minimap-scale))` }}
+        style={{ height: `calc(${sessionChatMinimapRailHeight(turns.length)}px * var(--ghostex-chat-minimap-scale))` }}
         type='button'
       >
         <span aria-hidden='true' className='ghostex-chat-minimap-line' />
@@ -124,7 +122,7 @@ export function SessionChatMinimap({
               key={turn.user.id}
               style={{
                 top: `${topPercent(index)}%`,
-                width: `calc(${distance === 0 ? 24 : distance === 1 ? 16 : distance === 2 ? 10 : 8}px * var(--ghostex-chat-minimap-scale))`,
+                width: `calc(${sessionChatMinimapDashWidth(distance)}px * var(--ghostex-chat-minimap-scale))`,
               }}
             />
           );

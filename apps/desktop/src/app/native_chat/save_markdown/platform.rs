@@ -1,4 +1,4 @@
-pub(super) fn prepare(window: &mut gpui::Window) {
+pub(in crate::app::native_chat) fn prepare(window: &mut gpui::Window) {
     #[cfg(target_os = "macos")]
     {
         use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};

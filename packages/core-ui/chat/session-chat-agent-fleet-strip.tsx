@@ -7,7 +7,7 @@
 import { IconUsers } from '@tabler/icons-react';
 import { useContext, useEffect, useLayoutEffect, useState } from 'react';
 import type { SessionChatAgentFleet } from '../../shared/session-chat';
-import { formatSessionChatActivityElapsed, sessionChatActivityElapsedSeconds } from './session-chat-activity-row';
+import { sessionChatAgentFleetRows } from '@/packages/shared/session-chat-presentation/agent-fleet';
 import { persistSessionChatInteractions, sessionChatInteractionState } from './session-chat-interaction-state';
 import { SessionChatSimpleModeContext } from './session-chat-simple-mode';
 import { SessionChatStatusCard, SessionChatStatusCardLead } from './session-chat-status-card';
@@ -63,8 +63,8 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
   }, [agentCount, rowsElement]);
   const [now, setNow] = useState(() => Date.now());
   const detectedAt = fleet?.detectedAt ?? null;
-  const validUntil = fleet?.validUntil ? Date.parse(fleet.validUntil) : null;
-  const stale = fleet?.stale === true || (validUntil !== null && (!Number.isFinite(validUntil) || now >= validUntil));
+  const projection = sessionChatAgentFleetRows(fleet, provider, now);
+  const stale = projection?.stale === true;
   // Keep checking the observation lease even when every row's elapsed clock is idle.
   useEffect(() => {
     if (detectedAt === null || stale) {
@@ -75,29 +75,11 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
     return () => clearInterval(timer);
   }, [detectedAt, stale]);
 
-  const agents = fleet?.agents ?? [];
-  if (!fleet || agents.length === 0) {
+  if (!projection) {
     return null;
   }
 
-  const idleCount = agents.filter((agent) => agent.status === 'idle').length;
-  const runningCount = stale ? 0 : agents.length - idleCount;
-  // The header says how many are running; the working pulse lives on each row.
-  // A stale roster cannot vouch for anything running, so it only carries its size.
-  const countLabel = stale
-    ? `${agents.length}`
-    : [runningCount > 0 ? `${runningCount} running` : null, idleCount > 0 ? `${idleCount} idle` : null]
-        .filter((part) => part !== null)
-        .join(', ');
-
-  // Carry the captured roster, not the ticking display clock, so identical
-  // agent types can be resolved against the provider's ordered launch records.
-  const roster = agents.map((agent) => ({
-    name: agent.name,
-    startedAt:
-      agent.startedAt ??
-      (agent.elapsedSeconds === undefined ? null : Date.parse(fleet.detectedAt) - agent.elapsedSeconds * 1000),
-  }));
+  const { countLabel, rows } = projection;
 
   return (
     <SessionChatStatusCard
@@ -123,31 +105,21 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
         className={`ghostex-chat-agent-fleet-rows${scrollable ? ' scroll-fade-y' : ''}`}
         role='list'
       >
-        {agents.map((agent, index) => {
-          // CDXC:SessionChat 2026-09-12 DECISION: User: Codex rows show the child name/path beside the model and effort in the status column, moving it out of the tooltip; Claude keeps its task text.
-          const statusText = provider === 'codex' ? agent.name : agent.task;
-          const idle = agent.status === 'idle';
-          const working = !stale && !idle;
-          const selector = agent.id ?? `fleet:${JSON.stringify({ agents: roster, index })}`;
+        {/* CDXC:SessionChat 2026-09-12 DECISION: User: Codex rows show the child name/path beside the model and effort in the status column, moving it out of the tooltip; Claude keeps its task text. */}
+        {rows.map((row) => {
+          const { statusText, idle, working } = row;
           const transcriptTarget = {
-            name: agent.task ?? agent.name,
-            selector,
-            agentType: agent.name,
-            task: agent.task,
-            model: agent.model,
-            effort: agent.effort,
+            name: row.name,
+            selector: row.selector,
+            agentType: row.agentType,
+            task: row.task,
+            model: row.model,
+            effort: row.effort,
           };
-          const elapsed = sessionChatActivityElapsedSeconds(
-            {
-              detectedAt: fleet.detectedAt,
-              ...(agent.elapsedSeconds === undefined ? {} : { elapsedSeconds: agent.elapsedSeconds }),
-            },
-            working ? now : Date.parse(fleet.detectedAt)
-          );
           return (
             <div
               className='ghostex-chat-agent-fleet-row'
-              key={agent.id ?? `${index}:${agent.name}`}
+              key={row.key}
               role='listitem'
               data-status={stale ? 'unavailable' : idle ? 'idle' : 'working'}
             >
@@ -159,8 +131,8 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
                 }
               />
               <span className='ghostex-chat-card-content ghostex-chat-agent-fleet-name'>
-                <SessionChatSubagentLink {...transcriptTarget} showAgentType={provider !== 'codex'}>
-                  <SessionChatSubagentModel info={agent} />
+                <SessionChatSubagentLink {...transcriptTarget} showAgentType={row.showAgentType}>
+                  <SessionChatSubagentModel info={{ model: row.model, effort: row.effort }} />
                 </SessionChatSubagentLink>
               </span>
               {/* Task and marker share one cell: `+2` reads as belonging to the
@@ -168,7 +140,7 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
                   a marked row aligned with every unmarked one. */}
               <span className='ghostex-chat-agent-fleet-work'>
                 {/* CDXC:SessionChat 2026-09-10 DECISION: User: put the ‣ separator at the start of the status cell so it aligns across subagent rows regardless of model label width. */}
-                {statusText || (idle && !stale) || agent.nested ? (
+                {row.marker ? (
                   <span aria-hidden='true' className='ghostex-chat-card-content shrink-0'>
                     ‣
                   </span>
@@ -176,19 +148,19 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
                 {idle && !stale ? <span className='ghostex-chat-card-hint'>Idle</span> : null}
                 <span className='ghostex-chat-card-content ghostex-chat-agent-fleet-task'>
                   {statusText ? (
-                    <SessionChatSubagentLink {...transcriptTarget} showAgentType={provider !== 'codex'}>
+                    <SessionChatSubagentLink {...transcriptTarget} showAgentType={row.showAgentType}>
                       {statusText}
                     </SessionChatSubagentLink>
                   ) : (
                     ''
                   )}
                 </span>
-                {agent.nested ? (
+                {row.nested ? (
                   <span
                     className='ghostex-chat-card-hint [--chat-card-hint-base:0.625rem] ghostex-chat-agent-fleet-nested'
-                    title={`${agent.nested} more agent${agent.nested === 1 ? '' : 's'} under this one`}
+                    title={row.nestedTitle}
                   >
-                    +{agent.nested}
+                    +{row.nested}
                   </span>
                 ) : null}
               </span>
@@ -197,13 +169,13 @@ function SessionChatAgentFleetCard({ fleet, provider, sessionKey }: SessionChatA
                   matter how long the one above it was. The separator only
                   appears when it has something on both sides of it. */}
               <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-fleet-tokens'>
-                {agent.tokens ?? ''}
+                {row.tokens}
               </span>
               <span aria-hidden='true' className='ghostex-chat-agent-fleet-separator'>
-                {agent.tokens && elapsed !== null ? '•' : ''}
+                {row.separator}
               </span>
               <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-fleet-clock'>
-                {elapsed === null ? '' : formatSessionChatActivityElapsed(elapsed)}
+                {row.elapsedLabel}
               </span>
             </div>
           );

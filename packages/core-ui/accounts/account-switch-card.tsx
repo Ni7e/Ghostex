@@ -1,18 +1,16 @@
 import { IconArrowRight, IconCheck, IconRefresh } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
-import type { AccountSwitchProgress, AccountUsageWindow, AgentAccount } from '@/packages/shared/agent-accounts';
-import { fableWindow, isFiveHourWindow, isWeeklyWindow } from '@/packages/shared/account-usage-windows';
-import { formatResetCountdown } from '@/packages/shared/reset-countdown';
+import type { AccountSwitchProgress, AgentAccount } from '@/packages/shared/agent-accounts';
+import {
+  accountSwitchCardPresentation,
+  type AccountSwitchCardAccount,
+  type AccountSwitchUsageCard,
+} from '@/packages/shared/session-chat-presentation/accounts';
 import { getBrandAgentLogoStyle } from '../agent-logos';
 import { useAccountText } from './account-text';
 import './account-switch-card.css';
 
-function UsageCard({ label, usage, now }: { label: string; usage?: AccountUsageWindow; now: number }) {
-  const used = usage && Number.isFinite(usage.usedPercent) ? Math.max(0, Math.min(100, usage.usedPercent)) : undefined;
-  const level =
-    used === undefined ? 'unknown' : used >= 100 ? 'exhausted' : used >= 80 ? 'high' : used >= 50 ? 'moderate' : 'low';
-  const remaining = usage?.resetsAt ? Date.parse(usage.resetsAt) - now : NaN;
-  const reset = Number.isFinite(remaining) ? (remaining > 0 ? formatResetCountdown(remaining) : 'Due') : null;
+function UsageCard({ usage: { label, used, level, reset } }: { usage: AccountSwitchUsageCard }) {
   return (
     <div
       className='gx-account-switch-usage-card'
@@ -38,23 +36,15 @@ function UsageCard({ label, usage, now }: { label: string; usage?: AccountUsageW
 }
 
 function Account({
-  account,
-  role,
+  account: { label, role, target, usage },
   provider,
-  target,
   verified,
-  now,
 }: {
-  account?: AgentAccount;
-  role: string;
+  account: AccountSwitchCardAccount;
   provider: AccountSwitchProgress['provider'];
-  target?: boolean;
   verified: boolean;
-  now: number;
 }) {
   const text = useAccountText();
-  const main = account?.usage.filter((window) => !window.model) ?? [];
-  const label = account?.email || (target ? 'Selected account' : 'Current CLI login');
   return (
     <div
       className={`gx-account-switch-account gx-account-switch-account-${target ? 'to' : 'from'}`}
@@ -72,25 +62,15 @@ function Account({
         {target && verified && <IconCheck size={15} className='gx-account-switch-verified' />}
       </div>
       <div className='gx-account-switch-usage-cards'>
-        <UsageCard label='5h limit' usage={main.find(isFiveHourWindow)} now={now} />
-        <UsageCard label='7d limit' usage={main.find(isWeeklyWindow)} now={now} />
-        {provider === 'claude' && <UsageCard label='Fable' usage={fableWindow(account?.usage ?? [])} now={now} />}
+        {usage.map((card) => (
+          <UsageCard key={card.label} usage={card} />
+        ))}
       </div>
     </div>
   );
 }
 
-/**
- * CDXC:AgentProviders 2026-09-12 DECISION:
- * User: center the account-switch card in chat until the switch completes; only add this card and leave the Switch Account menu unchanged.
- * Show both accounts with three percentage cards side by side, including Fable, colored by proximity to the limit and red at 100%. Omit "used" and "limit reached" captions.
- * Keep numbered steps with one animated line beneath the active step, replacing the rejected spinner around the number. The automatic third step is "Continue Session"; manual switches wait for the user's next message.
- * No heading spinner, repeated status above the composer, View terminal button, draft reassurance, or bottom bar.
- * Show plain provider logos in this card, without the account's two-character indicator inside them.
- * Identify each account by its real email on one line, respecting Hide emails, rather than account names or the preview's former invented aliases.
- *
- * `ready` is the chat's confirmation that the second account is bound and usable (see use-account-switch-status.ts). A `success` phase without it keeps the last step active and the "Switching" heading, so the card never announces completion before the account is ready.
- */
+/** Renders accountSwitchCardPresentation (packages/shared/session-chat-presentation/accounts.ts), which owns the card's copy, steps and usage levels. */
 export function AccountSwitchCard({
   progress,
   accounts,
@@ -107,73 +87,24 @@ export function AccountSwitchCard({
   now?: number;
 }) {
   const text = useAccountText();
-  const { phase, source, provider } = progress;
-  const settled = phase === 'success' && ready;
-  const finishing = phase === 'success' && !ready;
-  const verified = progress.accountReady === true || phase === 'success' || phase === 'continuing';
-  const providerName = provider === 'claude' ? 'Claude' : 'Codex';
-  if (phase === 'cancelled') return null;
-  const labels = ['Switch account', 'Resume conversation', ...(source === 'automatic' ? ['Continue Session'] : [])];
+  const card = accountSwitchCardPresentation(progress, accounts, ready, now);
+  if (!card) return null;
   return (
-    <section
-      className='gx-account-switch-card'
-      data-phase={finishing ? 'finishing' : phase}
-      aria-label='Account switch status'
-    >
+    <section className='gx-account-switch-card' data-phase={card.phase} aria-label='Account switch status'>
       <div className='gx-account-switch-card-heading'>
         <div role='status' aria-live='polite'>
-          <h2>
-            {phase === 'failed'
-              ? verified
-                ? 'Couldn’t continue the session'
-                : 'Couldn’t complete the switch'
-              : settled
-                ? 'Account switched'
-                : `Switching ${providerName} account`}
-          </h2>
-          <p>
-            {phase === 'failed'
-              ? verified
-                ? 'The account is ready, but continuation needs attention.'
-                : 'The new account isn’t ready yet.'
-              : settled
-                ? source === 'automatic'
-                  ? 'Your task is continuing on the new account.'
-                  : 'Ready whenever you are. Send your next message.'
-                : finishing
-                  ? 'Loading your conversation on the new account.'
-                  : source === 'automatic'
-                    ? 'Usage limit reached. Continuing on an available account.'
-                    : 'Your conversation will be ready for your next message.'}
-          </p>
+          <h2>{card.heading}</h2>
+          <p>{card.lede}</p>
         </div>
       </div>
       <div className='gx-account-switch-account-route'>
-        <Account
-          account={accounts.find((account) => account.id === progress.fromAccountId)}
-          provider={provider}
-          role={verified ? 'Previous account' : 'Current account'}
-          verified={verified}
-          now={now}
-        />
+        <Account account={card.from} provider={progress.provider} verified={card.verified} />
         <IconArrowRight size={17} className='gx-account-switch-route-arrow' aria-hidden='true' />
-        <Account
-          account={accounts.find((account) => account.id === progress.toAccountId)}
-          provider={provider}
-          role={verified ? 'Active account' : 'Switching to'}
-          target
-          verified={verified}
-          now={now}
-        />
+        <Account account={card.to} provider={progress.provider} verified={card.verified} />
       </div>
-      {phase === 'failed' ? (
+      {card.steps === null ? (
         <div className='gx-account-switch-failure-detail' role='alert'>
-          <p>
-            {text(
-              progress.reason ||
-                'We couldn’t confirm the new login. Retry this switch or use Switch Account to choose another account.'
-            )}
-          </p>
+          <p>{text(card.failure ?? '')}</p>
           {onRetry && (
             <div className='gx-account-switch-failure-actions'>
               <Button size='sm' variant='outline' disabled={retrying} onClick={onRetry}>
@@ -185,30 +116,25 @@ export function AccountSwitchCard({
         </div>
       ) : (
         <ol className='gx-account-switch-progress' aria-label='Switch progress'>
-          {labels.map((label, index) => {
-            const current = phase === 'switching' ? 0 : phase === 'resuming' ? 1 : finishing ? labels.length - 1 : 2;
-            const done = settled || index < current;
-            const active = !done && index === current;
-            return (
-              <li
-                key={label}
-                className='gx-account-switch-step'
-                data-state={done ? 'done' : active ? 'active' : 'pending'}
-                aria-current={active ? 'step' : undefined}
-                aria-label={`Step ${index + 1}: ${label}, ${done ? 'complete' : active ? 'in progress' : 'pending'}`}
-              >
-                <span className='gx-account-switch-step-marker' aria-hidden='true'>
-                  <span className='gx-account-switch-step-number'>{index + 1}</span>
+          {card.steps.map(({ label, state }, index) => (
+            <li
+              key={label}
+              className='gx-account-switch-step'
+              data-state={state}
+              aria-current={state === 'active' ? 'step' : undefined}
+              aria-label={`Step ${index + 1}: ${label}, ${state === 'done' ? 'complete' : state === 'active' ? 'in progress' : 'pending'}`}
+            >
+              <span className='gx-account-switch-step-marker' aria-hidden='true'>
+                <span className='gx-account-switch-step-number'>{index + 1}</span>
+              </span>
+              <span className='gx-account-switch-step-copy'>
+                <span className='gx-account-switch-step-label'>{label}</span>
+                <span className='gx-account-switch-step-track' aria-hidden='true'>
+                  {state === 'active' && <span className='gx-account-switch-step-motion' />}
                 </span>
-                <span className='gx-account-switch-step-copy'>
-                  <span className='gx-account-switch-step-label'>{label}</span>
-                  <span className='gx-account-switch-step-track' aria-hidden='true'>
-                    {active && <span className='gx-account-switch-step-motion' />}
-                  </span>
-                </span>
-              </li>
-            );
-          })}
+              </span>
+            </li>
+          ))}
         </ol>
       )}
     </section>

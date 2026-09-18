@@ -31,6 +31,25 @@ impl NativeChatView {
         }));
     }
 
+    /// Pressing a blocked Send: the reason is a native toast, never a read-only composer.
+    ///
+    /// CDXC:SessionChat 2026-09-18 SEE-ALSO:
+    /// The request comes from `packages/shared/session-chat-presentation/send-blocked.ts`, so this
+    /// raises exactly the toast React raises over the app-modal bridge
+    /// (`session-chat-send-blocked-toast.tsx`, the user's 2026-09-03 decision).
+    pub(super) fn report_send_blocked(&mut self, reason: &str, cx: &mut Context<Self>) {
+        let request = self.runtime.as_ref().and_then(|runtime| {
+            runtime.query(
+                "sendBlockedToast",
+                vec![serde_json::Value::String(reason.to_owned())],
+                std::time::Duration::from_millis(60),
+            )
+        });
+        if let Some(request) = request.filter(serde_json::Value::is_object) {
+            cx.emit(super::state::NativeChatEvent::Host(request));
+        }
+    }
+
     fn stop_from_button(&mut self, cx: &mut Context<Self>) {
         if self.stop_cooldown_task.is_some() {
             return;

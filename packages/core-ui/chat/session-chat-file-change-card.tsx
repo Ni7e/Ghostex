@@ -3,7 +3,12 @@ import { useSessionChatDisclosureState } from './session-chat-interaction-state'
 import { cn } from '@/packages/components/utils';
 import { AppTooltip } from '../app-tooltip';
 import type { SessionChatFileChange } from './session-chat-file-changes';
-import { sessionChatFileChangeDisplayPath } from './session-chat-file-change-path';
+import {
+  SESSION_CHAT_FILE_CHANGE_PREVIEW_LINES,
+  sessionChatFileChangeCounts,
+  sessionChatFileChangeExpandable,
+  sessionChatFileChangePathParts,
+} from './session-chat-file-change-path';
 import { useSessionChatHostLinks } from './session-chat-links';
 import { SESSION_CHAT_FILE_PATH_ATTRIBUTE } from './session-chat-file-paths';
 import { revealSessionChatFileChangeHeader } from './session-chat-file-change-scroll';
@@ -48,9 +53,12 @@ function FileChangeCard({
   const openFile = hostLinks?.openFile;
   const bodyId = useId();
   const headerRef = useRef<HTMLDivElement>(null);
-  const displayPath = sessionChatFileChangeDisplayPath(change.path, hostLinks?.workingDirectory);
-  const filename = displayPath.split(/[\\/]/).at(-1) || displayPath;
-  const parentPath = displayPath.slice(0, -filename.length);
+  // React shortens the folder half with CSS, which is width-aware, so it opts out of the shared character budget.
+  const { filename, parent: parentPath } = sessionChatFileChangePathParts(
+    change.path,
+    hostLinks?.workingDirectory,
+    Number.POSITIVE_INFINITY
+  );
   useEffect(() => {
     if (copyStatus === null) return;
     const timeout = window.setTimeout(() => setCopyStatus(null), 1500);
@@ -66,12 +74,13 @@ function FileChangeCard({
       setCopyStatus('Could not copy path');
     }
   };
-  const code = change.lines.filter((line) => line.kind !== 'meta');
-  const added = code.filter((line) => line.kind === 'add').length;
-  const removed = code.filter((line) => line.kind === 'del').length;
-  const canExpand = !previewEnabled || code.length > 7 || Boolean(change.result?.isError);
+  const counts = sessionChatFileChangeCounts(change.lines);
+  const { added, removed } = counts;
+  const canExpand = sessionChatFileChangeExpandable(counts, previewEnabled, Boolean(change.result?.isError));
   const showBody = expanded || previewEnabled;
-  const lines = expanded ? change.lines : code.slice(0, 7);
+  const lines = expanded
+    ? change.lines
+    : change.lines.filter((line) => line.kind !== 'meta').slice(0, SESSION_CHAT_FILE_CHANGE_PREVIEW_LINES);
   const toggle = () => {
     if (!canExpand) return;
     if (messageId) reportInteraction?.(messageId);

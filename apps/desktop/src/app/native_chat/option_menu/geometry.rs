@@ -28,6 +28,15 @@ pub(super) fn measure_rows(
             if row["context"].is_object() {
                 return super::context::height(&row["context"], width, appearance, cx);
             }
+            if row["accounts"].is_object() {
+                return super::accounts::height(
+                    &row["accounts"],
+                    width,
+                    row["customize"] == true,
+                    appearance,
+                    cx,
+                );
+            }
             if row["separator"] == true {
                 return Ok(13.0);
             }
@@ -40,6 +49,8 @@ pub(super) fn measure_rows(
                 };
             let icon = if row["icon"].is_string() || row["iconPath"].is_string() {
                 22.0
+            } else if row["dot"].is_string() {
+                14.0
             } else {
                 0.0
             };
@@ -63,6 +74,8 @@ pub(super) fn measure_rows(
                 )?;
                 lines
                     .iter()
+                    // A row's subtitle is one truncated line (`render.rs`); only a heading wraps.
+                    .take(if heading { usize::MAX } else { 1 })
                     .map(|line| f32::from(line.size(px(16.0 * scale)).height) / scale)
                     .sum::<f32>()
                     + 2.0

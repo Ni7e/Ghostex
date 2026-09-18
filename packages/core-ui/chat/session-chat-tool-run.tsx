@@ -22,14 +22,17 @@ import {
   SessionChatSubagentLink,
   sessionChatToolSubagent,
 } from './session-chat-subagent-link';
+import { formatSessionChatToolInput } from './session-chat-tool-summary';
 import {
-  formatSessionChatToolInput,
-  summarizeSessionChatCommandInput,
-  summarizeSessionChatToolInput,
-  truncateSessionChatToolPreview,
-} from './session-chat-tool-summary';
+  SESSION_CHAT_MAX_TOOL_RESULT_CHARS,
+  clipSessionChatToolBody,
+  isSessionChatCommandTool,
+  sessionChatToolGlyph,
+  sessionChatToolPreview,
+  sessionChatToolRunFold,
+} from '@/packages/shared/session-chat-presentation/tool-rows';
 
-export const SESSION_CHAT_MAX_TOOL_RESULT_CHARS = 4000;
+export { SESSION_CHAT_MAX_TOOL_RESULT_CHARS };
 
 type ToolBlock = SessionChatToolCallBlock | SessionChatToolResultBlock;
 
@@ -47,12 +50,6 @@ export interface SessionChatToolRunProps {
   questionPairsAsRows?: boolean;
 }
 
-function clipBody(text: string): string {
-  return text.length > SESSION_CHAT_MAX_TOOL_RESULT_CHARS
-    ? `${text.slice(0, SESSION_CHAT_MAX_TOOL_RESULT_CHARS)}…`
-    : text;
-}
-
 /*
  * The one glyph on this surface that says WHAT ran rather than "this expands":
  * semantic tier (see CDXC:SessionChat in chat.css). It shares the
@@ -60,26 +57,17 @@ function clipBody(text: string): string {
  * vertical axis as the chevrons; only its stroke weight and its shape set it
  * apart, and it must never be flattened into a chevron.
  */
-function toolIcon(name: string): ReactNode {
-  const normalized = name.toLowerCase();
-  const className = 'ghostex-chat-glyph-semantic';
-  if (/edit|write|patch|replace/.test(normalized)) {
-    return <IconPencil aria-hidden='true' className={className} />;
-  }
-  if (/read|file|glob|list/.test(normalized)) {
-    return <IconFileText aria-hidden='true' className={className} />;
-  }
-  if (/exec|command|shell|terminal|bash/.test(normalized)) {
-    return <IconTerminal2 aria-hidden='true' className={className} />;
-  }
-  if (/web|search|browser|fetch|url/.test(normalized)) {
-    return <IconWorldSearch aria-hidden='true' className={className} />;
-  }
-  return <IconTool aria-hidden='true' className={className} />;
-}
+const TOOL_GLYPH_ICONS = {
+  edit: IconPencil,
+  file: IconFileText,
+  terminal: IconTerminal2,
+  web: IconWorldSearch,
+  tool: IconTool,
+} as const;
 
-function isCommandTool(name: string): boolean {
-  return /exec|command|shell|terminal|bash/.test(name.toLowerCase());
+function toolIcon(name: string): ReactNode {
+  const Icon = TOOL_GLYPH_ICONS[sessionChatToolGlyph(name)];
+  return <Icon aria-hidden='true' className='ghostex-chat-glyph-semantic' />;
 }
 
 function DiffView({ lines }: { lines: readonly SessionChatDiffLine[] }) {
@@ -103,7 +91,7 @@ function ToolBody({ error, label, text }: { error?: boolean; label?: string; tex
   return (
     <div className='ghostex-chat-tool-body-group'>
       {label ? <div className='ghostex-chat-tool-body-label'>{label}</div> : null}
-      <pre className={cn('ghostex-chat-tool-body', error && 'is-error')}>{clipBody(text)}</pre>
+      <pre className={cn('ghostex-chat-tool-body', error && 'is-error')}>{clipSessionChatToolBody(text)}</pre>
     </div>
   );
 }
@@ -126,11 +114,8 @@ function ToolLine({
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const name = call?.name ?? 'Result';
-  const commandTool = isCommandTool(name);
-  const inputPreview = call ? summarizeSessionChatToolInput(call.input) : '';
-  const commandPreview = call ? summarizeSessionChatCommandInput(call.input) : '';
-  const resultPreview = truncateSessionChatToolPreview(result?.output.split('\n')[0]?.trim() ?? '', 120);
-  const preview = commandTool ? commandPreview : inputPreview || resultPreview;
+  const commandTool = isSessionChatCommandTool(name);
+  const preview = sessionChatToolPreview({ call, result });
   const callDiff = call ? diffFromSessionChatToolCall(call.name, call.input) : null;
   const resultDiff = result ? diffFromSessionChatText(result.output) : null;
   const diff = callDiff ?? resultDiff;
@@ -214,11 +199,8 @@ export function SessionChatToolRun({
     return <ToolLine index={index} call={pair.call} expandSignal={expandSignal} key={index} result={pair.result} />;
   };
 
-  // An answered question is conversation, not work: its card never folds
-  // behind the "+N previous tool calls" toggle. The fold hides only the
-  // ordinary tool rows before the last pair, exactly as before.
-  const collapsedVisible = pairs.map((_, index) => index === pairs.length - 1 || exchanges[index] !== null);
-  const hiddenCount = collapsedVisible.filter((visible) => !visible).length;
+  const fold = sessionChatToolRunFold(exchanges.map((exchange) => exchange !== null));
+  const { visible: collapsedVisible, hiddenCount } = fold;
   const toggle = (
     <button
       aria-expanded={expanded}
@@ -229,9 +211,7 @@ export function SessionChatToolRun({
       <span className='ghostex-chat-work-icon'>
         <IconChevronRight aria-hidden='true' className={cn('ghostex-chat-disclosure-chevron', expanded && 'is-open')} />
       </span>
-      <span>
-        {expanded ? 'Show fewer tool calls' : `+${hiddenCount} previous tool ${hiddenCount === 1 ? 'call' : 'calls'}`}
-      </span>
+      <span>{expanded ? fold.expandedLabel : fold.collapsedLabel}</span>
     </button>
   );
 

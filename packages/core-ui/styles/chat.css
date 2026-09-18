@@ -2492,7 +2492,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 .ghostex-chat-markdown h6 {
   font-weight: 600;
   line-height: var(--chat-heading-line-height);
-  margin: 1.25rem 0 0.5rem;
+  margin: var(--chat-heading-gap-before) 0 0.5rem;
 }
 
 .ghostex-chat-markdown h1 {
