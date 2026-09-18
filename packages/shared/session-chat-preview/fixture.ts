@@ -1,6 +1,17 @@
 import type { GxserverReadSessionChatResult, SessionChatMessage } from '../session-chat';
+import { MARKDOWN_PREVIEW } from './markdown-fixture';
 
-export const PREVIEW_SCENARIOS = ['conversation', 'working', 'compacting', 'question', 'queue', 'empty'] as const;
+export const PREVIEW_SCENARIOS = [
+  'conversation',
+  'markdown',
+  'working',
+  'compacting',
+  'question',
+  'approval',
+  'async',
+  'queue',
+  'empty',
+] as const;
 export type PreviewScenario = (typeof PREVIEW_SCENARIOS)[number];
 export interface ChatPreviewConfig {
   scenario: PreviewScenario;
@@ -76,8 +87,25 @@ export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSess
       'The sample is ready. You can type and send a message, change the scenario, or reset both previews from the comparison controls.'
     ),
   ];
+  if (config.scenario === 'async') {
+    messages.push({
+      ...previewMessage('20', 'assistant', 'I can keep reviewing while you choose the next check.'),
+      asyncQuestions: [
+        { title: 'Which layout should I check next?', options: ['Narrow pane', 'Large text'] },
+        { title: 'Any other behavior you want me to verify?' },
+      ],
+    });
+  }
   return {
-    messages: config.scenario === 'empty' ? [] : messages,
+    messages:
+      config.scenario === 'empty'
+        ? []
+        : config.scenario === 'markdown'
+          ? [
+              previewMessage('1', 'user', 'Compare inline code wrapping and selection.'),
+              previewMessage('2', 'assistant', MARKDOWN_PREVIEW),
+            ]
+          : messages,
     hasMore: false,
     beforeOffset: 0,
     epoch: 1,
@@ -87,7 +115,7 @@ export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSess
     sessionAgentId: 'codex',
     agentSessionId: 'chat-preview',
     screenProbed: true,
-    working: config.scenario === 'working' || config.scenario === 'compacting',
+    working: config.scenario === 'working' || config.scenario === 'compacting' || config.scenario === 'async',
     selectedOptions: {
       detectedAt: '2026-09-17T10:00:00Z',
       model: { value: 'gpt-5', label: 'GPT 5' },
@@ -115,6 +143,9 @@ export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSess
             detectedAt: new Date().toISOString(),
           },
         }
+      : {}),
+    ...(config.scenario === 'approval'
+      ? { prompt: { kind: 'approval' as const, tool: 'Shell', summary: 'bun run typecheck' } }
       : {}),
     ...(config.scenario === 'question'
       ? {

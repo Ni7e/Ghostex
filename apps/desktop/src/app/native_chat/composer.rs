@@ -209,8 +209,7 @@ impl NativeChatView {
         }
         if !maximized {
             if let Some(strip) = self.render_working_strip(p) {
-                // React's status portal and composer each contribute an 8px grid gap.
-                footer = footer.child(div().mb(px(8.0 * s)).child(strip));
+                footer = footer.child(strip);
             }
         }
         if let Some(error) = self.snapshot["operationError"].as_str() {
@@ -223,14 +222,20 @@ impl NativeChatView {
         if let Some(notice) = self.render_notice(p, window, cx) {
             footer = footer.child(notice);
         }
+        if let Some(questions) = self.render_async_questions(p, window, cx) {
+            footer = footer.child(questions);
+        }
         if let Some(prompt) = self.render_prompt(p, window, cx) {
-            return div()
-                .flex()
-                .w_full()
-                .justify_center()
-                .flex_shrink_0()
-                .child(footer.child(prompt))
-                .into_any_element();
+            if self.snapshot["prompt"]["kind"] == "question" {
+                return div()
+                    .flex()
+                    .w_full()
+                    .justify_center()
+                    .flex_shrink_0()
+                    .child(footer.child(prompt))
+                    .into_any_element();
+            }
+            footer = footer.child(prompt);
         }
         if let Some(note) = self.render_note(p, window, cx) {
             footer = footer.child(note);
@@ -270,6 +275,7 @@ impl NativeChatView {
         )
         .absolute()
         .size_full();
+        // CDXC:SessionChat 2026-09-18 WHY: React's inline composer has a zero-height notification section before its field, contributing one grid gap even while idle. Reserve that same gap here, after any cards or note.
         footer = footer.child(
             div()
                 .relative()
@@ -277,6 +283,7 @@ impl NativeChatView {
                 .flex_col()
                 .w_full()
                 .min_w_0()
+                .when(!maximized, |this| this.mt(px(8.0 * s)))
                 .child(suggestion_anchor)
                 .rounded(px(22.0 * s))
                 .border_1()
@@ -311,13 +318,14 @@ impl NativeChatView {
                         .child(
                             Input::new(&input)
                                 .disabled(!self.composer_ready)
+                                .placeholder_color(p.muted.opacity(0.6))
                                 .appearance(false)
                                 .bordered(false)
                                 .focus_bordered(false)
                                 .w_full()
                                 .p_0()
                                 .text_size(px(14.0 * s))
-                                .text_color(p.foreground)
+                                .text_color(p.primary)
                                 .line_height(px(if collapsed { 32.0 } else { 24.0 } * s))
                                 .when(collapsed, |this| this.h(px(32.0 * s)).max_h(px(32.0 * s)))
                                 .when(!collapsed && !maximized, |this| this.max_h(px(160.0 * s)))

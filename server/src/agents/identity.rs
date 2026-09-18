@@ -268,6 +268,7 @@ pub(crate) fn apply_session_state_update(
             &current_with_identity,
             params.get("title"),
             params.get("titleSource"),
+            read_text(params, "agentSessionId").as_deref(),
             &identity,
         )? {
             title = candidate.title;
@@ -869,11 +870,18 @@ pub(crate) fn select_trusted_title_for_identity(
     current_session: &Value,
     event_title: Option<&Value>,
     event_title_source: Option<&Value>,
+    event_agent_session_id: Option<&str>,
     identity: &ResolvedIdentity,
 ) -> Result<Option<TrustedTitleCandidate>, DomainStateError> {
-    if let Some(candidate) =
-        create_trusted_title_candidate(event_title, event_title_source, "event-title", None, true)
-    {
+    let same_conversation = event_agent_session_id.is_some()
+        && event_agent_session_id == identity.agent_session_id.as_deref();
+    if let Some(candidate) = create_trusted_title_candidate(
+        event_title,
+        event_title_source,
+        "event-title",
+        None,
+        same_conversation,
+    ) {
         return Ok(Some(candidate));
     }
 
@@ -1305,7 +1313,10 @@ pub(crate) fn normalize_status_agent_name(value: Option<&str>) -> Option<String>
 }
 
 pub(crate) fn infer_agent_id_from_path(path: Option<&str>) -> Option<String> {
-    let lower = path?.to_ascii_lowercase();
+    let lower = path?.replace('\\', "/").to_ascii_lowercase();
+    if lower.ends_with("/.zcode/cli/db/db.sqlite") {
+        return Some("zcode".to_string());
+    }
     if lower.contains("/.cursor/") && (lower.ends_with(".json") || lower.ends_with(".jsonl")) {
         return Some("cursor".to_string());
     }

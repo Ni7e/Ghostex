@@ -5,7 +5,7 @@ use gpui::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
     Styled as _, Window, div, px, relative,
 };
-use gpui_component::text::{TextView, TextViewStyle};
+use gpui_component::text::TextView;
 use serde_json::{Value, json};
 
 pub(crate) fn text(value: &Value, key: &str) -> String {
@@ -63,20 +63,35 @@ impl NativeChatView {
             }
             row.into_any_element()
         } else if item["kind"] == "completed-work" {
+            let mut work_appearance = p.clone();
+            work_appearance.primary = p.muted;
             let id = format!("work:{}", text(&item, "id"));
             let expanded = self.is_expanded(&id, p.verbose);
             let mut row = div().flex().flex_col().w_full().gap(px(8.0 * s));
-            row = row.child(
-                self.disclosure(
+            let heading = if item["expandable"] == true {
+                let disclosure = self.disclosure(
                     id,
                     text(&item, "label"),
                     expanded,
                     Some(json!({"type":"loadWork","id":item["id"],"work":item["deferred"]}))
                         .filter(|_| item["deferred"].is_object()),
-                    &p,
+                    &work_appearance,
                     cx,
-                ),
-            );
+                );
+                div()
+                    .text_color(p.muted)
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(disclosure)
+                    .into_any_element()
+            } else {
+                div()
+                    .pl(px(24.0 * s))
+                    .text_color(p.muted.opacity(0.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(text(&item, "label"))
+                    .into_any_element()
+            };
+            row = row.child(heading);
             row = row.child(
                 div()
                     .h(px(1.0))
@@ -90,6 +105,9 @@ impl NativeChatView {
                     row = row.child(self.message_row(message, &p, window, cx));
                 }
             }
+            for message in item["artifacts"].as_array().into_iter().flatten() {
+                row = row.child(self.message_row(message, &p, window, cx));
+            }
             if item["final"].is_object() {
                 row = row.child(self.message_row(&item["final"], &p, window, cx));
             }
@@ -101,12 +119,16 @@ impl NativeChatView {
             .w_full()
             .flex()
             .justify_center()
+            .when(index == 0, |this| this.pt(px(32.0 * s)))
+            .when(index + 1 == items.len(), |this| {
+                this.pb(px(super::transcript_layout::LAYOUT.end_padding * s))
+            })
             .child(
                 div()
                     .w_full()
                     .max_w(px(768.0 * s))
                     .px(px(16.0 * s))
-                    .pb(px(13.0 * s))
+                    .pb(px(16.0 * s))
                     .when_some(p.transcript_width, |this, width| {
                         this.max_w(relative(1.0)).w(relative(width))
                     })
@@ -174,10 +196,7 @@ impl NativeChatView {
     }
 
     pub(crate) fn markdown(&self, id: String, content: String, p: &ChatAppearance) -> AnyElement {
-        let mut style = TextViewStyle::default()
-            .paragraph_gap(gpui::rems(0.75))
-            .heading_font_size(|_, base| base);
-        style.heading_base_font_size = px(14.0 * p.scale);
+        let mut style = super::markdown_style::text_style(p);
         style.is_dark = !p.light;
         style.highlight_theme = if p.light {
             gpui_component::highlighter::HighlightTheme::default_light()
@@ -190,7 +209,7 @@ impl NativeChatView {
             .style(style)
             .text_size(px(14.0 * p.scale))
             .line_height(px(22.75 * p.scale))
-            .text_color(p.primary)
+            .text_color(p.prose)
             .into_any_element()
     }
 
@@ -198,12 +217,14 @@ impl NativeChatView {
         &mut self,
         message: &Value,
         p: &ChatAppearance,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = text(message, "id");
         let body = text(message, "text");
         let s = p.scale;
+        let reply_focus = self.reply_focus(message, window, cx);
+        let reply_focused = reply_focus.as_ref().is_some_and(|(_, focused)| *focused);
         let mut row = div()
             .id(format!("message:{id}"))
             .group("native-chat-message")
@@ -211,17 +232,24 @@ impl NativeChatView {
             .flex_col()
             .min_w_0()
             .w_full()
-            .gap(px(8.0 * s));
+            .gap(px(8.0 * s))
+            .when_some(reply_focus, |row, (focus, _)| {
+                row.track_focus(&focus).tab_stop(false)
+            });
         if message["role"] == "user" && message["suppressed"].is_null() {
             let copy = text(message, "copyText");
             // The prompt renders as markdown like the React bubble, which also makes it a selectable TextView; a plain string child cannot be selected.
+            let mut bubble_appearance = p.clone();
+            bubble_appearance.prose = p.primary;
             let bubble = div()
                 .max_w(relative(0.8))
                 .min_w_0()
                 .rounded(px(16.0 * s))
+                .border(px(1.0 * s))
+                .border_color(gpui::transparent_black())
                 .p(px(12.0 * s))
                 .bg(p.input)
-                .child(self.markdown(format!("user:{id}"), body.clone(), p));
+                .child(self.markdown(format!("user:{id}"), body.clone(), &bubble_appearance));
             return row
                 .when(message["queued"] == true, |this| {
                     this.child(
@@ -303,21 +331,7 @@ impl NativeChatView {
                         .flex()
                         .items_start()
                         .gap(px(6.0 * s))
-                        .child(
-                            div()
-                                .w(px(16.0 * s))
-                                .ml(px(2.0 * s))
-                                .flex_shrink_0()
-                                .flex()
-                                .justify_center()
-                                .child(
-                                    div()
-                                        .mt(px(9.5 * s))
-                                        .size(px(4.0 * s))
-                                        .rounded_full()
-                                        .bg(p.primary),
-                                ),
-                        )
+                        .child(self.reply_marker(message, reply_focused, p, cx))
                         .child(div().min_w_0().flex_1().child(self.markdown(
                             format!("body:{id}"),
                             body.clone(),
@@ -454,36 +468,12 @@ impl NativeChatView {
                 }
             }
         }
-        if self.snapshot["finalIds"]
-            .as_array()
-            .is_some_and(|ids| ids.iter().any(|candidate| candidate.as_str() == Some(&id)))
+        if self.has_reply_actions(message)
+            && message["tools"]
+                .as_array()
+                .is_some_and(|tools| !tools.is_empty())
         {
-            let copy = text(message, "copyText");
-            let annotate = body;
-            row = row.child(
-                div()
-                    .flex()
-                    .gap(px(10.0 * s))
-                    .text_color(p.muted)
-                    .child(
-                        div()
-                            .id(format!("copy:{id}"))
-                            .cursor_pointer()
-                            .child(gpui::svg().path("titlebar/copy.svg").size(px(14.0 * s)))
-                            .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .id(format!("annotate:{id}"))
-                            .cursor_pointer()
-                            .child(gpui::svg().path("titlebar/pencil.svg").size(px(14.0 * s)))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.host("annotateReply", json!({"markdown":annotate}), cx)
-                            })),
-                    ),
-            );
+            row = row.child(self.reply_actions(message, false, reply_focused, p, cx));
         }
         row.into_any_element()
     }

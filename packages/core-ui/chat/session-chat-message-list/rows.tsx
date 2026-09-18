@@ -4,13 +4,10 @@ import {
   IconArrowBackUp,
   IconCheck,
   IconChevronRight,
-  IconCopy,
-  IconFile,
   IconGitBranch,
   IconInfoCircle,
   IconPhoto,
   IconSparkles,
-  IconMessagePlus,
 } from '@tabler/icons-react';
 import { memo, useContext, useId, useRef } from 'react';
 import {
@@ -59,7 +56,9 @@ import { SessionChatTerminalToolRow } from '../session-chat-terminal-tool-row';
 import { pairSessionChatToolBlocks, splitSessionChatBlocks } from '../session-chat-tool-fold';
 import { SessionChatToolRun } from '../session-chat-tool-run';
 import { SessionChatUserMessageLayout } from '../session-chat-user-message-layout';
+import { sessionChatMessageActionContent } from '@/packages/shared/session-chat-presentation/message-actions';
 import '../session-chat-agent-tools-disclosure.css';
+import { SessionChatMessageActionIcon } from '../session-chat-message-action-icon';
 import { playCopySound } from '../../copy-sound';
 export const PASTED_IMAGE_NAME = /^ghostex-paste-.+\.png$/i;
 export function isPastedImagePath(path: string | undefined): boolean {
@@ -168,7 +167,7 @@ export function CopyFooter({
   onSaveMarkdown?: (markdown: string) => void;
   onSavePrompt?: (prompt: string) => Promise<void>;
 }) {
-  const canSaveMarkdown = markdown.split(/\r?\n/u).filter((line) => line.trim().length > 0).length > 1;
+  const { canAnnotate, canSaveMarkdown } = sessionChatMessageActionContent(markdown);
   return (
     <MessageFooter
       className={cn(
@@ -190,7 +189,7 @@ export function CopyFooter({
         title='Copy message'
         variant='ghost'
       >
-        <IconCopy aria-hidden='true' data-icon='inline-start' stroke={1.9} />
+        <SessionChatMessageActionIcon name='copy' />
       </Button>
       {onSavePrompt ? <SessionChatSavePromptButton prompt={markdown} onSave={onSavePrompt} /> : null}
       {onRewind ? (
@@ -198,7 +197,7 @@ export function CopyFooter({
           <IconArrowBackUp aria-hidden='true' data-icon='inline-start' stroke={1.9} />
         </Button>
       ) : null}
-      {onAnnotate && markdown.trim().length > 0 ? (
+      {onAnnotate && canAnnotate ? (
         <Button
           aria-label='Reply by Annotating'
           className={
@@ -209,7 +208,7 @@ export function CopyFooter({
           title='Reply by Annotating'
           variant='ghost'
         >
-          <IconMessagePlus aria-hidden='true' data-icon='inline-start' stroke={1.9} />
+          <SessionChatMessageActionIcon name='annotate' />
         </Button>
       ) : null}
       {onSaveMarkdown && canSaveMarkdown ? (
@@ -221,7 +220,7 @@ export function CopyFooter({
           title='Save to md'
           variant='ghost'
         >
-          <IconFile aria-hidden='true' data-icon='inline-start' stroke={1.9} />
+          <SessionChatMessageActionIcon name='save' />
         </Button>
       ) : null}
     </MessageFooter>
@@ -365,8 +364,24 @@ export function StatusRows({ statuses }: { statuses: readonly SessionChatStatusR
  * the code block's copy control are interactive). It keeps line structure so
  * the caller can rebuild paragraphs from it.
  */
-import { plainReasoningText, plainReasoningTeaser, NON_HOISTABLE_REASONING_LINE, splitReasoningHeadline, USER_TURN_SEPARATOR, normalizeUserMessageMarkdown, userTurnCopyMarkdown } from '@/packages/shared/session-chat-presentation/message-text';
-export { plainReasoningText, plainReasoningTeaser, NON_HOISTABLE_REASONING_LINE, splitReasoningHeadline, USER_TURN_SEPARATOR, normalizeUserMessageMarkdown, userTurnCopyMarkdown };
+import {
+  plainReasoningText,
+  plainReasoningTeaser,
+  NON_HOISTABLE_REASONING_LINE,
+  splitReasoningHeadline,
+  USER_TURN_SEPARATOR,
+  normalizeUserMessageMarkdown,
+  userTurnCopyMarkdown,
+} from '@/packages/shared/session-chat-presentation/message-text';
+export {
+  plainReasoningText,
+  plainReasoningTeaser,
+  NON_HOISTABLE_REASONING_LINE,
+  splitReasoningHeadline,
+  USER_TURN_SEPARATOR,
+  normalizeUserMessageMarkdown,
+  userTurnCopyMarkdown,
+};
 
 /**
  * Answered question cards carried by a turn's tool blocks. They are

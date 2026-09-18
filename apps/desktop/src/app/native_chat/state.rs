@@ -58,6 +58,8 @@ pub(crate) struct NativeChatView {
     input_needs_sync: bool,
     input_undoable: bool,
     input_caret: Option<usize>,
+    pub(super) async_answer_input: Option<(String, Entity<InputState>)>,
+    pub(super) async_answer_subscription: Option<Subscription>,
     pub(crate) answer_input: Option<(String, Entity<InputState>)>,
     pub(crate) answer_subscription: Option<Subscription>,
     pub(super) terminal_dialog_input: Option<super::terminal_dialog::TerminalDialogInput>,
@@ -97,7 +99,7 @@ impl NativeChatView {
                 .await;
             let _ = this.update(cx, |this, cx| this.pump(cx));
         });
-        let list = gpui::ListState::new(0, gpui::ListAlignment::Bottom, gpui::px(400.0));
+        let list = gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.0));
         list.set_follow_mode(gpui::FollowMode::Tail);
         let chat = cx.weak_entity();
         list.set_scroll_handler(move |event, _, cx| {
@@ -146,6 +148,8 @@ impl NativeChatView {
             input_needs_sync: false,
             input_undoable: false,
             input_caret: None,
+            async_answer_input: None,
+            async_answer_subscription: None,
             answer_input: None,
             answer_subscription: None,
             terminal_dialog_input: None,
@@ -185,7 +189,7 @@ impl NativeChatView {
             self.input_subscription = Some(cx.subscribe_in(
                 &input,
                 window,
-                |this, input, event: &InputEvent, _, cx| match event {
+                |this, input, event: &InputEvent, window, cx| match event {
                     InputEvent::Change => {
                         let draft = input.read(cx).value().to_string();
                         if draft == this.draft {
@@ -199,6 +203,7 @@ impl NativeChatView {
                         cx.notify();
                     }
                     InputEvent::Focus => {
+                        super::focus::reclaim_keyboard_focus(window);
                         this.invoke(json!({"type":"composerExpand","editor":true}), cx);
                         cx.emit(NativeChatEvent::ComposerFocused);
                     }

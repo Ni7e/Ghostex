@@ -5,14 +5,9 @@ use serde_json::json;
 impl NativeChatView {
     pub(super) fn composer_collapse_eligible(&self) -> bool {
         self.maximized_window.is_none()
-            && self.snapshot["questionCard"]["visible"] != true
-            && self.snapshot["note"]["open"] != true
-            && !self.snapshot["suggestions"].is_object()
-            && !self.snapshot["operationError"].is_string()
-            && self.snapshot["pendingAttachments"].as_u64().unwrap_or(0) == 0
-            && !self.snapshot["queue"]["prompts"]
-                .as_array()
-                .is_some_and(|prompts| !prompts.is_empty())
+            && !(self.snapshot["questionCard"]["visible"] == true
+                && self.snapshot["prompt"]["kind"] == "question")
+            && self.snapshot["composerCollapseEligible"] == true
     }
 
     pub(super) fn composer_collapsed(&self) -> bool {

@@ -57,6 +57,9 @@ impl Render for NativeChatView {
             .line_height(px(22.75 * s))
             .bg(p.background)
             .text_color(p.primary)
+            .capture_any_mouse_down(|_, window, _| {
+                super::focus::reclaim_keyboard_focus(window);
+            })
             .capture_key_down(cx.listener(Self::composer_key_down))
             .composer_input_actions(cx)
             .capture_key_up(cx.listener(|chat, _, _, _| chat.composer_held_key = None))
@@ -145,10 +148,13 @@ impl Render for NativeChatView {
                                 composer_ready,
                                 pane_focused,
                                 || {
-                                    app.as_ref().and_then(|app| app.upgrade()).is_some_and(|app| {
-                                        app.read(cx).focused_agents_or_companion_shell_session_id()
-                                            == Some(shell_session_id)
-                                    })
+                                    app.as_ref()
+                                        .and_then(|app| app.upgrade())
+                                        .is_some_and(|app| {
+                                            app.read(cx)
+                                                .focused_agents_or_companion_shell_session_id()
+                                                == Some(shell_session_id)
+                                        })
                                 },
                             );
                         }

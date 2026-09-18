@@ -52,9 +52,12 @@ impl PreviewWindow {
         let mut scenarios = div().flex().flex_wrap().gap_2();
         for name in [
             "conversation",
+            "markdown",
             "working",
             "compacting",
             "question",
+            "approval",
+            "async",
             "queue",
             "empty",
         ] {

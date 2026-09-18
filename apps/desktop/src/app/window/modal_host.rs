@@ -347,6 +347,17 @@ impl GpuiAppModalHostWindow {
         }
     }
 
+    pub(crate) fn refresh_project_view_spaces(
+        &mut self,
+        spaces: &serde_json::Value,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.latest_sidebar_state_message["hud"]["projectViewSpaces"] = spaces.clone();
+        if self.is_ready && self.current_modal.requires_sidebar_state() {
+            self.dispatch_sidebar_state(cx);
+        }
+    }
+
     pub(crate) fn dispatch_transient_sidebar_state_message(
         &mut self,
         payload: serde_json::Value,

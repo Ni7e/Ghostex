@@ -5678,7 +5678,7 @@
       "default": "powershell",
       "options": [
         {
-          "label": "PowerShell (native Windows)",
+          "label": "PowerShell (Native)",
           "value": "powershell"
         },
         {

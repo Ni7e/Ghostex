@@ -30,6 +30,21 @@ fn text<'a>(v: &'a Value, key: &str) -> &'a str {
 }
 
 impl GhostexGpuiApp {
+    /// CDXC:Spaces 2026-09-18 WHY:
+    /// Settings builds its own hydrate, which omitted the sidebar's spaces and showed an empty picker despite existing spaces.
+    /// Reuse the shared runtime's complete local/remote options, including their computer-scoped identities.
+    pub(crate) fn with_project_view_spaces(&self, mut message: Value) -> Value {
+        if let Some(spaces) = self
+            .native_sidebar
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.hud.get("projectViewSpaces"))
+        {
+            message["hud"]["projectViewSpaces"] = spaces.clone();
+        }
+        message
+    }
+
     /// CDXC:Extensions 2026-09-09 WHY:
     /// Two projects can resolve to the same website. Keep their page navigation separate and park the actual CEF child when switching projects or opening command output.
     pub(crate) fn park_custom_project_view(&mut self, owned: ProjectWorkareaRuntimeCefSurface) {
