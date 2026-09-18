@@ -308,6 +308,21 @@ pub(crate) fn request_session_rename(
         startup_text: None,
     });
     if is_agent_associated(&session, &identity) {
+        if identity
+            .agent_id
+            .as_deref()
+            .is_some_and(|agent_id| agent_id.eq_ignore_ascii_case("zcode"))
+        {
+            return zcode_session_rename(
+                repository,
+                lifecycle,
+                &session,
+                identity.agent_session_id.as_deref(),
+                params,
+                &title,
+                home_dir,
+            );
+        }
         let mut runtime_settings = object_field(&session, "runtimeSettings");
         if let Some(agent_id) = identity.agent_id.clone() {
             runtime_settings.insert("agentName".to_string(), json!(agent_id));
