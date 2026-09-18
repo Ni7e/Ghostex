@@ -1,0 +1,441 @@
+name: GPUI release - macOS arm64
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      runtime_artifacts_ready:
+        required: true
+        type: boolean
+      update_sparkle:
+        required: false
+        default: true
+        type: boolean
+      plan:
+        description: Resolved release plan JSON from the prepare job
+        required: false
+        default: ''
+        type: string
+    secrets:
+      APPLE_DEVELOPER_ID_P12_BASE64:
+        required: true
+      APPLE_DEVELOPER_ID_P12_PASSWORD:
+        required: true
+      APPLE_KEYCHAIN_PASSWORD:
+        required: true
+      APPLE_NOTARY_KEY_BASE64:
+        required: false
+      APPLE_NOTARY_KEY_ID:
+        required: false
+      APPLE_NOTARY_ISSUER_ID:
+        required: false
+      APPLE_NOTARY_APPLE_ID:
+        required: false
+      APPLE_NOTARY_TEAM_ID:
+        required: false
+      APPLE_NOTARY_APP_PASSWORD:
+        required: false
+      SPARKLE_PRIVATE_KEY:
+        required: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+
+permissions:
+  attestations: write
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 150
+    env:
+      CEF_PATH: ${{ github.workspace }}/apps/desktop/build/cef-cache
+      GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+      GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/build/zig-global-cache
+      # CDXC:ReleaseSccache 2026-09-02: both release cargo builds (server/ from
+      # prepare-macos-runtime.sh, apps/desktop/ from build-macos-app.sh) compiled
+      # every crate cold on each run. sccache with the Actions cache backend
+      # caches the rustc outputs; the job-level env reaches every cargo
+      # invocation, including the ones nested inside the macOS build scripts.
+      # Incremental compilation is off because sccache cannot cache incremental
+      # artifacts and release profiles never use them. The namespace is
+      # platform-specific so the four release platforms never share one cache.
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: macos-arm64-1
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      # Component tags are published to a separate repository that
+      # github.token cannot write; fail before any build work when the PAT is
+      # missing (see tooling/release-gpui/components-repo-setup.md).
+      - name: Require the components publishing token
+        shell: bash
+        env:
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "$COMPONENTS_GITHUB_TOKEN" ]]; then
+            echo "::error::COMPONENTS_GITHUB_TOKEN is not configured; component tags are published to $(node tooling/release-gpui/components-repo.mjs) and github.token cannot write there. See tooling/release-gpui/components-repo-setup.md."
+            exit 1
+          fi
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      # CDXC:Release 2026-09-15 WHY:
+      # Only the code-server identity input is restored here. The VS Code tree,
+      # its `npm ci` (4 to 6 minutes) and the ripgrep seed were only needed to
+      # build the darwin-arm64 code-server component inside this job; that now
+      # happens in release-gpui-code-server-macos.yml, in parallel, and this job
+      # awaits the published component just in time before staging. A standalone
+      # dispatch (runtime_artifacts_ready=false) restores them below.
+      - name: Restore embedded source checkouts
+        run: git submodule update --init --depth=1 -- .dependencies/code-server
+      - name: Resolve immutable code-server component identity
+        id: code_server_identity
+        run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform linux-x64 --github-output >> "$GITHUB_OUTPUT"
+      - name: Resolve the macOS code-server component artifact name
+        id: code_server_darwin
+        run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform darwin-arm64 --github-output >> "$GITHUB_OUTPUT"
+      # CDXC:ReleaseChangeAwarePlanning 2026-08-13: the runtime artifacts used to
+      # be downloaded here, behind a `needs: gxserver_*` edge that added ~22 min
+      # to the critical path. macos.sh consumes them only in
+      # prepare-macos-runtime.sh, so the download now happens just before the
+      # build, after every macOS-local setup step.
+      - name: Resolve dependency cache keys
+        id: cache_keys
+        run: |
+          {
+            printf 'cef=%s\n' "$(git rev-parse HEAD:.dependencies/cef-rs)"
+            printf 'zig=%s\n' "$(git rev-parse HEAD:.dependencies/ghostty)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Restore Cargo registry cache
+        uses: actions/cache@v6
+        id: cargo_cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-reg-macos-${{ hashFiles('apps/desktop/Cargo.lock', 'server/Cargo.lock') }}
+          restore-keys: cargo-reg-macos-
+      - name: Restore CEF distribution cache
+        uses: actions/cache@v6
+        id: cef_cache
+        with:
+          path: apps/desktop/build/cef-cache
+          key: cef-macos-arm64-${{ steps.cache_keys.outputs.cef }}
+      - name: Restore Zig package cache
+        uses: actions/cache@v6
+        id: zig_cache
+        with:
+          path: |
+            build/zig-global-cache
+            ~/.cache/zig
+          key: zig-macos-arm64-${{ steps.cache_keys.outputs.zig }}
+          restore-keys: zig-macos-arm64-
+      # CDXC:Release 2026-09-15 WHY:
+      # warm-rust-build-cache.yml has cached the GhosttyKit xcframework on the
+      # vendored ghostty revision since 2026-09-02, but this job never restored
+      # it and rebuilt the kit from source on every release (about 4 minutes of
+      # `macos.sh --phase prepare`, measured on 9.4.0 and 9.5.1). Same key as the
+      # warm job; macos.sh skips the Zig build when the kit directory exists.
+      - name: Restore GhosttyKit build cache
+        uses: actions/cache@v6
+        id: ghosttykit_cache
+        with:
+          path: .dependencies/ghostty/macos/GhosttyKit.xcframework
+          key: warm-ghosttykit-macos-arm64-zig0.16.0-${{ steps.cache_keys.outputs.zig }}
+      - name: Install build tools
+        run: tooling/release-gpui/retry.sh 3 5 -- brew install cmake ninja rsync xcodegen
+      - name: Install pinned Zig toolchain
+        run: |
+          tooling/release-gpui/retry.sh 3 5 -- bash -c 'curl -fsSL https://mise.run | sh'
+          tooling/release-gpui/retry.sh 3 5 -- "$HOME/.local/bin/mise" install zig@0.16.0
+          ZIG_BIN="$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig"
+          [[ "$($ZIG_BIN version)" == "0.16.0" ]]
+          printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' \
+            "$ZIG_BIN" "$ZIG_BIN" >> "$GITHUB_ENV"
+      - name: Seed pinned VS Code ripgrep cache
+        if: ${{ !inputs.runtime_artifacts_ready }}
+        env:
+          RIPGREP_PACKAGE_VERSION: 1.17.1
+          RIPGREP_VERSION: v15.0.1
+          RIPGREP_SHA256: 2fa16464fd8638588a67c7fc172d3c4b57fbdc65dff366e10b0b0e90734628a6
+        run: |
+          RIPGREP_ASSET="ripgrep-${RIPGREP_VERSION}-aarch64-apple-darwin.tar.gz"
+          RIPGREP_CACHE_DIR="$(node -p 'require("os").tmpdir()')/vscode-ripgrep-cache-${RIPGREP_PACKAGE_VERSION}"
+          RIPGREP_CACHE_PATH="${RIPGREP_CACHE_DIR}/${RIPGREP_ASSET}"
+          mkdir -p "$RIPGREP_CACHE_DIR"
+          curl --fail --location --retry 5 --retry-all-errors \
+            "https://github.com/microsoft/ripgrep-prebuilt/releases/download/${RIPGREP_VERSION}/${RIPGREP_ASSET}" \
+            --output "$RIPGREP_CACHE_PATH"
+          [[ "$(shasum -a 256 "$RIPGREP_CACHE_PATH" | awk '{print $1}')" == "$RIPGREP_SHA256" ]]
+          tar -tzf "$RIPGREP_CACHE_PATH" >/dev/null
+      - name: Install JavaScript dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: tooling/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
+      - name: Restore the VS Code build tree for a standalone dispatch
+        if: ${{ !inputs.runtime_artifacts_ready }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git -C .dependencies/code-server submodule update --init --depth=1 -- lib/vscode
+          tooling/release-gpui/retry.sh 3 5 -- npm --prefix .dependencies/code-server ci
+      - name: Pre-fetch Zig package dependencies
+        run: tooling/release-gpui/fetch-zig-deps.sh ghostty
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.1
+      - name: Validate Sparkle signing credential
+        if: ${{ inputs.update_sparkle }}
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo "SPARKLE_PRIVATE_KEY is required when update_sparkle is enabled" >&2
+            exit 1
+          fi
+      # CDXC:T3CodeDisabled ghostex-mzp9: Retain this dependency setup for a
+      # future re-enable; macOS packages intentionally omit T3 today.
+      # - name: Install embedded T3 Code dependencies
+      #   env:
+      #     GITHUB_TOKEN: ${{ github.token }}
+      #   run: |
+      #     npm install --global pnpm@10.24.0
+      #     pnpm --dir t3code install --frozen-lockfile
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/ghostex-signing.keychain-db"
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+      - name: Configure App Store Connect notarization key
+        env:
+          NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+        run: |
+          if [[ -n "$NOTARY_KEY_BASE64" && -n "$NOTARY_KEY_ID" && -n "$NOTARY_ISSUER_ID" ]]; then
+            NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_${NOTARY_KEY_ID}.p8"
+            printf '%s' "$NOTARY_KEY_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
+            xcrun notarytool store-credentials notarytool-profile \
+              --key "$NOTARY_KEY_PATH" \
+              --key-id "$NOTARY_KEY_ID" \
+              --issuer "$NOTARY_ISSUER_ID"
+          elif [[ -n "$NOTARY_APPLE_ID" && -n "$NOTARY_TEAM_ID" && -n "$NOTARY_APP_PASSWORD" ]]; then
+            xcrun notarytool store-credentials notarytool-profile \
+              --apple-id "$NOTARY_APPLE_ID" \
+              --team-id "$NOTARY_TEAM_ID" \
+              --password "$NOTARY_APP_PASSWORD"
+          else
+            echo "Configure either App Store Connect API-key or Apple ID notarization secrets" >&2
+            exit 1
+          fi
+      - name: Await the runtime artifacts of this run
+        if: ${{ inputs.runtime_artifacts_ready }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tooling/release-gpui/await-run-artifacts.mjs \
+            --names "release-gxserver-linux-x64,release-gxserver-linux-arm64,${{ steps.code_server_identity.outputs.artifact_name }},release-code-server-${{ steps.code_server_identity.outputs.component_version }}-linux-arm64" \
+            --producer-pattern '^(gxserver_x64|gxserver_arm64|code_server_x64|code_server_arm64|reuse)' \
+            --timeout-minutes 45
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: release-gxserver-linux-x64
+          path: build/runtime-artifacts/x64
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: release-gxserver-linux-arm64
+          path: build/runtime-artifacts/arm64
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: ${{ steps.code_server_identity.outputs.artifact_name }}
+          path: build/runtime-artifacts/code-server-x64
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: release-code-server-${{ steps.code_server_identity.outputs.component_version }}-linux-arm64
+          path: build/runtime-artifacts/code-server-arm64
+      - name: Validate required remote runtime archives
+        run: |
+          for archive in \
+            build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz \
+            build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz \
+            build/runtime-artifacts/code-server-x64/${{ steps.code_server_identity.outputs.archive_name }} \
+            build/runtime-artifacts/code-server-arm64/code-server-${{ steps.code_server_identity.outputs.component_version }}-linux-arm64.tar.gz; do
+            [[ -f "$archive" ]] || { echo "Missing required macOS release archive: $archive" >&2; exit 1; }
+            tar -tzf "$archive" >/dev/null
+          done
+          for tuple in \
+            "x64 build/runtime-artifacts/code-server-x64/${{ steps.code_server_identity.outputs.archive_name }}" \
+            "arm64 build/runtime-artifacts/code-server-arm64/code-server-${{ steps.code_server_identity.outputs.component_version }}-linux-arm64.tar.gz"; do
+            set -- $tuple
+            node tooling/release-gpui/verify-code-server-archive.mjs \
+              --archive "$2" \
+              --version "${{ steps.code_server_identity.outputs.component_version }}" \
+              --platform "linux-$1"
+          done
+      - name: Restore remote runtime packages
+        if: ${{ inputs.runtime_artifacts_ready }}
+        run: |
+          mkdir -p build/remote-gxserver-linux/x64/package build/remote-gxserver-linux/arm64/package
+          tar -xzf build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz -C build/remote-gxserver-linux/x64/package
+          tar -xzf build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz -C build/remote-gxserver-linux/arm64/package
+      # CDXC:ReleaseMacosPhases 2026-09-02: macos.sh used to run as one step
+      # (1423 s on run 33462783752), hiding where the time went. It now runs as
+      # one step per phase so the jobs API reports each phase's duration. Steps
+      # share no shell state, so the environment the single step used to carry
+      # is exported once to $GITHUB_ENV here (same literals, same values) and
+      # the two secrets are attached to every phase step. The two cargo phases
+      # pre-warm the exact builds the staging and assembly scripts run
+      # afterwards, so those scripts find every artifact fresh and the shipped
+      # binaries are still produced by their original commands.
+      - name: Export macOS release build environment
+        env:
+          GHOSTEX_CODE_SIGN_IDENTITY: 'Developer ID Application: Mohamad Youssef (KTKP595G3B)'
+          GHOSTEX_NOTARY_PROFILE: notarytool-profile
+          GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ inputs.update_sparkle && '1' || '0' }}
+          GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/x64/gxserver-linux-x64.tar.gz
+          GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/arm64/gxserver-linux-arm64.tar.gz
+          GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
+          GHOSTEX_ON_DEMAND_CODE_SERVER_LINUX_X64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/code-server-x64/${{ steps.code_server_identity.outputs.archive_name }}
+          GHOSTEX_ON_DEMAND_CODE_SERVER_LINUX_ARM64_ARCHIVE: ${{ github.workspace }}/build/runtime-artifacts/code-server-arm64/code-server-${{ steps.code_server_identity.outputs.component_version }}-linux-arm64.tar.gz
+        run: |
+          for name in \
+            GHOSTEX_CODE_SIGN_IDENTITY \
+            GHOSTEX_NOTARY_PROFILE \
+            GHOSTEX_RELEASE_UPDATE_SPARKLE \
+            GHOSTEX_ON_DEMAND_LINUX_X64_ARCHIVE \
+            GHOSTEX_ON_DEMAND_LINUX_ARM64_ARCHIVE \
+            GHOSTEX_CODE_SERVER_COMPONENT_VERSION \
+            GHOSTEX_ON_DEMAND_CODE_SERVER_LINUX_X64_ARCHIVE \
+            GHOSTEX_ON_DEMAND_CODE_SERVER_LINUX_ARM64_ARCHIVE; do
+            printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
+          done
+      - name: Prepare references, code-server archives, and GhosttyKit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: tooling/release-gpui/macos.sh --phase prepare "${{ inputs.version }}"
+      - name: Cargo build gxserver (server crates)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOSTEX_CARGO_TIMINGS: '1'
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: tooling/release-gpui/macos.sh --phase build-server "${{ inputs.version }}"
+      # The macOS code-server component is published by its own job; staging
+      # only needs the tag to be live, which the artifact upload proves.
+      - name: Await the macOS code-server component of this run
+        if: ${{ inputs.runtime_artifacts_ready }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tooling/release-gpui/await-run-artifacts.mjs \
+            --names "${{ steps.code_server_darwin.outputs.artifact_name }}" \
+            --producer-pattern '^(code_server_darwin_arm64)' \
+            --timeout-minutes 45
+      - name: Stage macOS runtime (code-server, zmx, portless, gxserver package)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: tooling/release-gpui/macos.sh --phase stage-runtime "${{ inputs.version }}"
+      - name: Cargo build ghostex-gpui (desktop crate)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOSTEX_CARGO_TIMINGS: '1'
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: tooling/release-gpui/macos.sh --phase build-desktop "${{ inputs.version }}"
+      - name: Assemble, sign, and validate Ghostex.app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: tooling/release-gpui/macos.sh --phase assemble "${{ inputs.version }}"
+      - name: Create DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: tooling/release-gpui/macos.sh --phase dmg "${{ inputs.version }}"
+      - name: Notarize and staple DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: tooling/release-gpui/macos.sh --phase notarize "${{ inputs.version }}"
+      - name: Generate appcast and write release manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: tooling/release-gpui/macos.sh --phase finalize "${{ inputs.version }}"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            build/release-gpui/${{ inputs.version }}/macos-arm64/ghostex-${{ inputs.version }}-arm64.dmg
+      - name: Report sccache statistics
+        if: ${{ always() }}
+        run: '"${SCCACHE_PATH:-sccache}" --show-stats'
+      - name: Record job observability
+        if: ${{ always() }}
+        run: |
+          {
+            echo "- Cargo registry cache: ${{ steps.cargo_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- CEF distribution cache: ${{ steps.cef_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- Zig package cache: ${{ steps.zig_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- GhosttyKit build cache: ${{ steps.ghosttykit_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # `cargo build --timings` reports for both crates. sccache hits 100 % on a
+      # warm release and the two cargo phases still take ~10 minutes; the report
+      # shows whether that is link time, build scripts, or cache fetches.
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: cargo-timings-macos-arm64
+          path: |
+            apps/desktop/target/cargo-timings/
+            server/target/cargo-timings/
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-macos-arm64
+          path: build/release-gpui/${{ inputs.version }}/macos-arm64/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.plan != '' }}
+        with:
+          name: release-provenance-macos-arm64
+          path: build/release-gpui/${{ inputs.version }}/macos-arm64/provenance.json
+          if-no-files-found: error
+          retention-days: 14

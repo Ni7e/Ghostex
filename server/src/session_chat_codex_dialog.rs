@@ -1,0 +1,856 @@
+//! Codex-owned dialogs projected into the shared chat notice card.
+
+use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
+
+use crate::domain::DomainStateError;
+use crate::session_chat_options::{normalize_spaces, strip_ansi_sgr};
+use crate::session_chat_send::{
+    capture_session_terminal_text, execute_session_chat_send, SessionChatSendStep,
+    SessionChatSendTarget, SESSION_CHAT_INTERRUPT,
+};
+
+use crate::session_chat_terminal_dialog::{TerminalDialog, TerminalDialogRow};
+
+fn clean(line: &str) -> &str {
+    line.trim().trim_matches(['│', '┃', '▌']).trim()
+}
+
+fn left_column(line: &str) -> &str {
+    line.split("          ").next().unwrap_or_default().trim()
+}
+
+fn row(line: &str) -> Option<TerminalDialogRow> {
+    let line = clean(line);
+    let selected = line.starts_with('›');
+    let line = line.strip_prefix('›').unwrap_or(line).trim_start();
+    let (number, label) = line.split_once(". ")?;
+    let number = number.parse::<u32>().ok()?;
+    if number == 0 || label.trim().is_empty() {
+        return None;
+    }
+    let (label, description) = label
+        .split_once("  ")
+        .map(|(label, detail)| {
+            (
+                label,
+                Some(detail.split_whitespace().collect::<Vec<_>>().join(" ")),
+            )
+        })
+        .unwrap_or((label, None));
+    Some(TerminalDialogRow {
+        number,
+        label: label.trim().to_string(),
+        description,
+        selected,
+    })
+}
+
+const DIRECTORY_TRUST_ID_PREFIX: &str = "codex-directory-trust:";
+const UPDATE_PROMPT_ID_PREFIX: &str = "codex-update-prompt:";
+
+/// CDXC:AgentScreenDetection 2026-09-11 DECISION:
+/// User: the Codex update prompt card must read nicely, and its option must not show the raw install command.
+/// The card names both versions and says in words how Codex installs the update; the exact command stays readable under the card's terminal output, since the notice keeps the real screen for this dialog.
+/// SEE-ALSO: Codex tui/src/update_prompt.rs (the modal) and tui/src/update_action.rs (the commands it prints); server/src/session_chat_notice.rs keeps the screen tail.
+fn update_prompt_dialog(mut dialog: TerminalDialog) -> TerminalDialog {
+    let Some((_, versions)) = dialog.title.split_once("Update available!") else {
+        return dialog;
+    };
+    let Some((current, latest)) = versions
+        .split_once("->")
+        .map(|(current, latest)| (current.trim(), latest.trim()))
+        .filter(|(current, latest)| !current.is_empty() && !latest.is_empty())
+    else {
+        return dialog;
+    };
+    let Some(update_row) = dialog
+        .rows
+        .first()
+        .filter(|row| row.label.starts_with("Update now"))
+    else {
+        return dialog;
+    };
+    if dialog.rows.len() < 2
+        || dialog.rows[1..]
+            .iter()
+            .any(|row| !row.label.starts_with("Skip"))
+    {
+        return dialog;
+    }
+    // A narrow screen wraps the command into the row's continuation lines.
+    let command = format!(
+        "{} {}",
+        update_row.label,
+        update_row.description.as_deref().unwrap_or_default()
+    );
+    let method = if command.contains("brew ") {
+        "through Homebrew"
+    } else if command.contains("pnpm ") {
+        "through pnpm"
+    } else if command.contains("npm ") {
+        "through npm"
+    } else if command.contains("bun ") {
+        "through bun"
+    } else if command.contains("vp ") {
+        "through Vite+"
+    } else if command.contains("install.sh") || command.contains("install.ps1") {
+        "with the official Codex installer"
+    } else {
+        "with the install method it was set up with"
+    };
+    let (current, latest) = (current.to_string(), latest.to_string());
+    dialog.id = format!("{UPDATE_PROMPT_ID_PREFIX}{}", dialog.id);
+    dialog.title = format!("Update Codex to {latest}?");
+    dialog.body = format!(
+        "This session runs Codex {current}. Update now installs {latest} {method}. Codex quits to install it, so start it again in this session afterwards."
+    );
+    dialog.footer = "Choose an option to continue.".to_string();
+    dialog.actions.clear();
+    dialog.rows[0].label = "Update now".to_string();
+    dialog.rows[0].description = None;
+    if dialog.rows[1].label == "Skip" {
+        dialog.rows[1].label = "Skip for now".to_string();
+    }
+    dialog
+}
+
+/// CDXC:AgentScreenDetection 2026-09-09 WHY:
+/// Codex's extended-thinking menu has an informational footer instead of the usual Escape/Enter hints, so the generic dialog parser misses its choices.
+/// The request keeps running; expose its two rows without adding a cancel action that would interrupt it.
+fn extended_thinking_dialog(lines: &[String]) -> Option<TerminalDialog> {
+    let heading = lines
+        .iter()
+        .rposition(|line| clean(line).starts_with("Our systems are thinking"))?;
+    let content = &lines[heading..];
+    let first_row = content.iter().position(|line| row(line).is_some())?;
+    let title = content[..first_row]
+        .iter()
+        .map(|line| clean(line))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if title != "Our systems are thinking a bit more about this request before responding." {
+        return None;
+    }
+    let rows: Vec<_> = content.iter().filter_map(|line| row(line)).collect();
+    if rows.len() != 2
+        || rows[0].number != 1
+        || rows[0].label != "Dismiss and keep waiting"
+        || rows[1].number != 2
+        || rows[1].label != "Learn more"
+        || rows.iter().filter(|row| row.selected).count() != 1
+    {
+        return None;
+    }
+    let last_row = content.iter().rposition(|line| row(line).is_some())?;
+    let remaining = &content[last_row + 1..];
+    // A returned composer means this menu is only old terminal output.
+    if remaining.iter().any(|line| clean(line).starts_with('›')) {
+        return None;
+    }
+    let footer = remaining
+        .iter()
+        .map(|line| clean(line))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !footer.starts_with("No action is required. Codex will keep waiting") {
+        return None;
+    }
+    let identity = serde_json::to_string(&(&title, &rows, &footer)).ok()?;
+    Some(TerminalDialog {
+        id: format!("{:x}", Sha256::digest(identity.as_bytes())),
+        title,
+        body: String::new(),
+        footer,
+        rows,
+        input: None,
+        input_value: String::new(),
+        actions: Vec::new(),
+    })
+}
+
+/// CDXC:AgentScreenDetection 2026-09-06 WHY:
+/// Codex redraws the directory heading into scrollback during onboarding, so only the final heading belongs to the live trust dialog.
+/// Its trust shortcut selects Yes but requires Enter to commit; treating it like the ordinary numbered menus leaves the dialog open.
+fn directory_trust_dialog(content: &[&str]) -> Option<TerminalDialog> {
+    let heading = content.iter().position(|line| !clean(line).is_empty())?;
+    let path_start = clean(content[heading]).strip_prefix("> You are in ")?;
+    let path_end = (heading + 1..content.len()).find(|&i| clean(content[i]).is_empty())?;
+    let folder = std::iter::once(path_start)
+        .chain(
+            content[heading + 1..path_end]
+                .iter()
+                .map(|line| clean(line)),
+        )
+        .collect::<String>();
+    let first_row = content.iter().position(|line| row(line).is_some())?;
+    let mut rows: Vec<_> = content.iter().filter_map(|line| row(line)).collect();
+    if rows.len() != 2
+        || rows[0].number != 1
+        || rows[0].label != "Yes, continue"
+        || rows[1].number != 2
+        || rows[1].label != "No, quit"
+        || rows.iter().filter(|row| row.selected).count() != 1
+        || path_end >= first_row
+    {
+        return None;
+    }
+    let context = content[path_end..first_row]
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !context.contains("Do you trust the contents of this directory?") {
+        return None;
+    }
+    let context = context.replace(
+        "Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt injection. Trusting the directory allows project-local config, hooks, and exec policies to load.",
+        "Only continue if you trust this folder's contents. Codex will load its local configuration, hooks, and execution policies. Untrusted content can contain instructions that manipulate the agent.",
+    );
+    let last_row = content.iter().rposition(|line| row(line).is_some())?;
+    let error = content[last_row + 1..]
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let identity = serde_json::to_string(&(&folder, &context, &rows, &error)).ok()?;
+    rows[0].label = "Trust and continue".to_string();
+    rows[1].label = "Quit Codex".to_string();
+    let name = folder
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()?;
+    Some(TerminalDialog {
+        id: format!(
+            "{DIRECTORY_TRUST_ID_PREFIX}{:x}",
+            Sha256::digest(identity.as_bytes())
+        ),
+        title: format!("Trust folder \"{name}\"?"),
+        body: format!("{folder}\n\n{context}\n\n{error}")
+            .trim()
+            .to_string(),
+        footer: "Choose an option to continue.".to_string(),
+        rows,
+        input: None,
+        input_value: String::new(),
+        actions: Vec::new(),
+    })
+}
+
+/// CDXC:AgentScreenDetection 2026-09-05 DECISION:
+/// User: expose the "Implement this plan?" picker in chat so switching to the terminal is unnecessary.
+/// User: audit every Codex command and make its messages and interactions usable in chat, using the existing UX and improving it where needed.
+/// Numbered selectors, searchable menus, checkbox settings, and text forms retain their own selection, navigation, toggle, save, and cancel actions.
+/// SEE-ALSO: packages/core-ui/chat/session-chat-terminal-dialog.tsx and Codex tui/src/bottom_pane/list_selection_view.rs.
+pub fn detect_codex_dialog(text: &str) -> Option<TerminalDialog> {
+    if let Some(pager) = crate::session_chat_codex_pager::detect_codex_transcript_pager(text) {
+        return Some(pager);
+    }
+    let lines: Vec<String> = text
+        .lines()
+        .rev()
+        .take(160)
+        .map(|line| {
+            normalize_spaces(&strip_ansi_sgr(line))
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if let Some(dialog) = extended_thinking_dialog(&lines) {
+        return Some(dialog);
+    }
+    let end = lines.iter().rposition(|line| !line.trim().is_empty())?;
+    let footer_index = (end.saturating_sub(3)..=end).rev().find(|&i| {
+        let line = clean(&lines[i]).to_ascii_lowercase();
+        crate::session_chat_codex_blocking::is_codex_modal_footer(&line)
+            || line == "q to quit"
+            || line.starts_with("press enter to continue")
+            || line.starts_with("press space to select or enter to save")
+    })?;
+    if lines[footer_index + 1..]
+        .iter()
+        .any(|line| clean(line).starts_with('›'))
+    {
+        return None;
+    }
+    // A dialog is separated from scrollback by an empty band. Preserve blank
+    // lines inside it, but stop at the last double-blank boundary before it.
+    let mut start = (1..footer_index)
+        .rev()
+        .find(|&i| lines[i].trim().is_empty() && lines[i - 1].trim().is_empty())
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    // Onboarding and text-entry views use a single empty line above their
+    // heading, unlike the standard list selection view's two-line band.
+    if let Some(named) = (start..footer_index).rev().find(|&i| {
+        clean(&lines[i]).starts_with("Tell us more (")
+            || matches!(
+                clean(&lines[i]),
+                "Name thread"
+                    | "Rename thread"
+                    | "Edit goal"
+                    | "Save conversation"
+                    | "Add marketplace"
+                    | "Remap Shortcut"
+                    | "Choose an import source"
+                    | "Choose what to import"
+                    | "Custom review instructions"
+                    | "Export filename"
+                    | "Save transcript"
+                    | "Resume a previous session"
+                    | "Fork a previous session"
+            )
+    }) {
+        start = named;
+    }
+    if clean(&lines[footer_index])
+        .to_ascii_lowercase()
+        .starts_with("press enter to continue")
+    {
+        if let Some(trust_heading) = lines[..footer_index]
+            .iter()
+            .rposition(|line| clean(line).starts_with("> You are in "))
+        {
+            if let Some(dialog) = directory_trust_dialog(
+                &lines[trust_heading..footer_index]
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            ) {
+                return Some(dialog);
+            }
+        }
+    }
+    if clean(&lines[footer_index]) == "q to quit" {
+        start = 0;
+    } else if let Some(fullscreen) = lines[..footer_index].iter().rposition(|line| {
+        matches!(
+            clean(line),
+            "Resume a previous session" | "Fork a previous session"
+        )
+    }) {
+        start = fullscreen;
+    }
+    let content: Vec<&str> = lines[start..footer_index]
+        .iter()
+        .map(|line| line.as_str())
+        .collect();
+    let heading = content.iter().position(|line| !clean(line).is_empty())?;
+    let title = if clean(&lines[footer_index]) == "q to quit" {
+        let heading = content[heading]
+            .split('/')
+            .find(|part| !part.trim().is_empty())
+            .unwrap_or_default()
+            .trim();
+        match heading.replace(' ', "").as_str() {
+            "DIFF" => "Git diff".to_string(),
+            "TRANSCRIPT" => "Conversation transcript".to_string(),
+            _ => heading.to_string(),
+        }
+    } else {
+        clean(left_column(content[heading])).to_string()
+    };
+    if title.starts_with("Question ")
+        || content
+            .iter()
+            .any(|line| clean(line).starts_with("Question ") && line.contains('/'))
+    {
+        return None;
+    }
+    if title.len() > 200 {
+        return None;
+    }
+    let mut rows: Vec<TerminalDialogRow> = Vec::new();
+    let mut body = Vec::new();
+    let mut in_rows = false;
+    for line in &content[heading + 1..] {
+        if let Some(parsed) = row(line) {
+            in_rows = true;
+            rows.push(parsed);
+        } else if in_rows && !line.trim().is_empty() && line.starts_with("     ") {
+            if let Some(last) = rows.last_mut() {
+                let detail = last.description.get_or_insert_with(String::new);
+                if !detail.is_empty() {
+                    detail.push(' ');
+                }
+                detail.push_str(clean(line));
+            }
+        } else if !in_rows || !line.trim().is_empty() {
+            body.push(*line);
+        }
+    }
+    let numbered = !rows.is_empty() && rows.iter().filter(|r| r.selected).count() == 1;
+    let body = if clean(&lines[footer_index]) == "q to quit" {
+        content[heading + 1..]
+            .iter()
+            .filter(|line| line.trim() != "~" && !line.contains("pgup/pgdn to page"))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else if numbered {
+        body.join("\n")
+    } else {
+        content[heading + 1..].join("\n")
+    };
+    if !numbered {
+        rows.clear();
+    }
+    let footer = lines[footer_index
+        .saturating_sub(usize::from(clean(&lines[footer_index]) == "q to quit"))
+        ..=end]
+        .iter()
+        .map(|line| clean(line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lower = format!("{title}\n{body}\n{footer}").to_ascii_lowercase();
+    let footer_lower = footer.to_ascii_lowercase();
+    let search_placeholder = content.iter().position(|line| {
+        let line = left_column(line).to_ascii_lowercase();
+        line.starts_with("type to search") || line.starts_with("type to filter")
+    });
+    let searchable_title = matches!(
+        title.as_str(),
+        "Select Syntax Theme"
+            | "Select Pet"
+            | "Keymap"
+            | "Select a base branch"
+            | "Select a commit to review"
+            | "Auto-review Denials"
+            | "Apps"
+            | "Plugins"
+            | "Resume a previous session"
+            | "Fork a previous session"
+    );
+    let search_index = search_placeholder.or_else(|| {
+        if !searchable_title {
+            return None;
+        }
+        let gap = (heading + 1..content.len()).find(|&i| left_column(content[i]).is_empty())?;
+        let mut index = (gap + 1..content.len()).find(|&i| !left_column(content[i]).is_empty())?;
+        if title == "Keymap" && clean(content[index]).starts_with('[') {
+            index = (index + 1..content.len()).find(|&i| !left_column(content[i]).is_empty())?;
+        }
+        Some(index)
+    });
+    let input = if title == "Remap Shortcut" {
+        Some("key".to_string())
+    } else if search_index.is_some() {
+        Some("search".to_string())
+    } else if content.iter().any(|line| line.trim().starts_with('▌'))
+        || lower.contains("type a name")
+    {
+        Some("text".to_string())
+    } else {
+        None
+    };
+    let input_value = if let Some(index) = search_index {
+        if search_placeholder.is_some() {
+            content
+                .get(index + 1)
+                .and_then(|line| clean(line).strip_prefix('>'))
+                .unwrap_or_default()
+                .trim_start()
+                .to_string()
+        } else {
+            left_column(content[index]).trim().to_string()
+        }
+    } else if input.as_deref() == Some("text") {
+        let input_start = content
+            .iter()
+            .rposition(|line| line.trim() == "▌")
+            .map(|i| i + 1)
+            .unwrap_or(heading + 1);
+        content[input_start..]
+            .iter()
+            .filter(|line| line.trim().starts_with('▌'))
+            .map(|line| clean(line))
+            .filter(|line| {
+                !line.starts_with("Type ")
+                    && !line.starts_with("(optional)")
+                    && !line.starts_with("owner/repo, git URL")
+                    && !line.is_empty()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    };
+    let mut actions = Vec::new();
+    if rows.is_empty() && !matches!(input.as_deref(), Some("text" | "key")) {
+        actions.extend(["up", "down"].map(str::to_string));
+        if footer_lower.contains("left/right") || footer_lower.contains("←/→") {
+            actions.extend(["left", "right"].map(str::to_string));
+        }
+        if footer_lower.contains("tab") {
+            actions.push("tab".to_string());
+        }
+        if footer_lower.contains("space") {
+            actions.push("toggle".to_string());
+        }
+    }
+    if footer_lower.contains("page") || footer_lower.contains("browse") {
+        actions.extend(["pageUp", "pageDown", "home", "end"].map(str::to_string));
+    }
+    if footer.to_ascii_lowercase().contains("enter") {
+        actions.push("confirm".to_string());
+    }
+    actions.push("cancel".to_string());
+    let identity = content.join("\n") + &footer;
+    let id = format!("{:x}", Sha256::digest(identity.as_bytes()));
+    Some(update_prompt_dialog(TerminalDialog {
+        id,
+        title,
+        body: body.trim().to_string(),
+        footer,
+        rows,
+        input,
+        input_value,
+        actions,
+    }))
+}
+
+impl TerminalDialog {
+    pub(crate) fn is_codex_directory_trust(&self) -> bool {
+        self.id.starts_with(DIRECTORY_TRUST_ID_PREFIX)
+    }
+
+    pub(crate) fn is_codex_update_prompt(&self) -> bool {
+        self.id.starts_with(UPDATE_PROMPT_ID_PREFIX)
+    }
+
+    fn payload(&self, params: &Map<String, Value>) -> Result<String, DomainStateError> {
+        let invalid = || DomainStateError {
+            code: "invalidParams",
+            message: "That action is not offered by this Codex dialog.".to_string(),
+        };
+        if let Some(index) = params.get("choiceIndex").and_then(Value::as_u64) {
+            let row = self.rows.get(index as usize).ok_or_else(invalid)?;
+            if self.is_codex_directory_trust() {
+                return Ok(match row.number {
+                    1 => "\x1b[A\r",
+                    2 => "2",
+                    _ => return Err(invalid()),
+                }
+                .to_string());
+            }
+            // CDXC:AgentScreenDetection 2026-09-07 WHY:
+            // Codex's sensitive rows (including hook trust) only highlight on a digit, while ordinary rows commit immediately and searchable lists insert digits into the query.
+            // Navigate from the freshly captured highlight and confirm once so all three select the clicked row without submitting into the next dialog.
+            let selected = self
+                .rows
+                .iter()
+                .position(|r| r.selected)
+                .ok_or_else(invalid)?;
+            let target = index as usize;
+            let arrow = if target >= selected {
+                "\x1b[B"
+            } else {
+                "\x1b[A"
+            };
+            return Ok(arrow.repeat(target.abs_diff(selected)) + "\r");
+        }
+        let action = params
+            .get("dialogAction")
+            .and_then(Value::as_str)
+            .ok_or_else(invalid)?;
+        if (action == "text" && self.input.as_deref() == Some("search"))
+            || (action == "submit" && self.input.as_deref() == Some("text"))
+        {
+            let text = params
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(invalid)?;
+            let search = self.input.as_deref() == Some("search");
+            if text.len() > if search { 512 } else { 8192 }
+                || text
+                    .chars()
+                    .any(|c| c.is_control() && (search || !matches!(c, '\n' | '\t')))
+            {
+                return Err(invalid());
+            }
+            return Ok(if self.input.as_deref() == Some("search") {
+                "\x7f".repeat(self.input_value.chars().count()) + text
+            } else {
+                let clear = crate::session_chat_send::build_agent_tui_clear_input_for_text(
+                    &self.input_value,
+                )
+                .replace('\u{15}', "\x1b[117;5u")
+                .replace('\u{b}', "\x1b[107;5u");
+                format!("{clear}\x1b[200~{text}\x1b[201~\r")
+            });
+        }
+        if action == "key" && self.input.as_deref() == Some("key") {
+            let key = params
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or_else(invalid)?;
+            let modifiers = params
+                .get("keyModifiers")
+                .and_then(Value::as_u64)
+                .filter(|m| *m < 16)
+                .ok_or_else(invalid)?
+                + 1;
+            let code = match key {
+                "Enter" => 13,
+                "Tab" => 9,
+                "Backspace" => 127,
+                "Escape" => 27,
+                "ArrowUp" | "ArrowDown" | "ArrowRight" | "ArrowLeft" | "Home" | "End" => {
+                    let suffix = match key {
+                        "ArrowUp" => 'A',
+                        "ArrowDown" => 'B',
+                        "ArrowRight" => 'C',
+                        "ArrowLeft" => 'D',
+                        "Home" => 'H',
+                        _ => 'F',
+                    };
+                    return Ok(format!("\x1b[1;{modifiers}{suffix}"));
+                }
+                "Insert" | "Delete" | "PageUp" | "PageDown" => {
+                    let code = match key {
+                        "Insert" => 2,
+                        "Delete" => 3,
+                        "PageUp" => 5,
+                        _ => 6,
+                    };
+                    return Ok(format!("\x1b[{code};{modifiers}~"));
+                }
+                "F1" | "F2" | "F3" | "F4" => {
+                    let suffix = match key {
+                        "F1" => 'P',
+                        "F2" => 'Q',
+                        "F3" => 'R',
+                        _ => 'S',
+                    };
+                    return Ok(format!("\x1b[1;{modifiers}{suffix}"));
+                }
+                "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12" => {
+                    let code = match key {
+                        "F5" => 15,
+                        "F6" => 17,
+                        "F7" => 18,
+                        "F8" => 19,
+                        "F9" => 20,
+                        "F10" => 21,
+                        "F11" => 23,
+                        _ => 24,
+                    };
+                    return Ok(format!("\x1b[{code};{modifiers}~"));
+                }
+                _ if key.chars().count() == 1 => key.chars().next().ok_or_else(invalid)? as u32,
+                _ => return Err(invalid()),
+            };
+            return Ok(format!("\x1b[{code};{modifiers}u"));
+        }
+        if !self.actions.iter().any(|a| a == action) {
+            return Err(invalid());
+        }
+        Ok(match action {
+            "up" => "\x1b[A",
+            "down" => "\x1b[B",
+            "left" => "\x1b[D",
+            "right" => "\x1b[C",
+            "tab" => "\t",
+            "toggle" => " ",
+            "confirm" => "\r",
+            "pageUp" => "\x1b[5~",
+            "pageDown" => "\x1b[6~",
+            "home" => "\x1b[H",
+            "end" => "\x1b[F",
+            "cancel"
+                if self.id == crate::session_chat_codex_pager::CODEX_TRANSCRIPT_PAGER_ID
+                    || self.footer.contains("q to quit") =>
+            {
+                "q"
+            }
+            "cancel" => SESSION_CHAT_INTERRUPT,
+            _ => return Err(invalid()),
+        }
+        .to_string())
+    }
+}
+
+pub(crate) async fn answer_codex_dialog(
+    target: &SessionChatSendTarget,
+    params: &Map<String, Value>,
+) -> Result<Value, DomainStateError> {
+    let stale = || DomainStateError {
+        code: "invalidState",
+        message: "Codex's dialog changed. Review the current choices and try again.".to_string(),
+    };
+    let screen = capture_session_terminal_text(&target.zmx_name)
+        .await
+        .ok_or_else(stale)?;
+    let dialog = detect_codex_dialog(&screen).ok_or_else(stale)?;
+    if params.get("dialogId").and_then(Value::as_str) != Some(dialog.id.as_str()) {
+        return Err(stale());
+    }
+    let payload = dialog.payload(params)?;
+    execute_session_chat_send(
+        &target.project_id,
+        &target.session_id,
+        &target.zmx_name,
+        "session-chat-dialog",
+        vec![
+            SessionChatSendStep::BeginLocalCommandOutput {
+                agent: Some("codex".to_string()),
+                command: dialog.title,
+                durable_id: None,
+            },
+            SessionChatSendStep::VerifyTerminalDialog {
+                agent: "codex".to_string(),
+                id: dialog.id.clone(),
+            },
+            SessionChatSendStep::Write(payload),
+            SessionChatSendStep::SleepMs(150),
+            SessionChatSendStep::FinishLocalCommandOutput,
+        ],
+    )
+    .await
+    .map_err(|error| DomainStateError {
+        code: "invalidState",
+        message: error.message,
+    })?;
+    let completes = params.contains_key("choiceIndex")
+        || matches!(
+            params.get("dialogAction").and_then(Value::as_str),
+            Some("submit" | "confirm" | "cancel")
+        );
+    if completes
+        && capture_session_terminal_text(&target.zmx_name)
+            .await
+            .and_then(|screen| detect_codex_dialog(&screen))
+            .is_some_and(|current| current.id == dialog.id)
+    {
+        return Err(DomainStateError {
+            code: "invalidState",
+            message: "Codex kept this dialog open. Review its message and try again.".to_string(),
+        });
+    }
+    Ok(json!({"queued": true}))
+}
+
+/// Local commands print results outside Codex's conversation JSONL.
+/// CDXC:AgentScreenDetection 2026-09-13 SEE-ALSO:
+/// Compaction is intentionally excluded: session_chat_terminal_activity.rs owns its live card, and ContextCompaction records its result.
+pub(crate) fn command_has_local_output(text: &str) -> bool {
+    matches!(
+        text.split_whitespace().next().unwrap_or_default(),
+        "/status"
+            | "/pwd"
+            | "/cwd"
+            | "/cd"
+            | "/usage"
+            | "/ps"
+            | "/stop"
+            | "/clean"
+            | "/mcp"
+            | "/ide"
+            | "/approve"
+            | "/diff"
+            | "/debug-config"
+            | "/copy"
+            | "/export"
+            | "/raw"
+            | "/vim"
+            | "/personality"
+            | "/goal"
+            | "/plan"
+            | "/model"
+            | "/skills"
+            | "/hooks"
+            | "/apps"
+            | "/plugins"
+            | "/memories"
+            | "/keymap"
+            | "/theme"
+            | "/title"
+            | "/statusline"
+            | "/pets"
+            | "/pet"
+            | "/permissions"
+            | "/experimental"
+            | "/import"
+            | "/rename"
+            | "/setup-default-sandbox"
+            | "/sandbox-add-read-dir"
+            | "/rollout"
+            | "/agents"
+            | "/subagents"
+            | "/resume"
+            | "/review"
+            | "/feedback"
+            | "/new"
+            | "/clear"
+            | "/fork"
+            | "/init"
+            | "/recap"
+            | "/side"
+            | "/btw"
+            | "/app"
+            | "/archive"
+            | "/delete"
+            | "/fast"
+            | "/effort"
+    )
+}
+
+fn history_without_composer(text: &str) -> Vec<String> {
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            normalize_spaces(&strip_ansi_sgr(line))
+                .trim_end()
+                .to_string()
+        })
+        .collect();
+    if let Some(dialog) = detect_codex_dialog(text) {
+        if let Some(heading) = lines
+            .iter()
+            .rposition(|line| clean(left_column(line)) == dialog.title)
+        {
+            lines.truncate(heading);
+        }
+    } else if let Some(composer) = lines.iter().rposition(|line| {
+        let line = clean(line);
+        line.starts_with('›') && row(line).is_none()
+    }) {
+        lines.truncate(composer);
+    }
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+    lines
+}
+
+/// Only newly printed command output, excluding the previous conversation and
+/// the returned composer. A live dialog has its own card instead.
+pub fn codex_command_output(before: &str, after: &str) -> Option<String> {
+    if detect_codex_dialog(after).is_some() {
+        return None;
+    }
+    let before = history_without_composer(before);
+    let after = history_without_composer(after);
+    let output =
+        crate::session_chat_local_command::newly_printed_lines(&before, &after)?.join("\n");
+    // A submitted terminal prompt belongs to the JSONL transcript, not this local command.
+    let output = output
+        .lines()
+        .take_while(|line| !clean(line).starts_with('›'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if output.trim().is_empty() {
+        None
+    } else {
+        Some(output.trim().chars().take(24_000).collect())
+    }
+}

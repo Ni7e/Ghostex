@@ -1,0 +1,336 @@
+name: GPUI release - publish
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      expected_platforms:
+        required: true
+        type: string
+      prerelease:
+        required: false
+        default: false
+        type: boolean
+      update_sparkle:
+        required: false
+        default: true
+        type: boolean
+      windows_signed:
+        required: false
+        default: true
+        type: boolean
+      source_run_id:
+        required: false
+        default: ''
+        type: string
+      plan:
+        description: Resolved release plan JSON from the prepare job
+        required: false
+        default: ''
+        type: string
+      amend:
+        description: Merge into an existing public release instead of creating a tag
+        required: false
+        default: false
+        type: boolean
+      amend_products:
+        description: Comma-separated product ids this amend is allowed to add or replace
+        required: false
+        default: ''
+        type: string
+      # CDXC:Release 2026-09-15 DECISION:
+      # User: every platform goes live as soon as its own build finishes. A
+      # staged release calls this workflow once per stage (macos, android,
+      # linux, windows-x64, windows-arm64); publish-staged.mjs creates the
+      # release when this stage is first and amends it otherwise. Empty means
+      # the classic single publish of the whole scope (publish-only recovery,
+      # the standalone amend workflow).
+      stage:
+        description: Publish stage of a staged release (macos, android, linux, windows-x64, windows-arm64)
+        required: false
+        default: ''
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+      expected_platforms:
+        description: Comma-separated platform manifest names
+        required: true
+        type: string
+      prerelease:
+        description: Publish as a prerelease
+        required: false
+        default: true
+        type: boolean
+      update_sparkle:
+        description: Commit and publish the Sparkle appcast
+        required: false
+        default: false
+        type: boolean
+      windows_signed:
+        description: Windows artifacts are Authenticode-signed
+        required: false
+        default: false
+        type: boolean
+      source_run_id:
+        description: Completed release workflow run containing all artifacts
+        required: true
+        type: string
+      plan:
+        description: >-
+          Resolved release plan JSON recorded by the source run. Leave empty to
+          use the run's own release-plan artifact.
+        required: false
+        default: ''
+        type: string
+      stage:
+        description: Publish only this stage of a staged release (macos, android, linux, windows-x64, windows-arm64); empty publishes the whole recorded scope
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  # One group per stage: the stages of a staged release run concurrently on
+  # purpose, and a shared group would cancel all but one pending stage.
+  group: ghostex-gpui-publish-${{ inputs.version }}${{ inputs.stage != '' && format('-{0}', inputs.stage) || '' }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      # A stage downloads only its own products (plus the plan and the
+      # provenance records); the whole-scope publish downloads everything.
+      - name: Resolve the artifacts this publish needs
+        id: artifacts
+        env:
+          GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+          GHOSTEX_RELEASE_STAGE: ${{ inputs.stage }}
+        run: |
+          if [[ -z "$GHOSTEX_RELEASE_STAGE" || -z "$GHOSTEX_RELEASE_PLAN" ]]; then
+            echo 'pattern=*' >> "$GITHUB_OUTPUT"
+          else
+            node --input-type=module -e '
+              import { stageArtifactPattern } from "./tooling/release-gpui/publish-stage.mjs";
+              const plan = JSON.parse(process.env.GHOSTEX_RELEASE_PLAN);
+              console.log(`pattern=${stageArtifactPattern({ plan, stage: process.env.GHOSTEX_RELEASE_STAGE })}`);
+            ' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.source_run_id == '' }}
+        with:
+          path: build/release-gpui/workflow-artifacts
+          pattern: ${{ steps.artifacts.outputs.pattern }}
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.source_run_id != '' }}
+        with:
+          path: build/release-gpui/workflow-artifacts
+          pattern: ${{ steps.artifacts.outputs.pattern }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate and publish the complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOSTEX_RELEASE_EXPECTED_PLATFORMS: ${{ inputs.expected_platforms }}
+          # CDXC:ReleaseChangeAwarePlanning 2026-08-13: the resolved plan decides
+          # what this release contains. assemble.mjs cross-checks plan <->
+          # manifest <-> provenance for every product, emits
+          # release-provenance-<version>.json, and refuses a mixed set. When this
+          # input is empty the run's own `release-plan` artifact is used, and when
+          # both exist they must agree exactly.
+          GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+          # Every freshly built artifact in the set must come from one Actions
+          # run: this one, or the nominated source run of a publish-only
+          # recovery. Reused artifacts legitimately name a foreign origin run.
+          GHOSTEX_RELEASE_SOURCE_RUN_ID: ${{ inputs.source_run_id != '' && inputs.source_run_id || github.run_id }}
+          GHOSTEX_RELEASE_PRERELEASE: ${{ inputs.prerelease && '1' || '0' }}
+          GHOSTEX_RELEASE_UPDATE_SPARKLE: ${{ inputs.update_sparkle && '1' || '0' }}
+          GHOSTEX_RELEASE_WINDOWS_SIGNED: ${{ inputs.windows_signed && '1' || '0' }}
+          GHOSTEX_RELEASE_AMEND_PRODUCTS: ${{ inputs.amend_products }}
+          GHOSTEX_RELEASE_STAGE: ${{ inputs.stage }}
+        # A stage runs publish-staged.mjs, which creates the release when this
+        # stage is first and amends it otherwise. The classic paths are
+        # unchanged: the whole-scope assemble, and the standalone amend.
+        run: >-
+          node tooling/release-gpui/${{ inputs.stage != '' && 'publish-staged.mjs' || (inputs.amend && 'amend-existing.mjs' || 'assemble.mjs') }}
+          "${{ inputs.version }}"
+          build/release-gpui/workflow-artifacts
+      # The vendor-maintained `ghostex-bin` AUR package tracks the portable
+      # Linux tarball of the release that was just published. Its template,
+      # scriptlet, and the one-time AUR account setup live in
+      # tooling/packaging/aur/ghostex-bin/. This never runs for a prerelease: Arch users
+      # follow stable releases only.
+      # In a staged release only the linux stage runs this: the tarball is that
+      # stage's, and sibling stages would otherwise race to push the package.
+      - name: Decide whether the ghostex-bin AUR package can be updated
+        id: aur_gate
+        if: ${{ !inputs.prerelease && (inputs.stage == '' || inputs.stage == 'linux') }}
+        env:
+          # `if:` conditions cannot read `secrets`, so secret availability is
+          # resolved into a step output here and gates the step below instead.
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ -z "${AUR_SSH_PRIVATE_KEY}" ]; then
+            echo "AUR_SSH_PRIVATE_KEY is not configured; skipping the ghostex-bin AUR update."
+            echo "See tooling/packaging/aur/ghostex-bin/README.md for the one-time setup."
+            echo 'publish=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          asset="ghostex-${VERSION}-linux-x64.tar.zst"
+          if ! gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --json assets \
+            --jq '.assets[].name' | grep -qxF "${asset}"; then
+            echo "v${VERSION} publishes no ${asset}; skipping the ghostex-bin AUR update."
+            echo 'publish=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A publish-only recovery or an amend may target an older release. The
+          # AUR carries exactly one version, so pushing one of those would
+          # silently downgrade every Arch user.
+          latest="$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq '.tagName')"
+          if [ "${latest}" != "v${VERSION}" ]; then
+            echo "v${VERSION} is not the latest release (${latest}); skipping the ghostex-bin AUR update."
+            echo 'publish=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Updating the ghostex-bin AUR package to ${VERSION}."
+          echo 'publish=true' >>"$GITHUB_OUTPUT"
+      # The Linux packages are already live when this runs; an AUR push that
+      # fails (key not registered, AUR down) must not turn the stage red.
+      - name: Update the ghostex-bin AUR package
+        if: ${{ steps.aur_gate.outputs.publish == 'true' }}
+        continue-on-error: true
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" >"$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          # Pinned rather than ssh-keyscan'd: a blind keyscan trusts whatever
+          # answers on port 22 the first time. These are the aur.archlinux.org
+          # host keys published in archlinux/infrastructure docs/ssh-hostkeys.txt:
+          #   ECDSA   SHA256:uTa/0PndEgPZTf76e1DFqXKJEXKsn7m9ivhLQtzGOCI
+          #   ED25519 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4
+          #   RSA     SHA256:5s5cIyReIfNNVGRFdDbe3hdYiI5OelHGpw2rOUud3Q8
+          cat >"$HOME/.ssh/aur_known_hosts" <<'EOF'
+          aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN
+          aur.archlinux.org ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLMiLrP8pVi5BFX2i3vepSUnpedeiewE5XptnUnau+ZoeUOPkpoCgZZuYfpaIQfhhJJI5qgnjJmr4hyJbe/zxow=
+          aur.archlinux.org ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDKF9vAFWdgm9Bi8uc+tYRBmXASBb5cB5iZsB7LOWWFeBrLp3r14w0/9S2vozjgqY5sJLDPONWoTTaVTbhe3vwO8CBKZTEt1AcWxuXNlRnk9FliR1/eNB9uz/7y1R0+c1Md+P98AJJSJWKN12nqIDIhjl2S1vOUvm7FNY43fU2knIhEbHybhwWeg+0wxpKwcAd/JeL5i92Uv03MYftOToUijd1pqyVFdJvQFhqD4v3M157jxS5FTOBrccAEjT+zYmFyD8WvKUa9vUclRddNllmBJdy4NyLB8SvVZULUPrP3QOlmzemeKracTlVOUG1wsDbxknF1BwSCU7CmU6UFP90kpWIyz66bP0bl67QAvlIc52Yix7pKJPbw85+zykvnfl2mdROsaT8p8R9nwCdFsBc9IiD0NhPEHcyHRwB8fokXTajk2QnGhL+zP5KnkmXnyQYOCUYo3EKMXIlVOVbPDgRYYT/XqvBuzq5S9rrU70KoI/S5lDnFfx/+lPLdtcnnEPk=
+          EOF
+          chmod 600 "$HOME/.ssh/aur_known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/aur_known_hosts"
+          # Prefer the checksum the producing job already recorded. When the
+          # tarball product was reused rather than rebuilt there is no manifest
+          # in this workspace, and the publisher falls back to the published
+          # asset's own digest.
+          manifest="build/release-gpui/workflow-artifacts/release-linux-tar-x64/manifest.json"
+          manifest_argument=()
+          if [ -f "${manifest}" ]; then manifest_argument=(--manifest "${manifest}"); fi
+          node tooling/release-gpui/publish-aur.mjs \
+            --version "${VERSION}" "${manifest_argument[@]}" --publish
+
+  # CDXC:Release 2026-09-15 DECISION:
+  # User: with the `ghostex` cask accepted into Homebrew/homebrew-cask, every
+  # release must update the official cask automatically from CI, in the macOS
+  # publish stage, and `brew install ghostex` is the advertised macOS install
+  # path. The legacy maddada/homebrew-tap receives the same bump. Never for a
+  # prerelease: Homebrew ships stable versions only.
+  #
+  # CDXC:Release 2026-09-15 WHY:
+  # A separate macOS job rather than steps on the ubuntu publisher, because
+  # Homebrew's pull request template asks the submitter to confirm that
+  # `brew style` and `brew audit --cask --online` pass, and its bot closes a PR
+  # whose template is missing. Both commands need brew and a cask inside a tap,
+  # so this job renders the bumped cask into a throwaway local tap, runs them
+  # for real, and only then opens the PR with those boxes ticked. It also waits
+  # for the raw appcast CDN to serve the new version, the source Homebrew's
+  # livecheck reads. macOS is already live when this runs, so the job never
+  # fails the workflow; rerun it by hand if it reports a problem.
+  homebrew:
+    needs: publish
+    if: ${{ !inputs.prerelease && (inputs.stage == '' || inputs.stage == 'macos') }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - name: Decide whether the Homebrew cask can be updated
+        id: homebrew_gate
+        env:
+          # `if:` conditions cannot read `secrets`, so secret availability is
+          # resolved into a step output here and gates the steps below instead.
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ -z "${HOMEBREW_GITHUB_API_TOKEN}" ]; then
+            echo "HOMEBREW_GITHUB_API_TOKEN is not configured; skipping the Homebrew cask update."
+            echo "See tooling/release-gpui/homebrew-cask-setup.md for the one-time setup."
+            echo 'publish=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          asset="ghostex-${VERSION}-arm64.dmg"
+          if ! gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --json assets \
+            --jq '.assets[].name' | grep -qxF "${asset}"; then
+            echo "v${VERSION} publishes no ${asset}; skipping the Homebrew cask update."
+            echo 'publish=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A cask carries exactly one version, so a publish-only recovery or an
+          # amend of an older release must not move Homebrew users backwards.
+          latest="$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq '.tagName')"
+          if [ "${latest}" != "v${VERSION}" ]; then
+            echo "v${VERSION} is not the latest release (${latest}); skipping the Homebrew cask update."
+            echo 'publish=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Updating the Homebrew cask to ${VERSION}."
+          echo 'publish=true' >>"$GITHUB_OUTPUT"
+      - name: Render the bumped cask and run brew style and brew audit on it
+        if: ${{ steps.homebrew_gate.outputs.publish == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          TAP_DIR="$RUNNER_TEMP/homebrew-audit"
+          node tooling/release-gpui/publish-homebrew-cask.mjs \
+            --version "${VERSION}" --render "$TAP_DIR/Casks/ghostex.rb"
+          if [ ! -f "$TAP_DIR/Casks/ghostex.rb" ]; then
+            echo "Nothing rendered (the official cask already ships ${VERSION}); skipping the audit."
+            exit 0
+          fi
+          git -C "$TAP_DIR" init -q
+          git -C "$TAP_DIR" add Casks/ghostex.rb
+          git -C "$TAP_DIR" -c user.name=ghostex-release -c user.email=release@ghostex.invalid commit -qm "ghostex ${VERSION}"
+          brew tap ghostex-release/audit "$TAP_DIR"
+          brew style ghostex-release/audit/ghostex
+          brew audit --cask --online ghostex-release/audit/ghostex
+          brew untap ghostex-release/audit
+      - name: Open the Homebrew cask pull request and push the tap
+        if: ${{ steps.homebrew_gate.outputs.publish == 'true' }}
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          node tooling/release-gpui/publish-homebrew-cask.mjs \
+            --version "${VERSION}" --publish --audited --styled

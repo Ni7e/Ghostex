@@ -1,0 +1,534 @@
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::atomic::AtomicU64,
+    time::Duration,
+};
+
+use crate::*;
+
+pub(crate) fn gpui_collect_native_resource_process_tree(
+    seeds: &[GpuiNativeResourceProcess],
+    children_by_parent: &HashMap<u32, Vec<GpuiNativeResourceProcess>>,
+) -> Vec<GpuiNativeResourceProcess> {
+    gpui_collect_native_resource_process_tree_bounded(seeds, children_by_parent, &|_| false)
+}
+
+/// Walk a process tree from `seeds`, skipping every descendant that another
+/// Resources row already owns. Boundary processes are neither counted nor
+/// descended into, so one row can never absorb another row's subtree.
+pub(crate) fn gpui_collect_native_resource_process_tree_bounded(
+    seeds: &[GpuiNativeResourceProcess],
+    children_by_parent: &HashMap<u32, Vec<GpuiNativeResourceProcess>>,
+    is_boundary: &dyn Fn(&GpuiNativeResourceProcess) -> bool,
+) -> Vec<GpuiNativeResourceProcess> {
+    let mut collected = HashMap::<u32, GpuiNativeResourceProcess>::new();
+    let mut queue = seeds.to_vec();
+    while let Some(process) = queue.pop() {
+        if collected.contains_key(&process.pid) {
+            continue;
+        }
+        queue.extend(
+            children_by_parent
+                .get(&process.pid)
+                .into_iter()
+                .flatten()
+                .filter(|child| !is_boundary(child))
+                .cloned(),
+        );
+        collected.insert(process.pid, process);
+    }
+    collected.into_values().collect()
+}
+
+pub(crate) fn gpui_sum_native_resource_processes(
+    processes: &[GpuiNativeResourceProcess],
+) -> (f64, f64) {
+    processes.iter().fold((0.0, 0.0), |(cpu, memory), process| {
+        (cpu + process.cpu, memory + process.memory_mb)
+    })
+}
+
+pub(crate) fn gpui_native_resource_is_app_bundle_process(
+    process: &GpuiNativeResourceProcess,
+) -> bool {
+    let command = process.command.to_ascii_lowercase();
+    command.contains("/ghostex.app/contents/")
+        || command.contains("/ghostex-dev.app/contents/")
+        || (cfg!(target_os = "windows")
+            && [
+                "ghostex.exe",
+                "ghostex-gpui.exe",
+                "ghostex-gpui-cef-helper.exe",
+            ]
+            .iter()
+            .any(|executable| command.contains(executable)))
+}
+
+/// True for the app's own executables: the Ghostex binary, its CEF helper
+/// processes, and the gxserver daemon. These are the app itself, never a
+/// user-owned server or runtime.
+pub(crate) fn gpui_native_resource_is_app_shell_process(
+    process: &GpuiNativeResourceProcess,
+) -> bool {
+    if gpui_native_resource_is_ghostex_web_process(process) {
+        return false;
+    }
+    let command = process.command.to_ascii_lowercase();
+    [
+        "/ghostex.app/contents/macos/",
+        "/ghostex.app/contents/frameworks/",
+        "/ghostex-dev.app/contents/macos/",
+        "/ghostex-dev.app/contents/frameworks/",
+    ]
+    .iter()
+    .any(|marker| command.contains(marker))
+        || gpui_native_resource_is_gxserver_process(process)
+        || (cfg!(target_os = "windows")
+            && [
+                "ghostex.exe",
+                "ghostex-gpui.exe",
+                "ghostex-gpui-cef-helper.exe",
+            ]
+            .iter()
+            .any(|executable| command.contains(executable)))
+}
+
+/// CDXC:Resources 2026-09-06 WHY:
+/// gxserver's API listener belongs to the control plane, so keep it out of Dev Servers.
+/// This supersedes the old assumption that its port was ephemeral: it uses port 58744, and web hosting now belongs to a separate `ghostex web` process.
+pub(crate) fn gpui_native_resource_is_gxserver_process(
+    process: &GpuiNativeResourceProcess,
+) -> bool {
+    matches!(
+        gpui_native_resource_process_name(process)
+            .to_ascii_lowercase()
+            .as_str(),
+        "gxserver" | "gxserver.exe"
+    )
+}
+
+/// CDXC:Resources 2026-09-06 DECISION:
+/// User: the separately launched `ghostex web` server must appear in Resources instead of being filtered with gxserver's ports.
+/// Match the CLI invocation so it also appears when started outside the active project directory.
+/// SEE-ALSO: server/src/ghostex_cli/web.rs.
+pub(crate) fn gpui_native_resource_is_ghostex_web_process(
+    process: &GpuiNativeResourceProcess,
+) -> bool {
+    let mut arguments = process.command.split_whitespace();
+    let executable = arguments
+        .next()
+        .and_then(|path| Path::new(path).file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    matches!(executable, "ghostex" | "gx" | "ghostex.exe" | "gx.exe")
+        && arguments.next() == Some("web")
+}
+
+pub(crate) fn gpui_native_resource_is_ghostex_owned_process(
+    process: &GpuiNativeResourceProcess,
+) -> bool {
+    let command = process.command.to_ascii_lowercase();
+    gpui_native_resource_is_app_bundle_process(process)
+        || command.contains("/.ghostex/")
+        || command.contains("/.ghostex-dev/")
+        || command.contains("ghostex_")
+        || command.contains("/resources/web/bin/zmx")
+}
+
+pub(crate) fn gpui_native_resource_is_user_runtime_process(
+    process: &GpuiNativeResourceProcess,
+) -> bool {
+    let command = process.command.to_ascii_lowercase();
+    [
+        "zmx",
+        "codex",
+        "code-server",
+        "computer-use",
+        "chrome-devtools",
+        "devtools",
+    ]
+    .iter()
+    .any(|needle| command.contains(needle))
+}
+
+/// CDXC:Resources 2026-09-04 WHY:
+/// A Ghostex CEF helper is recognised by its executable, not by "ghostex"
+/// appearing anywhere on the command line. The substring test also matched
+/// every helper of a Google Chrome that Ghostex launched with a
+/// `--user-data-dir=/tmp/ghostex-cursor-web-chrome.*` profile (and would match
+/// any Chrome tab whose URL mentions ghostex), so unrelated browsers were
+/// summed into the Browser runtime row. The helper executable carries the
+/// name on every platform: `Ghostex Helper (Renderer)` inside the macOS
+/// bundle, `ghostex-gpui-cef-helper` beside the Linux and Windows binaries.
+pub(crate) fn gpui_native_resource_is_ghostex_browser_process(
+    process: &GpuiNativeResourceProcess,
+) -> bool {
+    let command = process.command.to_ascii_lowercase();
+    (command.contains("--type=renderer")
+        || command.contains("--type=gpu-process")
+        || command.contains("--type=utility"))
+        && command
+            .split_whitespace()
+            .next()
+            .is_some_and(|executable| executable.contains("ghostex"))
+}
+
+/// True for a zmx process (daemon, attach client, or gxserver watcher) that
+/// serves the session whose zmx name ends in `suffix` (`-<project>-<session>`).
+pub(crate) fn gpui_native_resource_process_is_zmx_session(
+    process: &GpuiNativeResourceProcess,
+    suffix: &str,
+) -> bool {
+    gpui_native_resource_zmx_session_name(process).is_some_and(|name| name.ends_with(suffix))
+}
+
+pub(crate) fn gpui_native_resource_zmx_session_name(
+    process: &GpuiNativeResourceProcess,
+) -> Option<&str> {
+    let mut args = process.command.split_whitespace();
+    let executable = Path::new(args.next()?).file_name()?.to_str()?;
+    if !matches!(executable, "zmx" | "zmx.exe")
+        || !matches!(args.next()?, "run" | "attach" | "watch-title")
+    {
+        return None;
+    }
+    args.next()
+}
+
+/// CDXC:Resources 2026-09-06 WHY:
+/// Attach clients and title watchers belong to the app's terminal and server lifecycle; exposing their raw PID as an orphan close action bypasses that lifecycle.
+pub(crate) fn gpui_native_resource_is_zmx_client(process: &GpuiNativeResourceProcess) -> bool {
+    matches!(
+        gpui_native_resource_process_name(process).as_str(),
+        "zmx" | "zmx.exe"
+    ) && process.command.split_whitespace().nth(1) != Some("run")
+}
+
+/// CDXC:Resources 2026-09-06 WHY:
+/// An agent can launch Ghostex itself, so an unbounded runtime tree can include the app or a launcher whose termination takes the app down too.
+/// Protect the shell, its infrastructure and their ancestors before constructing or executing raw process close actions.
+pub(crate) fn gpui_native_resource_protected_pids(
+    processes: &[GpuiNativeResourceProcess],
+) -> HashSet<u32> {
+    let mut protected = HashSet::new();
+    let by_pid = processes
+        .iter()
+        .map(|p| (p.pid, p))
+        .collect::<HashMap<_, _>>();
+    for process in processes.iter().filter(|p| {
+        gpui_native_resource_is_app_shell_process(p)
+            || gpui_native_resource_is_zmx_client(p)
+            || (p.system_pid == std::process::id()
+                && (!cfg!(target_os = "windows") || p.pid != p.system_pid))
+    }) {
+        let mut pid = process.pid;
+        while protected.insert(pid) {
+            let Some(parent) = by_pid.get(&pid) else {
+                break;
+            };
+            if parent.ppid <= 1 {
+                break;
+            }
+            pid = parent.ppid;
+        }
+    }
+    protected
+}
+
+pub(crate) fn gpui_native_resource_process_name(process: &GpuiNativeResourceProcess) -> String {
+    process
+        .command
+        .split_whitespace()
+        .next()
+        .and_then(|path| Path::new(path).file_name())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("process")
+        .to_string()
+}
+
+pub(crate) fn gpui_native_resource_child_rows(
+    processes: &[GpuiNativeResourceProcess],
+    excluded_pid: Option<u32>,
+) -> Vec<GpuiNativeResourceChild> {
+    processes
+        .iter()
+        .filter(|process| Some(process.pid) != excluded_pid)
+        .take(8)
+        .map(|process| GpuiNativeResourceChild {
+            cpu: process.cpu,
+            label: gpui_native_resource_process_name(process),
+            memory_mb: process.memory_mb,
+            pid: process.system_pid,
+        })
+        .collect()
+}
+
+pub(crate) fn format_gpui_resource_cpu(cpu: f64) -> String {
+    format!("CPU {:.0}%", cpu.max(0.0))
+}
+
+pub(crate) fn format_gpui_resource_memory(memory_mb: f64) -> String {
+    if memory_mb >= 1024.0 {
+        format!("RAM {:.1} GB", memory_mb / 1024.0)
+    } else {
+        format!("RAM {:.0} MB", memory_mb.max(0.0))
+    }
+}
+
+pub(crate) fn find_app_bundle_root(path: &std::path::Path) -> Option<PathBuf> {
+    for ancestor in path.ancestors() {
+        if ancestor
+            .extension()
+            .is_some_and(|extension| extension == "app")
+        {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn file_url(path: &std::path::Path) -> String {
+    format!("file://{}", path.to_string_lossy())
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn file_url(path: &std::path::Path) -> String {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    format!("file:///{}", normalized.trim_start_matches('/'))
+}
+
+/// CDXC:Docs 2026-09-10 WHY:
+/// The 1,200-entry budget was exhausted by older screenshots in maestro_swift, leaving newer date folders empty in the sidebar.
+/// Project scans use the same entry budget as mounted Docs trees and report exhausted limits instead of returning partial listings.
+/// SEE-ALSO: server/src/project_docs.rs.
+pub(crate) const MANAGE_FILE_LIST_MAX_ENTRIES: usize = 20_000;
+pub(crate) const MANAGE_FILE_LIST_MAX_DEPTH: usize = 8;
+/*
+CDXC:Docs 2026-08-09:
+Mirrors `server/src/project_docs.rs`: a mounted Docs directory is a notes
+tree with a bounded walk. Hitting a limit labels that mount with the cap instead of returning a tree that
+silently stopped.
+*/
+pub(crate) const MANAGE_DOCS_TREE_MAX_ENTRIES: usize = 20_000;
+pub(crate) const MANAGE_DOCS_TREE_MAX_DEPTH: usize = 12;
+pub(crate) const MANAGE_FILE_PREVIEW_MAX_BYTES: u64 = 2_000_000;
+pub(crate) const MANAGE_FILE_SAVE_MAX_BYTES: usize = 2_000_000;
+pub(crate) const MANAGE_GIT_BASELINE_MAX_BYTES: usize = 1024 * 1024;
+pub(crate) const MANAGE_REMOTE_RESOURCE_MAX_BYTES: usize = 12 * 1024 * 1024;
+pub(crate) const MANAGE_SESSION_CONTEXT_MAX_BYTES: usize = 300_000;
+pub(crate) static MANAGE_REMOTE_RESOURCE_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+pub(crate) const MANAGE_DOCS_RELATIVE_PATH: &str = "docs";
+pub(crate) const MANAGE_BUILT_IN_DOCS_RELATIVE_PATHS: &[&str] =
+    &[MANAGE_DOCS_RELATIVE_PATH, "artifacts", "ai", "tmp"];
+/*
+CDXC:Docs 2026-08-09:
+Mirrors `EXTRA_ROOT_MOUNT_SEGMENT` in `server/src/project_docs.rs`: the
+reserved first path segment that addresses the mounted Docs directory. Every
+other Docs path is project-relative, so one relative path can only ever mean one
+root and no read, save, rename, delete, move, or reveal can resolve out of the
+root it was addressed to.
+*/
+pub(crate) const MANAGE_DOCS_EXTRA_ROOT_MOUNT_SEGMENT: &str = ".ghostex-docs-root";
+/*
+CDXC:SessionChat 2026-08-27:
+Chat may open one explicitly referenced Markdown, HTML, or Excalidraw file in
+the active project's Docs surface even when it lives outside the tree Docs
+normally lists. This reserved runtime-only mount addresses the selected file's
+containing folder without turning Docs into an unrestricted filesystem browser.
+*/
+pub(crate) const MANAGE_DOCS_CHAT_FILE_MOUNT_SEGMENT: &str = ".ghostex-chat-file";
+pub(crate) const MANAGE_ANNOTATIONS_SIDECAR_RELATIVE_PATH: &str =
+    ".ghostex/manage-annotations.json";
+pub(crate) const MANAGE_ROOT_ARTIFACT_FILE_EXTENSIONS: &[&str] = &[
+    "excalidraw",
+    "htm",
+    "html",
+    "markdown",
+    "md",
+    "mdown",
+    "mkdn",
+];
+pub(crate) const PROJECT_BOARD_CLIPBOARD_IMAGE_MAX_BYTES: usize = 12 * 1024 * 1024;
+pub(crate) const PROJECT_BOARD_IMAGE_PREVIEW_MAX_BYTES: usize = 12 * 1024 * 1024;
+pub(crate) const GPUI_GXSERVER_LOCAL_API_HOST: &str = "127.0.0.1";
+pub(crate) const GPUI_GXSERVER_LOCAL_API_PORT: u16 = 58_744;
+/// CDXC:ServerDaemon 2026-09-13 WHY:
+/// Isolated desktop instances must use the same alternate listener as gxserver and the CLI.
+/// Remote SSH destinations still use the product port, not this local override.
+pub(crate) fn gpui_local_gxserver_api_port() -> u16 {
+    std::env::var("GHOSTEX_GXSERVER_DEV_PORT")
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .filter(|port| *port != 0)
+        .unwrap_or_else(|| {
+            #[cfg(windows)]
+            if crate::windows_terminal_backend::current_preference()
+                == crate::windows_terminal_backend::WindowsTerminalBackendPreference::PowerShell
+            {
+                return 58_746;
+            }
+            GPUI_GXSERVER_LOCAL_API_PORT
+        })
+}
+pub(crate) const GPUI_GXSERVER_PRODUCT: &str = "gxserver";
+pub(crate) const GPUI_GXSERVER_PROTOCOL_HEADER: &str = "x-gxserver-protocol-version";
+pub(crate) const GPUI_GXSERVER_PROTOCOL_VERSION: u64 = 1;
+// CDXC:Portless 2026-07-25: Keep the complete GPUI Portless
+// implementation available for later, while gating all current runtime and UI
+// exposure behind one intentionally disabled product switch.
+pub(crate) const GPUI_PORTLESS_APP_INTEGRATION_ENABLED: bool = false;
+pub(crate) const GPUI_SIDEBAR_GXSERVER_CLIENT_ID: &str = "ghostex-gpui-sidebar";
+pub(crate) const GPUI_REMOTE_GXSERVER_TOKEN_START_MARKER: &str = "__GHOSTEX_REMOTE_TOKEN_START__";
+pub(crate) const GPUI_REMOTE_GXSERVER_TOKEN_END_MARKER: &str = "__GHOSTEX_REMOTE_TOKEN_END__";
+pub(crate) const GPUI_REMOTE_GXSERVER_BUILD_IDENTITY_START_MARKER: &str =
+    "__GHOSTEX_REMOTE_BUILD_IDENTITY_START__";
+pub(crate) const GPUI_REMOTE_GXSERVER_BUILD_IDENTITY_END_MARKER: &str =
+    "__GHOSTEX_REMOTE_BUILD_IDENTITY_END__";
+pub(crate) const GPUI_REMOTE_GXSERVER_INSTALLED_VERSION_START_MARKER: &str =
+    "__GHOSTEX_REMOTE_GXSERVER_VERSION_START__";
+pub(crate) const GPUI_REMOTE_GXSERVER_INSTALLED_VERSION_END_MARKER: &str =
+    "__GHOSTEX_REMOTE_GXSERVER_VERSION_END__";
+pub(crate) const GPUI_REMOTE_GXSERVER_INSTALLED_VERSION_MAX_LENGTH: usize = 40;
+// The install-state probe's own "no gxserver here" exit code. Any other
+// non-zero code means the remote login shell never ran the probe script.
+pub(crate) const GPUI_REMOTE_GXSERVER_NOT_INSTALLED_EXIT_CODE: i32 = 3;
+pub(crate) const GPUI_REMOTE_GXSERVER_CONNECT_TIMEOUT: Duration = Duration::from_secs(18);
+pub(crate) const GPUI_REMOTE_GXSERVER_INSTALL_PROBE_TIMEOUT: Duration = Duration::from_secs(12);
+pub(crate) const GPUI_REMOTE_GXSERVER_ARCHIVE_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const GPUI_REMOTE_GXSERVER_UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const GPUI_REMOTE_GXSERVER_INSTALL_TIMEOUT: Duration = Duration::from_secs(45);
+// gxserver advertises this in /api/health/server once it accepts the
+// `code-server` prompt-editor selector on session create and attach operations.
+pub(crate) const GPUI_GXSERVER_CODE_SERVER_PROMPT_EDITOR_CAPABILITY: &str =
+    "codeServerPromptEditor";
+pub(crate) const GPUI_REMOTE_GXSERVER_HEALTH_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const GPUI_REMOTE_GXSERVER_HEALTH_DEADLINE: Duration = Duration::from_secs(7);
+pub(crate) const GPUI_REMOTE_GXSERVER_WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
+pub(crate) const GPUI_REMOTE_GXSERVER_WATCHDOG_FAILURE_THRESHOLD: u8 = 2;
+pub(crate) const GPUI_REMOTE_GXSERVER_TUNNEL_STARTUP_DELAY: Duration = Duration::from_millis(350);
+pub(crate) const GPUI_REMOTE_GXSERVER_TUNNEL_RETRY_DELAY: Duration = Duration::from_millis(200);
+pub(crate) const GPUI_REMOTE_GXSERVER_TUNNEL_PORT_MIN: u16 = 42_000;
+pub(crate) const GPUI_REMOTE_GXSERVER_TUNNEL_PORT_MAX: u16 = 58_999;
+pub(crate) const GPUI_REMOTE_GXSERVER_TUNNEL_ATTEMPTS: usize = 8;
+pub(crate) const GPUI_REMOTE_GXSERVER_PARAMS_MAX_BYTES: usize = 64 * 1024;
+pub(crate) const GPUI_REMOTE_GXSERVER_SIDEBAR_REQUEST_TIMEOUT_MIN_MS: u64 = 1_000;
+pub(crate) const GPUI_REMOTE_GXSERVER_SIDEBAR_REQUEST_TIMEOUT_MAX_MS: u64 = 130_000;
+pub(crate) const GPUI_REMOTE_GXSERVER_PRESENTATION_STREAM_ATTEMPTS: usize = 4;
+pub(crate) const GPUI_REMOTE_GXSERVER_PRESENTATION_STREAM_FRAME_MAX_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const GPUI_REMOTE_GXSERVER_PRESENTATION_STREAM_HANDSHAKE_TIMEOUT: Duration =
+    Duration::from_secs(8);
+pub(crate) const GPUI_REMOTE_GXSERVER_PRESENTATION_STREAM_READ_TIMEOUT: Duration =
+    Duration::from_millis(900);
+pub(crate) const GPUI_REMOTE_GXSERVER_PRESENTATION_HEALTH_INTERVAL: Duration =
+    Duration::from_secs(15);
+pub(crate) const GPUI_REMOTE_GXSERVER_PRESENTATION_STREAM_RECONNECT_DELAY: Duration =
+    Duration::from_millis(700);
+pub(crate) const GPUI_REMOTE_REPOSITORY_CLONE_POLL_INTERVAL: Duration = Duration::from_millis(700);
+pub(crate) const GPUI_REMOTE_REPOSITORY_CLONE_PREVIEW_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const GPUI_REMOTE_REPOSITORY_CLONE_START_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const GPUI_REMOTE_REPOSITORY_CLONE_JOB_TIMEOUT: Duration = Duration::from_secs(15);
+/*
+ * CDXC:AddProject 2026-07-30:
+ * Add-project timeouts. Registering a project right after a remote reconnect
+ * has been measured at ~19s, which the previous 20s add timeout raced: the add
+ * landed on the machine while the dialog reported failure. Adds and clone
+ * starts get a full minute, and every waiter on the JS side uses the same
+ * budget so neither end can give up while the other is still working.
+ */
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_ADD_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_BROWSE_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_JOB_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_CLONE_WATCH_INTERVAL: Duration = Duration::from_secs(5);
+// CDXC:AddProject 2026-07-30: ~10 minutes of native follow-up for a remote clone
+// whose dialog poll answer was lost, and an early exit once the tunnel stops
+// answering at all.
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_CLONE_WATCH_MAX_POLLS: u32 = 120;
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_CLONE_WATCH_MAX_CONSECUTIVE_ERRORS: u32 = 3;
+pub(crate) const GPUI_ADD_PROJECT_DIALOG_LOCAL_MACHINE_ID: &str = "local";
+pub(crate) const GPUI_GHOSTTY_SETTINGS_DOCS_URL: &str = "https://ghostty.org/docs/config/reference";
+pub(crate) const GPUI_MACOS_ACCESSIBILITY_PREFERENCES_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+pub(crate) const GPUI_MACOS_SCREEN_RECORDING_PREFERENCES_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+pub(crate) const GPUI_MACOS_NOTIFICATION_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.Notifications-Settings.extension";
+/// CDXC:Cli 2026-09-03 WHY:
+/// This value is the on-disk ownership stamp written into the public `ghostex`
+/// and `gx` wrappers and read back to tell a Ghostex wrapper from a foreign
+/// command of the same name, so it is a compatibility contract with every
+/// wrapper already on a user's machine, not a comment tag. The 2026-09-03 area
+/// rename swept it to `CDXC:Cli` here and in the Homebrew cask template, which
+/// would have made CLI repair and `brew upgrade` treat their own wrappers as
+/// foreign. Changing it means accepting both spellings for at least one
+/// release.
+/// SEE-ALSO: the cask body and `validateGhostexCask` in tooling/release-ghostex.mjs.
+pub(crate) const GPUI_GHOSTEX_CLI_WRAPPER_MARKER: &str = "CDXC:CliInstall 2026-06-12-09:31";
+pub(crate) const GPUI_GTE_INSTALL_ACTION_ID: &str = "installGte";
+pub(crate) const GPUI_GTE_HOMEBREW_INSTALL_SCRIPT: &str = concat!(
+    "if command -v brew >/dev/null 2>&1; then BREW=$(command -v brew); ",
+    "elif [ -x /opt/homebrew/bin/brew ]; then BREW=/opt/homebrew/bin/brew; ",
+    "elif [ -x /usr/local/bin/brew ]; then BREW=/usr/local/bin/brew; ",
+    "else echo 'Homebrew was not found on PATH, /opt/homebrew/bin, or /usr/local/bin.' >&2; exit 127; fi; ",
+    "\"$BREW\" install maddada/tap/gte"
+);
+pub(crate) const GPUI_GTE_INSTALL_SUCCESS_MESSAGE: &str = "gte installed from Homebrew.";
+pub(crate) const GPUI_GTE_INSTALL_FAILURE_MESSAGE: &str =
+    "gte install failed. Install Homebrew or run brew install maddada/tap/gte in a terminal.";
+pub(crate) const GPUI_BUNDLED_GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
+    /*
+    CDXC:AgentSkills 2026-06-26-13:47:
+    GPUI packages the same app-bundled Codex session-move skill as the native sidebar so settings repair and install flows expose a consistent Ghostex skill set.
+    */
+    "ghostex-browser-use",
+    "ghostex-embedded-browser-use",
+    "ghostex-computer-use",
+    "ghostex-cli",
+    "ghostex-help",
+    "ghostex-fable-56-orchestration",
+    "ghostex-manage-beads",
+    "ghostex-auto-rename-session",
+    "ghostex-move-codex-session",
+    "ghostex-manage-beads",
+];
+
+/// CDXC:Resources 2026-09-06 WHY:
+/// Resources keeps the opening snapshot while PIDs can exit and be reused; signaling those numbers blindly can terminate Ghostex itself.
+/// Recheck the sampled process identity and current app ancestry on the worker before sending a signal.
+pub(crate) fn gpui_terminate_native_resource_processes(
+    targets: Vec<GpuiNativeResourceProcess>,
+    signal: &'static str,
+) {
+    if targets.is_empty() {
+        return;
+    }
+    thread::spawn(move || {
+        let processes = gpui_read_native_resource_processes();
+        let protected = gpui_native_resource_protected_pids(&processes);
+        let pids = targets
+            .iter()
+            .filter_map(|target| {
+                processes
+                    .iter()
+                    .find(|process| {
+                        process.pid == target.pid
+                            && process.system_pid == target.system_pid
+                            && process.command == target.command
+                            && process.system_pid > 1
+                            && !protected.contains(&process.pid)
+                    })
+                    .map(|process| process.system_pid.to_string())
+            })
+            .collect::<HashSet<_>>();
+        if pids.is_empty() {
+            return;
+        }
+        let mut command = Command::new("/bin/kill");
+        command.arg(format!("-{signal}")).args(pids);
+        let _ = command.status();
+    });
+}

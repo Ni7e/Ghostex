@@ -1,0 +1,745 @@
+use std::fs;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+
+use serde_json::{json, Value};
+
+use crate::agent_transcripts::resolve_session_transcript_path;
+use crate::domain::{DomainRepository, DomainStateError};
+
+use super::*;
+
+pub(crate) struct AgentMetadataTitle {
+    agent_session_id: Option<String>,
+    provider: &'static str,
+    record_revision: Option<String>,
+    title: String,
+    updated_at: Option<String>,
+}
+
+/// CDXC:SessionTitles 2026-09-15 WHY:
+/// Custom launch profiles keep their configured agent ID, so matching that ID against provider names skipped metadata sync and left confirmed Claude renames pending forever.
+/// Resolve the underlying launch provider only for metadata reads; the session retains its configured identity.
+fn metadata_session_identity(session: &Value) -> ResolvedIdentity {
+    let runtime_settings = object_field(session, "runtimeSettings");
+    let mut identity = resolve_session_identity(&IdentityInput {
+        agent_id: read_text_value(session, "agentId"),
+        agent_name: read_text_from_map(&runtime_settings, "agentName"),
+        agent_session_id: read_text_from_map(&runtime_settings, "agentSessionId"),
+        agent_session_path: read_text_from_map(&runtime_settings, "agentSessionPath"),
+        runtime_settings,
+        startup_text: None,
+    });
+    if identity
+        .agent_id
+        .as_deref()
+        .is_some_and(|agent_id| agent_id.starts_with("custom-"))
+    {
+        identity.agent_id = session_launch_agent_provider_id(session);
+    }
+    identity
+}
+
+/*
+CDXC:SessionTitles 2026-09-11 WHY:
+Older Ghostex versions claimed Codex title jobs while waiting for its provisional 36-character prompt prefix to become a generated name.
+Metadata reconciliation still recognizes the provisional prefix to retire those legacy claims when the final title arrives; new Codex sessions never claim a job.
+Compare against the raw prompt because Codex truncates the text it received, before Ghostex strips filler.
+*/
+pub(crate) const CODEX_PROVISIONAL_THREAD_NAME_MAX_CHARS: usize = 36;
+
+pub(crate) fn is_codex_provisional_thread_name(
+    first_prompt: Option<&str>,
+    thread_name: &str,
+) -> bool {
+    let Some(first_prompt) = first_prompt else {
+        return false;
+    };
+    let collapsed = first_prompt
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let expected = collapsed
+        .chars()
+        .take(CODEX_PROVISIONAL_THREAD_NAME_MAX_CHARS)
+        .collect::<String>();
+    let thread_name = thread_name.trim();
+    !expected.is_empty() && (thread_name == expected || thread_name == expected.trim())
+}
+
+pub(crate) struct AgentTitleReconcileResult {
+    pub(crate) changed: bool,
+    pub(crate) metadata_title_found: bool,
+    pub(crate) reason: String,
+    pub(crate) session: Option<Value>,
+}
+
+pub(crate) fn reconcile_agent_metadata_title_for_session(
+    repository: &DomainRepository<'_>,
+    project_id: &str,
+    session_id: &str,
+    home_dir: &Path,
+    pending_mismatch_status: &str,
+) -> Result<bool, DomainStateError> {
+    let lifecycle = LifecycleParams {
+        project_id: project_id.to_string(),
+        session_id: session_id.to_string(),
+    };
+    let result =
+        reconcile_agent_metadata_title(repository, &lifecycle, home_dir, pending_mismatch_status)?;
+    Ok(result.changed)
+}
+
+/// CDXC:SessionTitles 2026-09-10 WHY:
+/// Metadata sync and the title worker write the same runtime settings, so the read/modify/write must be atomic to prevent an old running flag from overwriting the worker's completed state.
+/// Adopting Codex's final name also finishes its waiting attempt, even if the worker is already gone; manual Generate Name keeps ownership of its replacement title.
+pub(crate) fn reconcile_agent_metadata_title(
+    repository: &DomainRepository<'_>,
+    lifecycle: &LifecycleParams,
+    home_dir: &Path,
+    pending_mismatch_status: &str,
+) -> Result<AgentTitleReconcileResult, DomainStateError> {
+    let db = repository.connection();
+    let transaction = db
+        .is_autocommit()
+        .then(|| rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate))
+        .transpose()
+        .map_err(sql_error)?;
+    let Some(session) = repository.get_session(&lifecycle.project_id, &lifecycle.session_id)?
+    else {
+        return Ok(AgentTitleReconcileResult {
+            changed: false,
+            metadata_title_found: false,
+            reason: "session-missing".to_string(),
+            session: None,
+        });
+    };
+    let runtime_settings = object_field(&session, "runtimeSettings");
+    let identity = metadata_session_identity(&session);
+    if !is_agent_associated(&session, &identity) {
+        return Ok(AgentTitleReconcileResult {
+            changed: false,
+            metadata_title_found: false,
+            reason: "not-agent-associated".to_string(),
+            session: Some(session),
+        });
+    }
+    let pending_title = read_text_from_map(&runtime_settings, "pendingAgentTitleRequestTitle");
+    let pending_requested_at =
+        read_text_from_map(&runtime_settings, "pendingAgentTitleRequestRequestedAt");
+    let metadata_title = read_agent_metadata_title(home_dir, &session).or_else(|| {
+        read_pending_codex_rename_metadata_title(
+            home_dir,
+            &identity,
+            pending_title.as_deref(),
+            pending_requested_at.as_deref(),
+        )
+    });
+    let Some(metadata_title) = metadata_title else {
+        return Ok(AgentTitleReconcileResult {
+            changed: false,
+            metadata_title_found: false,
+            reason: "metadata-title-missing".to_string(),
+            session: Some(session),
+        });
+    };
+
+    crate::session_chat_app_command::resolve_latest_session_chat_app_command_title(
+        &lifecycle.project_id,
+        &lifecycle.session_id,
+        &metadata_title.title,
+        metadata_title.record_revision.as_deref(),
+    );
+
+    let pending_status = pending_title.as_deref().map(|pending_title| {
+        if titles_match(pending_title, &metadata_title.title) {
+            "confirmed"
+        } else {
+            pending_mismatch_status
+        }
+    });
+    let mut next_runtime_settings = runtime_settings.clone();
+    next_runtime_settings.insert("titleMetadataCheckedAt".to_string(), json!(now_iso()));
+    next_runtime_settings.insert(
+        "titleMetadataProvider".to_string(),
+        json!(metadata_title.provider),
+    );
+    next_runtime_settings.insert("titleMetadataSource".to_string(), json!("agent-metadata"));
+    next_runtime_settings.insert("titleSource".to_string(), json!("terminal-auto"));
+    if let Some(agent_session_id) = metadata_title.agent_session_id.as_deref() {
+        next_runtime_settings.insert("agentSessionId".to_string(), json!(agent_session_id));
+    }
+    if let Some(updated_at) = metadata_title.updated_at.as_deref() {
+        next_runtime_settings.insert("titleMetadataUpdatedAt".to_string(), json!(updated_at));
+    }
+    if let Some(status) = pending_status {
+        next_runtime_settings.insert("pendingAgentTitleRequestStatus".to_string(), json!(status));
+    }
+    let completed_codex_auto_title = identity.agent_id.as_deref() == Some("codex")
+        && read_text_from_map(&runtime_settings, "gxserverFirstPromptAutoTitleStatus").as_deref()
+            == Some("running")
+        && !runtime_settings.contains_key("gxserverManualTitleGenerationRequestedAt")
+        && !is_codex_provisional_thread_name(
+            read_text_from_map(&runtime_settings, "firstUserMessage").as_deref(),
+            &metadata_title.title,
+        );
+    if completed_codex_auto_title {
+        next_runtime_settings.remove(FIRST_PROMPT_AUTO_TITLE_ATTEMPT_ID_KEY);
+        next_runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleStatus".to_string(),
+            json!("skipped"),
+        );
+        next_runtime_settings.insert(
+            "gxserverFirstPromptAutoTitleReason".to_string(),
+            json!("agentAutoTitle"),
+        );
+    }
+    let codex_fork_auto_title_pending = identity.agent_id.as_deref() == Some("codex")
+        && runtime_settings
+            .get("forkFirstPromptAutoTitlePending")
+            .and_then(Value::as_bool)
+            == Some(true);
+    if codex_fork_auto_title_pending {
+        next_runtime_settings.remove("forkFirstPromptAutoTitlePending");
+        next_runtime_settings.remove("gxserverForkInitialRenameStatus");
+        next_runtime_settings.remove("gxserverForkInitialRenameUpdatedAt");
+        next_runtime_settings.insert("autoTitleFromFirstPrompt".to_string(), Value::Bool(true));
+    }
+    let needs_update = completed_codex_auto_title
+        || session.get("title").and_then(Value::as_str) != Some(metadata_title.title.as_str())
+        || runtime_settings.get("titleSource") != next_runtime_settings.get("titleSource")
+        || runtime_settings.get("titleMetadataSource")
+            != next_runtime_settings.get("titleMetadataSource")
+        || runtime_settings.get("titleMetadataProvider")
+            != next_runtime_settings.get("titleMetadataProvider")
+        || runtime_settings.get("agentSessionId") != next_runtime_settings.get("agentSessionId")
+        || runtime_settings.get("titleMetadataUpdatedAt")
+            != next_runtime_settings.get("titleMetadataUpdatedAt")
+        || runtime_settings.get("pendingAgentTitleRequestStatus")
+            != next_runtime_settings.get("pendingAgentTitleRequestStatus")
+        || runtime_settings.get("forkFirstPromptAutoTitlePending")
+            != next_runtime_settings.get("forkFirstPromptAutoTitlePending")
+        || runtime_settings.get("gxserverForkInitialRenameStatus")
+            != next_runtime_settings.get("gxserverForkInitialRenameStatus")
+        || runtime_settings.get("gxserverForkInitialRenameUpdatedAt")
+            != next_runtime_settings.get("gxserverForkInitialRenameUpdatedAt")
+        || runtime_settings.get("autoTitleFromFirstPrompt")
+            != next_runtime_settings.get("autoTitleFromFirstPrompt");
+
+    if !needs_update {
+        return Ok(AgentTitleReconcileResult {
+            changed: false,
+            metadata_title_found: true,
+            reason: "metadata-title-already-current".to_string(),
+            session: Some(session),
+        });
+    }
+
+    let mut update = lifecycle_update(lifecycle);
+    update.insert(
+        "runtimeSettings".to_string(),
+        Value::Object(next_runtime_settings),
+    );
+    update.insert("title".to_string(), Value::String(metadata_title.title));
+    let updated = repository.update_session(&update)?;
+    if let Some(transaction) = transaction {
+        transaction.commit().map_err(sql_error)?;
+    }
+    Ok(AgentTitleReconcileResult {
+        changed: true,
+        metadata_title_found: true,
+        reason: "metadata-title-applied".to_string(),
+        session: Some(updated),
+    })
+}
+
+/*
+CDXC:SessionTitles 2026-08-18:
+A rename of an agent session is only confirmed once the Agent CLI writes the
+new name into its own session metadata, so every agent Ghostex renames through
+`/rename` needs a reader here. Codex publishes `thread_name` in the shared
+`session_index.jsonl`; Claude Code writes a `custom-title` record into the
+session transcript. While Claude had no reader its renames stayed pending
+forever, `title` was never promoted, and the sidebar card kept the previous
+name until Claude happened to push an unrelated terminal title.
+*/
+pub(crate) enum AgentMetadataTitleSource {
+    ClaudeTranscript {
+        transcript_path: PathBuf,
+    },
+    CodexSessionIndex {
+        agent_session_id: String,
+        index_paths: Vec<PathBuf>,
+    },
+    /*
+    Hermes keeps its session names in the `sessions` table of its own state
+    database rather than in any per-session file, and names a session twice on
+    its own: instantly from the opening message, then again once a small model
+    upgrades that name. Reading the row is what lets both land on the card.
+    */
+    HermesStateDb {
+        agent_session_id: String,
+        state_db_path: PathBuf,
+    },
+    /*
+    CDXC:AgentProviders 2026-09-03:
+    Antigravity names every conversation itself about a second after the first
+    prompt and writes `title:"…"` to `annotations/<conversationId>.pbtxt`
+    under its app data dir; its `/rename <name>` rewrites the same file. That
+    file is the only live copy of the name (the summaries database is written
+    after the CLI exits), so it is the record the sidebar follows.
+    */
+    AntigravityAnnotation {
+        annotation_path: PathBuf,
+    },
+}
+
+impl AgentMetadataTitleSource {
+    pub(crate) fn revision_paths(&self) -> Vec<&Path> {
+        match self {
+            Self::ClaudeTranscript { transcript_path } => vec![transcript_path.as_path()],
+            Self::CodexSessionIndex { index_paths, .. } => {
+                index_paths.iter().map(PathBuf::as_path).collect()
+            }
+            Self::HermesStateDb { state_db_path, .. } => vec![state_db_path.as_path()],
+            Self::AntigravityAnnotation { annotation_path } => vec![annotation_path.as_path()],
+        }
+    }
+}
+
+pub(crate) fn read_agent_metadata_title(
+    home_dir: &Path,
+    session: &Value,
+) -> Option<AgentMetadataTitle> {
+    match agent_metadata_title_source(home_dir, session)? {
+        AgentMetadataTitleSource::ClaudeTranscript { transcript_path } => {
+            read_claude_transcript_title(&transcript_path)
+        }
+        AgentMetadataTitleSource::CodexSessionIndex {
+            agent_session_id,
+            index_paths,
+        } => read_codex_session_index_title(&index_paths, &agent_session_id).filter(|metadata| {
+            let initial_title = provisional_fork_title(session);
+            let inherited_title = initial_title
+                .as_deref()
+                .and_then(|title| title.strip_prefix("Fork: "));
+            let pending_title = read_text_from_map(
+                &object_field(session, "runtimeSettings"),
+                "pendingAgentTitleRequestTitle",
+            );
+            pending_title.is_some()
+                || !inherited_title.is_some_and(|title| titles_match(title, &metadata.title))
+        }),
+        AgentMetadataTitleSource::HermesStateDb {
+            agent_session_id, ..
+        } => read_hermes_state_db_title(&agent_session_id),
+        AgentMetadataTitleSource::AntigravityAnnotation { annotation_path } => {
+            read_antigravity_annotation_title(&annotation_path)
+        }
+    }
+}
+
+pub(crate) fn agent_metadata_title_source(
+    home_dir: &Path,
+    session: &Value,
+) -> Option<AgentMetadataTitleSource> {
+    let identity = metadata_session_identity(session);
+    let agent_session_id = identity.agent_session_id.as_deref()?.trim();
+    if agent_session_id.is_empty() {
+        return None;
+    }
+    match identity.agent_id.as_deref() {
+        Some("claude") => Some(AgentMetadataTitleSource::ClaudeTranscript {
+            transcript_path: resolve_session_transcript_path(
+                "claude",
+                Some(agent_session_id),
+                identity.agent_session_path.as_deref(),
+            )?,
+        }),
+        Some("codex") => Some(AgentMetadataTitleSource::CodexSessionIndex {
+            agent_session_id: agent_session_id.to_string(),
+            index_paths: get_codex_session_index_candidate_paths(
+                home_dir,
+                identity.agent_session_path.as_deref(),
+            ),
+        }),
+        Some("hermes-agent")
+            if crate::session_chat_hermes::is_safe_hermes_session_id(agent_session_id) =>
+        {
+            Some(AgentMetadataTitleSource::HermesStateDb {
+                agent_session_id: agent_session_id.to_string(),
+                state_db_path: crate::session_chat_hermes::hermes_state_db_path(),
+            })
+        }
+        Some("antigravity")
+            if crate::session_chat_antigravity_mirror::is_safe_antigravity_session_id(
+                agent_session_id,
+            ) =>
+        {
+            Some(AgentMetadataTitleSource::AntigravityAnnotation {
+                annotation_path: crate::session_chat_antigravity_mirror::antigravity_app_data_dir()
+                    .join("annotations")
+                    .join(format!("{agent_session_id}.pbtxt")),
+            })
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn agent_metadata_title_revision(home_dir: &Path, session: &Value) -> Option<String> {
+    let source = agent_metadata_title_source(home_dir, session)?;
+    let mut revisions = Vec::new();
+    for path in source.revision_paths() {
+        let Ok(metadata) = fs::metadata(path) else {
+            continue;
+        };
+        let modified_ns = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| {
+                modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|duration| duration.as_nanos())
+            })
+            .unwrap_or_default();
+        revisions.push(format!(
+            "{}:{}:{modified_ns}",
+            path.to_string_lossy(),
+            metadata.len(),
+        ));
+    }
+    (!revisions.is_empty()).then(|| revisions.join("|"))
+}
+
+/*
+CDXC:SessionTitles 2026-08-18:
+Claude Code rewrites its `custom-title` state record on every turn, so the
+current name always sits within the last few kilobytes of a live transcript.
+Scan a bounded tail window rather than the whole file: these transcripts reach
+several megabytes and the metadata sync pass re-reads every running session's
+transcript each second. The transcript belongs to exactly one session, so the
+newest record wins without matching the embedded `sessionId`, which diverges
+from the resolved identity on resumed and forked Claude sessions.
+*/
+pub(crate) const CLAUDE_TRANSCRIPT_TITLE_TAIL_BYTES: u64 = 256 * 1024;
+
+pub(crate) fn read_claude_transcript_title(transcript_path: &Path) -> Option<AgentMetadataTitle> {
+    let (tail, tail_start) =
+        read_transcript_tail_text_with_offset(transcript_path, CLAUDE_TRANSCRIPT_TITLE_TAIL_BYTES)?;
+    for (line_offset, line) in tail.rsplit('\n').scan(tail.len(), |line_end, line| {
+        let line_offset = line_end.saturating_sub(line.len());
+        *line_end = line_offset.saturating_sub(1);
+        Some((line_offset, line))
+    }) {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(entry) = entry.as_object() else {
+            continue;
+        };
+        if entry.get("type").and_then(Value::as_str) != Some("custom-title") {
+            continue;
+        }
+        let title = normalize_metadata_title(entry.get("customTitle"))?;
+        return Some(AgentMetadataTitle {
+            agent_session_id: None,
+            provider: "claude-transcript",
+            record_revision: Some(format!(
+                "{}:{}",
+                transcript_path.to_string_lossy(),
+                tail_start.saturating_add(line_offset as u64),
+            )),
+            title,
+            updated_at: None,
+        });
+    }
+    None
+}
+
+fn read_transcript_tail_text_with_offset(path: &Path, tail_bytes: u64) -> Option<(String, u64)> {
+    let mut file = fs::File::open(path).ok()?;
+    let length = file.metadata().ok()?.len();
+    let start = length.saturating_sub(tail_bytes);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::with_capacity(length.saturating_sub(start) as usize);
+    file.read_to_end(&mut bytes).ok()?;
+    let mut text_start = start;
+    if start > 0 {
+        match bytes.iter().position(|byte| *byte == b'\n') {
+            Some(first_newline) => {
+                let removed = first_newline + 1;
+                bytes.drain(..removed);
+                text_start = text_start.saturating_add(removed as u64);
+            }
+            None => {
+                bytes.clear();
+                text_start = length;
+            }
+        }
+    }
+    Some((String::from_utf8_lossy(&bytes).into_owned(), text_start))
+}
+
+pub(crate) fn read_codex_session_index_title(
+    index_paths: &[PathBuf],
+    agent_session_id: &str,
+) -> Option<AgentMetadataTitle> {
+    for index_path in index_paths {
+        if let Some(title) = read_codex_session_index_title_from_path(index_path, agent_session_id)
+        {
+            return Some(title);
+        }
+    }
+    None
+}
+
+pub(crate) fn read_codex_session_index_title_from_path(
+    index_path: &Path,
+    agent_session_id: &str,
+) -> Option<AgentMetadataTitle> {
+    let text = fs::read_to_string(index_path).ok()?;
+    for line in text.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(entry) = entry.as_object() else {
+            continue;
+        };
+        if entry.get("id").and_then(Value::as_str) != Some(agent_session_id) {
+            continue;
+        }
+        let title = normalize_metadata_title(
+            entry
+                .get("thread_name")
+                .or_else(|| entry.get("title"))
+                .or_else(|| entry.get("name")),
+        )?;
+        return Some(AgentMetadataTitle {
+            agent_session_id: Some(agent_session_id.to_string()),
+            provider: "codex-session-index",
+            record_revision: None,
+            title,
+            updated_at: entry
+                .get("updated_at")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        });
+    }
+    None
+}
+
+/*
+The agent names a session twice on its own — instantly from the opening
+message, then again once a small model upgrades that name — and records which
+stage a stored name came from. Both stages are adopted, so a card is named the
+moment the session starts and sharpens a moment later, and the provenance rides
+along in the record revision so an upgrade that keeps the same text is still
+seen as the same title rather than a new one.
+*/
+pub(crate) fn read_hermes_state_db_title(agent_session_id: &str) -> Option<AgentMetadataTitle> {
+    let session_title = crate::session_chat_hermes::read_hermes_session_title(agent_session_id)?;
+    let title = normalize_metadata_title(Some(&Value::String(session_title.title)))?;
+    Some(AgentMetadataTitle {
+        agent_session_id: Some(agent_session_id.to_string()),
+        provider: "hermes-state-db",
+        record_revision: session_title
+            .title_source
+            .map(|source| format!("{agent_session_id}:{source}")),
+        title,
+        updated_at: None,
+    })
+}
+
+/// `title:"…"` from the annotation text proto. The value is a proto string
+/// literal, so the usual backslash escapes are decoded; a file without a
+/// title field (or with an empty one) means the conversation has no name yet.
+pub(crate) fn read_antigravity_annotation_title(
+    annotation_path: &Path,
+) -> Option<AgentMetadataTitle> {
+    let text = fs::read_to_string(annotation_path).ok()?;
+    let raw = parse_pbtxt_string_field(&text, "title")?;
+    let title = normalize_metadata_title(Some(&Value::String(raw)))?;
+    let modified_ns = fs::metadata(annotation_path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    Some(AgentMetadataTitle {
+        agent_session_id: None,
+        provider: "antigravity-annotation",
+        record_revision: Some(format!(
+            "{}:{modified_ns}",
+            annotation_path.to_string_lossy()
+        )),
+        title,
+        updated_at: None,
+    })
+}
+
+fn parse_pbtxt_string_field(text: &str, field: &str) -> Option<String> {
+    let mut rest = text;
+    loop {
+        let start = rest.find(field)?;
+        let after = &rest[start + field.len()..];
+        let boundary_ok = start == 0
+            || !rest[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|previous| previous.is_ascii_alphanumeric() || previous == '_');
+        let after_trimmed = after.trim_start();
+        if boundary_ok && after_trimmed.starts_with(':') {
+            let value = after_trimmed[1..].trim_start();
+            let quote = value.chars().next()?;
+            if quote != '"' && quote != '\'' {
+                return None;
+            }
+            let mut decoded = String::new();
+            let mut chars = value[1..].chars();
+            while let Some(character) = chars.next() {
+                match character {
+                    '\\' => match chars.next()? {
+                        'n' => decoded.push('\n'),
+                        't' => decoded.push('\t'),
+                        'r' => decoded.push('\r'),
+                        other => decoded.push(other),
+                    },
+                    character if character == quote => return Some(decoded),
+                    other => decoded.push(other),
+                }
+            }
+            return None;
+        }
+        rest = after;
+    }
+}
+
+/*
+CDXC:SessionTitles 2026-08-22:
+Plain `codex` launches do not always expose their active rollout through argv,
+an open file descriptor, or a hook before the user renames the session. A
+pending rename still has an exact, independently written confirmation: Codex
+appends that requested title to `session_index.jsonl` after the request time.
+Use only that post-request exact-title record, and adopt its session id, so the
+sidebar can confirm the rename without guessing from transcript recency.
+*/
+pub(crate) fn read_pending_codex_rename_metadata_title(
+    home_dir: &Path,
+    identity: &ResolvedIdentity,
+    pending_title: Option<&str>,
+    pending_requested_at: Option<&str>,
+) -> Option<AgentMetadataTitle> {
+    if identity.agent_id.as_deref() != Some("codex") || identity.agent_session_id.is_some() {
+        return None;
+    }
+    let pending_title = pending_title?.trim();
+    let requested_at = chrono::DateTime::parse_from_rfc3339(pending_requested_at?.trim()).ok()?;
+    for index_path in
+        get_codex_session_index_candidate_paths(home_dir, identity.agent_session_path.as_deref())
+    {
+        let Ok(text) = fs::read_to_string(index_path) else {
+            continue;
+        };
+        for line in text.lines().rev() {
+            let Ok(entry) = serde_json::from_str::<Value>(line.trim()) else {
+                continue;
+            };
+            let Some(entry) = entry.as_object() else {
+                continue;
+            };
+            let Some(title) = normalize_metadata_title(
+                entry
+                    .get("thread_name")
+                    .or_else(|| entry.get("title"))
+                    .or_else(|| entry.get("name")),
+            ) else {
+                continue;
+            };
+            if !titles_match(pending_title, &title) {
+                continue;
+            }
+            let Some(updated_at) = entry
+                .get("updated_at")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let Ok(updated_at_parsed) = chrono::DateTime::parse_from_rfc3339(updated_at) else {
+                continue;
+            };
+            if updated_at_parsed < requested_at {
+                continue;
+            }
+            let Some(agent_session_id) = entry
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            return Some(AgentMetadataTitle {
+                agent_session_id: Some(agent_session_id.to_string()),
+                provider: "codex-session-index-pending-rename",
+                record_revision: None,
+                title,
+                updated_at: Some(updated_at.to_string()),
+            });
+        }
+    }
+    None
+}
+
+pub(crate) fn get_codex_session_index_candidate_paths(
+    home_dir: &Path,
+    agent_session_path: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = get_codex_root_from_session_path(agent_session_path) {
+        roots.push(root);
+    }
+    let home_root = home_dir.join(".codex");
+    if !roots.iter().any(|root| root == &home_root) {
+        roots.push(home_root);
+    }
+    roots
+        .into_iter()
+        .map(|root| root.join("session_index.jsonl"))
+        .collect()
+}
+
+pub(crate) fn get_codex_root_from_session_path(
+    agent_session_path: Option<&str>,
+) -> Option<PathBuf> {
+    let normalized_path = agent_session_path?.trim().replace('\\', "/");
+    if normalized_path.is_empty() {
+        return None;
+    }
+    let sessions_marker_index = normalized_path.rfind("/sessions/")?;
+    (sessions_marker_index > 0).then(|| PathBuf::from(&normalized_path[..sessions_marker_index]))
+}
+
+pub(crate) fn normalize_metadata_title(value: Option<&Value>) -> Option<String> {
+    let title = get_visible_terminal_title(value?.as_str()?)?
+        .trim()
+        .to_string();
+    (!title.is_empty() && !is_rejected_resume_title(&title)).then_some(title)
+}
+
+pub(crate) fn titles_match(left: &str, right: &str) -> bool {
+    left.split_whitespace().collect::<Vec<_>>().join(" ")
+        == right.split_whitespace().collect::<Vec<_>>().join(" ")
+}

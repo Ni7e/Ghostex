@@ -1,0 +1,36 @@
+--- a/src/build/GhosttyXCFramework.zig
++++ b/src/build/GhosttyXCFramework.zig
+@@ -15,9 +15,6 @@
+     deps: *const SharedDeps,
+     target: Target,
+ ) !GhosttyXCFramework {
+-    // Universal macOS build
+-    const macos_universal = try GhosttyLib.initMacOSUniversal(b, deps);
+-
+     // Native macOS build
+     const macos_native = try GhosttyLib.initStatic(b, &try deps.retarget(
+         b,
+@@ -40,12 +37,17 @@
+         .name = "GhosttyKit",
+         .out_path = "macos/GhosttyKit.xcframework",
+         .libraries = switch (target) {
+-            .universal => &.{
+-                .{
+-                    .library = macos_universal.output,
+-                    .headers = headers,
+-                    .dsym = macos_universal.dsym,
+-                },
++            // Ghostex patch (2026-07-11): build the universal library lazily
++            // so native-only GhosttyKit builds don't compile the x86_64 half.
++            .universal => universal: {
++                const macos_universal = try GhosttyLib.initMacOSUniversal(b, deps);
++                break :universal &.{
++                    .{
++                        .library = macos_universal.output,
++                        .headers = headers,
++                        .dsym = macos_universal.dsym,
++                    },
++                };
+             },
+ 
+             .native => &.{.{

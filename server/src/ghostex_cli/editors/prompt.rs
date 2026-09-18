@@ -1,0 +1,420 @@
+use super::*;
+
+pub fn prompt_editor_command(args: &[String]) -> CliResult<()> {
+    /*
+    CDXC:PromptEditor 2026-06-30-03:11 (ported):
+    Ctrl+G fallback is the machine's editor, not gte. Preserve Monaco only for
+    macOS app clients or zmx leaders that explicitly advertise Monaco; every
+    other context runs the first non-Ghostex editor from the preserved
+    provider environment, VISUAL, EDITOR, then vi.
+    */
+    let selection_started_at = Instant::now();
+    let parsed = parse_args(args);
+    let Some(file_path) = parsed.rest.iter().find(|arg| !arg.trim().is_empty()) else {
+        return Err(CliError::Other(
+            "Usage: ghostex prompt-editor <file>".to_string(),
+        ));
+    };
+
+    let cwd = js_path_resolve(&parsed.flags.text("cwd").unwrap_or_else(current_dir_string));
+    let resolved_file_path = js_path_resolve_from(&cwd, file_path)
+        .to_string_lossy()
+        .into_owned();
+    let backend = prompt_editor_backend_from_environment();
+    let capability_started_at = Instant::now();
+    let client_capability = zmx_prompt_editor_capability();
+    let capability_duration_ms = elapsed_ms(capability_started_at);
+    let selection =
+        select_prompt_editor_command(&backend, client_capability.as_deref(), &resolved_file_path);
+    let originating_session_id = prompt_editor_originating_session_id_from_environment();
+    let selection_duration_ms = elapsed_ms(selection_started_at);
+
+    append_floating_editor_log(json!({
+        "backend": backend,
+        "command": selection.command_args.join(" "),
+        "cwd": cwd.to_string_lossy(),
+        "event": "cli.prompt_editor_select",
+        "globalSessionRef": env_or_empty("GHOSTEX_GLOBAL_SESSION_REF"),
+        "gxserverBaseUrl": env_or_empty("GHOSTEX_GXSERVER_BASE_URL"),
+        "macosAppClient": is_macos_app_prompt_editor_client(client_capability.as_deref()),
+        "originatingSessionId": originating_session_id.clone().unwrap_or_default(),
+        "promptEditorClientCapability": client_capability.clone().unwrap_or_default(),
+    }));
+
+    /*
+    CDXC:SavedPrompts 2026-07-29:
+    The GPUI "Stash Prompt" agent action writes a one-shot marker for the
+    session and sends Ctrl+G. When this invocation finds a fresh marker, the
+    file already holds the composer text the agent CLI wrote for $EDITOR, so
+    stash it and exit without presenting any editor. Clearing the file on a
+    durable stash is the visible result: the agent CLI reads the emptied file
+    back and the composer text has moved into the stash.
+    */
+    if consume_prompt_stash_request(originating_session_id.as_deref(), &resolved_file_path) {
+        crate::ghostex_cli::set_exit_code(0);
+        return Ok(());
+    }
+
+    if selection.kind == "monaco" {
+        let trace = json!({
+            "backend": backend,
+            "capabilityDurationMs": capability_duration_ms,
+            "clientCapability": client_capability.unwrap_or_default(),
+            "hasGlobalSessionRef": !env_or_empty("GHOSTEX_GLOBAL_SESSION_REF").is_empty(),
+            "hasOriginatingSessionId": originating_session_id.is_some(),
+            "selectionDurationMs": selection_duration_ms,
+            "selectionKind": selection.kind,
+        });
+        return floating_monaco_editor_command_with_trace(args, &trace);
+    }
+    if selection.kind == "code-server" {
+        return run_code_server_prompt_editor(&selection.command_args, &cwd);
+    }
+    run_editor_inline(&selection.command_args, &cwd)
+}
+
+pub(super) fn prompt_editor_backend_from_environment() -> String {
+    let backend = env_or_empty("GHOSTEX_PROMPT_EDITOR_BACKEND")
+        .trim()
+        .to_string();
+    if backend == "monaco" || backend == "custom" {
+        return backend;
+    }
+    // "gte" and GHOSTEX_RICH_PROMPT_EDITING_WITH_GTE both collapse to inherit.
+    "inherit".to_string()
+}
+
+pub(super) fn zmx_prompt_editor_capability() -> Option<String> {
+    if env_or_empty("ZMX_SESSION").trim().is_empty() {
+        return None;
+    }
+    /*
+    CDXC:PromptEditor 2026-06-07-08:09 (ported): zmx sessions without an
+    explicit GHOSTEX_ZMX_BIN stay terminal-native instead of probing PATH.
+    */
+    let zmx_command = env_or_empty("GHOSTEX_ZMX_BIN").trim().to_string();
+    if zmx_command.is_empty() {
+        return Some("editor".to_string());
+    }
+    let capability = run_zmx_capability_probe(&zmx_command);
+    match capability.as_deref() {
+        Some("monaco") | Some("code-server") | Some("editor") | Some("gte") => capability,
+        _ => Some("editor".to_string()),
+    }
+}
+
+/// execFileAsync(zmx, ["prompt-editor-capability"], { timeout: 750 }).
+pub(super) fn run_zmx_capability_probe(command: &str) -> Option<String> {
+    let mut probe = Command::new(command);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        probe.creation_flags(0x0800_0000);
+    }
+    let mut child = probe
+        .arg("prompt-editor-capability")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_millis(750);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                let mut output = String::new();
+                child.stdout.take()?.read_to_string(&mut output).ok()?;
+                return Some(output.trim().to_string());
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+pub(super) fn is_macos_app_prompt_editor_client(client_capability: Option<&str>) -> bool {
+    is_macos_app_prompt_editor_client_with(client_capability, &|key| std::env::var(key).ok())
+}
+
+pub(super) fn is_macos_app_prompt_editor_client_with(
+    client_capability: Option<&str>,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> bool {
+    if let Some(capability) = client_capability.filter(|value| !value.is_empty()) {
+        return capability == "monaco";
+    }
+    env("GHOSTEX_PROMPT_EDITOR_CLIENT").as_deref() == Some("macos-app")
+}
+
+pub(super) struct PromptEditorSelection {
+    pub(super) command_args: Vec<String>,
+    pub(super) kind: &'static str,
+}
+
+pub(super) fn select_prompt_editor_command(
+    backend: &str,
+    client_capability: Option<&str>,
+    file_path: &str,
+) -> PromptEditorSelection {
+    select_prompt_editor_command_with(
+        backend,
+        client_capability,
+        file_path,
+        &|key| std::env::var(key).ok(),
+        &|| resolve_ghostex_editor_executable().is_some(),
+        &mut |message| eprintln!("{message}"),
+    )
+}
+
+pub(super) fn select_prompt_editor_command_with(
+    backend: &str,
+    client_capability: Option<&str>,
+    file_path: &str,
+    env: &dyn Fn(&str) -> Option<String>,
+    ghostex_editor_available: &dyn Fn() -> bool,
+    warn: &mut dyn FnMut(&str),
+) -> PromptEditorSelection {
+    let capability = client_capability.filter(|value| !value.is_empty());
+    if capability == Some("code-server") {
+        return PromptEditorSelection {
+            command_args: code_server_prompt_editor_command(file_path),
+            kind: "code-server",
+        };
+    }
+    if backend == "custom" {
+        let custom_command = env("GHOSTEX_CUSTOM_PROMPT_EDITOR_COMMAND")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "code --wait".to_string());
+        return PromptEditorSelection {
+            command_args: machine_editor_args(&custom_command, file_path),
+            kind: "custom",
+        };
+    }
+    if (backend == "monaco" || capability == Some("monaco"))
+        && is_macos_app_prompt_editor_client_with(capability, env)
+    {
+        if ghostex_editor_available() {
+            return PromptEditorSelection {
+                command_args: vec![
+                    "ghostex".to_string(),
+                    "floating-monaco-editor".to_string(),
+                    file_path.to_string(),
+                ],
+                kind: "monaco",
+            };
+        }
+        warn(&ghostex_editor_unavailable_message(None));
+    }
+    let editor_command = machine_prompt_editor_command_with(env);
+    PromptEditorSelection {
+        command_args: machine_editor_args(&editor_command, file_path),
+        kind: "editor",
+    }
+}
+
+pub(super) fn code_server_prompt_editor_command(file_path: &str) -> Vec<String> {
+    let code_root = rpc::ghostex_data_home().join("code-server");
+    let package = code_root.join("package");
+    #[cfg(windows)]
+    let package = std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.parent()?
+                .parent()?
+                .parent()
+                .map(|app| app.join("code-server"))
+        })
+        .filter(|path| path.join("lib/node.exe").is_file())
+        .unwrap_or(package);
+    let user_data = code_root.join("runtime/user-data");
+    #[cfg(not(windows))]
+    let socket = user_data.join("code-server-ipc.sock");
+    #[cfg(windows)]
+    let socket = {
+        use sha2::{Digest, Sha256};
+        let identity = user_data
+            .to_string_lossy()
+            .replace('/', "\\")
+            .to_lowercase();
+        PathBuf::from(format!(
+            r"\\.\pipe\ghostex-code-{:x}",
+            Sha256::digest(identity.as_bytes())
+        ))
+    };
+    vec![
+        package
+            .join(if cfg!(windows) {
+                "lib/node.exe"
+            } else {
+                "lib/node"
+            })
+            .to_string_lossy()
+            .into_owned(),
+        package
+            .join("out/node/entry.js")
+            .to_string_lossy()
+            .into_owned(),
+        "--user-data-dir".to_string(),
+        user_data.to_string_lossy().into_owned(),
+        "--session-socket".to_string(),
+        socket.to_string_lossy().into_owned(),
+        "--reuse-window".to_string(),
+        "--wait".to_string(),
+        file_path.to_string(),
+    ]
+}
+
+pub(super) fn run_code_server_prompt_editor(command_args: &[String], cwd: &Path) -> CliResult<()> {
+    let node = command_args.first().map(Path::new);
+    let entrypoint = command_args.get(1).map(Path::new);
+    let session_socket = command_args.get(5).map(Path::new);
+    if !node.is_some_and(|path| path.to_str().is_some_and(is_executable_file))
+        || !entrypoint.is_some_and(|path| path.is_file())
+        || !cwd.is_dir()
+    {
+        return Err(CliError::Other(
+            "Remote Ghostex Code editor is unavailable for this session.".to_string(),
+        ));
+    }
+    let Some(session_socket) = session_socket else {
+        return Err(CliError::Other(
+            "Remote Ghostex Code editor target is invalid.".to_string(),
+        ));
+    };
+    #[cfg(windows)]
+    {
+        // The editor itself connects to the named pipe; filesystem existence is not a pipe readiness check.
+        let _ = session_socket;
+        return run_editor_inline(command_args, cwd);
+    }
+    #[cfg(not(windows))]
+    let deadline = Instant::now() + Duration::from_secs(10);
+    #[cfg(not(windows))]
+    while !session_socket.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    #[cfg(not(windows))]
+    if !session_socket.exists() {
+        return Err(CliError::Other(
+            "Remote Ghostex Code editor did not become ready for this session.".to_string(),
+        ));
+    }
+    #[cfg(not(windows))]
+    run_editor_inline(command_args, cwd)
+}
+
+pub(super) fn machine_prompt_editor_command_from_environment() -> String {
+    machine_prompt_editor_command_with(&|key| std::env::var(key).ok())
+}
+
+pub(super) fn machine_prompt_editor_command_with(env: &dyn Fn(&str) -> Option<String>) -> String {
+    [
+        "GHOSTEX_PROMPT_EDITOR_MACHINE_VISUAL",
+        "GHOSTEX_PROMPT_EDITOR_MACHINE_EDITOR",
+        "VISUAL",
+        "EDITOR",
+    ]
+    .iter()
+    .filter_map(|key| env(key))
+    .filter_map(|value| normalized_environment_string(&value))
+    .find(|command| is_usable_machine_editor_command(command))
+    .unwrap_or_else(|| if cfg!(windows) { "notepad.exe" } else { "vi" }.to_string())
+}
+
+pub(super) fn is_usable_machine_editor_command(command: &str) -> bool {
+    if command.is_empty() {
+        return false;
+    }
+    !is_ghostex_prompt_editor_command(command)
+}
+
+pub(super) fn is_ghostex_prompt_editor_command(command: &str) -> bool {
+    let trimmed = command.trim();
+    let mut executable = trimmed.split_whitespace().next().unwrap_or("");
+    // /^['"]|['"]$/gu — strip one leading and one trailing quote character.
+    if executable.starts_with('\'') || executable.starts_with('"') {
+        executable = &executable[1..];
+    }
+    if executable.ends_with('\'') || executable.ends_with('"') {
+        executable = &executable[..executable.len() - 1];
+    }
+    let executable_name = executable.rsplit('/').next().unwrap_or("");
+    executable_name == "prompt-editor"
+        || trimmed.contains("ghostex prompt-editor")
+        || (trimmed.contains("ghostex-cli.mjs") && trimmed.contains("prompt-editor"))
+        || trimmed.contains("floating-monaco-editor")
+        || command.contains("floating-editor -- gte")
+}
+
+pub(super) fn prompt_editor_originating_session_id_from_environment() -> Option<String> {
+    /*
+    CDXC:PromptEditor 2026-06-09-21:50 (ported): derive the native P:G focus
+    id from the per-session gxserver S:P:G ref before falling back to the
+    legacy native env key for older direct terminals.
+    */
+    native_focus_session_id_from_global_session_ref(&env_or_empty("GHOSTEX_GLOBAL_SESSION_REF"))
+        .or_else(|| normalized_environment_string(&env_or_empty("GHOSTEX_NATIVE_SESSION_ID")))
+}
+
+pub(super) fn native_focus_session_id_from_global_session_ref(
+    global_session_ref: &str,
+) -> Option<String> {
+    let parts: Vec<&str> = global_session_ref.trim().split(':').collect();
+    if parts.len() == 3
+        && matches_session_ref_part(parts[0], b'S', 1)
+        && matches_session_ref_part(parts[1], b'P', 3)
+        && matches_session_ref_part(parts[2], b'G', 3)
+    {
+        return Some(format!("{}:{}", parts[1], parts[2]));
+    }
+    None
+}
+
+/// ^X[0-9][a-z0-9]{tail_len}$ for the S/P/G global session ref parts.
+pub(super) fn matches_session_ref_part(part: &str, prefix: u8, tail_len: usize) -> bool {
+    let bytes = part.as_bytes();
+    bytes.len() == 2 + tail_len
+        && bytes[0] == prefix
+        && bytes[1].is_ascii_digit()
+        && bytes[2..]
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || byte.is_ascii_lowercase())
+}
+
+// ---------------------------------------------------------------------------
+// floating-monaco-editor (lines 3509-3712).
+
+pub(super) fn machine_editor_args(command: &str, file_path: &str) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let shell = crate::platform::shell::command_shell();
+        let script = format!(
+            "& {command} '{}'; exit $LASTEXITCODE",
+            file_path.replace('\'', "''")
+        );
+        let mut args = vec![shell.executable.clone()];
+        args.extend(shell.script_args(&script));
+        args
+    }
+    #[cfg(not(windows))]
+    {
+        vec![
+            "/bin/zsh".into(),
+            "-lc".into(),
+            format!("exec {command} \"$@\""),
+            "ghostex-prompt-editor".into(),
+            file_path.into(),
+        ]
+    }
+}

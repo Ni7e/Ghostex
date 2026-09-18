@@ -1,0 +1,114 @@
+use super::super::state::NativeChatView;
+use gpui::{
+    AppContext as _, Context, Entity, Styled as _, Subscription, WindowBounds, WindowOptions, px,
+};
+use gpui_component::{
+    Root,
+    input::{InputEvent, InputState},
+};
+use serde_json::json;
+
+#[derive(Default)]
+pub(in crate::app::native_chat) struct ContextEditorWindowState {
+    handle: Option<gpui::WindowHandle<Root>>,
+    opening: bool,
+    subscription: Option<Subscription>,
+}
+
+pub(super) struct ContextEditorWindow {
+    pub(super) chat: Entity<NativeChatView>,
+    pub(super) filter: Entity<InputState>,
+    pub(super) scroll: gpui::ScrollHandle,
+    _subscription: Subscription,
+    _input_subscription: Subscription,
+}
+
+impl NativeChatView {
+    pub(in crate::app::native_chat) fn sync_context_editor_window(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.snapshot["contextEditor"].is_null() {
+            if let Some(handle) = self.context_editor_window.handle.take() {
+                let main = self.main_window;
+                let chat = cx.weak_entity();
+                cx.defer(move |cx| {
+                    let _ = handle.update(cx, |_, window, _| window.remove_window());
+                    if let Some(main) = main {
+                        let _ = main.update(cx, |_, window, cx| {
+                            window.activate_window();
+                            let _ = chat.update(cx, |chat, cx| {
+                                chat.focus_requested = true;
+                                chat.ensure_input(window, cx);
+                            });
+                        });
+                    }
+                });
+            }
+            return;
+        }
+        if self.context_editor_window.handle.is_some() || self.context_editor_window.opening {
+            return;
+        }
+        let Some(main) = self.main_window else {
+            return;
+        };
+        self.context_editor_window.opening = true;
+        let pane = self.bounds.get();
+        let parent = self.config.parent_native_view;
+        let chat = cx.entity();
+        let appearance = super::super::appearance::ChatAppearance::current(&self.snapshot);
+        cx.defer(move |cx| {
+            let result = main.update(cx,|_,window,cx| {
+                let width = px(576.0*appearance.scale).min(pane.size.width-px(24.0));
+                let height = px(760.0*appearance.scale).min(pane.size.height-px(32.0));
+                let origin = window.bounds().origin + pane.origin + gpui::point((pane.size.width-width)/2.0,(pane.size.height-height)/2.0);
+                let bounds = gpui::Bounds::new(origin,gpui::size(width,height));
+                (bounds,window.display(cx).map(|display|display.id()))
+            }).and_then(|(bounds,display_id)| cx.open_window(WindowOptions {
+                window_bounds:Some(WindowBounds::Windowed(bounds)),display_id,
+                app_id:crate::gpui_platform_window_app_id(),icon:crate::gpui_platform_window_icon(),
+                focus:true,show:true,is_resizable:false,is_minimizable:false,is_movable:false,titlebar:None,
+                ..Default::default()
+            }, {
+                let chat=chat.clone();
+                move |window,cx| {
+                    crate::app::window::attach_gpui_app_modal_window_to_main_window(window,parent);
+                    let view=cx.new(|cx| {
+                        let subscription=cx.observe(&chat,|_,_,cx|cx.notify());
+                        let filter=cx.new(|cx|InputState::new(window,cx).placeholder("Search rows"));
+                        let input_subscription=cx.subscribe(&filter,|this: &mut ContextEditorWindow,filter,event,cx| {
+                            if matches!(event,InputEvent::Change) {
+                                let query=filter.read(cx).value().to_string();
+                                this.chat.update(cx,|chat,cx|chat.invoke(json!({"type":"contextQuery","query":query}),cx));
+                            }
+                        });
+                        use gpui::Focusable as _;
+                        filter.focus_handle(cx).focus(window,cx);
+                        ContextEditorWindow {chat,filter,scroll:Default::default(),_subscription:subscription,_input_subscription:input_subscription}
+                    });
+                    cx.new(|cx|Root::new(view,window,cx).bg(appearance.background))
+                }
+            }));
+            chat.update(cx,|chat,cx| {
+                chat.context_editor_window.opening=false;
+                match result {
+                    Ok(handle)=> {
+                        chat.context_editor_window.handle=Some(handle);
+                        let weak=cx.weak_entity();
+                        chat.context_editor_window.subscription=Some(cx.on_window_closed(move |cx,id| {
+                            let _=weak.update(cx,|chat,cx| {
+                                if chat.context_editor_window.handle.is_some_and(|handle|handle.window_id()==id) {
+                                    chat.context_editor_window.handle=None;
+                                    chat.invoke(json!({"type":"contextCancel"}),cx);
+                                }
+                            });
+                        }));
+                        chat.sync_context_editor_window(cx);
+                    }
+                    Err(error)=>{chat.error=Some(error.to_string());chat.invoke(json!({"type":"contextCancel"}),cx);}
+                }
+            });
+        });
+    }
+}

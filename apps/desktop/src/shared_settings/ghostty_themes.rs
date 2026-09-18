@@ -1,0 +1,94 @@
+use std::{collections::HashSet, fs, path::Path};
+
+use serde_json::{Map, Value};
+
+/// CDXC:Theming 2026-09-14 DECISION:
+/// User: show the user's existing Ghostty theme selections instead of forcing GitHub palettes; use GitHub defaults only when no theme is configured.
+/// Ghostty owns the dark palette setting; an explicit app light palette overrides its light selection.
+pub(super) fn hydrate_ghostty_theme_selections(object: &mut Map<String, Value>) {
+    let Ok(path) = super::selected_ghostty_config_path() else {
+        return;
+    };
+    let Some(theme) =
+        configured_theme(&path, &mut HashSet::new()).filter(|theme| !theme.is_empty())
+    else {
+        return;
+    };
+    let mut light = None;
+    let mut dark = None;
+    for part in theme.split(',') {
+        let part = part.trim();
+        if let Some(name) = part.strip_prefix("light:") {
+            light = Some(name.trim());
+        } else if let Some(name) = part.strip_prefix("dark:") {
+            dark = Some(name.trim());
+        }
+    }
+    if light.is_none() && dark.is_none() {
+        light = Some(theme.as_str());
+        dark = Some(theme.as_str());
+    }
+    if let Some(dark) = dark.filter(|name| !name.is_empty()) {
+        object.insert("terminalGhosttyTheme".into(), Value::String(dark.into()));
+    }
+    if !object
+        .get("terminalGhosttyLightTheme")
+        .and_then(Value::as_str)
+        .is_some_and(|name| !name.is_empty())
+    {
+        if let Some(light) = light.filter(|name| !name.is_empty()) {
+            object.insert(
+                "terminalGhosttyLightTheme".into(),
+                Value::String(light.into()),
+            );
+        }
+    }
+}
+
+fn configured_theme(path: &Path, visiting: &mut HashSet<std::path::PathBuf>) -> Option<String> {
+    let path = fs::canonicalize(path).ok()?;
+    if !visiting.insert(path.clone()) {
+        return None;
+    }
+    let result = (|| {
+        let source = fs::read_to_string(&path).ok()?;
+        let mut theme = None;
+        let mut includes = Vec::new();
+        for line in source.lines().map(str::trim) {
+            if line.starts_with('#') {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = value.trim();
+            let value = value
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or(value);
+            match key.trim() {
+                "theme" => theme = Some(value.to_string()),
+                "config-file" if value.is_empty() => includes.clear(),
+                "config-file" => {
+                    let value = value.strip_prefix('?').unwrap_or(value);
+                    let include = if let Some(relative) = value.strip_prefix("~/") {
+                        std::path::PathBuf::from(std::env::var_os("HOME")?).join(relative)
+                    } else {
+                        path.parent()?.join(value)
+                    };
+                    includes.push(include);
+                }
+                _ => {}
+            }
+        }
+        // Ghostty loads recursive config files after the containing file.
+        for include in includes {
+            if let Some(included) = configured_theme(&include, visiting) {
+                theme = Some(included);
+            }
+        }
+        theme
+    })();
+    visiting.remove(&path);
+    result
+}

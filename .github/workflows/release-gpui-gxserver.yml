@@ -1,0 +1,168 @@
+name: GPUI release - gxserver runtime
+
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13:
+# Split out of release-gpui-runtime.yml. The immutable code-server component now
+# has its own workflow (release-gpui-code-server.yml) so the two stop being
+# serialized: code-server was ~10m of the ~21m gxserver job and sat directly on
+# the release critical path for no reason.
+#
+# Nothing downstream `needs:` this job any more. Consumers await
+# release-gxserver-linux-<arch> just in time (await-run-artifacts.mjs), which is
+# what lets Windows/macOS/Linux compilers start at t≈2 min.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      arch:
+        required: true
+        type: string
+      plan:
+        description: Resolved release plan JSON from the prepare job
+        required: false
+        default: ''
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+      arch:
+        description: Linux runtime architecture
+        required: true
+        default: x64
+        type: choice
+        options: [x64, arm64]
+
+permissions:
+  attestations: write
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    env:
+      GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+      GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
+      CARGO_INCREMENTAL: '0'
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: gxserver-linux-${{ inputs.arch }}-1
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/build/zig-global-cache
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - name: Resolve dependency cache keys
+        id: cache_keys
+        run: |
+          {
+            printf 'zig=%s\n' "$(git rev-parse HEAD:.dependencies/zmx)"
+          } >> "$GITHUB_OUTPUT"
+      # CDXC:Release 2026-09-16 WHY: this key used to carry the tree hash of
+      # server/, which changes on nearly every push, so every push wrote two
+      # new 45 MB registry entries that only superseded the previous ones. The
+      # lockfile hash changes only when the dependency set does, like the
+      # desktop registry keys.
+      - name: Restore Cargo registry cache
+        uses: actions/cache@v6
+        id: cargo_cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-reg-gxserver-${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('server/Cargo.lock') }}
+          restore-keys: cargo-reg-gxserver-${{ runner.os }}-${{ inputs.arch }}-
+      - name: Restore Zig package cache
+        uses: actions/cache@v6
+        id: zig_cache
+        with:
+          path: |
+            build/zig-global-cache
+            ~/.cache/zig
+          key: zig-gxserver-${{ runner.os }}-${{ inputs.arch }}-${{ steps.cache_keys.outputs.zig }}
+          restore-keys: zig-gxserver-${{ runner.os }}-${{ inputs.arch }}-
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      # sccache with the GitHub Actions cache backend. The registry cache above
+      # only stores crate *sources*; every `cargo build --release` on this
+      # runner was a cold compile (~50% of the 31-minute release critical path
+      # on 8.5.0). RUSTC_WRAPPER/SCCACHE_GHA_ENABLED are job-level env so the
+      # wrapper reaches the musl `cargo build` that
+      # build-remote-gxserver-linux-release.sh runs through
+      # server/package-remote-linux.mjs (both pass the environment through).
+      # The zmx Zig build is not cargo and is untouched. SCCACHE_GHA_VERSION is
+      # namespaced per arch because this job runs on both ubuntu-24.04 and
+      # ubuntu-24.04-arm. Pinned to an exact tag; the release preflight asserts
+      # every release build workflow uses this same tag.
+      - name: Install sccache
+        id: sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Install native build dependencies
+        run: |
+          tooling/release-gpui/retry.sh 3 5 -- sudo apt-get update
+          tooling/release-gpui/retry.sh 3 5 -- sudo apt-get install -y build-essential cmake ninja-build pkg-config
+      - name: Install pinned Zig toolchain
+        run: |
+          tooling/release-gpui/retry.sh 3 5 -- bash -c 'curl -fsSL https://mise.run | sh'
+          tooling/release-gpui/retry.sh 3 5 -- "$HOME/.local/bin/mise" install zig@0.16.0
+          printf 'ZIG=%s\nGHOSTEX_ZIG=%s\n' \
+            "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" \
+            "$HOME/.local/share/mise/installs/zig/0.16.0/bin/zig" >> "$GITHUB_ENV"
+      - name: Install Rust musl targets
+        run: tooling/release-gpui/retry.sh 3 5 -- rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+      - name: Install JavaScript dependencies
+        run: tooling/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
+      - name: Prepare source dependencies
+        run: GHOSTEX_RELEASE_SKIP_GPUI_REFERENCES=1 tooling/release-gpui/prepare-references.sh
+      - name: Pre-fetch Zig package dependencies
+        run: tooling/release-gpui/fetch-zig-deps.sh zmx
+      - name: Build remote runtime
+        run: |
+          tooling/build-remote-gxserver-linux-release.sh --arch "${{ inputs.arch }}"
+          OUTPUT="build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}"
+          mkdir -p "$OUTPUT"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -C "build/remote-gxserver-linux/${{ inputs.arch }}/package" \
+            -czf "$OUTPUT/gxserver-linux-${{ inputs.arch }}.tar.gz" .
+          source tooling/release-gpui/common.sh
+          release_gpui_write_manifest \
+            "$OUTPUT" \
+            "gxserver-linux-${{ inputs.arch }}" \
+            "${{ inputs.version }}" \
+            "$OUTPUT/gxserver-linux-${{ inputs.arch }}.tar.gz"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}/gxserver-linux-${{ inputs.arch }}.tar.gz
+      - name: Report sccache statistics
+        if: ${{ always() && steps.sccache.conclusion == 'success' }}
+        run: sccache --show-stats
+      - name: Record job observability
+        if: ${{ always() }}
+        run: |
+          {
+            echo "- Cargo registry cache: ${{ steps.cargo_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- Zig package cache: ${{ steps.zig_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-gxserver-linux-${{ inputs.arch }}
+          path: build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.plan != '' }}
+        with:
+          name: release-provenance-gxserver-linux-${{ inputs.arch }}
+          path: build/release-gpui/${{ inputs.version }}/gxserver-linux-${{ inputs.arch }}/provenance.json
+          if-no-files-found: error
+          retention-days: 14

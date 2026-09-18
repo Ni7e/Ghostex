@@ -1,0 +1,44 @@
+@import './monaco-scrollbars.css';
+
+.gx-app-scrollbars,
+.gx-app-scrollbars
+  :not(:is(.sidebar-reference-layout, .sidebar-reference-layout *, .manage-sidebar, .manage-sidebar *)) {
+  scrollbar-width: none !important;
+  scrollbar-gutter: auto !important;
+}
+
+.gx-app-scrollbars::-webkit-scrollbar,
+.gx-app-scrollbars
+  :not(
+    :is(.sidebar-reference-layout, .sidebar-reference-layout *, .manage-sidebar, .manage-sidebar *)
+  )::-webkit-scrollbar,
+.gx-app-scrollbars [data-slot='scroll-area-scrollbar']:not(:is(.sidebar-reference-layout *, .manage-sidebar *)) {
+  display: none !important;
+}
+
+[data-app-scrollbar='layer'] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 100;
+}
+
+[data-app-scrollbar='vertical'],
+[data-app-scrollbar='horizontal'] {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+}
+
+[data-app-scrollbar='thumb'] {
+  border-radius: 999px;
+  background: var(--gx-scrollbar-thumb);
+}
+
+[data-app-scrollbar][data-scroll-reveal='scroll'] {
+  transition: opacity 350ms ease;
+}

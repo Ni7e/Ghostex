@@ -1,0 +1,149 @@
+/*
+ * CDXC:Docs 2026-09-05 DECISION:
+ * User: the Docs files context menu must match the existing app sidebar menu.
+ * Shared menu appearance lives with AppMenuPanel so every host loads it together with the component.
+ */
+.ghostex-menu-panel[role='menu'] {
+  --menu-background: var(--app-dropdown-background, var(--popover));
+  --menu-foreground: var(--app-foreground, var(--popover-foreground));
+  --menu-border: var(--ghostex-tooltip-border, var(--border));
+  --menu-hover: var(--app-context-menu-hover-background, var(--accent));
+  --menu-danger: var(--destructive);
+  --accent-foreground: var(--menu-foreground);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: min(156px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: min(var(--available-height, 100vh), calc(100vh - 24px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border: 1px solid var(--menu-border);
+  border-radius: 8px;
+  background: var(--menu-background);
+  color: var(--menu-foreground);
+  font: 400 calc(var(--vscode-font-size, 13px) * var(--sidebar-density-scale, 1))/1.4
+    var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  box-shadow:
+    0 14px 28px rgb(0 0 0 / 32%),
+    0 0 0 1px rgb(255 255 255 / 4%);
+  backdrop-filter: blur(12px);
+  outline: none;
+}
+
+.ghostex-menu-panel[role='menu'][data-menu-theme='light'] {
+  color-scheme: light;
+  --menu-background: #fff;
+  --menu-foreground: #292929;
+  --menu-border: rgb(0 0 0 / 12%);
+  --menu-hover: #efefef;
+  --menu-danger: #d32f2f;
+}
+
+.ghostex-menu-panel[role='menu'][data-menu-theme='dark'] {
+  color-scheme: dark;
+  --menu-background: #191919;
+  --menu-foreground: #fcfcfc;
+  --menu-border: rgb(255 255 255 / 12%);
+  --menu-hover: #202020;
+  --menu-danger: #ff7b72;
+}
+
+.ghostex-menu-panel > *,
+.ghostex-menu-panel :is([role^='menuitem'], .session-context-menu-item) > * {
+  min-width: 0;
+}
+
+.ghostex-menu-panel [role='group'] {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ghostex-menu-panel[role='menu'] [data-slot$='checkbox-item'],
+.ghostex-menu-panel[role='menu'] [data-slot$='radio-item'] {
+  padding-right: 32px;
+}
+
+.ghostex-menu-panel[role='menu'] [data-inset='true'] {
+  padding-left: 36px;
+}
+
+.ghostex-menu-panel :is([role^='menuitem'], .session-context-menu-item) {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--menu-foreground);
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: default;
+  outline: none;
+}
+
+.ghostex-menu-panel :is([role^='menuitem'], .session-context-menu-item) svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.ghostex-menu-panel
+  :is([role^='menuitem'], .session-context-menu-item):is(
+    :hover,
+    :focus-visible,
+    [data-highlighted],
+    [aria-expanded='true']
+  ):not(:disabled):not([data-disabled]) {
+  background: var(--menu-hover);
+  color: var(--menu-foreground);
+}
+
+.ghostex-menu-panel :is([role^='menuitem'], .session-context-menu-item):is(:disabled, [data-disabled]) {
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.ghostex-menu-panel
+  :is([role^='menuitem'], .session-context-menu-item):is(
+    [data-variant='destructive'],
+    .session-context-menu-item-danger
+  ) {
+  color: var(--menu-danger);
+}
+
+.ghostex-menu-panel
+  :is([role^='menuitem'], .session-context-menu-item):is(
+    [data-variant='destructive'],
+    .session-context-menu-item-danger
+  ):is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--menu-danger) 18%, transparent);
+}
+
+.ghostex-menu-panel [role='separator'] {
+  height: 1px;
+  margin: 6px 4px;
+  background: color-mix(in srgb, var(--menu-border) 70%, transparent);
+}
+
+.ghostex-menu-panel [data-slot$='-shortcut'],
+.ghostex-menu-panel [data-slot$='-label'] {
+  color: color-mix(in srgb, var(--menu-foreground) 58%, transparent);
+}
+
+.ghostex-menu-panel [data-slot$='-label'] {
+  padding: 4px 10px 2px;
+  font-size: 11px;
+  font-weight: 500;
+}

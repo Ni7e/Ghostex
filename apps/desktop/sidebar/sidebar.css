@@ -1,0 +1,83 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+body {
+  background: var(--app-background, var(--ghostex-sidebar-initial-background));
+  transition: none;
+}
+
+body[data-sidebar-starting] {
+  background: var(--ghostex-sidebar-initial-background);
+}
+
+.gpui-sidebar {
+  height: 100%;
+  min-height: 100%;
+  width: 100%;
+}
+
+/*
+ * GPUI can surface several sessions at once through terminal splits, Browser
+ * splits, and project-editor companion panes. Keep every surfaced row visible,
+ * while reserving the opaque composer surface for the session or Browser tab
+ * that actually owns focus. The visible tier stays translucent below that.
+ */
+.gpui-sidebar .sidebar-reference-layout[data-reference-sidebar='true'] .session[data-visible='true']::after {
+  opacity: 0.7;
+}
+
+.gpui-sidebar .sidebar-reference-layout[data-reference-sidebar='true'] .session[data-focused='true']::after {
+  /*
+   * CDXC:Sessions 2026-03-09:
+   * The selected row is the opaque chat-composer surface (#141414). A reduced
+   * opacity here mixed that fill with the sidebar and made it miss the input
+   * box. Hover/visible tiers still use the translucent treatment below.
+   */
+  opacity: 1;
+}
+
+.gpui-sidebar
+  .sidebar-reference-layout[data-reference-sidebar='true']
+  .session:is(:hover, :focus-visible, [data-search-selected='true'])::after {
+  opacity: 1;
+}
+
+.gpui-sidebar .reference-sidebar-empty-state-action {
+  align-items: center;
+  appearance: none;
+  background: color-mix(in srgb, var(--app-button-background) 82%, #111111);
+  border: 1px solid color-mix(in srgb, var(--app-button-background) 72%, #ffffff 16%);
+  border-radius: 5px;
+  color: var(--app-button-foreground);
+  cursor: pointer;
+  display: flex;
+  font:
+    600 12.5px/1 -apple-system,
+    BlinkMacSystemFont,
+    'SF Pro Text',
+    sans-serif;
+  justify-content: center;
+  margin-top: 14px;
+  min-height: 28px;
+  padding: 7px 11px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+  width: fit-content;
+}
+
+.gpui-sidebar .reference-sidebar-empty-state-action:hover {
+  background: color-mix(in srgb, var(--app-button-background) 92%, #111111);
+  border-color: color-mix(in srgb, var(--app-button-background) 82%, #ffffff 24%);
+}
+
+.gpui-sidebar .reference-sidebar-empty-state-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--app-button-background) 62%, #ffffff 24%);
+  outline-offset: 2px;
+}

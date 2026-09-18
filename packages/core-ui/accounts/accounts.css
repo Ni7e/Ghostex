@@ -1,0 +1,769 @@
+:root {
+  --gx-account-font-family: ui-monospace, SFMono-Regular, monospace;
+}
+/* CDXC:AgentProviders 2026-09-08 DECISION: Usage bars remain neutral and selection uses brighter controls. Original provider logos keep their appearance. Account labels sit over larger session icons; sidebar icons have no account indicator. */
+.gx-accounts {
+  --ring: #bcbcbc;
+  min-width: 0;
+  color: var(--foreground);
+  font-size: 12px;
+}
+.gx-accounts h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+.gx-accounts p,
+.gx-accounts small {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.gx-accounts p {
+  margin: 7px 0;
+}
+.gx-accounts button {
+  font-size: 12px;
+}
+.gx-account-logo {
+  display: inline-block;
+  width: 21px;
+  height: 21px;
+  flex: none;
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-position: center;
+}
+.gx-account-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 62px;
+}
+.gx-account-figures {
+  font-family: var(--gx-account-font-family);
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.gx-account-figures span + span {
+  opacity: 0.6;
+}
+.gx-account-heading,
+.gx-account-field-row,
+.gx-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gx-account-heading {
+  margin-bottom: 14px;
+}
+.gx-account-row {
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.gx-account-row-copy {
+  flex: 1;
+  min-width: 0;
+}
+.gx-account-row-copy strong,
+.gx-account-row-copy small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.gx-account-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gx-account-status {
+  font-size: 10px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted-foreground);
+}
+.gx-account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 15px 0;
+}
+.gx-accounts select,
+.gx-accounts input[type='text'] {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  padding: 6px 10px;
+  color: var(--foreground);
+  font: inherit;
+}
+.gx-accounts select:focus-visible,
+.gx-accounts input:focus-visible {
+  outline: 3px solid #bcbcbc33;
+  border-color: #bcbcbc;
+  outline-offset: 1px;
+}
+.gx-account-policy fieldset {
+  border: 0;
+  min-width: 0;
+  padding: 0;
+  margin: 18px 0 0;
+}
+.gx-account-policy fieldset:disabled {
+  opacity: 0.45;
+}
+.gx-account-policy legend {
+  margin-bottom: 9px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.gx-account-field-row {
+  margin: 14px 0;
+}
+.gx-account-usage {
+  display: grid;
+  gap: 18px;
+  margin: 20px 0;
+}
+.gx-account-usage-window strong {
+  font-size: 11px;
+  font-weight: 500;
+}
+.gx-account-meter {
+  height: 5px;
+  background: var(--gx-account-meter-track, #363636);
+  border-radius: 3px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+.gx-account-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--gx-account-meter-fill, #b9b9b9);
+  border-radius: 3px;
+}
+.gx-account-usage-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.gx-account-editor,
+.gx-account-setup {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 16px;
+  margin: 14px 0;
+}
+.gx-account-session-policy-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.gx-account-session-policy-heading > button {
+  color: var(--muted-foreground);
+}
+.gx-account-policy-reset {
+  margin-top: 8px;
+}
+.gx-account-error,
+.gx-account-recovery {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+  line-height: 1.6;
+}
+.gx-account-error {
+  color: var(--foreground);
+}
+/* CDXC:AgentProviders 2026-09-12 DECISION: Give the recovery message and Stop automatic recovery button clear spacing, and keep that button rounded. */
+.gx-account-recovery {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.gx-account-recovery > p {
+  margin: 0;
+}
+.gx-account-recovery > [data-slot='button'] {
+  border-radius: 8px;
+}
+.gx-account-preview {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 15px 0;
+}
+.gx-account-preview > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.gx-accounts .gx-account-switch {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 12px 10px;
+  margin: 4px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.gx-account-switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.gx-account-switch:hover:enabled {
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.gx-account-panel {
+  flex: none;
+  max-height: 55vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 18px;
+  margin: 8px 0;
+}
+.gx-account-panel-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+}
+.gx-account-panel-columns > section + section {
+  border-left: 1px solid var(--border);
+  padding-left: 24px;
+}
+.gx-account-current {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.gx-account-color-preview-label {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.gx-account-submenu {
+  width: min(420px, calc(100vw - 24px));
+  max-width: var(--available-width);
+  padding: 0;
+}
+.gx-account-submenu .gx-account-panel {
+  margin: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  max-height: min(70vh, var(--available-height));
+  padding: 14px;
+}
+.gx-account-submenu .gx-account-heading {
+  flex-wrap: wrap;
+}
+.gx-account-submenu .gx-account-panel-columns {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+.gx-account-submenu .gx-account-panel-columns > section + section {
+  border-left: 0;
+  border-top: 1px solid var(--border);
+  padding: 18px 0 0;
+}
+.gx-account-command-block {
+  margin: 12px 0;
+}
+.gx-account-command {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.gx-account-command code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.gx-account-command-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.gx-account-policy-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+}
+.gx-account-policy-summary::-webkit-details-marker {
+  display: none;
+}
+.gx-account-policy-summary > svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+details[open] > .gx-account-policy-summary > svg {
+  transform: rotate(90deg);
+}
+.gx-account-consent {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  margin: 14px 0;
+}
+.gx-account-provider {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.gx-account-manager {
+  display: grid;
+  gap: 28px;
+}
+.gx-account-settings {
+  font-size: 13px;
+}
+.gx-account-settings p,
+.gx-account-settings small {
+  font-size: 12px;
+}
+.gx-account-settings .gx-account-heading {
+  margin-bottom: 0;
+}
+.gx-account-manager-toolbar {
+  align-items: flex-start;
+}
+.gx-account-manager-toolbar p {
+  margin: 0;
+  max-width: 52ch;
+}
+.gx-account-provider-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gx-account-provider-title > .gx-account-logo {
+  width: 18px;
+  height: 18px;
+}
+.gx-account-list {
+  display: grid;
+  gap: 8px;
+}
+.gx-account-saved,
+.gx-account-empty,
+.gx-account-defaults {
+  border: 1px solid var(--border);
+  border-radius: var(--settings-radius-control, 8px);
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  min-width: 0;
+}
+.gx-account-settings .gx-account-row {
+  padding: 14px 12px;
+  border: 0;
+  gap: 14px;
+}
+.gx-account-settings .gx-account-status {
+  border: 0;
+  padding: 0;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gx-account-status-info {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  cursor: help;
+}
+.gx-account-status-info svg {
+  width: 100%;
+  height: 100%;
+}
+.gx-account-saved[data-editing='true'] .gx-account-edit-chevron {
+  transform: rotate(90deg);
+}
+.gx-account-settings .gx-account-editor {
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0 16px 16px;
+}
+.gx-account-empty {
+  padding: 18px 16px;
+}
+.gx-account-empty p {
+  margin-bottom: 0;
+}
+.gx-account-defaults > .gx-account-policy-summary {
+  padding: 14px 12px;
+  gap: 10px;
+  cursor: pointer;
+  border-radius: inherit;
+}
+.gx-account-defaults > .gx-account-policy-summary:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+.gx-account-defaults > .gx-account-policy-summary:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-color: color-mix(in srgb, var(--ring) 20%, transparent);
+  outline-offset: -3px;
+}
+.gx-account-defaults .gx-account-row-copy strong {
+  font-weight: 500;
+}
+.gx-account-defaults .gx-account-row-copy small {
+  margin-top: 3px;
+}
+.gx-account-defaults-body {
+  padding: 0 16px 16px;
+}
+.gx-account-settings .gx-account-field {
+  margin: 20px 0;
+  gap: 8px;
+}
+.gx-account-settings .gx-account-field-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 22px 0 12px;
+}
+.gx-account-settings .gx-account-policy legend {
+  font-size: 13px;
+  color: var(--foreground);
+}
+.gx-account-settings .gx-account-setup {
+  margin: 0;
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  border-radius: var(--settings-radius-control, 8px);
+}
+@container (max-width:600px) {
+  .gx-account-panel-columns {
+    grid-template-columns: 1fr;
+  }
+  .gx-account-panel-columns > section + section {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 18px 0 0;
+  }
+}
+@media (max-width: 650px) {
+  .gx-account-panel-columns {
+    grid-template-columns: 1fr;
+  }
+  .gx-account-panel-columns > section + section {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 18px 0 0;
+  }
+  .gx-account-row {
+    flex-wrap: wrap;
+  }
+}
+
+.gx-account-guide {
+  max-width: min(680px, calc(100vw - 48px));
+  overflow-y: auto;
+  gap: 20px;
+}
+.gx-account-guide section {
+  display: grid;
+  gap: 10px;
+}
+.gx-account-guide h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+.gx-accounts.gx-account-guide p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.gx-account-guide-providers {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 4px 0;
+  list-style: none;
+}
+.gx-account-guide-providers li {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+.gx-account-guide-providers li[data-selected='true'] {
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.gx-account-guide h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+}
+.gx-account-launcher-hint {
+  padding: 8px 10px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.group-agent-menu .gx-account-logo {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+.gx-account-launcher-copy {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.gx-account-launcher-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.gx-account-launcher-usage {
+  font-family: var(--gx-account-font-family);
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gx-account-launcher-default {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.gx-account-refresh[aria-busy='true'] {
+  opacity: 1;
+  cursor: progress;
+}
+.gx-account-refresh[aria-busy='true'] svg {
+  animation: gx-account-refresh-spin 1s linear infinite;
+}
+@keyframes gx-account-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gx-account-refresh[aria-busy='true'] svg {
+    animation: none;
+  }
+}
+
+.gx-account-login-action {
+  flex-shrink: 0;
+}
+
+.gx-account-privacy-description {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.gx-account-saved .gx-account-logo,
+.session-saved-account-submenu .gx-account-logo {
+  flex-shrink: 0;
+}
+
+.gx-account-settings .gx-account-privacy-setting {
+  flex-direction: row;
+  align-items: center;
+  margin: 4px 0 18px;
+}
+.gx-account-default-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gx-account-default-summary .gx-account-logo {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.session-context-menu.session-saved-account-submenu {
+  width: 260px;
+  max-width: calc(100vw - 24px);
+}
+.session-saved-account-submenu .session-tag-menu-item-label {
+  flex: 1;
+  white-space: nowrap;
+}
+.session-saved-account-submenu .session-context-menu-trailing-icon {
+  flex-shrink: 0;
+}
+
+.gx-account-logo,
+.gx-account-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.gx-account-logo {
+  background: none;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+.gx-account-logo-image {
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  width: 100%;
+  height: 100%;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+.gx-account-mark {
+  line-height: 1;
+}
+.gx-account-mark:has(> .gx-account-indicator) {
+  display: inline-grid;
+  place-items: center;
+  width: 19.2px;
+  height: 19.2px;
+}
+.gx-account-mark:has(> .gx-account-indicator) > * {
+  grid-area: 1 / 1;
+  pointer-events: none;
+}
+.gx-account-mark:has(> .gx-account-indicator) > :first-child {
+  width: 19.2px;
+  height: 19.2px;
+  opacity: 0.3;
+}
+.gx-account-indicator {
+  position: relative;
+  color: var(--muted-foreground);
+  font: 600 9.9px/9.9px var(--gx-account-font-family);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+}
+.gx-account-mark[data-provider='codex'] > .gx-account-indicator {
+  color: #7db8fb;
+}
+.gx-account-saved[data-highlighted='true'] {
+  outline: 2px solid var(--foreground);
+  outline-offset: 3px;
+  background: var(--accent);
+}
+.gx-account-connect-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin: 12px 0;
+}
+.gx-account-connect-flow > button {
+  align-self: flex-start;
+}
+.gx-account-connect-flow .gx-account-consent {
+  margin: 0;
+}
+.gx-account-code-input {
+  display: flex;
+  gap: 8px;
+}
+.gx-account-terminal-output {
+  max-height: 240px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--background);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.gx-account-signin-link {
+  text-decoration: underline;
+  font-size: 12px;
+}
+
+/* CDXC:Settings 2026-09-10 DECISION: User: the Accounts page uses the General page's section cards and rows; account-specific chrome is limited to the identity figures, the status caption, and inset form blocks. */
+.ghostex-settings-shadcn .gx-account-status {
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.ghostex-settings-shadcn .gx-account-saved[data-highlighted='true'] {
+  outline: 2px solid var(--foreground);
+  outline-offset: -2px;
+  background: transparent;
+}
+.ghostex-settings-shadcn .gx-account-default-summary .gx-account-logo {
+  vertical-align: -3px;
+}
+.ghostex-settings-shadcn .gx-account-preview-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ghostex-settings-shadcn .gx-account-inset {
+  padding: 0.875rem 1.25rem;
+}
+.ghostex-settings-shadcn .settings-list-panel > .gx-account-inset {
+  padding-inline: 0;
+}
+.ghostex-settings-shadcn .gx-account-inset .gx-account-command-block,
+.ghostex-settings-shadcn .gx-account-inset .gx-account-connect-flow {
+  margin: 0;
+}
+.ghostex-settings-shadcn .gx-account-inset .gx-account-field {
+  margin: 0 0 12px;
+}
+.ghostex-settings-shadcn .gx-account-inset p {
+  margin: 8px 0 0;
+}

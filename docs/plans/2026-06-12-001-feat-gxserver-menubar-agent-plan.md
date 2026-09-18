@@ -1,12 +1,22 @@
 ---
 title: "feat: Move the macOS menu bar icon from Ghostex.app into a gxserver-owned menu bar agent"
 type: feat
-status: active
+status: historical
 date: 2026-06-12
 depth: deep
 ---
 
 # feat: gxserver Menu Bar Agent
+
+## Historical context (reviewed 2026-09-18)
+
+This is the June 2026 design proposal, retained as planning history rather than
+an implementation guide. Ghostex now ships a Rust/GPUI desktop app under
+`apps/desktop/` and a Rust gxserver under `server/`; the Swift host, Node daemon,
+paths, API assumptions, and packaging commands cited below belong to the retired
+architecture. The current menu bar item is owned by the desktop app. Implementing
+a separate server-owned agent would require a fresh design against those current
+components. Merging this document does not implement or enable that agent.
 
 ## Summary
 

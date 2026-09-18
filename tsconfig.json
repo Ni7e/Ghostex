@@ -21,13 +21,15 @@
     "target": "ES2023",
     "types": ["node"]
   },
-  "include": ["src/**/*", "shared/**/*", "sidebar/**/*", "native/sidebar/**/*"],
-  "exclude": [
-    "node_modules",
-    "build",
-    "dist",
-    "out",
-    "**/*.test.ts",
-    "**/*.test.tsx"
-  ]
+  "include": [
+    "packages/client-storage/**/*",
+    "packages/shared/**/*",
+    "packages/core-ui/**/*",
+    "packages/components/**/*",
+    "apps/desktop/views/**/*",
+    "apps/editor/web/**/*",
+    "apps/mobile/views/chat/**/*",
+    "apps/mobile/views/find/**/*"
+  ],
+  "exclude": ["node_modules", "build", "dist", "out", "**/*.test.ts", "**/*.test.tsx"]
 }

@@ -1,0 +1,322 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <style>
+      __GHOSTEX_EDITOR_STYLES__
+    </style>
+    <style>
+      :root {
+        color-scheme: dark;
+        --foreground: #d4d4d4;
+        --background: #1e1e1e;
+        --muted-foreground: #8f8f8f;
+        --popover: #252526;
+        --popover-foreground: #d4d4d4;
+        --border: #3c3c3c;
+        --accent: #3f3f46;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+      }
+
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        width: 100%;
+      }
+
+      body {
+        background: #1e1e1e;
+        color: #d4d4d4;
+      }
+
+      #root {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      .editor-header {
+        align-items: center;
+        background: #252526;
+        border-bottom: 1px solid #3c3c3c;
+        box-sizing: border-box;
+        display: flex;
+        flex: 0 0 auto;
+        gap: 8px;
+        min-height: 38px;
+        padding: 5px 8px 5px 12px;
+      }
+
+      .editor-hint {
+        color: #8f8f8f;
+        flex: 1 1 auto;
+        font-size: 12px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .editor-actions {
+        display: flex;
+        flex: 0 0 auto;
+        gap: 6px;
+      }
+
+      button {
+        appearance: none;
+        background: #333333;
+        border: 1px solid #555555;
+        border-radius: 4px;
+        color: #e5e5e5;
+        cursor: default;
+        font: inherit;
+        font-size: 12px;
+        line-height: 1;
+        min-width: 64px;
+        padding: 6px 10px;
+      }
+
+      button:hover {
+        background: #3f3f46;
+        border-color: #6a6a6a;
+      }
+
+      button:active {
+        background: #2d2d30;
+      }
+
+      .save-button {
+        background: #0e639c;
+        border-color: #1177bb;
+        color: #ffffff;
+      }
+
+      .save-button:hover {
+        background: #1177bb;
+      }
+
+      #editor {
+        flex: 1 1 auto;
+        min-height: 0;
+        width: 100%;
+      }
+
+      #editor .ghostex-chat-composer-lexical {
+        margin: 0;
+        width: 100%;
+        font-family: 'JetBrains Mono', SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      #editor .ghostex-chat-composer-lexical-content {
+        padding: 12px 16px 48px;
+      }
+      #editor .ghostex-chat-editor-panel {
+        margin: 6px;
+      }
+      #editor .ghostex-chat-editor-panel input {
+        color: inherit;
+        font: inherit;
+      }
+      #editor .ghostex-chat-editor-panel button {
+        min-width: 24px;
+      }
+      #editor .ghostex-chat-reference-pill {
+        color: #b3c0d1;
+        white-space: nowrap;
+      }
+
+      /*
+       * Pasted prompt images should remain visible while writing without
+       * replacing the prompt text. Render a compact thumbnail shelf below the
+       * editor, keep every thumbnail square, and reveal removal controls only
+       * on hover so the shelf stays quiet during normal prompt editing.
+       */
+      .editor-image-strip {
+        align-items: center;
+        background: #111;
+        border-top: 1px solid rgb(255 255 255 / 10%);
+        box-sizing: border-box;
+        display: flex;
+        flex: 0 0 auto;
+        gap: 8px;
+        min-height: 58px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 7px 32px 7px 10px;
+      }
+
+      .editor-image-strip[hidden] {
+        display: none;
+      }
+
+      .editor-image-thumb {
+        background: rgb(255 255 255 / 4%);
+        border: 1px solid rgb(255 255 255 / 12%);
+        border-radius: 0;
+        box-sizing: border-box;
+        cursor: default;
+        flex: 0 0 44px;
+        height: 44px;
+        overflow: hidden;
+        position: relative;
+        width: 44px;
+      }
+
+      .editor-image-thumb:hover,
+      .editor-image-thumb:focus-within {
+        border-color: rgb(255 255 255 / 28%);
+      }
+
+      .editor-image-open {
+        background: transparent;
+        border: 0;
+        color: inherit;
+        cursor: default;
+        display: block;
+        inset: 0;
+        min-width: 0;
+        padding: 0;
+        position: absolute;
+      }
+
+      .editor-image-open:hover,
+      .editor-image-open:active {
+        background: transparent;
+        border: 0;
+      }
+
+      .editor-image-open:focus-visible {
+        outline: 1px solid rgb(255 255 255 / 42%);
+        outline-offset: -2px;
+      }
+
+      .editor-image-open img {
+        display: block;
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+      }
+
+      .editor-image-open span {
+        background:
+          linear-gradient(135deg, transparent 0 45%, rgb(255 255 255 / 18%) 46% 54%, transparent 55%),
+          rgb(255 255 255 / 5%);
+        display: block;
+        height: 100%;
+        width: 100%;
+      }
+
+      .editor-image-remove {
+        align-items: center;
+        background: rgb(0 0 0 / 58%);
+        border: 1px solid rgb(255 255 255 / 22%);
+        border-radius: 0;
+        color: rgb(255 255 255 / 76%);
+        cursor: default;
+        display: inline-flex;
+        font:
+          700 10px/1 system-ui,
+          sans-serif;
+        height: 16px;
+        justify-content: center;
+        min-width: 0;
+        opacity: 0;
+        padding: 0;
+        position: absolute;
+        right: 3px;
+        top: 3px;
+        transition: opacity 120ms ease;
+        width: 16px;
+        z-index: 2;
+      }
+
+      .editor-image-remove:hover {
+        background: rgb(0 0 0 / 74%);
+        border-color: rgb(255 255 255 / 42%);
+        color: #ffffff;
+      }
+
+      .editor-image-thumb:hover .editor-image-remove,
+      .editor-image-thumb:focus-within .editor-image-remove {
+        opacity: 1;
+      }
+
+      .editor-image-popup {
+        align-items: center;
+        background: rgb(0 0 0 / 74%);
+        display: flex;
+        inset: 0;
+        justify-content: center;
+        padding: 28px;
+        position: fixed;
+        z-index: 1400;
+      }
+
+      .editor-image-popup[hidden] {
+        display: none;
+      }
+
+      .editor-image-popup img {
+        border-radius: 0;
+        box-shadow: 0 18px 60px rgb(0 0 0 / 50%);
+        max-height: min(82vh, 900px);
+        max-width: min(82vw, 1100px);
+        object-fit: contain;
+      }
+
+      .editor-image-popup-close {
+        align-items: center;
+        background: rgb(18 18 18 / 90%);
+        border: 1px solid rgb(255 255 255 / 18%);
+        border-radius: 0;
+        box-shadow: 0 10px 30px rgb(0 0 0 / 38%);
+        color: rgb(255 255 255 / 82%);
+        cursor: default;
+        display: inline-flex;
+        font:
+          700 12px/1 system-ui,
+          sans-serif;
+        height: 32px;
+        justify-content: center;
+        min-width: 0;
+        padding: 0;
+        position: fixed;
+        right: 20px;
+        top: 20px;
+        width: 32px;
+      }
+
+      .editor-image-popup-close:hover {
+        background: rgb(32 32 32 / 94%);
+        border-color: rgb(255 255 255 / 32%);
+        color: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <header class="editor-header">
+        <div class="editor-hint" id="editor-hint"></div>
+        <div class="editor-actions">
+          <button id="cancel-button" type="button">Cancel</button>
+          <button class="save-button" id="save-button" type="button">Save</button>
+        </div>
+      </header>
+      <main id="editor"></main>
+      <footer class="editor-image-strip" hidden id="image-strip"></footer>
+    </div>
+    <div class="editor-image-popup" hidden id="image-popup" role="presentation">
+      <button aria-label="Close image preview" class="editor-image-popup-close" id="image-popup-close" type="button">
+        ✕
+      </button>
+      <img alt="" id="image-popup-image" />
+    </div>
+    <script>
+      __GHOSTEX_EDITOR_BUNDLE__;
+    </script>
+  </body>
+</html>

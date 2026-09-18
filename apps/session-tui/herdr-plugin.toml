@@ -1,0 +1,41 @@
+id = "ghostex.sessions"
+name = "Ghostex Sessions"
+version = "0.1.0"
+min_herdr_version = "0.9.1"
+description = "Ghostex session TUI with independent direct zmx recovery"
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["bun", "build.ts"]
+
+[[actions]]
+id = "open"
+title = "Open Ghostex sessions"
+contexts = ["workspace"]
+command = ["./dist/ghostex-debug", "--herdr-open"]
+
+[[actions]]
+id = "floating"
+title = "Show floating Ghostex debugger"
+contexts = ["global", "workspace", "pane"]
+command = ["./dist/ghostex-debug", "--herdr-float"]
+
+[[panes]]
+id = "floating"
+title = "Ghostex Debug (F8 to hide)"
+placement = "popup"
+width = "85%"
+height = "85%"
+command = ["./dist/ghostex-debug", "--popup-ui"]
+
+[[panes]]
+id = "sessions"
+title = "Ghostex sessions"
+placement = "split"
+command = ["./dist/ghostex-debug"]
+
+[[panes]]
+id = "attach"
+title = "Ghostex terminal"
+placement = "split"
+command = ["./dist/ghostex-debug", "--attach-env"]

@@ -1,0 +1,567 @@
+use super::{
+    actions::NativeSidebarAction,
+    menu_state::{SidebarMenuPanel, SidebarMenuState},
+};
+use crate::{GhostexGpuiApp, app::helpers::*};
+use gpui::prelude::FluentBuilder;
+use gpui::{
+    AnyElement, Bounds, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    Pixels, Point, StatefulInteractiveElement, Styled, Window, deferred, div, px,
+};
+use gpui_component::{Root, h_flex, v_flex};
+use serde_json::Value;
+
+impl GhostexGpuiApp {
+    pub(crate) fn show_native_sidebar_menu(
+        items: &Value,
+        position: Point<Pixels>,
+        scale: f32,
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) {
+        let Some(mut items) = items.as_array().filter(|items| !items.is_empty()).cloned() else {
+            return;
+        };
+        let app = window.root::<Root>().flatten().and_then(|root| {
+            root.read(cx)
+                .view()
+                .clone()
+                .downcast::<GhostexGpuiApp>()
+                .ok()
+        });
+        #[cfg(target_os = "macos")]
+        let app = app.or_else(|| {
+            window
+                .root::<Root>()
+                .flatten()
+                .and_then(|root| {
+                    root.read(cx)
+                        .view()
+                        .clone()
+                        .downcast::<super::reveal::FloatingSidebarWindow>()
+                        .ok()
+                })
+                .and_then(|view| view.read(cx).app.upgrade())
+        });
+        let Some(app) = app else {
+            return;
+        };
+        let source = window.window_handle();
+        cx.defer(move |cx| {
+            let _ = source.update(cx, |_, window, cx| {
+                app.update(cx, |app, cx| {
+                    let previous_focus = window.focused(cx);
+                    let focus = cx.focus_handle();
+                    focus.focus(window, cx);
+                    if items
+                        .first()
+                        .is_some_and(|item| item["onOpen"]["type"] == "sessionMenu")
+                    {
+                        app.native_sidebar.next_menu_request += 1;
+                        let owner =
+                            format!("session-menu:{}", app.native_sidebar.next_menu_request);
+                        items[0]["menuOwner"] = Value::String(owner.clone());
+                        items[0]["onOpen"]["ownerId"] = Value::String(owner);
+                    }
+                    let account_panel = items
+                        .first()
+                        .and_then(|item| item["menuOwner"].as_str())
+                        .map(|owner| (owner.to_owned(), 0));
+                    let on_open = items.first().and_then(|item| item.get("onOpen")).cloned();
+                    app.native_sidebar.menu = Some(SidebarMenuState {
+                        window: source,
+                        account_panel,
+                        panels: vec![SidebarMenuPanel {
+                            scroll: Default::default(),
+                            items,
+                            anchor: position,
+                            selected: None,
+                            pages: vec![],
+                        }],
+                        focus,
+                        previous_focus,
+                        scale,
+                    });
+                    if let Some(command) = on_open {
+                        app.dispatch_native_sidebar_ui(command, cx);
+                    }
+                    cx.notify();
+                })
+            });
+        });
+    }
+
+    pub(crate) fn dismiss_native_sidebar_menu(&mut self, cx: &mut gpui::Context<Self>) {
+        if let Some(menu) = self.native_sidebar.menu.take() {
+            cx.defer(move |cx| {
+                let _ = menu.window.update(cx, |_, window, cx| {
+                    if let Some(focus) = menu.previous_focus {
+                        focus.focus(window, cx);
+                    }
+                });
+            });
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn close_native_sidebar_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(menu) = self.native_sidebar.menu.take() {
+            if let Some(focus) = menu.previous_focus {
+                focus.focus(window, cx);
+            }
+            cx.notify();
+        }
+    }
+
+    fn activate_native_sidebar_menu_secondary(
+        &mut self,
+        panel_index: usize,
+        item_index: usize,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let command = self
+            .native_sidebar
+            .menu
+            .as_ref()
+            .and_then(|menu| menu.panels.get(panel_index))
+            .and_then(|panel| panel.items.get(item_index))
+            .and_then(|item| item["secondary"].get("command"))
+            .cloned();
+        if let Some(command) = command {
+            self.dispatch_native_sidebar_ui(command, cx);
+        }
+    }
+
+    fn activate_native_sidebar_menu_item(
+        &mut self,
+        panel_index: usize,
+        item_index: usize,
+        row_bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let Some(menu) = self.native_sidebar.menu.as_mut() else {
+            return;
+        };
+        let Some(panel) = menu.panels.get_mut(panel_index) else {
+            return;
+        };
+        let Some(item) = panel.items.get(item_index).cloned() else {
+            return;
+        };
+        if item["disabled"] == true || item["heading"] == true {
+            return;
+        }
+        if item["back"] == true {
+            if let Some(items) = panel.pages.pop() {
+                panel.items = items;
+                panel.selected = None;
+            }
+        } else if let Some(children) = item["children"].as_array() {
+            if item["presentation"] == "page" {
+                panel.pages.push(panel.items.clone());
+                panel.items = std::iter::once(
+                    serde_json::json!({"label": "Back", "icon": "chevron-left", "back": true}),
+                )
+                .chain(std::iter::once(serde_json::json!({"separator": true})))
+                .chain(children.clone())
+                .collect();
+                panel.selected = None;
+                menu.panels.truncate(panel_index + 1);
+            } else {
+                panel.selected = Some(item_index);
+                menu.panels.truncate(panel_index + 1);
+                menu.panels.push(SidebarMenuPanel {
+                    scroll: Default::default(),
+                    items: children.clone(),
+                    anchor: Point::new(
+                        row_bounds.left(),
+                        row_bounds.bottom() + px(4.0 * menu.scale),
+                    ),
+                    selected: None,
+                    pages: vec![],
+                });
+            }
+        } else if let Some(command) = item.get("command") {
+            if command["type"] == "sessionAccounts" && command["action"] == "load" {
+                menu.panels.truncate(panel_index + 1);
+                menu.account_panel = command["sessionId"]
+                    .as_str()
+                    .map(|id| (id.to_owned(), panel_index + 1));
+                menu.panels.push(SidebarMenuPanel {
+                    scroll: Default::default(),
+                    items: vec![
+                        serde_json::json!({"label": "Loading accounts…", "disabled": true}),
+                    ],
+                    anchor: Point::new(
+                        row_bounds.left(),
+                        row_bounds.bottom() + px(4.0 * menu.scale),
+                    ),
+                    selected: None,
+                    pages: vec![],
+                });
+            }
+            let action = NativeSidebarAction {
+                command: command.clone(),
+            };
+            if item["keepOpen"] != true {
+                self.close_native_sidebar_menu(window, cx);
+            }
+            self.handle_native_sidebar_action(&action, window, cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn render_native_sidebar_menu(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        let menu = self.native_sidebar.menu.as_ref()?;
+        let sidebar = self.native_sidebar.bounds;
+        let scale = menu.scale;
+        let light = self
+            .native_sidebar
+            .snapshot
+            .as_ref()
+            .is_some_and(|snapshot| {
+                snapshot.hud["settings"]
+                    .as_object()
+                    .is_some_and(sidebar_uses_light_theme)
+            });
+        let panels = menu.panels.clone();
+        let background = titlebar_popup_menu_background();
+        let foreground = titlebar_popup_menu_foreground();
+        let hover = titlebar_popup_menu_hover_color();
+        let panel_bounds: Vec<_> = panels
+            .iter()
+            .enumerate()
+            .map(|(index, panel)| panel.bounds(sidebar, scale, index > 0))
+            .collect();
+        let left = panel_bounds
+            .iter()
+            .map(|bounds| bounds.left())
+            .min()
+            .unwrap_or(sidebar.left());
+        let top = panel_bounds
+            .iter()
+            .map(|bounds| bounds.top())
+            .min()
+            .unwrap_or(sidebar.top());
+        let right = panel_bounds
+            .iter()
+            .map(|bounds| bounds.right())
+            .max()
+            .unwrap_or(left);
+        let bottom = panel_bounds
+            .iter()
+            .map(|bounds| bounds.bottom())
+            .max()
+            .unwrap_or(top);
+        let mut layers = div()
+            .id("native-sidebar-menu-layers")
+            .absolute()
+            .left(left - sidebar.left())
+            .top(top - sidebar.top())
+            .w(right - left)
+            .h(bottom - top)
+            .track_focus(&menu.focus)
+            .on_mouse_down_out(
+                cx.listener(|app, _, window, cx| app.close_native_sidebar_menu(window, cx)),
+            )
+            .on_key_down(cx.listener(|app, event: &gpui::KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.as_str();
+                let Some(menu) = app.native_sidebar.menu.as_mut() else {
+                    return;
+                };
+                match key {
+                    "escape" => {
+                        let back = menu
+                            .panels
+                            .last()
+                            .and_then(|panel| panel.items.first())
+                            .and_then(|item| item.get("command"))
+                            .filter(|command| {
+                                command["type"] == "agentAccounts" && command["action"] == "root"
+                            })
+                            .cloned();
+                        if let Some(command) = back {
+                            app.dispatch_native_sidebar_ui(command, cx);
+                        } else {
+                            app.close_native_sidebar_menu(window, cx);
+                        }
+                    }
+                    "left" => {
+                        if menu.panels.len() > 1 {
+                            menu.panels.pop();
+                        } else if let Some(items) = menu.panels[0].pages.pop() {
+                            menu.panels[0].items = items;
+                        }
+                    }
+                    "up" | "down" | "home" | "end" => {
+                        if let Some(panel) = menu.panels.last_mut() {
+                            panel.move_selection(key);
+                        }
+                    }
+                    "enter" | "space" | "right" => {
+                        let panel_index = menu.panels.len() - 1;
+                        let panel = &menu.panels[panel_index];
+                        if let Some(index) = panel.selected {
+                            if key == "right" && panel.items[index].get("secondary").is_some() {
+                                app.activate_native_sidebar_menu_secondary(panel_index, index, cx);
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                return;
+                            }
+                            let bounds = panel.bounds(
+                                app.native_sidebar.bounds,
+                                menu.scale,
+                                panel_index > 0,
+                            );
+                            let y = panel.items[..index]
+                                .iter()
+                                .map(|item| {
+                                    if item["separator"] == true {
+                                        13.0
+                                    } else {
+                                        34.0
+                                    }
+                                })
+                                .sum::<f32>();
+                            let row_bounds = Bounds {
+                                origin: Point::new(
+                                    bounds.left(),
+                                    bounds.top() + px((6.0 + y) * menu.scale),
+                                ),
+                                size: gpui::size(bounds.size.width, px(34.0 * menu.scale)),
+                            };
+                            app.activate_native_sidebar_menu_item(
+                                panel_index,
+                                index,
+                                row_bounds,
+                                window,
+                                cx,
+                            );
+                        }
+                    }
+                    _ => return,
+                }
+                window.prevent_default();
+                cx.stop_propagation();
+                cx.notify();
+            }));
+        for (panel_index, panel) in panels.iter().enumerate() {
+            let bounds = panel.bounds(sidebar, scale, panel_index > 0);
+            let relative = bounds.origin - Point::new(left, top);
+            let mut content = v_flex()
+                .id(format!("native-sidebar-menu-panel-{panel_index}"))
+                .absolute()
+                .left(relative.x)
+                .top(relative.y)
+                .w(bounds.size.width)
+                .max_h(bounds.size.height)
+                .overflow_y_scroll()
+                .track_scroll(&panel.scroll)
+                .occlude()
+                .p(px(6.0 * scale))
+                .rounded(px(8.0 * scale))
+                .border_1()
+                .border_color(titlebar_popup_menu_border_color())
+                .bg(background)
+                .text_color(foreground)
+                .font_weight(FontWeight::NORMAL)
+                .text_size(px(13.0 * scale))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
+            let mut offset = 6.0;
+            for (item_index, item) in panel.items.iter().enumerate() {
+                if item["separator"] == true {
+                    content = content.child(
+                        div()
+                            .h(px(13.0 * scale))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .h(px(1.0))
+                                    .w_full()
+                                    .bg(titlebar_popup_menu_border_color()),
+                            ),
+                    );
+                    offset += 13.0;
+                    continue;
+                }
+                let label = item["label"].as_str().unwrap_or_default().to_owned();
+                let icon = item["icon"]
+                    .as_str()
+                    .map(|icon| gpui_sidebar_command_icon_asset_path(Some(icon)).to_string());
+                let icon_color = item["iconColor"]
+                    .as_str()
+                    .and_then(|color| u32::from_str_radix(color.trim_start_matches('#'), 16).ok())
+                    .map(|color| {
+                        if !light {
+                            return color;
+                        }
+                        if item["icon"] == "star-filled" {
+                            return 0xf6c944;
+                        }
+                        let channel =
+                            |shift| ((color >> shift & 255u32) as f32 * 0.42).round() as u32;
+                        channel(16) << 16 | channel(8) << 8 | channel(0)
+                    })
+                    .map(gpui::rgb)
+                    .map(gpui::Hsla::from)
+                    .unwrap_or(foreground);
+                let image = item["imageDataUrl"].as_str().and_then(|value| {
+                    super::images::agent_image(value, item["agentIcon"].as_str(), light)
+                });
+                let color = item["color"]
+                    .as_str()
+                    .and_then(|color| u32::from_str_radix(color.trim_start_matches('#'), 16).ok())
+                    .map(gpui::rgb);
+                let disabled = item["disabled"] == true;
+                let heading = item["heading"] == true;
+                let selected = panel.selected == Some(item_index);
+                let row_bounds = Bounds {
+                    origin: Point::new(bounds.left(), bounds.top() + px(offset * scale)),
+                    size: gpui::size(bounds.size.width, px(34.0 * scale)),
+                };
+                content = content.child(
+                    h_flex()
+                        .id(format!("native-menu-item-{panel_index}-{item_index}"))
+                        .w_full()
+                        .min_h(px(if heading { 24.0 } else { 34.0 } * scale))
+                        .flex_shrink_0()
+                        .px(px(10.0 * scale))
+                        .gap(px(8.0 * scale))
+                        .rounded(px(6.0 * scale))
+                        .when(selected, |row| row.bg(hover))
+                        .when(!disabled && !heading, |row| row.hover(|row| row.bg(hover)))
+                        .when(disabled, |row| row.opacity(0.42))
+                        .when(heading, |row| row.text_size(px(11.0 * scale)).opacity(0.6))
+                        .when(item["danger"] == true, |row| {
+                            row.text_color(chrome_color(0xff7b72, 0xd32f2f))
+                        })
+                        .when_some(icon, |row, icon| {
+                            row.child(
+                                gpui::svg()
+                                    .path(icon)
+                                    .text_color(icon_color)
+                                    .size(px(16.0 * scale))
+                                    .flex_shrink_0(),
+                            )
+                        })
+                        .when_some(image, |row, image| {
+                            row.child(gpui::img(image).size(px(16.0 * scale)).flex_shrink_0())
+                        })
+                        .when_some(color, |row, color| {
+                            row.child(div().size(px(14.0 * scale)).rounded_full().bg(color))
+                        })
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    h_flex()
+                                        .gap(px(4.0 * scale))
+                                        .child(div().min_w_0().child(label))
+                                        .when_some(item["suffix"].as_str(), |row, suffix| {
+                                            row.child(
+                                                div()
+                                                    .text_size(px(10.0 * scale))
+                                                    .opacity(0.6)
+                                                    .child(suffix.to_owned()),
+                                            )
+                                        }),
+                                )
+                                .when_some(
+                                    item["detail"].as_str().filter(|detail| !detail.is_empty()),
+                                    |column, detail| {
+                                        column.child(
+                                            div()
+                                                .text_size(px(10.0 * scale))
+                                                .opacity(0.6)
+                                                .child(detail.to_owned()),
+                                        )
+                                    },
+                                ),
+                        )
+                        .when(item["supportsChat"] == true, |row| {
+                            row.child(
+                                gpui::svg()
+                                    .path("titlebar/message-circle.svg")
+                                    .size(px(14.0 * scale))
+                                    .text_color(foreground.opacity(0.5)),
+                            )
+                        })
+                        .when_some(item.get("secondary"), |row, secondary| {
+                            row.child(
+                                h_flex()
+                                    .id(format!("native-menu-secondary-{panel_index}-{item_index}"))
+                                    .h(px(28.0 * scale))
+                                    .px(px(5.0 * scale))
+                                    .gap(px(3.0 * scale))
+                                    .rounded(px(4.0 * scale))
+                                    .hover(|button| button.bg(hover))
+                                    .child(
+                                        gpui::svg()
+                                            .path(gpui_sidebar_command_icon_asset_path(
+                                                secondary["icon"].as_str(),
+                                            ))
+                                            .size(px(14.0 * scale))
+                                            .text_color(foreground),
+                                    )
+                                    .child(
+                                        secondary["label"].as_str().unwrap_or_default().to_owned(),
+                                    )
+                                    .on_click(cx.listener(move |app, _, _, cx| {
+                                        cx.stop_propagation();
+                                        app.activate_native_sidebar_menu_secondary(
+                                            panel_index,
+                                            item_index,
+                                            cx,
+                                        );
+                                    })),
+                            )
+                        })
+                        .when(item["checked"] == true, |row| {
+                            row.child(titlebar_svg_icon(
+                                "titlebar/check.svg",
+                                14.0 * scale,
+                                foreground,
+                            ))
+                        })
+                        .when(
+                            item.get("children").is_some()
+                                || item["command"]["type"] == "sessionAccounts"
+                                    && item["command"]["action"] == "load",
+                            |row| {
+                                row.child(titlebar_svg_icon(
+                                    "titlebar/chevron-right.svg",
+                                    14.0 * scale,
+                                    foreground,
+                                ))
+                            },
+                        )
+                        .on_click(cx.listener(move |app, _, window, cx| {
+                            cx.stop_propagation();
+                            app.activate_native_sidebar_menu_item(
+                                panel_index,
+                                item_index,
+                                row_bounds,
+                                window,
+                                cx,
+                            );
+                        })),
+                );
+                offset += if heading { 24.0 } else { 34.0 };
+            }
+            layers = layers.child(content);
+        }
+        Some(deferred(layers).with_priority(20).into_any_element())
+    }
+}
