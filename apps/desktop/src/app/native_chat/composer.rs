@@ -171,6 +171,7 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let s = p.scale;
+        self.sync_composer_references(p, cx);
         let maximized = self.maximized_window.is_some();
         let collapsed = self.composer_collapsed();
         let input = self.input.as_ref().unwrap().clone();
@@ -311,8 +312,9 @@ impl NativeChatView {
                         .when(maximized, |this| this.flex_1().h_full().min_h_0())
                         .on_mouse_down(
                             gpui::MouseButton::Left,
-                            cx.listener(|this, _, _, cx| {
+                            cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
                                 this.invoke(json!({"type":"composerExpand","editor":true}), cx);
+                                this.click_composer_reference(event, cx);
                             }),
                         )
                         .child(

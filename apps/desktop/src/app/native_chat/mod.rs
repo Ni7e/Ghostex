@@ -12,6 +12,7 @@ mod attachments;
 mod binding;
 mod cards;
 mod choice_rows;
+mod composer_references;
 mod composer_scroll;
 mod focus;
 mod fonts;
