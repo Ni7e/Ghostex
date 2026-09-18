@@ -2,7 +2,8 @@ import { PointerActivationConstraints } from '@dnd-kit/dom';
 
 const SIDEBAR_REORDER_HOLD_DELAY_MS = 250;
 const SIDEBAR_REORDER_HOLD_TOLERANCE_PX = 12;
-export const SIDEBAR_REORDER_DISTANCE_PX = 8;
+import { SIDEBAR_REORDER_DISTANCE_PX } from '@/packages/shared/sidebar-gestures';
+export { SIDEBAR_REORDER_DISTANCE_PX } from '@/packages/shared/sidebar-gestures';
 const TOUCH_SIDEBAR_REORDER_HOLD_DELAY_MS = 320;
 const TOUCH_SIDEBAR_REORDER_HOLD_TOLERANCE_PX = 12;
 

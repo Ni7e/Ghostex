@@ -271,6 +271,16 @@ impl GhostexGpuiApp {
                     }
                 }),
             )
+            .when(account_button, |this| {
+                this.on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.show_gpui_titlebar_account_menu(event.position, window, cx);
+                    }),
+                )
+            })
             .when(!open, |this| {
                 this.managed_discrete_tooltip_with_placement(
                     ManagedTooltipPlacement::Left,

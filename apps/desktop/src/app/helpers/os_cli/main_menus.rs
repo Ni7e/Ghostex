@@ -88,6 +88,19 @@ pub(crate) fn register_ghostex_gpui_main_menu_actions(
             });
         }
     });
+    cx.on_action({
+        let app = app.clone();
+        move |_: &OpenGpuiAccountsModal, cx| {
+            let app = app.clone();
+            cx.defer(move |cx| {
+                let _ = main_window.update(cx, |_, window, cx| {
+                    let _ = app.update(cx, |app, cx| {
+                        app.open_gpui_settings_accounts_page(Some(window), cx);
+                    });
+                });
+            });
+        }
+    });
     cx.on_action(|_: &HideGhostexGpui, cx| cx.hide());
     cx.on_action(|_: &HideGhostexGpuiOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAllGhostexGpuiApps, cx| cx.unhide_other_apps());

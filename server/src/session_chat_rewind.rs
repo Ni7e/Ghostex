@@ -345,9 +345,8 @@ fn composer_draft(screen: &str) -> Option<String> {
 
 struct ClaudeTranscriptRow {
     lineage: TranscriptLineage,
-    /// Real user prompt text, set only for rows the chat decoder publishes as
-    /// user turns. Tool results, meta turns, and harness-injected envelopes are
-    /// `None`, because Claude's rewind list does not offer them either.
+    /// User prompt or local slash command as shown in Claude's rewind list.
+    /// Tool results, meta turns, and command output are not selectable rows.
     prompt_text: Option<String>,
 }
 
@@ -359,10 +358,35 @@ struct ClaudeRewindTarget {
     leaf_id: Option<String>,
     /// First line of the prompt, space-collapsed, for screen verification.
     first_line: String,
-    /// Real user prompts of the active conversation that come AFTER the target.
+    /// Selectable prompts and local commands that come AFTER the target.
     /// The list starts on `(current)`, so reaching the target costs one more
     /// press than that.
     prompts_after: usize,
+}
+
+/// CDXC:SessionChat 2026-09-16 WHY:
+/// Claude's rewind picker includes local slash commands even though the chat noise classifier excludes their envelopes from ordinary prompts.
+/// Omitting two /rate-limit-options rows made a three-move rewind land on a later "." prompt instead of the requested message five moves back.
+fn claude_rewind_prompt_text(message: &crate::session_chat::SessionChatMessage) -> Option<String> {
+    if message.role != SessionChatRole::User || message.queued {
+        return None;
+    }
+    let text = message_text(message);
+    if !is_noise_message(message) {
+        return Some(text);
+    }
+    let command = text.trim().strip_prefix("<command-name>")?;
+    let (name, rest) = command.split_once("</command-name>")?;
+    let args = rest
+        .split_once("<command-args>")
+        .and_then(|(_, args)| args.split_once("</command-args>"))
+        .map(|(args, _)| args.trim())
+        .unwrap_or_default();
+    Some(if args.is_empty() {
+        name.trim().to_string()
+    } else {
+        format!("{} {args}", name.trim())
+    })
 }
 
 /// Every non-sidechain, non-queue row of a Claude transcript, in file order,
@@ -370,7 +394,7 @@ struct ClaudeRewindTarget {
 ///
 /// This walks the file with the SAME two functions the chat tail reader
 /// composes (`claude_transcript_lineage` for the tree, the Claude line decoder
-/// plus the noise classifier for "is this a real user prompt"). It cannot use
+/// plus the picker-specific prompt classifier). It cannot use
 /// the tail page itself, because a page carries decoded messages without their
 /// parents, and the parent is precisely what a rewind is addressed by.
 fn read_claude_transcript_rows(path: &Path) -> std::io::Result<Vec<ClaudeTranscriptRow>> {
@@ -391,13 +415,8 @@ fn read_claude_transcript_rows(path: &Path) -> std::io::Result<Vec<ClaudeTranscr
         if lineage.queue.is_some() {
             continue;
         }
-        let prompt_text =
-            decode_claude_transcript_line(trimmed, &fallback_id).and_then(|message| {
-                let is_prompt = message.role == SessionChatRole::User
-                    && !message.queued
-                    && !is_noise_message(&message);
-                is_prompt.then(|| message_text(&message))
-            });
+        let prompt_text = decode_claude_transcript_line(trimmed, &fallback_id)
+            .and_then(|message| claude_rewind_prompt_text(&message));
         rows.push(ClaudeTranscriptRow {
             lineage,
             prompt_text,

@@ -1,3 +1,4 @@
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 import { openAppModal } from '../app-modal-host-bridge';
 import { AccountLogo } from './controls';
 import { AccountText, useAccountText } from './account-text';
@@ -39,7 +40,7 @@ export function SidebarAccountMenu({
     }
   }, [position.x, position.y, data, error]);
   return (
-    <div
+    <AppMenuPanel
       ref={menuRef}
       aria-label='Switch Account'
       className='session-context-menu session-tag-submenu session-saved-account-submenu'
@@ -133,6 +134,6 @@ export function SidebarAccountMenu({
         <IconSettings aria-hidden='true' size={16} />
         <span>Manage accounts</span>
       </button>
-    </div>
+    </AppMenuPanel>
   );
 }

@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
+import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import './session-chat-scrollbar.css';
 
-/** CDXC:SessionChat 2026-09-14 DECISION:
- * User: the transcript has a 5px scrollbar on the right that overlays content, fades in only on scroll, and fades away afterward.
+/** CDXC:SessionChat 2026-09-16 DECISION:
+ * User: keep one transcript scrollbar with the shared app colors and hover reveal, superseding the earlier transcript scroll-only reveal. The chat input retains its scroll-only reveal.
  */
 export function SessionChatScrollbar({
   viewportRef,
@@ -13,6 +14,7 @@ export function SessionChatScrollbar({
   contentRef: RefObject<HTMLDivElement | null>;
   onNavigate: () => void;
 }) {
+  useAppScrollbars();
   const trackRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ y: number; top: number } | null>(null);

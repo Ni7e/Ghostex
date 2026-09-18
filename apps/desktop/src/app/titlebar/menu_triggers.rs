@@ -173,6 +173,20 @@ impl GhostexGpuiApp {
             .show(position, window, cx);
     }
 
+    /// CDXC:ContextMenus 2026-09-17 DECISION:
+    /// User: right-clicking a titlebar account shows Accounts below Extensions in that context menu.
+    pub(crate) fn show_gpui_titlebar_account_menu(
+        &self,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        GpuiContextMenu::new()
+            .menu("Extensions", Box::new(OpenGpuiExtensionsModal))
+            .menu("Accounts", Box::new(OpenGpuiAccountsModal))
+            .show(position, window, cx);
+    }
+
     pub(crate) fn select_titlebar_mode_from_menu(
         &mut self,
         mode_index: u64,

@@ -279,8 +279,8 @@ export type ghostexSettings = {
    * showBetaFeatures key. Experimental surfaces stay hidden by default, while
    * Agents Hub remains outside this gate and visible in the sidebar.
    *
-   * CDXC:Automations 2026-07-01-03:24:
-   * Automations Overview and project Automate are experimental macOS surfaces.
+   * CDXC:Automations 2026-09-17:
+   * All Automations and project Automate are experimental macOS surfaces.
    * Keep their real page content behind this gate; disabled users should see
    * only the coming-soon overlay for those pages.
    */
@@ -565,6 +565,8 @@ export type ghostexSettings = {
   sidebarTheme: SidebarThemeSetting;
   /** Follow the app theme, or override chat with Light, Dark, or System. */
   sessionChatTheme: SessionChatThemeSetting;
+  /** Desktop renderer feature flag, applied when the app starts. */
+  sessionChatUseGpui: boolean;
   /** CSS font-family used by chat messages and the prompt composer. */
   sessionChatFontFamily: string;
   /** Default zoom percentage for the desktop chat interface. */

@@ -531,6 +531,7 @@ impl Render for GpuiRenameSessionModalWindow {
                 this.agent_select.close();
                 cx.notify();
             },
+            window,
             cx,
         );
         let description = if self.can_generate_from_history {

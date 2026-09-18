@@ -4951,6 +4951,20 @@
       "agentWritable": false
     },
     {
+      "key": "sessionChatUseGpui",
+      "title": "Use GPUI chat",
+      "subtitle": "Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "chat",
+      "groupTitle": "Chat",
+      "section": "chat",
+      "sectionTitle": "Chat",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
       "key": "preferredAgentInterface",
       "title": "Default view for compatible agents",
       "subtitle": "Automatically switch to chat as soon as Ghostex detects that an agent session supports it.",
@@ -5664,7 +5678,7 @@
       "default": "powershell",
       "options": [
         {
-          "label": "PowerShell (native Windows)",
+          "label": "PowerShell (Native)",
           "value": "powershell"
         },
         {

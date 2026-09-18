@@ -35,6 +35,7 @@ pub(crate) enum SidebarBridgeEventKind {
     BrowserTabFocus,
     ProjectBoardConversationResponse,
     ResourcesSnapshotRequest,
+    NativeSidebarSnapshot,
 }
 
 impl SidebarBridgeEventKind {
@@ -84,6 +85,7 @@ impl SidebarBridgeEventKind {
                 Self::ProjectBoardConversationResponse
             }
             SidebarBridgeFunctionId::ResourcesSnapshotRequest => Self::ResourcesSnapshotRequest,
+            SidebarBridgeFunctionId::NativeSidebarSnapshot => Self::NativeSidebarSnapshot,
         })
     }
 }
@@ -232,11 +234,17 @@ pub enum SidebarBridgeEvent {
     BrowserTabFocus(String),
     ProjectBoardConversationResponse(String),
     ResourcesSnapshotRequest(String),
+    NativeSidebarSnapshot(String),
     /// A first-party page tried to navigate its own main frame somewhere else; the payload is the refused URL.
     RefusedPageNavigation(String),
 }
 
 pub type SidebarBridgeEventHandler = StdRc<dyn Fn(SidebarBridgeEvent)>;
+
+pub(crate) fn sidebar_event_for_function(name: &str, payload: String) -> Option<SidebarBridgeEvent> {
+    let spec = sidebar_bridge_function_spec_for_js_function(name)?;
+    Some(SidebarBridgeEventKind::forwarded_from(spec.id)?.with_payload(payload))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProjectWorkareaBridgeEvent {
@@ -303,6 +311,7 @@ impl SidebarBridgeEventKind {
                 SidebarBridgeEvent::ProjectBoardConversationResponse(payload)
             }
             Self::ResourcesSnapshotRequest => SidebarBridgeEvent::ResourcesSnapshotRequest(payload),
+            Self::NativeSidebarSnapshot => SidebarBridgeEvent::NativeSidebarSnapshot(payload),
         }
     }
 }
@@ -1189,7 +1198,7 @@ pub(crate) fn send_sidebar_bridge_process_message(
     if sidebar_bridge_event_kind_for_process_message(process_message_name).is_none() {
         return false;
     }
-    if payload.chars().count() > SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS {
+    if payload.chars().count() > sidebar_bridge_payload_max_chars(process_message_name) {
         return false;
     }
 

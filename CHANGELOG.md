@@ -2,9 +2,72 @@
 
 ## Unreleased
 
-- Stabilization
+## 9.8.5 - 2026-09-16
 
-  - After an app update, gxserver comes back on the first start instead of showing "gxserver failed to start" until you reload. Ghostex now waits for the previous daemon to exit before it re-registers the background job, verifies that launchd actually spawned the new one, and the copyable diagnostics include every launchd step and launchctl error.
+**Ghostex 9.8.5 is out.** Agent Sync in the Agents Hub keeps every agent on your computer pointed at one shared set of skills, instructions, and hooks, plus switching a draft between Claude and Codex, annotations that clear after you send them, and fixes to chat and the sidebar.
+
+### 🔗 Agent Sync
+
+- **Keep every agent on one set of skills, instructions, and hooks.** Open the Agents Hub (Cmd+5) and choose Agent Sync to see each agent and profile on your computer, with a dot for Skills, Instructions, and Hooks and a list of problems such as broken links or copied skill folders.
+- **Review a plan before anything changes.** Sync all or sync one agent to preview the links and instruction pointers Ghostex will write; instruction files with other content are backed up first and nothing is deleted.
+- **Run it from the terminal too.** `ghostex agent-sync status`, `plan`, and `apply --yes` do the same scan, plan, and apply.
+
+### 💬 Chat and agents
+
+- **Switch a draft between Claude and Codex before the first message.** Use Switch Agent CLI in the model menu; the new agent picks its account by your Account for new sessions rule, and your unsent text stays in place.
+- **Queued prompts go out after a manual /compact in Claude.** Messages you queued no longer stay held once compaction finishes.
+- **Shift+Enter adds a new line wherever focus is in the chat view.**
+
+### 📝 Annotations
+
+- **Copying or sending annotations clears them.** This applies in the Browser toolbar and in Docs HTML files, and the toolbar's settings panel can turn it off.
+
+### 🗂 Sidebar
+
+- **Reveal Session leaves room around the session.** The revealed row stops 50px from the edge, below any pinned headers.
+- **The selected session blends with tinted sidebars in dark mode.** Its fill is translucent instead of a flat gray block.
+- **Dragging sessions is smoother.** The sidebar does less layout work while you drag.
+- **Search by Prompt stays open when started from Previous Sessions.** Its floating button now matches the chat composer's look.
+
+## 9.8.0 - 2026-09-16
+
+**Ghostex 9.8.0 is out.** Continue a Codex conversation that is open in another session, animated session sections with a separate dot for pending questions, one menu style across the app, Search by Prompt filters in the toolbar, and a reliable restart of the background server after an update.
+
+### 💬 Chat and agents
+
+- **Continue a Codex conversation that is open somewhere else.** When Codex says the conversation is in use by another session, choose Continue here (or press Cmd+Enter) and Ghostex closes the other Ghostex session, retries, and keeps your draft unsent until it succeeds.
+- **Rewind lands on the prompt you picked.** Claude slash commands now appear in the rewind list, so choosing a row no longer rewinds to a different prompt.
+- **Delayed Send waits for the agent to really finish.** A scheduled send no longer goes out while the agent is still writing its last turn.
+- **A session whose agent changed wakes with the right agent.** A session that started with one agent and was taken over by another now resumes with its current agent instead of the old command.
+- **Cursor conversations keep their place.** Late thinking steps from Cursor no longer shift where your next message is sent.
+
+### 🗂 A clearer sidebar
+
+- **Session sections open and close with an animation.** Status dots stay put while rows slide, and a session waiting on a question shows its own pink dot.
+- **Reveal Session is easy to spot.** After the section expands, the revealed session blinks with an outline, and the titlebar button uses a hollow circle.
+- **Closing a project keeps you in your Space.** Ghostex moves focus to an awake session in the next project of the same Space instead of leaving it.
+- **Light mode reads better.** The active session row and its hover buttons stand out more, and resize handles and agent tab drop targets use a softer gray.
+
+### 🎨 One look for menus and scrollbars
+
+- **Every menu shares one panel.** Dropdowns, context menus, and titlebar popups have the same rounded panel and shadow, and submenus open on click.
+- **Scrollbars are thin and match your theme everywhere.** Terminals, the code editor, chat, and the menu bar panel all use the same slim scrollbar that appears on hover.
+- **Long pick lists stay inside the window.** Delayed Send and other pickers scroll to the highlighted row instead of running off screen.
+
+### 🔍 Search by Prompt
+
+- **Agent and project filters sit in the toolbar.** They are dropdowns at the top right, and the list shows placeholders while your history loads.
+- **Open Search by Prompt from Previous Sessions.** A Search by Prompt button floats over the Sessions list.
+
+### 📝 Docs and views
+
+- **The annotation toolbar sits above your selection.** It moves below the text near the top of the page, and the X marks text for removal with a note.
+- **The Docs header shows Send or Copy with the annotation count.** It shrinks to an icon in narrow windows.
+- **Titlebar view menus offer Configure view and Wake again.** Configure view opens that custom view in Settings, and a sleeping web view can be woken from its menu.
+
+### 🩹 Fixes
+
+- **The background server starts on the first try after an update.** Ghostex waits for the old server to exit before starting the new one, so "gxserver failed to start" no longer appears until you reload, and the copyable diagnostics explain any start failure.
 
 ## 9.7.0 - 2026-09-16
 

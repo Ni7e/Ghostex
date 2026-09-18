@@ -606,6 +606,24 @@ pub fn decode_claude_turn_lifecycle(
     let message = record.get("message").and_then(Value::as_object);
     let timestamp = parse_timestamp(record.get("timestamp"));
 
+    // CDXC:SessionChat 2026-09-16 WHY:
+    // Claude records a plain /compact user turn but no assistant end_turn afterward, leaving queued prompts held forever despite an idle terminal.
+    // The screen marker holds the queue during compaction, and only a manual boundary settles the prior turn; automatic compaction continues the active response.
+    if record.get("type").and_then(Value::as_str) == Some("system")
+        && record.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
+        && record
+            .get("compactMetadata")
+            .and_then(|metadata| metadata.get("trigger"))
+            .and_then(Value::as_str)
+            == Some("manual")
+    {
+        return Some(SessionChatTurnLifecycle {
+            state: SessionChatTurnLifecycleState::Completed,
+            turn_id: extract_string(record.get("uuid")).unwrap_or_else(|| fallback_id.to_string()),
+            timestamp,
+        });
+    }
+
     // 1. Interrupt beats everything.
     if let Some(interrupted_message_id) = claude_interrupted_message_id(&record) {
         return Some(SessionChatTurnLifecycle {
@@ -650,6 +668,13 @@ pub fn decode_claude_turn_lifecycle(
     }
     if is_noise_message(&decoded) {
         return None; // harness noise is not a new generation
+    }
+    if crate::session_chat_terminal_activity::transcript_message_starts_session_chat_activity(
+        Some("claude"),
+        &decoded,
+    ) {
+        // /compact starts screen-owned work, not an assistant generation, including when Claude declines it because there are not enough messages.
+        return None;
     }
     Some(SessionChatTurnLifecycle {
         state: SessionChatTurnLifecycleState::Working,

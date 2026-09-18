@@ -6,7 +6,7 @@ type ExplicitSidebarProjectContext = NonNullable<SidebarStoryWorkspace['groupMet
 type ExplicitLiveSidebarProjectContext = NonNullable<SidebarSessionGroup['projectContext']>;
 
 const GPUI_QUICK_AUTOMATIONS_PROJECT_ID = 'quick-automations';
-const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE = 'Automations Overview';
+const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE = 'All Automations';
 
 /**
  * CDXC:CefRuntime 2026-06-23-19:19:
@@ -177,7 +177,7 @@ function createGpuiQuickAutomationsOverviewPayload(): GpuiSidebarActiveProjectCo
   /*
   CDXC:Automations 2026-07-08:
   Mirror macOS `createQuickAutomationsProjectEditorUrl` and
-  `focusQuickAutomationsProject`: the Quick Automations Overview publishes a
+  `focusQuickAutomationsProject`: All Automations publishes a
   project-scoped Automate surface id for `quick-automations`, but no Source,
   Browser, Kanban, Manage, icon, or project path.
   */

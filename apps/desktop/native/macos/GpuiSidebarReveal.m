@@ -310,8 +310,8 @@ void GhostexGpuiSidebarRevealDispose(void *sidebarPtr) {
 
 // A GPUI companion owns a separate window because its header, split controls,
 // terminals, and chat pages all need their normal window-local layout and input.
-bool GhostexGpuiCompanionRevealUpdate(void *rootPtr, void *popupPtr, bool enabled,
-                                     double width, double titlebarHeight) {
+static bool GhostexGpuiNativeRevealUpdate(void *rootPtr, void *popupPtr, bool enabled,
+                                         double width, double titlebarHeight, bool requested, bool sticky) {
   NSView *root = (__bridge NSView *)rootPtr;
   NSView *popup = (__bridge NSView *)popupPtr;
   NSWindow *parent = root.window;
@@ -347,12 +347,31 @@ bool GhostexGpuiCompanionRevealUpdate(void *rootPtr, void *popupPtr, bool enable
     state.attached = YES;
     state.targetFrame = frame;
     objc_setAssociatedObject(popup, GhostexGpuiSidebarRevealKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [state animateIn];
+    if (sticky) {
+      state.revealTarget = 1;
+      state.revealProgress = 1;
+      [state layoutReveal];
+      [state.panel orderFront:nil];
+    } else {
+      [state animateIn];
+    }
   } else {
     state.targetFrame = frame;
     [state layoutReveal];
   }
   NSPoint pointer = NSEvent.mouseLocation;
+  if (requested) state.requestedRevealDeadline = NSProcessInfo.processInfo.systemUptime + 5;
+  if (state.requestedRevealDeadline > 0) {
+    if (NSPointInRect(pointer, state.panel.frame)) state.requestedRevealDeadline = 0;
+    else if (NSProcessInfo.processInfo.systemUptime < state.requestedRevealDeadline) {
+      [state animateTo:1];
+      return true;
+    } else {
+      state.requestedRevealDeadline = 0;
+      [state animateTo:0];
+      return true;
+    }
+  }
   BOOL inside = NSPointInRect(pointer, state.revealTarget == 0 ? state.panel.frame : frame);
   for (NSWindow *child in parent.childWindows) {
     if (child != state.panel && child.visible && NSPointInRect(pointer, child.frame)) inside = YES;
@@ -366,6 +385,36 @@ bool GhostexGpuiCompanionRevealUpdate(void *rootPtr, void *popupPtr, bool enable
     if (now - state.outsideSince >= 0.2) [state animateTo:0];
   }
   return true;
+}
+
+bool GhostexGpuiCompanionRevealUpdate(void *root, void *popup, bool enabled, double width, double titlebarHeight) {
+  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, false, false);
+}
+
+bool GhostexGpuiNativeSidebarRevealUpdate(void *root, void *popup, bool enabled, double width, double titlebarHeight, bool requested, bool sticky) {
+  return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, requested, sticky);
+}
+
+// The native sidebar and companion share the existing 10px edge gesture.
+// This observes the pointer; each GPUI child window owns its normal input.
+int GhostexGpuiNativeSidebarRevealRequest(void *rootPtr, double width, double titlebarHeight, bool companionHidden, bool requested, bool keepUnderPointer) {
+  NSView *root = (__bridge NSView *)rootPtr;
+  NSWindow *parent = root.window;
+  NSWindow *keyRoot = NSApp.keyWindow;
+  while (keyRoot.parentWindow) keyRoot = keyRoot.parentWindow;
+  if (!parent || !parent.visible || parent.miniaturized || !NSApp.active || keyRoot != parent) return 0;
+  NSRect body = root.bounds;
+  body.size.height = MAX(0, body.size.height - titlebarHeight);
+  if (root.flipped) body.origin.y += titlebarHeight;
+  body = [parent convertRectToScreen:[root convertRect:body toView:nil]];
+  NSPoint pointer = NSEvent.mouseLocation;
+  NSRect edge = body;
+  edge.size.width = MIN(10, body.size.width);
+  NSRect slot = body;
+  slot.size.width = MIN(width, body.size.width);
+  if (requested || (keepUnderPointer && NSPointInRect(pointer, slot))) return 1;
+  if (!NSPointInRect(pointer, edge) || NSEvent.pressedMouseButtons != 0) return 0;
+  return companionHidden && pointer.y < NSMidY(body) ? 2 : 1;
 }
 
 bool GhostexGpuiReparentPaneNativeView(void *viewPtr, void *parentPtr, void *fromPtr) {

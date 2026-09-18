@@ -27,9 +27,17 @@ pub(crate) fn resolve(
         crate::server::read_runtime_text(session, "agentSessionPath").as_deref(),
     )
     .ok_or("Codex's question transcript is unavailable.")?;
+    let started_at = crate::session_chat_async_questions::async_questions_since(session);
     let mut questions = Vec::new();
     let mut collect = |messages: Vec<SessionChatMessage>| {
         for message in messages {
+            if message
+                .timestamp
+                .zip(started_at)
+                .is_some_and(|(at, start)| at < start)
+            {
+                continue;
+            }
             for (index, question) in message
                 .async_questions
                 .unwrap_or_default()

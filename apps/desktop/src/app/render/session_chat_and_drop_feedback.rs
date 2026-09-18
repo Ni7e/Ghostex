@@ -6,6 +6,8 @@ use gpui::AnyElement;
 use gpui::FontWeight;
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
+use gpui::MouseButton;
+use gpui::MouseDownEvent;
 use gpui::ParentElement as _;
 use gpui::Styled as _;
 use gpui::canvas;
@@ -30,9 +32,8 @@ impl GhostexGpuiApp {
         /*
         CDXC:SessionChat 2026-07-31:
         Chat owns the same normal-layout workspace body rectangle as a
-        terminal: a per-session CefSurface child
-        plus ordinary placeholder layout children. No terminal mount canvas,
-        native geometry probe, overlay, or hidden hit region participates.
+        terminal: a per-session GPUI child plus ordinary placeholder layout children.
+        The native chat remains inside its workspace pane's layout frame.
         */
         let content = self.render_session_chat_surface_content(session_id);
         self.render_agents_session_chat_body_frame(pane_id, session_id, content, cx)
@@ -47,22 +48,15 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         let switching = self.session_account_switch_placeholder_progress(session_id);
         self.record_session_chat_render(session_id);
-        let surface = self
-            .agents_chat_surfaces
-            .get(&session_id)
-            .filter(|_| switching.is_none())
-            .cloned();
-        if let Some(surface) = surface {
-            div()
-                .id(format!("ghostex-gpui-session-chat-cef-{}", session_id.0))
-                .relative()
-                .size_full()
-                .min_w_0()
-                .min_h_0()
-                .overflow_hidden()
-                .child(surface)
-                .into_any_element()
-        } else {
+        if let Some(view) = self.native_chat_views.get(&session_id).filter(|_| switching.is_none()) {
+            return div().id(format!("native-chat-{}", session_id.0)).size_full().min_w_0().min_h_0().overflow_hidden().child(view.clone()).into_any_element();
+        }
+        if let Some(surface) = self.agents_chat_surfaces.get(&session_id).filter(|_| switching.is_none()) {
+            return div().id(format!("react-chat-{}", session_id.0))
+                .relative().size_full().min_w_0().min_h_0().overflow_hidden()
+                .child(surface.clone()).into_any_element();
+        }
+        {
             let bootstrap_missing = self.sidebar_gxserver_bootstrap.is_none();
             let (title, message) = if let Some(progress) = switching {
                 (progress.title.as_str(), progress.email.as_str())
@@ -186,6 +180,20 @@ impl GhostexGpuiApp {
             .w_full()
             .overflow_hidden()
             .bg(gpui_session_chat_background_color())
+            /*
+            CDXC:FocusRouting 2026-09-17 WHY:
+            The native chat composer stops mouse-down propagation, so a bubble-phase listener here never sees a click on the composer itself.
+            Capture the click like the composited terminal body does: claim the pane and hand the keyboard off right away, before the composer or an answer field takes its own GPUI focus from the same click.
+            */
+            .capture_any_mouse_down(
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if event.button != MouseButton::Left {
+                        return;
+                    }
+                    this.focus_agents_pane(pane_id, cx);
+                    this.drain_pending_keyboard_handoff(window, cx);
+                }),
+            )
             .on_drag_move::<DraggedWorkspaceTab>(cx.listener(
                 move |this, event: &gpui::DragMoveEvent<DraggedWorkspaceTab>, _window, cx| {
                     this.update_workspace_pane_drag_feedback(event, pane_id, cx);

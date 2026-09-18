@@ -1,3 +1,4 @@
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 import {
   IconCheck,
   IconChevronDown,
@@ -219,7 +220,7 @@ export function GitActionRow({ git, groupId, projectId, vscode }: GitActionRowPr
       </div>
       {isMenuOpen && menuPosition
         ? createPortal(
-            <div
+            <AppMenuPanel
               className='git-action-menu vertical-scroll-fade-mask'
               ref={menuRef}
               role='menu'
@@ -289,7 +290,7 @@ export function GitActionRow({ git, groupId, projectId, vscode }: GitActionRowPr
                   <span className='git-action-menu-toggle-state'>{git.generateCommitBody ? 'On' : 'Off'}</span>
                 </button>
               </AppTooltip>
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}

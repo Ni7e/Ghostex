@@ -1,7 +1,7 @@
 import type { SidebarActiveSessionsSortMode } from '../../shared/session-grid-contract';
 import { moveProjectsWithWorktrees, type ProjectWorktreeOrderItem } from '../../shared/project-worktree-order';
 import type { SidebarProjectCollectionsState } from '../project-collections';
-import { SIDEBAR_REORDER_DISTANCE_PX } from '../sidebar-reorder-activation';
+import { SIDEBAR_REORDER_DISTANCE_PX } from '@/packages/shared/sidebar-gestures';
 import {
   canonicalizeSidebarSessionDropTarget,
   getClientPoint,
@@ -427,10 +427,20 @@ export function resolvePinnedSessionDropTargetFromPoint(
     return undefined;
   }
 
+  if (groupBounds && (point.y < groupBounds.top || point.y > groupBounds.bottom)) {
+    return undefined;
+  }
+
+  /**
+   * CDXC:Sidebar 2026-09-16 WHY:
+   * Pinned reorder resolves every row against the same pointer position; hit-testing the document separately for each pinned session made pointer movement pay that layout cost repeatedly.
+   * Share one hit-test result while retaining pointer-based disambiguation when a session appears in multiple sidebar sections.
+   */
+  const elementsAtPoint = document.elementsFromPoint(point.x, point.y);
   const targetSessionMetrics = pinnedSessionIds
     .filter((sessionId) => sessionId !== sourceData.sessionId)
     .flatMap((sessionId) => {
-      const element = getTargetSessionElement(sessionId, point);
+      const element = getTargetSessionElement(sessionId, point, elementsAtPoint);
       return element
         ? [
             {
@@ -1079,11 +1089,12 @@ export function getSidebarGroupDropBoundsElement(groupElement: HTMLElement): HTM
 
 export function getTargetSessionElement(
   sessionId: string,
-  point: ReturnType<typeof getClientPoint>
+  point: ReturnType<typeof getClientPoint>,
+  elementsAtPoint?: readonly Element[]
 ): HTMLElement | undefined {
   const selector = `[data-sidebar-session-id="${sessionId}"]`;
   if (point) {
-    for (const element of document.elementsFromPoint(point.x, point.y)) {
+    for (const element of elementsAtPoint ?? document.elementsFromPoint(point.x, point.y)) {
       const sessionElement = element.closest<HTMLElement>(selector);
       if (sessionElement && sessionElement.dataset.dragging !== 'true') {
         return sessionElement;

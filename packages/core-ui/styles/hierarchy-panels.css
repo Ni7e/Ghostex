@@ -24,15 +24,15 @@
 .sidebar-reference-layout[data-reference-sidebar='true'] {
   --sidebar-active-session-border: #ffffff;
   /*
-   * CDXC:Sessions 2026-03-09:
-   * User: selected-session chrome matches the dark chat composer
-   * (session-chat-composer-focus.css / chat.css). Collapsed groups, collapsed
-   * collections, collapsed section rows, and unselected Spaces that still own
-   * that session reuse the same fill, outline, and inner highlight.
+   * CDXC:Sessions 2026-09-16 DECISION:
+   * User: the selected session's dark fill must not be a rigid gray; it should be translucent so it takes on the sidebar's tinted background colors.
+   * Supersedes the 2026-03-09 decision that copied the chat composer's literal #141414 fill, which sat as a neutral gray block on tinted and custom-colored sidebars.
+   * The outline and inner highlight still match the composer, and collapsed groups, collections, section rows, and unselected Spaces that own the session reuse the same three values.
+   * Light mode keeps its opaque white fill in sidebar-light.css.
    */
-  --sidebar-composer-surface: #141414;
-  --sidebar-composer-outline: rgb(255 255 255 / 5%);
-  --sidebar-composer-highlight: rgb(255 255 255 / 3%);
+  --sidebar-composer-surface: color-mix(in srgb, var(--app-foreground) 12%, transparent);
+  --sidebar-composer-outline: rgb(255 255 255 / 8%);
+  --sidebar-composer-highlight: rgb(255 255 255 / 4%);
 }
 
 .reference-sidebar-section-heading {
@@ -500,34 +500,21 @@ section.project-collection[data-collapsed='true'][data-contains-active-session='
   margin-left: 10px;
 }
 
-/* Branched mode adds a short visual link from the group rail to each project. */
-.sidebar-reference-layout[data-project-group-style='branched']
-  .project-collection-projects
-  > .group[data-project-group='true']
-  .group-title-wrap::before {
-  background: var(--project-group-rail-color);
-  content: '';
-  height: 2px;
-  left: -43px;
+/* CDXC:Projects 2026-09-17 DECISION:
+ * User: expanded projects show the same right-facing chevron rotated down, shifted 2px left.
+ * The disclosure replaces the short branch marker beside the project icon.
+ */
+.project-disclosure-chevron {
+  color: #a6adb6;
+  left: -23px;
   pointer-events: none;
   position: absolute;
-  top: calc(50% - 1px);
-  width: 39px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
-/* Top-level projects keep the same branch marker without inventing a parent rail. */
-.sidebar-reference-layout[data-project-group-style='branched']
-  .reference-project-group-list
-  > .group[data-project-group='true']
-  .group-title-wrap::before {
-  background: color-mix(in srgb, var(--workspace-project-theme-color, var(--app-foreground)) 18%, transparent);
-  content: '';
-  height: 2px;
-  left: -21px;
-  pointer-events: none;
-  position: absolute;
-  top: calc(50% - 1px);
-  width: 13px;
+.project-disclosure-chevron[data-collapsed='false'] {
+  transform: translateY(-50%) rotate(90deg);
 }
 
 /* Non-reference contexts (Storybook grid stories, legacy layouts). */
@@ -582,12 +569,7 @@ section.project-collection[data-collapsed='true'][data-contains-active-session='
   --session-surface: color-mix(in srgb, var(--app-background) 90%, #000000 10%);
   --session-light-surface: color-mix(in srgb, var(--session-expanded-group-surface) 70%, var(--app-foreground) 30%);
   --session-hover-surface: color-mix(in srgb, var(--session-expanded-group-surface) 78%, var(--app-foreground) 22%);
-  /*
-   * CDXC:Sessions 2026-03-09:
-   * User: the selected session must use the chat composer surface, not a
-   * derived hierarchy tint. Dark composer fill is #141414
-   * (session-chat-composer-focus.css / chat.css).
-   */
+  /* The selected fill is --sidebar-composer-surface (translucent in dark mode, see the 2026-09-16 decision above). */
   --session-focused-surface: var(--sidebar-composer-surface);
   --session-visible-surface: color-mix(in srgb, var(--session-light-surface) 60%, #000000 40%);
   --session-visible-hover-overlay: color-mix(in srgb, var(--app-foreground) 8%, transparent);

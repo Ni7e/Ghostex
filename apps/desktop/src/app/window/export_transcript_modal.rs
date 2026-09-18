@@ -829,7 +829,7 @@ impl GpuiExportTranscriptModalWindow {
 }
 
 impl Render for GpuiExportTranscriptModalWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let names: Vec<String> = self.agents.iter().map(|agent| agent.name.clone()).collect();
         let menu = modal_select_menu(
@@ -843,6 +843,7 @@ impl Render for GpuiExportTranscriptModalWindow {
                 this.agent_select.close();
                 cx.notify();
             },
+            window,
             cx,
         );
         let content = vec![

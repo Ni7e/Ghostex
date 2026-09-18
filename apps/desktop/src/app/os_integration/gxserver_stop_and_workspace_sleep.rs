@@ -153,43 +153,24 @@ impl GhostexGpuiApp {
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
 
-    /*
-    CDXC:Sidebar 2026-08-02:
-    Report an observed pointer crossing of the sidebar's native frame into the
-    page. The sidebar CEF surface is a native sibling of GPUI chrome, Ghostty
-    terminal hosts, and the other CEF panes, so Chromium never sees the pointer
-    leave and can hold the last hovered row's `:hover` state indefinitely. The
-    page turns this into the shared `data-native-pointer-inside` contract that
-    the sidebar stylesheet already declares suppressors against.
-    */
     #[cfg(target_os = "macos")]
     pub(crate) fn dispatch_gpui_sidebar_pointer_inside(
         &mut self,
         inside: bool,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        let script = gpui_sidebar_native_pointer_inside_script(inside);
-        let wrote_flag = sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
-        /*
-        CDXC:Sidebar 2026-08-20:
-        The CSS flag can only neutralize hover-derived *styling*. A tooltip is
-        page state opened on pointer-enter and closed on pointer-leave, and the
-        leave never reaches the renderer when the pointer crosses into a native
-        sibling, so a session row's tooltip stayed on screen over a terminal
-        pane. Dismissing it needs page code, so it goes through the sidebar
-        bridge like context-menu dismissal does; if the bridge is not installed
-        the page cannot have an open tooltip either.
-        */
-        if !inside {
-            let dismissed = sidebar.update(cx, |surface, _| {
-                surface.execute_app_owned_script(GPUI_SIDEBAR_DISMISS_TOOLTIPS_SCRIPT)
-            });
-            return wrote_flag || dismissed;
+        if self.native_sidebar.pointer_inside != inside {
+            self.native_sidebar.pointer_inside = inside;
+            cx.notify();
         }
-        wrote_flag
+        if !inside {
+            self.native_sidebar.hovered_collection = None;
+            self.native_sidebar.hovered_group = None;
+            self.native_sidebar.hovered_session = None;
+            self.native_sidebar.hovered_section = None;
+            cx.notify();
+        }
+        true
     }
 
     /*
@@ -212,24 +193,15 @@ impl GhostexGpuiApp {
         })
     }
 
-    /*
-    CDXC:Sidebar 2026-08-02:
-    A mouse-down landed outside the sidebar's native frame, so any open sidebar
-    context menu must close. The page's own backdrop only covers the sidebar
-    document, and its window-blur dismissal never fires here: the sidebar
-    surface is mouse-focus passive, so clicking a terminal pane or a titlebar
-    button does not blur a browsing context that never held focus.
-    */
+    /// CDXC:Sidebar 2026-09-17 WHY:
+    /// Embedded browser panes receive clicks outside GPUI, so the AppKit observer dismisses the native sidebar menu through this callback.
     #[cfg(target_os = "macos")]
     pub(crate) fn dispatch_gpui_sidebar_dismiss_context_menus(
         &mut self,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let Some(sidebar) = self.sidebar.clone() else {
-            return false;
-        };
-        sidebar.update(cx, |surface, _| {
-            surface.execute_app_owned_script(GPUI_SIDEBAR_DISMISS_CONTEXT_MENUS_SCRIPT)
-        })
+        let open = self.native_sidebar.menu.take().is_some();
+        if open { cx.notify(); }
+        open
     }
 }

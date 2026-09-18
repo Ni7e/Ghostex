@@ -92,6 +92,17 @@ pub(crate) fn apply_session_state_update(
     identity_update_source: SessionIdentityUpdateSource,
 ) -> Result<(Map<String, Value>, Value), DomainStateError> {
     let session = require_session(repository, lifecycle)?;
+    if draft_agent_switch_in_progress(&lifecycle.project_id, &lifecycle.session_id) {
+        return Ok((
+            object_from_value(json!({
+                "changed": false,
+                "projection": project_session_title_projection(&session),
+                "reason": "draft-agent-switch-in-progress",
+                "session": session.clone(),
+            })),
+            session,
+        ));
+    }
     let project = require_project(repository, &lifecycle.project_id)?;
     let mut project_sessions = LazyProjectSessions::new(repository, &lifecycle.project_id);
     let observed_identity = align_observed_identity_with_launch_profile(
@@ -162,6 +173,47 @@ pub(crate) fn apply_session_state_update(
     }
     if identity_update_source == SessionIdentityUpdateSource::VerifiedRewind {
         insert_optional_from_params(&mut runtime_settings, params, "codexRewindProcessId");
+    }
+    // CDXC:AgentProviders 2026-09-16 WHY:
+    // Live identity adoption can replace the CLI without a Switch Agent flow, leaving the previous binary paired with the new family's resume grammar and conversation id.
+    // Clear its launch and account metadata together so account validation and automatic recovery cannot reuse the previous provider's login.
+    // SEE-ALSO: server/src/agents/resume_plan.rs, server/src/agents/switch_account.rs.
+    let family_changed = {
+        let previous = normalize_agent_id(current_identity.agent_id.as_deref());
+        let next = normalize_agent_id(identity.agent_id.as_deref());
+        previous.is_some() && next.is_some() && previous != next
+    };
+    let mut stale_launch_metadata_cleared = 0;
+    let mut launch_settings = object_field(&session, "launchSettings");
+    if family_changed {
+        for key in [
+            "agentCommand",
+            "accountId",
+            "accountName",
+            "accountColor",
+            "accountSlot",
+            "accountProvider",
+            "accountBaseCommand",
+            "accountCommand",
+            "accountSwitch",
+            "accountRecovery",
+            "accountRecoverySuppressed",
+            "accountPolicyOverride",
+            "accountPolicyDefault",
+        ] {
+            runtime_settings.remove(key);
+        }
+        for key in [
+            "acceptAllMode",
+            "agentCommand",
+            "agentLaunchPlan",
+            "agentResumePlan",
+            "icon",
+        ] {
+            if launch_settings.remove(key).is_some() {
+                stale_launch_metadata_cleared += 1;
+            }
+        }
     }
     if let Some(dropped_activity) = stored_runtime_settings
         .get("agentActivity")
@@ -248,7 +300,14 @@ pub(crate) fn apply_session_state_update(
         Value::Object(runtime_settings.clone()),
     );
     update.insert("title".to_string(), json!(title));
+    if stale_launch_metadata_cleared > 0 {
+        update.insert(
+            "launchSettings".to_string(),
+            Value::Object(launch_settings.clone()),
+        );
+    }
     let needs_update = update.get("title") != session.get("title")
+        || stale_launch_metadata_cleared > 0
         || next_agent != read_text_value(&session, "agentId")
         || (should_promote_agent && session.get("kind").and_then(Value::as_str) != Some("agent"))
         || runtime_settings.get("agentName")
@@ -1291,39 +1350,62 @@ pub(crate) fn align_observed_identity_with_launch_profile(
     identity
 }
 
+/// Infer the first known CLI from shell words, preserving quoted paths on every host.
+/// CDXC:AgentProviders 2026-09-16 WHY:
+/// Resume validation must recognize quoted Unix paths and Windows launchers, including account wrappers, or a stale command can evade the family check.
 pub(crate) fn infer_agent_id_from_command(command: &str) -> Option<String> {
     let command = command.to_ascii_lowercase();
-    for (agent, needle) in [
-        ("cursor", "cursor-agent"),
-        ("hermes-agent", "hermes"),
-        ("codebuddy", "codebuddy"),
-        ("antigravity", "agy"),
-        ("opencode", "opencode"),
-        ("rovodev", "rovodev"),
-        ("qoder", "qodercli"),
-        ("command-code", "commandcode"),
-        ("openclaude", "openclaude"),
-        ("mastra", "mastracode"),
-        ("devin", "devin"),
-        ("kimi", "kimi"),
-        ("claude", "claude"),
-        ("copilot", "copilot"),
-        ("gemini", "gemini"),
-        ("codex", "codex"),
-        ("zcode", "zcode"),
-        ("droid", "droid"),
-        ("grok", "grok"),
-        ("amp", "amp"),
-        ("pi", "pi"),
-    ] {
-        if command
-            .split(|char: char| {
-                char.is_whitespace() || matches!(char, ';' | '&' | '|' | '(' | ')' | '/')
-            })
-            .any(|token| token == needle)
-        {
-            return Some(agent.to_string());
+    let mut quote = None;
+    let tokens = command.split(|character: char| {
+        if quote == Some(character) {
+            quote = None;
+        } else if quote.is_none() {
+            if matches!(character, '\'' | '"') {
+                quote = Some(character);
+            } else {
+                return character.is_whitespace()
+                    || matches!(character, ';' | '&' | '|' | '(' | ')');
+            }
         }
+        false
+    });
+    for token in tokens {
+        let token = token.trim_matches(['\'', '"']);
+        if token.is_empty() || token.contains('=') || token.starts_with('-') {
+            continue;
+        }
+        let basename = token.rsplit(['/', '\\']).next().unwrap_or(token);
+        let executable = [".exe", ".cmd", ".bat", ".ps1"]
+            .iter()
+            .find_map(|suffix| basename.strip_suffix(suffix))
+            .unwrap_or(basename);
+        let agent = match executable {
+            "cursor-agent" => "cursor",
+            "hermes" => "hermes-agent",
+            "codebuddy" => "codebuddy",
+            "agy" => "antigravity",
+            "opencode" => "opencode",
+            "omp" => "omp",
+            "rovodev" => "rovodev",
+            "qodercli" => "qoder",
+            "commandcode" => "command-code",
+            "openclaude" => "openclaude",
+            "mastracode" => "mastra",
+            "devin" => "devin",
+            "kimi" => "kimi",
+            "kiro-cli" => "kiro",
+            "claude" | "cswap" => "claude",
+            "copilot" => "copilot",
+            "gemini" => "gemini",
+            "codex" | "xswap" => "codex",
+            "zcode" | "zcode-cli" => "zcode",
+            "droid" => "droid",
+            "grok" => "grok",
+            "amp" => "amp",
+            "pi" => "pi",
+            _ => continue,
+        };
+        return Some(agent.to_string());
     }
     None
 }

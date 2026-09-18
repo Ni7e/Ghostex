@@ -1,3 +1,9 @@
+import { canCollapseSessionChatComposer } from '@/packages/shared/session-chat-presentation/composer-scroll';
+import { composerSuggestions, completeComposerMention, composerNativeCommand } from '@/packages/shared/session-chat-presentation/composer-suggestions';
+import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS } from '@/packages/shared/session-chat-controller/composer-policy';
+import { deliverChatSubmission, editQueuedChatPrompt, restoreUndeliveredChatText } from '@/packages/shared/session-chat-controller/submission';
+import { nextFileReferenceIndex, insertChatReference } from '@/packages/shared/session-chat-presentation/references';
+import { classifyDraftHandoff } from '@/packages/shared/session-chat-controller/draft-handoff';
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { flushClientStorage } from '@/packages/client-storage';
 import { SessionChatAttachmentPreviews } from './session-chat-attachment-previews';
@@ -123,14 +129,11 @@ import {
   writeStoredSessionChatDraft,
 } from './session-chat-draft-storage';
 import {
-  filterSessionChatSlashCommands,
   sessionChatSlashQuery,
   type SessionChatSlashCommand,
 } from './session-chat-slash-commands';
 import {
   detectSessionChatComposerTrigger,
-  filterSessionChatFiles,
-  filterSessionChatSkills,
   linkedSessionChatSkillMention,
   sessionChatDisplaySkillDirectoryPath,
   sessionChatFileBasename,
@@ -186,6 +189,12 @@ export interface SessionChatComposerHandle {
   */
   flushDraft: () => void;
   focus: () => void;
+  /**
+   * Send the current draft as if Enter (or Option+Enter with `compactFirst`) was
+   * pressed inside the field. Returns false when this composer does not send on
+   * Enter, so a host key handler leaves the key alone.
+   */
+  sendDraft: (compactFirst?: boolean) => boolean;
   getDraft: () => string;
   handoffDraft: () => Promise<SessionChatDraftHandoff>;
   receiveDraftHandoff: (handoff: SessionChatDraftHandoff) => Promise<void>;
@@ -465,24 +474,11 @@ export interface SessionChatComposerProps {
   agentTasks?: SessionChatAgentTasks | null;
 }
 
-/** Numbered file references include both attachment labels and descriptive picker labels. */
-function nextFileReferenceIndex(text: string): number {
-  let highest = 0;
-  for (const match of text.matchAll(/\[(?:\\.|[^\]\\\r\n])* #(\d+)\]\(/g)) {
-    const index = Number.parseInt(match[1] ?? '', 10);
-    if (Number.isFinite(index)) {
-      highest = Math.max(highest, index);
-    }
-  }
-  return highest + 1;
-}
-
 /** Mentions queue and the two composer pickers so they are discoverable without docs. */
 const DESKTOP_SESSION_CHAT_PLACEHOLDER =
   'Press Enter to send a message and Tab to Queue.\nUse @ to mention a file and $ for using skills.';
 const MOBILE_SESSION_CHAT_PLACEHOLDER = 'Tap ↑ to send or hold it to queue; use @ for files and $ for skills.';
 
-const SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS = 2_000;
 
 /**
  * A push that failed is retried on this delay, this many times. Without a
@@ -790,36 +786,14 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       setPastedImages((current) => current.filter((image) => referencedHrefs.has(image.path)));
     }, [draft]);
 
-    const slashQuery = sessionChatSlashQuery(draft);
-    const slashMatches = useMemo(
-      () =>
-        slashQuery !== null && !slashDismissed && slashCommands !== undefined
-          ? filterSessionChatSlashCommands(slashCommands, slashQuery)
-          : [],
-      [slashCommands, slashDismissed, slashQuery]
-    );
-    const slashOpen = slashMatches.length > 0;
+    const { slashQuery, slashMatches, slashOpen, trigger, skillQuery, skillMatches, skillPickerActive,
+      skillOpen, fileQuery, fileMatches, filePickerActive, fileOpen } = useMemo(() => composerSuggestions({
+      draft, caret: caret ?? draft.length, slashCommands, skills, files, skillsLoading, skillsError,
+      canRequestSkills: !!onRequestSkills, filesLoading, slashDismissed, skillDismissed, fileDismissed,
+    }), [draft, caret, slashCommands, skills, files, skillsLoading, skillsError, onRequestSkills,
+      filesLoading, slashDismissed, skillDismissed, fileDismissed]);
     const highlightedIndex = Math.min(slashIndex, Math.max(slashMatches.length - 1, 0));
-    const trigger = detectSessionChatComposerTrigger(draft, caret ?? draft.length);
-    const skillQuery = trigger?.kind === 'skill' ? trigger.query : null;
-    const skillMatches = useMemo(
-      () => (skillQuery !== null && !skillDismissed ? filterSessionChatSkills(skills ?? [], skillQuery) : []),
-      [skillDismissed, skillQuery, skills]
-    );
-    const skillPickerActive = skillQuery !== null && !skillDismissed && !slashOpen;
-    const skillOpen =
-      skillPickerActive &&
-      (skillMatches.length > 0 || skillsLoading || !!skillsError || (skills?.length === 0 && !!onRequestSkills));
     const highlightedSkillIndex = Math.min(skillIndex, Math.max(skillMatches.length - 1, 0));
-    const fileQuery = trigger?.kind === 'path' ? trigger.query : null;
-    const fileMatches = useMemo(
-      () => (fileQuery !== null && !fileDismissed ? filterSessionChatFiles(files ?? [], fileQuery) : []),
-      [fileDismissed, fileQuery, files]
-    );
-    const filePickerActive = fileQuery !== null && !fileDismissed && !slashOpen;
-    // The picker stays up while the host is still listing so "@" never looks
-    // dead on the first use of a session, when nothing is cached yet.
-    const fileOpen = filePickerActive && (fileMatches.length > 0 || (filesLoading && !files));
     const highlightedFileIndex = Math.min(fileIndex, Math.max(fileMatches.length - 1, 0));
     const {
       collapsed,
@@ -828,16 +802,15 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     } = useSessionChatComposerCollapse({
       onCollapsedChange: onScrollCollapsedChange,
       enabled: scrollCollapseEnabled,
-      collapseEligible:
-        !maximized &&
-        !sessionNoteActive &&
-        !slashOpen &&
-        !skillOpen &&
-        !fileOpen &&
-        !sendError &&
-        pastedImages.length === 0 &&
-        pendingImagePastes === 0 &&
-        (queue?.prompts.length ?? 0) === 0,
+      collapseEligible: canCollapseSessionChatComposer({
+        maximized,
+        noteOpen: sessionNoteActive,
+        suggestionsOpen: slashOpen || skillOpen || fileOpen,
+        hasError: !!sendError,
+        attachmentCount: pastedImages.length,
+        pendingAttachments: pendingImagePastes,
+        queuedPrompts: queue?.prompts.length ?? 0,
+      }),
       transcriptRef,
     });
 
@@ -1052,6 +1025,13 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         setSendError(null);
         return true;
       },
+      sendDraft: (compactFirst = false): boolean => {
+        if (!sendOnEnter) {
+          return false;
+        }
+        send(undefined, compactFirst);
+        return true;
+      },
       flushDraft: (): void => {
         traceDraft('hostFlush');
         /*
@@ -1160,20 +1140,12 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
             version: handoff.draftVersion,
             updatedAt: Date.now(),
           });
-        if (
-          handoff.draftVersion &&
-          stored?.version &&
-          stored.version.draftId === handoff.draftVersion.draftId &&
-          stored &&
-          !stored.parked &&
-          !parkedDraftRef.current &&
-          current === stored.text &&
-          stored.version!.revision >= handoff.draftVersion!.revision
-        ) {
+        const disposition = classifyDraftHandoff({ content: handoff.content, version: handoff.draftVersion, current, stored, parked: parkedDraftRef.current });
+        if (disposition === 'current') {
           await flushDraftSaves(sessionKey);
           return;
         }
-        if (current !== '' && current !== handoff.content) {
+        if (disposition === 'conflict') {
           // The late transfer remains independently recoverable; newer typing owns this editor.
           setIncomingDraft({
             content: handoff.content,
@@ -1307,7 +1279,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       const current = draftSyncUnmountedRef.current
         ? readStoredSessionChatDraft(sessionKey)
         : (getInputApi()?.getValue() ?? draftRef.current);
-      const restored = current === '' || current === text ? text : `${text}\n${current}`;
+      const restored = restoreUndeliveredChatText(text, current);
       persistComposerDraft(restored);
       if (draftSyncUnmountedRef.current) {
         return;
@@ -1335,12 +1307,10 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         reportSendBlocked();
         return;
       }
-      const nativeCommand = slashCommands?.find(
-        (command) => command.insertText !== undefined && text.trim() === `/${command.name}`
-      );
-      if (!compactFirst && nativeCommand?.insertText !== undefined) {
-        updateDraft(nativeCommand.insertText, nativeCommand.insertText.length);
-        getInputApi()?.applyValue(nativeCommand.insertText, nativeCommand.insertText.length);
+      const nativeCommand = composerNativeCommand(slashCommands, text);
+      if (!compactFirst && nativeCommand !== undefined) {
+        updateDraft(nativeCommand, nativeCommand.length);
+        getInputApi()?.applyValue(nativeCommand, nativeCommand.length);
         getInputApi()?.focus();
         return;
       }
@@ -1368,42 +1338,23 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
 
       let sendPhase = 'saveDraft';
       const sendStartedAtMs = Date.now();
-      const sendRequest = (async () => {
-        /*
-        CDXC:Drafts 2026-09-06 DECISION:
-        User: preserve unsent messages and retire sent drafts by identity and revision, including older copies containing deleted text.
-        Await the exact submitted revision before delivery; subsequent edits use a new identity and survive the receipt for this send.
-        */
-        if (draftSync?.canSync) {
-          traceDraft('sendSaveBegin', { sent: sessionChatDraftFingerprint(text) });
-          await draftSync.push(text, submittedDraft.version);
-          traceDraft('sendSaveAcknowledged', { sent: sessionChatDraftFingerprint(text) });
-        }
-        /** CDXC:SessionChat 2026-09-16 WHY:
-         * Escape can reach gxserver while this send is still saving its draft, before there is a terminal send to cancel.
-         * Cancel the pending submission here so it cannot start after the interrupt and consume the recovered draft.
-         */
-        const checkCancelled = () => {
-          if (attempt.cancelled) {
-            throw new GxserverRpcError(
-              'sendCancelled',
-              'The session chat send was cancelled.',
-              '/api/sendSessionChatMessage'
-            );
-          }
-        };
-        checkCancelled();
-        sendPhase = 'deliverMessage';
-        traceDraft('deliveryBegin', { sent: sessionChatDraftFingerprint(text) });
-        if (compactQueue) {
-          await onSend('/compact');
-          checkCancelled();
-          sendPhase = 'queueAfterCompact';
-          await compactQueue.queuePrompt(text, submittedDraft.version);
-        } else {
-          await onSend(text, submittedDraft.version);
-        }
-      })();
+      const sendRequest = deliverChatSubmission({
+        text,
+        version: submittedDraft.version,
+        mode: compactQueue ? 'compact' : 'send',
+        push: draftSync?.canSync ? async (value, version) => {
+          traceDraft('sendSaveBegin', { sent: sessionChatDraftFingerprint(value) });
+          await draftSync.push(value, version);
+          traceDraft('sendSaveAcknowledged', { sent: sessionChatDraftFingerprint(value) });
+        } : undefined,
+        send: onSend,
+        queue: compactQueue?.queuePrompt,
+        cancelled: () => attempt.cancelled,
+        phase: (phase) => {
+          sendPhase = phase;
+          if (phase === 'deliverMessage') traceDraft('deliveryBegin', { sent: sessionChatDraftFingerprint(text) });
+        },
+      });
       /*
       CDXC:SessionChat 2026-09-10 WHY:
       Local draft cleanup can throw after delivery was acknowledged. Only rejection of the send itself may restore the prompt; treating cleanup as a failed send offers an already-delivered message for resending.
@@ -1531,10 +1482,11 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       pendingDraftTransfersRef.current += 1;
       void (async () => {
         try {
-          if (draftSync?.canSync) {
-            await draftSync.push(stored, submittedDraft.version);
-          }
-          await controller.queuePrompt(text, submittedDraft.version);
+          await deliverChatSubmission({
+            text: stored, version: submittedDraft.version, mode: 'queue',
+            push: draftSync?.canSync ? draftSync.push : undefined,
+            send: onSend, queue: controller.queuePrompt,
+          });
           try {
             recordSentSessionChatMessage(text, sessionKey);
             clearStoredSessionChatDraftIfUnchanged(sessionKey, submittedDraft);
@@ -1571,12 +1523,13 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
       }
       pendingComposerOperationsRef.current += 1;
       void (async () => {
-        const removed = await controller.removePrompt(prompt.id);
-        const current = getInputApi()?.getValue() ?? draftRef.current;
-        if (current.trim() !== '') {
-          await controller.queuePrompt(current);
-        }
-        loadComposerText(removed?.text ?? prompt.text);
+        const text = await editQueuedChatPrompt({
+          original: prompt.text,
+          remove: () => controller.removePrompt(prompt.id),
+          readCurrent: () => getInputApi()?.getValue() ?? draftRef.current,
+          queue: controller.queuePrompt,
+        });
+        loadComposerText(text);
       })()
         .catch(() => {
           setSendError('The queued prompt could not be edited.');
@@ -1827,12 +1780,10 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
         end: current.length,
         start: current.length,
       };
-      const needsLeadingSpace = start > 0 && !/\s/.test(current[start - 1] ?? '');
-      const inserted = `${needsLeadingSpace ? ' ' : ''}${reference} `;
-      const next = `${current.slice(0, start)}${inserted}${current.slice(end)}`;
-      updateDraft(next, start + inserted.length);
+      const { text: next, caret } = insertChatReference(current, reference, start, end);
+      updateDraft(next, caret);
       api?.focus();
-      api?.applyValue(next, start + inserted.length);
+      api?.applyValue(next, caret);
     };
 
     const addImagePreview = useCallback((path: string, dataUrl: string): void => {
@@ -2206,11 +2157,9 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
 
     /** Replaces the token under the caret and leaves the caret just past it. */
     const completeMention = (replacement: string): void => {
-      if (!trigger) {
-        return;
-      }
-      const next = `${draft.slice(0, trigger.start)}${replacement}${draft.slice(trigger.end)}`;
-      const nextCaret = trigger.start + replacement.length;
+      const completion = completeComposerMention(draft, caret ?? draft.length, replacement);
+      if (!completion) return;
+      const { content: next, caret: nextCaret } = completion;
       updateDraft(next, nextCaret);
       const api = getInputApi();
       api?.focus();
@@ -2947,6 +2896,14 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                     maximized={maximized}
                     onToggleMaximized={() => {
                       setMaximizedAndFocus(!maximized);
+                    }}
+                    onMenuClosed={() => {
+                      // The menu hands focus back to its trigger; a trigger that
+                      // keeps it would turn the next Enter into a reopen.
+                      const active = document.activeElement;
+                      if (active instanceof HTMLElement && active.closest('.ghostex-chat-composer-toolbar')) {
+                        getInputApi()?.focus();
+                      }
                     }}
                     sessionNoteActive={sessionNoteActive}
                     sessionNoteHasText={sessionNoteHasText}

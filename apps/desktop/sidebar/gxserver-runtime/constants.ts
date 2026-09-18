@@ -130,7 +130,7 @@ export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_VERSION = 
 export const GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_RESPONSE_MESSAGE_TYPE =
   'ghostex.gpui.sidebar.projectBoardConversationResponse';
 export const GPUI_QUICK_AUTOMATIONS_PROJECT_ID = 'quick-automations';
-export const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE = 'Automations Overview';
+export const GPUI_QUICK_AUTOMATIONS_DISPLAY_TITLE = 'All Automations';
 export const GPUI_QUICK_AUTOMATIONS_SIDEBAR_SESSION_ID = '__quick-automations__';
 export const GPUI_AGENT_PROMPT_READY_DELAY_MS = 4_000;
 export const GPUI_AGENT_PROMPT_STEP_DELAY_MS = 1_000;

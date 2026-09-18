@@ -483,7 +483,7 @@ not.
 export interface SessionChatTerminalNoticeAction {
   id: string;
   label: string;
-  kind: 'switchToTerminal' | 'sendKeys';
+  kind: 'switchToTerminal' | 'sendKeys' | 'recoverCodexConversation';
   /** Raw bytes for `sendKeys`, written verbatim through answerSessionChatPrompt. */
   send?: string;
 }
@@ -514,7 +514,13 @@ export interface SessionChatTerminalNoticeChoice {
   selected: boolean;
 }
 
+export interface SessionChatConversationLock {
+  conversationId: string | null;
+  sessions: { projectId: string; sessionId: string }[];
+}
+
 export interface SessionChatTerminalNotice {
+  conversationLock?: SessionChatConversationLock;
   /** Live Codex-owned menu or form, validated again before each input. */
   dialog?: SessionChatTerminalDialog;
   /**
@@ -782,6 +788,8 @@ export interface SessionChatSubagentInfo {
 }
 
 export interface GxserverReadSessionChatResult {
+  /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
+  asyncQuestionsSince?: number | null;
   /** Present only for a child transcript read, independent of the main chat stream. */
   subagent?: SessionChatSubagentInfo;
   messages: SessionChatMessage[];
@@ -1048,7 +1056,15 @@ export interface GxserverReadSessionChatImageResult {
 export interface GxserverAnswerSessionChatPromptParams {
   projectId: string;
   sessionId: string;
-  kind: 'question' | 'approval' | 'terminalChoice' | 'terminalDialog' | 'asyncQuestion' | 'dismissAsyncQuestion';
+  kind:
+    | 'question'
+    | 'approval'
+    | 'terminalChoice'
+    | 'terminalDialog'
+    | 'asyncQuestion'
+    | 'dismissAsyncQuestion'
+    | 'recoverCodexConversation';
+  conversationLock?: SessionChatConversationLock;
   questionId?: string;
   dialogId?: string;
   dialogAction?: string;
@@ -1150,6 +1166,8 @@ interface SessionChatFrameBase {
 }
 
 export interface GxserverSessionChatSnapshotEvent extends SessionChatFrameBase {
+  /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
+  asyncQuestionsSince?: number | null;
   type: 'sessionChatSnapshot';
   messages: SessionChatMessage[];
   lifecycle?: SessionChatTurnLifecycle;
@@ -1232,6 +1250,8 @@ export interface GxserverSessionChatAppendedEvent extends SessionChatFrameBase {
 }
 
 export interface GxserverSessionChatReplacedEvent extends SessionChatFrameBase {
+  /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
+  asyncQuestionsSince?: number | null;
   type: 'sessionChatReplaced';
   messages: SessionChatMessage[];
   lifecycle?: SessionChatTurnLifecycle;
@@ -1292,6 +1312,8 @@ export interface GxserverSessionChatReplacedEvent extends SessionChatFrameBase {
 }
 
 export interface GxserverSessionChatStateEvent extends SessionChatFrameBase {
+  /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
+  asyncQuestionsSince?: number | null;
   type: 'sessionChatState';
   status: SessionChatStatus;
   lifecycle?: SessionChatTurnLifecycle;

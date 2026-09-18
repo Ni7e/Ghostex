@@ -74,6 +74,7 @@ How to use this file:
 
 #### Chat
 
+- **Use GPUI chat** `sessionChatUseGpui` (boolean, default false): Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.
 - **Default view for compatible agents** `preferredAgentInterface` (one of terminal | chat; default chat): Automatically switch to chat as soon as Ghostex detects that an agent session supports it. Option labels: terminal = Terminal, chat = Chat.
 - **Chat font family** `sessionChatFontFamily` (text, default (empty)): Use any installed font in chat messages and the prompt composer.
 - **Default chat zoom (%)** `sessionChatZoomPercent` (number 70 to 200 step 5 default 100): Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.
@@ -127,7 +128,7 @@ How to use this file:
 - **Show session id in terminal panes** `showSessionIdInTerminalPanes` (boolean, default false) [advanced]: Show the provider session id in the top-right corner of terminal panes.
 - **Show notification on terminal bell** `showNotificationOnTerminalBell` (boolean, default false): Treat terminal bell events as session attention.
 - **⌃G prompt editor** `promptEditorBackend` (one of monaco | inherit; default monaco) [advanced]: Choose which editor ⌃G uses when a terminal prompt asks for $EDITOR. Option labels: monaco = Ghostex editor, inherit = Use default from this machine.
-- **Windows Environment** `windowsTerminalBackend` (one of powershell | wsl; default powershell): Windows only. PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex. Option labels: powershell = PowerShell (native Windows), wsl = WSL (Linux).
+- **Windows Environment** `windowsTerminalBackend` (one of powershell | wsl; default powershell): Windows only. PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex. Option labels: powershell = PowerShell (Native), wsl = WSL (Linux).
 - **WSL distribution** `windowsWslDistribution` (text, default (empty)): Windows only. Exact distro name from `wsl.exe --list --verbose`; blank uses automatic WSL2 discovery.
 #### Terminal Behavior
 

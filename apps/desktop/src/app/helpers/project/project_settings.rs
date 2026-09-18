@@ -558,7 +558,7 @@ pub(crate) fn automate_workarea_runtime_url_from_project_snapshot(
     Automate mirrors macOS `createProjectAutomateEditorUrl`: use the bundled Kanban/tasks CEF page, the explicit project identity params, the automate-mode project editor id, and `surface=automations`. Projectless contexts, missing project path, or missing automateBoardId must stay on the placeholder instead of synthesizing an Automate URL.
 
     CDXC:Automations 2026-07-26:
-    Project-scoped Automate is no longer an experimental GPUI feature. Mark that first-party workarea explicitly so the shared page does not apply the Show Beta Features content gate or experimental label. Quick Automations Overview keeps its existing experimental startup seed.
+    Project-scoped Automate is no longer an experimental GPUI feature. Mark that first-party workarea explicitly so the shared page does not apply the Show Beta Features content gate. All Automations keeps its existing experimental startup seed.
     */
     if !snapshot.feature_availability.automate {
         return None;

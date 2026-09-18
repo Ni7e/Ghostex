@@ -119,6 +119,11 @@ export function useScrollGlowState(scrollContainerRef: RefObject<HTMLElement | n
       }
     };
 
+    /**
+     * CDXC:Sidebar 2026-09-16 WHY:
+     * Watching descendant attributes made every drag-preview update schedule a scrollHeight read and force layout; profiling a 3.4-second session drag spent 560ms in that read alone.
+     * ResizeObserver tracks content size, including animated expansion; mutations only need to register or remove direct content children, not remeasure drag styles or status text.
+     */
     const mutationObserver = new MutationObserver(() => {
       syncObservedContentChildren();
       scheduleScrollGlowUpdate();
@@ -127,10 +132,7 @@ export function useScrollGlowState(scrollContainerRef: RefObject<HTMLElement | n
     resizeObserver.observe(element);
     syncObservedContentChildren();
     mutationObserver.observe(element, {
-      attributes: true,
       childList: true,
-      characterData: true,
-      subtree: true,
     });
     window.addEventListener('resize', scheduleScrollGlowUpdate);
     scheduleScrollGlowUpdate();

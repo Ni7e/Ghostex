@@ -1,3 +1,4 @@
+import { ChatTransfers } from '@/packages/shared/session-chat-controller/transfers';
 import type { PendingDraft } from '@/packages/core-ui/chat/session-chat-draft-outbox';
 import { GXSERVER_PROTOCOL_VERSION } from '@/packages/shared/gxserver-protocol';
 import { mergeSessionChatMessagesWith } from '@/packages/core-ui/chat/session-chat-merge';
@@ -103,14 +104,8 @@ export function retainSessionChatTransport(
     }
     pending.clear();
   };
-  const transfers = new Map<
-    string,
-    { parts: string[]; total: number; length: number; timer: ReturnType<typeof setTimeout> }
-  >();
-  const clearTransfers = (): void => {
-    for (const transfer of transfers.values()) clearTimeout(transfer.timer);
-    transfers.clear();
-  };
+  const transfers = new ChatTransfers((reason) => { rejectPending(reason); recoverStream(); });
+  const clearTransfers = (): void => transfers.clear();
   const recoverStream = (): void => {
     if (recovering || disposed || !listeners.size) return;
     recovering = true;
@@ -156,59 +151,8 @@ export function retainSessionChatTransport(
   const receive = (message: Message): void => {
     if (disposed) return;
     if (message.kind === 'chunk') {
-      const { transferId, index, total, data } = message;
-      if (
-        !transferId ||
-        !Number.isInteger(index) ||
-        !Number.isInteger(total) ||
-        total! < 1 ||
-        total! > 683 ||
-        typeof data !== 'string' ||
-        data.length > 96 * 1024
-      ) {
-        rejectPending('Invalid shared chat transfer.');
-        clearTransfers();
-        recoverStream();
-        return;
-      }
-      let transfer = transfers.get(transferId);
-      if (!transfer && index === 0 && transfers.size < 1) {
-        transfer = {
-          parts: [],
-          total: total!,
-          length: 0,
-          timer: setTimeout(() => {
-            transfers.delete(transferId);
-            rejectPending('The shared chat transfer timed out.');
-            recoverStream();
-          }, 30_000),
-        };
-        transfers.set(transferId, transfer);
-      }
-      if (!transfer || transfer.total !== total || transfer.parts.length !== index) {
-        rejectPending('The shared chat transfer was interrupted.');
-        clearTransfers();
-        recoverStream();
-        return;
-      }
-      transfer.length += data.length;
-      if (transfer.length > 64 * 1024 * 1024) {
-        rejectPending('The shared chat transfer is too large.');
-        clearTransfers();
-        recoverStream();
-        return;
-      }
-      transfer.parts.push(data);
-      if (transfer.parts.length === transfer.total) {
-        clearTimeout(transfer.timer);
-        transfers.delete(transferId);
-        try {
-          receive(JSON.parse(transfer.parts.join('')) as Message);
-        } catch {
-          rejectPending('Invalid shared chat transfer.');
-          recoverStream();
-        }
-      }
+      const assembled = transfers.accept(message);
+      if (assembled) receive(assembled as Message);
       return;
     }
     if (message.kind === 'reset') {

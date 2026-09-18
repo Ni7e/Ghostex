@@ -54,7 +54,22 @@ import {
   type ReactNode,
 } from 'react';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
+import markdownVisual from '@/packages/shared/session-chat-presentation/markdown-visual.json';
 import remarkGfm from 'remark-gfm';
+
+/** CDXC:SessionChat 2026-09-17 SEE-ALSO: Native Markdown consumes these same typography and inline code metrics in native_chat/markdown_style.rs. */
+const markdownMetrics = {
+  '--chat-paragraph-gap': `${markdownVisual.paragraphGap / 16}rem`,
+  '--chat-heading-line-height': markdownVisual.headingLineHeight,
+  ...Object.fromEntries(
+    markdownVisual.headingFontSizes.map((size, index) => [`--chat-heading-${index + 1}-size`, `${size / 16}rem`])
+  ),
+  '--chat-inline-code-size': `${markdownVisual.inlineCode.fontScale}em`,
+  '--chat-inline-code-padding-x': `${markdownVisual.inlineCode.paddingX / 16}rem`,
+  '--chat-inline-code-padding-y': `${markdownVisual.inlineCode.paddingY / 16}rem`,
+  '--chat-inline-code-border-width': `${markdownVisual.inlineCode.borderWidth / 16}rem`,
+  '--chat-inline-code-radius': `${markdownVisual.inlineCode.radius / 16}rem`,
+} as CSSProperties;
 import { MermaidDiagram } from '../mermaid/mermaid-diagram';
 import { AppModalShell, AppModalTitle } from '../app-modal-shell';
 import { openAppModal } from '../app-modal-host-bridge';
@@ -1060,7 +1075,7 @@ export function SessionChatMarkdown({
     <SessionChatInteractionSubscope id={interactionKey}>
       <SessionChatMarkdownStreamingContext value={isStreaming}>
         <SessionChatMarkdownSourceContext value={source}>
-          <div className='ghostex-chat-markdown'>
+          <div className='ghostex-chat-markdown' style={markdownMetrics}>
             <ReactMarkdown
               components={components}
               rehypePlugins={REHYPE_PLUGINS}

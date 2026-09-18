@@ -2091,7 +2091,7 @@ impl TerminalView {
             self.settings.scrollbar_visible && self.scrollbar_visible,
             self.frame.as_ref()?.scrollbar,
             self.terminal_bounds?,
-            rgb_to_hsla(self.frame.as_ref()?.foreground),
+            self.settings.light_theme,
         )
     }
 
@@ -2425,7 +2425,7 @@ impl TerminalView {
                 self.settings.scrollbar_visible && self.scrollbar_visible,
                 frame.scrollbar,
                 bounds,
-                rgb_to_hsla(frame.foreground),
+                self.settings.light_theme,
             ),
         }
     }
@@ -4302,7 +4302,7 @@ fn layout_scrollbar(
     visible: bool,
     scrollbar: VtScrollbar,
     bounds: Bounds<Pixels>,
-    mut foreground: Hsla,
+    light_theme: bool,
 ) -> Option<ScrollbarLayout> {
     if !visible || scrollbar.total <= scrollbar.len || bounds.size.height <= px(0.) {
         return None;
@@ -4326,11 +4326,12 @@ fn layout_scrollbar(
     let knob_y = slot.origin.y + (slot_height - knob_height) * offset_fraction;
     let knob = Bounds::new(point(slot.origin.x, knob_y), size(thickness, knob_height));
 
-    foreground.a = 0.28;
+    // CDXC:DesignSystem 2026-09-16 SEE-ALSO:
+    // Exact app scrollbar colors are shared with packages/components/ui/scrollbar-theme.css.
     Some(ScrollbarLayout {
         slot,
         knob,
-        knob_color: foreground,
+        knob_color: gpui::rgb(if light_theme { 0xbcbcbd } else { 0x424346 }).into(),
     })
 }
 

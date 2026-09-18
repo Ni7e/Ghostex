@@ -1,12 +1,13 @@
 {
   "name": "ghostex",
-  "version": "9.7.0",
+  "version": "9.8.5",
   "private": true,
   "description": "Ghostex cross-platform GPUI workarea and sessions UI.",
   "type": "module",
   "packageManager": "bun@1.4.0",
   "scripts": {
     "start": "bun tooling/start-gpui.mjs",
+    "chat:lab": "bun tooling/chat-preview.mjs",
     "start:isolated": "bun tooling/start-gpui.mjs --isolated",
     "gx:isolated": "bun tooling/isolated-gpui.mjs",
     "start:web": "bun run web:build && cd server && cargo run --quiet --bin ghostex -- web --dist-dir ../apps/web/dist",
@@ -41,6 +42,8 @@
     "gxserver:remote-linux:arm64": "node server/package-remote-linux.mjs --arch arm64",
     "history": "cargo run --quiet --manifest-path apps/history-cli/Cargo.toml --",
     "history:list": "cargo run --quiet --manifest-path apps/history-cli/Cargo.toml -- --list",
+    "debug:sessions": "bun apps/session-tui/src/main.ts",
+    "debug:sessions:build": "bun apps/session-tui/build.ts",
     "build:sidebar-css": "tailwindcss -i packages/core-ui/styles/shadcn.css -o packages/core-ui/styles/shadcn.generated.css --minify",
     "build:mobile-chat": "node tooling/build-mobile-chat.mjs",
     "build:mobile-find": "node tooling/build-mobile-find.mjs",

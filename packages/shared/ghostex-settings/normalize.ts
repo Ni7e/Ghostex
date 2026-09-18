@@ -629,6 +629,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     sidebarTheme: clampSidebarThemeSetting(readString(source, 'sidebarTheme', DEFAULT_ghostex_SETTINGS.sidebarTheme)),
     sessionChatTheme: normalizeSessionChatTheme(source.sessionChatTheme),
+    sessionChatUseGpui: readBoolean(source, 'sessionChatUseGpui', DEFAULT_ghostex_SETTINGS.sessionChatUseGpui),
     sessionChatFontFamily: readString(
       source,
       'sessionChatFontFamily',

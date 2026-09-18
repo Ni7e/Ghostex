@@ -1018,7 +1018,8 @@ pub(crate) fn browser_agentation_feedback_injection_script() -> String {
     /*
     CDXC:Browser 2026-09-16 DECISION:
     User: Annotate must land in the frame that owns the page content. Agentation picks elements with elementFromPoint on its own document, so a toolbar mounted in the Storybook manager could only select the sidebar and header while the story sat in the preview iframe. The script therefore runs itself, via Function.prototype.toString, inside the largest same-origin iframe that covers at least a third of the viewport, toggles whichever realm already hosts it, and stays in the host page when there is no such frame or the frame's document cannot run an injected script. Supersedes the 2026-06-23 main-frame-only injection. Keep the script bounded to pinned module URLs, auto-start feedback mode, and avoid persistent logs, console page metadata, raw URLs, titles, page content, cookies, tokens, paths, command text, terminal content, or JS error payloads.
-    SEE-ALSO: packages/client-storage/catalog.ts (agentationToolbar, agentationAnnotations).
+    User: "i want clearing when i click copy to be enabled by default in agentation". Agentation's "Clear on copy/send" setting is turned on once per origin through its stored settings; a user who turns it off afterwards is not overridden.
+    SEE-ALSO: packages/client-storage/catalog.ts (agentationToolbar, agentationAnnotations), apps/desktop/views/manage/preview/html-viewer.tsx (same default for Docs HTML files), tooling/client-storage/check.mjs (externalStoreScripts).
     */
     const TEMPLATE: &str = r##"
 (function() {
@@ -1030,6 +1031,9 @@ pub(crate) fn browser_agentation_feedback_injection_script() -> String {
     const stateKey = '__GHOSTEX_AGENTATION__';
     const rootId = 'ghostex-agentation-root';
     const directionStyleId = 'ghostex-agentation-direction-style';
+    const settingsKey = 'feedback-toolbar-settings';
+    const settingsStampKey = 'ghostexDefaults';
+    const settingsStamp = 1;
     const existing = window[stateKey];
     if (existing && typeof existing.unmount === 'function') {
       existing.unmount();
@@ -1144,6 +1148,25 @@ pub(crate) fn browser_agentation_feedback_injection_script() -> String {
 
       state.container = container;
       state.directionStyle = directionStyle;
+      // Agentation reads its settings from this key once, on mount, and merges
+      // them over its own defaults; it exposes no prop for them. Ghostex turns
+      // "Clear on copy/send" on once per origin and keeps the stamp inside the
+      // stored object, which Agentation preserves, so a later manual toggle
+      // stays in force.
+      let settings = null;
+      try {
+        settings = JSON.parse(localStorage.getItem(settingsKey) || 'null');
+      } catch (_) {
+        settings = null;
+      }
+      if (!settings || typeof settings !== 'object') {
+        settings = {};
+      }
+      if (settings[settingsStampKey] !== settingsStamp) {
+        settings.autoClearAfterCopy = true;
+        settings[settingsStampKey] = settingsStamp;
+        localStorage.setItem(settingsKey, JSON.stringify(settings));
+      }
       state.root = ReactDOMClient.createRoot(container);
       state.root.render(React.createElement(Agentation));
       scheduleAutoActivate();

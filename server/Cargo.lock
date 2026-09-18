@@ -480,6 +480,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostex-agent-sync"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "ghostex-docs"
 version = "0.1.0"
 dependencies = [
@@ -519,6 +528,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "futures-util",
+ "ghostex-agent-sync",
  "ghostex-docs",
  "ghostex-editor-client",
  "ghostex-find",

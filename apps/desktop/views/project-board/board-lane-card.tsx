@@ -1,3 +1,4 @@
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 import {
   IconCircleMinus,
   IconExclamationCircle,
@@ -444,7 +445,7 @@ export function ProjectBoardTicketContextMenu({
         }}
         type='button'
       />
-      <div
+      <AppMenuPanel
         className='fixed z-[1200] flex min-w-44 flex-col gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-xl'
         onClick={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.preventDefault()}
@@ -463,7 +464,7 @@ export function ProjectBoardTicketContextMenu({
           {primaryActionLabel}
         </button>
         <button
-          className='flex h-8 items-center gap-2 rounded-md border-0 bg-transparent px-2.5 text-left text-[13px] font-normal text-red-400/90 outline-none hover:bg-red-400/10 disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:text-red-400/90'
+          data-variant='destructive'
           disabled={deleting}
           onClick={onDelete}
           role='menuitem'
@@ -472,7 +473,7 @@ export function ProjectBoardTicketContextMenu({
           <IconTrash aria-hidden='true' />
           {confirmingDelete ? (deleting ? 'Deleting' : 'Confirm delete') : 'Delete'}
         </button>
-      </div>
+      </AppMenuPanel>
     </>,
     document.body
   );

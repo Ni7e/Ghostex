@@ -1,8 +1,10 @@
-// The configuration dialog behind the pen icon in the context meter popover
-// (see session-chat-context-details.ts for the decision it implements). It is
-// a plain in-page shadcn Dialog like the chat's Rewind and Save-to-Markdown
-// dialogs: the chat runs inside CEF on desktop and in a browser tab on web, so
-// no native child window is involved. Edits are a draft until Save.
+// React renderer for the context details editor. Preferences and row operations are shared with native chat.
+import {
+  moveContextRow as moveRow,
+  matchesContextDetailFilter,
+  toggleContextDetailStar,
+  reorderContextDetails,
+} from '@/packages/shared/session-chat-presentation/context-editor';
 
 import {
   IconFileImport,
@@ -65,28 +67,6 @@ const rowSensors = [
   }),
 ];
 
-function moveRow<T>(rows: readonly T[], from: number, to: number): T[] {
-  const next = [...rows];
-  const [moved] = next.splice(from, 1);
-  if (moved !== undefined) {
-    next.splice(to, 0, moved);
-  }
-  return next;
-}
-
-/** The filter bar matches the row's title, its description, and the value it currently shows. */
-function matchesContextDetailFilter(
-  query: string,
-  row: SessionChatContextDetailRowDefinition,
-  sample: string | null
-): boolean {
-  const needle = query.trim().toLowerCase();
-  if (needle.length === 0) {
-    return true;
-  }
-  return [row.label, row.description, sample ?? ''].some((text) => text.toLowerCase().includes(needle));
-}
-
 export function SessionChatContextDetailsDialog({
   agent = 'claude',
   onOpenChange,
@@ -121,18 +101,7 @@ export function SessionChatContextDetailsDialog({
     setDraft((current) => ({ ...current, shown: { ...current.shown, [row.id]: shown } }));
   };
   const toggleStarred = (row: SessionChatContextDetailRowDefinition) => {
-    setDraft((current) => {
-      const starred = !isSessionChatContextDetailStarred(current, row);
-      const withoutRow = orderedSessionChatStarredRows(current, agent)
-        .map((starredRow) => starredRow.id)
-        .filter((id) => id !== row.id);
-      return {
-        ...current,
-        starred: { ...current.starred, [row.id]: starred },
-        // A newly starred row joins the end of the status line.
-        starredOrder: starred ? [...withoutRow, row.id] : withoutRow,
-      };
-    });
+    setDraft((current) => toggleContextDetailStar(current, row, agent));
   };
   const reorderStarred = (from: number, to: number) => {
     setDraft((current) => ({
@@ -165,18 +134,7 @@ export function SessionChatContextDetailsDialog({
     fromId: SessionChatContextDetailRowDefinition['id'],
     toId: SessionChatContextDetailRowDefinition['id']
   ) => {
-    setDraft((current) => {
-      const rows = orderedSessionChatContextDetailRows(current, group, agent);
-      const from = rows.findIndex((row) => row.id === fromId);
-      const to = rows.findIndex((row) => row.id === toId);
-      if (from < 0 || to < 0 || from === to) {
-        return current;
-      }
-      return {
-        ...current,
-        order: { ...current.order, [group]: moveRow(rows, from, to).map((row) => row.id) },
-      };
-    });
+    setDraft((current) => reorderContextDetails(current, agent, group, fromId, toId));
   };
 
   // Groups with no row left after the filter are dropped so a label never renders alone.

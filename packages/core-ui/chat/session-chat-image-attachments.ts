@@ -4,28 +4,8 @@ export interface PastedImagePreview {
   path: string;
 }
 
-/** Rich Prompt Editor numbering: max existing [Image #N]( in the draft, +1. */
-export function nextImageReferenceIndex(text: string): number {
-  let highest = 0;
-  for (const match of text.matchAll(/\[Image #(\d+)·?\]\(/g)) {
-    const index = Number.parseInt(match[1] ?? '', 10);
-    if (Number.isFinite(index)) {
-      highest = Math.max(highest, index);
-    }
-  }
-  return highest + 1;
-}
-
-export const IMAGE_PATH_PATTERN = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i;
-/**
- * CDXC:SessionChat 2026-09-06 DECISION:
- * User: expanded image references with the trailing · must still show image previews in input boxes across all apps.
- */
-export const LINKED_IMAGE_REFERENCE_PATTERN = /\[Image #\d+·?\]\(([^)\r\n]+)\)/g;
-
-export function linkedImageReferenceHrefs(text: string): string[] {
-  return [...text.matchAll(LINKED_IMAGE_REFERENCE_PATTERN)].map((match) => match[1]?.trim() ?? '').filter(Boolean);
-}
+import { IMAGE_PATH_PATTERN } from '@/packages/shared/session-chat-presentation/references';
+export { nextImageReferenceIndex, IMAGE_PATH_PATTERN, LINKED_IMAGE_REFERENCE_PATTERN, linkedImageReferenceHrefs } from '@/packages/shared/session-chat-presentation/references';
 
 export function isImageFile(file: File): boolean {
   return file.type.startsWith('image/') || IMAGE_PATH_PATTERN.test(file.name);

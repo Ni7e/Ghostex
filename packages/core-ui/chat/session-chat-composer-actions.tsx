@@ -1,3 +1,4 @@
+import { COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS, AGENT_HOST_ACTION_IDS } from '@/packages/shared/session-chat-presentation/actions';
 import {
   IconClock,
   IconClockCheck,
@@ -48,15 +49,6 @@ import { sessionChatSummaryToggleHotkey } from './session-chat-summary-override'
 import { formatSessionTerminalTailPreview, useSessionTerminalTail } from './use-session-terminal-tail';
 import { useSessionChatComposerOverflow } from './use-session-chat-composer-overflow';
 import { SessionChatComposerOptionsMenuContext } from './session-chat-composer-options-menu';
-
-/**
- * Host actions intentionally excluded from the dots menu. Most already render
- * as footer controls; Prompt editor is omitted from the chat overflow menu.
- */
-const COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS = new Set(['attachPath', 'promptEditor', 'stashPrompt', 'stashedPrompts']);
-
-/** Per-session lifecycle actions, shown under the menu's "Agent" heading. */
-const AGENT_HOST_ACTION_IDS = new Set(['fork', 'fullReload', 'rename', 'sleep', 'switchAccount']);
 
 const HOST_ACTION_ICONS: Record<string, TablerIcon> = {
   splitSessionRight: IconLayoutColumns,
@@ -117,6 +109,8 @@ interface SessionChatComposerActionsProps {
   onShowStashedPrompts?: () => void;
   onStash?: () => void;
   onToggleMaximized: () => void;
+  /** Runs once the More actions menu has finished closing. */
+  onMenuClosed?: () => void;
   onToggleSummary?: () => void;
   onToggleVerbose?: () => void;
   sessionNoteActive: boolean;
@@ -141,6 +135,7 @@ export function SessionChatComposerActions({
   onShowStashedPrompts,
   onStash,
   onToggleMaximized,
+  onMenuClosed,
   onToggleSummary,
   onToggleVerbose,
   sessionNoteActive,
@@ -478,7 +473,15 @@ export function SessionChatComposerActions({
 
   return (
     <div className='ghostex-chat-composer-toolbar' ref={toolbarRef}>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        onOpenChangeComplete={(open) => {
+          if (!open) {
+            onMenuClosed?.();
+          }
+        }}
+      >
         <AppTooltip content={withShortcut('More actions', hostActions?.moreActionsShortcut)}>
           <DropdownMenuTrigger
             render={

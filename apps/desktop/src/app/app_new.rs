@@ -262,6 +262,9 @@ impl GhostexGpuiApp {
                 agents_chat_eviction_retry_scheduled: false,
                 agents_chat_reconcile_scheduled: false,
                 agents_chat_eviction_requested: false,
+                session_chat_use_gpui: shared_settings_snapshot.object()
+                    .get("sessionChatUseGpui").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                native_chat_views: HashMap::new(),
                 agents_chat_surfaces: HashMap::new(),
                 session_chat_broker_endpoints: HashMap::new(),
                 session_chat_broker_epoch: None,
@@ -518,6 +521,7 @@ impl GhostexGpuiApp {
                 titlebar_tips_sidebar_agent_ids: None,
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
+                native_sidebar: Default::default(),
                 browser_surfaces: HashMap::new(),
                 browser_address_inputs: HashMap::new(),
                 browser_address_input_subscriptions: HashMap::new(),

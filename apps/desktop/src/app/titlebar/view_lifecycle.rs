@@ -11,8 +11,9 @@ impl GhostexGpuiApp {
             .map(|item| item.mode)
     }
 
-    /// CDXC:Titlebar 2026-09-13 DECISION:
-    /// User: right-clicking a web-based view's titlebar button offers Reload, Sleep, a separator, then Extensions.
+    /// CDXC:Titlebar 2026-09-16 DECISION:
+    /// User: right-clicking a web-based view's titlebar button offers Reload, Sleep or Wake, a separator, then Extensions.
+    /// Wake replaces the disabled Sleep action when the view is sleeping.
     /// Actions target the clicked view even when another view is selected; the compact button targets its displayed view.
     pub(crate) fn titlebar_view_lifecycle_menu(&self, mode: TitlebarMode) -> GpuiContextMenu {
         let menu = GpuiContextMenu::new();
@@ -20,21 +21,31 @@ impl GhostexGpuiApp {
             return menu;
         }
         let unavailable = !self.titlebar_mode_available(mode);
-        menu.menu_with_disabled(
+        let menu = menu.menu_with_disabled(
             "Reload",
             unavailable,
             Box::new(ReloadGpuiTitlebarView {
                 mode_index: mode.switcher_index(),
             }),
-        )
-        .menu_with_disabled(
-            "Sleep",
-            unavailable || !self.project_editor_shell.is_mode_awake(mode),
-            Box::new(SleepGpuiTitlebarView {
-                mode_index: mode.switcher_index(),
-            }),
-        )
-        .separator()
+        );
+        let menu = if self.project_editor_shell.is_mode_awake(mode) {
+            menu.menu_with_disabled(
+                "Sleep",
+                unavailable,
+                Box::new(SleepGpuiTitlebarView {
+                    mode_index: mode.switcher_index(),
+                }),
+            )
+        } else {
+            menu.menu_with_disabled(
+                "Wake",
+                unavailable,
+                Box::new(SelectGpuiTitlebarMode {
+                    mode_index: mode.switcher_index(),
+                }),
+            )
+        };
+        menu.separator()
     }
 
     pub(crate) fn show_gpui_titlebar_view_menu(

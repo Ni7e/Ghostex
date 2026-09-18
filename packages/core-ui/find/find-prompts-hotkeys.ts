@@ -67,7 +67,7 @@ export const FIND_PROMPTS_HINTS: readonly {
   key: string;
   label: string;
 }[] = [
-  { action: 'toggleDayGrouping', key: '^d', label: 'days' },
+  { action: 'toggleDayGrouping', key: '^d', label: 'grouping' },
   { action: 'openAgentPicker', key: '^g', label: 'agents' },
   { action: 'openProjectPicker', key: '^j', label: 'projects' },
   { action: 'toggleFavorite', key: '^f', label: 'fav' },

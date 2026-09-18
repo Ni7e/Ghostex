@@ -103,7 +103,7 @@ import {
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
 import '@/packages/core-ui/styles.css';
 
-const clientStorage = storageScope(["commitAgent","renameAgent"]);
+const clientStorage = storageScope(['commitAgent', 'renameAgent']);
 
 type AppModalKind =
   | 'addProject'
@@ -233,6 +233,9 @@ function measureOneShotNativeFitHeight(modal: AppModalKind): number | undefined 
 
 type AgentsHubCatalogMessage = Extract<ExtensionToSidebarMessage, { type: 'agentsHubCatalog' }>;
 type AgentsHubFileContentMessage = Extract<ExtensionToSidebarMessage, { type: 'agentsHubFileContent' }>;
+type AgentSyncReportMessage = Extract<ExtensionToSidebarMessage, { type: 'agentSyncReport' }>;
+type AgentSyncPlanMessage = Extract<ExtensionToSidebarMessage, { type: 'agentSyncPlan' }>;
+type AgentSyncApplyResultMessage = Extract<ExtensionToSidebarMessage, { type: 'agentSyncApplyResult' }>;
 type AgentHookStatusMessage = Extract<ExtensionToSidebarMessage, { type: 'agentHookStatus' }>;
 type GhostexCliStatusMessage = Extract<ExtensionToSidebarMessage, { type: 'ghostexCliStatus' }>;
 type OSIntegrationStatusMessage = Extract<ExtensionToSidebarMessage, { type: 'osIntegrationStatus' }>;
@@ -284,6 +287,7 @@ type AppModalHostMessage =
       initialRemoteMachineId?: string;
       initialRemoteSection?: SettingsRemoteSection;
       initialAgentsSection?: SettingsAgentsSection;
+      initialCustomViewId?: string;
       initialSection?: MainSettingsInitialSectionId;
       initialSidebarTagsAction?: SettingsSidebarTagsAction;
       /** CDXC:SavedPrompts 2026-08-24: see StashedPromptsModalState. */
@@ -1252,6 +1256,9 @@ function AppModalHost() {
     agentHooksRequired,
     agentsHubCatalog,
     agentsHubFileContent,
+    agentSyncApplyResult,
+    agentSyncPlan,
+    agentSyncReport,
     config,
     delayedSend,
     firstUserMessage,
@@ -1296,6 +1303,7 @@ function AppModalHost() {
     settingsInitialRemoteMachineId,
     settingsInitialRemoteSection,
     settingsInitialAgentsSection,
+    settingsInitialCustomViewId,
     settingsInitialSearchQuery,
     settingsInitialTabOverride,
   } = useModalStateFromNative();
@@ -2165,6 +2173,9 @@ function AppModalHost() {
         fileContent={agentsHubFileContent}
         isOpen={activeModal === 'agentsHub'}
         onClose={closeModal}
+        syncApplyResult={agentSyncApplyResult}
+        syncPlan={agentSyncPlan}
+        syncReport={agentSyncReport}
         vscode={vscode}
       />
       {/*
@@ -2454,6 +2465,7 @@ function AppModalHost() {
         initialRemoteMachineId={settingsInitialRemoteMachineId}
         initialRemoteSection={settingsInitialRemoteSection}
         initialAgentsSection={settingsInitialAgentsSection}
+        initialCustomViewId={settingsInitialCustomViewId}
         initialSearchQuery={settingsInitialSearchQuery}
         initialTab={settingsInitialTab}
         isOpen={isSettingsRenderable}
@@ -3029,6 +3041,9 @@ function useModalStateFromNative() {
   const [agentHooksRequired, setAgentHooksRequired] = useState<AgentHooksRequiredModalState>();
   const [agentsHubCatalog, setAgentsHubCatalog] = useState<AgentsHubCatalogMessage>();
   const [agentsHubFileContent, setAgentsHubFileContent] = useState<AgentsHubFileContentMessage>();
+  const [agentSyncReport, setAgentSyncReport] = useState<AgentSyncReportMessage>();
+  const [agentSyncPlan, setAgentSyncPlan] = useState<AgentSyncPlanMessage>();
+  const [agentSyncApplyResult, setAgentSyncApplyResult] = useState<AgentSyncApplyResultMessage>();
   const [config, setConfig] = useState<ConfigModalState>({});
   const [delayedSend, setDelayedSend] = useState<DelayedSendModalState>();
   const [firstUserMessage, setFirstUserMessage] = useState<FirstUserMessageModalState>();
@@ -3073,6 +3088,7 @@ function useModalStateFromNative() {
   const [settingsInitialRemoteMachineId, setSettingsInitialRemoteMachineId] = useState<string>();
   const [settingsInitialRemoteSection, setSettingsInitialRemoteSection] = useState<SettingsRemoteSection>();
   const [settingsInitialAgentsSection, setSettingsInitialAgentsSection] = useState<SettingsAgentsSection>();
+  const [settingsInitialCustomViewId, setSettingsInitialCustomViewId] = useState<string>();
   const [settingsInitialSearchQuery, setSettingsInitialSearchQuery] = useState<string>();
   const [settingsInitialTabOverride, setSettingsInitialTabOverride] = useState<SettingsModalTab>();
   const activeModalRef = useRef<AppModalKind | undefined>(activeModal);
@@ -3110,6 +3126,9 @@ function useModalStateFromNative() {
     setAppIconState(undefined);
     setAgentsHubCatalog(undefined);
     setAgentsHubFileContent(undefined);
+    setAgentSyncReport(undefined);
+    setAgentSyncPlan(undefined);
+    setAgentSyncApplyResult(undefined);
     setCommandPaletteInitialQuery('');
     setCommandPaletteOpenRequestSequence(0);
     setIsCommandPalettePrewarm(false);
@@ -3675,12 +3694,16 @@ function useModalStateFromNative() {
             setSettingsInitialAgentsSection(
               message.initialAgentsSection === 'agentHooks' ? message.initialAgentsSection : undefined
             );
+            setSettingsInitialCustomViewId(
+              typeof message.initialCustomViewId === 'string' ? message.initialCustomViewId : undefined
+            );
             setSettingsInitialTabOverride(isSettingsModalTab(message.initialTab) ? message.initialTab : undefined);
           } else {
             setSettingsInitialSection(undefined);
             setSettingsInitialRemoteMachineId(undefined);
             setSettingsInitialRemoteSection(undefined);
             setSettingsInitialAgentsSection(undefined);
+            setSettingsInitialCustomViewId(undefined);
             setSettingsInitialSearchQuery(undefined);
             setSettingsInitialTabOverride(undefined);
           }
@@ -3722,6 +3745,9 @@ function useModalStateFromNative() {
           if (message.modal !== 'agentsHub') {
             setAgentsHubCatalog(undefined);
             setAgentsHubFileContent(undefined);
+            setAgentSyncReport(undefined);
+            setAgentSyncPlan(undefined);
+            setAgentSyncApplyResult(undefined);
           }
           setActiveModalRequestId(typeof message.requestId === 'string' ? message.requestId : undefined);
           setActiveModal(message.modal);
@@ -3879,6 +3905,20 @@ function useModalStateFromNative() {
             setAgentsHubFileContent(message.message);
             return;
           }
+          if (isAgentSyncReportMessage(message.message)) {
+            setAgentSyncReport(message.message);
+            setAgentSyncPlan(undefined);
+            return;
+          }
+          if (isAgentSyncPlanMessage(message.message)) {
+            setAgentSyncPlan(message.message);
+            setAgentSyncApplyResult(undefined);
+            return;
+          }
+          if (isAgentSyncApplyResultMessage(message.message)) {
+            setAgentSyncApplyResult(message.message);
+            return;
+          }
           if (isGhostexFolderStatsMessage(message.message)) {
             setGhostexFolderStats(message.message);
             return;
@@ -3943,6 +3983,9 @@ function useModalStateFromNative() {
     agentHooksRequired,
     agentsHubCatalog,
     agentsHubFileContent,
+    agentSyncApplyResult,
+    agentSyncPlan,
+    agentSyncReport,
     config,
     delayedSend,
     firstUserMessage,
@@ -3987,6 +4030,7 @@ function useModalStateFromNative() {
     settingsInitialRemoteMachineId,
     settingsInitialRemoteSection,
     settingsInitialAgentsSection,
+    settingsInitialCustomViewId,
     settingsInitialSearchQuery,
     settingsInitialTabOverride,
   };
@@ -4095,6 +4139,20 @@ function isAgentsHubCatalogMessage(message: unknown): message is AgentsHubCatalo
 function isAgentsHubFileContentMessage(message: unknown): message is AgentsHubFileContentMessage {
   return Boolean(
     message && typeof message === 'object' && 'type' in message && message.type === 'agentsHubFileContent'
+  );
+}
+
+function isAgentSyncReportMessage(message: unknown): message is AgentSyncReportMessage {
+  return Boolean(message && typeof message === 'object' && 'type' in message && message.type === 'agentSyncReport');
+}
+
+function isAgentSyncPlanMessage(message: unknown): message is AgentSyncPlanMessage {
+  return Boolean(message && typeof message === 'object' && 'type' in message && message.type === 'agentSyncPlan');
+}
+
+function isAgentSyncApplyResultMessage(message: unknown): message is AgentSyncApplyResultMessage {
+  return Boolean(
+    message && typeof message === 'object' && 'type' in message && message.type === 'agentSyncApplyResult'
   );
 }
 
@@ -4268,4 +4326,6 @@ const accountsBootstrapBridge = window as unknown as {
 };
 accountsBootstrapBridge.ghostexGpui ??= {};
 accountsBootstrapBridge.ghostexGpui.onGxserverBootstrapChanged = notifyAccountsConnectionsChanged;
-bootClientStorage(() => { createRoot(document.getElementById('root')!).render(<AppModalHost />); });
+bootClientStorage(() => {
+  createRoot(document.getElementById('root')!).render(<AppModalHost />);
+});

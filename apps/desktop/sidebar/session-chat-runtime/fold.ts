@@ -6,7 +6,7 @@ import type {
 import { mergeSessionChatMessagesWith } from '@/packages/core-ui/chat/session-chat-merge';
 import { sessionChatOptionEvidencePriority } from '@/packages/core-ui/chat/session-chat-session-options';
 import { sessionChatTranscriptStatusAfterState } from '@/packages/core-ui/chat/session-chat-view-state';
-import { mergeSessionChatDraftState } from '@/packages/core-ui/chat/session-chat-queue';
+import { mergeSessionChatDraftState } from '@/packages/shared/session-chat-controller/queue';
 
 type StateCarrier = Exclude<GxserverSessionChatEvent, { type: 'sessionChatAppended' }> | GxserverReadSessionChatResult;
 
@@ -53,6 +53,8 @@ export function foldSessionChatState(
     lifecycle: incoming.lifecycle ?? (stateOnly ? previous?.lifecycle : undefined),
     working: incoming.working ?? previous?.working,
     prompt: incoming.prompt,
+    asyncQuestionsSince:
+      incoming.asyncQuestionsSince !== undefined ? incoming.asyncQuestionsSince : previous?.asyncQuestionsSince,
     terminalNotice: incoming.terminalNotice,
     terminalActivity: incoming.terminalActivity,
     agentFleet: incoming.agentFleet,

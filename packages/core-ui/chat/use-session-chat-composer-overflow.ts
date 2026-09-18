@@ -1,3 +1,4 @@
+import { fitChatComposerControls } from '@/packages/shared/session-chat-presentation/composer-layout';
 import { useLayoutEffect, useRef, useState } from 'react';
 
 /**
@@ -30,20 +31,21 @@ export function useSessionChatComposerOverflow(editingHostAction: boolean) {
         const available =
           footer.clientWidth - parseFloat(footerStyle.paddingLeft) - parseFloat(footerStyle.paddingRight);
         const gap = parseFloat(getComputedStyle(toolbar).columnGap) || 0;
-        const clearance = 16;
-        let required =
-          options.getBoundingClientRect().width +
-          actions.getBoundingClientRect().width +
-          (parseFloat(footerStyle.columnGap) || 0) +
-          clearance;
-        next = [];
-        for (const action of toolbar.querySelectorAll<HTMLElement>(':scope > [data-composer-action]')) {
-          if (required <= available) break;
-          next.push(action.dataset.composerAction!);
-          required -= action.getBoundingClientRect().width + gap;
-        }
-        nextOptionsOverflowed =
-          required > available && options.querySelector('[data-composer-option-overflow]') !== null;
+        const fitted = fitChatComposerControls({
+          available,
+          options: options.getBoundingClientRect().width,
+          actions: actions.getBoundingClientRect().width,
+          footerGap: parseFloat(footerStyle.columnGap) || 0,
+          actionGap: gap,
+          clearance: 16,
+          hasOverflowOptions: options.querySelector('[data-composer-option-overflow]') !== null,
+          controls: [...toolbar.querySelectorAll<HTMLElement>(':scope > [data-composer-action]')].map((action) => ({
+            id: action.dataset.composerAction!,
+            width: action.getBoundingClientRect().width,
+          })),
+        });
+        next = fitted.overflowed;
+        nextOptionsOverflowed = fitted.optionsOverflowed;
       } finally {
         delete footer.dataset.composerMeasuring;
       }

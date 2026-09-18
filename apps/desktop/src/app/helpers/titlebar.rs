@@ -754,12 +754,12 @@ pub(crate) fn titlebar_popup_standard_menu_row(
     let text_color = if disabled {
         titlebar_popup_menu_disabled_text_color()
     } else {
-        titlebar_text_color()
+        titlebar_popup_menu_foreground()
     };
     let icon_color = if disabled {
         titlebar_popup_menu_disabled_text_color()
     } else {
-        titlebar_icon_color()
+        titlebar_popup_menu_foreground()
     };
 
     h_flex()
@@ -769,7 +769,7 @@ pub(crate) fn titlebar_popup_standard_menu_row(
         .overflow_hidden()
         .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
         .items_center()
-        .gap(px(10.0))
+        .gap(px(8.0))
         .rounded(px(4.0))
         .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
         .font_weight(FontWeight::NORMAL)
@@ -818,7 +818,7 @@ pub(crate) fn titlebar_popup_extension_menu_row(
         .min_h(px(TITLEBAR_POPUP_EXTENSION_ROW_HEIGHT))
         .items_center()
         .gap(px(10.0))
-        .text_color(titlebar_text_color())
+        .text_color(titlebar_popup_menu_foreground())
         .child(
             h_flex()
                 .flex_shrink_0()
@@ -916,7 +916,7 @@ pub(crate) fn titlebar_popup_action_menu_row(action: GpuiTitlebarAction) -> impl
         .gap(px(10.0))
         .rounded(px(4.0))
         .py(px(6.0))
-        .text_color(titlebar_text_color())
+        .text_color(titlebar_popup_menu_foreground())
         .child(
             div()
                 .flex()
@@ -1077,7 +1077,7 @@ pub(crate) fn titlebar_popup_git_status_menu_row(
         .rounded(px(4.0))
         .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
         .font_weight(FontWeight::NORMAL)
-        .text_color(titlebar_text_color())
+        .text_color(titlebar_popup_menu_foreground())
         .child(
             div()
                 .flex()
@@ -1149,7 +1149,7 @@ pub(crate) fn titlebar_popup_git_action_menu_row(row: GpuiTitlebarGitMenuRow) ->
         .rounded(px(4.0))
         .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
         .font_weight(FontWeight::NORMAL)
-        .text_color(titlebar_text_color())
+        .text_color(titlebar_popup_menu_foreground())
         .child(
             div()
                 .flex()
@@ -1461,8 +1461,12 @@ chrome reads as one continuous surface. Solid consumers (popup borders, modal
 host fills) keep `titlebar_background()`.
 */
 pub(crate) fn titlebar_gradient_fill() -> gpui::Background {
+    sidebar_chrome_gradient_fill(90.0)
+}
+
+pub(crate) fn sidebar_chrome_gradient_fill(angle: f32) -> gpui::Background {
     gpui::linear_gradient(
-        90.,
+        angle,
         gpui::linear_color_stop(
             rgb(GPUI_TITLEBAR_GRADIENT_LEFT_RGB.load(Ordering::Relaxed) as u32),
             0.,
@@ -1491,28 +1495,38 @@ pub(crate) fn titlebar_active_segment_color() -> Hsla {
     titlebar_overlay_base().opacity(0.11).into()
 }
 
-/*
-CDXC:Titlebar 2026-07-09:
-All titlebar dropdown surfaces (the Git/Actions/Open In popup menus and the
-Tips/Resources CEF reading panels) share one chrome spec after visual review:
-#0e0e0e background, 1px #303030 border, 2px corner radius.
-*/
+pub(crate) static GPUI_MENU_DARK_BACKGROUND_RGB: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0x0e0e0e);
+
 pub(crate) fn titlebar_popup_menu_background() -> Hsla {
     rgb(if titlebar_uses_light_theme() {
         0xffffff
     } else {
-        0x0e0e0e
+        GPUI_MENU_DARK_BACKGROUND_RGB.load(Ordering::Relaxed)
+    })
+    .into()
+}
+
+pub(crate) fn titlebar_popup_menu_foreground() -> Hsla {
+    rgb(if titlebar_uses_light_theme() {
+        0x292929
+    } else {
+        0xfcfcfc
+    })
+    .into()
+}
+
+pub(crate) fn titlebar_popup_menu_hover_color() -> Hsla {
+    rgb(if titlebar_uses_light_theme() {
+        0xefefef
+    } else {
+        0x202020
     })
     .into()
 }
 
 pub(crate) fn titlebar_popup_menu_border_color() -> Hsla {
-    rgb(if titlebar_uses_light_theme() {
-        0xd4d4d4
-    } else {
-        0x3f3f3f
-    })
-    .into()
+    titlebar_overlay_base().opacity(0.12).into()
 }
 
 pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
@@ -1526,19 +1540,20 @@ pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
     }
     let theme = Theme::global_mut(cx);
     theme.popover = titlebar_popup_menu_background();
-    theme.popover_foreground = titlebar_text_color();
+    theme.popover_foreground = titlebar_popup_menu_foreground();
     theme.border = titlebar_popup_menu_border_color();
     theme.radius = px(2.0);
     theme.scrollbar = gpui::transparent_black();
-    let mut thumb = titlebar_active_text_color();
-    thumb.a = 0.28;
+    theme.scrollbar_show = gpui_component::scroll::ScrollbarShow::Hover;
+    // CDXC:DesignSystem 2026-09-16 SEE-ALSO:
+    // Exact app scrollbar colors are shared with packages/components/ui/scrollbar-theme.css.
+    let thumb: Hsla = gpui::rgb(if titlebar_uses_light_theme() { 0xbcbcbd } else { 0x424346 }).into();
     theme.tokens.scrollbar_thumb = thumb.into();
-    thumb.a = 0.42;
     theme.tokens.scrollbar_thumb_hover = thumb.into();
 }
 
 pub(crate) fn titlebar_popup_menu_disabled_text_color() -> Hsla {
-    titlebar_overlay_base().opacity(0.34).into()
+    titlebar_overlay_base().opacity(0.42).into()
 }
 
 pub(crate) fn titlebar_popup_menu_preview_text_color() -> Hsla {

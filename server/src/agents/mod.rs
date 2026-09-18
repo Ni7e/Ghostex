@@ -1,5 +1,6 @@
 pub mod accept_all;
 pub mod activity;
+mod draft_switch;
 pub mod drafts;
 pub mod endpoint;
 pub mod fork;
@@ -19,6 +20,7 @@ pub mod zcode_titles;
 
 pub(crate) use accept_all::*;
 pub(crate) use activity::*;
+pub(crate) use draft_switch::*;
 pub(crate) use drafts::*;
 pub use endpoint::*;
 pub(crate) use fork::*;

@@ -7,6 +7,7 @@ GPUI still has schema-sized privacy-boundary serde_json::json! payloads outside 
 */
 mod app;
 mod app_icon;
+mod chat_preview;
 mod assets;
 mod browser_history;
 mod cef;
@@ -162,6 +163,10 @@ pub(crate) use crate::app::model::*;
 pub(crate) use crate::app::core::*;
 
 fn main() {
+    if std::env::var_os("GHOSTEX_CHAT_PREVIEW_STATE").is_some() {
+        chat_preview::run();
+        return;
+    }
     #[cfg(target_os = "windows")]
     windows_updater::run_startup_hooks();
 

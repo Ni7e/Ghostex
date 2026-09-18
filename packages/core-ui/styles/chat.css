@@ -1168,12 +1168,9 @@ the markdown block) rather than pinned to a tier of its own.
   background: var(--background);
 }
 
-/* The transcript reserves the band's height below its last row. While the
-   composer is collapsed the inset holds the expanded height, so the rows the
-   expansion will cover again stay hidden instead of flashing into view. */
-.ghostex-session-chat-scope [data-slot='message-scroller-content'] {
-  padding-bottom: calc(var(--ghostex-chat-composer-inset, 0px) + 1rem);
-}
+/* The message list reserves the band's height plus the shared transcript end
+   padding below its last row. While collapsed, the inset holds the expanded
+   height so expansion does not flash previously hidden rows into view. */
 
 /* The viewport's bottom scroll fade sits under the opaque band, so lift its
    fade region to the band's top edge. --scroll-fade-b is what scroll-fade-b
@@ -1588,7 +1585,8 @@ the markdown block) rather than pinned to a tier of its own.
   ):not(.ghostex-chat-markdown-file-chip):not(
     .ghostex-chat-status-line-copy,
     .ghostex-chat-minimap-rail,
-    .ghostex-chat-file-change-card button
+    .ghostex-chat-file-change-card button,
+    .ghostex-menu-panel [role^='menuitem']
   ),
 body[data-session-chat-theme='dark']
   .ghostex-session-chat-popup
@@ -1599,7 +1597,8 @@ body[data-session-chat-theme='dark']
   ):not(.ghostex-chat-markdown-file-chip):not(
     .ghostex-chat-status-line-copy,
     .ghostex-chat-minimap-rail,
-    .ghostex-chat-file-change-card button
+    .ghostex-chat-file-change-card button,
+    .ghostex-menu-panel [role^='menuitem']
   ) {
   background-color: transparent;
   color: var(--chat-primary-foreground);
@@ -1614,7 +1613,8 @@ body[data-session-chat-theme='dark']
     .ghostex-chat-status-line-copy,
     .ghostex-chat-minimap-rail,
     .ghostex-chat-subagent-link,
-    .ghostex-chat-file-change-card button
+    .ghostex-chat-file-change-card button,
+    .ghostex-menu-panel [role^='menuitem']
   ):not(:disabled):hover,
 body[data-session-chat-theme='dark']
   .ghostex-session-chat-popup
@@ -1626,7 +1626,8 @@ body[data-session-chat-theme='dark']
     .ghostex-chat-status-line-copy,
     .ghostex-chat-minimap-rail,
     .ghostex-chat-subagent-link,
-    .ghostex-chat-file-change-card button
+    .ghostex-chat-file-change-card button,
+    .ghostex-menu-panel [role^='menuitem']
   ):not(:disabled):hover {
   background-color: #333333;
 }
@@ -2415,7 +2416,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 .ghostex-chat-markdown pre,
 .ghostex-chat-markdown .ghostex-chat-markdown-codeblock,
 .ghostex-chat-markdown .ghostex-chat-markdown-table {
-  margin: 0.65rem 0;
+  margin: var(--chat-paragraph-gap) 0;
 }
 
 /* Markers sit outside the padding box (`list-style-position: outside`), so a
@@ -2490,25 +2491,27 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 .ghostex-chat-markdown h5,
 .ghostex-chat-markdown h6 {
   font-weight: 600;
-  line-height: 1.3;
+  line-height: var(--chat-heading-line-height);
   margin: 1.25rem 0 0.5rem;
 }
 
 .ghostex-chat-markdown h1 {
-  font-size: 1.25rem;
+  font-size: var(--chat-heading-1-size);
 }
 .ghostex-chat-markdown h2 {
-  font-size: 1.125rem;
+  font-size: var(--chat-heading-2-size);
 }
 .ghostex-chat-markdown h3 {
-  font-size: 1rem;
+  font-size: var(--chat-heading-3-size);
 }
-.ghostex-chat-markdown h4,
-.ghostex-chat-markdown h5,
-.ghostex-chat-markdown h6 {
-  font-size: 0.875rem;
+.ghostex-chat-markdown h4 {
+  font-size: var(--chat-heading-4-size);
+}
+.ghostex-chat-markdown h5 {
+  font-size: var(--chat-heading-5-size);
 }
 .ghostex-chat-markdown h6 {
+  font-size: var(--chat-heading-6-size);
   color: var(--muted-foreground);
 }
 
@@ -2529,11 +2532,11 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 
 .ghostex-chat-markdown :not(pre) > code {
   background: var(--chat-inline-code-surface, var(--muted));
-  border: 1px solid var(--chat-inline-code-border, var(--border));
-  border-radius: 0.375rem;
+  border: var(--chat-inline-code-border-width) solid var(--chat-inline-code-border, var(--border));
+  border-radius: var(--chat-inline-code-radius);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-  font-size: var(--chat-code-size);
-  padding: 0.1rem 0.35rem;
+  font-size: var(--chat-inline-code-size);
+  padding: var(--chat-inline-code-padding-y) var(--chat-inline-code-padding-x);
 }
 
 /* An inline-code span that is a file reference. Its visual chrome comes from
@@ -3134,38 +3137,8 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
    here lands on exactly the pixel that was clicked, and staying out of the
    scrolling layer keeps the menu still while a zoomed picture pans. */
 .ghostex-chat-image-menu {
-  background: var(--popover);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
-  color: var(--popover-foreground);
-  display: flex;
-  flex-direction: column;
-  min-width: 9rem;
-  padding: 0.25rem;
   position: fixed;
   z-index: 20;
-}
-
-.ghostex-chat-image-menu-item {
-  background: none;
-  border: none;
-  border-radius: 6px;
-  color: inherit;
-  font-size: 0.8125rem;
-  padding: 0.375rem 0.625rem;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.ghostex-chat-image-menu-item:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.ghostex-chat-image-menu-item:not(:disabled):hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
 }
 
 .ghostex-chat-image-menu-error {
@@ -3261,63 +3234,10 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   scrollbar-width: thin;
 }
 
-/* CDXC:SessionChat 2026-09-07 DECISION:
- * User: hovering a transcript table should reveal its horizontal scrollbar when it overflows, across apps.
- * Explicit Chromium scrollbar geometry overrides the shared hidden-scrollbar reset and macOS overlay auto-hiding.
+/* CDXC:SessionChat 2026-09-16 DECISION:
+ * User: transcript tables use the same 5px floating hover scrollbar and exact theme colors as the rest of chat.
+ * The shared app-scrollbars controller owns this viewport, replacing its separate native scrollbar styling.
  */
-.ghostex-chat-markdown-table-scroll {
-  scrollbar-color: transparent transparent;
-}
-
-.ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll {
-  scrollbar-color: color-mix(in srgb, var(--foreground) 35%, transparent) transparent;
-}
-
-@supports selector(::-webkit-scrollbar) {
-  .ghostex-chat-markdown-table-scroll {
-    scrollbar-color: auto;
-    scrollbar-width: auto;
-  }
-
-  .ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll {
-    scrollbar-color: auto;
-  }
-
-  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar {
-    display: block;
-    height: 6px;
-    width: 6px;
-  }
-
-  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 999px;
-  }
-
-  .ghostex-chat-markdown-table:is(:hover, :focus-within) .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--foreground) 35%, transparent);
-  }
-}
-
-@media (hover: none) {
-  .ghostex-chat-markdown-table-scroll {
-    scrollbar-color: color-mix(in srgb, var(--foreground) 35%, transparent) transparent;
-  }
-
-  @supports selector(::-webkit-scrollbar) {
-    .ghostex-chat-markdown-table-scroll {
-      scrollbar-color: auto;
-    }
-
-    .ghostex-chat-markdown-table-scroll::-webkit-scrollbar-thumb {
-      background: color-mix(in srgb, var(--foreground) 35%, transparent);
-    }
-  }
-}
 
 /* `min-width: max-content` is what makes the wrapper scroll instead of the
    columns crushing. The markdown root sets `overflow-wrap: anywhere` for prose,
@@ -4137,35 +4057,35 @@ reduced-motion turns both off and keeps the static glyph.
 .ghostex-chat-working-strip {
   display: grid;
   gap: 0.375rem;
-  min-height: 1.5rem;
-  padding: 0 0.375rem;
+  min-height: var(--working-min-height);
+  padding: 0 var(--working-padding-x);
   user-select: none;
 }
 
 .ghostex-chat-working-strip-row {
   align-items: center;
   display: flex;
-  gap: 0.5rem;
+  gap: var(--working-gap);
   min-width: 0;
 }
 
 .ghostex-chat-working-strip-spark {
   align-items: center;
-  animation: ghostex-chat-working-spark-pulse 1.6s ease-in-out infinite;
+  animation: ghostex-chat-working-spark-pulse var(--working-pulse) ease-in-out infinite;
   display: flex;
   flex: none;
-  height: 1rem;
+  height: var(--working-spark-box);
   justify-content: center;
-  width: 1rem;
+  width: var(--working-spark-box);
   will-change: transform, opacity, filter;
 }
 
 .ghostex-chat-working-strip-spark svg {
-  animation: ghostex-chat-working-spark-spin 9s linear infinite;
+  animation: ghostex-chat-working-spark-spin var(--working-spin) linear infinite;
   display: block;
   fill: var(--foreground);
-  height: 0.875rem;
-  width: 0.875rem;
+  height: var(--working-spark-size);
+  width: var(--working-spark-size);
 }
 
 @keyframes ghostex-chat-working-spark-pulse {
@@ -4193,7 +4113,7 @@ reduced-motion turns both off and keeps the static glyph.
 
 .ghostex-chat-working-strip-text {
   color: var(--muted-foreground);
-  font-size: 0.78125rem;
+  font-size: var(--working-font-size);
   letter-spacing: 0.01em;
   min-width: 0;
   overflow: hidden;

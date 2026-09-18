@@ -1105,6 +1105,7 @@ impl Render for GpuiDelayedSendModalWindow {
                 this.trigger_select.close();
                 cx.notify();
             },
+            window,
             cx,
         );
         let agent_items: Vec<String> = self
@@ -1123,6 +1124,7 @@ impl Render for GpuiDelayedSendModalWindow {
                 this.agent_select.close();
                 cx.notify();
             },
+            window,
             cx,
         );
         let content = vec![self.render_header(), self.render_body(window, cx)];

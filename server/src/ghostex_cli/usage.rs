@@ -412,6 +412,10 @@ pub fn usage() -> String {
             "Show general Ghostex CLI discovery and agent skill setup",
         ),
         format_help_command(
+            "agents --help",
+            "Communicate and coordinate with other agents",
+        ),
+        format_help_command(
             "fable-5.6-orchestration --help",
             "Show Ghostex Fable 5.6 Orchestration skill setup",
         ),
@@ -428,6 +432,10 @@ pub fn usage() -> String {
             "Show Ghostex Move Codex Session skill setup",
         ),
         format_help_command("guide --help", "Show Ghostex Help skill setup"),
+        format_help_command(
+            "agent-sync status | plan | apply [--agent id] [--json]",
+            "Point every agent at the shared ~/.agents skills, instructions, and hooks",
+        ),
         format_help_command("toggle-sidebar", "Collapse or expand the sidebar"),
     ]
     .join("\n");

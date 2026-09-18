@@ -652,7 +652,16 @@ export function createGpuiSessionChatPage({
             className='gpui-session-chat-view'
             customTranscriptWidthEnabled={chatCustomTranscriptWidthEnabled}
             diagnosticLog={postSessionChatDiagnosticLog}
-            hostActions={GPUI_SESSION_CHAT_HOST_ACTIONS}
+            hostActions={{
+              ...GPUI_SESSION_CHAT_HOST_ACTIONS,
+              ...(remote
+                ? {}
+                : {
+                    onFocusSession: async (target: { projectId: string; sessionId: string }) => {
+                      await rpc(bootstrap, '/api/focusSession', target);
+                    },
+                  }),
+            }}
             hotkeys={normalizeghostexHotkeySettings(hotkeysValue)}
             hostComposerBridge={composerBridge}
             hostLinks={hostLinks}

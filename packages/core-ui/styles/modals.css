@@ -550,7 +550,57 @@ html:has(body.app-modal-host-native-window-body) {
   overflow: hidden;
   padding: var(--previous-sessions-modal-padding-top) var(--previous-sessions-modal-padding-x)
     var(--previous-sessions-modal-padding-bottom);
+  position: relative;
   width: min(654px, 100%);
+}
+
+/*
+ * CDXC:Sessions 2026-09-16 DECISION:
+ * User: the floating Search by Prompt button has no drop shadow; it uses the chat composer's chrome instead (session-chat-composer-focus.css): 1px outline, a 1px inset top highlight, and the composer fill, in both dark and light themes.
+ */
+.previous-sessions-find-prompts-button {
+  --previous-sessions-find-surface: #141414;
+  --previous-sessions-find-outline: rgb(255 255 255 / 5%);
+  --previous-sessions-find-highlight: rgb(255 255 255 / 3%);
+  align-items: center;
+  background: var(--previous-sessions-find-surface);
+  border: 1px solid var(--previous-sessions-find-outline);
+  border-radius: 999px;
+  bottom: 14px;
+  box-shadow: inset 0 1px var(--previous-sessions-find-highlight);
+  color: var(--foreground, var(--app-foreground));
+  cursor: default;
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  gap: 7px;
+  height: 32px;
+  line-height: 20px;
+  padding: 0 14px 0 12px;
+  position: absolute;
+  right: 18px;
+  z-index: 2;
+}
+
+:is(body, .ghostex-root):is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-'])
+  .previous-sessions-find-prompts-button {
+  --previous-sessions-find-surface: #ffffff;
+  --previous-sessions-find-outline: rgb(0 0 0 / 8%);
+  --previous-sessions-find-highlight: transparent;
+}
+
+.previous-sessions-find-prompts-button:hover,
+.previous-sessions-find-prompts-button:focus-visible {
+  background: color-mix(in srgb, var(--foreground, var(--app-foreground)) 5%, var(--previous-sessions-find-surface));
+  border-color: color-mix(in srgb, var(--foreground, var(--app-foreground)) 14%, transparent);
+  outline: none;
+}
+
+.previous-sessions-find-prompts-hotkey {
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  opacity: 0.58;
 }
 
 .app-modal-host-body .confirm-modal-root:has(.previous-sessions-modal) {

@@ -17,7 +17,7 @@
 // stay hidden.
 
 import { agentModelCatalogEffortLabel } from '../../shared/agent-model-catalog';
-import { currentAgentModelCatalog } from '../../shared/agent-model-catalog-store';
+import { currentAgentModelCatalog } from '../../shared/agent-model-catalog-state';
 import type { SessionChatMessage } from '../../shared/session-chat';
 import { parseSessionChatCommandEnvelope } from './session-chat-command-envelope';
 import { decodeSessionChatEscapedMarkup } from './session-chat-local-command-transcript';

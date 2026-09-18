@@ -9,6 +9,14 @@ impl GhostexGpuiApp {
         content: &str,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
+            if !view.read(cx).composer_ready { return false; }
+            view.update(cx, |view, cx| {
+                let text = if view.draft.is_empty() { content.to_owned() } else { format!("{}\n\n{content}", view.draft) };
+                view.insert_prompt(&text, cx);
+            });
+            return true;
+        }
         let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
             return false;
         };
@@ -120,6 +128,14 @@ impl GhostexGpuiApp {
         let Some(payload) = self.pending_session_chat_received_drafts.get(&session_id) else {
             return;
         };
+        if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
+            if !view.read(cx).composer_ready { return; }
+            let mut command = payload.clone();
+            command["type"] = "receiveHandoff".into();
+            command["current"] = view.read(cx).draft.clone().into();
+            view.update(cx, |view, cx| view.invoke(command, cx));
+            return;
+        }
         let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
             return;
         };

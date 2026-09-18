@@ -19,6 +19,7 @@ use crate::{
         increment_presentation_revision, presentation_activity,
     },
     session_chat_queue::{SessionChatQueuePublisherFactory, SessionChatQueueSenderFactory},
+    session_chat_queue_runtime::SessionChatTranscriptGate,
     storage::open_gxserver_database,
 };
 
@@ -33,6 +34,7 @@ pub struct DelayedSendRuntime {
     paths: GxserverPaths,
     presentation_event_sequence: Arc<Mutex<()>>,
     server_id: String,
+    transcript_gates: Arc<Mutex<HashMap<(String, String), SessionChatTranscriptGate>>>,
 }
 
 #[derive(Clone)]
@@ -58,6 +60,7 @@ impl DelayedSendRuntime {
             paths,
             presentation_event_sequence,
             server_id: server_id.into(),
+            transcript_gates: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -339,7 +342,19 @@ impl DelayedSendRuntime {
         chat_publisher_factory: &SessionChatQueuePublisherFactory,
     ) -> Result<(), DomainStateError> {
         let db = open_gxserver_database(&self.paths).map_err(internal_error)?;
-        for record in read_armed_records(&db)? {
+        let records = read_armed_records(&db)?;
+        if let Ok(mut gates) = self.transcript_gates.lock() {
+            gates.retain(|(project_id, session_id), _| {
+                records.iter().any(|record| {
+                    record.trigger != "timer"
+                        && ((record.project_id == *project_id
+                            && (record.trigger == "allAgentsStop" || record.session_id == *session_id))
+                            || (record.watched_project_id.as_ref() == Some(project_id)
+                                && record.watched_session_id.as_ref() == Some(session_id)))
+                })
+            });
+        }
+        for record in records {
             self.refresh_record(&db, record, chat_sender_factory, chat_publisher_factory)?;
         }
         Ok(())
@@ -371,7 +386,8 @@ impl DelayedSendRuntime {
                 // hold the ten-second stability window open.
                 let session_is_working = |session: &Value| {
                     effective_lifecycle_state(session) == "running"
-                        && presentation_activity(session, &now_iso()) == "working"
+                        && (presentation_activity(session, &now_iso()) == "working"
+                            || self.transcript_is_working(session))
                 };
                 // CDXC:DelayedSend 2026-09-14 DECISION:
                 // User: wait for a specific running agent session to finish, then confirm it stays finished for 10 seconds.
@@ -435,6 +451,17 @@ impl DelayedSendRuntime {
         Ok(())
     }
 
+    fn transcript_is_working(&self, session: &Value) -> bool {
+        let key = (
+            session["projectId"].as_str().unwrap_or_default().to_string(),
+            session["sessionId"].as_str().unwrap_or_default().to_string(),
+        );
+        let Ok(mut gates) = self.transcript_gates.lock() else {
+            return true;
+        };
+        gates.entry(key).or_default().is_working(session)
+    }
+
     fn update_non_working_since(
         &self,
         db: &Connection,
@@ -465,8 +492,8 @@ impl DelayedSendRuntime {
         chat_sender_factory: &SessionChatQueueSenderFactory,
         chat_publisher_factory: &SessionChatQueuePublisherFactory,
     ) -> Result<(), DomainStateError> {
-        // CDXC:DelayedSend 2026-09-15 WHY:
-        // A postpone can replace the deadline after this tick reads it. Claim only the deadline this tick observed so the old timer cannot fire early.
+        // CDXC:DelayedSend 2026-09-16 WHY:
+        // Postponing or rearming can replace the deadline, watched agent, or stability window after this tick reads it. Claim only the schedule this tick actually checked.
         let claimed = db
             .execute(
                 r#"
@@ -474,13 +501,18 @@ impl DelayedSendRuntime {
                 SET state = 'firing', updatedAt = ?3
                 WHERE projectId = ?1 AND sessionId = ?2 AND state = 'armed'
                   AND trigger = ?4 AND deadlineAt IS ?5
+                  AND nonWorkingSinceAt IS ?6
+                  AND watchedProjectId IS ?7 AND watchedSessionId IS ?8
                 "#,
                 params![
                     record.project_id,
                     record.session_id,
                     now_iso(),
                     record.trigger,
-                    record.deadline_at
+                    record.deadline_at,
+                    record.non_working_since_at,
+                    record.watched_project_id,
+                    record.watched_session_id
                 ],
             )
             .map_err(sql_error)?

@@ -18,7 +18,7 @@
 use gpui::Action;
 use gpui::px;
 use gpui_component::Side;
-use gpui_component::menu::PopupMenu;
+use gpui_component::menu::{PopupMenu, PopupMenuAppearance};
 use gpui_component::scroll::ScrollbarShow;
 
 use crate::app::actions::*;
@@ -27,6 +27,11 @@ use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
 
+/// CDXC:ContextMenus 2026-09-16 DECISION:
+/// User: GPUI context menus use the same style as the shared React sidebar menu.
+/// Panel corners are 8px, rows 6px, panel padding 6px, and horizontal row padding 10px, with neutral theme-aware colors.
+/// User: remove GPUI menu shadows because they are cut off by the popup window.
+/// SEE-ALSO: packages/components/ui/app-menu-panel.css, app/consts.rs menu geometry, app/context_menu.rs label sizing.
 pub(crate) fn titlebar_popup_menu_with_scroll_behavior(
     menu: PopupMenu,
     width: f32,
@@ -34,6 +39,19 @@ pub(crate) fn titlebar_popup_menu_with_scroll_behavior(
     scrollable: bool,
 ) -> PopupMenu {
     let menu = menu
+        .appearance(PopupMenuAppearance {
+            shadow: false,
+            panel_radius: px(8.0),
+            item_radius: px(6.0),
+            padding: px(6.0),
+            item_padding_x: px(10.0),
+            item_height: px(TITLEBAR_POPUP_MENU_MIN_ITEM_HEIGHT),
+            separator_margin: px(6.0),
+            background: titlebar_popup_menu_background(),
+            foreground: titlebar_popup_menu_foreground(),
+            border: titlebar_popup_menu_border_color(),
+            hover: titlebar_popup_menu_hover_color(),
+        })
         .min_w(px(width))
         .max_w(px(width))
         .max_h(px(max_height))

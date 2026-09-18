@@ -774,6 +774,7 @@ pub fn has_ask_answer(selections: &[SessionChatQuestionSelection]) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionChatSendStep {
+    RetryCodexConversation,
     DriveCodexAsyncQuestion(crate::session_chat_codex_async_answer::AsyncAnswer),
     /// Stop this interrupt job if Escape would open Codex's message-editing pager.
     GuardCodexInterrupt,
@@ -1476,6 +1477,23 @@ async fn run_session_chat_send_worker(
                 observer(&step);
             }
             match step {
+                SessionChatSendStep::RetryCodexConversation => {
+                    if let Err(message) = crate::session_chat_codex_lock::retry(
+                        &project_id,
+                        &session_id,
+                        &zmx_name,
+                        &source,
+                        &|| job_generation != generation.load(Ordering::SeqCst),
+                    )
+                    .await
+                    {
+                        outcome = Err(SessionChatSendError::new(
+                            SessionChatSendFailure::Write,
+                            message,
+                        ));
+                        break;
+                    }
+                }
                 SessionChatSendStep::DriveCodexAsyncQuestion(answer) => {
                     if let Err(message) = crate::session_chat_codex_async_answer::run(
                         &project_id,
@@ -3271,6 +3289,23 @@ pub(crate) async fn handle_answer_session_chat_prompt_http(
                     message: error.to_string(),
                 },
             ),
+        };
+    }
+    if kind == "recoverCodexConversation" {
+        let result = crate::session_chat_codex_lock::recover(state, &params).await;
+        schedule_session_chat_option_redetect(
+            state,
+            &target.project_id,
+            &target.session_id,
+            Some("codex"),
+        );
+        return match result {
+            Ok(()) => routed_json(
+                Some(endpoint_path),
+                StatusCode::OK,
+                rpc_success(request_id, json!({ "queued": false })),
+            ),
+            Err(error) => domain_error_response(endpoint_path, request_id, error),
         };
     }
     if kind == "terminalDialog" {

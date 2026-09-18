@@ -52,10 +52,10 @@ const SIDEBAR_SESSION_TAG_ICONS = {
 } satisfies Record<BuiltinSidebarSessionTag, TablerIcon>;
 
 export {
+  getSidebarSessionTagLabel,
   SIDEBAR_SESSION_TAG_FILTER_UNTAGGED,
   SIDEBAR_SESSION_TAG_OPTIONS,
   SIDEBAR_SESSION_TAG_SECTIONS,
-  getSidebarSessionTagLabel,
 };
 export type { SidebarSessionTag, SidebarSessionTagFilter };
 
@@ -81,14 +81,7 @@ export function useCustomSessionTag(tag: string | undefined): CustomSessionTag |
   );
 }
 
-/** Non-hook variant for helpers that run outside render (tooltips, search keywords). */
-export function getSessionTagCatalogs(): CustomSessionTagCatalogs {
-  return selectSessionTagCatalogs(useSidebarStore.getState());
-}
-
-function selectSessionTagCatalogs(state: ReturnType<typeof useSidebarStore.getState>): CustomSessionTagCatalogs {
-  return [state.customSessionTags, ...Object.values(state.remoteCustomSessionTagsByMachineId)];
-}
+export { getSessionTagCatalogs } from './session-tag-catalogs';
 
 /** Draws a custom tag's own icon in its own color. Unknown icon ids fall back to the generic tag glyph. */
 export function CustomSessionTagGlyph({

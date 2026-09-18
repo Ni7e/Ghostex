@@ -184,6 +184,7 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
     'appIconSourceId',
   ],
   chat: [
+    'sessionChatUseGpui',
     'preferredAgentInterface',
     'sessionChatFontFamily',
     'sessionChatZoomPercent',

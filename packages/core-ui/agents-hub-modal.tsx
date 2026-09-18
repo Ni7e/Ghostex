@@ -26,14 +26,19 @@ import { applySavedAgentsHubContents } from '../shared/agents-hub-catalog';
 import { ghostexHotkeyTextFromKeyboardEvent } from '../shared/ghostex-hotkeys';
 import { formatSidebarHotkeyLabel } from './hotkey-label';
 import type {
+  AgentSyncApplyResultMessage,
+  AgentSyncPlanMessage,
+  AgentSyncReportMessage,
   AgentsHubCatalogMessage,
   AgentsHubFile,
   AgentsHubFileContentMessage,
+  AgentsHubFileTab,
   AgentsHubGroup,
   AgentsHubProfile,
   AgentsHubTab,
 } from '../shared/session-grid-contract';
 import { playCopySound } from './copy-sound';
+import { AgentSyncSurface } from './agents-hub-sync';
 
 type MonacoAmdRequire = {
   (deps: string[], callback: () => void): void;
@@ -74,6 +79,12 @@ const tabLabels: Record<AgentsHubTab, string> = {
   mds: 'MDs',
   hooks: 'Hooks',
   configs: 'Configs & MCPs',
+  /*
+   * CDXC:AgentSync 2026-09-16 WHY:
+   * Agent Sync is the fifth tab and lists agents, not files; it renders its own
+   * surface instead of the catalog panes and gets Cmd+5.
+   */
+  sync: 'Agent Sync',
 };
 
 /*
@@ -86,9 +97,10 @@ const tabHotkeys: Record<AgentsHubTab, string> = {
   mds: 'cmd+2',
   hooks: 'cmd+3',
   configs: 'cmd+4',
+  sync: 'cmd+5',
 };
 
-const emptyGroupsByTab: Record<AgentsHubTab, AgentsHubGroup[]> = {
+const emptyGroupsByTab: Record<AgentsHubFileTab, AgentsHubGroup[]> = {
   configs: [],
   hooks: [],
   mds: [],
@@ -111,6 +123,11 @@ export function AgentsHubModal({
   initialTab,
   isOpen,
   onClose,
+  syncApplyResult,
+  syncInitialAgentId,
+  syncInitialPlanScope,
+  syncPlan,
+  syncReport,
   vscode,
 }: {
   catalog?: AgentsHubCatalogMessage;
@@ -118,6 +135,12 @@ export function AgentsHubModal({
   initialTab?: AgentsHubTab;
   isOpen: boolean;
   onClose: () => void;
+  syncApplyResult?: AgentSyncApplyResultMessage;
+  /** Story entry points for the Agent Sync tab. */
+  syncInitialAgentId?: string;
+  syncInitialPlanScope?: string;
+  syncPlan?: AgentSyncPlanMessage;
+  syncReport?: AgentSyncReportMessage;
   vscode: WebviewApi;
 }) {
   return (
@@ -139,6 +162,11 @@ export function AgentsHubModal({
             fileContent={fileContent}
             initialTab={initialTab}
             isOpen={isOpen}
+            syncApplyResult={syncApplyResult}
+            syncInitialAgentId={syncInitialAgentId}
+            syncInitialPlanScope={syncInitialPlanScope}
+            syncPlan={syncPlan}
+            syncReport={syncReport}
             vscode={vscode}
           />
         </DialogContent>
@@ -152,12 +180,22 @@ function AgentsHubSurface({
   fileContent,
   initialTab = 'mds',
   isOpen,
+  syncApplyResult,
+  syncInitialAgentId,
+  syncInitialPlanScope,
+  syncPlan,
+  syncReport,
   vscode,
 }: {
   catalog?: AgentsHubCatalogMessage;
   fileContent?: AgentsHubFileContentMessage;
   initialTab?: AgentsHubTab;
   isOpen: boolean;
+  syncApplyResult?: AgentSyncApplyResultMessage;
+  syncInitialAgentId?: string;
+  syncInitialPlanScope?: string;
+  syncPlan?: AgentSyncPlanMessage;
+  syncReport?: AgentSyncReportMessage;
   vscode: WebviewApi;
 }) {
   const [fileContentsByPath, setFileContentsByPath] = useState<Record<string, string>>({});
@@ -200,7 +238,7 @@ function AgentsHubSurface({
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen]);
-  const [selectedFileIds, setSelectedFileIds] = useState<Record<AgentsHubTab, string>>({
+  const [selectedFileIds, setSelectedFileIds] = useState<Record<AgentsHubFileTab, string>>({
     configs: firstFileId(emptyGroupsByTab, 'configs'),
     hooks: firstFileId(emptyGroupsByTab, 'hooks'),
     mds: firstFileId(emptyGroupsByTab, 'mds'),
@@ -264,7 +302,9 @@ function AgentsHubSurface({
     }));
   }, [groupsByTab]);
 
-  const activeFile = findFile(groupsByTab, activeTab, selectedFileIds[activeTab]);
+  const activeFileTab: AgentsHubFileTab | undefined = activeTab === 'sync' ? undefined : activeTab;
+  const activeFile =
+    activeFileTab === undefined ? undefined : findFile(groupsByTab, activeFileTab, selectedFileIds[activeFileTab]);
   const activeFileContent =
     activeFile === undefined ? undefined : (activeFile.content ?? fileContentsByPath[activeFile.path]);
   const activeFileLoadError = activeFile === undefined ? undefined : fileContentErrorsByPath[activeFile.path];
@@ -347,7 +387,18 @@ function AgentsHubSurface({
           </TabsTrigger>
         ))}
       </TabsList>
-      {(Object.keys(tabLabels) as AgentsHubTab[]).map((tab) => (
+      <TabsContent className='agents-hub-tab-content' key='sync' value='sync'>
+        <AgentSyncSurface
+          applyResult={syncApplyResult}
+          initialAgentId={syncInitialAgentId}
+          initialPlanScope={syncInitialPlanScope}
+          isActive={isOpen && activeTab === 'sync'}
+          plan={syncPlan}
+          report={syncReport}
+          vscode={vscode}
+        />
+      </TabsContent>
+      {(Object.keys(emptyGroupsByTab) as AgentsHubFileTab[]).map((tab) => (
         <TabsContent className='agents-hub-tab-content' key={tab} value={tab}>
           <section className='agents-hub-layout'>
             <aside className='agents-hub-list-pane'>
@@ -455,9 +506,9 @@ function GroupList({
   vscode,
 }: {
   activeFileId: string;
-  activeTab: AgentsHubTab;
+  activeTab: AgentsHubFileTab;
   expandedIds: Set<string>;
-  groupsByTab: Record<AgentsHubTab, AgentsHubGroup[]>;
+  groupsByTab: Record<AgentsHubFileTab, AgentsHubGroup[]>;
   isCatalogLoading: boolean;
   onSelectFile: (fileId: string) => void;
   onToggleExpanded: (groupId: string) => void;
@@ -914,8 +965,8 @@ function EditorToolbarButton({
 }
 
 function useFilteredGroups(
-  groupsByTab: Record<AgentsHubTab, AgentsHubGroup[]>,
-  tab: AgentsHubTab,
+  groupsByTab: Record<AgentsHubFileTab, AgentsHubGroup[]>,
+  tab: AgentsHubFileTab,
   query: string
 ): AgentsHubGroup[] {
   return useMemo(() => {
@@ -944,8 +995,8 @@ function useFilteredGroups(
  * themselves through firstFileId.
  */
 function findFile(
-  groupsByTab: Record<AgentsHubTab, AgentsHubGroup[]>,
-  tab: AgentsHubTab,
+  groupsByTab: Record<AgentsHubFileTab, AgentsHubGroup[]>,
+  tab: AgentsHubFileTab,
   fileId: string
 ): AgentsHubFile | undefined {
   for (const group of groupsByTab[tab]) {
@@ -957,7 +1008,7 @@ function findFile(
   return undefined;
 }
 
-function firstFileId(groupsByTab: Record<AgentsHubTab, AgentsHubGroup[]>, tab: AgentsHubTab): string {
+function firstFileId(groupsByTab: Record<AgentsHubFileTab, AgentsHubGroup[]>, tab: AgentsHubFileTab): string {
   return groupsByTab[tab][0]?.files[0]?.id ?? '';
 }
 

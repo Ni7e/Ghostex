@@ -224,8 +224,22 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn initialize_cef(&mut self, cx: &mut gpui::Context<Self>) {
-        if self.sidebar.is_some() {
-            return;
+        if self.sidebar.is_none() {
+            let sidebar_handler = self.sidebar_bridge_event_handler(cx);
+            let host_handler = self.app_modal_host_bridge_event_handler(cx);
+            match crate::app::native_service::NativeService::new(
+                self.sidebar_runtime_settings_snapshot.clone(),
+                self.sidebar_gxserver_bootstrap.clone(),
+                sidebar_handler,
+                host_handler,
+                cx,
+            ) {
+                Ok(service) => self.sidebar = Some(service),
+                Err(error) => {
+                    support_logs::append(support_logs::GpuiSupportLog::CrashReports, "gpui.nativeService.startFailed", serde_json::json!({"error": error}));
+                    return;
+                }
+            }
         }
 
         cef::initialize(cx).expect("failed to initialize CEF");
@@ -251,108 +265,11 @@ impl GhostexGpuiApp {
             .detach();
             return;
         }
-        let parent_ns_view = self.parent_ns_view;
-        // CDXC:Theming 2026-09-16 WHY:
-        // The sidebar document paints before CEF delivers saved settings at load-end, so its first background must come from the same resolved palette as the native titlebar.
-        let sidebar_url = gpui_url_with_query_param(
-            &self.sidebar_url,
-            "initialTheme",
-            if CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed) {
-                "light"
-            } else {
-                "dark"
-            },
-        );
-        let sidebar_url = gpui_url_with_query_param(
-            &sidebar_url,
-            "initialBackground",
-            &format!(
-                "{:06x}",
-                sidebar_cef_prepaint_background_color() & 0x00ff_ffff
-            ),
-        );
-        let sidebar_bridge_event_handler = self.sidebar_bridge_event_handler(cx);
-        let app_modal_host_bridge_event_handler = self.app_modal_host_bridge_event_handler(cx);
-        let sidebar_runtime_settings = self.sidebar_runtime_settings_snapshot.clone();
-        let sidebar_gxserver_bootstrap = self.sidebar_gxserver_bootstrap.clone();
-        let sidebar_visible = gpui_sidebar_chrome_visible(self.sidebar_collapsed);
-        match CefSurface::try_new(
-            "gpui-sidebar".to_string(),
-            parent_ns_view,
-            sidebar_url,
-            "gpui-sidebar".to_string(),
-            sidebar_cef_prepaint_background_color(),
-            false,
-            titlebar_background(),
-            None,
-            sidebar_visible,
-            None,
-            None,
-            None,
-            Some(sidebar_runtime_settings),
-            sidebar_gxserver_bootstrap,
-            Some(sidebar_bridge_event_handler),
-            None,
-            None,
-            Some(cef::AppModalHostBridgeSurface::Sidebar),
-            Some(app_modal_host_bridge_event_handler),
-            None,
-            cx,
-        ) {
-            Ok(sidebar) => {
-                /*
-                CDXC:Sidebar 2026-08-02:
-                Hand the sidebar's CEF child view to the AppKit sendEvent
-                observer so pointer crossings of its frame, and mouse-downs
-                outside it, become the page's hover-suppression and
-                context-menu-dismissal signals.
-                */
-                #[cfg(target_os = "macos")]
-                if let Some(native_view) =
-                    sidebar.read(cx).native_view_for_sidebar_pointer_tracking()
-                {
-                    cef::set_sidebar_pointer_tracking_view(native_view);
-                }
-                self.sidebar = Some(sidebar);
-            }
-            Err(error) => {
-                // The sidebar profile uses the pre-initialized global app-ui
-                // context, so a creation failure here is unexpected. Retry
-                // once after CEF has had time to settle; on a second failure
-                // keep the app alive without the sidebar instead of the
-                // previous process abort
-                // (CDXC:CefRuntime 2026-07-11).
-                support_logs::append(
-                    support_logs::GpuiSupportLog::CrashReports,
-                    "gpui.cefSurface.createFailed",
-                    serde_json::json!({
-                        "surface": "sidebar",
-                        "retryScheduled": !self.cef_sidebar_creation_retried,
-                        "error": error,
-                    }),
-                );
-                if !self.cef_sidebar_creation_retried {
-                    self.cef_sidebar_creation_retried = true;
-                    cx.spawn(async move |this, cx| {
-                        cx.background_executor()
-                            .timer(Duration::from_millis(750))
-                            .await;
-                        let _ = this.update(cx, |this, cx| {
-                            if this.sidebar.is_none() {
-                                this.initialize_cef(cx);
-                            }
-                        });
-                    })
-                    .detach();
-                }
-                return;
-            }
-        }
         self.ensure_active_browser_surface(cx);
         self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
         self.update_active_mode_cef_child_visibility(cx);
         // First-run onboarding may open the CEF app-modal host. Start it only
-        // after the required runtime and initial sidebar surface are ready;
+        // after the required CEF runtime is ready;
         // macOS release first launch can spend time in the native component
         // window before CEF is available.
         self.start_gpui_first_run_onboarding(cx);

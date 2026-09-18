@@ -8,6 +8,11 @@ section here in the same change.
 Each section ends with "Related settings" so the helper can turn an
 explanation into a change with `ghostex settings set`.
 
+Context menus share the sidebar's rounded appearance and follow the current
+light or dark theme. Click a submenu to open it; it stays open as you move the
+pointer across other rows. Long menus scroll vertically to keep every action
+reachable, without a horizontal scrollbar.
+
 ## Views (titlebar tabs)
 
 Every project has the same six built-in views, switched from the titlebar tabs
@@ -23,11 +28,13 @@ become a dropdown on the left after the Notifications bell that follows Next
 the same outlined chat bubble with text lines whether the companion is visible or hidden.
 
 Right-click Code, Browser, Kanban, Automate, Docs, or another web-based view's
-titlebar button for **Reload** and **Sleep**, followed by **Extensions**. Reload
+titlebar button for **Reload** and **Sleep** (or **Wake** when sleeping), followed by **Extensions**. Reload
 refreshes the clicked view (the focused tab in Browser); a sleeping view opens
 again. Sleep unloads the view while keeping its place, and Code also stops its
-editor server. Select the view again to wake it. Resources can stop Code too,
-without closing Ghostex.
+editor server. Choose Wake or select the view again to wake it. Resources can stop Code too,
+without closing Ghostex. Custom project views also offer **Command output** and
+**Configure view** before **Extensions**. Configure view opens that view's editor
+in Settings > Extensions and focuses its name field.
 
 - **Agents**: the terminal grid. Panes and tabs run agent CLIs or plain shells,
   split horizontally or vertically, in one or more groups. Each pane can show
@@ -45,7 +52,8 @@ without closing Ghostex.
   with Agentation in the Browser toolbar; GitHub pages disallow that tool.
   When a page shows its content inside a frame, such as a Storybook story,
   the Annotate toolbar opens inside that frame so the content itself can be
-  selected.
+  selected. Copying or sending annotations clears them afterwards by default;
+  the toolbar's own settings panel (Clear on copy/send) turns that off.
   HTML files in Docs use the same Agentation overlay via Annotate. Markdown
   files use Docs selection comments instead (see Docs below).
 - **Kanban**: the project board backed by the Beads `bd` CLI (see Project
@@ -54,8 +62,9 @@ without closing Ghostex.
 - **Docs**: Markdown, HTML, and Excalidraw files from the project's docs
   folders, with a markdown editor and an annotation system that sends notes
   back to the agent. Select text in a Markdown file to comment on it, mark it
-  Looks good, Clarify, or Needs tests, or delete it (press D), and add a global
-  comment from the header. In the comment box, Add (or Cmd+Enter, Ctrl+Enter
+  Looks good, Clarify, or Needs tests, or mark it Remove this (the X button, or
+  press D), and add a global comment from the header. Unselect the text to
+  close the toolbar. In the comment box, Add (or Cmd+Enter, Ctrl+Enter
   on Windows and Linux) adds the note to the list; the same chord outside the
   box is Send. Send (or Cmd+Enter) delivers the new notes as
   numbered feedback with line numbers to the session last clicked in the
@@ -94,6 +103,10 @@ Related settings: `terminalViewWidthMode`, `webLinkOpenTarget`,
 
 The sidebar lists projects and their sessions. Project headers carry the git
 branch and diff stats, an agent launcher, Add Worktree, and project actions.
+Right-click a project for Open Folder in the file manager or Add to Group.
+Close Project parks the project in Recent Projects; when it held the active
+session, Ghostex stays in the current Space and switches to an awake session
+of the next project in the list.
 Session rows show the agent icon, title, status, tags, and last-active time.
 Top chrome holds the Quick section (projectless Quick chats and terminals),
 tag filters, Spaces, and More Options: Settings, Search by
@@ -133,9 +146,10 @@ session replaces that active pane's session and leaves the other pane in place.
 
 - Width: the sidebar sits on the left; drag the divider to resize,
   double-click it to restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
-- Reveal active session: the titlebar button expands its section and scrolls
-  the active session into view, then blinks its outline twice: pale blue in
-  light mode and white in dark mode. Active sessions also have a slightly
+- Reveal active session: the hollow-circle titlebar button expands its section and scrolls
+  the active session into view with 50px of space from the top or bottom edge
+  (below any pinned headers, where scrolling allows), then blinks its outline
+  twice: pale blue in light mode and white in dark mode. Active sessions also have a slightly
   stronger background and border in light mode.
 - Pane memory: the companion and Commands panes are remembered for Agents and,
   separately, for the wide views (Browser, Code, Docs, Kanban, Automate), the
@@ -208,7 +222,8 @@ session replaces that active pane's session and leaves the other pane in place.
   disappears when expanded without moving the other dots. Hovering gives the
   header a subtle square background and replaces the dots with a chevron.
   Click anywhere across the heading row, including the empty space to its
-  right, to animate the section closed or open. The animation follows Sidebar
+  right, to animate the section closed or open. Sessions keep their full size
+  and spacing while the section reveals or clips the list. The animation follows Sidebar
   Collapse Animation and reduced-motion preferences. Related setting:
   `sidebarCollapseAnimationDurationMs`.
 - New sessions appear at the top of Sessions for 10 minutes. After that,
@@ -291,7 +306,9 @@ syncs those names without running a first-prompt title job or blocking terminal
 input. Pi and OMP use the Title Generation Agent for first-prompt names.
 Manual Generate Name and `/rename` in chat remain available for Claude and Codex.
 ZCode sessions rename from the sidebar and `ghostex rename-command` too: the name
-is saved in ZCode's own session store, and ZCode's automatic naming will not
+is saved in ZCode's own session store once its session row exists (after the
+first prompt), and ZCode's automatic naming will not replace it. Before that,
+the rename is saved only in Ghostex and ZCode's later automatic naming may
 replace it.
 Fork starts the new session as `Fork: <original name>` and saves that name
 through the agent's own rename command so it survives reopening the conversation.
@@ -318,9 +335,13 @@ through the agent's own rename command so it survives reopening the conversation
   a terminal with `zcode --resume <session-id>`; install the ZCode CLI on that
   computer first. Deleted, archived, running, and subagent ZCode conversations
   are excluded from discovery.
-- Search by Prompt (More Options, or `gx f` in a terminal) fuzzy-searches every
-  prompt you ever sent to an agent; Enter resumes that session, and starred
-  prompts stay on top. Ctrl+G is agents, Ctrl+J is projects inside the picker.
+- Search by Prompt (More Options, the floating Search by Prompt button at the
+  bottom of Quick Access > Sessions, the `openFindPrompts` hotkey, default
+  `cmd+shift+f`, or `gx f` in a terminal) fuzzy-searches every prompt you ever
+  sent to an agent; Enter resumes that session, and starred prompts stay on
+  top. Inside the picker the agent and project filters are dropdowns at the top
+  right (Ctrl+G and Ctrl+J open them), Grouping (Ctrl+D) toggles day headers,
+  and hovering any control shows its hotkey.
 - Delayed Actions opens Session Automations. Send Enter can run after a delay,
   when this agent finishes, when all agents in the project finish, or **When a
   specific agent finishes**. Choose the specific agent from the Agent sessions
@@ -333,6 +354,8 @@ Related settings: `autoSleep*`, `clickToWakeSleepingSessions`,
 `renameSessionOnDoubleClick`.
 
 ## Session Chat
+
+In Settings > Chat, **Use GPUI chat** selects the desktop chat renderer. It is off by default, so desktop uses React chat. Turn it on to try and compare the native GPUI version. Restart the desktop app after changing it. Mobile and web keep their existing chat renderer (`sessionChatUseGpui`).
 
 Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
@@ -436,6 +459,12 @@ To compact before sending a new prompt, press `⌥Enter` on macOS or `Alt+Enter`
 or right-click Send and choose Compact & Send. Ghostex sends `/compact` first,
 then puts your written prompt in the queue above the input to send after compaction.
 In narrow chats, notice cards hide Show terminal output; Open terminal remains available.
+If Codex says **Conversation open elsewhere**, choose **Continue here** or press
+Cmd+Enter (Ctrl+Enter on Windows and Linux) to close the other matching Ghostex
+sessions and retry here. This stops their running work but keeps conversation history.
+**Go to other session**, when available, opens the existing session instead.
+If the conversation is open outside Ghostex, close it in that app and choose
+**Retry** with the same shortcut. Your draft stays editable and is not sent by recovery.
 While Claude Code writes a reply, the chat shows the text as it appears in the
 terminal, updated about once a second, and swaps in the saved message the moment
 Claude records it; nothing to enable.
@@ -478,7 +507,7 @@ Code/Docs preferences as transcript links. Double-click a composer pill to edit
 its reference text. Right-click a file reference or file-change path for Open in
 Code, Open in Docs (Markdown, HTML, and Excalidraw), Copy Path, or Open File/Folder
 Location. Open File/Folder Location appears directly below the path-copy actions
-in chat, image previews, Git changed files, projects, and Docs menus, and opens
+in chat, image previews, Git changed files, and Docs menus, and opens
 the location in the machine’s file manager. It requires a local desktop path.
 Disabled Code and Docs views are omitted from the menu.
 Hosts without an editor copy the path on click.
@@ -538,6 +567,10 @@ reset the one whose limit resets first, Most used first keeps draining the
 account already in use, and Same as last session reuses the account of the last
 session. Pick a specific account instead to always start
 with it. When the rule finds no account, new sessions use the current CLI login.
+Before sending a session's first message, use the model menu's Switch Agent CLI
+to change between Claude and Codex. The new agent uses its Account for new
+sessions rule, just like the sidebar agent button, while the terminal and your
+unsent chat text stay in place.
 Sign-in and usage-limit notices in Claude and Codex chats offer Switch account
 beside Open terminal, so you can choose another account directly from those notices.
 In the chat's More actions menu, click Switch Account to open its submenu;
@@ -656,14 +689,42 @@ per-machine default with per-project overrides. Actions (Settings > Actions)
 are saved terminal commands or browser URLs shown on project headers and in
 the titlebar Actions menu; Global Actions apply to every project.
 
-Agents Hub lets you browse and edit agent files in Skills, MDs, Hooks, and
-Configs & MCPs. In MDs, expand Shared agent markdown to see the files in your
-shared agent folder, then select a filename to read or edit it. Expand the
-profile instruction groups the same way. Use Refresh to reload files from
-disk and Save to write your edits.
+Agents Hub lets you browse and edit agent files in Skills, MDs, Hooks,
+Configs & MCPs, and Agent Sync. In MDs, expand Shared agent markdown to see the
+files in your shared agent folder, then select a filename to read or edit it.
+Expand the profile instruction groups the same way. Use Refresh to reload files
+from disk and Save to write your edits.
 
-Cross-agent orchestration is built in: any agent with the `$ghostex-cli`
-skill installed can run `ghostex` to start other agents and steer them. For
+Agent Sync (the fifth Hub tab, Cmd+5) keeps one source of truth in `~/.agents`
+(skills, `main.md` and the other rule files, hook scripts, `.skill-lock.json`)
+and points every agent on the computer at it. The left list shows each detected
+agent and profile with three dots for Skills, Instructions, and Hooks; the right
+pane shows the problems found (dangling links, copied skill folders, whole-folder
+links, instruction files that do not point at `main.md`, stale lock entries) and
+one agent's details when selected. Sync all or Sync <agent> opens a plan first:
+one relative symlink per skill in every agent's skills folder, whole-folder links
+converted to per-skill links, the one-line pointer written into each agent's
+instruction file (a file with other content is backed up as
+`<name>.pre-sync-<stamp>.bak` first), and the hooks folder and lock file linked
+into Claude Code and Codex. Nothing is deleted; pruning stale lock entries is an
+opt-in group. Agents that read `~/.agents/skills` directly (Amp, Cursor,
+OpenCode) get no links. The same scan, plan, and apply run from the CLI:
+`ghostex agent-sync status`, `ghostex agent-sync plan [--agent <id>]`, and
+`ghostex agent-sync apply --yes [--agent <id>] [--group <group>...]
+[--prune-lock]`; `ghostex agent-sync agents` lists the ids.
+
+Use `ghostex agents --help` to create, message, and close other agent sessions.
+`ghostex agents whoami --json` identifies the caller; `agents types` lists
+configured agent IDs; `agents create <agent-id> --task "<task>"` starts one in
+the caller's project (`--project-id` selects another). `agents list` finds
+sessions, and `agents send <session-ref> "<text>"` attaches the sender's identity
+and reply reference automatically. Use `--body-file` for multiline messages,
+`--interrupt` for an urgent correction, or `--queue` to wait until the current
+turn finishes. `agents close <session-ref>` ends that session, including any
+unfinished work. `ghostex read-session-chat` and `ghostex read-text` read replies.
+On older versions without `agents`, use the existing commands below.
+
+Cross-agent orchestration also works through the `$ghostex-cli` skill. For
 "make Claude Code control Codex":
 
 1. Install the Ghostex CLI skill (Settings > Integrations, or
@@ -706,7 +767,8 @@ Related settings: Settings > Projects (beads directory and display key),
 
 ## Automations
 
-The Automate view schedules agent work per project: a name, an agent, a
+The sidebar All Automations page lists scheduled work across projects. The
+Automate view schedules agent work per project: a name, an agent, a
 prompt, a schedule (timer, once, interval, daily, weekly, or cron with a
 timezone), and an execution mode (local checkout, a fresh worktree with an
 optional setup command, or an existing agent thread). Runs are listed with
@@ -729,6 +791,9 @@ sessions, so any client can control agents on any machine.
   reconnects interrupted agent terminals. Tap a red cloud or choose Reconnect
   from the computer's menu to start a fresh connection. Easy Connect does not
   require the separate Tailscale app; the Tailscale connection option does.
+  If the connection fails while saved sessions are still visible, the Sessions
+  list shows a warning with the failure reason and a Retry button. The warning
+  clears once the list successfully refreshes.
   Paired devices are listed and can be removed. On the phone, open Web Preview
   from the machine menu and enter a website address or a port such as `3000`
   immediately, or choose a listening port from the list. The address bar stays
@@ -839,9 +904,10 @@ docs directory), `hideProjectHeaderDiffStats`,
   it. These are the same per-account stars available in Settings > Accounts.
   Claude buttons show the two tightest of the weekly, five-hour, and Fable
   limits, so the Fable limit is never hidden when it is running out; launcher
-  and picker rows and the Accounts figures use the same two numbers. Each
+  and picker rows and the Accounts figures use the same two numbers.   Each
   button opens that login's live limits, reset times, and extra usage or rate
-  limit resets, with the Fable limit as a main bar for Claude. Click the same
+  limit resets, with the Fable limit as a main bar for Claude. Right-click a
+  usage button for Extensions and Accounts. Click the same
   usage button again to close its dropdown. Click another titlebar dropdown's
   button to close the current dropdown and open that one in a single click.
   Clicking outside, including in

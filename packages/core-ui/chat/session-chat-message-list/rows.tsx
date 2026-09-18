@@ -4,13 +4,10 @@ import {
   IconArrowBackUp,
   IconCheck,
   IconChevronRight,
-  IconCopy,
-  IconFile,
   IconGitBranch,
   IconInfoCircle,
   IconPhoto,
   IconSparkles,
-  IconMessagePlus,
 } from '@tabler/icons-react';
 import { memo, useContext, useId, useRef } from 'react';
 import {
@@ -59,7 +56,9 @@ import { SessionChatTerminalToolRow } from '../session-chat-terminal-tool-row';
 import { pairSessionChatToolBlocks, splitSessionChatBlocks } from '../session-chat-tool-fold';
 import { SessionChatToolRun } from '../session-chat-tool-run';
 import { SessionChatUserMessageLayout } from '../session-chat-user-message-layout';
+import { sessionChatMessageActionContent } from '@/packages/shared/session-chat-presentation/message-actions';
 import '../session-chat-agent-tools-disclosure.css';
+import { SessionChatMessageActionIcon } from '../session-chat-message-action-icon';
 import { playCopySound } from '../../copy-sound';
 export const PASTED_IMAGE_NAME = /^ghostex-paste-.+\.png$/i;
 export function isPastedImagePath(path: string | undefined): boolean {
@@ -168,7 +167,7 @@ export function CopyFooter({
   onSaveMarkdown?: (markdown: string) => void;
   onSavePrompt?: (prompt: string) => Promise<void>;
 }) {
-  const canSaveMarkdown = markdown.split(/\r?\n/u).filter((line) => line.trim().length > 0).length > 1;
+  const { canAnnotate, canSaveMarkdown } = sessionChatMessageActionContent(markdown);
   return (
     <MessageFooter
       className={cn(
@@ -190,7 +189,7 @@ export function CopyFooter({
         title='Copy message'
         variant='ghost'
       >
-        <IconCopy aria-hidden='true' data-icon='inline-start' stroke={1.9} />
+        <SessionChatMessageActionIcon name='copy' />
       </Button>
       {onSavePrompt ? <SessionChatSavePromptButton prompt={markdown} onSave={onSavePrompt} /> : null}
       {onRewind ? (
@@ -198,7 +197,7 @@ export function CopyFooter({
           <IconArrowBackUp aria-hidden='true' data-icon='inline-start' stroke={1.9} />
         </Button>
       ) : null}
-      {onAnnotate && markdown.trim().length > 0 ? (
+      {onAnnotate && canAnnotate ? (
         <Button
           aria-label='Reply by Annotating'
           className={
@@ -209,7 +208,7 @@ export function CopyFooter({
           title='Reply by Annotating'
           variant='ghost'
         >
-          <IconMessagePlus aria-hidden='true' data-icon='inline-start' stroke={1.9} />
+          <SessionChatMessageActionIcon name='annotate' />
         </Button>
       ) : null}
       {onSaveMarkdown && canSaveMarkdown ? (
@@ -221,7 +220,7 @@ export function CopyFooter({
           title='Save to md'
           variant='ghost'
         >
-          <IconFile aria-hidden='true' data-icon='inline-start' stroke={1.9} />
+          <SessionChatMessageActionIcon name='save' />
         </Button>
       ) : null}
     </MessageFooter>
@@ -365,70 +364,24 @@ export function StatusRows({ statuses }: { statuses: readonly SessionChatStatusR
  * the code block's copy control are interactive). It keeps line structure so
  * the caller can rebuild paragraphs from it.
  */
-export function plainReasoningText(markdown: string): string {
-  return (
-    markdown
-      .replace(/```(?:[^\n]*)\n?([\s\S]*?)```/g, '$1')
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+/gm, '')
-      // Underscores drop only where they mark emphasis; the ones inside
-      // snake_case identifiers are part of the word and stay.
-      .replace(/(?:\*\*|\*|~~|(?<![A-Za-z0-9])_+|_+(?![A-Za-z0-9]))/g, '')
-      .replace(/\\([\\`*_[\]{}()#+\-.!>])/g, '$1')
-      .trim()
-  );
-}
-
-/** The first non-empty line of the stripped reasoning, for a one-line label. */
-export function plainReasoningTeaser(markdown: string): string {
-  return (
-    plainReasoningText(markdown)
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .find(Boolean) ?? ''
-  );
-}
-
-/**
- * A list item, a table row, a blockquote, or a fence opener means something to
- * the markdown renderer that plain text on the trigger cannot carry, so that
- * line and everything after it stay in the body.
- */
-export const NON_HOISTABLE_REASONING_LINE = /^\s{0,3}(?:[-+*]\s|\d+[.)]\s|>|\||```|~~~)/;
-
-/**
- * The disclosure heading carries the reasoning's OWN text, never the word
- * "Thinking". Verbose mode opens every reasoning turn by default, so a static
- * label produced a column of identical "Thinking" rows that said nothing
- * while the sentence under each of them said everything.
- *
- * CDXC:SessionChat 2026-09-04 DECISION:
- * User: a reasoning row with tool calls under it must "always show all of the text wrapped"; it used to hoist only the first line and clamp it to one row with an ellipsis, so the reader had to expand the row to finish the sentence.
- * The heading therefore owns every leading line that plain text can carry (paragraphs, headings, emphasis, inline code, links), and the body renders only what follows the first line that needs the markdown renderer, so nothing is printed twice and the chevron folds the tool calls rather than the thought.
- * Paragraphs stay separated by one blank line and hard-wrapped lines rejoin with a space, so the heading reads the way markdown would have set it.
- */
-export function splitReasoningHeadline(markdown: string): {
-  headline: string;
-  body: string;
-} {
-  const lines = markdown.split(/\r?\n/);
-  const firstBlock = lines.findIndex((line) => NON_HOISTABLE_REASONING_LINE.test(line));
-  const split = firstBlock < 0 ? lines.length : firstBlock;
-  const headline = plainReasoningText(lines.slice(0, split).join('\n'))
-    .split(/\n[ \t]*\n+/)
-    .map((paragraph) => paragraph.replace(/\s*\n\s*/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n\n');
-  if (headline.length === 0) {
-    return { headline: plainReasoningTeaser(markdown), body: markdown };
-  }
-  return {
-    headline,
-    body: lines.slice(split).join('\n').trim(),
-  };
-}
+import {
+  plainReasoningText,
+  plainReasoningTeaser,
+  NON_HOISTABLE_REASONING_LINE,
+  splitReasoningHeadline,
+  USER_TURN_SEPARATOR,
+  normalizeUserMessageMarkdown,
+  userTurnCopyMarkdown,
+} from '@/packages/shared/session-chat-presentation/message-text';
+export {
+  plainReasoningText,
+  plainReasoningTeaser,
+  NON_HOISTABLE_REASONING_LINE,
+  splitReasoningHeadline,
+  USER_TURN_SEPARATOR,
+  normalizeUserMessageMarkdown,
+  userTurnCopyMarkdown,
+};
 
 /**
  * Answered question cards carried by a turn's tool blocks. They are
@@ -634,47 +587,6 @@ input after the separator (the repeated part is normally a prefix of the
 combined part). Present those inputs as ordinary paragraphs and collapse the
 repeated prefix instead of exposing transport syntax in the user's bubble.
 */
-export const USER_TURN_SEPARATOR = /\r?\n[\t ]*---[\t ]*(?:\r?\n|$)/;
-
-export function normalizeUserMessageMarkdown(markdown: string): string {
-  const parts = markdown.split(USER_TURN_SEPARATOR).map((part) => part.trim());
-  if (parts.length === 1) {
-    return markdown;
-  }
-
-  const visible: string[] = [];
-  for (const part of parts) {
-    if (!part) {
-      continue;
-    }
-    const containingIndex = visible.findIndex((candidate) => candidate.startsWith(part));
-    if (containingIndex < 0) {
-      visible.push(part);
-      continue;
-    }
-
-    const remainder = visible[containingIndex]?.slice(part.length).trimStart() ?? '';
-    visible[containingIndex] = remainder ? `${part}\n\n${remainder}` : part;
-  }
-  return visible.join('\n\n');
-}
-
-/*
- * Legacy agent transcripts carry a picture as a separate image block. Copy has
- * to restore a named reference for those blocks or the reader loses the one
- * thing that names the file they attached. Modern linked references stay in
- * the turn's text, so both their authored position and copyable path survive.
- */
-export function userTurnCopyMarkdown(markdown: string, images: readonly { path?: string; url?: string }[]): string {
-  const references = images
-    .map((block, index) => {
-      const href = block.path ?? block.url;
-      return href === undefined ? '' : `[Image #${index + 1}](${href})`;
-    })
-    .filter((reference) => reference !== '');
-  return [references.join(' '), markdown].filter((part) => part !== '').join('\n\n');
-}
-
 export const MessageRow = memo(
   function MessageRow(props: Parameters<typeof MessageRowBody>[0]) {
     return (

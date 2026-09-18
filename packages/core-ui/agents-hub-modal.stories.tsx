@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { ModalStorySurface } from './modal-gallery/modal-story-surface';
 import { AgentsHubModal } from './agents-hub-modal';
+import { agentSyncFixturePlan, agentSyncFixtureReport } from './agents-hub-sync/agent-sync-fixture';
 import type { WebviewApi } from './webview-api';
 import type { AgentsHubCatalogMessage, AgentsHubTab } from '../shared/session-grid-contract';
 
@@ -467,13 +468,29 @@ const emptyCatalog: AgentsHubCatalogMessage = {
 function AgentsHubModalStory({
   catalog = mockCatalog,
   initialTab,
+  syncAgentId,
+  syncPlanScope,
+  withSyncFixture = false,
 }: {
   catalog?: AgentsHubCatalogMessage;
   initialTab: AgentsHubTab;
+  syncAgentId?: string;
+  syncPlanScope?: string;
+  withSyncFixture?: boolean;
 }) {
   return (
     <ModalStorySurface>
-      <AgentsHubModal catalog={catalog} initialTab={initialTab} isOpen onClose={() => undefined} vscode={mockVscode} />
+      <AgentsHubModal
+        catalog={catalog}
+        initialTab={initialTab}
+        isOpen
+        onClose={() => undefined}
+        syncInitialAgentId={syncAgentId}
+        syncInitialPlanScope={syncPlanScope}
+        syncPlan={withSyncFixture ? { ...agentSyncFixturePlan, type: 'agentSyncPlan' } : undefined}
+        syncReport={withSyncFixture ? { ...agentSyncFixtureReport, type: 'agentSyncReport' } : undefined}
+        vscode={mockVscode}
+      />
     </ModalStorySurface>
   );
 }
@@ -533,6 +550,30 @@ export const EmptyCatalog: Story = {
      */
     <AgentsHubModalStory catalog={emptyCatalog} initialTab='configs' />
   ),
+};
+
+export const AgentSync: Story = {
+  render: () => (
+    /*
+     * CDXC:AgentSync 2026-09-16 WHY:
+     * The fifth tab renders a fixture report (one agent per state) and a fixture plan for the
+     * "all" scope, so Sync all… opens the plan sheet without a native bridge.
+     */
+    <AgentsHubModalStory initialTab='sync' withSyncFixture />
+  ),
+};
+
+export const AgentSyncAgentDetail: Story = {
+  render: () => <AgentsHubModalStory initialTab='sync' syncAgentId='kiro-cli' withSyncFixture />,
+};
+
+export const AgentSyncPlanSheet: Story = {
+  render: () => <AgentsHubModalStory initialTab='sync' syncPlanScope='all' withSyncFixture />,
+};
+
+export const AgentSyncLight: Story = {
+  globals: { modalTheme: 'light' },
+  render: () => <AgentsHubModalStory initialTab='sync' withSyncFixture />,
 };
 
 export const Light: Story = {

@@ -923,6 +923,19 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) -> Option<Entity<CefSurface>> {
+        if self.session_chat_use_gpui {
+            self.ensure_native_chat(session_id, cx);
+            None
+        } else {
+            self.create_legacy_react_chat_surface(session_id, cx)
+        }
+    }
+
+    fn create_legacy_react_chat_surface(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<Entity<CefSurface>> {
         if let Some(surface) = self.agents_chat_surfaces.get(&session_id) {
             return Some(surface.clone());
         }
@@ -1075,6 +1088,8 @@ impl GhostexGpuiApp {
             .collect::<HashSet<_>>();
         self.agents_chat_mode_sessions
             .retain(|session_id| live_session_ids.contains(session_id));
+        let stale_native = self.native_chat_views.keys().copied().filter(|id| !live_session_ids.contains(id)).collect::<Vec<_>>();
+        for id in stale_native { self.remove_agents_chat_surface_for_session(id, cx); }
         /*
         CDXC:Diagnostics 2026-08-28:
         Only surfaces whose SESSION is gone are destroyed here. A live session
@@ -1306,6 +1321,7 @@ impl GhostexGpuiApp {
         session_id: TerminalSessionId,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.native_chat_views.remove(&session_id);
         let caller = std::panic::Location::caller();
         let file = std::path::Path::new(caller.file())
             .file_name()
@@ -1420,6 +1436,7 @@ impl GhostexGpuiApp {
             ),
             page_states: std::mem::take(&mut self.agents_chat_page_states),
             protected_sessions,
+            native_views: std::mem::take(&mut self.native_chat_views),
             surfaces: std::mem::take(&mut self.agents_chat_surfaces),
             surface_hidden_since: std::mem::take(&mut self.agents_chat_surface_hidden_since),
             composer_ready_sessions: std::mem::take(&mut self.session_chat_composer_ready_sessions),
@@ -1440,6 +1457,7 @@ impl GhostexGpuiApp {
     ) {
         self.agents_chat_auto_switch_observed_sessions = parked.auto_switch_observed_sessions;
         self.agents_chat_page_states = parked.page_states;
+        self.native_chat_views = parked.native_views;
         self.agents_chat_surfaces = parked.surfaces;
         self.agents_chat_surface_hidden_since = parked.surface_hidden_since;
         self.session_chat_composer_ready_sessions = parked.composer_ready_sessions;

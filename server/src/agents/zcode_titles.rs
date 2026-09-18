@@ -72,9 +72,7 @@ pub(crate) fn zcode_session_rename(
     ZCode session row does not exist yet, the title still lands in Ghostex's
     own session record, like a non-agent rename.
     */
-    let title_applied_in_zcode =
-        write_zcode_custom_session_title(&home_dir.join(".zcode"), zcode_session_id, title)
-            .map_err(sql_error)?;
+    let title: String = title.trim().chars().take(ZCODE_TITLE_MAX_CHARS).collect();
     let mut runtime_settings = object_field(&session, "runtimeSettings");
     runtime_settings.insert(
         "titleSource".to_string(),
@@ -85,8 +83,11 @@ pub(crate) fn zcode_session_rename(
         "runtimeSettings".to_string(),
         Value::Object(runtime_settings),
     );
-    update.insert("title".to_string(), Value::String(title.to_string()));
+    update.insert("title".to_string(), Value::String(title.clone()));
     let updated = repository.update_session(&update)?;
+    let title_applied_in_zcode =
+        write_zcode_custom_session_title(&home_dir.join(".zcode"), zcode_session_id, &title)
+            .map_err(sql_error)?;
     Ok(json!({
         "changed": true,
         "pendingAgentMetadata": false,

@@ -224,10 +224,16 @@ pub(crate) fn sync_live_zmx_process_identities(
             }
         })
         .filter_map(|session| {
+            let project_id = read_session_text(session, "projectId")?;
+            let session_id = read_session_text(session, "sessionId")?;
+            if crate::agents::draft_agent_switch_in_progress(&project_id, &session_id) {
+                return None;
+            }
             Some((
-                read_session_text(session, "projectId")?,
-                read_session_text(session, "sessionId")?,
+                project_id,
+                session_id,
                 read_session_text(session, "zmxName")?,
+                read_session_text(session, "agentId"),
             ))
         })
         .collect::<Vec<_>>();
@@ -236,7 +242,7 @@ pub(crate) fn sync_live_zmx_process_identities(
     }
     let session_names = candidates
         .iter()
-        .map(|(_, _, zmx_name)| zmx_name.clone())
+        .map(|(_, _, zmx_name, _)| zmx_name.clone())
         .collect::<Vec<_>>();
     let Ok(identities) =
         read_cached_zmx_session_process_identities(&session_names, &state.paths.home_dir)
@@ -245,11 +251,16 @@ pub(crate) fn sync_live_zmx_process_identities(
     };
     let mut changed_any = false;
     let codex_hook_identities = read_codex_hook_session_identities(&state.paths);
-    for (candidate_project_id, candidate_session_id, _) in candidates {
+    for (candidate_project_id, candidate_session_id, _, candidate_agent_id) in candidates {
         let Some(current) = repository.get_session(&candidate_project_id, &candidate_session_id)?
         else {
             continue;
         };
+        // CDXC:Drafts 2026-09-16 WHY:
+        // A process scan started before a CLI switch can finish after it. Its old observation must not undo the selected agent and clear the new account.
+        if read_session_text(&current, "agentId") != candidate_agent_id {
+            continue;
+        }
         if !should_sync_live_zmx_process_identity(&current) {
             continue;
         }

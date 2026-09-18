@@ -278,6 +278,7 @@ export type SettingsModalProps = {
   initialRemoteSection?: SettingsRemoteSection;
   /** Agents tab card to scroll to (consumed by the Agents tab). */
   initialAgentsSection?: SettingsAgentsSection;
+  initialCustomViewId?: string;
   initialTab?: SettingsModalTab;
   isOpen: boolean;
   presentation?: SettingsModalPresentation;
@@ -365,6 +366,7 @@ export function SettingsModal({
   initialRemoteMachineId,
   initialRemoteSection,
   initialAgentsSection,
+  initialCustomViewId,
   initialTab = 'settings',
   isOpen,
   onChange,
@@ -641,8 +643,8 @@ export function SettingsModal({
   }, [initialTab, isOpen]);
 
   useEffect(() => {
-    if (isOpen && initialAgentsSection) setSettingsSearchQuery('');
-  }, [isOpen, initialAgentsSection]);
+    if (isOpen && (initialAgentsSection || initialCustomViewId)) setSettingsSearchQuery('');
+  }, [isOpen, initialAgentsSection, initialCustomViewId]);
 
   useEffect(() => {
     if (activeTab !== 'osIntegration' || showOSIntegrationSettingsTab) {
@@ -1763,6 +1765,15 @@ export function SettingsModal({
 
                         {mainSectionVisible('chat', settingsSearch.chat) ? (
                           <SettingsSection sectionRef={chatSectionRef} title='Chat'>
+                            {mainSettingVisible(settingsSearch.chat, 'sessionChatUseGpui') ? (
+                              <ToggleField
+                                checked={draft.sessionChatUseGpui}
+                                description='Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.'
+                                label='Use GPUI chat'
+                                {...getSettingModificationProps('sessionChatUseGpui')}
+                                onChange={(checked) => updateDraft('sessionChatUseGpui', checked)}
+                              />
+                            ) : null}
                             {mainSettingVisible(settingsSearch.chat, 'preferredAgentInterface') ? (
                               <PreferredAgentInterfaceField
                                 description='Chat switches on automatically as soon as Ghostex detects a compatible agent. The terminal stays live in the background, and you can switch back at any time. Settings > Agents can override this for one agent at a time.'
@@ -2826,14 +2837,14 @@ export function SettingsModal({
                                  * CDXC:Automations 2026-07-26:
                                  * GPUI has graduated project Automate from this gate. The
                                  * shared macOS host still inventories Automate here, while
-                                 * GPUI lists only the Quick Automations Overview preview.
+                                 * GPUI lists only the Quick All Automations preview.
                                  */}
                                 <ToggleField
                                   checked={draft.showBetaFeatures}
                                   description={
                                     automateIsExperimental
-                                      ? 'Show experimental settings, Automations and Automate pages, and the Keep Awake title-bar button.'
-                                      : 'Show experimental settings, Automations Overview, and the Keep Awake title-bar button.'
+                                      ? 'Show experimental settings, All Automations and Automate pages, and the Keep Awake title-bar button.'
+                                      : 'Show experimental settings, All Automations, and the Keep Awake title-bar button.'
                                   }
                                   label='Enable Experimental Features'
                                   {...getSettingModificationProps('showBetaFeatures')}
@@ -2845,8 +2856,8 @@ export function SettingsModal({
                                     <li>OS Integration settings tab</li>
                                     <li>
                                       {automateIsExperimental
-                                        ? 'Automations Overview and project Automate pages'
-                                        : 'Automations Overview'}
+                                        ? 'All Automations and project Automate pages'
+                                        : 'All Automations'}
                                     </li>
                                     <li>Title bar and Power settings: Keep Awake</li>
                                   </ul>
@@ -2931,6 +2942,7 @@ export function SettingsModal({
                 {!isFirstLaunchSetup ? (
                   <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='extensions'>
                     <ExtensionsSettingsTab
+                      initialCustomViewId={initialCustomViewId}
                       spaces={projectViewSpaces}
                       isActive={isOpen && activeTab === 'extensions'}
                       onRequestStatus={onRequestPluginSettingsStatus}

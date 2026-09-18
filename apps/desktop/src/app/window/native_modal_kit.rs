@@ -14,7 +14,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Bounds, ClickEvent, Context, Div, FocusHandle,
     FontWeight, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, MouseDownEvent,
-    ParentElement as _, Pixels, Render, Rgba, SharedString, Stateful,
+    ParentElement as _, Pixels, Render, Rgba, ScrollHandle, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled as _, Transformation, Window, anchored, deferred, div,
     point, px, radians, rgb, size, svg,
 };
@@ -478,6 +478,7 @@ pub(crate) struct ModalSelect {
     pub(crate) open: bool,
     pub(crate) highlight: Option<usize>,
     pub(crate) trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    scroll: ScrollHandle,
 }
 
 pub(crate) enum ModalSelectKey {
@@ -495,12 +496,16 @@ impl ModalSelect {
             open: false,
             highlight: None,
             trigger_bounds: Rc::new(Cell::new(None)),
+            scroll: ScrollHandle::new(),
         }
     }
 
     pub(crate) fn toggle(&mut self, selected: Option<usize>) {
         self.open = !self.open;
         self.highlight = self.open.then(|| selected.unwrap_or(0));
+        if let Some(index) = self.highlight {
+            self.scroll.scroll_to_item(index);
+        }
     }
 
     pub(crate) fn close(&mut self) {
@@ -520,6 +525,7 @@ impl ModalSelect {
                 let delta: isize = if key == "up" { -1 } else { 1 };
                 let current = self.highlight.unwrap_or(0) as isize;
                 self.highlight = Some((current + delta).rem_euclid(count as isize) as usize);
+                self.scroll.scroll_to_item(self.highlight.unwrap());
                 ModalSelectKey::Consumed
             }
             "enter" => {
@@ -598,6 +604,7 @@ pub(crate) fn modal_select_menu<V: 'static>(
     selected: Option<usize>,
     on_choose: impl Fn(&mut V, usize, &mut Window, &mut Context<V>) + Clone + 'static,
     on_dismiss: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
+    window: &Window,
     cx: &mut Context<V>,
 ) -> Option<AnyElement> {
     if !select.open {
@@ -606,6 +613,9 @@ pub(crate) fn modal_select_menu<V: 'static>(
     let trigger = select.trigger_bounds.get()?;
     let p = *p;
     let highlight = select.highlight;
+    // CDXC:AppModal 2026-09-16 WHY:
+    // Anchoring only repositions the popup; it cannot make a long session list fit or scroll. Bound the list to the window and keep keyboard highlights in the same scroll container.
+    let max_height = px(288.0).min((window.viewport_size().height - px(16.0)).max(px(0.0)));
     let position = point(
         trigger.origin.x,
         trigger.origin.y + trigger.size.height + px(4.0),
@@ -617,6 +627,7 @@ pub(crate) fn modal_select_menu<V: 'static>(
         h_flex()
             .id((id, index))
             .w_full()
+            .flex_shrink_0()
             .min_h(px(28.0))
             .px(px(8.0))
             .py(px(6.0))
@@ -657,6 +668,9 @@ pub(crate) fn modal_select_menu<V: 'static>(
                         .id(id)
                         .occlude()
                         .w(trigger.size.width)
+                        .max_h(max_height)
+                        .overflow_y_scroll()
+                        .track_scroll(&select.scroll)
                         .p(px(4.0))
                         .rounded(px(MODAL_RADIUS_CONTROL))
                         .border_1()

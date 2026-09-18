@@ -69,7 +69,7 @@ import {
 } from './annotation-store';
 import { applyThemeSettings as applyMeoThemeSettings } from '../meo/helpers/theme';
 
-const clientStorage = storageScope(["docsFormatting"]);
+const clientStorage = storageScope(['docsFormatting']);
 
 export const MANAGE_MEO_THEME = {
   backgroundColor: '#0e0e0e',
@@ -931,7 +931,9 @@ export function manageEditorRangeAnchor(view: EditorView, from: number, to: numb
     const left = Math.min(...rects.map((rect) => rect.left));
     const right = Math.max(...rects.map((rect) => rect.right));
     const top = Math.min(...rects.map((rect) => rect.top));
+    const bottom = Math.max(...rects.map((rect) => rect.bottom));
     return {
+      bottom: Math.min(Math.max(bottom, 12), window.innerHeight - 12),
       left: Math.min(Math.max((left + right) / 2, 12), window.innerWidth - 12),
       top: Math.min(Math.max(top, 12), window.innerHeight - 12),
     };
@@ -941,6 +943,7 @@ export function manageEditorRangeAnchor(view: EditorView, from: number, to: numb
     return undefined;
   }
   return {
+    bottom: Math.min(Math.max(coords.bottom, 12), window.innerHeight - 12),
     left: Math.min(Math.max((coords.left + coords.right) / 2, 12), window.innerWidth - 12),
     top: Math.min(Math.max(coords.top, 12), window.innerHeight - 12),
   };

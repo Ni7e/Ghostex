@@ -27,6 +27,7 @@ pub(crate) enum SidebarBridgeFunctionId {
     BrowserTabFocus,
     ProjectBoardConversationResponse,
     ResourcesSnapshotRequest,
+    NativeSidebarSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,6 +162,15 @@ response the bridge silently dropped, so every card showed
 "No linked conversation yet" while the links were stored correctly.
 */
 pub(crate) const SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS: usize = 256 * 1024;
+
+pub(crate) fn sidebar_bridge_payload_max_chars(process_message_name: &str) -> usize {
+    if process_message_name == "ghostex.gpui.sidebar.nativeSnapshot" {
+        16 * 1024 * 1024
+    } else {
+        SIDEBAR_BRIDGE_PAYLOAD_MAX_CHARS
+    }
+}
+
 pub(crate) const PROJECT_WORKAREA_BRIDGE_INSTALL_MESSAGE_NAME: &str =
     "ghostex.gpui.projectWorkarea.installBridge";
 const PROJECT_WORKAREA_PROJECT_BEADS_REQUEST_PROCESS_MESSAGE_NAME: &str =
@@ -409,7 +419,12 @@ The sidebar CEF post-function allowlist must have one Rust manifest shared by ma
 CDXC:CefRuntime 2026-06-29-14:45:
 GPUI CEF bridge names, payload budgets, and allowed app-modal/project-workarea surfaces live in this Rust manifest so the macOS browser process and helper renderer consume one ownership point. Keep sidebar, project-workarea, and app-modal handlers surface-specific; this manifest is an allowlist, not a generic IPC bus.
 */
-pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 27] = [
+pub(crate) const SIDEBAR_BRIDGE_FUNCTION_SPECS: [SidebarBridgeFunctionSpec; 28] = [
+    SidebarBridgeFunctionSpec {
+        id: SidebarBridgeFunctionId::NativeSidebarSnapshot,
+        js_function_name: "postNativeSidebarSnapshot",
+        process_message_name: "ghostex.gpui.sidebar.nativeSnapshot",
+    },
     SidebarBridgeFunctionSpec {
         id: SidebarBridgeFunctionId::ActiveProjectContext,
         js_function_name: SIDEBAR_PROJECT_CONTEXT_JS_FUNCTION,

@@ -1,58 +1,14 @@
-import { storageScope, storageFailure, subscribeStorage } from '@/packages/client-storage';
+import { storageFailure, subscribeStorage } from '@/packages/client-storage';
 import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
-import { SessionChatStorageIndex } from './session-chat-storage-index';
+import { questionDraftStorageKey, readQuestionDrafts, writeQuestionDrafts, remainingQuestionDrafts, type AnswerDrafts, type SessionChatAnswerDraft } from '@/packages/shared/session-chat-controller/question-drafts';
+export type { SessionChatAnswerDraft } from '@/packages/shared/session-chat-controller/question-drafts';
 
-const clientStorage = storageScope(["questionDrafts"]);
-
-export interface SessionChatAnswerDraft {
-  indices: number[];
-  other: string;
-}
-
-type AnswerDrafts = Record<string, SessionChatAnswerDraft>;
-const PREFIX = 'ghostex.sessionChat.questionDraft.';
-const draftIndex = new SessionChatStorageIndex<AnswerDrafts>(
-  'questionDrafts',
-  PREFIX, decodeDrafts, () => '');
-
-function decodeDrafts(raw: string): AnswerDrafts | null {
-  try {
-    const value = JSON.parse(raw) as AnswerDrafts;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    return Object.values(value).every(
-      (answer) =>
-        answer &&
-        typeof answer.other === 'string' &&
-        Array.isArray(answer.indices) &&
-        answer.indices.every((index) => Number.isSafeInteger(index) && index >= 0)
-    )
-      ? value
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function readDrafts(key: string | null): AnswerDrafts {
-  if (!key) return {};
-  try {
-    return decodeDrafts(clientStorage.getItem(key) ?? '{}') ?? {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * CDXC:SessionChat 2026-09-15 DECISION:
- * User: answer text in question cards must survive session switches, reusing the composer's draft storage system.
- * Save each edit through the same local storage index, scoped to the session and question, and clear only after successful delivery or explicit dismissal.
- */
 export function useSessionChatQuestionDrafts(sessionKey: string | undefined, promptKey: string) {
   const persistenceError = useSyncExternalStore(subscribeStorage, () => storageFailure('questionDrafts'), () => undefined);
   const scope = JSON.stringify([sessionKey, promptKey]);
-  const key = sessionKey ? `${PREFIX}${scope}` : null;
-  const [state, setState] = useState(() => ({ scope, drafts: readDrafts(key), error: '' }));
-  if (state.scope !== scope) setState({ scope, drafts: readDrafts(key), error: '' });
+  const key = sessionKey ? questionDraftStorageKey(sessionKey, promptKey) : null;
+  const [state, setState] = useState(() => ({ scope, drafts: readQuestionDrafts(key), error: '' }));
+  if (state.scope !== scope) setState({ scope, drafts: readQuestionDrafts(key), error: '' });
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -61,8 +17,7 @@ export function useSessionChatQuestionDrafts(sessionKey: string | undefined, pro
       let error = '';
       if (key) {
         try {
-          if (Object.keys(drafts).length) draftIndex.set(key, drafts);
-          else draftIndex.remove(key);
+          writeQuestionDrafts(key, drafts);
         } catch {
           error = 'Your answer could not be saved on this computer. Keep this view open until saving succeeds.';
         }
@@ -77,16 +32,13 @@ export function useSessionChatQuestionDrafts(sessionKey: string | undefined, pro
 
   const clearDrafts = useCallback(
     (submitted: AnswerDrafts): void => {
-      const remaining = key
-        ? readDrafts(key)
-        : { ...(stateRef.current.scope === scope ? stateRef.current.drafts : {}) };
-      for (const [question, answer] of Object.entries(submitted)) {
-        if (JSON.stringify(remaining[question]) === JSON.stringify(answer)) delete remaining[question];
-      }
+      const remaining = remainingQuestionDrafts(
+        key ? readQuestionDrafts(key) : stateRef.current.scope === scope ? stateRef.current.drafts : {},
+        submitted
+      );
       if (key) {
         try {
-          if (Object.keys(remaining).length) draftIndex.set(key, remaining);
-          else draftIndex.remove(key);
+          writeQuestionDrafts(key, remaining);
         } catch {
           return;
         }
@@ -100,7 +52,7 @@ export function useSessionChatQuestionDrafts(sessionKey: string | undefined, pro
     (question: string, update: (draft: SessionChatAnswerDraft) => SessionChatAnswerDraft): void => {
       const current =
         key && !stateRef.current.error
-          ? readDrafts(key)
+          ? readQuestionDrafts(key)
           : stateRef.current.scope === scope
             ? stateRef.current.drafts
             : {};

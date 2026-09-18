@@ -1,3 +1,4 @@
+import { flushSessionNote } from '@/packages/shared/session-chat-controller/note';
 /*
 CDXC:SessionNotes 2026-08-24:
 The chat-side editor for a session's note ("what to do next / when to come back
@@ -50,7 +51,7 @@ export function SessionChatNotePanel({
   panel, so without it a single note would be written on blur, again on close
   and again on unmount; comparing against it makes every extra flush a no-op.
   */
-  const savedRef = useRef('');
+  const writeState = useRef({ saved: '' });
   const editedRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lexicalApiRef = useRef<SessionChatComposerInputApi | null>(null);
@@ -69,7 +70,7 @@ export function SessionChatNotePanel({
     void readNote()
       .then((result) => {
         const note = result.note ?? '';
-        savedRef.current = note.trim();
+        writeState.current.saved = note.trim();
         onHasNoteChange(note.trim() !== '');
         // A read that lands after the user started typing must not overwrite
         // what they wrote.
@@ -89,18 +90,7 @@ export function SessionChatNotePanel({
   }, [onHasNoteChange, readNote]);
 
   const flushNote = useCallback((): void => {
-    const previous = savedRef.current;
-    const next = valueRef.current.trim();
-    if (next === previous) {
-      return;
-    }
-    savedRef.current = next;
-    void saveNoteRef.current(next).catch((error: unknown) => {
-      // Put the bookkeeping back so the next blur / close retries the write
-      // instead of believing a note that never landed is already stored.
-      if (savedRef.current === next) {
-        savedRef.current = previous;
-      }
+    void flushSessionNote(writeState.current, valueRef.current, (note) => saveNoteRef.current(note)).catch((error: unknown) => {
       console.error('[session-chat] session note save failed', error);
     });
   }, []);

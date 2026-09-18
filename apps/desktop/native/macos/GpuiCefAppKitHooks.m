@@ -181,6 +181,14 @@ GhostexGpuiSidebarPointerTrackingContainsScreenPoint(NSPoint screenPoint);
  data-native-pointer-inside CSS contract and context-menu dismissal).
 */
 static __weak NSView *g_ghostexGpuiSidebarPointerTrackingView = nil;
+static BOOL g_ghostexGpuiSidebarUsesNativeBounds = NO;
+static NSRect g_ghostexGpuiSidebarNativeBounds;
+
+static NSRect GhostexGpuiSidebarTrackingRect(NSView *view) {
+  return g_ghostexGpuiSidebarUsesNativeBounds
+      ? NSIntersectionRect(view.visibleRect, g_ghostexGpuiSidebarNativeBounds)
+      : view.visibleRect;
+}
 
 /*
  CDXC:Sidebar 2026-08-20:
@@ -217,12 +225,24 @@ extern void GhostexGpuiSidebarScrollGestureBegan(void);
 
 void GhostexGpuiCEFSetSidebarPointerTrackingView(void *view) {
   NSView *sidebarView = (__bridge NSView *)view;
+  g_ghostexGpuiSidebarUsesNativeBounds = NO;
   g_ghostexGpuiSidebarPointerTrackingView = sidebarView;
   // Unknown until the next mouse event recomputes it against the new view.
   g_ghostexGpuiSidebarPointerState =
       GhostexGpuiSidebarPointerTrackingStateUnknown;
   // Pointer-moved events are only generated for a window that asks for them.
   sidebarView.window.acceptsMouseMovedEvents = YES;
+}
+
+// CDXC:Sidebar 2026-09-17 WHY:
+// Embedded browser panes consume clicks before GPUI receives them. Track the rendered sidebar rectangle in its GPUI view so those clicks still dismiss native menus and clear stale hover.
+void GhostexGpuiNativeSidebarSetTrackingBounds(void *view, double x, double y, double width, double height) {
+  NSView *nativeView = (__bridge NSView *)view;
+  if (nativeView != g_ghostexGpuiSidebarPointerTrackingView) {
+    GhostexGpuiCEFSetSidebarPointerTrackingView(view);
+  }
+  g_ghostexGpuiSidebarUsesNativeBounds = YES;
+  g_ghostexGpuiSidebarNativeBounds = NSMakeRect(x, nativeView.isFlipped ? y : NSHeight(nativeView.bounds) - y - height, width, height);
 }
 
 static void GhostexGpuiSidebarPointerTrackingReport(BOOL inside) {
@@ -250,7 +270,7 @@ GhostexGpuiSidebarPointerTrackingContainsScreenPoint(NSPoint screenPoint) {
       !NSApp.active || sidebarView.isHiddenOrHasHiddenAncestor) {
     return NO;
   }
-  NSRect frameInWindow = [sidebarView convertRect:sidebarView.visibleRect
+  NSRect frameInWindow = [sidebarView convertRect:GhostexGpuiSidebarTrackingRect(sidebarView)
                                            toView:nil];
   NSRect contentInWindow = [window.contentView convertRect:window.contentView.bounds
                                                    toView:nil];
@@ -353,7 +373,7 @@ static void GhostexGpuiSidebarPointerTrackingObserveEvent(NSEvent *event) {
     BOOL clickedSidebar = window && window == sidebarView.window &&
         !sidebarView.isHiddenOrHasHiddenAncestor &&
         NSPointInRect([sidebarView convertPoint:event.locationInWindow fromView:nil],
-                      sidebarView.visibleRect);
+                      GhostexGpuiSidebarTrackingRect(sidebarView));
     if (!clickedSidebar) {
       GhostexGpuiSidebarOutsideMouseDown();
     }

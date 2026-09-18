@@ -1,5 +1,7 @@
-import { SessionQuestionIndicator } from './session-question-indicator';
-import { CollapsibleSessionRow } from './collapsible-session-row';
+import { CollisionPriority } from '@dnd-kit/abstract';
+import { PointerSensor } from '@dnd-kit/dom';
+import { useDroppable } from '@dnd-kit/react';
+import { useSortable } from '@dnd-kit/react/sortable';
 import {
   IconAlertTriangle,
   IconCaretRightFilled,
@@ -9,9 +11,9 @@ import {
   IconChevronRight,
   IconChevronUp,
   IconCopy,
+  IconEyeOff,
   IconFolder,
   IconFolderOpen,
-  IconEyeOff,
   IconGitBranch,
   IconGitPullRequest,
   IconHistory,
@@ -22,24 +24,19 @@ import {
   IconPlayerPlay,
   IconPlus,
   IconRefresh,
-  IconSettings,
   IconStack,
   IconTerminal2,
   IconTrash,
   IconWorld,
   IconX,
 } from '@tabler/icons-react';
-import { CollisionPriority } from '@dnd-kit/abstract';
-import { PointerSensor } from '@dnd-kit/dom';
-import { useDroppable } from '@dnd-kit/react';
-import { useSortable } from '@dnd-kit/react/sortable';
 import {
   Fragment,
   startTransition,
   useCallback,
-  useLayoutEffect,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -48,65 +45,32 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { AppTooltip } from './app-tooltip';
-import { AgentLauncherMenuItems } from './accounts/agent-launcher-menu';
-import { SidebarProjectIcon } from './sidebar-project-icon';
+import { clampProjectSessionListCollapsedCount, DEFAULT_ghostex_SETTINGS } from '../shared/ghostex-settings';
+import type { SidebarProjectDiffStats } from '../shared/project-diff-stats';
 import {
   getSidebarSessionLifecycleState,
   type SidebarSessionItem,
   type SidebarTheme,
 } from '../shared/session-grid-contract';
-import type { SidebarProjectDiffStats } from '../shared/project-diff-stats';
-import type { SidebarAgentButton } from '../shared/sidebar-agents';
-import type { SidebarCommandButton, SidebarCommandScope } from '../shared/sidebar-commands';
-import { DEFAULT_SIDEBAR_COMMAND_ICON } from '../shared/sidebar-command-icons';
-import { SidebarCommandIconGlyph } from './sidebar-command-icon';
-import { DEFAULT_ghostex_SETTINGS, clampProjectSessionListCollapsedCount } from '../shared/ghostex-settings';
 import type { SidebarSessionTagListItem } from '../shared/session-tags';
-import { ConfirmationModal } from './confirmation-modal';
-import {
-  createGroupDropData,
-  createSessionDropTargetData,
-  createSessionDropTargetId,
-  type SidebarGroupDropTarget,
-  type SidebarSessionDropTarget,
-} from './sidebar-dnd';
-import {
-  getAwakeTerminalAndBrowserCount,
-  getGroupSessionSummary,
-  type GroupSessionSummary,
-} from './group-session-summary';
-import { shouldShowSessionGroupConnector } from './session-group-connector';
-import { getGroupStatusAnchorName, getSessionStatusAnchorName } from './session-status-anchor';
-import { useSidebarStore } from './sidebar-store';
-import {
-  type SidebarSessionSelectionChangeRequest,
-  SortableSessionCard,
-  type SortableSessionCardSharedSettings,
-} from './sortable-session-card';
-import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
-import { resolveSidebarSpaceIcon } from './space-filter-row';
-import { createRemoteSidebarSpaceSectionKey, LOCAL_SIDEBAR_SPACE_SECTION_KEY } from './sidebar-app/space-filtering';
-import { getSidebarSpaceIdsContainingProject, type SidebarSpacesState } from './spaces';
-import { useCollapsibleHeight } from './use-collapsible-height';
-import {
-  DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE,
-  getProjectSessionSection,
-  type ProjectSessionSection,
-  type ProjectSessionSectionCollapseStateById,
-} from './sidebar-app/project-session-section-state';
-import { useSidebarCollapsiblePresence } from './sidebar-collapse-animation';
-import type { WebviewApi } from './webview-api';
-import { openAppModal, openQuickAccess } from './app-modal-host-bridge';
-import { getQuickAccessSessionProjectId } from './quick-access-session-scope';
-import { getVisibleProjectSessionIds, type ProjectSessionListExpandedState } from './project-session-list-toggle';
+import type { SidebarAgentButton } from '../shared/sidebar-agents';
+import { DEFAULT_SIDEBAR_COMMAND_ICON } from '../shared/sidebar-command-icons';
+import type { SidebarCommandButton, SidebarCommandScope } from '../shared/sidebar-commands';
 import {
   DEFAULT_WORKSPACE_THEME_COLOR,
   normalizeWorkspaceThemeColor,
   updateWorkspaceThemeColorHistory,
 } from '../shared/workspace-project-appearance';
-import { readWorkspaceThemeColorHistory, writeWorkspaceThemeColorHistory } from './workspace-theme-color-history';
-import { SidebarFixedTooltipButton } from './sidebar-fixed-tooltip-button';
+import { AgentLauncherMenuItems } from './accounts/agent-launcher-menu';
+import { openAppModal, openQuickAccess } from './app-modal-host-bridge';
+import { AppTooltip } from './app-tooltip';
+import { CollapsibleSessionSection } from './collapsible-session-section';
+import { ConfirmationModal } from './confirmation-modal';
+import {
+  getAwakeTerminalAndBrowserCount,
+  getGroupSessionSummary,
+  type GroupSessionSummary,
+} from './group-session-summary';
 import {
   PRIMARY_AGENT_LAUNCHER_CHANGED_EVENT,
   readPrimaryAgentLauncherId,
@@ -114,8 +78,45 @@ import {
   type PrimaryAgentLauncherChangedEvent,
 } from './primary-agent-launcher';
 import { ProjectAgentLauncherIcon } from './project-agent-launcher-icon';
+import { getVisibleProjectSessionIds, type ProjectSessionListExpandedState } from './project-session-list-toggle';
+import { formatCountLabel, formatProjectEditorLineCount, formatProjectTooltipGitStats } from './project-tooltip-model';
+import { getQuickAccessSessionProjectId } from './quick-access-session-scope';
+import { shouldShowSessionGroupConnector } from './session-group-connector';
+import { SessionQuestionIndicator } from './session-question-indicator';
+import { getGroupStatusAnchorName, getSessionStatusAnchorName } from './session-status-anchor';
+import {
+  DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE,
+  getProjectSessionSection,
+  type ProjectSessionSection,
+  type ProjectSessionSectionCollapseStateById,
+} from './sidebar-app/project-session-section-state';
+import { createRemoteSidebarSpaceSectionKey, LOCAL_SIDEBAR_SPACE_SECTION_KEY } from './sidebar-app/space-filtering';
+import { useSidebarCollapsiblePresence } from './sidebar-collapse-animation';
+import { SidebarCommandIconGlyph } from './sidebar-command-icon';
+import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
+import {
+  createGroupDropData,
+  createSessionDropTargetData,
+  createSessionDropTargetId,
+  type SidebarGroupDropTarget,
+  type SidebarSessionDropTarget,
+} from './sidebar-dnd';
+import { SidebarFixedTooltipButton } from './sidebar-fixed-tooltip-button';
+import { SidebarProjectIcon } from './sidebar-project-icon';
 import { getSidebarReorderActivationConstraints } from './sidebar-reorder-activation';
+import { useSidebarStore } from './sidebar-store';
+import {
+  SortableSessionCard,
+  type SidebarSessionSelectionChangeRequest,
+  type SortableSessionCardSharedSettings,
+} from './sortable-session-card';
+import { resolveSidebarSpaceIcon } from './space-filter-row';
+import { getSidebarSpaceIdsContainingProject, type SidebarSpacesState } from './spaces';
 import { useSidebarTooltipDelayMs } from './tooltip-delay';
+import { useCollapsibleHeight } from './use-collapsible-height';
+import type { WebviewApi } from './webview-api';
+import { readWorkspaceThemeColorHistory, writeWorkspaceThemeColorHistory } from './workspace-theme-color-history';
+export { formatProjectTooltipGitStats } from './project-tooltip-model';
 
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 196;
@@ -188,7 +189,6 @@ function isElementTarget(target: EventTarget | null): target is Element {
  * Cap git +/− line counts shown in project headers at four digits so very large
  * diffs stay readable in the sidebar without widening the status label.
  */
-const PROJECT_EDITOR_DISPLAY_MAX_LINES = 9999;
 const PROJECT_CONTEXT_THEME_OPTIONS: ReadonlyArray<{ label: string; value: SidebarTheme }> = [
   /**
    * CDXC:Theming 2026-06-15-01:43:
@@ -389,10 +389,6 @@ function formatProjectEditorFilesCount(files: number): string {
   return String(Math.min(PROJECT_EDITOR_DISPLAY_MAX_FILES, Math.max(0, files)));
 }
 
-function formatProjectEditorLineCount(lines: number): string {
-  return String(Math.min(PROJECT_EDITOR_DISPLAY_MAX_LINES, Math.max(0, lines)));
-}
-
 function ProjectHeaderDiffStats({ showFileCount, stats }: { showFileCount: boolean; stats: SidebarProjectDiffStats }) {
   return (
     <div
@@ -410,32 +406,6 @@ function ProjectHeaderDiffStats({ showFileCount, stats }: { showFileCount: boole
       </span>
     </div>
   );
-}
-
-export function formatProjectTooltipGitStats(stats: SidebarProjectDiffStats): string {
-  if (stats.isLoading) {
-    return 'Git: loading changes';
-  }
-
-  if (!stats.isRepo) {
-    return 'Git: not a repository';
-  }
-
-  const fileCount = Math.max(0, stats.files);
-  const changedLineCount = Math.max(0, stats.additions) + Math.max(0, stats.deletions);
-  /**
-   * CDXC:Git 2026-06-14-16:33:
-   * Project and worktree title tooltips should spell out the file and line
-   * nouns so one changed file or one changed line reads as singular while the
-   * compact inline diff badge can remain numeric-only.
-   */
-  return `${fileCount} ${formatCountLabel(fileCount, 'file')} changed  +${formatProjectEditorLineCount(
-    stats.additions
-  )}  -${formatProjectEditorLineCount(stats.deletions)} ${formatCountLabel(changedLineCount, 'line')}`;
-}
-
-function formatCountLabel(count: number, singular: string): string {
-  return Math.abs(count) === 1 ? singular : `${singular}s`;
 }
 
 function ProjectTitleTooltip({
@@ -510,6 +480,8 @@ export type SessionGroupSectionProps = {
   spaceMemberProjectId?: string;
   spaces?: SidebarSpacesState;
   onHideGroup?: () => void;
+  /** The session to focus in place of this project's when Close Project parks it; see sidebar-app/close-project-successor.ts. */
+  resolveCloseProjectSuccessorSessionId?: () => string | undefined;
   onSessionSelectionChange?: (request: SidebarSessionSelectionChangeRequest) => void;
   orderedSessionIds?: readonly string[];
   selectedSearchSessionId?: string;
@@ -753,6 +725,7 @@ export function SessionGroupSection({
   spaceMemberProjectId,
   spaces,
   onHideGroup,
+  resolveCloseProjectSuccessorSessionId,
   onSessionSelectionChange,
   orderedSessionIds: orderedSessionIdsProp,
   selectedSearchSessionId,
@@ -1055,6 +1028,29 @@ export function SessionGroupSection({
           isSessionInCollapsedSection(sessionId)
       )
     : orderedSessionIds;
+  const renderedSessionSections: Array<{
+    key: string;
+    section: ProjectSessionSection;
+    sessionIds: string[];
+    startIndex: number;
+  }> = [];
+  const sectionBlockCounts = new Map<ProjectSessionSection, number>();
+  for (const [sessionIndex, sessionId] of renderedSessionIds.entries()) {
+    const section = getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs);
+    const previous = renderedSessionSections.at(-1);
+    if (previous?.section === section) {
+      previous.sessionIds.push(sessionId);
+    } else {
+      const blockIndex = sectionBlockCounts.get(section) ?? 0;
+      sectionBlockCounts.set(section, blockIndex + 1);
+      renderedSessionSections.push({
+        key: `${section}:${blockIndex}`,
+        section,
+        sessionIds: [sessionId],
+        startIndex: sessionIndex,
+      });
+    }
+  }
   const renderedBrowserSessionIds = renderedSessionIds.filter((sessionId) => {
     return getProjectSessionSection(sessionsById[sessionId], enableSessionParking, sessionListNowMs) === 'browser';
   });
@@ -1841,8 +1837,10 @@ export function SessionGroupSection({
     }
 
     setContextMenuPosition(undefined);
+    const successorSessionId = resolveCloseProjectSuccessorSessionId?.();
     vscode.postMessage({
       groupId: group.groupId,
+      ...(successorSessionId ? { successorSessionId } : {}),
       type: 'closeWorkspaceProjectForGroup',
     });
   };
@@ -2129,6 +2127,15 @@ export function SessionGroupSection({
           style={groupHeaderStyle}
         >
           <div className='group-title-wrap'>
+            {projectContext && !isChatCollection ? (
+              <IconChevronRight
+                aria-hidden='true'
+                className='project-disclosure-chevron'
+                data-collapsed={String(isCollapsed)}
+                size={16}
+                stroke={2}
+              />
+            ) : null}
             {isEditing ? (
               <input
                 className='group-title-input'
@@ -2636,51 +2643,19 @@ export function SessionGroupSection({
               ) : null}
               {orderedSessionIds.length > 0 ? (
                 <>
-                  {renderedSessionIds.map((sessionId, sessionIndex) => {
-                    const session = sessionsById[sessionId];
-                    const projectSessionSection = getProjectSessionSection(
-                      session,
-                      enableSessionParking,
-                      sessionListNowMs
-                    );
-                    const isProjectSessionSectionCollapsed =
-                      (Boolean(projectContext) ||
-                        (isChatCollection &&
-                          (projectSessionSection === 'drafts' ||
-                            projectSessionSection === 'parked' ||
-                            projectSessionSection === 'snoozed'))) &&
-                      collapsedProjectSessionSections[projectSessionSection];
-                    /*
-                     * CDXC:Sessions 2026-09-15 WHY:
-                     * The gap after the last pinned row is keyed to the next session, but belongs above that session's section heading, even when the next section is collapsed.
-                     * Resolve the gap key against renderedSessionIds, matching this loop: visibleSessionIds skips collapsed and Compact-hidden rows that still own headings, which moved the line below Drafts and Sessions.
-                     */
+                  {renderedSessionSections.map(({ key, section, sessionIds, startIndex }) => {
+                    const sessionId = sessionIds[0];
                     const isPinnedSectionEndGap =
                       Boolean(projectContext) &&
-                      sessionIndex > 0 &&
-                      projectSessionSection !== 'pinned' &&
+                      startIndex > 0 &&
+                      section !== 'pinned' &&
                       getProjectSessionSection(
-                        sessionsById[renderedSessionIds[sessionIndex - 1]],
+                        sessionsById[renderedSessionIds[startIndex - 1]],
                         enableSessionParking,
                         sessionListNowMs
                       ) === 'pinned';
-                    const isVisibleSessionRow = visibleSessionIdSet.has(sessionId);
-                    const sessionIdsBelowStartIndex = (visibleSessionIndexById.get(sessionId) ?? -1) + 1;
-                    const sessionDropPosition =
-                      sessionDropIndicator?.kind === 'session' &&
-                      sessionDropIndicator.groupId === group.groupId &&
-                      sessionDropIndicator.sessionId === sessionId
-                        ? sessionDropIndicator.position
-                        : undefined;
-                    const pinnedSessionDropPosition =
-                      pinnedSessionDropIndicator?.kind === 'session' &&
-                      pinnedSessionDropIndicator.groupId === group.groupId &&
-                      pinnedSessionDropIndicator.sessionId === sessionId
-                        ? pinnedSessionDropIndicator.position
-                        : undefined;
-
                     return (
-                      <Fragment key={sessionId}>
+                      <Fragment key={key}>
                         {isPinnedSectionEndGap &&
                         !collapsedProjectSessionSections.pinned &&
                         shouldRenderSessionRowGaps ? (
@@ -2744,59 +2719,119 @@ export function SessionGroupSection({
                         {!projectContext && shouldRenderSessionKindLabels && sessionId === firstTerminalSessionId ? (
                           <div className='session-kind-label'>Sessions</div>
                         ) : null}
-                        <CollapsibleSessionRow visible={isVisibleSessionRow}>
-                          {!isPinnedSectionEndGap && shouldRenderSessionRowGaps ? (
-                            <div
-                              aria-hidden
-                              className='pinned-session-drop-gap'
-                              data-active={String(pinnedSessionDropGapKey === getSessionDropGapKeyBefore(sessionId))}
-                              data-edge={sessionIndex === 0 ? 'start' : undefined}
-                            />
-                          ) : null}
-                          <SortableSessionCard
-                            completionFlashNonce={completionFlashNonceBySessionId?.[sessionId] ?? 0}
-                            dragDisabled={
-                              draggingDisabled ||
-                              (sessionDraggingDisabled &&
-                                !(allowPinnedSessionReorder && sessionsById[sessionId]?.isPinned === true))
-                            }
-                            dropDisabled={draggingDisabled || (sessionDraggingDisabled && !allowPinnedSessionReorder)}
-                            groupId={group.groupId}
-                            forcedDropPosition={
-                              allowPinnedSessionReorder ? undefined : (sessionDropPosition ?? pinnedSessionDropPosition)
-                            }
-                            hoverActionsExpanded={areSessionCardHoverActionsExpanded}
-                            index={sessionIndex}
-                            isSearchSelected={selectedSearchSessionId === sessionId}
-                            onFocusRequested={onFocusRequested}
-                            onHoverActionsExpandedChange={setSessionCardHoverActionsExpanded}
-                            onSessionSelectionChange={onSessionSelectionChange}
-                            sessionCardSettings={sessionCardSettings}
-                            sessionGroup={group}
-                            sessionTagListItems={sessionTagListItems}
-                            sessionIdsBelowSource={visibleSessionIds}
-                            sessionIdsBelowStartIndex={sessionIdsBelowStartIndex}
-                            sessionId={sessionId}
-                            selectedSessionIds={selectedSessionIds}
-                            shouldKeepLastProjectSessionVisibleOnClose={
+                        <CollapsibleSessionSection visible={!isSessionInCollapsedSection(sessionId)}>
+                          {sessionIds.map((sessionId, indexInSection) => {
+                            const sessionIndex = startIndex + indexInSection;
+                            const session = sessionsById[sessionId];
+                            const projectSessionSection = getProjectSessionSection(
+                              session,
+                              enableSessionParking,
+                              sessionListNowMs
+                            );
+                            const isProjectSessionSectionCollapsed =
+                              (Boolean(projectContext) ||
+                                (isChatCollection &&
+                                  (projectSessionSection === 'drafts' ||
+                                    projectSessionSection === 'parked' ||
+                                    projectSessionSection === 'snoozed'))) &&
+                              collapsedProjectSessionSections[projectSessionSection];
+                            /*
+                             * CDXC:Sessions 2026-09-15 WHY:
+                             * The gap after the last pinned row is keyed to the next session, but belongs above that session's section heading, even when the next section is collapsed.
+                             * Resolve the gap key against renderedSessionIds, matching this loop: visibleSessionIds skips collapsed and Compact-hidden rows that still own headings, which moved the line below Drafts and Sessions.
+                             */
+                            const isPinnedSectionEndGap =
                               Boolean(projectContext) &&
-                              !isChatCollection &&
-                              storedSessionIds.length === 1 &&
-                              storedSessionIds[0] === sessionId
-                            }
-                            showGroupDropTargetChrome={!allowPinnedSessionReorder}
-                            showGroupConnector={showSessionGroupConnector}
-                            showDropPositionIndicator={showSessionDropPositionIndicators && !allowPinnedSessionReorder}
-                            vscode={vscode}
-                          />
-                        </CollapsibleSessionRow>
-                        {!projectContext &&
-                        !isProjectSessionSectionCollapsed &&
-                        sessionsById[sessionId]?.isPinned === true &&
-                        orderedSessionIds[sessionIndex + 1] !== undefined &&
-                        sessionsById[orderedSessionIds[sessionIndex + 1]]?.isPinned !== true ? (
-                          <div aria-hidden className='pinned-sessions-divider' />
-                        ) : null}
+                              sessionIndex > 0 &&
+                              projectSessionSection !== 'pinned' &&
+                              getProjectSessionSection(
+                                sessionsById[renderedSessionIds[sessionIndex - 1]],
+                                enableSessionParking,
+                                sessionListNowMs
+                              ) === 'pinned';
+                            const isVisibleSessionRow = visibleSessionIdSet.has(sessionId);
+                            const sessionIdsBelowStartIndex = (visibleSessionIndexById.get(sessionId) ?? -1) + 1;
+                            const sessionDropPosition =
+                              sessionDropIndicator?.kind === 'session' &&
+                              sessionDropIndicator.groupId === group.groupId &&
+                              sessionDropIndicator.sessionId === sessionId
+                                ? sessionDropIndicator.position
+                                : undefined;
+                            const pinnedSessionDropPosition =
+                              pinnedSessionDropIndicator?.kind === 'session' &&
+                              pinnedSessionDropIndicator.groupId === group.groupId &&
+                              pinnedSessionDropIndicator.sessionId === sessionId
+                                ? pinnedSessionDropIndicator.position
+                                : undefined;
+                            return (
+                              <Fragment key={sessionId}>
+                                {isVisibleSessionRow ? (
+                                  <>
+                                    {!isPinnedSectionEndGap && shouldRenderSessionRowGaps ? (
+                                      <div
+                                        aria-hidden
+                                        className='pinned-session-drop-gap'
+                                        data-active={String(
+                                          pinnedSessionDropGapKey === getSessionDropGapKeyBefore(sessionId)
+                                        )}
+                                        data-edge={sessionIndex === 0 ? 'start' : undefined}
+                                      />
+                                    ) : null}
+                                    <SortableSessionCard
+                                      completionFlashNonce={completionFlashNonceBySessionId?.[sessionId] ?? 0}
+                                      dragDisabled={
+                                        draggingDisabled ||
+                                        (sessionDraggingDisabled &&
+                                          !(allowPinnedSessionReorder && sessionsById[sessionId]?.isPinned === true))
+                                      }
+                                      dropDisabled={
+                                        draggingDisabled || (sessionDraggingDisabled && !allowPinnedSessionReorder)
+                                      }
+                                      groupId={group.groupId}
+                                      forcedDropPosition={
+                                        allowPinnedSessionReorder
+                                          ? undefined
+                                          : (sessionDropPosition ?? pinnedSessionDropPosition)
+                                      }
+                                      hoverActionsExpanded={areSessionCardHoverActionsExpanded}
+                                      index={sessionIndex}
+                                      isSearchSelected={selectedSearchSessionId === sessionId}
+                                      onFocusRequested={onFocusRequested}
+                                      onHoverActionsExpandedChange={setSessionCardHoverActionsExpanded}
+                                      onSessionSelectionChange={onSessionSelectionChange}
+                                      sessionCardSettings={sessionCardSettings}
+                                      sessionGroup={group}
+                                      sessionTagListItems={sessionTagListItems}
+                                      sessionIdsBelowSource={visibleSessionIds}
+                                      sessionIdsBelowStartIndex={sessionIdsBelowStartIndex}
+                                      sessionId={sessionId}
+                                      selectedSessionIds={selectedSessionIds}
+                                      shouldKeepLastProjectSessionVisibleOnClose={
+                                        Boolean(projectContext) &&
+                                        !isChatCollection &&
+                                        storedSessionIds.length === 1 &&
+                                        storedSessionIds[0] === sessionId
+                                      }
+                                      showGroupDropTargetChrome={!allowPinnedSessionReorder}
+                                      showGroupConnector={showSessionGroupConnector}
+                                      showDropPositionIndicator={
+                                        showSessionDropPositionIndicators && !allowPinnedSessionReorder
+                                      }
+                                      vscode={vscode}
+                                    />
+                                  </>
+                                ) : null}
+                                {!projectContext &&
+                                !isProjectSessionSectionCollapsed &&
+                                sessionsById[sessionId]?.isPinned === true &&
+                                orderedSessionIds[sessionIndex + 1] !== undefined &&
+                                sessionsById[orderedSessionIds[sessionIndex + 1]]?.isPinned !== true ? (
+                                  <div aria-hidden className='pinned-sessions-divider' />
+                                ) : null}
+                              </Fragment>
+                            );
+                          })}
+                        </CollapsibleSessionSection>
                       </Fragment>
                     );
                   })}
@@ -3138,8 +3173,8 @@ export function SessionGroupSection({
                  * CDXC:Worktrees 2026-05-28-07:46:
                  * Worktree project rows have their own compact context menu: open/reveal/rename first, then destructive worktree-specific actions. Delete removes the Git worktree checkout after confirmation; Remove only drops the Ghostex project row.
                  *
-                 * CDXC:Projects 2026-06-04-13:39:
-                 * Project and worktree filesystem menu items should say Open File/Folder Location instead of Finder-specific copy so the macOS app presents OS-agnostic action names.
+                 * CDXC:Projects 2026-09-18 WHY:
+                 * Project and worktree filesystem menus use the shorter Open Folder label, replacing Open File/Folder Location while keeping OS-agnostic copy.
                  *
                  * CDXC:Projects 2026-06-08-09:19:
                  * Worktree project headings should keep Copy Path but omit Open so the compact menu prioritizes filesystem copy/reveal and worktree-specific rename/delete/remove actions.
@@ -3155,7 +3190,7 @@ export function SessionGroupSection({
                   type='button'
                 >
                   <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  Open File/Folder Location
+                  Open Folder
                 </button>
                 {projectGitRemoteOriginUrl ? (
                   <button
@@ -3196,7 +3231,7 @@ export function SessionGroupSection({
                     type='button'
                   >
                     <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} />
-                    Add to project group
+                    Add to Group
                     <IconChevronRight aria-hidden='true' className='session-context-menu-trailing-icon' size={14} />
                   </button>
                 ) : null}
@@ -3276,7 +3311,7 @@ export function SessionGroupSection({
                   type='button'
                 >
                   <IconFolderOpen aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  Open File/Folder Location
+                  Open Folder
                 </button>
                 {projectGitRemoteOriginUrl ? (
                   <button
@@ -3297,7 +3332,7 @@ export function SessionGroupSection({
                     type='button'
                   >
                     <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} />
-                    Add to project group
+                    Add to Group
                     <IconChevronRight aria-hidden='true' className='session-context-menu-trailing-icon' size={14} />
                   </button>
                 ) : null}

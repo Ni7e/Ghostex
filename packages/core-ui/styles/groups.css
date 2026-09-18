@@ -869,10 +869,11 @@
   opacity: 0.58;
 }
 
-button.group-agent-menu-account-button {
+.group-agent-menu-row > button.group-agent-menu-account-button {
   /* CDXC:AgentLauncher 2026-09-09 DECISION: User: the profile/count sub-button owns a rounded 5px hover surface matching session cards, with its own visible hover outline instead of inheriting the full launcher-row hover. */
   /* The element selector keeps the radius above the later global :is(button, ...) reset. */
   justify-content: center;
+  width: auto;
   min-width: 28px;
   padding: 5px 4px;
   border: 0;
@@ -880,8 +881,8 @@ button.group-agent-menu-account-button {
   background: transparent;
 }
 
-.group-agent-menu-account-button:hover,
-.group-agent-menu-account-button:focus-visible {
+.group-agent-menu-row > button.group-agent-menu-account-button:hover,
+.group-agent-menu-row > button.group-agent-menu-account-button:focus-visible {
   background: color-mix(in srgb, var(--app-foreground) 10%, transparent);
   outline: 1px solid color-mix(in srgb, var(--app-foreground) 18%, transparent);
   outline-offset: -1px;
@@ -1306,6 +1307,15 @@ button.group-agent-menu-account-button {
   width: calc(100% + var(--session-kind-end-bleed, 0px));
 }
 
+/*
+ * CDXC:Drafts 2026-09-16 WHY:
+ * Drafts sits between Pinned and Sessions and starts collapsed, so its heading lands directly on the Sessions heading with nothing between them.
+ * Without a gap the pair reads as one wrapped "DRAFTS SESSIONS" label with the count floating beside it, so a heading that follows another heading gets a row's worth of breathing room.
+ */
+.session-kind-toggle + .session-kind-toggle {
+  margin-top: calc(8px * var(--sidebar-density-scale));
+}
+
 .session-kind-toggle:hover,
 .session-kind-toggle:focus-visible {
   /* CDXC:Sidebar 2026-09-16 DECISION: User: section headers get a subtle hover background with square corners. */
@@ -1313,7 +1323,14 @@ button.group-agent-menu-account-button {
   color: color-mix(in srgb, var(--app-text-color) 58%, transparent);
 }
 
-.session-section-row {
+.session-section-body {
+  gap: inherit;
+  min-width: 0;
+}
+
+.session-section-content {
+  display: grid;
+  gap: inherit;
   min-width: 0;
 }
 

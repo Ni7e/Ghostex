@@ -1,12 +1,16 @@
-import { SessionQuestionIndicator } from './session-question-indicator';
+import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
+import { Modifier, type DragOperation } from '@dnd-kit/abstract';
+import { KeyboardSensor, PointerSensor } from '@dnd-kit/dom';
+import { SortableKeyboardPlugin } from '@dnd-kit/dom/sortable';
+import { useDroppable } from '@dnd-kit/react';
+import { useSortable } from '@dnd-kit/react/sortable';
 import {
   IconAlarm,
   IconArchive,
-  IconChevronRight,
   IconCheck,
-  IconCopy,
+  IconChevronRight,
   IconClock,
-  IconDeviceMobile,
+  IconCopy,
   IconDots,
   IconFileExport,
   IconFocus2,
@@ -20,18 +24,13 @@ import {
   IconPinned,
   IconPinnedOff,
   IconPlayerPlay,
+  IconPlus,
   IconRefresh,
   IconSparkles,
   IconSwitchHorizontal,
-  IconPlus,
   IconTag,
   IconX,
 } from '@tabler/icons-react';
-import { Modifier, type DragOperation } from '@dnd-kit/abstract';
-import { KeyboardSensor, PointerSensor } from '@dnd-kit/dom';
-import { SortableKeyboardPlugin } from '@dnd-kit/dom/sortable';
-import { useDroppable } from '@dnd-kit/react';
-import { useSortable } from '@dnd-kit/react/sortable';
 import {
   Fragment,
   useCallback,
@@ -40,17 +39,20 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { getSidebarSessionLifecycleState, type SidebarSessionItem } from '../shared/session-grid-contract';
+import { createPortal, flushSync } from 'react-dom';
 import {
   splitSessionCardHoverButtons,
   type SessionCardHoverAction,
   type SessionCardHoverButtonItem,
 } from '../shared/session-card-hover-actions';
+import { resolveSessionChatTranscriptAgent } from '../shared/session-chat';
+import { buildSidebarSessionDetailsClipboardText } from '../shared/session-details-copy';
+import { getSidebarSessionLifecycleState, type SidebarSessionItem } from '../shared/session-grid-contract';
 import {
   isSidebarSessionSnoozed,
   resolveSessionSnoozeWakeTime,
@@ -58,38 +60,58 @@ import {
   SESSION_SNOOZE_PRESETS,
   type SessionSnoozePreset,
 } from '../shared/session-snooze';
-import { SidebarAccountMenu } from './accounts/sidebar-account-menu';
-import { resolveSessionChatTranscriptAgent } from '../shared/session-chat';
 import {
   getEnabledVisibleSidebarSessionTagSections,
   type CustomSessionTagsState,
   type SidebarSessionTagListItem,
 } from '../shared/session-tags';
-import { buildSidebarSessionDetailsClipboardText } from '../shared/session-details-copy';
+import { SidebarAccountMenu } from './accounts/sidebar-account-menu';
+import { closeAppModal, openAppModal } from './app-modal-host-bridge';
+import {
+  canSleepSidebarSession,
+  getSidebarBulkSessionContextMenuAvailability,
+  getSidebarSessionContextMenuEligibility,
+  type SidebarBulkSessionContextMenuAvailability,
+} from './session-card-capabilities';
 import {
   getSessionCardTitleTooltip,
   OverflowTooltipText,
   SessionCardContent,
-  type SessionCardHoverButton,
   SessionFloatingAgentIcon,
   shouldShowTerminalSessionIcon,
+  type SessionCardHoverButton,
 } from './session-card-content';
+import { SessionQuestionIndicator } from './session-question-indicator';
 import { getSessionStatusAnchorName } from './session-status-anchor';
-import { createSessionDragData, createSessionDropTargetData, createSessionDropTargetId } from './sidebar-dnd';
-import { closeAppModal, openAppModal } from './app-modal-host-bridge';
+import { getEffectiveSessionTag, SessionTagIcon, type SidebarSessionTag } from './session-tag-ui';
 import { SidebarContextMenuPortal } from './sidebar-context-menu-portal';
+import { createSessionDragData, createSessionDropTargetData, createSessionDropTargetId } from './sidebar-dnd';
 import { postSidebarRefreshDebugLog } from './sidebar-refresh-debug-log';
 import { getSidebarReorderActivationConstraints } from './sidebar-reorder-activation';
-import { useSidebarTooltipDelayMs } from './tooltip-delay';
 import { useSidebarStore, type SidebarGroupRecord } from './sidebar-store';
-import {
-  getEffectiveSessionTag,
-  getSidebarSessionTagLabel,
-  SessionTagIcon,
-  type SidebarSessionTag,
-} from './session-tag-ui';
+import { useSidebarTooltipDelayMs } from './tooltip-delay';
 import type { WebviewApi } from './webview-api';
-import { createPortal, flushSync } from 'react-dom';
+export {
+  canSleepSidebarSession,
+  canWakeSidebarSession,
+  getSidebarSessionContextMenuEligibility,
+  gpuiWorkspaceTerminalFocusBridgeAvailable,
+  isSidebarBrowserSession,
+  supportsCloseAfterDoneMenuAction,
+  supportsDelayedSendMenuAction,
+  supportsFork,
+  supportsFullReload,
+  supportsFullReloadMenuAction,
+  supportsGeneratedName,
+  supportsPopOutPane,
+  supportsPopOutPaneMenuAction,
+  supportsResumeCommandCopy,
+  supportsTranscriptExport,
+} from './session-card-capabilities';
+export type {
+  SidebarSessionContextMenuEligibility,
+  SidebarSessionContextMenuEligibilityInput,
+} from './session-card-capabilities';
 
 const CONTEXT_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_WIDTH_PX = 178;
@@ -325,18 +347,6 @@ type SleepBelowDebugDetailsInput = {
   visibleBelowCount: number;
 };
 
-type SidebarBulkSessionContextMenuAvailability = {
-  closableSessionIds: string[];
-  fullReloadableSessionIds: string[];
-  parkableSessionIds: string[];
-  pinnableSessionIds: string[];
-  sleepableSessionIds: string[];
-  taggableSessionIds: string[];
-  unparkableSessionIds: string[];
-  unpinnableSessionIds: string[];
-  wakeableSessionIds: string[];
-};
-
 export type SidebarSessionPointerDownFocusInput = {
   altKey: boolean;
   button: number;
@@ -451,121 +461,6 @@ export function shouldRenameSidebarSessionOnDoubleClick({
   return (
     renameSessionOnDoubleClick && !isBrowserSession && !isProjectSessionListOverflowRow && !isProjectSessionListMoreRow
   );
-}
-
-export type SidebarSessionContextMenuEligibilityInput = {
-  isProjectSessionListMoreRow: boolean;
-  isRemoteSession: boolean;
-  session: SidebarSessionItem | undefined;
-  showSessionCommandCopyActions: boolean;
-  showSessionDetailsCopyAction: boolean;
-};
-
-export type SidebarSessionContextMenuEligibility = {
-  canCloseAfterDone: boolean;
-  canCopyAttachCommand: boolean;
-  canCopyResumeCommand: boolean;
-  canCopySessionDetails: boolean;
-  canDelayedSend: boolean;
-  canExportTranscript: boolean;
-  canForkSession: boolean;
-  canFullReloadSession: boolean;
-  canGenerateSessionTitle: boolean;
-  /**
-   * CDXC:SessionNotes 2026-08-24:
-   * Notes are keyed by the session's provider conversation id, so a row that
-   * has not captured one yet has nothing to file a note against.
-   */
-  canOpenSessionNote: boolean;
-  canPinSession: boolean;
-  canPopOutPane: boolean;
-  canRenameSession: boolean;
-  canSleepSession: boolean;
-  /**
-   * CDXC:Workarea 2026-09-04 DECISION:
-   * User: Advanced > Split Right opens the session in a pane to the right of
-   * the focused agents pane, for local and remote machine rows alike. The Rust
-   * workspace owns pane topology, so the item needs the GPUI bridge and is
-   * hidden in the web app.
-   */
-  canSplitSessionRight: boolean;
-  canTagSession: boolean;
-  isBrowserSession: boolean;
-};
-
-export function getSidebarSessionContextMenuEligibility({
-  isProjectSessionListMoreRow,
-  isRemoteSession,
-  session,
-  showSessionCommandCopyActions,
-  showSessionDetailsCopyAction,
-}: SidebarSessionContextMenuEligibilityInput): SidebarSessionContextMenuEligibility {
-  const isBrowserSession = isSidebarBrowserSession(session);
-  const hasSession = session !== undefined;
-  const isDraftSession = session?.isDraft === true;
-  const isConcreteSessionRow = hasSession && !isProjectSessionListMoreRow;
-  const canUseTerminalAgentMenuAction = isConcreteSessionRow && !isBrowserSession;
-
-  /*
-   * CDXC:RemoteMachines 2026-06-30-15:22:
-   * Remote session rows share the local context-menu renderer, but local AppKit and host-timer actions must opt in through explicit row capabilities. Keep ordinary gxserver-backed actions visible from the remote group signal while avoiding frontend guesses for Pop Out Pane, Delayed Send, and Close After Done.
-   */
-  return {
-    canCloseAfterDone:
-      canUseTerminalAgentMenuAction && hasSession && supportsCloseAfterDoneMenuAction(session, isRemoteSession),
-    canCopyAttachCommand:
-      showSessionCommandCopyActions &&
-      canUseTerminalAgentMenuAction &&
-      Boolean(session?.sessionPersistenceProvider && session.sessionPersistenceName),
-    canCopyResumeCommand:
-      showSessionCommandCopyActions &&
-      canUseTerminalAgentMenuAction &&
-      hasSession &&
-      supportsResumeCommandCopy(session),
-    canCopySessionDetails: isConcreteSessionRow && showSessionDetailsCopyAction,
-    canDelayedSend:
-      canUseTerminalAgentMenuAction && hasSession && supportsDelayedSendMenuAction(session, isRemoteSession),
-    canExportTranscript:
-      canUseTerminalAgentMenuAction && hasSession && !isDraftSession && supportsTranscriptExport(session),
-    /*
-     * CDXC:Drafts 2026-08-28:
-     * A draft has no conversation and no prompt yet, so Fork has nothing to
-     * fork from and Full reload has nothing to reload into: both would only
-     * ever produce an empty agent. Hide them here — the ONE resolver both the
-     * V1 card menu and the V2 row menu read — so the two menus cannot disagree.
-     * Rename, Sleep, Pin, Tag, and Close stay available on drafts.
-     */
-    canForkSession: canUseTerminalAgentMenuAction && hasSession && !isDraftSession && supportsFork(session),
-    canSplitSessionRight:
-      canUseTerminalAgentMenuAction && hasSession && !isDraftSession && gpuiWorkspaceTerminalFocusBridgeAvailable(),
-    canFullReloadSession:
-      canUseTerminalAgentMenuAction &&
-      hasSession &&
-      !isDraftSession &&
-      supportsFullReloadMenuAction(session, isRemoteSession),
-    canGenerateSessionTitle:
-      canUseTerminalAgentMenuAction &&
-      hasSession &&
-      supportsGeneratedName(session) &&
-      Boolean(session.firstUserMessage?.trim()),
-    canOpenSessionNote: canUseTerminalAgentMenuAction && Boolean(session?.agentSessionId?.trim()),
-    canPinSession: isConcreteSessionRow,
-    canPopOutPane:
-      isConcreteSessionRow &&
-      hasSession &&
-      supportsPopOutPaneMenuAction(session, {
-        isBrowserSession,
-        isRemoteSession,
-      }),
-    canRenameSession: canUseTerminalAgentMenuAction,
-    canSleepSession: isConcreteSessionRow && (canSleepSidebarSession(session) || canWakeSidebarSession(session)),
-    canTagSession: canUseTerminalAgentMenuAction,
-    isBrowserSession,
-  };
-}
-
-function isSidebarBrowserSession(session: SidebarSessionItem | undefined): boolean {
-  return session?.sessionKind === 'browser' || session?.kind === 'browser';
 }
 
 export function createSleepBelowDebugDetails(input: SleepBelowDebugDetailsInput): Record<string, unknown> {
@@ -3463,7 +3358,7 @@ export function SortableSessionCard({
       ) : null}
       {contextMenuPosition && tagSubmenuPosition && !isProjectSessionListMoreRow
         ? createPortal(
-            <div
+            <AppMenuPanel
               aria-label='Tag as'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
@@ -3482,13 +3377,13 @@ export function SortableSessionCard({
               }}
             >
               {tagMenuContent}
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}
       {contextMenuPosition && postponeSubmenuPosition && canPostponeDelayedSend && !isProjectSessionListMoreRow
         ? createPortal(
-            <div
+            <AppMenuPanel
               aria-label='Postpone by'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
@@ -3520,12 +3415,7 @@ export function SortableSessionCard({
                 </button>
               ))}
               <div className='session-context-menu-divider' role='separator' />
-              <button
-                className='session-context-menu-item'
-                role='menuitem'
-                type='button'
-                onClick={requestDelayedSend}
-              >
+              <button className='session-context-menu-item' role='menuitem' type='button' onClick={requestDelayedSend}>
                 Edit delayed send
               </button>
               <button
@@ -3540,13 +3430,13 @@ export function SortableSessionCard({
               >
                 Disable delayed send
               </button>
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}
       {contextMenuPosition && snoozeSubmenuPosition && !isProjectSessionListMoreRow
         ? createPortal(
-            <div
+            <AppMenuPanel
               aria-label='Snooze'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
@@ -3559,13 +3449,13 @@ export function SortableSessionCard({
               }}
             >
               {snoozePresetRows}
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}
       {contextMenuPosition && advancedSubmenuPosition && !isProjectSessionListMoreRow
         ? createPortal(
-            <div
+            <AppMenuPanel
               aria-label='Advanced'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
@@ -3609,7 +3499,7 @@ export function SortableSessionCard({
                   </div>
                 </Fragment>
               ))}
-            </div>,
+            </AppMenuPanel>,
             document.body
           )
         : null}
@@ -3637,70 +3527,6 @@ function getSessionRenameInitialTitle(session: SidebarSessionItem): string {
   return session.primaryTitle?.trim() || session.terminalTitle?.trim() || session.alias;
 }
 
-export function canSleepSidebarSession(session: SidebarSessionItem | undefined): boolean {
-  /*
-  CDXC:ContextMenus 2026-06-07-13:34:
-  Sleep below targets every running session, including browser panes. Stopped
-  history can remain visible when pinned, tagged, or favorited, but sleeping it
-  would reactivate that history as a sleeping sidebar row.
-  */
-  return session !== undefined && getSidebarSessionLifecycleState(session) === 'running';
-}
-
-export function canWakeSidebarSession(session: SidebarSessionItem | undefined): boolean {
-  /*
-   * CDXC:Sessions 2026-07-01-18:33:
-   * Wake selected mirrors Sleep selected and targets only rows that are
-   * actually parked or sleeping, avoiding no-op wake messages for active
-   * terminal, agent, and browser sessions.
-   */
-  return session !== undefined && getSidebarSessionLifecycleState(session) === 'sleeping';
-}
-
-function getSidebarBulkSessionContextMenuAvailability({
-  enableSessionParking,
-  sessionIds,
-  sessionsById,
-}: {
-  enableSessionParking: boolean;
-  sessionIds: readonly string[];
-  sessionsById: Record<string, SidebarSessionItem | undefined>;
-}): SidebarBulkSessionContextMenuAvailability {
-  /*
-   * CDXC:Sessions 2026-07-01-18:33:
-   * Bulk session context menus should show only actions that can run over the
-   * current selected rows without guessing. Filter each action to eligible
-   * concrete sessions and let the action handler target exactly that subset.
-   */
-  const concreteSessionIds: string[] = [];
-  const seenSessionIds = new Set<string>();
-  for (const sessionId of sessionIds) {
-    if (seenSessionIds.has(sessionId) || !sessionsById[sessionId]) {
-      continue;
-    }
-    seenSessionIds.add(sessionId);
-    concreteSessionIds.push(sessionId);
-  }
-
-  const sessionForId = (sessionId: string) => sessionsById[sessionId];
-  const parkingSessionIds = enableSessionParking
-    ? concreteSessionIds.filter((sessionId) => !isSidebarBrowserSession(sessionsById[sessionId]!))
-    : EMPTY_SESSION_IDS;
-  return {
-    closableSessionIds: concreteSessionIds,
-    fullReloadableSessionIds: concreteSessionIds.filter((sessionId) =>
-      supportsSelectedSessionFullReload(sessionForId(sessionId), sessionId)
-    ),
-    parkableSessionIds: parkingSessionIds.filter((sessionId) => sessionForId(sessionId)?.isParked !== true),
-    pinnableSessionIds: concreteSessionIds.filter((sessionId) => sessionForId(sessionId)?.isPinned !== true),
-    sleepableSessionIds: concreteSessionIds.filter((sessionId) => canSleepSidebarSession(sessionForId(sessionId))),
-    taggableSessionIds: concreteSessionIds.filter((sessionId) => canTagSelectedSidebarSession(sessionForId(sessionId))),
-    unparkableSessionIds: parkingSessionIds.filter((sessionId) => sessionForId(sessionId)?.isParked === true),
-    unpinnableSessionIds: concreteSessionIds.filter((sessionId) => sessionForId(sessionId)?.isPinned === true),
-    wakeableSessionIds: concreteSessionIds.filter((sessionId) => canWakeSidebarSession(sessionForId(sessionId))),
-  };
-}
-
 function getSidebarBulkSessionContextMenuCounts({
   availability,
   hasSessionTagSubmenu,
@@ -3725,10 +3551,6 @@ function getSidebarBulkSessionContextMenuCounts({
     /* The bulk menu renders no group headings; see contextMenuSections. */
     labelCount: 0,
   };
-}
-
-function canTagSelectedSidebarSession(session: SidebarSessionItem | undefined): boolean {
-  return Boolean(session) && !isSidebarBrowserSession(session);
 }
 
 function getSharedSelectedSidebarSessionTag({
@@ -3765,175 +3587,6 @@ function getSharedSelectedSidebarSessionTag({
   }
 
   return referenceTag;
-}
-
-function supportsSelectedSessionFullReload(session: SidebarSessionItem | undefined, sessionId: string): boolean {
-  if (!session || isSidebarBrowserSession(session)) {
-    return false;
-  }
-
-  if (isRemotePresentationSidebarSessionId(sessionId)) {
-    return session.sessionKind === 'terminal';
-  }
-
-  return supportsFullReload(session);
-}
-
-function isRemotePresentationSidebarSessionId(sessionId: string): boolean {
-  return /^remote:[^:]+:session:[^:]+:.+$/u.test(sessionId);
-}
-
-function supportsResumeCommandCopy(session: SidebarSessionItem): boolean {
-  /**
-   * CDXC:SessionSleep 2026-04-27-08:04
-   * Match agent-tiler context-menu visibility: Copy resume is only shown for
-   * built-in agents with known resume or resume-selection CLI behavior.
-   *
-   * CDXC:AgentProviders 2026-05-20-08:20:
-   * Cursor resume uses stored chat UUIDs or a local title lookup fallback, so
-   * Cursor CLI cards expose the same copy-resume affordance as Codex and Pi.
-   */
-  return (
-    session.agentIcon === 'codex' ||
-    session.agentIcon === 'claude' ||
-    session.agentIcon === 'copilot' ||
-    session.agentIcon === 'gemini' ||
-    session.agentIcon === 'opencode' ||
-    session.agentIcon === 'pi' ||
-    (session.agentName === 'zcode' && Boolean(session.agentSessionId)) ||
-    session.agentIcon === 'cursor-cli' ||
-    session.agentIcon === 'antigravity-cli'
-  );
-}
-
-function gpuiWorkspaceTerminalFocusBridgeAvailable(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-  const bridge = (window as { ghostexGpui?: { postWorkspaceTerminalFocus?: unknown } }).ghostexGpui;
-  return typeof bridge?.postWorkspaceTerminalFocus === 'function';
-}
-
-function supportsFork(session: SidebarSessionItem): boolean {
-  /**
-   * CDXC:AgentProviders 2026-05-08-09:42
-   * Pi exposes a real `--fork <session>` CLI path once ghostex has captured the
-   * Pi session id/path, so Pi cards should show the same one-click Fork action
-   * as Codex in the session context menu.
-   */
-  return session.agentIcon === 'codex' || session.agentIcon === 'claude' || session.agentIcon === 'pi';
-}
-
-function supportsTranscriptExport(session: SidebarSessionItem): boolean {
-  return resolveSessionChatTranscriptAgent(session.agentName, session.agentIcon) !== null;
-}
-
-function supportsGeneratedName(session: SidebarSessionItem): boolean {
-  /**
-   * CDXC:AgentProviders 2026-05-08-16:18
-   * Pi cards should expose the same right-click Generate Title action as Codex
-   * once the first user message has been captured. The native rename path
-   * already switches Pi to `/name <title>`, so the menu gate should include Pi
-   * instead of creating a Pi-only title-generation command.
-   *
-   * Antigravity takes `/rename <title>`, the default rename command.
-   */
-  return (
-    session.agentIcon === 'codex' ||
-    session.agentIcon === 'claude' ||
-    session.agentIcon === 'pi' ||
-    session.agentIcon === 'antigravity-cli'
-  );
-}
-
-function supportsDelayedSendMenuAction(session: SidebarSessionItem, isRemoteSession: boolean): boolean {
-  if (isRemoteSession) {
-    return session.canScheduleDelayedSend === true;
-  }
-
-  return true;
-}
-
-function supportsCloseAfterDoneMenuAction(session: SidebarSessionItem, isRemoteSession: boolean): boolean {
-  if (isRemoteSession) {
-    return session.canToggleCloseAfterDone === true;
-  }
-
-  return true;
-}
-
-function supportsFullReloadMenuAction(session: SidebarSessionItem, isRemoteSession: boolean): boolean {
-  if (isRemoteSession) {
-    return session.sessionKind === 'terminal';
-  }
-
-  return supportsFullReload(session);
-}
-
-function supportsPopOutPaneMenuAction(
-  session: SidebarSessionItem,
-  {
-    isBrowserSession,
-    isRemoteSession,
-  }: {
-    isBrowserSession: boolean;
-    isRemoteSession: boolean;
-  }
-): boolean {
-  if (isRemoteSession) {
-    return session.canPopOutPane === true && getSidebarSessionLifecycleState(session) === 'running';
-  }
-
-  return supportsPopOutPane(session, isBrowserSession);
-}
-
-function supportsPopOutPane(session: SidebarSessionItem, isBrowserSession: boolean): boolean {
-  /**
-   * CDXC:Workarea 2026-05-19-10:15:
-   * Sidebar context menus expose pop-out for browser panes and agent terminal
-   * sessions. Sleeping sessions dispose their native surface and cannot remain
-   * in a detached window.
-   */
-  if (getSidebarSessionLifecycleState(session) !== 'running') {
-    return false;
-  }
-
-  if (isBrowserSession) {
-    return true;
-  }
-
-  return session.sessionKind === 'terminal' && Boolean(session.agentIcon);
-}
-
-function supportsFullReload(session: SidebarSessionItem): boolean {
-  /**
-   * CDXC:SessionSleep 2026-04-27-08:04
-   * Match agent-tiler context-menu visibility: Full reload is only shown for
-   * agent sessions that can be recreated and resumed programmatically.
-   *
-   * CDXC:AgentProviders 2026-05-08-16:18
-   * Pi has a restorable CLI identity through its captured session id/path, so
-   * right-click Full reload should be visible on Pi cards like it is for Codex.
-   *
-   * CDXC:AgentProviders 2026-05-20-08:20:
-   * Cursor cards can full-reload through stored chat UUIDs or trusted titles
-   * resolved from the local Cursor chat store for the active project.
-   *
-   * CDXC:AgentProviders 2026-09-03:
-   * Antigravity resumes only by conversation id (`agy --conversation <id>`),
-   * which its hooks report; without one a reload could only start a fresh
-   * conversation, so the card shows Full reload once the id is captured.
-   */
-  if (session.agentIcon === 'antigravity-cli') {
-    return Boolean(session.agentSessionId?.trim());
-  }
-  return (
-    session.agentIcon === 'codex' ||
-    session.agentIcon === 'claude' ||
-    session.agentIcon === 'opencode' ||
-    session.agentIcon === 'pi' ||
-    session.agentIcon === 'cursor-cli'
-  );
 }
 
 function postSidebarAgentIconRenderDebugLog(vscode: WebviewApi, event: string, details: Record<string, unknown>): void {

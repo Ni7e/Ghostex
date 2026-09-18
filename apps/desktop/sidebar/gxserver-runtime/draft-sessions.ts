@@ -1,6 +1,6 @@
 import { importDraftRecovery } from '@/packages/core-ui/chat/session-chat-draft-recovery';
 import { replayDraftSaves } from '@/packages/core-ui/chat/session-chat-draft-outbox';
-import { sessionChatDraftClientId } from '@/packages/core-ui/chat/session-chat-queue';
+import { sessionChatDraftClientId } from '@/packages/shared/session-chat-controller/client-id';
 /*
 CDXC:Drafts 2026-08-28:
 The sidebar's share of the draft-session lifecycle. gxserver owns the marker,

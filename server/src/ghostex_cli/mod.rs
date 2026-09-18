@@ -1,5 +1,7 @@
 mod account_login;
+mod agents;
 pub mod actions;
+pub mod agent_sync;
 pub mod args;
 pub mod attach;
 pub mod automations;
@@ -68,6 +70,7 @@ pub fn run() -> i32 {
 /// global help gate.
 const HELP_GATE_EXCLUDED: &[&str] = &[
     "account-login",
+    "agents",
     "automations",
     "bd",
     "beads",
@@ -160,6 +163,7 @@ fn exit_code() -> i32 {
 fn is_known_command(name: &str) -> bool {
     const NAMES: &[&str] = &[
         "account-login",
+        "agents",
         "sessions",
         "s",
         "list-sessions",
@@ -307,6 +311,7 @@ fn is_known_command(name: &str) -> bool {
         "move-codex-session",
         "install-move-codex-session-skill",
         "guide",
+        "agent-sync",
         "notify",
         "install-help-skill",
         "settings",
@@ -337,6 +342,7 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
     };
     match name {
         "account-login" => account_login::run(args),
+        "agents" => agents::run(args),
         "sessions" | "s" | "list-sessions" | "ls" => sessions::sessions_command(args),
         "find" | "f" => launchers::zehn_search_command(args),
         "history" | "h" => launchers::history_command(args),
@@ -782,6 +788,7 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
             skills::install_move_codex_session_skill_command(args)
         }
         "guide" => guide::guide_command(args),
+        "agent-sync" => agent_sync::agent_sync_command(args),
         "install-help-skill" => skills::install_help_skill_command(args),
         "settings" => settings::settings_command(args),
         "toggle-sidebar" => run_bridge_action("toggleSidebarCollapsed", Parser::None, plain, args),

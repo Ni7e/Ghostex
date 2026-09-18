@@ -54,6 +54,9 @@ const adapters = new Set([
   'packages/client-storage/adapters/browser.ts',
   'packages/client-storage/adapters/database.ts',
 ]);
+// JavaScript that Ghostex injects into third-party pages, where no client-storage handle exists.
+// Such a script may write only keys of stores marked `external` in packages/client-storage/catalog.ts.
+const externalStoreScripts = new Set(['apps/desktop/src/app/helpers/browser.rs']);
 const forbidden = new Set(['localStorage', 'sessionStorage', 'indexedDB', 'webkitIndexedDB', 'mozIndexedDB']);
 function* sources(directory) {
   if (!fs.existsSync(directory)) return;
@@ -79,7 +82,7 @@ export function checkClientStorage() {
   for (const directory of roots)
     for (const file of sources(path.join(root, directory))) {
       const relative = path.relative(root, file).split(path.sep).join('/');
-      if (adapters.has(relative)) continue;
+      if (adapters.has(relative) || externalStoreScripts.has(relative)) continue;
       const source = fs.readFileSync(file, 'utf8');
       const report = (offset) =>
         errors.push(

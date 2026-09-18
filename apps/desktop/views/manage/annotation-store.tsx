@@ -40,7 +40,7 @@ export function annotationPersistenceLabel(state: 'idle' | 'loading' | 'ready' |
 
 export function annotationTypeLabel(annotation: ManageAnnotation): string {
   if (annotation.type === 'redline') {
-    return 'Redline';
+    return 'Remove this';
   }
   if (annotation.labelId) {
     return quickLabelText(annotation.labelId);
@@ -136,14 +136,34 @@ export function selectionAnchorFromRect(rect: DOMRect | undefined): ManageSelect
   }
   const left = Math.min(Math.max(rect.left + rect.width / 2, 12), window.innerWidth - 12);
   const top = Math.min(Math.max(rect.top, 12), window.innerHeight - 12);
-  return { left, top };
+  const bottom = Math.min(Math.max(rect.bottom, top), window.innerHeight - 12);
+  return { bottom, left, top };
 }
 
 export function defaultManageSelectionAnchor(): ManageSelectionAnchor {
+  const top = Math.min(Math.max(72, 12), window.innerHeight - 12);
   return {
+    bottom: top,
     left: Math.min(Math.max(window.innerWidth / 2, 12), window.innerWidth - 12),
-    top: Math.min(Math.max(72, 12), window.innerHeight - 12),
+    top,
   };
+}
+
+/**
+ * CDXC:Docs 2026-09-16 DECISION:
+ * User: the annotation toolbar sits above the selected text, and moves below it when the selection is near the top of the editor, where "above" would land on the document header.
+ * Same rule as the formatting bar in meoSelectionToolbarPosition, so the two toolbars flip at the same place.
+ */
+export function manageAnnotationToolbarTop(anchor: ManageSelectionAnchor): number {
+  const margin = 8;
+  const toolbarHeight = 38;
+  const headerBottom =
+    (document.querySelector('.manage-preview-header') as HTMLElement | null)?.getBoundingClientRect().bottom ?? 0;
+  const aboveTop = anchor.top - margin - toolbarHeight;
+  if (aboveTop < headerBottom + margin) {
+    return anchor.bottom + margin;
+  }
+  return aboveTop;
 }
 
 export function annotationPreviewText(annotation: ManageAnnotation): string {

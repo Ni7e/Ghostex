@@ -118,8 +118,8 @@ void GhostexGpuiAttachToastPopupToMainWindow(void *toastNativeView,
  detaches it first: a child window closed while still attached lingers in the
  parent's childWindows list and can be ordered back in with the parent.
  */
-void GhostexGpuiAttachAppModalWindowToMainWindow(void *modalNativeView,
-                                                 void *mainNativeView) {
+static void GhostexGpuiAttachChildWindow(void *modalNativeView,
+                                        void *mainNativeView, BOOL activate) {
   @autoreleasepool {
     if (modalNativeView == NULL || mainNativeView == NULL) {
       return;
@@ -150,8 +150,26 @@ void GhostexGpuiAttachAppModalWindowToMainWindow(void *modalNativeView,
                     observer = nil;
                   }
                 }];
-    [modalWindow makeKeyAndOrderFront:nil];
+    if (activate) [modalWindow makeKeyAndOrderFront:nil];
   }
+}
+
+void GhostexGpuiAttachAppModalWindowToMainWindow(void *modalNativeView,
+                                               void *mainNativeView) {
+  GhostexGpuiAttachChildWindow(modalNativeView, mainNativeView, YES);
+}
+
+// CDXC:SessionChat 2026-09-17 WHY:
+// Autocomplete owns a child window but typing must remain in the composer's window.
+void GhostexGpuiAttachComposerSuggestionsWindow(void *nativeView,
+                                               void *mainNativeView) {
+  NSWindow *window = ((__bridge NSView *)nativeView).window;
+  GhostexGpuiRemoveToastPopupWindowChrome(nativeView);
+  if ([window isKindOfClass:[NSPanel class]]) {
+    ((NSPanel *)window).becomesKeyOnlyIfNeeded = YES;
+  }
+  window.hasShadow = YES;
+  GhostexGpuiAttachChildWindow(nativeView, mainNativeView, NO);
 }
 
 void GhostexGpuiPrepareTitlebarPopupWindow(void *nativeView) {

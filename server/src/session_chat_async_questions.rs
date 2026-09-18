@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 
 use crate::domain::DomainRepository;
@@ -18,6 +19,7 @@ use crate::storage::open_gxserver_database;
 struct QuestionCursor {
     path: PathBuf,
     version: Option<TranscriptFileVersion>,
+    started_at: Option<i64>,
     boundary: String,
     incremental: SessionChatIncrementalState,
     seen: HashSet<String>,
@@ -36,9 +38,17 @@ fn observe_messages(
     seen: &mut HashSet<String>,
     pending: &mut Vec<(String, String)>,
     messages: Vec<SessionChatMessage>,
+    started_at: Option<i64>,
 ) {
     for message in messages {
         if message.role == SessionChatRole::Assistant {
+            if message
+                .timestamp
+                .zip(started_at)
+                .is_some_and(|(at, start)| at < start)
+            {
+                continue;
+            }
             for (index, question) in message
                 .async_questions
                 .unwrap_or_default()
@@ -127,8 +137,10 @@ fn refresh(state: &AppState, cursors: &mut HashMap<String, QuestionCursor>) {
         let Ok(version) = read_transcript_file_version(&path) else {
             continue;
         };
+        let started_at = async_questions_since(&session);
         let cursor = cursors.entry(key).or_default();
         if cursor.path != path
+            || cursor.started_at != started_at
             || cursor.version.as_ref().is_some_and(|old| {
                 old.identity != version.identity
                     || version.size < cursor.incremental.offset
@@ -141,13 +153,15 @@ fn refresh(state: &AppState, cursors: &mut HashMap<String, QuestionCursor>) {
         {
             *cursor = QuestionCursor {
                 path: path.clone(),
+                started_at,
                 ..Default::default()
             };
         }
         if cursor.version.as_ref() != Some(&version) {
             // Stream the initial history once, then only appended bytes. A bounded tail could lose a question during a long-running turn.
-            let mut on_batch =
-                |messages| observe_messages(&mut cursor.seen, &mut cursor.pending, messages);
+            let mut on_batch = |messages| {
+                observe_messages(&mut cursor.seen, &mut cursor.pending, messages, started_at)
+            };
             let Ok(messages) = read_incremental_transcript_messages(
                 &path,
                 &mut cursor.incremental,
@@ -199,7 +213,36 @@ fn broadcast(
         "delta": delta, "protocolVersion": crate::constants::GXSERVER_PROTOCOL_VERSION,
         "revision": revision, "serverId": state.metadata.server_id, "type": "presentationDelta",
     }));
+    drop(_sequence);
+    if let Some(session) = repository.get_session(project_id, session_id)? {
+        crate::session_chat_interactive::emit_session_chat_prompt_state_frame(state, &session);
+    }
     Ok(())
+}
+
+/// CDXC:SessionChat 2026-09-17 WHY:
+/// Codex's unanswered async question UI belongs to its current process run. Replaying questions from before startup/resume resurrected a card that was no longer present in the CLI.
+/// Turn completion and compaction do not start a new run, so questions still pending there remain answerable.
+pub(crate) fn async_questions_since(session: &Value) -> Option<i64> {
+    parse_started_at(read_runtime_text(session, "sessionChatCodexStartedAt"))
+}
+
+pub(crate) fn read_async_questions_since(
+    db: &rusqlite::Connection,
+    project_id: &str,
+    session_id: &str,
+) -> Option<i64> {
+    let value = db.query_row(
+        "SELECT json_extract(runtimeSettingsJson, '$.sessionChatCodexStartedAt') FROM sessions WHERE projectId = ?1 AND sessionId = ?2",
+        rusqlite::params![project_id, session_id], |row| row.get::<_, Option<String>>(0),
+    ).optional().ok().flatten().flatten();
+    parse_started_at(value)
+}
+
+fn parse_started_at(value: Option<String>) -> Option<i64> {
+    value
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+        .map(|value| value.timestamp_millis())
 }
 
 fn publish_pending(

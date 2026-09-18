@@ -43,9 +43,9 @@ impl GhostexGpuiApp {
         ))
     }
 
-    /// CDXC:Navigation 2026-09-09 DECISION:
+    /// CDXC:Navigation 2026-09-16 DECISION:
     /// User: place a circle icon between Previous and Next that reveals the currently focused/active session in the sidebar.
-    /// User: use a filled circle with the same color, reduced 30% from the original diameter and then another 20% (56% of the original).
+    /// User: match the sidebar's unfilled active-session circle; this replaces the filled dot.
     pub(crate) fn render_titlebar_session_reveal_button(
         &self,
         cx: &mut gpui::Context<Self>,

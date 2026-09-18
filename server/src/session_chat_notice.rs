@@ -165,6 +165,7 @@ pub enum SessionChatTerminalNoticeActionKind {
     SwitchToTerminal,
     /// Verbatim bytes, delivered through the existing approval-answer path.
     SendKeys,
+    RecoverCodexConversation,
 }
 
 impl SessionChatTerminalNoticeActionKind {
@@ -172,6 +173,7 @@ impl SessionChatTerminalNoticeActionKind {
         match self {
             Self::SwitchToTerminal => "switchToTerminal",
             Self::SendKeys => "sendKeys",
+            Self::RecoverCodexConversation => "recoverCodexConversation",
         }
     }
 }
@@ -264,6 +266,7 @@ pub struct SessionChatTerminalNotice {
     /// only describes a state.
     pub choices: Vec<SessionChatTerminalNoticeChoice>,
     pub dialog: Option<crate::session_chat_terminal_dialog::TerminalDialog>,
+    pub conversation_lock: Option<crate::session_chat_codex_lock::ConversationLock>,
     /// Server-side delivery policy for this particular detected state.
     blocks_input: bool,
 }
@@ -286,6 +289,7 @@ impl SessionChatTerminalNotice {
             actions: Vec::new(),
             choices: Vec::new(),
             dialog: None,
+            conversation_lock: None,
             blocks_input: session_chat_notice_kind_blocks_input(kind),
         }
     }
@@ -335,6 +339,7 @@ impl SessionChatTerminalNotice {
                 && self.blocks_input == other.blocks_input
                 && self.actions == other.actions
                 && self.dialog == other.dialog
+                && self.conversation_lock == other.conversation_lock
                 // Labels only: the highlight moves whenever the user arrows
                 // around in the terminal, and re-minting `detectedAt` for that
                 // would resurrect a card they just dismissed.
@@ -384,7 +389,7 @@ impl SessionChatTerminalNotice {
     /// Stable identity for the long-poll fingerprint: kind plus the human text.
     /// Never includes `detectedAt` or the screen tail.
     pub fn identity(&self) -> String {
-        format!(
+        let mut identity = format!(
             "{}\u{1f}{}\u{1f}{}",
             self.kind,
             self.title,
@@ -392,12 +397,20 @@ impl SessionChatTerminalNotice {
                 .as_ref()
                 .map(|dialog| dialog.id.as_str())
                 .unwrap_or_else(|| self.detail.as_deref().unwrap_or_default())
-        )
+        );
+        if let Some(lock) = &self.conversation_lock {
+            identity.push('\u{1f}');
+            identity.push_str(&json!(lock).to_string());
+        }
+        identity
     }
 
     pub fn to_value(&self) -> Value {
         let mut map = Map::new();
         map.insert("kind".to_string(), json!(self.kind));
+        if let Some(lock) = &self.conversation_lock {
+            map.insert("conversationLock".to_string(), json!(lock));
+        }
         map.insert("severity".to_string(), json!(self.severity.as_str()));
         if let Some(dialog) = self.dialog.as_ref() {
             map.insert("dialog".to_string(), json!(dialog));
@@ -1802,6 +1815,13 @@ pub fn classify_session_chat_terminal_notice(
     let screen = NoticeScreen::new(screen_text);
     if screen.folded.is_empty() {
         return None;
+    }
+    if agent == SessionChatOptionAgent::Codex
+        && crate::session_chat_codex_lock::is_locked(screen_text)
+    {
+        return Some(
+            crate::session_chat_codex_lock::notice().with_screen_tail(screen.screen_tail()),
+        );
     }
     if let Some(notice) =
         crate::session_chat_workspace_trust::detect_workspace_trust_prompt(agent, screen_text)
