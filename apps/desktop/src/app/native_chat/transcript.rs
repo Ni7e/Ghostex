@@ -1,3 +1,4 @@
+use super::disclosure_body::{DisclosureRail, disclosure_body};
 use super::{appearance::ChatAppearance, state::NativeChatView};
 use gpui::StatefulInteractiveElement;
 use gpui::prelude::FluentBuilder as _;
@@ -5,7 +6,6 @@ use gpui::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
     Styled as _, Window, div, px, relative,
 };
-use gpui_component::text::TextView;
 use serde_json::{Value, json};
 
 pub(crate) fn text(value: &Value, key: &str) -> String {
@@ -13,8 +13,19 @@ pub(crate) fn text(value: &Value, key: &str) -> String {
 }
 
 impl NativeChatView {
-    fn is_expanded(&self, id: &str, default: bool) -> bool {
+    pub(super) fn is_expanded(&self, id: &str, default: bool) -> bool {
         self.expanded.contains(id) || default && !self.collapsed.contains(id)
+    }
+
+    /// Flip a row that defaults to closed, and remeasure the list its height changed.
+    pub(super) fn toggle_disclosure(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.expanded.contains(id) {
+            self.expanded.remove(id);
+        } else {
+            self.expanded.insert(id.to_string());
+        }
+        self.list.remeasure();
+        cx.notify();
     }
     pub(crate) fn transcript_row(
         &mut self,
@@ -23,8 +34,32 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let items = self.items.clone();
+        self.transcript_item_row(&items, index, true, window, cx)
+    }
+
+    /// One row of a projected transcript. The subagent viewer renders its own item list
+    /// through the same renderers; `main` is this session's own transcript, which is the
+    /// only one the search tints and the only one a rewind may act on.
+    pub(crate) fn transcript_item_row(
+        &mut self,
+        items: &[Value],
+        index: usize,
+        main: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.in_subagent = !main;
         let item = &items[index];
-        let p = ChatAppearance::current(&self.snapshot);
+        let mut p = ChatAppearance::current(&self.snapshot);
+        // CDXC:SessionChat 2026-09-09 DECISION:
+        // User: subagent transcripts default to the same normal display as main chat, with verbose
+        // and summarized modes off. React reaches that by mounting its own list inside the dialog;
+        // GPUI shares one renderer, so the child's rows drop both modes here.
+        if !main {
+            p.verbose = false;
+            p.simple = false;
+        }
+        let p = p;
         let s = p.scale;
         let content = if item["kind"] == "summary" {
             let id = format!("summary:{}", text(&item, "id"));
@@ -67,6 +102,9 @@ impl NativeChatView {
             work_appearance.primary = p.muted;
             let id = format!("work:{}", text(&item, "id"));
             let expanded = self.is_expanded(&id, p.verbose);
+            // Every row of a finished turn hides its own writes; they belong to the turn's
+            // "N files changed" fold below the heading (file_change_card.rs).
+            self.hide_file_changes = true;
             let mut row = div().flex().flex_col().w_full().gap(px(8.0 * s));
             let heading = if item["expandable"] == true {
                 let disclosure = self.disclosure(
@@ -101,16 +139,41 @@ impl NativeChatView {
                     .bg(p.border),
             );
             if expanded {
-                for message in item["work"].as_array().into_iter().flatten() {
-                    row = row.child(self.message_row(message, &p, window, cx));
+                // React hangs the whole log off the rail the "Worked for" heading opened
+                // (`SessionChatExpansion`), so the turn's work reads as one indented block.
+                let mut log: Vec<AnyElement> = Vec::new();
+                if let Some(notice) = self.deferred_work_notice(item, &p, cx) {
+                    log.push(notice);
                 }
+                self.in_work_fold = true;
+                for message in item["work"].as_array().into_iter().flatten() {
+                    log.push(self.message_row(message, &p, window, cx));
+                }
+                self.in_work_fold = false;
+                if !log.is_empty() {
+                    row = row.child(disclosure_body(&p, DisclosureRail::Marker, 8.0, log));
+                }
+            }
+            if let Some(files) = self.completed_files_fold(item, &p, cx) {
+                row = row.child(files);
             }
             for message in item["artifacts"].as_array().into_iter().flatten() {
                 row = row.child(self.message_row(message, &p, window, cx));
             }
+            // The turn's answered questions, lifted out of the fold so an exchange the reader took
+            // part in is never buried by a collapsed "Worked for Xs" section.
+            if let Some(cards) = self.question_exchange_cards(
+                &format!("work:{}", text(&item, "id")),
+                &item["questions"],
+                &p,
+                cx,
+            ) {
+                row = row.child(cards);
+            }
             if item["final"].is_object() {
                 row = row.child(self.message_row(&item["final"], &p, window, cx));
             }
+            self.hide_file_changes = false;
             row.into_any_element()
         } else {
             self.message_row(&item["message"], &p, window, cx)
@@ -132,8 +195,65 @@ impl NativeChatView {
                     .when_some(p.transcript_width, |this, width| {
                         this.max_w(relative(1.0)).w(relative(width))
                     })
+                    // Transcript search tints the rows that matched; the selected one is stronger.
+                    .when_some(
+                        self.search_row_tint(index, &p).filter(|_| main),
+                        |this, tint| this.bg(tint).rounded(px(8.0 * s)),
+                    )
                     .child(content),
             )
+            .into_any_element()
+    }
+
+    /// The chevron a disclosure puts in the transcript's marker column, in place of the dot a plain
+    /// row hangs its first line from. React draws the same glyph through `.ghostex-chat-marker-slot`
+    /// and toggles from the button around it, so a heading made of the agent's own Markdown keeps
+    /// its links and code controls clickable.
+    pub(super) fn disclosure_marker(
+        &self,
+        id: String,
+        expanded: bool,
+        p: &ChatAppearance,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let s = p.scale;
+        div()
+            .id(gpui::SharedString::from(id.clone()))
+            .role(gpui::Role::Button)
+            .aria_label(if expanded {
+                "Hide tool calls for this message"
+            } else {
+                "Show tool calls for this message"
+            })
+            .w(px(16.0 * s))
+            .ml(px(2.0 * s))
+            .h(px(22.75 * s))
+            .flex()
+            .items_center()
+            .justify_center()
+            .flex_shrink_0()
+            .cursor_pointer()
+            .child(
+                gpui::svg()
+                    .path(if expanded {
+                        "titlebar/chevron-down.svg"
+                    } else {
+                        "titlebar/chevron-right.svg"
+                    })
+                    .size(px(14.0 * s))
+                    .text_color(p.primary),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if expanded {
+                    this.expanded.remove(&id);
+                    this.collapsed.insert(id.clone());
+                } else {
+                    this.collapsed.remove(&id);
+                    this.expanded.insert(id.clone());
+                }
+                this.list.remeasure();
+                cx.notify();
+            }))
             .into_any_element()
     }
 
@@ -203,36 +323,7 @@ impl NativeChatView {
         p: &ChatAppearance,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let chat = cx.weak_entity();
-        let mut style = super::markdown_style::text_style(p);
-        style.is_dark = !p.light;
-        style.highlight_theme = if p.light {
-            gpui_component::highlighter::HighlightTheme::default_light()
-        } else {
-            gpui_component::highlighter::HighlightTheme::default_dark()
-        }
-        .clone();
-        let references = super::markdown_links::presentations(references, p);
-        TextView::markdown(id, content)
-            .link_presentation(move |href, label| {
-                references
-                    .get(&(href.to_owned(), label.to_owned()))
-                    .cloned()
-            })
-            .on_link_click(move |href, modifiers, _, cx| {
-                let _ = chat.update(cx, |chat, cx| {
-                    chat.invoke(
-                        json!({"type":"openMarkdownLink","href":href,"external":modifiers.shift}),
-                        cx,
-                    )
-                });
-            })
-            .selectable(true)
-            .style(style)
-            .text_size(px(14.0 * p.scale))
-            .line_height(px(22.75 * p.scale))
-            .text_color(p.prose)
-            .into_any_element()
+        self.rich_markdown(id, content, references, p, cx)
     }
 
     fn message_row(
@@ -263,8 +354,13 @@ impl NativeChatView {
                 .child(self.inter_agent_message_card(&id, message, p, cx))
                 .into_any_element();
         }
+        if message["terminalTool"].is_object() {
+            let activity = message["terminalTool"].clone();
+            return row
+                .child(self.terminal_tool_row(&activity, p, cx))
+                .into_any_element();
+        }
         if message["role"] == "user" && message["suppressed"].is_null() {
-            let copy = text(message, "copyText");
             // The prompt renders as markdown like the React bubble, which also makes it a selectable TextView; a plain string child cannot be selected.
             let mut bubble_appearance = p.clone();
             bubble_appearance.prose = p.primary;
@@ -283,67 +379,55 @@ impl NativeChatView {
                     &bubble_appearance,
                     cx,
                 ));
+            let startup_delivery = self.render_startup_delivery(message, p, cx);
+            // The prompt's own pictures sit above the bubble, where their author put them.
+            let thumbnails = self.user_image_thumbnails(message, p, cx);
+            let actions = self.user_actions(message, p, window, cx);
             return row
-                .when(message["queued"] == true, |this| {
-                    this.child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .text_size(px(11.0 * s))
-                            .text_color(p.muted)
-                            .child("QUEUED"),
-                    )
-                })
+                // A send still waiting for the terminal says so instead of showing the agent's queue label.
+                .when_some(startup_delivery, |this, status| this.child(status))
+                .when(
+                    message["queued"] == true && message["startupDelivery"].is_null(),
+                    |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .text_size(px(11.0 * s))
+                                .text_color(p.muted)
+                                .child("QUEUED"),
+                        )
+                    },
+                )
+                .when_some(thumbnails, |this, images| this.child(images))
                 .child(
                     div()
                         .flex()
                         .justify_end()
                         .items_start()
                         .gap(px(6.0 * s))
-                        .child(
-                            div()
-                                .id(format!("copy:{id}"))
-                                .opacity(0.0)
-                                .group_hover("native-chat-message", |style| style.opacity(1.0))
-                                .cursor_pointer()
-                                .on_click(move |_, _, cx| {
-                                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                        copy.clone(),
-                                    ))
-                                })
-                                .child(
-                                    gpui::svg()
-                                        .path("titlebar/copy.svg")
-                                        .size(px(14.0 * s))
-                                        .text_color(p.muted),
-                                ),
-                        )
+                        .child(actions)
                         .child(bubble),
                 )
                 .into_any_element();
         }
         if message["suppressed"].is_object() {
-            let key = format!("suppressed:{id}");
-            let expanded = self.expanded.contains(&key);
-            row = row.child(self.disclosure(
-                key,
-                text(&message["suppressed"], "label"),
-                expanded,
-                None,
-                p,
-                cx,
-            ));
-            if expanded {
-                row = row.child(self.markdown(
-                    format!("body:{id}"),
-                    body,
-                    &message["markdownReferences"],
-                    p,
-                    cx,
-                ));
-            }
-            return row.into_any_element();
+            return row
+                .child(self.suppressed_row(&id, message, p, cx))
+                .into_any_element();
         }
+        if message["systemCard"].is_object() {
+            return row
+                .child(self.system_card(&id, message, p, cx))
+                .into_any_element();
+        }
+        // A picture an agent shared renders as the picture, above the prose it came with.
+        if let Some(images) = self.assistant_image_attachments(message, p, cx) {
+            row = row.child(images);
+        }
+        // A reasoning headline owns the tools that followed it, so it renders them itself and the
+        // run below must not render them a second time.
+        let mut tools_rendered = false;
         if !body.is_empty() {
             let reasoning = message["role"] == "reasoning";
             let tools = message["tools"]
@@ -353,30 +437,59 @@ impl NativeChatView {
                 let key = format!("reasoning:{id}");
                 let expanded = self.is_expanded(&key, p.verbose);
                 row = row.child(self.disclosure(
-                    key.clone(),
+                    key,
                     text(&message["reasoning"], "headline"),
                     expanded,
                     None,
                     p,
                     cx,
                 ));
-                let detail = text(&message["reasoning"], "body");
-                if expanded && !detail.is_empty() {
-                    row = row.child(self.markdown(
-                        format!("reasoning-body:{id}"),
-                        detail,
-                        &message["markdownReferences"],
-                        p,
-                        cx,
-                    ));
+                if expanded {
+                    // React's ReasoningRow puts the thought's tail and the tool run it owns in one
+                    // expansion, so both hang off the rail the headline opened.
+                    let mut detail_rows: Vec<AnyElement> = Vec::new();
+                    let detail = text(&message["reasoning"], "body");
+                    if !detail.is_empty() {
+                        detail_rows.push(self.markdown(
+                            format!("reasoning-body:{id}"),
+                            detail,
+                            &message["markdownReferences"],
+                            p,
+                            cx,
+                        ));
+                    }
+                    detail_rows.extend(self.tool_rows(message, p, cx));
+                    if !detail_rows.is_empty() {
+                        row =
+                            row.child(disclosure_body(p, DisclosureRail::Marker, 8.0, detail_rows));
+                    }
                 }
+                tools_rendered = true;
+            } else if reasoning {
+                row = row.child(self.thinking_row(
+                    &id,
+                    body.clone(),
+                    &message["markdownReferences"],
+                    p,
+                    cx,
+                ));
             } else {
+                // React's AgentToolsDisclosure: an agent's own words are the heading its tool calls
+                // hang from, so the marker column carries a chevron instead of the reply dot and
+                // the rows below sit on that disclosure's rail
+                // (CDXC:SessionChat 2026-09-13 DECISION in rows.tsx).
+                let key = format!("tools:{id}");
+                let expanded = tools && self.is_expanded(&key, p.verbose);
                 row = row.child(
                     div()
                         .flex()
                         .items_start()
                         .gap(px(6.0 * s))
-                        .child(self.reply_marker(message, reply_focused, p, cx))
+                        .child(if tools {
+                            self.disclosure_marker(key, expanded, p, cx)
+                        } else {
+                            self.reply_marker(message, reply_focused, p, cx)
+                        })
                         .child(div().min_w_0().flex_1().child(self.markdown(
                             format!("body:{id}"),
                             body.clone(),
@@ -385,137 +498,32 @@ impl NativeChatView {
                             cx,
                         ))),
                 );
-            }
-        }
-        let files_key = format!("files:{id}");
-        let files_expanded = self.expanded.contains(&files_key);
-        if p.simple
-            && message["files"]
-                .as_array()
-                .is_some_and(|files| !files.is_empty())
-        {
-            row = row.child(self.disclosure(
-                files_key,
-                text(message, "simpleFileLabel"),
-                files_expanded,
-                None,
-                p,
-                cx,
-            ));
-        }
-        for (file_index, file) in message["files"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .enumerate()
-            .filter(|_| !p.simple || files_expanded)
-        {
-            let key = format!("file:{id}:{file_index}");
-            let expanded = self.expanded.contains(&key);
-            let path = text(file, "path");
-            let mut card = div()
-                .flex()
-                .flex_col()
-                .w_full()
-                .border_1()
-                .border_color(p.border)
-                .rounded(px(8.0 * s))
-                .overflow_hidden()
-                .child(div().p(px(8.0 * s)).child(self.disclosure(
-                    key,
-                    format!("{} {}", text(file, "action"), path),
-                    expanded,
-                    None,
-                    p,
-                    cx,
-                )));
-            if expanded || p.file_previews {
-                for line in file["lines"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .take(if expanded { usize::MAX } else { 7 })
-                {
-                    let color = match line["kind"].as_str() {
-                        Some("add") => gpui::rgb(0x95d0a5),
-                        Some("del") => gpui::rgb(0xe6a0a0),
-                        _ => gpui::rgb(0xb4b8c0),
-                    };
-                    let sign = match line["kind"].as_str() {
-                        Some("add") => "+",
-                        Some("del") => "-",
-                        _ => " ",
-                    };
-                    card = card.child(
-                        div()
-                            .px(px(8.0 * s))
-                            .font_family("JetBrainsMono Nerd Font")
-                            .text_size(px(12.6 * s))
-                            .text_color(color)
-                            .child(format!("{sign} {}", text(line, "text"))),
-                    );
+                if tools {
+                    if expanded {
+                        let work = self.tool_rows(message, p, cx);
+                        if !work.is_empty() {
+                            row = row.child(disclosure_body(p, DisclosureRail::Marker, 8.0, work));
+                        }
+                    }
+                    tools_rendered = true;
                 }
             }
+        }
+        for card in self.file_change_cards(message, p, cx) {
             row = row.child(card);
         }
-        let reasoning = message["role"] == "reasoning";
-        let tools_key = format!("tools:{id}");
-        let tools_expanded = self.is_expanded(&tools_key, p.verbose);
-        if p.simple
-            && message["tools"]
-                .as_array()
-                .is_some_and(|tools| !tools.is_empty())
-        {
-            row = row.child(self.disclosure(
-                tools_key,
-                text(message, "simpleToolLabel"),
-                tools_expanded,
-                None,
-                p,
-                cx,
-            ));
-        }
-        if (!p.simple || tools_expanded)
-            && (!reasoning || self.is_expanded(&format!("reasoning:{id}"), p.verbose))
-        {
-            for (index, tool) in message["tools"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .enumerate()
-            {
-                let key = format!("tool:{id}:{index}");
-                let expanded = self.expanded.contains(&key);
-                let label = if p.simple {
-                    text(&tool["call"], "name")
-                } else {
-                    format!("{} {}", text(&tool["call"], "name"), text(tool, "preview"))
-                };
-                row = row.child(self.disclosure(key.clone(), label, expanded, None, p, cx));
-                if expanded {
-                    let detail = format!(
-                        "{}\n{}",
-                        text(tool, "input"),
-                        text(&tool["result"], "output")
-                    );
-                    row = row.child(
-                        div()
-                            .id(format!("detail:{key}"))
-                            .max_h(px(400.0 * s))
-                            .overflow_y_scroll()
-                            .p(px(12.0 * s))
-                            .bg(p.input)
-                            .rounded(px(8.0 * s))
-                            .child(self.markdown(
-                                format!("content:{key}"),
-                                format!("```\n{detail}\n```"),
-                                &Value::Null,
-                                p,
-                                cx,
-                            )),
-                    );
-                }
+        if !tools_rendered {
+            for tool in self.tool_rows(message, p, cx) {
+                row = row.child(tool);
             }
+        }
+        // Inside a turn's work fold the raw tool pairs stay plain rows and the cards are hoisted
+        // onto the turn instead, so an answer is never rendered twice (question-hoisting.ts).
+        if !self.in_work_fold
+            && let Some(cards) =
+                self.question_exchange_cards(&format!("message:{id}"), &message["questions"], p, cx)
+        {
+            row = row.child(cards);
         }
         if self.has_reply_actions(message)
             && message["tools"]

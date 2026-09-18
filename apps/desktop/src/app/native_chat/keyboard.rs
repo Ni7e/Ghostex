@@ -29,6 +29,10 @@ pub(super) fn register(cx: &mut gpui::App) {
             ("tab", "tab"),
             ("shift-tab", "tab"),
             ("escape", "escape"),
+            // CDXC:SessionChat 2026-09-18 SEE-ALSO: The terminal chords the composer answers itself, matching `sessionChatTerminalShortcut`; `edit_shortcuts.rs` keeps the kill buffer.
+            ("ctrl-u", "u"),
+            ("ctrl-k", "k"),
+            ("ctrl-y", "y"),
         ]
         .into_iter()
         .map(|(binding, key)| {
@@ -78,6 +82,38 @@ impl NativeChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The search field owns Enter, the arrows and Escape while it has focus.
+        if self.search_key_down(event, window, cx) {
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
+        /*
+        CDXC:SessionChat 2026-09-18 WHY:
+        React's image viewer closes on Escape from a capture listener on the whole chat surface
+        (session-chat-image-viewer.tsx), ahead of the composer's interrupt. The native viewer is a
+        child window over the same pane, so the pane answers Escape for it too and the picture
+        closes whichever of the two windows the keystroke reached.
+        */
+        if self.image_viewer.request.is_some()
+            && event.keystroke.key == "escape"
+            && !event.keystroke.modifiers.platform
+        {
+            self.close_image_viewer(cx);
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
+        // The subagent transcript is modal: Escape closes it and nothing behind it takes a
+        // keystroke, the focus trap React's dialog applies. Application chords still pass.
+        if self.snapshot["subagent"].is_object() && !event.keystroke.modifiers.platform {
+            if event.keystroke.key == "escape" && !event.is_held {
+                self.invoke(json!({"type":"subagentClose"}), cx);
+            }
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
         let this = self;
 
         let key = &event.keystroke;
@@ -152,6 +188,34 @@ impl NativeChatView {
             return;
         };
         if !input.read(cx).focus_handle(cx).is_focused(window) {
+            /*
+            CDXC:SessionChat 2026-09-18 DECISION:
+            User (2026-09-06 and 2026-09-07, React composer): arrows and text-editing chords act on
+            the composer even when only the chat background is focused. The shared rules decide what
+            counts as typing intent; everything else keeps its own keyboard ownership here.
+            */
+            if this.composer_background_key(key, window, cx) {
+                cx.stop_propagation();
+                window.prevent_default();
+            }
+            return;
+        }
+        let terminal_chord = match key.key.as_str() {
+            "u" => Some("killLineLeft"),
+            "k" => Some("killLineRight"),
+            "y" => Some("yank"),
+            _ => None,
+        }
+        .filter(|_| {
+            key.modifiers.control
+                && !key.modifiers.shift
+                && !key.modifiers.alt
+                && !key.modifiers.platform
+        });
+        if let Some(command) = terminal_chord {
+            this.composer_terminal_edit(command, cx);
+            cx.stop_propagation();
+            window.prevent_default();
             return;
         }
         if key.key == "enter"

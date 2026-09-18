@@ -52,8 +52,11 @@ impl NativeChatView {
         if mode != "send" && self.snapshot["queue"]["capabilities"]["canQueue"] != true {
             return;
         }
-        if self.snapshot["sendBlockedReason"].is_string() {
-            self.invoke(json!({"type":"reportSendBlocked"}), cx);
+        let blocked = self.snapshot["sendBlockedReason"]
+            .as_str()
+            .map(str::to_owned);
+        if let Some(reason) = blocked {
+            self.report_send_blocked(&reason, cx);
             return;
         }
         self.update_suggestion_selection(cx);
@@ -127,8 +130,22 @@ impl NativeChatView {
             "terminalView" => "Terminal View",
             _ => action,
         };
+        // CDXC:SessionChat 2026-09-18 SEE-ALSO: The stash count badge, the session-note presence dot and the pressed Summary/Note states come from `packages/shared/session-chat-controller/native-composer-chrome.ts`, the shared form of React's `session-chat-composer-actions.tsx` chrome.
+        let chrome = &self.snapshot["composerChrome"];
+        let pressed = match action {
+            "summaryMode" => chrome["summaryPressed"] == true,
+            "sessionNote" => chrome["notePressed"] == true,
+            "maximizeComposer" => self.maximized_window.is_some(),
+            _ => false,
+        };
+        let badge = match action {
+            "stashPrompt" => chrome["stashBadge"].as_str().map(str::to_owned),
+            "sessionNote" if chrome["notePresence"] == true => Some(String::new()),
+            _ => None,
+        };
         div()
             .id(action)
+            .relative()
             .role(gpui::Role::Button)
             .aria_label(label)
             .cursor_pointer()
@@ -137,13 +154,37 @@ impl NativeChatView {
             .items_center()
             .justify_center()
             .rounded_full()
+            .when(pressed, |this| this.bg(p.border))
             .hover(|style| style.bg(p.border))
             .child(
                 gpui::svg()
                     .path(icon)
                     .size(px(16.0 * p.scale))
-                    .text_color(p.primary),
+                    .text_color(if pressed {
+                        p.control_primary
+                    } else {
+                        p.primary
+                    }),
             )
+            .when_some(badge, |this, badge| {
+                let dot = badge.is_empty();
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(0.0))
+                        .right(px(0.0))
+                        .size(px(if dot { 6.0 } else { 12.0 } * p.scale))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(p.foreground)
+                        .text_color(p.background)
+                        .text_size(px(9.0 * p.scale))
+                        .line_height(px(9.0 * p.scale))
+                        .child(badge),
+                )
+            })
             .tooltip(move |window, cx| {
                 gpui_component::tooltip::Tooltip::new(label).build(window, cx)
             })
@@ -175,6 +216,11 @@ impl NativeChatView {
         let maximized = self.maximized_window.is_some();
         let collapsed = self.composer_collapsed();
         let input = self.input.as_ref().unwrap().clone();
+        let attachment_previews = if collapsed {
+            None
+        } else {
+            self.render_attachment_previews(p, cx)
+        };
         let mut footer = div()
             .w_full()
             .flex()
@@ -186,11 +232,44 @@ impl NativeChatView {
             .max_w(px(768.0 * s))
             .when(maximized, |this| this.p_0().max_w_full().h_full().min_h_0());
         if self.snapshot["incomingDraft"].is_object() {
+            /*
+            CDXC:Drafts 2026-09-18 DECISION:
+            User (2026-09-10, React): the saved-draft notice previews the message it would restore.
+            React hangs a popover off a document icon; the GPUI row puts the same preview in the
+            icon's tooltip so the notice stays one line high.
+            */
+            let preview: String = self.snapshot["incomingDraft"]["content"]
+                .as_str()
+                .unwrap_or_default()
+                .chars()
+                .take(600)
+                .collect();
             footer = footer.child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(8.0 * s))
+                    .child(
+                        div()
+                            .id("incoming-draft-preview")
+                            .flex_shrink_0()
+                            .size(px(20.0 * s))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .hover(|style| style.bg(p.border))
+                            .child(
+                                gpui::svg()
+                                    .path("titlebar/file-text.svg")
+                                    .size(px(14.0 * s))
+                                    .text_color(p.muted),
+                            )
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(preview.clone())
+                                    .build(window, cx)
+                            }),
+                    )
                     .child(div().flex_1().child("Another saved draft is available"))
                     .child(self.chat_button(
                         "use-incoming".into(),
@@ -213,12 +292,23 @@ impl NativeChatView {
                 footer = footer.child(strip);
             }
         }
-        if let Some(error) = self.snapshot["operationError"].as_str() {
+        // A `composerNotReady` refusal gets its own card instead of the plain error line.
+        if let Some(card) = self.render_composer_not_ready(p, cx) {
+            footer = footer.child(card);
+        } else if let Some(error) = self.snapshot["operationError"].as_str() {
             footer = footer.child(
                 div()
                     .text_color(gpui::rgb(0xef9999))
                     .child(error.to_string()),
             );
+        }
+        if !maximized {
+            if let Some(tasks) = self.render_agent_tasks(p, cx) {
+                footer = footer.child(tasks);
+            }
+            if let Some(fleet) = self.render_agent_fleet(p, cx) {
+                footer = footer.child(fleet);
+            }
         }
         if let Some(notice) = self.render_notice(p, window, cx) {
             footer = footer.child(notice);
@@ -300,6 +390,7 @@ impl NativeChatView {
                         .gap(px(12.0 * s))
                         .py(px(8.0 * s))
                 })
+                .children(attachment_previews)
                 .children(self.render_queue(p, cx))
                 .child(
                     div()
@@ -315,6 +406,14 @@ impl NativeChatView {
                             cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
                                 this.invoke(json!({"type":"composerExpand","editor":true}), cx);
                                 this.click_composer_reference(event, cx);
+                            }),
+                        )
+                        .on_mouse_down(
+                            gpui::MouseButton::Right,
+                            cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                                if this.show_composer_reference_menu(event, window, cx) {
+                                    cx.stop_propagation();
+                                }
                             }),
                         )
                         .child(

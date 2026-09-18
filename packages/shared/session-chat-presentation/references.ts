@@ -42,3 +42,14 @@ export function insertChatReference(current: string, reference: string, start = 
 export function nativePathReference(path: string, text: string): string {
   return IMAGE_PATH_PATTERN.test(path) ? `[Image #${nextImageReferenceIndex(text)}](${path})` : `[File #${nextFileReferenceIndex(text)}](${path})`;
 }
+
+/**
+ * Drops the reference an attachment thumbnail stands for, the way removing a pasted image does in
+ * `packages/core-ui/chat/session-chat-composer.tsx`: one leading space and one trailing space go
+ * with it so the surrounding sentence keeps its spacing.
+ */
+export function removeChatReference(current: string, start: number, end: number): { text: string; caret: number } {
+  const from = start > 0 && /[^\S\r\n]/.test(current[start - 1] ?? '') ? start - 1 : start;
+  const to = /[^\S\r\n]/.test(current[end] ?? '') ? end + 1 : end;
+  return { text: `${current.slice(0, from)}${current.slice(to)}`, caret: from };
+}

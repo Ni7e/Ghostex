@@ -122,14 +122,18 @@ impl NativeChatView {
     ) {
         if self.composer_reference_draft.as_deref() != Some(self.draft.as_str()) {
             let draft = self.draft.clone();
-            let parsed = self.runtime.as_mut().and_then(|runtime| {
-                runtime
-                    .query("composerReferences", &[Value::String(draft.clone())])
-                    .ok()
+            let parsed = self.runtime.as_ref().and_then(|runtime| {
+                runtime.query(
+                    "composerReferences",
+                    vec![Value::String(draft.clone())],
+                    std::time::Duration::from_millis(40),
+                )
             });
-            self.composer_references = parsed
-                .map(|parsed| parse(&draft, &parsed))
-                .unwrap_or_default();
+            // A busy runtime answers nothing in time; keep the last pills and ask again on the next paint.
+            let Some(parsed) = parsed else {
+                return;
+            };
+            self.composer_references = parse(&draft, &parsed);
             self.composer_reference_draft = Some(draft);
             // Editing the draft moves every reference, so a click that has not opened yet no
             // longer refers to what the user pressed.

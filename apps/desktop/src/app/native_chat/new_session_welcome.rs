@@ -26,11 +26,15 @@ const AGENT_CARD_SIZE: f32 = 48.0;
 /// `.ghostex-chat-new-session-agent-logo`: 1.75rem of artwork inside it.
 const AGENT_LOGO_SIZE: f32 = 28.0;
 /// `.ghostex-chat-new-session-title`: 1.375rem / 600.
+///
+/// React also tightens it with `letter-spacing: -0.025em`, which GPUI has no style for, so the
+/// headline measures a few percent wider here at the same glyph size. Do not shrink the size to
+/// compensate: that trades a width difference for a cap-height one.
 const TITLE_TEXT_SIZE: f32 = 22.0;
 
 /// Port of `getBrandAgentLogoStyle` (packages/core-ui/agent-logos.ts) against the
 /// chat's own theme tokens rather than the app chrome's.
-fn brand_logo_color(icon: &str, p: &ChatAppearance) -> Hsla {
+pub(super) fn brand_logo_color(icon: &str, p: &ChatAppearance) -> Hsla {
     match icon {
         // chat.css: `--ghostex-zcode-logo` is black on light chat, white on dark.
         "zcode" => {
@@ -64,6 +68,9 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let s = p.scale;
+        // `.ghostex-chat-new-session`: `padding: 1.5rem 1.5rem var(--ghostex-chat-composer-overlay)`.
+        // The band below already reserves its own height, so the welcome has no bottom padding of
+        // its own; adding one lifts the whole block off centre.
         let region = div()
             .flex_1()
             .flex()
@@ -71,7 +78,8 @@ impl NativeChatView {
             .items_center()
             .justify_center()
             .gap(px(14.0 * s))
-            .p(px(24.0 * s));
+            .pt(px(24.0 * s))
+            .px(px(24.0 * s));
 
         if let Some(welcome) = state["newSessionWelcome"].as_object() {
             let icon = welcome
@@ -112,6 +120,9 @@ impl NativeChatView {
                 )
                 .into_any_element();
         }
+
+        // `.ghostex-chat-empty-state` keeps the bottom padding the welcome drops.
+        let region = region.pb(px(24.0 * s));
 
         /*
         The loading hold. `loadingStage` is `blank` for the first 600ms of a

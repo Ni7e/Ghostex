@@ -1,6 +1,7 @@
+use super::model::NativeSidebarSnapshot;
 use crate::GhostexGpuiApp;
 use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase, Window};
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 #[derive(Default)]
 pub(crate) struct SpaceGesture {
@@ -16,6 +17,10 @@ struct SpaceTransition {
     direction: f32,
     destination: Option<String>,
     phase: TransitionPhase,
+    /// CDXC:Spaces 2026-09-18 WHY:
+    /// React selects the destination synchronously, so its exit fade runs straight into the enter fade. The native switch round-trips through the service thread, and waiting for the exit before asking left a blank list in between.
+    /// The switch is requested the moment the gesture locks, while the outgoing Space keeps rendering from this frozen snapshot until its fade ends; the enter fade then starts on whatever the new Space already delivered.
+    frozen: Option<Arc<NativeSidebarSnapshot>>,
 }
 
 enum TransitionPhase {
@@ -26,6 +31,14 @@ enum TransitionPhase {
 }
 
 impl SpaceGesture {
+    /// The outgoing Space's snapshot while its exit fade is still running.
+    pub(crate) fn exiting_snapshot(&self) -> Option<&Arc<NativeSidebarSnapshot>> {
+        self.transition
+            .as_ref()
+            .filter(|transition| matches!(transition.phase, TransitionPhase::Exit))
+            .and_then(|transition| transition.frozen.as_ref())
+    }
+
     pub(crate) fn presentation(&self) -> (f32, f32) {
         let Some(transition) = &self.transition else {
             return (0.0, 1.0);
@@ -135,12 +148,20 @@ impl GhostexGpuiApp {
         } else {
             TransitionPhase::Boundary
         };
+        let frozen = destination.is_some().then(|| snapshot.clone());
         gesture.transition = Some(SpaceTransition {
             started: now,
             direction,
-            destination,
+            destination: destination.clone(),
             phase,
+            frozen,
         });
+        if let Some(space_id) = destination {
+            self.dispatch_native_sidebar_ui(
+                serde_json::json!({"type": "selectSpace", "spaceId": space_id}),
+                cx,
+            );
+        }
         // CDXC:Spaces 2026-09-17 WHY:
         // Wheel callbacks have no current render view, so request_animation_frame panics there.
         // Notify starts the redraw; update_native_space_transition schedules subsequent frames during prepaint.
@@ -156,12 +177,25 @@ impl GhostexGpuiApp {
             return;
         };
         let elapsed = transition.started.elapsed().as_secs_f32();
-        let mut command = None;
         let mut complete = false;
+        let destination_selected = self
+            .native_sidebar
+            .snapshot
+            .as_ref()
+            .is_some_and(|snapshot| {
+                snapshot.spaces.iter().any(|space| {
+                    space.selected && Some(&space.id) == transition.destination.as_ref()
+                })
+            });
         match transition.phase {
             TransitionPhase::Exit if elapsed >= 0.085 => {
-                command = transition.destination.clone();
-                transition.phase = TransitionPhase::Waiting;
+                transition.frozen = None;
+                if destination_selected {
+                    transition.phase = TransitionPhase::Enter;
+                    transition.started = Instant::now();
+                } else {
+                    transition.phase = TransitionPhase::Waiting;
+                }
             }
             TransitionPhase::Waiting => {
                 if self
@@ -179,16 +213,7 @@ impl GhostexGpuiApp {
                     complete = true;
                 }
 
-                if self
-                    .native_sidebar
-                    .snapshot
-                    .as_ref()
-                    .is_some_and(|snapshot| {
-                        snapshot.spaces.iter().any(|space| {
-                            space.selected && Some(&space.id) == transition.destination.as_ref()
-                        })
-                    })
-                {
+                if destination_selected {
                     transition.phase = TransitionPhase::Enter;
                     transition.started = Instant::now();
                 }
@@ -199,12 +224,6 @@ impl GhostexGpuiApp {
         }
         if complete {
             self.native_sidebar.space_gesture.transition = None;
-        }
-        if let Some(space_id) = command {
-            self.dispatch_native_sidebar_ui(
-                serde_json::json!({"type": "selectSpace", "spaceId": space_id}),
-                cx,
-            );
         }
         window.request_animation_frame();
         cx.notify();

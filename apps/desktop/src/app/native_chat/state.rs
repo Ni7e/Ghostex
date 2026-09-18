@@ -1,9 +1,14 @@
+use super::runtime_worker::{ChatRuntimeOutput, ChatRuntimeWorker};
 use crate::app::{helpers::*, model::*};
-use ghostex_chat_runtime::ChatRuntime;
+use futures::StreamExt as _;
 use gpui::{AppContext as _, Context, Entity, EventEmitter, Focusable as _, Subscription, Window};
 use gpui_component::input::{InputEvent, InputState};
 use serde_json::{Value, json};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 #[derive(Clone)]
 pub(crate) struct NativeChatConfig {
@@ -31,9 +36,11 @@ pub(crate) enum NativeChatEvent {
 
 pub(crate) struct NativeChatView {
     pub(crate) config: NativeChatConfig,
-    pub(crate) runtime: Option<ChatRuntime>,
+    pub(crate) runtime: Option<ChatRuntimeWorker>,
     pub(crate) snapshot: Arc<Value>,
     pub(crate) items: Arc<Vec<Value>>,
+    /// The open subagent transcript's items, projected and spliced on their own channel.
+    pub(crate) subagent_items: Arc<Vec<Value>>,
     pub(crate) error: Option<String>,
     pub(crate) input: Option<Entity<InputState>>,
     input_subscription: Option<Subscription>,
@@ -44,6 +51,16 @@ pub(crate) struct NativeChatView {
     input_window: Option<gpui::WindowId>,
     pub(super) option_menu: Option<Entity<super::option_menu::ChatOptionMenu>>,
     pub(super) save_markdown_window: super::save_markdown::SaveMarkdownWindowState,
+    pub(super) rewind_window: super::rewind::RewindWindowState,
+    pub(super) image_viewer: super::image_viewer::ImageViewerState,
+    /// Bytes for the transcript's pictures, read once and shared by the thumbnails and the viewer.
+    pub(super) images: super::images::ChatImageCache,
+    /// True while a completed turn's work rows render, which is where answered question cards are suppressed.
+    pub(super) in_work_fold: bool,
+    /// True while any row of a completed turn renders: its writes belong to that turn's "N files changed" fold.
+    pub(super) hide_file_changes: bool,
+    /// True while a row of the subagent viewer's transcript renders, where a rewind would act on the wrong conversation.
+    pub(super) in_subagent: bool,
     pub(super) context_editor_window: super::context_editor::ContextEditorWindowState,
     pub(super) model_picker_window: super::model_picker::window::ModelPickerWindowState,
     pub(crate) maximized_window: Option<gpui::WindowHandle<gpui_component::Root>>,
@@ -73,6 +90,10 @@ pub(crate) struct NativeChatView {
     pub(super) terminal_dialog_key_focus: gpui::FocusHandle,
     pub(crate) note_input: Option<Entity<InputState>>,
     pub(crate) note_subscription: Option<Subscription>,
+    /// Transcript search (Cmd+F): the field, and the navigation it last scrolled to.
+    pub(super) search_input: Option<Entity<InputState>>,
+    pub(super) search_subscription: Option<Subscription>,
+    pub(super) search_scrolled_revision: i64,
     pub(crate) draft: String,
     pub(crate) draft_revision: u64,
     pub(crate) draft_id: String,
@@ -80,11 +101,27 @@ pub(crate) struct NativeChatView {
     pub(crate) composer_ready: bool,
     pub(crate) expanded: HashSet<String>,
     pub(crate) collapsed: HashSet<String>,
+    /// How each fenced block the reader has touched wraps; the rest follow `code_wrap_default`.
+    pub(super) code_wrap: HashMap<String, bool>,
+    /// React's remembered last choice (session-chat-code-wrap.ts): the blocks that
+    /// scroll into view after a toggle start the way the reader last asked for.
+    pub(super) code_wrap_default: bool,
+    /// The tables whose cells the reader capped back to one line (React's collapsed table).
+    pub(super) table_collapsed: HashSet<String>,
     pub(crate) list: gpui::ListState,
+    /// The transcript minimap's dashes, hover and measured column (minimap.rs).
+    pub(super) minimap: super::minimap::MinimapState,
+    /// The subagent viewer's list, kept apart so opening it never disturbs the main transcript's scroll.
+    pub(crate) subagent_list: gpui::ListState,
+    /// The subagent viewer's own focus, so its Escape works without the composer having been focused first.
+    pub(super) subagent_focus: gpui::FocusHandle,
+    /// Whether the open viewer has already taken focus, so a redraw does not steal it back every frame.
+    pub(super) subagent_focused: bool,
     pub(crate) pane_focused: bool,
     pub(crate) focus_requested: bool,
     pub(crate) subscriptions: Vec<Subscription>,
-    pump_task: Option<gpui::Task<()>>,
+    /// When this view last rendered; a parked chat keeps applying frames without redrawing the window.
+    pub(crate) last_render: Option<std::time::Instant>,
 }
 
 impl EventEmitter<NativeChatEvent> for NativeChatView {}
@@ -93,21 +130,26 @@ impl NativeChatView {
     pub(crate) fn new(config: NativeChatConfig, cx: &mut Context<Self>) -> Self {
         super::fonts::register(cx);
         super::keyboard::register(cx);
-        let runtime = ChatRuntime::new(
-            &json!({"clientId":config.client_id,"projectId":config.project_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+        let (wake, mut wakes) = futures::channel::mpsc::unbounded::<()>();
+        let runtime = ChatRuntimeWorker::start(
+            json!({"clientId":config.client_id,"projectId":config.project_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+            move || {
+                let _ = wake.unbounded_send(());
+            },
         );
-        let (runtime, error) = match runtime {
-            Ok(value) => (Some(value), None),
-            Err(error) => (None, Some(error.to_string())),
-        };
-        let pump_task = cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(16))
-                .await;
-            let _ = this.update(cx, |this, cx| this.pump(cx));
-        });
+        cx.spawn(async move |this, cx| {
+            while wakes.next().await.is_some() {
+                if this.update(cx, |this, cx| this.pump(cx)).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+        let (runtime, error) = (Some(runtime), None);
         let list = gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.0));
         list.set_follow_mode(gpui::FollowMode::Tail);
+        let subagent_list = gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.0));
+        subagent_list.set_follow_mode(gpui::FollowMode::Tail);
         let chat = cx.weak_entity();
         list.set_scroll_handler(move |_, _, cx| {
             let chat = chat.clone();
@@ -116,6 +158,7 @@ impl NativeChatView {
                     if chat.list.is_following_tail() && chat.snapshot["composerCollapsed"] == true {
                         chat.invoke(json!({"type":"composerExpand"}), cx);
                     }
+                    chat.load_earlier_if_near_top(cx);
                     cx.notify();
                 });
             });
@@ -131,6 +174,7 @@ impl NativeChatView {
             error,
             snapshot: Arc::new(Value::Null),
             items: Arc::default(),
+            subagent_items: Arc::default(),
             input: None,
             input_subscription: None,
             input_observer: None,
@@ -142,6 +186,12 @@ impl NativeChatView {
             model_picker_window: Default::default(),
             context_editor_window: Default::default(),
             save_markdown_window: Default::default(),
+            rewind_window: Default::default(),
+            image_viewer: Default::default(),
+            images: Default::default(),
+            in_work_fold: false,
+            hide_file_changes: false,
+            in_subagent: false,
             maximized_window: None,
             main_window: None,
             window_subscription: None,
@@ -168,17 +218,27 @@ impl NativeChatView {
             terminal_dialog_key_focus: cx.focus_handle(),
             note_input: None,
             note_subscription: None,
+            search_input: None,
+            search_subscription: None,
+            search_scrolled_revision: -1,
             draft: String::new(),
             draft_revision: 0,
             pending_send: false,
             composer_ready: false,
             expanded: HashSet::new(),
             collapsed: HashSet::new(),
+            code_wrap: HashMap::new(),
+            code_wrap_default: false,
+            table_collapsed: HashSet::new(),
             list,
+            minimap: Default::default(),
+            subagent_list,
+            subagent_focus: cx.focus_handle(),
+            subagent_focused: false,
             pane_focused: false,
             focus_requested: false,
             subscriptions: Vec::new(),
-            pump_task: Some(pump_task),
+            last_render: None,
         }
     }
 
@@ -283,12 +343,10 @@ impl NativeChatView {
             action["size"] =
                 json!({"width":size.width.as_f32()/scale,"height":size.height.as_f32()/scale});
         }
-        if let Some(runtime) = &mut self.runtime
-            && let Err(error) = runtime.call("action", &[action])
-        {
-            self.error = Some(error.to_string());
+        if let Some(runtime) = &self.runtime {
+            runtime.call("action", vec![action]);
         }
-        self.pump(cx);
+        let _ = cx;
     }
 
     pub(crate) fn receive_callback(
@@ -298,16 +356,13 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) {
         if callback == "onSessionChatRuntimeMessage" {
-            if let Some(runtime) = &mut self.runtime
-                && let Err(error) = runtime.call("brokerMessage", &[payload.clone()])
-            {
-                self.error = Some(error.to_string());
+            if let Some(runtime) = &self.runtime {
+                runtime.call("brokerMessage", vec![payload.clone()]);
             }
         }
         if callback == "onSessionChatAttachmentsPicked" {
             self.invoke(json!({"type":"attachPaths","paths":payload["paths"]}), cx);
         }
-        self.pump(cx);
     }
 
     pub(crate) fn insert_prompt(&mut self, content: &str, cx: &mut Context<Self>) {
@@ -347,26 +402,35 @@ impl NativeChatView {
         cx.emit(NativeChatEvent::Host(Value::Object(message)));
     }
 
+    /// Apply everything the runtime thread has drained since the last wake.
     pub(crate) fn pump(&mut self, cx: &mut Context<Self>) {
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &self.runtime else {
             return;
         };
-        let mut output = match runtime.drain() {
-            Ok(value) => value,
-            Err(error) => {
-                self.error = Some(error.to_string());
-                cx.notify();
-                return;
+        for output in runtime.take_outputs() {
+            match output {
+                ChatRuntimeOutput::Drained(output) => self.apply_output(output, cx),
+                ChatRuntimeOutput::Error(error) => {
+                    self.error = Some(error);
+                    cx.notify();
+                }
             }
-        };
-        self.pump_task = output["nextWakeMs"].as_u64().map(|delay| {
-            cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_millis(delay.max(1)))
-                    .await;
-                let _ = this.update(cx, |this, cx| this.pump(cx));
-            })
-        });
+        }
+    }
+
+    /// CDXC:SessionChat 2026-09-18 WHY:
+    /// Retained chat views stay subscribed while parked, and every state frame (several a second across working sessions) notified, which redraws the whole window for a view nobody sees.
+    /// The state is applied either way; only a view that rendered recently asks for a redraw, and a parked one paints the latest state when it comes back.
+    fn notify_if_shown(&self, cx: &mut Context<Self>) {
+        if self
+            .last_render
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
+        {
+            cx.notify();
+        }
+    }
+
+    fn apply_output(&mut self, mut output: Value, cx: &mut Context<Self>) {
         if let Some(mut splice) = output
             .as_object_mut()
             .and_then(|output| output.remove("itemsSplice"))
@@ -385,8 +449,23 @@ impl NativeChatView {
                 .min(items.len());
             let inserted_len = inserted.len();
             items.splice(start..end, inserted);
-            self.list.splice(start..end, inserted_len);
-            cx.notify();
+            self.splice_transcript(start, end, inserted_len);
+            self.notify_if_shown(cx);
+        }
+        if let Some(markers) = output
+            .as_object_mut()
+            .and_then(|output| output.remove("minimap"))
+        {
+            self.minimap.adopt(&markers);
+            self.notify_if_shown(cx);
+        }
+        if let Some(mut splice) = output
+            .as_object_mut()
+            .and_then(|output| output.remove("subagentSplice"))
+            .filter(Value::is_object)
+        {
+            self.apply_subagent_splice(&mut splice);
+            self.notify_if_shown(cx);
         }
         if let Some(snapshot) = output
             .as_object_mut()
@@ -396,8 +475,10 @@ impl NativeChatView {
             self.sync_model_picker_window(cx);
             self.sync_context_editor_window(cx);
             self.sync_save_markdown_window(cx);
+            self.sync_rewind_window(cx);
             self.sync_suggestion_window(cx);
-            cx.notify();
+            self.load_earlier_if_near_top(cx);
+            self.notify_if_shown(cx);
         }
         for request in output["requests"].as_array().into_iter().flatten() {
             match request["kind"].as_str() {
@@ -416,6 +497,8 @@ impl NativeChatView {
                     self.input_needs_sync = true;
                     self.composer_ready = true;
                     self.host("composerReady", json!({}), cx);
+                    // The stash badge and the session-note dot need their first read (native-composer-chrome.ts).
+                    self.invoke(json!({"type":"refreshComposerChrome","sessionId":self.config.session_id}), cx);
                     cx.emit(NativeChatEvent::DraftState(self.draft.is_empty()));
                     cx.notify();
                 }
@@ -466,6 +549,7 @@ impl NativeChatView {
                     }
                 }
                 Some("host") => self.host(request["method"].as_str().unwrap_or_default(), request["params"].clone(), cx),
+                Some("chatImage") => self.receive_chat_image(request, cx),
                 Some("actionError") => { cx.notify(); }
                 Some("composer") => {
                     self.replace_draft(request["params"]["content"].as_str().unwrap_or_default(), request["method"] == "history", cx);
@@ -482,19 +566,16 @@ impl NativeChatView {
             return;
         };
         if method == "readNativeComposer" {
-            if let Some(runtime) = &mut self.runtime
-                && let Err(error) = runtime.call(
+            if let Some(runtime) = &self.runtime {
+                runtime.call(
                     "resolve",
-                    &[
+                    vec![
                         request["id"].clone(),
                         self.draft.clone().into(),
                         Value::Null,
                     ],
-                )
-            {
-                self.error = Some(error.to_string());
+                );
             }
-            self.pump(cx);
             return;
         }
         let endpoint = format!("/api/{method}");
@@ -518,12 +599,10 @@ impl NativeChatView {
                     Ok(value) => (value, Value::Null),
                     Err(error) => (Value::Null, error),
                 };
-                if let Some(runtime) = &mut this.runtime
-                    && let Err(error) = runtime.call("resolve", &[id, value, error])
-                {
-                    this.error = Some(error.to_string());
+                if let Some(runtime) = &this.runtime {
+                    runtime.call("resolve", vec![id, value, error]);
                 }
-                this.pump(cx);
+                let _ = cx;
             });
         })
         .detach();

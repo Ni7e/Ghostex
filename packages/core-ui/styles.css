@@ -3658,20 +3658,26 @@ body.app-modal-host-body {
    * The list now contains top-level Settings pages plus collapsible section
    * groups, so override the horizontal tab-list default into a vertical rail.
    */
+  /*
+   * CDXC:Settings 2026-09-18 DECISION:
+   * The rail scrollbar touches the rail's right border. The list extends through the rail's right padding and puts it back as inner padding, so rows keep their inset while the overlay track sits at the border.
+   */
   --edge-fade-distance: 12px;
   align-items: stretch;
   background: transparent;
   border: 0;
+  box-sizing: border-box;
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 0.25rem;
   height: auto;
   justify-content: flex-start;
+  margin-right: -0.5rem;
   min-height: 0;
   overflow: auto;
-  padding: 0;
-  width: 100%;
+  padding: 0 0.5rem 0 0;
+  width: calc(100% + 0.5rem);
 }
 
 .ghostex-settings-shadcn .settings-sidebar-page-group {

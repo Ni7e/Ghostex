@@ -18,6 +18,7 @@ pub(super) struct ModelPickerWindow {
     pub(super) focus: FocusHandle,
     pub(super) last_size: Option<(f32, f32)>,
     pub(super) started: std::time::Instant,
+    _activation: Subscription,
     _subscription: Subscription,
 }
 
@@ -93,6 +94,23 @@ impl NativeChatView {
                             );
                             let view = cx.new(|cx| {
                                 let subscription = cx.observe(&chat, |_, _, cx| cx.notify());
+                                /*
+                                CDXC:SessionChat 2026-09-18 WHY:
+                                React treats losing the window as a blur: the held-key highlights
+                                release and the picker stays open with its choice
+                                (`useModelPickerKeyFeedback` in session-chat-model-picker-input.ts).
+                                Cancelling here instead would throw away a selection the user made.
+                                */
+                                let activation = cx.observe_window_activation(
+                                    window,
+                                    |view: &mut ModelPickerWindow, window, cx| {
+                                        if !window.is_window_active() {
+                                            view.chat.update(cx, |chat, cx| {
+                                                chat.invoke(json!({"type":"modelPickerBlur"}), cx);
+                                            });
+                                        }
+                                    },
+                                );
                                 let focus = cx.focus_handle();
                                 focus.focus(window, cx);
                                 ModelPickerWindow {
@@ -100,6 +118,7 @@ impl NativeChatView {
                                     focus,
                                     last_size: None,
                                     started: std::time::Instant::now(),
+                                    _activation: activation,
                                     _subscription: subscription,
                                 }
                             });

@@ -755,6 +755,10 @@ impl GhostexGpuiApp {
             self.split_existing_agents_session_right(session_id, cx);
             return;
         }
+        if action == "selectForkBranch" {
+            self.select_session_chat_fork_branch(session_id, &message, cx);
+            return;
+        }
         let request = match action {
             "rename" => TerminalAgentActionRequest::Rename,
             "sleep" => TerminalAgentActionRequest::Sleep,

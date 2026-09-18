@@ -1,5 +1,4 @@
 use super::{state::NativeChatView, transcript::text};
-use crate::app::context_menu::GpuiContextMenu;
 use gpui::{Context, Window};
 use serde_json::{Value, json};
 
@@ -27,25 +26,28 @@ fn host_action_icon(id: &str) -> Option<&'static str> {
 }
 
 impl NativeChatView {
+    /// Send's own right-click menu.
+    ///
+    /// CDXC:SessionChat 2026-09-18 WHY:
+    /// It is the chat's own popup, not the app shell's native menu, because
+    /// React draws it as one more `ghostex-session-chat-popup`
+    /// (`session-chat-composer.tsx`) and because the shell is not there to ask
+    /// in Chat Lab, where the two renderers are compared side by side.
     pub(crate) fn show_send_actions(
-        &self,
+        &mut self,
         position: gpui::Point<gpui::Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let enabled = self.composer_ready && !self.pending_send && !self.draft.trim().is_empty();
         let can_queue = enabled && self.snapshot["queue"]["capabilities"]["canQueue"] == true;
-        if let Some(app) = self.config.app.as_ref().and_then(|app| app.upgrade()) {
-            GpuiContextMenu::new()
-                .menu_with_disabled(
-                    "Compact & Send",
-                    !can_queue,
-                    Box::new(NativeChatAction {
-                        command: json!({"type":"submit","mode":"compact"}),
-                    }),
-                )
-                .show_for_app(app, position, window, cx);
-        }
+        let rows = vec![json!({
+            "label":"Compact & Send",
+            "detail":crate::hotkey_label::terminal_overlay_hotkey_chord_label("alt+enter"),
+            "disabled":!can_queue,
+            "command":{"type":"submit","mode":"compact"},
+        })];
+        self.show_chat_menu_at(rows, position, 240.0, window, cx);
     }
     pub(crate) fn show_actions(
         &mut self,
@@ -109,7 +111,11 @@ impl NativeChatView {
             rows.push(host_row(action));
         }
         for (id, action, label, icon) in super::toolbar::COMPOSER_CONTROLS {
-            if id != "summary" && self.composer_control_overflowed(id) {
+            // React folds an overflowed control into this menu only when the host gave it a handler.
+            if id != "summary"
+                && self.composer_control_overflowed(id)
+                && self.composer_control_available(id)
+            {
                 let (label, icon) = if id == "maximize" && self.maximized_window.is_some() {
                     ("Exit maximize", "titlebar/minimize.svg")
                 } else {
@@ -131,12 +137,23 @@ impl NativeChatView {
             rows.push(json!({"heading":true,"label":"Agent"}));
             for action in agent_actions {
                 if action["id"] == "switchAccount" {
+                    /*
+                    CDXC:AgentProviders 2026-09-18 DECISION:
+                    User: Switch Account in GPUI chat works like React chat. Claude and Codex
+                    sessions open the Accounts & limits panel (SessionAccountsPanel); other
+                    agents keep the daemon's switchable-agent rows. Either submenu opens on
+                    click only, per the 2026-09-12 decision in session-chat-composer-actions.tsx.
+                    */
+                    if self.snapshot["accountPanel"].is_object() {
+                        rows.push(json!({"label":"Switch Account","iconPath":host_action_icon("switchAccount"),"openOnHover":false,"children":[{"accounts":self.snapshot["accountPanel"]}]}));
+                        continue;
+                    }
                     let accounts: Vec<_> = self.snapshot["switchableAgents"].as_array().into_iter().flatten().map(|account| json!({
                         "label":account["name"],"icon":account["icon"],
                         "command":{"type":"host","action":"switchAccount","agentId":account["agentId"]},
                     })).collect();
                     if !accounts.is_empty() {
-                        rows.push(json!({"label":"Switch Account","iconPath":host_action_icon("switchAccount"),"children":accounts}));
+                        rows.push(json!({"label":"Switch Account","iconPath":host_action_icon("switchAccount"),"openOnHover":false,"children":accounts}));
                     }
                 } else {
                     rows.push(host_row(action));
@@ -166,6 +183,24 @@ impl NativeChatView {
         );
     }
 
+    /// The notice card's Switch account button: the same panel as More actions > Switch Account.
+    pub(crate) fn show_account_panel(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.snapshot["accountPanel"].is_object() {
+            self.show_chat_menu(
+                vec![json!({"accounts":self.snapshot["accountPanel"]})],
+                gpui::Bounds::new(position, gpui::size(gpui::px(0.0), gpui::px(0.0))),
+                super::option_menu::ACCOUNT_PANEL_WIDTH,
+                window,
+                cx,
+            );
+        }
+    }
+
     pub(crate) fn handle_action(
         &mut self,
         action: &NativeChatAction,
@@ -185,6 +220,16 @@ impl NativeChatView {
                 window,
                 cx,
             );
+        } else if action.command["type"] == "openAccountsSettings" {
+            cx.emit(super::state::NativeChatEvent::Host(
+                json!({"type":"open","modal":"settings","initialTab":"accounts"}),
+            ));
+        } else if action.command["type"] == "copyText" {
+            // Copy Path and Copy URL rows, with the shared copy sound every other chat copy plays.
+            if let Some(text) = action.command["text"].as_str() {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_owned()));
+                crate::app::helpers::gpui_play_copy_sound();
+            }
         } else if action.command["type"] == "host" {
             self.host(
                 action.command["action"].as_str().unwrap_or_default(),

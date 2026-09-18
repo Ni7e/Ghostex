@@ -184,6 +184,7 @@ pub struct GhostexGpuiApp {
     pub(crate) extension_projects: HashMap<String, GpuiExtensionProjectMetadata>,
     pub(crate) extension_session_details: HashMap<String, serde_json::Value>,
     pub(crate) extensions_refresh_in_flight: bool,
+    pub(crate) extensions_refreshed_at: Option<std::time::Instant>,
     pub(crate) titlebar_accounts: Vec<serde_json::Value>,
     pub(crate) titlebar_accounts_refresh_in_flight: std::collections::HashSet<String>,
     pub(crate) titlebar_accounts_revision: u64,

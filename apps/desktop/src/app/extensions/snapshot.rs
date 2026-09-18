@@ -63,11 +63,25 @@ pub(crate) fn read_gpui_extensions_snapshot() -> Result<
 }
 
 impl GhostexGpuiApp {
+    /// CDXC:Extensions 2026-09-18 WHY:
+    /// The titlebar action refresh chained a full extension refresh, which reads the extension list, the project list, and the whole presentation snapshot from gxserver; with active-project snapshots changing about twice a second that was three heavy requests per second for data that rarely changes.
+    /// Refreshes that ride on unrelated state changes go through here and run at most every 30 seconds; extension events and bootstrap changes still refresh immediately.
+    pub(crate) fn refresh_extensions_if_stale(&mut self, cx: &mut gpui::Context<Self>) {
+        if self
+            .extensions_refreshed_at
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(30))
+        {
+            return;
+        }
+        self.refresh_extensions_in_background(cx);
+    }
+
     pub(crate) fn refresh_extensions_in_background(&mut self, cx: &mut gpui::Context<Self>) {
         if self.extensions_refresh_in_flight {
             return;
         }
         self.extensions_refresh_in_flight = true;
+        self.extensions_refreshed_at = Some(std::time::Instant::now());
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             let result = background

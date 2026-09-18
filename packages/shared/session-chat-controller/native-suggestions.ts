@@ -1,4 +1,5 @@
 import {
+  SESSION_CHAT_FILE_SUGGESTION_HEADING,
   composerSuggestions,
   completeComposerMention,
   composerNativeCommand,
@@ -116,7 +117,7 @@ export class NativeComposerSuggestions {
           ? sessionChatSlashHeadingForAgent(sources.agent)
           : kind === 'skill'
             ? `${sessionChatSlashHeadingForAgent(sources.agent)} skills`
-            : 'Files',
+            : SESSION_CHAT_FILE_SUGGESTION_HEADING,
       status:
         kind === 'skill'
           ? sources.skillsLoading

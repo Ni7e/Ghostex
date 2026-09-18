@@ -181,6 +181,7 @@ impl GhostexGpuiApp {
                 extension_projects: HashMap::new(),
                 extension_session_details: HashMap::new(),
                 extensions_refresh_in_flight: false,
+                extensions_refreshed_at: None,
                 titlebar_accounts: Vec::new(),
                 titlebar_accounts_refresh_in_flight: Default::default(),
                 titlebar_accounts_revision: 0,

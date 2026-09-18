@@ -1,4 +1,5 @@
 use super::appearance::ChatAppearance;
+use super::state::NativeChatView;
 use gpui::{Hsla, px, rgb};
 use gpui_component::text::InlineLink;
 use serde::Deserialize;
@@ -58,6 +59,22 @@ pub(super) fn composer_color(kind: &str, appearance: &ChatAppearance) -> Option<
         VISUAL.colors.get(kind)?
     };
     blended(hex, appearance)
+}
+
+/// The transcript's right-click menu on a reference, wired into the markdown view's secondary-click
+/// hook because these pills are inline links inside gpui-component's text, not elements of our own.
+/// The rows and the ordering are the composer's (`reference_menu.rs`), the way React shares
+/// `session-chat-reference-menu-items.tsx` between both.
+pub(super) fn secondary_click(
+    chat: gpui::WeakEntity<NativeChatView>,
+) -> impl Fn(&str, gpui::Modifiers, &mut gpui::Window, &mut gpui::App) + Send + Sync + 'static {
+    move |href, _, window, cx| {
+        let href = href.to_owned();
+        let _ = chat.update(cx, |chat, cx| {
+            let at = window.mouse_position();
+            chat.show_reference_menu(href, at, window, cx);
+        });
+    }
 }
 
 pub(super) fn presentations(
