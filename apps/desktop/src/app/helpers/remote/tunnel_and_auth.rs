@@ -108,7 +108,7 @@ pub(crate) fn gpui_spawn_remote_gxserver_tunnel(
     ) {
         arguments.push("-N".to_string());
     }
-    arguments.extend(gpui_remote_ssh_client_options(config.has_saved_password));
+    arguments.extend(gpui_remote_ssh_tunnel_options(config.has_saved_password));
     arguments.extend([
         "-o".to_string(),
         "ExitOnForwardFailure=yes".to_string(),

@@ -63,7 +63,7 @@ pub(crate) fn source_code_server_spawn_remote_runtime(
             break;
         }
         let askpass = gpui_remote_ssh_askpass_script(machine_config)?;
-        let mut arguments = gpui_remote_ssh_client_options(machine_config.has_saved_password);
+        let mut arguments = gpui_remote_ssh_tunnel_options(machine_config.has_saved_password);
         arguments.extend([
             "-o".to_string(),
             "ExitOnForwardFailure=yes".to_string(),

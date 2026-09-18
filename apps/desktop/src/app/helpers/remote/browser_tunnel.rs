@@ -50,7 +50,7 @@ pub(crate) fn start_remote_browser_tunnel(
         .map_err(|_| "Could not read the browser tunnel port.")?
         .port();
     let askpass = gpui_remote_ssh_askpass_script(config)?;
-    let mut args = gpui_remote_ssh_client_options(config.has_saved_password);
+    let mut args = gpui_remote_ssh_tunnel_options(config.has_saved_password);
     args.extend([
         "-N".into(),
         "-o".into(),

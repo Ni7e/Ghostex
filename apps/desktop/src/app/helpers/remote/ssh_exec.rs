@@ -455,3 +455,20 @@ pub(crate) fn gpui_login_shell_remote_command(command: &str) -> String {
         "if [ -x /bin/zsh ]; then exec /bin/zsh -lic {quoted_command}; elif command -v zsh >/dev/null 2>&1; then exec zsh -lic {quoted_command}; else exec /bin/sh -lc {quoted_command}; fi"
     )
 }
+
+/// CDXC:RemoteMachines 2026-09-18 WHY:
+/// A managed tunnel must own its SSH process and forwarding socket. Reusing a user-configured multiplexing master can make the child exit successfully before the readiness probe and leaves tunnel shutdown tied to an unrelated master.
+/// SEE-ALSO: tunnel_and_auth.rs, browser_tunnel.rs, source_code_server.rs.
+#[cfg(target_os = "macos")]
+pub(crate) fn gpui_remote_ssh_tunnel_options(has_saved_password: bool) -> Vec<String> {
+    let mut arguments = gpui_remote_ssh_client_options(has_saved_password);
+    arguments.extend([
+        "-o".to_string(),
+        "ControlMaster=no".to_string(),
+        "-o".to_string(),
+        "ControlPath=none".to_string(),
+        "-o".to_string(),
+        "ForkAfterAuthentication=no".to_string(),
+    ]);
+    arguments
+}
