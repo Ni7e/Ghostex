@@ -231,7 +231,7 @@ wrap_focus_handler! {
             let explicitly_active = native_view
                 .is_some_and(|native_view| {
                     active_cef_native_view() == Some(native_view as usize)
-                        || (cfg!(any(target_os = "windows", target_os = "linux"))
+                        || (cfg!(target_os = "windows")
                             && platform::native_view_owns_first_responder(native_view))
                 });
             let sidebar_editable_focus_granted = native_view.is_some_and(|native_view| {
@@ -239,8 +239,12 @@ wrap_focus_handler! {
                     == native_view as usize
             });
             // CDXC:FocusRouting 2026-09-18 WHY:
-            // Linux has no AppKit mouse hook to mark a clicked CEF view active. Like Windows, native SYSTEM focus must be allowed to establish ownership; requiring the previous registry owner strands chat input after sidebar interaction.
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            // Linux focus_native_view and the sidebar editable bridge mark the browser active before handing off focus. Require that app-owned grant: Chromium may already own X11 focus when a renderer-initiated SYSTEM request reaches this callback.
+            #[cfg(target_os = "linux")]
+            let cancel = hidden
+                || !explicitly_active
+                || (source == FocusSource::NAVIGATION && !sidebar_editable_focus_granted);
+            #[cfg(target_os = "windows")]
             let cancel = hidden
                 || (source == FocusSource::NAVIGATION && !sidebar_editable_focus_granted);
             #[cfg(not(any(target_os = "windows", target_os = "linux")))]
