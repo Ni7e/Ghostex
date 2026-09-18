@@ -216,6 +216,16 @@ pub(crate) fn with_agent_model_options(
             }
             (_, value) => (false, option_takes_value(agent, value)),
         };
+        if remove
+            && takes_value
+            && words
+                .get(index + 1)
+                .is_none_or(|(start, end, _)| command[*start..*end].starts_with('-'))
+        {
+            return Err(DomainStateError::bad_request(format!(
+                "The agent command option {word} needs a value before a model or effort override can be applied."
+            )));
+        }
         let last = if takes_value && index + 1 < words.len() {
             index + 1
         } else {
