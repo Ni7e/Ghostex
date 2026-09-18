@@ -54,7 +54,7 @@ pub fn focus_gpui_root_view(native_view: *mut c_void) {
     platform::focus_gpui_root_view(native_view);
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub fn gpui_root_view_has_native_focus(native_view: *mut c_void) -> bool {
     platform::native_view_has_direct_focus(native_view)
 }

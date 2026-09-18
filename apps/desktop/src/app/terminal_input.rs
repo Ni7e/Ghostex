@@ -796,20 +796,13 @@ impl GhostexGpuiApp {
         );
         #[cfg(target_os = "macos")]
         self.begin_programmatic_focus();
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        // CDXC:FocusRouting 2026-09-18 WHY:
+        // GPUI FocusHandle changes do not move X11 keyboard focus out of a CEF child. Linux needs the same native-root handoff as macOS and Windows or terminal clicks leave typing in Chromium until the window is reactivated.
         let focus_root = cef_parent_native_view(window).unwrap_or(self.parent_ns_view);
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
         cef::focus_gpui_root_view(focus_root);
         let focus_handle = view.read(cx).focus_handle(cx);
         window.focus(&focus_handle, cx);
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        {
-            self.composited_terminal_keyboard_owner = Some((focus_root as usize, target));
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            self.composited_terminal_keyboard_owner = Some((self.parent_ns_view as usize, target));
-        }
+        self.composited_terminal_keyboard_owner = Some((focus_root as usize, target));
         #[cfg(target_os = "macos")]
         {
             /*

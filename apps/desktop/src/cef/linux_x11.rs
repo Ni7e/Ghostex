@@ -21,8 +21,7 @@ native-Wayland shell (plan Phase 4).
 x11rb is the deliberate X library choice: gpui's own X11 backend already
 pulls it into the Linux dependency tree (same 0.13 major), it speaks the X
 protocol directly over its own connection (no libX11/libxcb link-time
-dependency), and the four requests this adapter needs (ConfigureWindow,
-MapWindow, UnmapWindow, SetInputFocus) are core protocol.
+dependency), and its window placement and focus requests are core protocol.
 
 Written without Linux hardware (P3 best-effort bring-up): the pump-state
 machine mirrors apps/desktop/native/macos/GpuiCefAppKitHooks.m semantics 1:1 except
@@ -522,7 +521,21 @@ pub(super) fn set_native_view_mouse_focus_passive(_native_view: *mut c_void, _pa
 
 pub(super) fn set_native_view_passive_focus_grant(_native_view: *mut c_void, _granted: bool) {}
 
-pub(super) fn return_focus_to_gpui_root(_native_view: *mut c_void) {}
+pub(super) fn return_focus_to_gpui_root(native_view: *mut c_void) {
+    let Some(host) = x11_window(native_view).and_then(embed_host_for_cef_window) else {
+        return;
+    };
+    let (connection, _) = x11_connection();
+    let Some(parent) = connection
+        .query_tree(host)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .map(|tree| tree.parent)
+    else {
+        return;
+    };
+    focus_gpui_root_view(parent as usize as *mut c_void);
+}
 
 pub(super) fn prepare_native_view_for_focus(native_view: *mut c_void) {
     // The macOS focus subclass exists to route AppKit first-responder and
@@ -688,22 +701,61 @@ pub(super) fn focus_native_view(native_view: *mut c_void) {
     let Some(window) = x11_window(native_view) else {
         return;
     };
-    // Mirrors makeFirstResponder on macOS: give the CEF child window X input
-    // focus so key events route to Chromium; the shared shell follows up
-    // with host.set_focus(1) so Chromium moves focus to its inner widget.
-    // RevertTo=Parent returns focus to the GPUI window if the child unmaps.
+    super::shell::mark_native_view_focused(native_view);
+    // CDXC:FocusRouting 2026-09-18 WHY:
+    // Moving X input focus from Chromium's focused widget to its browser parent emits a window blur, dismissing every sidebar menu after the first open. Preserve descendant focus during repeated grants.
+    if native_view_owns_first_responder(native_view) {
+        return;
+    }
     let (connection, _) = x11_connection();
     let _ = connection.set_input_focus(InputFocus::PARENT, window, x11rb::CURRENT_TIME);
     let _ = connection.flush();
 }
 
 pub(super) fn focus_gpui_root_view(native_view: *mut c_void) {
-    focus_native_view(native_view);
+    let Some(window) = x11_window(native_view) else {
+        return;
+    };
+    super::shell::clear_active_native_view();
+    let (connection, _) = x11_connection();
+    let _ = connection.set_input_focus(InputFocus::PARENT, window, x11rb::CURRENT_TIME);
+    let _ = connection.flush();
 }
 
-pub(super) fn native_view_owns_first_responder(_native_view: *mut c_void) -> bool {
-    // First-responder arbitration is an AppKit concern; X11 input focus is
-    // already granted explicitly through focus_native_view, so renderer
-    // focus requests keep their pre-existing allow behavior here.
-    true
+pub(super) fn native_view_owns_first_responder(native_view: *mut c_void) -> bool {
+    let Some(window) = x11_window(native_view) else {
+        return false;
+    };
+    let (connection, _) = x11_connection();
+    let Some(mut focused) = focused_x11_window() else {
+        return false;
+    };
+    while focused > u32::from(InputFocus::POINTER_ROOT) {
+        if focused == window {
+            return true;
+        }
+        let Some(tree) = connection
+            .query_tree(focused)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+        else {
+            return false;
+        };
+        focused = tree.parent;
+    }
+    false
+}
+
+pub(super) fn native_view_has_direct_focus(native_view: *mut c_void) -> bool {
+    x11_window(native_view).is_some_and(|window| focused_x11_window() == Some(window))
+}
+
+fn focused_x11_window() -> Option<X11Window> {
+    x11_connection()
+        .0
+        .get_input_focus()
+        .ok()?
+        .reply()
+        .ok()
+        .map(|reply| reply.focus)
 }
