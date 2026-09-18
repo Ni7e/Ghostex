@@ -592,6 +592,13 @@ the interrupted work once the new account is ready. Configured recovery after
 errors can also continue work on the same account.
 Account sign-in terminals open in the active local project's folder and appear
 under that project. Before a first project is chosen, sign-in uses the home folder.
+When a newer usage reading cannot be fetched for a Claude account, for example
+while the usage service rate limits checks for an hour at a time, Settings >
+Accounts, the titlebar usage popup, and the chat's Switch account rows show the
+last reading with its age ("Usage is from 3 hours ago") and Ghostex keeps
+retrying on its own. Automatic switching and the Account for new sessions rule
+skip that account until its usage refreshes. A login problem shows what to do
+instead, such as "The saved login expired. Reconnect this account."
 
 Hide emails in Settings > Accounts keeps the first and last characters before
 `@` and shows the same `•••••.•••` for every domain, with no blur effect.

@@ -121,6 +121,57 @@ fn window(
         model,
     })
 }
+/// The user-facing line for a cswap `usageStatus` other than `ok`. `has_last_good` says whether the row still carries an older reading to show, and `last_good_age` is that reading's age in seconds when cswap reports it.
+fn claude_usage_notice(
+    status: &str,
+    has_last_good: bool,
+    last_good_age: Option<f64>,
+) -> Option<String> {
+    Some(match status {
+        "ok" => return None,
+        "unavailable" => match (has_last_good, last_good_age) {
+            (true, Some(age)) => format!(
+                "Usage is from {} ago. Refreshing has failed since then; Ghostex keeps trying.",
+                age_text(age)
+            ),
+            (true, None) => {
+                "Usage could not be refreshed. Showing the last reading; Ghostex keeps trying."
+                    .into()
+            }
+            (false, _) => "Usage could not be read yet. Ghostex keeps trying.".into(),
+        },
+        "token_expired" => "The saved login expired. Reconnect this account.".into(),
+        "relogin_required" => "This account needs to sign in again. Reconnect it.".into(),
+        "no_credentials" => "No saved login was found for this account. Reconnect it.".into(),
+        "foreign_credential" => {
+            "The saved login belongs to a different account. Reconnect this account.".into()
+        }
+        "api_key" => "This login uses an API key, so it has no subscription usage limits.".into(),
+        "keychain_unavailable" => {
+            "The saved login could not be read from the Keychain. Unlock it and refresh.".into()
+        }
+        other => format!("Usage could not be read (helper status: {other}). Ghostex keeps trying."),
+    })
+}
+fn age_text(seconds: f64) -> String {
+    let unit = |count: i64, name: &str| {
+        if count == 1 {
+            format!("1 {name}")
+        } else {
+            format!("{count} {name}s")
+        }
+    };
+    let minutes = (seconds.max(0.) / 60.).round() as i64;
+    if minutes < 1 {
+        "under a minute".into()
+    } else if minutes < 60 {
+        unit(minutes, "minute")
+    } else if minutes < 24 * 60 {
+        unit(minutes / 60, "hour")
+    } else {
+        unit(minutes / (24 * 60), "day")
+    }
+}
 /// CDXC:AgentProviders 2026-09-05 DECISION:
 /// cswap owns Claude credentials and selected-account launches; gxserver schedules usage reads and decides when sessions switch. xswap supplies Codex account homes and launches.
 pub(crate) fn discover(home: &Path, provider: Provider) -> Result<Vec<DiscoveredAccount>, String> {
@@ -171,10 +222,18 @@ pub(crate) fn discover(home: &Path, provider: Provider) -> Result<Vec<Discovered
             if status == "foreign_credential" {
                 account.status = "identityChanged".into();
             }
-            if status != "ok" {
-                account.usage_error = Some(format!("Usage unavailable ({status})."));
-            }
-            let usage = &row["usage"];
+            // CDXC:AgentProviders 2026-09-18 WHY:
+            // cswap reports `unavailable` with a null `usage` once its last reading is too old to drive a switch, usually because the Anthropic usage endpoint answers 429 with a one-hour retry. Its documented `lastGoodUsage` fields keep that reading for display, so Ghostex shows those bars with their age instead of the bare status code. `usage_error` stays set, and every switch decision (`default_account.rs`, `has_room` in `recovery.rs`) requires it to be absent, so a stale reading never counts as headroom.
+            let (usage, fetched_at, last_good_age) = if row["usage"].is_object() {
+                (&row["usage"], &row["usageFetchedAt"], None)
+            } else {
+                (
+                    &row["lastGoodUsage"],
+                    &row["lastGoodFetchedAt"],
+                    row.get("lastGoodAgeSeconds").and_then(Value::as_f64),
+                )
+            };
+            account.usage_error = claude_usage_notice(&status, usage.is_object(), last_good_age);
             if let Some(w) = window(
                 "fiveHour",
                 "Five-hour limit",
@@ -204,10 +263,7 @@ pub(crate) fn discover(home: &Path, provider: Provider) -> Result<Vec<Discovered
             if let Some(w) = window("spend", "Extra usage", &usage["spend"], "pct", None) {
                 account.usage.push(w);
             }
-            account.usage_updated_at = row
-                .get("usageFetchedAt")
-                .and_then(Value::as_str)
-                .map(str::to_string);
+            account.usage_updated_at = fetched_at.as_str().map(str::to_string);
         } else {
             account.identity = text(row, "accountId");
             account.status = match text(row, "loginStatus").as_str() {
