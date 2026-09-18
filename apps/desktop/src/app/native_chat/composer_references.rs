@@ -83,7 +83,10 @@ pub(super) fn replacements(
                             COMPOSER_FONT_PX * appearance.scale * markdown_links::VISUAL.icon_em,
                         ),
                         gpui::px(ICON_INSET_REM * ROOT_FONT_PX * appearance.scale),
-                    ),
+                    )
+                    // Only a pill whose click opens something takes the hand cursor, the way the
+                    // composer stylesheet leaves web links on the text cursor.
+                    .pointer(reference.kind != "url"),
             )
         })
         .collect()
