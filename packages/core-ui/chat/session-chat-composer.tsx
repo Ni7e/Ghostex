@@ -1,6 +1,6 @@
 import { canCollapseSessionChatComposer } from '@/packages/shared/session-chat-presentation/composer-scroll';
 import { composerSuggestions, completeComposerMention, composerNativeCommand } from '@/packages/shared/session-chat-presentation/composer-suggestions';
-import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS } from '@/packages/shared/session-chat-controller/composer-policy';
+import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS, DESKTOP_SESSION_CHAT_PLACEHOLDER } from '@/packages/shared/session-chat-controller/composer-policy';
 import { deliverChatSubmission, editQueuedChatPrompt, restoreUndeliveredChatText } from '@/packages/shared/session-chat-controller/submission';
 import { nextFileReferenceIndex, insertChatReference } from '@/packages/shared/session-chat-presentation/references';
 import { classifyDraftHandoff } from '@/packages/shared/session-chat-controller/draft-handoff';
@@ -474,9 +474,6 @@ export interface SessionChatComposerProps {
   agentTasks?: SessionChatAgentTasks | null;
 }
 
-/** Mentions queue and the two composer pickers so they are discoverable without docs. */
-const DESKTOP_SESSION_CHAT_PLACEHOLDER =
-  'Press Enter to send a message and Tab to Queue.\nUse @ to mention a file and $ for using skills.';
 const MOBILE_SESSION_CHAT_PLACEHOLDER = 'Tap ↑ to send or hold it to queue; use @ for files and $ for skills.';
 
 

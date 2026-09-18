@@ -2907,14 +2907,17 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 }
 
 .ghostex-chat-markdown a {
-  color: var(--info-foreground);
+  color: var(--chat-web-link-light, var(--info-foreground));
   text-decoration: none;
 }
 
 .ghostex-chat-markdown .ghostex-chat-markdown-link-icon {
-  display: inline;
+  background-color: currentColor;
+  -webkit-mask: var(--chat-web-link-icon) center / contain no-repeat;
+  mask: var(--chat-web-link-icon) center / contain no-repeat;
+  display: inline-block;
   height: 1em;
-  margin-right: 0.2em;
+  margin-right: var(--chat-web-link-gap, 0.2em);
   vertical-align: -0.08em;
   width: 1em;
 }
@@ -2943,8 +2946,8 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 .ghostex-chat-markdown .ghostex-chat-reference-pill::before {
   align-self: center;
   background-color: currentColor;
-  height: 1em;
-  width: 1em;
+  height: var(--chat-reference-icon-size, 1em);
+  width: var(--chat-reference-icon-size, 1em);
 }
 
 .ghostex-chat-markdown .ghostex-chat-markdown-file-chip-icon {
@@ -2972,13 +2975,17 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 }
 
 .ghostex-session-chat-scope[data-chat-theme='dark'] .ghostex-chat-markdown a {
-  color: color-mix(in srgb, var(--info-foreground) 72%, white 28%);
+  color: color-mix(in srgb, var(--chat-web-link-dark, var(--info-foreground)) 72%, white 28%);
 }
 
 .ghostex-session-chat-scope[data-chat-theme='dark']
   .ghostex-chat-markdown
   :is(.ghostex-chat-reference-pill, .ghostex-chat-markdown-file-chip) {
-  color: color-mix(in srgb, var(--ghostex-chat-reference-outline) 72%, white 28%);
+  color: color-mix(
+    in srgb,
+    var(--ghostex-chat-reference-outline) var(--chat-reference-dark-base, 72%),
+    white var(--chat-reference-dark-white, 28%)
+  );
 }
 
 /* --- Footnotes ------------------------------------------------------------ */

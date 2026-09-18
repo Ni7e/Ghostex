@@ -1,0 +1,8 @@
+{
+  "label": "Scroll to bottom",
+  "edgeThreshold": 10,
+  "height": 24,
+  "fontSize": 11,
+  "paddingX": 10,
+  "bottom": 4
+}

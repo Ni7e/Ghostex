@@ -21,6 +21,7 @@ import {
 import { partitionCompletedChatWork, workedDurationLabel } from '../session-chat-presentation/turns';
 import type { SessionChatMessage } from '../session-chat';
 import { sessionChatMessageActionContent } from '../session-chat-presentation/message-actions';
+import { sessionChatMarkdownReferences } from '../session-chat-presentation/markdown-links';
 
 function projectMessage(message: SessionChatMessage) {
   const { tools, prose } = splitSessionChatBlocks(message.blocks);
@@ -33,6 +34,7 @@ function projectMessage(message: SessionChatMessage) {
     text: message.role === 'user' ? normalizeUserMessageMarkdown(body) : body,
     copyText: message.role === 'user' ? userTurnCopyMarkdown(normalizeUserMessageMarkdown(body), images) : body,
     actionContent: sessionChatMessageActionContent(body),
+    markdownReferences: sessionChatMarkdownReferences(body),
     reasoning: splitReasoningHeadline(body),
     agentMessage: agentMessage ? { ...agentMessage, name: agentDisplayName(agentMessage.sender) } : null,
     questions: pairSessionChatToolBlocks(tools).map(answeredSessionChatQuestionExchange).filter(Boolean),

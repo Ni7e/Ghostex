@@ -790,6 +790,8 @@ export interface SessionChatSubagentInfo {
 export interface GxserverReadSessionChatResult {
   /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
   asyncQuestionsSince?: number | null;
+  /** Server-confirmed answers/skips, including answers still queued inside Codex. Omitted means unchanged. */
+  retiredAsyncQuestionIds?: string[];
   /** Present only for a child transcript read, independent of the main chat stream. */
   subagent?: SessionChatSubagentInfo;
   messages: SessionChatMessage[];
@@ -1168,6 +1170,8 @@ interface SessionChatFrameBase {
 export interface GxserverSessionChatSnapshotEvent extends SessionChatFrameBase {
   /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
   asyncQuestionsSince?: number | null;
+  /** Server-confirmed answers/skips, including answers still queued inside Codex. Omitted means unchanged. */
+  retiredAsyncQuestionIds?: string[];
   type: 'sessionChatSnapshot';
   messages: SessionChatMessage[];
   lifecycle?: SessionChatTurnLifecycle;
@@ -1252,6 +1256,8 @@ export interface GxserverSessionChatAppendedEvent extends SessionChatFrameBase {
 export interface GxserverSessionChatReplacedEvent extends SessionChatFrameBase {
   /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
   asyncQuestionsSince?: number | null;
+  /** Server-confirmed answers/skips, including answers still queued inside Codex. Omitted means unchanged. */
+  retiredAsyncQuestionIds?: string[];
   type: 'sessionChatReplaced';
   messages: SessionChatMessage[];
   lifecycle?: SessionChatTurnLifecycle;
@@ -1314,6 +1320,8 @@ export interface GxserverSessionChatReplacedEvent extends SessionChatFrameBase {
 export interface GxserverSessionChatStateEvent extends SessionChatFrameBase {
   /** Codex process start in epoch ms; earlier async questions expired on resume. Omitted means unchanged. */
   asyncQuestionsSince?: number | null;
+  /** Server-confirmed answers/skips, including answers still queued inside Codex. Omitted means unchanged. */
+  retiredAsyncQuestionIds?: string[];
   type: 'sessionChatState';
   status: SessionChatStatus;
   lifecycle?: SessionChatTurnLifecycle;

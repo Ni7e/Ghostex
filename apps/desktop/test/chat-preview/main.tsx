@@ -13,11 +13,32 @@ import './preview.css';
 const embedded = new URLSearchParams(location.search).has('embedded');
 
 function Conversation({ config }: { config: ChatPreviewConfig }) {
+  const [hostAction, setHostAction] = useState('');
   const transport = useMemo(() => new ChatPreviewBackend(config).transport(), []);
   return (
     <div className='comparison-conversation' style={{ zoom: config.zoom / 100 }}>
+      {hostAction && (
+        <output
+          style={{
+            position: 'absolute',
+            zIndex: 20,
+            background: config.theme === 'light' ? '#fff' : '#141414',
+            fontSize: 12,
+            top: 0,
+            left: 0,
+            right: 0,
+          }}
+          aria-live='polite'
+        >
+          {hostAction}
+        </output>
+      )}
       <SessionChatView
         transport={transport}
+        hostLinks={{
+          openFile: (path, position) => setHostAction(JSON.stringify({ action: 'openFile', path, ...position })),
+          openUrl: (url, options) => setHostAction(JSON.stringify({ action: 'openLink', url, ...options })),
+        }}
         sessionKey={`chat-preview:${config.revision}`}
         sessionTitle='Sample conversation'
         theme={config.theme}

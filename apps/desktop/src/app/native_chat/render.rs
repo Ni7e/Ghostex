@@ -9,6 +9,7 @@ use serde_json::json;
 
 impl Render for NativeChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        super::scroll_bottom::register(cx);
         self.main_window = Some(window.window_handle());
         if self.maximized_window.is_none() {
             self.ensure_input(window, cx);
@@ -60,6 +61,7 @@ impl Render for NativeChatView {
             .capture_any_mouse_down(|_, window, _| {
                 super::focus::reclaim_keyboard_focus(window);
             })
+            .capture_action(cx.listener(Self::scroll_bottom_action))
             .capture_key_down(cx.listener(Self::composer_key_down))
             .composer_input_actions(cx)
             .capture_key_up(cx.listener(|chat, _, _, _| chat.composer_held_key = None))

@@ -487,8 +487,10 @@ pub fn is_session_chat_activity_command_text(agent: Option<&str>, text: &str) ->
 // Line/segment preparation
 // ---------------------------------------------------------------------------
 
-/// Defensive SGR strip: `zmx history` output is already plain text, but a
-/// themed statusline could carry colours.
+/// Removes terminal control sequences while preserving visible text.
+/// CDXC:AgentScreenDetection 2026-09-18 WHY:
+/// Codex chat notices use VT captures, but dialog answers recheck plain captures.
+/// Leaving OSC working-directory or hyperlink metadata in the text changes the dialog ID and rejects unchanged choices, including every update-prompt button.
 pub(crate) fn strip_ansi_sgr(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.chars().peekable();
@@ -497,14 +499,28 @@ pub(crate) fn strip_ansi_sgr(line: &str) -> String {
             out.push(ch);
             continue;
         }
-        if chars.peek() != Some(&'[') {
-            continue;
-        }
-        chars.next();
-        for inner in chars.by_ref() {
-            if inner.is_ascii_alphabetic() {
-                break;
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                for inner in chars.by_ref() {
+                    if ('@'..='~').contains(&inner) {
+                        break;
+                    }
+                }
             }
+            Some(']') => {
+                chars.next();
+                while let Some(inner) = chars.next() {
+                    if inner == '\u{7}' {
+                        break;
+                    }
+                    if inner == '\u{1b}' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
         }
     }
     out

@@ -56,6 +56,7 @@ pub(crate) struct NativeChatView {
     pub(super) composer_held_key: Option<String>,
     pub(crate) bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     input_needs_sync: bool,
+    input_placeholder: String,
     input_undoable: bool,
     input_caret: Option<usize>,
     pub(super) async_answer_input: Option<(String, Entity<InputState>)>,
@@ -102,17 +103,16 @@ impl NativeChatView {
         let list = gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.0));
         list.set_follow_mode(gpui::FollowMode::Tail);
         let chat = cx.weak_entity();
-        list.set_scroll_handler(move |event, _, cx| {
-            if !event.is_scrolled {
-                let chat = chat.clone();
-                cx.defer(move |cx| {
-                    let _ = chat.update(cx, |chat, cx| {
-                        if chat.snapshot["composerCollapsed"] == true {
-                            chat.invoke(json!({"type":"composerExpand"}), cx);
-                        }
-                    });
+        list.set_scroll_handler(move |_, _, cx| {
+            let chat = chat.clone();
+            cx.defer(move |cx| {
+                let _ = chat.update(cx, |chat, cx| {
+                    if chat.list.is_following_tail() && chat.snapshot["composerCollapsed"] == true {
+                        chat.invoke(json!({"type":"composerExpand"}), cx);
+                    }
+                    cx.notify();
                 });
-            }
+            });
         });
         Self {
             draft_id: format!(
@@ -146,6 +146,7 @@ impl NativeChatView {
             context_status_measurements: None,
             bounds: Default::default(),
             input_needs_sync: false,
+            input_placeholder: String::new(),
             input_undoable: false,
             input_caret: None,
             async_answer_input: None,
@@ -174,9 +175,13 @@ impl NativeChatView {
         if self.input.is_none() {
             let draft = self.draft.clone();
             let input = cx.new(|cx| InputState::new(window, cx).multi_line(true).submit_on_enter(true).auto_grow(3, 7)
-                .placeholder("Press Enter to send a message and Tab to Queue.\nUse @ to mention a file and $ for using skills.")
                 .default_value(draft));
             self.input = Some(input);
+        }
+        let placeholder = self.snapshot["composerPlaceholder"].as_str().unwrap_or_default();
+        if self.input_placeholder != placeholder {
+            self.input_placeholder = placeholder.to_owned();
+            self.input.as_ref().unwrap().update(cx, |input, cx| input.set_placeholder(self.input_placeholder.clone(), window, cx));
         }
         if self.input_window != Some(window.window_handle().window_id()) {
             self.input_window = Some(window.window_handle().window_id());

@@ -1,3 +1,4 @@
+import scrollBottom from '@/packages/shared/session-chat-presentation/scroll-bottom.json';
 import {
   normalizeChatTranscript,
   foldChatTranscript,
@@ -96,7 +97,7 @@ import {
 import type { SessionChatTransport } from '../session-chat-transport';
 
 const LOAD_EARLIER_SCROLL_TOP_PX = 320;
-const AUTO_SCROLL_EDGE_THRESHOLD_PX = 10;
+const AUTO_SCROLL_EDGE_THRESHOLD_PX = scrollBottom.edgeThreshold;
 /** Gap kept above the streaming row while the stream hold anchors it to the top. */
 const STREAM_HOLD_TOP_MARGIN_PX = 12;
 

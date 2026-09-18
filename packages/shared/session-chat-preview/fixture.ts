@@ -8,6 +8,9 @@ export const PREVIEW_SCENARIOS = [
   'compacting',
   'question',
   'approval',
+  'update',
+  'update-error',
+  'links',
   'async',
   'queue',
   'empty',
@@ -100,12 +103,20 @@ export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSess
     messages:
       config.scenario === 'empty'
         ? []
-        : config.scenario === 'markdown'
+        : config.scenario === 'links'
           ? [
-              previewMessage('1', 'user', 'Compare inline code wrapping and selection.'),
-              previewMessage('2', 'assistant', MARKDOWN_PREVIEW),
+              previewMessage(
+                '1',
+                'assistant',
+                '[Relative file](src/chat.ts:42:8)\n\n[File with spaces](/sample/My%20Project/chat.ts:9)\n\n[File URL](file:///sample/project/chat.ts:12)\n\n[Website](https://example.com/)'
+              ),
             ]
-          : messages,
+          : config.scenario === 'markdown'
+            ? [
+                previewMessage('1', 'user', 'Compare inline code wrapping and selection.'),
+                previewMessage('2', 'assistant', MARKDOWN_PREVIEW),
+              ]
+            : messages,
     hasMore: false,
     beforeOffset: 0,
     epoch: 1,
@@ -141,6 +152,41 @@ export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSess
             percent: 42,
             elapsedSeconds: 18,
             detectedAt: new Date().toISOString(),
+          },
+        }
+      : {}),
+    ...(config.scenario === 'update' || config.scenario === 'update-error'
+      ? {
+          terminalNotice: {
+            kind: 'updatePrompt',
+            severity: 'warning' as const,
+            source: 'screen' as const,
+            detectedAt: '2026-09-18T01:14:09Z',
+            title: 'Update Codex to 0.155.0?',
+            detail:
+              'This session runs Codex 0.154.0. Update now installs 0.155.0 through pnpm. Codex quits to install it, so start it again in this session afterwards.',
+            choices: ['Update now', 'Skip for now', 'Skip until next version'].map((label, index) => ({
+              index,
+              label,
+              selected: index === 0,
+            })),
+            dialog: {
+              id: 'codex-update-prompt:preview',
+              title: 'Update Codex to 0.155.0?',
+              body: '',
+              footer: 'Choose an option to continue.',
+              input: null,
+              inputValue: '',
+              actions: [],
+              rows: ['Update now', 'Skip for now', 'Skip until next version'].map((label, index) => ({
+                number: index + 1,
+                label,
+                description: null,
+                selected: index === 0,
+              })),
+            },
+            screenTail:
+              'Update available! 0.154.0 -> 0.155.0\n1. Update now (pnpm add -g @openai/codex)\n2. Skip for now\n3. Skip until next version',
           },
         }
       : {}),

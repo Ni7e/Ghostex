@@ -26,7 +26,7 @@ struct QuestionCursor {
     pending: Vec<(String, String)>,
 }
 
-fn answer_prefix(title: &str) -> String {
+pub(crate) fn answer_prefix(title: &str) -> String {
     let mut end = title.len().min(512);
     while !title.is_char_boundary(end) {
         end -= 1;
@@ -178,6 +178,41 @@ fn refresh(state: &AppState, cursors: &mut HashMap<String, QuestionCursor>) {
                 boundary_fingerprint(&path, cursor.incremental.offset).unwrap_or_default();
             cursor.version = Some(version);
         }
+        let dismissed = retired_question_ids(&session);
+        let candidates: Vec<_> = cursor
+            .pending
+            .iter()
+            .filter(|(id, _)| !dismissed.contains(id))
+            .collect();
+        if !candidates.is_empty() {
+            if let Ok(capture) =
+                crate::zmx::read_zmx_session_history_capture(&repository, project_id, session_id)
+            {
+                if !capture.truncated {
+                    for preview in
+                        crate::session_chat_notice::codex_queued_input_previews(&capture.text)
+                    {
+                        let matching: Vec<_> = cursor
+                            .pending
+                            .iter()
+                            .filter(|(_, prefix)| {
+                                let prefix =
+                                    prefix.split_whitespace().collect::<Vec<_>>().join(" ");
+                                preview
+                                    .strip_prefix(&prefix)
+                                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+                                    || (preview.chars().count() >= 12
+                                        && prefix.starts_with(&preview))
+                            })
+                            .collect();
+                        // A clipped preview must identify exactly one question before retiring it.
+                        if matching.len() == 1 && !dismissed.contains(&matching[0].0) {
+                            let _ = dismiss(state, project_id, session_id, &matching[0].0);
+                        }
+                    }
+                }
+            }
+        }
         let ids: Vec<&str> = cursor.pending.iter().map(|(id, _)| id.as_str()).collect();
         if session
             .pointer("/runtimeSettings/sessionChatAsyncQuestionIds")
@@ -283,6 +318,33 @@ pub(crate) fn dismiss(
         broadcast(state, &db, project_id, session_id)?;
     }
     Ok(())
+}
+
+pub(crate) fn retired_question_ids(session: &Value) -> Vec<String> {
+    session
+        .pointer("/runtimeSettings/sessionChatAsyncQuestionsDismissed")
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn read_retired_question_ids(
+    db: &rusqlite::Connection,
+    project_id: &str,
+    session_id: &str,
+) -> Vec<String> {
+    let value = db.query_row(
+        "SELECT json_extract(runtimeSettingsJson, '$.sessionChatAsyncQuestionsDismissed') FROM sessions WHERE projectId = ?1 AND sessionId = ?2",
+        rusqlite::params![project_id, session_id], |row| row.get::<_, Option<String>>(0),
+    ).optional().ok().flatten().flatten();
+    value
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
 }
 
 pub(crate) fn pending_question_count(session: &Value) -> usize {

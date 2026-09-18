@@ -186,6 +186,7 @@ export interface UseSessionChatResult {
   messages: SessionChatMessage[];
   lifecycle: SessionChatTurnLifecycle | null;
   prompt: SessionChatInteractivePrompt | null;
+  retiredAsyncQuestionIds?: readonly string[];
   working: boolean;
   /**
    * The raw live signal — server status/working frames plus the host's hook —

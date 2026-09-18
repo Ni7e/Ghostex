@@ -19,3 +19,22 @@ export function sessionChatSendBlockedReason(state: {
   if (state.sessionOptionSwitching) return 'Claude is still switching mode. Try again in a moment.';
   return null;
 }
+
+export const DESKTOP_SESSION_CHAT_PLACEHOLDER =
+  'Press Enter to send a message and Tab to Queue.\nUse @ to mention a file and $ for using skills.';
+
+export function sessionChatComposerPlaceholder(state: {
+  canSend: boolean;
+  terminalChoicePending: boolean;
+  controlsOnly: boolean;
+  noticeCardVisible: boolean;
+  sessionOptionSwitching: boolean;
+}): string | undefined {
+  if (!state.canSend) return 'Input is held by another device.';
+  if (state.terminalChoicePending) {
+    if (state.controlsOnly) return 'Use the controls above to continue.';
+    return state.noticeCardVisible ? 'Answer the question above to continue.' : 'Applying your answer…';
+  }
+  if (state.sessionOptionSwitching) return 'Switching Claude mode…';
+  return undefined;
+}

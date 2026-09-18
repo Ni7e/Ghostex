@@ -17,8 +17,10 @@ use std::rc::Rc;
 
 /// `APP_MODAL_HOST_UPDATE_AVAILABLE_WINDOW_WIDTH`: the child window the React dialog opened in.
 pub(crate) const UPDATE_AVAILABLE_MODAL_WIDTH: f32 = 640.0;
-/// First-frame height only. The window is resized to the measured layout as soon as the first prepaint reports it.
-pub(crate) const UPDATE_AVAILABLE_MODAL_INITIAL_HEIGHT: f32 = 560.0;
+/// CDXC:Release 2026-09-18 DECISION:
+/// User: make the update dialog 1.5x taller. The notes use the additional space while the footer stays visible.
+/// SEE-ALSO: packages/core-ui/styles.css, apps/desktop/src/app/update_available_modal_lifecycle.rs.
+pub(crate) const UPDATE_AVAILABLE_MODAL_INITIAL_HEIGHT: f32 = 560.0 * 1.5;
 
 const TITLE_READY: &str = "Ghostex is ready to update";
 const TITLE_AVAILABLE: &str = "A Ghostex update is available";
@@ -29,10 +31,10 @@ const CANCEL: &str = "Cancel";
 const RESTART_AND_UPDATE: &str = "Restart and update";
 const DOWNLOAD_UPDATE: &str = "Download update";
 
-/// `.update-available-modal-notes`: 13px prose at line-height 1.55, capped at 260px and scrolling.
+/// `.update-available-modal-notes`: 13px prose at line-height 1.55.
 const NOTES_FONT_SIZE: f32 = 13.0;
 const NOTES_LINE_HEIGHT: f32 = 20.15;
-const NOTES_MAX_HEIGHT: f32 = 260.0;
+const HEADER_HEIGHT: f32 = 20.8 + 6.0 + 20.15;
 /// The shadcn `Card size='sm'`: 16px padding all around (`py-4` plus `px-4` on its content).
 const CARD_PADDING: f32 = 16.0;
 /// `.ghostex-chat-markdown` block margins (`0.65rem`) and list gutter (`1.25rem`) at the 16px root size.
@@ -343,7 +345,7 @@ impl GpuiUpdateAvailableModalWindow {
             state: config.state,
             portable: config.portable,
             blocks,
-            fit: ModalFit::new(),
+            fit: ModalFit::fixed(),
             focus_handle,
         }
     }
@@ -672,13 +674,14 @@ impl GpuiUpdateAvailableModalWindow {
 
     /// The release notes card: the blocks stacked with CSS-style collapsed
     /// margins, first block flush with the top, last block flush with the bottom.
-    fn render_notes(&self) -> AnyElement {
+    fn render_notes(&self, height: f32) -> AnyElement {
         let p = self.palette;
         let mut notes = v_flex()
             .id("update-available-notes")
             .w_full()
             .min_w_0()
-            .max_h(px(NOTES_MAX_HEIGHT))
+            .h(px(height))
+            .flex_shrink_0()
             .overflow_y_scroll()
             .text_size(px(NOTES_FONT_SIZE))
             .line_height(px(NOTES_LINE_HEIGHT))
@@ -709,7 +712,7 @@ impl GpuiUpdateAvailableModalWindow {
                     .w_full()
                     .min_w_0()
                     // CDXC:Release 2026-09-18 WHY:
-                    // Shrinking blocks to the 260px viewport hides their overflowing text from GPUI's scroll bounds, leaving release notes clipped and unable to scroll.
+                    // Shrinking blocks to the viewport hides their overflowing text from GPUI's scroll bounds, leaving release notes clipped and unable to scroll.
                     .flex_shrink_0()
                     .mt(px(gap))
                     .mb(px(trailing))
@@ -723,12 +726,20 @@ impl GpuiUpdateAvailableModalWindow {
             .into_any_element()
     }
 
-    fn render_body(&self) -> AnyElement {
+    fn render_body(&self, window: &Window) -> AnyElement {
         let p = self.palette;
+        let portable_height = if self.portable { 12.0 + 19.5 } else { 0.0 };
+        let notes_height = (f32::from(window.viewport_size().height)
+            - MODAL_FIT_EXTRA_HEIGHT
+            - HEADER_HEIGHT
+            - CARD_PADDING * 2.0
+            - 2.0
+            - portable_height)
+            .max(0.0);
         v_flex()
             .w_full()
             .gap(px(12.0))
-            .child(self.render_notes())
+            .child(self.render_notes(notes_height))
             .when(self.portable, |this| {
                 this.child(
                     div()
@@ -774,7 +785,7 @@ impl GpuiUpdateAvailableModalWindow {
 }
 
 impl Render for GpuiUpdateAvailableModalWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let title = if self.ready() {
             TITLE_READY
@@ -783,7 +794,7 @@ impl Render for GpuiUpdateAvailableModalWindow {
         };
         let content = vec![
             modal_header(&p, title, Some(format!("Version {}", self.version))),
-            self.render_body(),
+            self.render_body(window),
         ];
         let footer = self.render_footer(cx);
         modal_shell(

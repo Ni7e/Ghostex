@@ -163,7 +163,8 @@ impl NativeChatView {
         if !text(dialog, "footer").is_empty() {
             body.push(
                 div()
-                    .text_size(px(12.0 * p.scale))
+                    .text_size(px(14.0 * p.scale))
+                    .line_height(px(18.666667*p.scale))
                     .child(text(dialog, "footer"))
                     .into_any_element(),
             );

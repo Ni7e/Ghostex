@@ -1994,8 +1994,19 @@ pub fn session_chat_screen_shows_queued_input(
     if session_chat_option_agent(agent) != Some(SessionChatOptionAgent::Codex) {
         return false;
     }
-    // CDXC:AgentScreenDetection 2026-09-13 WHY:
-    // Codex also renders this heading for unanswered async questions. Only a matching outgoing message preview (the ↳ row) proves this send is queued; the heading alone produced a false card after an answer arrived.
+    let needle = sent_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    !needle.is_empty()
+        && codex_queued_input_previews(screen_text)
+            .iter()
+            .any(|preview| {
+                needle == *preview || (preview.chars().count() >= 12 && needle.starts_with(preview))
+            })
+}
+
+/// CDXC:SessionChat 2026-09-18 WHY:
+/// Accepted async answers stay in Codex's client-side queue during compaction, before any UserMessage reaches the transcript.
+/// Both queue headings carry the same outgoing previews; the heading alone also appears with unanswered questions and proves nothing.
+pub(crate) fn codex_queued_input_previews(screen_text: &str) -> Vec<String> {
     let lines: Vec<String> = strip_ansi_sgr(screen_text)
         .lines()
         .map(normalize_spaces)
@@ -2004,18 +2015,13 @@ pub fn session_chat_screen_shows_queued_input(
         matches!(
             line.trim(),
             "• Queued follow-up inputs" | "• Queued followup inputs"
-        )
+        ) || line
+            .trim()
+            .starts_with("• Messages to be submitted after next tool call (")
     }) else {
-        return false;
+        return Vec::new();
     };
-    let needle = sent_text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if needle.is_empty() {
-        return false;
-    }
-    let matches_preview = |preview: &str| {
-        !preview.is_empty()
-            && (needle == preview || (preview.chars().count() >= 12 && needle.starts_with(preview)))
-    };
+    let mut previews = Vec::new();
     let mut preview = String::new();
     for line in &lines[header + 1..] {
         let trimmed = line.trim();
@@ -2023,26 +2029,29 @@ pub fn session_chat_screen_shows_queued_input(
             continue;
         }
         if let Some(first) = trimmed.strip_prefix("↳ ") {
-            if matches_preview(&preview) {
-                return true;
+            if !preview.is_empty() {
+                previews.push(std::mem::take(&mut preview));
             }
             preview = first.split_whitespace().collect::<Vec<_>>().join(" ");
         } else if trimmed == "…" && !preview.is_empty() {
-            if matches_preview(&preview) {
-                return true;
-            }
-            preview.clear();
+            previews.push(std::mem::take(&mut preview));
         } else if !preview.is_empty()
             && line.starts_with("    ")
             && !trimmed.contains("edit last queued message")
         {
             preview.push(' ');
             preview.push_str(&trimmed.split_whitespace().collect::<Vec<_>>().join(" "));
+        } else if preview.is_empty() && trimmed.ends_with("and send immediately)") {
+            // The long queue heading wraps in a narrow terminal.
+            continue;
         } else {
             break;
         }
     }
-    matches_preview(&preview)
+    if !preview.is_empty() {
+        previews.push(preview);
+    }
+    previews
 }
 
 /// The trimmed screen tail a watchdog notice attaches as evidence.

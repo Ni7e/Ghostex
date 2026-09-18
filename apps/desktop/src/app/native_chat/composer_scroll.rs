@@ -28,6 +28,7 @@ impl NativeChatView {
             .min_h_0()
             .w_full()
             .child(transcript)
+            .child(self.scroll_bottom_button(cx))
             .child(
                 gpui::canvas(
                     |bounds, _, _| bounds,

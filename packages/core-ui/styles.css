@@ -5040,13 +5040,46 @@ body.app-modal-host-body {
  * near-fullscreen shell rule and the bespoke bordered notes box / action row
  * are gone; only the release-notes scroll body stays modal-specific.
  */
+/* CDXC:Release 2026-09-18 DECISION:
+ * User: make the update dialog 1.5x taller (560px to 840px), using the extra space for the release notes.
+ * SEE-ALSO: apps/desktop/src/app/window/update_available_modal.rs.
+ */
+.gx-app-modal.update-available-modal {
+  height: 840px;
+  max-height: calc(100dvh - 2rem);
+  overflow: hidden;
+}
+
+.app-modal-host-native-window-body[data-app-modal-fit-height='true'] .gx-app-modal.update-available-modal {
+  height: 840px;
+  max-height: 100dvh;
+}
+
+.update-available-modal .gx-app-modal-form {
+  height: 100%;
+  min-height: 0;
+}
+
+.update-available-modal .gx-app-modal-stack,
+.update-available-modal [data-slot='card'] {
+  flex: 1;
+  min-height: 0;
+}
+
+.update-available-modal [data-slot='dialog-header'],
+.update-available-modal .gx-app-modal-footer,
+.update-available-modal .update-available-modal-portable {
+  flex-shrink: 0;
+}
+
 .update-available-modal .update-available-modal-notes {
   --chat-code-size: 0.8125rem;
 
   color: var(--foreground);
   font-size: 13px;
   line-height: 1.55;
-  max-height: 260px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
 }

@@ -2,7 +2,7 @@ import { computeSessionChatFiles } from '@/packages/shared/session-chat-controll
 import { queuedModelSelection } from '@/packages/shared/session-chat-controller/model-selection';
 import { sendSessionChatOptionAware } from '@/packages/shared/session-chat-controller/option-command';
 import { terminalNoticeChoiceAnswer } from '@/packages/shared/session-chat-presentation/terminal-prompts';
-import { sessionChatSendBlockedReason } from '@/packages/shared/session-chat-controller/composer-policy';
+import { sessionChatSendBlockedReason, sessionChatComposerPlaceholder } from '@/packages/shared/session-chat-controller/composer-policy';
 import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { AccountSwitchCard } from '../accounts/account-switch-card';
 import { useAccountSwitchStatus } from '../accounts/use-account-switch-status';
@@ -1884,6 +1884,7 @@ export function SessionChatView({
                             key={`async-questions:${sessionKey}`}
                             sessionKey={sessionKey}
                             messages={chat.messages}
+                            retiredIds={chat.retiredAsyncQuestionIds}
                             canSend={
                               composerEnabled && !questionActive && chat.status !== 'error' && chat.status !== 'loading'
                             }
@@ -2027,19 +2028,10 @@ export function SessionChatView({
                                   />
                                 </>
                               }
-                              placeholder={
-                                !canSend
-                                  ? 'Input is held by another device.'
-                                  : terminalChoicePending
-                                    ? chat.terminalNotice?.dialog?.rows.length === 0
-                                      ? 'Use the controls above to continue.'
-                                      : noticeCardVisible
-                                        ? 'Answer the question above to continue.'
-                                        : 'Applying your answer…'
-                                    : sessionOptionSwitching
-                                      ? 'Switching Claude mode…'
-                                      : undefined
-                              }
+                              placeholder={sessionChatComposerPlaceholder({
+                                canSend, terminalChoicePending, controlsOnly: chat.terminalNotice?.dialog?.rows.length === 0,
+                                noticeCardVisible, sessionOptionSwitching,
+                              })}
                               ref={composerRef}
                               slashCommands={slashCommands}
                               slashHeading={sessionChatSlashHeadingForAgent(resolvedAgentLabel)}

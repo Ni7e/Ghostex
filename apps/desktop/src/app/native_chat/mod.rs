@@ -11,8 +11,10 @@ mod async_questions;
 mod attachments;
 mod binding;
 mod cards;
+mod notice;
 mod choice_rows;
 mod composer_scroll;
+mod scroll_bottom;
 mod fonts;
 mod focus;
 mod note;
@@ -22,6 +24,7 @@ mod rpc;
 
 mod keyboard;
 mod markdown_style;
+mod markdown_links;
 mod message_actions;
 mod transcript_layout;
 mod maximized;

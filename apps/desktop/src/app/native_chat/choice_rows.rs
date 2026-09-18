@@ -19,9 +19,37 @@ impl NativeChatView {
         p: &ChatAppearance,
         cx: &Context<Self>,
     ) -> AnyElement {
+        self.choice_row(
+            id,
+            label,
+            description,
+            selected,
+            shortcut.map(|key| key.to_string()),
+            false,
+            disabled,
+            action,
+            p,
+            cx,
+        )
+    }
+
+    pub(super) fn choice_row(
+        &self,
+        id: String,
+        label: String,
+        description: String,
+        selected: bool,
+        shortcut: Option<String>,
+        dense: bool,
+        disabled: bool,
+        action: Value,
+        p: &ChatAppearance,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let s = p.scale;
         div()
             .id(id)
+            .when(!disabled, |row| row.tab_index(0))
             .role(gpui::Role::Button)
             .aria_label(label.clone())
             .flex()
@@ -29,7 +57,7 @@ impl NativeChatView {
             .gap(px(12.0 * s))
             .w_full()
             .px(px(12.0 * s))
-            .py(px(8.0 * s))
+            .py(px(if dense { 6.0 * s } else { 8.0 * s }))
             .rounded(px(8.0 * s))
             .border_1()
             .border_color(if selected {
@@ -97,10 +125,11 @@ impl NativeChatView {
                         .flex()
                         .justify_center()
                         .items_center()
+                        .font_family("Menlo")
                         .text_size(px(13.0 * s))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(p.muted)
-                        .child(shortcut.unwrap_or_default().to_string()),
+                        .child(shortcut.unwrap_or_default()),
                 )
             })
             .when(!disabled, |row| {

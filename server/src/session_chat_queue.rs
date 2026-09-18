@@ -95,6 +95,7 @@ pub struct SessionChatQueueSnapshot {
     pub draft: Option<SessionChatDraft>,
     pub account_switch: Option<Value>,
     pub async_questions_since: Option<i64>,
+    pub retired_async_question_ids: Vec<String>,
     pub pending_model_selection: Option<crate::session_chat_model_selection::PendingModelSelection>,
 }
 
@@ -104,6 +105,10 @@ impl SessionChatQueueSnapshot {
     pub fn insert_into(&self, target: &mut Map<String, Value>) {
         // CDXC:SessionChat 2026-09-17 SEE-ALSO:
         // session_chat_async_questions.rs owns question expiry; carry its resume boundary on every snapshot and state frame, including a first subscription without a read request.
+        target.insert(
+            "retiredAsyncQuestionIds".to_string(),
+            json!(self.retired_async_question_ids),
+        );
         target.insert(
             "asyncQuestionsSince".to_string(),
             json!(self.async_questions_since),
@@ -138,6 +143,8 @@ impl SessionChatQueueSnapshot {
         let mut revision = serde_json::to_string(&self.pending_model_selection).unwrap_or_default();
         revision.push_str(&serde_json::to_string(&self.account_switch).unwrap_or_default());
         revision.push_str(&serde_json::to_string(&self.async_questions_since).unwrap_or_default());
+        revision
+            .push_str(&serde_json::to_string(&self.retired_async_question_ids).unwrap_or_default());
         for prompt in &self.queue {
             revision.push_str(&prompt.id);
             revision.push(':');
@@ -617,6 +624,9 @@ fn read_snapshot(
         .map_err(sql_error)?;
     let draft = crate::session_chat_draft_versions::read(db, project_id, session_id)?;
     Ok(SessionChatQueueSnapshot {
+        retired_async_question_ids: crate::session_chat_async_questions::read_retired_question_ids(
+            db, project_id, session_id,
+        ),
         async_questions_since: crate::session_chat_async_questions::read_async_questions_since(
             db, project_id, session_id,
         ),

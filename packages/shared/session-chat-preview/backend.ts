@@ -82,7 +82,24 @@ export class ChatPreviewBackend {
         this.publish();
         break;
       case 'answerSessionChatPrompt':
-        if (params.kind === 'asyncQuestion' || params.kind === 'dismissAsyncQuestion') {
+        if (
+          params.kind === 'terminalChoice' ||
+          (params.kind === 'terminalDialog' && typeof params.choiceIndex === 'number')
+        ) {
+          const choice = this.snapshot.terminalNotice?.choices?.find((choice) => choice.index === params.choiceIndex);
+          if (!choice) throw new Error('That sample choice is no longer available.');
+          if (this.config.scenario === 'update-error' && params.choiceIndex === 0)
+            throw new Error("Codex's dialog changed. Review the current choices and try again.");
+          this.snapshot.messages = [
+            ...this.snapshot.messages,
+            previewMessage(
+              String(++this.counter),
+              'assistant',
+              `Sample choice: ${choice.label}. No update was installed.`
+            ),
+          ];
+          this.snapshot.terminalNotice = undefined;
+        } else if (params.kind === 'asyncQuestion' || params.kind === 'dismissAsyncQuestion') {
           const question = pendingSessionChatAsyncQuestions(this.snapshot.messages).find(
             (question) => question.key === params.questionId
           );

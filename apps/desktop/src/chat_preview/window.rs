@@ -1,5 +1,5 @@
 use crate::app::model::TerminalSessionId;
-use crate::app::native_chat::state::{NativeChatConfig, NativeChatView};
+use crate::app::native_chat::state::{NativeChatConfig, NativeChatEvent, NativeChatView};
 use gpui::{
     App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
     WindowBounds, WindowOptions, div, px, size,
@@ -34,6 +34,8 @@ pub(super) struct PreviewWindow {
     reference: Option<Entity<crate::CefSurface>>,
     pub(super) error: Option<String>,
     _watch: gpui::Task<()>,
+    host_subscription: gpui::Subscription,
+    last_host_action: String,
 }
 impl PreviewWindow {
     pub(super) fn apply_config(
@@ -44,8 +46,23 @@ impl PreviewWindow {
     ) {
         self.chat.update(cx, |chat, cx| chat.close_maximized(cx));
         self.chat = Self::chat(&config, window, cx);
+        self.host_subscription = Self::observe_host(&self.chat, cx);
+        self.last_host_action.clear();
         self.config = config;
         cx.notify();
+    }
+    fn observe_host(chat: &Entity<NativeChatView>, cx: &mut Context<Self>) -> gpui::Subscription {
+        cx.subscribe(chat, |this, _, event, cx| {
+            if let NativeChatEvent::Host(message) = event {
+                if message["action"] != "openFile" && message["action"] != "openLink" {
+                    return;
+                }
+                let mut fields = message.clone();
+                fields.as_object_mut().unwrap().remove("type");
+                this.last_host_action = fields.to_string();
+                cx.notify();
+            }
+        })
     }
     fn chat(config: &Value, window: &mut Window, cx: &mut Context<Self>) -> Entity<NativeChatView> {
         gpui_component::Theme::change(
@@ -78,6 +95,7 @@ impl PreviewWindow {
             serde_json::from_slice(&std::fs::read(&path).expect("read preview state"))
                 .expect("preview state JSON");
         let chat = Self::chat(&config, window, cx);
+        let host_subscription = Self::observe_host(&chat, cx);
         let watch = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -118,6 +136,8 @@ impl PreviewWindow {
             reference: None,
             error: None,
             _watch: watch,
+            host_subscription,
+            last_host_action: String::new(),
         }
     }
 }
@@ -165,7 +185,11 @@ impl Render for PreviewWindow {
                     .w_full()
                     .child(
                         pane()
-                            .child(label("GPUI"))
+                            .child(label(if self.last_host_action.is_empty() {
+                                "GPUI"
+                            } else {
+                                &self.last_host_action
+                            }))
                             .child(div().flex_1().min_h_0().child(self.chat.clone())),
                     )
                     .child(

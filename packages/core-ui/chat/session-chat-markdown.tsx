@@ -30,7 +30,6 @@ import {
   IconCopy,
   IconExternalLink,
   IconInfoCircle,
-  IconLink,
   IconMessageReport,
   IconTextWrap,
 } from '@tabler/icons-react';
@@ -53,7 +52,8 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
-import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform, type Components, type ExtraProps } from 'react-markdown';
+import referenceVisual from '@/packages/shared/session-chat-presentation/reference-visual.json';
 import markdownVisual from '@/packages/shared/session-chat-presentation/markdown-visual.json';
 import remarkGfm from 'remark-gfm';
 
@@ -69,6 +69,13 @@ const markdownMetrics = {
   '--chat-inline-code-padding-y': `${markdownVisual.inlineCode.paddingY / 16}rem`,
   '--chat-inline-code-border-width': `${markdownVisual.inlineCode.borderWidth / 16}rem`,
   '--chat-inline-code-radius': `${markdownVisual.inlineCode.radius / 16}rem`,
+  '--chat-web-link-light': referenceVisual.web.lightColor,
+  '--chat-web-link-dark': referenceVisual.web.darkColor,
+  '--chat-web-link-gap': `${referenceVisual.web.gapEm}em`,
+  '--chat-web-link-icon': `url("data:image/svg+xml,${encodeURIComponent(referenceVisual.icons.url)}")`,
+  '--chat-reference-icon-size': `${referenceVisual.iconEm}em`,
+  '--chat-reference-dark-base': `${(1 - referenceVisual.darkWhiteMix) * 100}%`,
+  '--chat-reference-dark-white': `${referenceVisual.darkWhiteMix * 100}%`,
 } as CSSProperties;
 import { MermaidDiagram } from '../mermaid/mermaid-diagram';
 import { AppModalShell, AppModalTitle } from '../app-modal-shell';
@@ -109,9 +116,7 @@ import {
   sessionChatFilePathChipLabel,
   sessionChatFilePathIcon,
   sessionChatFilePathTitle,
-  sessionChatFilePositionSuffix,
   type SessionChatFilePathRef,
-  type SessionChatFilePosition,
 } from './session-chat-file-paths';
 import { remarkSessionChatGithubAlerts, type SessionChatAlertKind } from './session-chat-github-alerts';
 import {
@@ -126,11 +131,10 @@ import { remarkSessionChatImageReferences } from './session-chat-image-reference
 import {
   classifySessionChatLinkHref,
   SESSION_CHAT_WEB_URL_ATTRIBUTE,
-  sessionChatFilePositionFromHref,
   useSessionChatHostLinks,
   type SessionChatHostLinks,
 } from './session-chat-links';
-import { sessionChatReferenceKind, type SessionChatReferenceKind } from './session-chat-reference-pills';
+import { sessionChatMarkdownReference } from '@/packages/shared/session-chat-presentation/markdown-links';
 import {
   SESSION_CHAT_COPY_CODE_ATTRIBUTE,
   sessionChatTableToCsv,
@@ -827,27 +831,26 @@ function MarkdownSummary({ children, node: _node, ...props }: ComponentProps<'su
 
 /** Rendered Markdown counterpart of the Monaco reference decoration. */
 function MarkdownReferencePill({
-  kind,
-  label,
+  reference,
   openFile,
-  path,
-  position,
 }: {
-  kind: SessionChatReferenceKind;
-  label: string;
+  reference: NonNullable<ReturnType<typeof sessionChatMarkdownReference>>;
   openFile: SessionChatHostLinks['openFile'];
-  path: string;
-  position?: SessionChatFilePosition;
 }) {
-  const positionSuffix = sessionChatFilePositionSuffix(position);
-  const displayLabel = positionSuffix !== '' && !label.endsWith(positionSuffix) ? `${label}${positionSuffix}` : label;
+  const { kind, label: displayLabel, path, position, title } = reference;
   const action = openFile ? `Open ${displayLabel}` : `Copy path for ${displayLabel}`;
-  const title = `${path}${positionSuffix}`;
   return (
     <AppTooltip content={title}>
       <button
         aria-label={`${action}, ${kind}`}
         className={`ghostex-chat-reference-pill ghostex-chat-reference-pill--${kind}`}
+        style={
+          {
+            '--ghostex-chat-reference-outline': referenceVisual.colors[kind as keyof typeof referenceVisual.colors],
+            '--ghostex-chat-reference-icon': `url("data:image/svg+xml,${encodeURIComponent(referenceVisual.icons[kind as keyof typeof referenceVisual.icons])}")`,
+            gap: referenceVisual.gap,
+          } as CSSProperties
+        }
         onClick={() => {
           if (openFile) {
             openFile(path, position);
@@ -979,17 +982,8 @@ function markdownComponents(
       }
       const target = classifySessionChatLinkHref(href);
       if (target.kind === 'file') {
-        const label = nodeText(children).trim() || target.path;
-        const position = sessionChatFilePositionFromHref(href);
-        return (
-          <MarkdownReferencePill
-            kind={sessionChatReferenceKind(label, target.path)}
-            label={label}
-            openFile={hostLinks?.openFile}
-            path={target.path}
-            position={position}
-          />
-        );
+        const reference = sessionChatMarkdownReference(href, nodeText(children))!;
+        return <MarkdownReferencePill reference={reference} openFile={hostLinks?.openFile} />;
       }
       if (target.kind === 'url') {
         const openUrl = hostLinks?.openUrl;
@@ -1006,7 +1000,7 @@ function markdownComponents(
                   openUrl(target.url, { external: event.shiftKey });
                 }}
               >
-                <IconLink aria-hidden='true' className='ghostex-chat-markdown-link-icon' size={13} stroke={1.8} />
+                <span aria-hidden='true' className='ghostex-chat-markdown-link-icon' />
                 {children}
               </a>
             </AppTooltip>
@@ -1014,7 +1008,7 @@ function markdownComponents(
         }
         return (
           <a href={target.url} rel='noreferrer' target='_blank'>
-            <IconLink aria-hidden='true' className='ghostex-chat-markdown-link-icon' size={13} stroke={1.8} />
+            <span aria-hidden='true' className='ghostex-chat-markdown-link-icon' />
             {children}
           </a>
         );
@@ -1078,6 +1072,9 @@ export function SessionChatMarkdown({
           <div className='ghostex-chat-markdown' style={markdownMetrics}>
             <ReactMarkdown
               components={components}
+              urlTransform={(url, key) =>
+                key === 'href' && classifySessionChatLinkHref(url).kind === 'file' ? url : defaultUrlTransform(url)
+              }
               rehypePlugins={REHYPE_PLUGINS}
               remarkPlugins={
                 chatText ? CHAT_TEXT_REMARK_PLUGINS : preserveLineBreaks ? LINE_BREAK_REMARK_PLUGINS : REMARK_PLUGINS

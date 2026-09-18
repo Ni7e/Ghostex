@@ -4,10 +4,12 @@ use rust_embed::RustEmbed;
 use std::borrow::Cow;
 use std::{collections::BTreeMap, sync::LazyLock};
 
-#[path = "assets/chat_working.rs"]
-pub(crate) mod chat_working;
 #[path = "assets/chat_message_actions.rs"]
 mod chat_message_actions;
+#[path = "assets/chat_references.rs"]
+mod chat_references;
+#[path = "assets/chat_working.rs"]
+pub(crate) mod chat_working;
 
 static MODEL_PICKER_ARTWORK: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
     serde_json::from_str(include_str!(
@@ -33,6 +35,11 @@ impl AssetSource for GhostexAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if path.is_empty() {
             return Ok(None);
+        }
+        if let Some(key) = path.strip_prefix("chat-references/") {
+            return chat_references::asset(key)
+                .map(|svg| Some(Cow::Borrowed(svg)))
+                .ok_or_else(|| anyhow!("unknown chat reference asset {key:?}"));
         }
         if let Some(key) = path.strip_prefix("chat-actions/") {
             return chat_message_actions::asset(key)

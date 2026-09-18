@@ -1,4 +1,5 @@
 import { useLayoutEffect, useState, type RefObject } from 'react';
+import scrollBottom from '@/packages/shared/session-chat-presentation/scroll-bottom.json';
 import { Button } from '@/packages/components/ui/button';
 
 export const FOLLOW_BOTTOM_ATTRIBUTE = 'data-ghostex-follow-bottom';
@@ -64,12 +65,19 @@ export function SessionChatScrollBottomButton({
         event.currentTarget.blur();
         onJump();
       }}
+      style={{
+        height: scrollBottom.height,
+        fontSize: scrollBottom.fontSize,
+        paddingInline: scrollBottom.paddingX,
+        bottom: `calc(var(--ghostex-chat-composer-overlay, 0px) + ${scrollBottom.bottom}px)`,
+      }}
       size='xs'
       tabIndex={visible ? 0 : -1}
       type='button'
       variant='secondary'
     >
-      Scroll to bottom{shortcutLabel ? ` (${shortcutLabel})` : ''}
+      {scrollBottom.label}
+      {shortcutLabel ? ` (${shortcutLabel})` : ''}
     </Button>
   );
 }

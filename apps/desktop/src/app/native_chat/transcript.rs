@@ -195,7 +195,15 @@ impl NativeChatView {
             .into_any_element()
     }
 
-    pub(crate) fn markdown(&self, id: String, content: String, p: &ChatAppearance) -> AnyElement {
+    pub(crate) fn markdown(
+        &self,
+        id: String,
+        content: String,
+        references: &Value,
+        p: &ChatAppearance,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let chat = cx.weak_entity();
         let mut style = super::markdown_style::text_style(p);
         style.is_dark = !p.light;
         style.highlight_theme = if p.light {
@@ -204,7 +212,21 @@ impl NativeChatView {
             gpui_component::highlighter::HighlightTheme::default_dark()
         }
         .clone();
+        let references = super::markdown_links::presentations(references, p);
         TextView::markdown(id, content)
+            .link_presentation(move |href, label| {
+                references
+                    .get(&(href.to_owned(), label.to_owned()))
+                    .cloned()
+            })
+            .on_link_click(move |href, modifiers, _, cx| {
+                let _ = chat.update(cx, |chat, cx| {
+                    chat.invoke(
+                        json!({"type":"openMarkdownLink","href":href,"external":modifiers.shift}),
+                        cx,
+                    )
+                });
+            })
             .selectable(true)
             .style(style)
             .text_size(px(14.0 * p.scale))
@@ -249,7 +271,13 @@ impl NativeChatView {
                 .border_color(gpui::transparent_black())
                 .p(px(12.0 * s))
                 .bg(p.input)
-                .child(self.markdown(format!("user:{id}"), body.clone(), &bubble_appearance));
+                .child(self.markdown(
+                    format!("user:{id}"),
+                    body.clone(),
+                    &message["markdownReferences"],
+                    &bubble_appearance,
+                    cx,
+                ));
             return row
                 .when(message["queued"] == true, |this| {
                     this.child(
@@ -301,7 +329,13 @@ impl NativeChatView {
                 cx,
             ));
             if expanded {
-                row = row.child(self.markdown(format!("body:{id}"), body, p));
+                row = row.child(self.markdown(
+                    format!("body:{id}"),
+                    body,
+                    &message["markdownReferences"],
+                    p,
+                    cx,
+                ));
             }
             return row.into_any_element();
         }
@@ -323,7 +357,13 @@ impl NativeChatView {
                 ));
                 let detail = text(&message["reasoning"], "body");
                 if expanded && !detail.is_empty() {
-                    row = row.child(self.markdown(format!("reasoning-body:{id}"), detail, p));
+                    row = row.child(self.markdown(
+                        format!("reasoning-body:{id}"),
+                        detail,
+                        &message["markdownReferences"],
+                        p,
+                        cx,
+                    ));
                 }
             } else {
                 row = row.child(
@@ -335,7 +375,9 @@ impl NativeChatView {
                         .child(div().min_w_0().flex_1().child(self.markdown(
                             format!("body:{id}"),
                             body.clone(),
+                            &message["markdownReferences"],
                             p,
+                            cx,
                         ))),
                 );
             }
@@ -462,7 +504,9 @@ impl NativeChatView {
                             .child(self.markdown(
                                 format!("content:{key}"),
                                 format!("```\n{detail}\n```"),
+                                &Value::Null,
                                 p,
+                                cx,
                             )),
                     );
                 }

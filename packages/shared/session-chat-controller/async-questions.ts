@@ -53,12 +53,21 @@ export class SessionChatAsyncQuestionsController {
         this.changed();
       }));
   }
-  project(messages: readonly SessionChatMessage[], canSend: boolean, working: boolean) {
+  project(
+    messages: readonly SessionChatMessage[],
+    canSend: boolean,
+    working: boolean,
+    retiredIds: readonly string[] = []
+  ) {
     if (this.messages !== messages) {
       this.messages = messages;
       this.pending = pendingSessionChatAsyncQuestions(messages);
     }
-    const pending = this.pending.filter((question) => !this.retired.has(question.key));
+    // CDXC:SessionChat 2026-09-18 WHY:
+    // Codex can accept an answer into its own queue before writing the user transcript. Server retirement must reach React and native chat, including another client or a remounted card.
+    const pending = this.pending.filter(
+      (question) => !this.retired.has(question.key) && !retiredIds.includes(question.key)
+    );
     const index = Math.max(
       0,
       pending.findIndex((question) => question.key === this.activeKey)
@@ -128,9 +137,10 @@ export class SessionChatAsyncQuestionsController {
     messages: readonly SessionChatMessage[],
     canSend: boolean,
     skip: boolean,
-    deliver: (key: string, answer: string, skip: boolean) => Promise<void>
+    deliver: (key: string, answer: string, skip: boolean) => Promise<void>,
+    retiredIds: readonly string[] = []
   ): Promise<void> {
-    const state = this.project(messages, canSend, false);
+    const state = this.project(messages, canSend, false, retiredIds);
     if (!state.question || state.disabled || (!skip && !state.answer.trim())) return;
     const key = state.question.key;
     const submitted = this.drafts[key] ? { [key]: this.drafts[key]! } : {};

@@ -153,6 +153,9 @@ export function computeSessionChat(
   );
   const [lifecycle, setLifecycle] = useState<SessionChatTurnLifecycle | null>(null);
   const [prompt, setPrompt] = useState<SessionChatInteractivePrompt | null>(null);
+  const [retiredAsyncQuestionIds, setRetiredAsyncQuestionIds] = useState<readonly string[]>(
+    () => transport.getCachedSnapshot?.()?.retiredAsyncQuestionIds ?? []
+  );
   const [asyncQuestionsSince, setAsyncQuestionsSince] = useState<number | null>(
     () => transport.getCachedSnapshot?.()?.asyncQuestionsSince ?? null
   );
@@ -355,6 +358,7 @@ export function computeSessionChat(
         setSelectedOptions(null);
         setScreenProbed(false);
         setAsyncQuestionsSince(null);
+        setRetiredAsyncQuestionIds([]);
       }
       const next = { ...previous };
       if (patch.agent !== undefined) {
@@ -569,6 +573,7 @@ export function computeSessionChat(
         status: SessionChatStatus;
         prompt?: SessionChatInteractivePrompt;
         asyncQuestionsSince?: number | null;
+        retiredAsyncQuestionIds?: string[];
         agent?: string;
         agentSessionId?: string;
         error?: string;
@@ -649,6 +654,7 @@ export function computeSessionChat(
         applySelectedOptions(result.selectedOptions);
       }
       if (result.asyncQuestionsSince !== undefined) setAsyncQuestionsSince(result.asyncQuestionsSince);
+      if (result.retiredAsyncQuestionIds !== undefined) setRetiredAsyncQuestionIds(result.retiredAsyncQuestionIds);
       setTerminalNotice(result.terminalNotice ?? null);
       applyTerminalActivity(result.terminalActivity);
       setAgentFleet(result.agentFleet ?? null);
@@ -854,6 +860,7 @@ export function computeSessionChat(
       setLifecycle(null);
       setPrompt(null);
       setAsyncQuestionsSince(null);
+      setRetiredAsyncQuestionIds([]);
       setAgent(presentation?.agent ?? null);
       setAgentSessionId(presentation?.agentSessionId ?? null);
       setError(null);
@@ -1017,6 +1024,7 @@ export function computeSessionChat(
       setPrompt(event.prompt ?? null);
       applyAgentIdentity({ agentSessionId: event.agentSessionId });
       if (event.asyncQuestionsSince !== undefined) setAsyncQuestionsSince(event.asyncQuestionsSince);
+      if (event.retiredAsyncQuestionIds !== undefined) setRetiredAsyncQuestionIds(event.retiredAsyncQuestionIds);
       applySelectedOptions(event.selectedOptions);
       setTerminalNotice(event.terminalNotice ?? null);
       applyTerminalActivity(event.terminalActivity);
@@ -1781,6 +1789,7 @@ export function computeSessionChat(
     loadingEarlier,
     messages,
     prompt,
+    retiredAsyncQuestionIds,
     queue,
     accountSwitch,
     pendingModelSelection,

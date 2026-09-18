@@ -53,6 +53,7 @@ export function foldSessionChatState(
     lifecycle: incoming.lifecycle ?? (stateOnly ? previous?.lifecycle : undefined),
     working: incoming.working ?? previous?.working,
     prompt: incoming.prompt,
+    retiredAsyncQuestionIds: incoming.retiredAsyncQuestionIds ?? previous?.retiredAsyncQuestionIds,
     asyncQuestionsSince:
       incoming.asyncQuestionsSince !== undefined ? incoming.asyncQuestionsSince : previous?.asyncQuestionsSince,
     terminalNotice: incoming.terminalNotice,

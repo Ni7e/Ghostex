@@ -18,6 +18,7 @@ import './session-chat-async-questions.css';
  */
 export function SessionChatAsyncQuestions({
   messages,
+  retiredIds,
   canSend,
   working,
   onSend,
@@ -27,6 +28,7 @@ export function SessionChatAsyncQuestions({
   theme,
 }: {
   messages: readonly SessionChatMessage[];
+  retiredIds?: readonly string[];
   canSend: boolean;
   working: boolean;
   onSend: (questionId: string, text: string) => Promise<void>;
@@ -48,7 +50,7 @@ export function SessionChatAsyncQuestions({
     () => storageFailure('questionDrafts'),
     () => undefined
   );
-  const state = controller.project(messages, canSend, working);
+  const state = controller.project(messages, canSend, working, retiredIds);
   const { question, draft, answer, disabled, collapsed, submitting, loading, index, count } = state;
   const error =
     state.error ||
@@ -58,7 +60,13 @@ export function SessionChatAsyncQuestions({
   const panelId = useId();
   if (!question) return null;
   const submit = (skip = false) =>
-    controller.submit(messages, canSend, skip, (key, text, dismiss) => (dismiss ? onDismiss(key) : onSend(key, text)));
+    controller.submit(
+      messages,
+      canSend,
+      skip,
+      (key, text, dismiss) => (dismiss ? onDismiss(key) : onSend(key, text)),
+      retiredIds
+    );
 
   return (
     <section

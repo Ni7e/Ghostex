@@ -1,5 +1,19 @@
-import { dismissedNoticeState, isNoticeDismissed, readStoredDismissedNotice, sessionChatTerminalNoticeDismissKey, writeStoredDismissedNotice, type DismissedNotice } from '@/packages/shared/session-chat-controller/notice-state';
-export { sessionChatTerminalNoticeDismissKey, NOTICE_REDISPLAY_COOLDOWN_MS } from '@/packages/shared/session-chat-controller/notice-state';
+import {
+  COLLAPSED_CHOICE_COUNT,
+  collapsedChoiceLabel,
+} from '@/packages/shared/session-chat-presentation/notice-choices';
+import {
+  dismissedNoticeState,
+  isNoticeDismissed,
+  readStoredDismissedNotice,
+  sessionChatTerminalNoticeDismissKey,
+  writeStoredDismissedNotice,
+  type DismissedNotice,
+} from '@/packages/shared/session-chat-controller/notice-state';
+export {
+  sessionChatTerminalNoticeDismissKey,
+  NOTICE_REDISPLAY_COOLDOWN_MS,
+} from '@/packages/shared/session-chat-controller/notice-state';
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 /*
 CDXC:AgentScreenDetection 2026-08-19:
@@ -79,27 +93,9 @@ import {
 } from './session-chat-status-card';
 import { SessionChatTerminalDialogCard } from './session-chat-terminal-dialog';
 
-
 const SEND_FAILED_NOTICE = "Couldn't deliver those keys. Switch to Terminal View to act there.";
 const READ_ONLY_HINT = 'Input is held by another device.';
 const CHOICE_FAILED_NOTICE = "Couldn't send your choice. Please try again.";
-/** Options a collapsed picker shows before the user expands it. */
-const COLLAPSED_CHOICE_COUNT = 2;
-/** Label suffixes dropped in the collapsed state so both options fit on one line. */
-const COLLAPSED_LABEL_SUFFIXES = [' (recommended)'];
-
-function collapsedChoiceLabel(label: string): string {
-  // CDXC:SessionChat 2026-09-07 WHY: Rate-limit continuation labels wrapped in the compact two-button layout. Shorten their shared prefix while preserving the timing, whether an explicit reset time or "shortly"; expanding still shows the terminal's full wording.
-  const trimmed = label.trim().replace(/^Wait here, then continue automatically\b/i, 'Continue automatically');
-  for (const suffix of COLLAPSED_LABEL_SUFFIXES) {
-    if (trimmed.toLowerCase().endsWith(suffix)) {
-      return trimmed.slice(0, -suffix.length).trimEnd();
-    }
-  }
-  return trimmed;
-}
-
-
 export interface SessionChatTerminalNoticeCardProps {
   notice: SessionChatTerminalNotice | null;
   /**

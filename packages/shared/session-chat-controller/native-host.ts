@@ -1,3 +1,5 @@
+import { COLLAPSED_CHOICE_COUNT, collapsedChoiceLabel } from '../session-chat-presentation/notice-choices';
+import { classifySessionChatLinkHref, sessionChatFilePositionFromHref } from '../session-chat-presentation/links';
 import { SessionChatAsyncQuestionsController } from './async-questions';
 import { canCollapseSessionChatComposer } from '../session-chat-presentation/composer-scroll';
 import { COMPOSER_SCROLL_RESET_MS, COMPOSER_SCROLL_THRESHOLD_PX, COMPOSER_BOTTOM_THRESHOLD_PX,
@@ -25,7 +27,7 @@ import { dismissedNoticeState, isNoticeDismissed, sessionChatTerminalNoticeDismi
 import { terminalDialogPresentation, terminalNoticeActionAnswer, terminalNoticeChoiceAnswer } from '../session-chat-presentation/terminal-prompts';
 import { fitChatComposerControls } from '../session-chat-presentation/composer-layout';
 import { computeNativeChatControls } from './native-controls';
-import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS, sessionChatSendBlockedReason } from './composer-policy';
+import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS, sessionChatSendBlockedReason, sessionChatComposerPlaceholder, DESKTOP_SESSION_CHAT_PLACEHOLDER } from './composer-policy';
 import { NativeChatPresentation } from './native-presentation';
 import { deliverChatSubmission, editQueuedChatPrompt, restoreUndeliveredChatText } from './submission';
 import { SESSION_CHAT_QUEUE_LONG_PRESS_MS, isSessionChatQueueRowBusy, sessionChatQueueRowPreview, moveSessionChatQueueRow, sessionChatQueuePromptIds } from './queue';
@@ -73,6 +75,7 @@ let booting = false;
 let eventListener: ((event: GxserverSessionChatEvent) => void) | undefined;
 let transport: SessionChatTransport;
 let operationError: string | undefined;
+let noticeError: string | undefined;
 let pendingAttachments = 0;
 let optionDispatchId: string | null = null;
 let optionSwitching = false;
@@ -153,7 +156,7 @@ function asyncQuestionsCanSend(state: NativeChatState): boolean {
 
 function publish(state: NativeChatState): void {
   const nextNoticeKey = sessionChatTerminalNoticeDismissKey(state.terminalNotice);
-  if (activeNoticeKey !== nextNoticeKey) { activeNoticeKey = nextNoticeKey; answeredNoticeKey = null; }
+  if (activeNoticeKey !== nextNoticeKey) { activeNoticeKey = nextNoticeKey; answeredNoticeKey = null; noticeError = undefined; }
   const nextPromptKey = sessionChatCardDismissKey(state.prompt);
   if (nextPromptKey !== promptKey) { promptKey = nextPromptKey; dismissedPrompt = null; }
   const nextContentKey = state.prompt === null ? null : `interactive:${JSON.stringify(state.prompt)}`;
@@ -205,11 +208,16 @@ function publish(state: NativeChatState): void {
     })),
     emptyState: sessionChatEmptyStateCopy(state.status === "working" || state.status === "ready" ? "empty" : state.status, state.agent),
     noticeVisible: noticeVisible(state),
-    terminalNotice: state.terminalNotice ? { ...state.terminalNotice, dialog: state.terminalNotice.dialog ? { ...state.terminalNotice.dialog, presentation: terminalDialogPresentation(state.terminalNotice.dialog) } : undefined, choices: state.terminalNotice.choices?.filter(choice => choice.label.trim()).map(choice => ({ ...choice, answer: terminalNoticeChoiceAnswer(state.terminalNotice, choice.index) })), actions: state.terminalNotice.actions?.flatMap(action => { const answer = terminalNoticeActionAnswer(state.terminalNotice!, action); return action.kind === 'switchToTerminal' || answer ? [{ ...action, answer }] : []; }) } : null,
+    noticeError,
+    terminalNotice: state.terminalNotice ? { ...state.terminalNotice, collapsedChoiceCount: COLLAPSED_CHOICE_COUNT, dialog: state.terminalNotice.dialog ? { ...state.terminalNotice.dialog, presentation: terminalDialogPresentation(state.terminalNotice.dialog) } : undefined, choices: state.terminalNotice.choices?.filter(choice => choice.label.trim()).map(choice => ({ ...choice, collapsedLabel: collapsedChoiceLabel(state.terminalNotice?.dialog?.rows[choice.index]?.label ?? choice.label), answer: terminalNoticeChoiceAnswer(state.terminalNotice, choice.index) })), actions: state.terminalNotice.actions?.flatMap(action => { const answer = terminalNoticeActionAnswer(state.terminalNotice!, action); return action.kind === 'switchToTerminal' || answer ? [{ ...action, answer }] : []; }) } : null,
     operationError,
     pendingAttachments,
     optionDispatchId,
     sendBlockedReason: sendBlockedReason(state),
+    composerPlaceholder: sessionChatComposerPlaceholder({ canSend: true,
+      terminalChoicePending: !!state.terminalNotice && !!(state.terminalNotice.choices?.length || state.terminalNotice.dialog || state.terminalNotice.conversationLock) && `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey,
+      controlsOnly: state.terminalNotice?.dialog?.rows.length === 0, noticeCardVisible: noticeVisible(state), sessionOptionSwitching: optionSwitching,
+    }) ?? DESKTOP_SESSION_CHAT_PLACEHOLDER,
     summaryMode,
     verboseOverride,
     composerOverflow,
@@ -218,7 +226,7 @@ function publish(state: NativeChatState): void {
     interaction: { queueLongPressMs: SESSION_CHAT_QUEUE_LONG_PRESS_MS, stopButtonCooldownMs: SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS },
     incomingDraft,
     note: { ...note },
-    asyncQuestions: asyncQuestions.project(state.messages, asyncQuestionsCanSend(state), state.working),
+    asyncQuestions: asyncQuestions.project(state.messages, asyncQuestionsCanSend(state), state.working, state.retiredAsyncQuestionIds),
     questionCard: { visible: promptKey !== null && promptKey !== dismissedPrompt && !(state.prompt?.kind === 'approval' && state.terminalNotice?.kind === 'permissionPrompt' && (!!state.terminalNotice.choices?.length || !!state.terminalNotice.dialog) && `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey), questionIndex, controls: questionAnswerControls(questionDrafts, questionIndex, state.prompt?.kind === 'question' ? state.prompt.questions.length : 0, answering), drafts: questionDrafts, answering, busy: answering || questionTransition, loading: questionDraftsLoading },
     finalIds: projection.finalIds,
   };
@@ -581,6 +589,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'answer':
         if (answering) break;
         answering = true;
+        noticeError = undefined;
         if (command.answer.kind === 'terminalChoice' || (command.answer.kind === 'terminalDialog' && typeof command.answer.choiceIndex === 'number')) answeredNoticeKey = activeNoticeKey;
         publish(chat);
         try {
@@ -589,19 +598,19 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           if (command.answer.kind === 'approval' || command.answer.kind === 'question' || chat.terminalNotice?.kind === 'permissionPrompt') dismissedPrompt = key;
         } catch (error) {
           answeredNoticeKey = null;
-          if (command.answer.kind === 'terminalChoice' && chat.terminalNotice) retiredNoticeKey = `${chat.terminalNotice.kind}:${chat.terminalNotice.detectedAt}`;
+          if (command.answer.kind === 'terminalChoice' && chat.terminalNotice && !chat.terminalNotice.dialog) retiredNoticeKey = `${chat.terminalNotice.kind}:${chat.terminalNotice.detectedAt}`;
           throw error;
         } finally { answering = false; }
         break;
       case 'asyncQuestionToggle': asyncQuestions.toggle(); break;
       case 'asyncQuestionNavigate': {
-        const state = asyncQuestions.project(chat.messages, asyncQuestionsCanSend(chat), chat.working);
+        const state = asyncQuestions.project(chat.messages, asyncQuestionsCanSend(chat), chat.working, chat.retiredAsyncQuestionIds);
         asyncQuestions.navigate(command.direction === 'previous' ? state.previousKey : state.nextKey);
         break;
       }
       case 'asyncQuestionText': asyncQuestions.edit(command.key, () => command.text); break;
       case 'asyncQuestionOption': {
-        const state = asyncQuestions.project(chat.messages, asyncQuestionsCanSend(chat), chat.working);
+        const state = asyncQuestions.project(chat.messages, asyncQuestionsCanSend(chat), chat.working, chat.retiredAsyncQuestionIds);
         if (!state.disabled && state.question?.key === command.key && state.question.options?.[command.index] !== undefined)
           asyncQuestions.select(command.key, command.index);
         break;
@@ -609,7 +618,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'asyncQuestionSend':
       case 'asyncQuestionSkip':
         await asyncQuestions.submit(chat.messages, asyncQuestionsCanSend(chat), command.type === 'asyncQuestionSkip',
-          (questionId, text, skip) => chat.answerPrompt(skip ? { kind: 'dismissAsyncQuestion', questionId } : { kind: 'asyncQuestion', questionId, text }));
+          (questionId, text, skip) => chat.answerPrompt(skip ? { kind: 'dismissAsyncQuestion', questionId } : { kind: 'asyncQuestion', questionId, text }), chat.retiredAsyncQuestionIds);
         break;
       case 'questionText': {
         if (answering || questionTransition || questionDraftsLoading || !questionDrafts[questionIndex]) break;
@@ -660,6 +669,12 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         break;
       }
       case 'sendKey': await chat.sendKey?.(command.key, command.marker ?? ''); break;
+      case 'openMarkdownLink': {
+        const target = classifySessionChatLinkHref(command.href);
+        if (target.kind === 'file') requests.push({ kind: 'host', method: 'openFile', params: { path: target.path, ...sessionChatFilePositionFromHref(command.href) } });
+        else if (target.kind === 'url') requests.push({ kind: 'host', method: 'openLink', params: { url: target.url, external: command.external === true } });
+        break;
+      }
       case 'retry': chat.retry(); break;
       case 'refresh': chat.refresh(); break;
       case 'loadEarlier': chat.loadEarlier(); break;
@@ -696,8 +711,9 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
     requests.push({ kind: 'actionComplete', method: command.type, params: { requestId: command.requestId, text: command.text } });
   } catch (error) {
     operationError = gxserverRpcErrorCode(error) === 'sendCancelled' ? undefined : error instanceof Error ? error.message : String(error);
+    if (command.type === 'answer' && (command.answer.kind === 'terminalChoice' || command.answer.kind === 'terminalDialog')) { noticeError = operationError; operationError = undefined; }
     if (command.type === 'handoff') requests.push({ kind: 'host', method: 'draftHandoffToTerminalFailed', params: { error: operationError } });
-    requests.push({ kind: 'actionError', method: command.type, params: { requestId: command.requestId, error: operationError } });
+    requests.push({ kind: 'actionError', method: command.type, params: { requestId: command.requestId, error: operationError ?? noticeError } });
   }
   publish(controller.current());
 }
