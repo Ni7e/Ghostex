@@ -131,6 +131,10 @@ impl NativeChatView {
                 .map(|parsed| parse(&draft, &parsed))
                 .unwrap_or_default();
             self.composer_reference_draft = Some(draft);
+            // Editing the draft moves every reference, so a click that has not opened yet no
+            // longer refers to what the user pressed.
+            self.composer_reference_click += 1;
+            self.composer_reference_task = None;
         }
         let replacements = replacements(&self.composer_references, appearance);
         if let Some(input) = self.input.clone() {
