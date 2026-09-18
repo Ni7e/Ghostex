@@ -319,9 +319,14 @@ impl SessionChatQueueRuntime {
             // User: model changes run during a turn whenever the CLI accepts them; only actual delivery failure keeps them pending.
             // Prompt activity, transcript and stability gates below do not apply to model selection. The serialized driver checks a fresh terminal screen.
             let snapshot = read_session_chat_queue_snapshot_with(&db, &project_id, &session_id);
-            if let Some(selection) = snapshot.pending_model_selection.as_ref() {
-                // A failed selection is kept only to explain itself in chat; never redeliver it.
-                if selection.state == "failed" || selection.retry_at > now.timestamp_millis() {
+            if let Some(selection) = snapshot
+                .pending_model_selection
+                .as_ref()
+                // A failed selection is kept only to explain itself in chat: never redelivered,
+                // and no longer in the way of the prompts queued behind it.
+                .filter(|selection| selection.state != "failed")
+            {
+                if selection.retry_at > now.timestamp_millis() {
                     continue;
                 }
                 ready.push(ReadyDelivery {

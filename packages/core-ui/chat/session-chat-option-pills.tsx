@@ -580,6 +580,8 @@ export function SessionChatSessionOptionPills({
       catalog,
       queuedControls,
       quickPicker,
+      pickerProvider,
+      alsoSetDefault,
       canSend,
       isWorking,
       beginDispatch,

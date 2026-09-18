@@ -527,6 +527,7 @@ pub fn list_sessions_with_pending_queue(
             FROM session_chat_queued_prompts
             WHERE state <> 'failed'
             UNION SELECT projectId, sessionId FROM session_chat_model_selections
+            WHERE state <> 'failed'
             ORDER BY projectId, sessionId
             "#,
         )

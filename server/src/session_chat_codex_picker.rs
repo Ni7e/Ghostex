@@ -74,6 +74,9 @@ const CLAUDE_ROW_STEP_LIMIT: usize = 24;
 const CLAUDE_ROW_SETTLE_MS: u64 = 900;
 /// The list numbers its rows from one, so this is the top.
 const CLAUDE_FIRST_ROW_NUMBER: u32 = 1;
+/// The footer is the last line the open list draws; a closed one is followed by Claude's
+/// acknowledgement and the input box, so the footer sits deeper than this many lines.
+const CLAUDE_PICKER_TAIL_LINES: usize = 4;
 
 const PICKER_POLL_MS: u64 = 150;
 const PICKER_STEP_TIMEOUT_MS: u64 = 6_000;
@@ -223,12 +226,25 @@ fn advanced_effort_picker_rows(screen: &str) -> Option<Vec<PickerRow>> {
 }
 
 fn any_picker_open(screen: &str) -> bool {
-    screen_lines(screen).iter().any(|line| {
-        line == CODEX_MODEL_PICKER_TITLE
-            || line.starts_with(CODEX_EFFORT_PICKER_TITLE_PREFIX)
-            || line == CODEX_ADVANCED_REASONING_TITLE
-            || line == CLAUDE_MODEL_PICKER_TITLE
-    })
+    claude_model_picker_open(screen)
+        || screen_lines(screen).iter().any(|line| {
+            line == CODEX_MODEL_PICKER_TITLE
+                || line.starts_with(CODEX_EFFORT_PICKER_TITLE_PREFIX)
+                || line == CODEX_ADVANCED_REASONING_TITLE
+        })
+}
+
+/// CDXC:SessionChat 2026-09-19 WHY:
+/// The capture is zmx history, so a `Select model` title outlives the list it belonged to. Only the
+/// footer still at the tail of the screen proves the list is open now; going by the title made every
+/// error-path `cancel_dialog` interrupt an idle Claude session that had used the picker once before.
+fn claude_model_picker_open(screen: &str) -> bool {
+    screen_lines(screen)
+        .iter()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .take(CLAUDE_PICKER_TAIL_LINES)
+        .any(|line| line.contains(CLAUDE_SESSION_ONLY_FOOTER))
 }
 
 /// Whether a row's text is the model or effort label `wanted`: the label is
@@ -647,16 +663,20 @@ impl PickerDriver<'_> {
     /// Presses one arrow and reports whether the highlight moved off `from`.
     async fn step_claude_row(&self, key: &str, from: u32) -> Result<bool, DomainStateError> {
         self.write(key).await?;
+        let moved = |screen: &str| {
+            claude_model_picker_rows(screen)?
+                .into_iter()
+                .find(|row| row.selected)
+                .filter(|row| row.number != from)
+        };
         // Read each landed highlight before the next press; the list does not coalesce.
-        Ok(self
-            .settle(CLAUDE_ROW_SETTLE_MS, |screen| {
-                claude_model_picker_rows(screen)?
-                    .into_iter()
-                    .find(|row| row.selected)
-                    .filter(|row| row.number != from)
-            })
-            .await
-            .is_some())
+        if self.settle(CLAUDE_ROW_SETTLE_MS, moved).await.is_some() {
+            return Ok(true);
+        }
+        // A repaint slower than one window is not the end of the list. Look once more without
+        // pressing again: a boundary stays put, a late repaint lands, and neither is misread as
+        // "the list does not offer this model", which is final.
+        Ok(self.settle(CLAUDE_ROW_SETTLE_MS, moved).await.is_some())
     }
 
     async fn cancel_dialog(&self) {
@@ -827,7 +847,8 @@ impl PickerDriver<'_> {
             }
         }
         let mut found = false;
-        for _ in 0..CLAUDE_ROW_STEP_LIMIT {
+        // Inclusive: the row the final step lands on is read too.
+        for _ in 0..=CLAUDE_ROW_STEP_LIMIT {
             if (self.cancelled)() {
                 return Err(agent_busy(
                     "The model change was cancelled by another action on this session.",
@@ -870,6 +891,11 @@ impl PickerDriver<'_> {
             }
         }
         if !found {
+            if (self.cancelled)() {
+                return Err(agent_busy(
+                    "The model change was cancelled by another action on this session.",
+                ));
+            }
             return Err(unsupported_selection(format!(
                 "Claude's model list does not offer {} in this session, so it cannot be applied without changing your default.",
                 plan.model
@@ -892,13 +918,12 @@ impl PickerDriver<'_> {
                     break;
                 }
                 if steps == CLAUDE_EFFORT_STEP_LIMIT {
-                    return Err(dialog_mismatch(
-                        "choose Claude effort",
-                        &format!(
-                            "Claude's effort rail never offered {} for this model.",
-                            plan.effort
-                        ),
-                    ));
+                    // The rail wraps, so a full lap without the level means this model does not
+                    // offer it: final, like a model the list does not show.
+                    return Err(unsupported_selection(format!(
+                        "Claude's effort rail does not offer {} for {}.",
+                        plan.effort, plan.model
+                    )));
                 }
                 steps += 1;
                 effort_adjusted = true;

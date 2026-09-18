@@ -28,7 +28,9 @@ export function modelPickerSupportsSessionScope(provider: ModelPickerProvider): 
   return provider === 'claude';
 }
 
-export const MODEL_PICKER_CODEX_SESSION_SCOPE_REASON = "Codex's model picker always saves the choice as its default.";
+/** Shown for every agent whose picker cannot apply a choice to one session: Codex, Cursor, Grok, Antigravity. */
+export const MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON =
+  "This agent's model picker always saves the choice as its default.";
 
 export const MODEL_SCOPE_DEFAULT_ROW_LABEL = 'Also set as default';
 
@@ -44,7 +46,7 @@ export function modelScopeMenuRow(
   if (!modelPickerSupportsSessionScope(provider))
     return {
       label: MODEL_SCOPE_DEFAULT_ROW_LABEL,
-      description: MODEL_PICKER_CODEX_SESSION_SCOPE_REASON,
+      description: MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
       checked: true,
       disabled: true,
     };

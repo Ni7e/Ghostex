@@ -736,7 +736,11 @@ export function SessionChatView({
     !accountsTransport ||
     !chat.accountSwitch?.toAccountId ||
     accountState.data?.session?.accountId === chat.accountSwitch.toAccountId;
-  const accountSwitchReady = accountSwitchConfirmed && !chat.pendingModelSelection;
+  // A failed selection stays only to explain itself; it is not work the switch has to wait for.
+  const accountSwitchReady =
+    accountSwitchConfirmed &&
+    chat.pendingModelSelection?.state !== 'queued' &&
+    chat.pendingModelSelection?.state !== 'applying';
   const accountSwitch = useAccountSwitchStatus(chat.accountSwitch, sessionKey, accountSwitchReady);
   const accountSwitchRefreshKey = chat.accountSwitch ? `${chat.accountSwitch.id}:${chat.accountSwitch.phase}` : null;
   useEffect(() => {

@@ -5,7 +5,11 @@ import type {
   SessionChatPendingModelSelection,
   SessionChatSelectionOptions,
 } from '../session-chat';
-import type { ModelPickerRequest, ModelPickerSelection } from '../session-chat-presentation/model-picker';
+import {
+  modelPickerSupportsSessionScope,
+  type ModelPickerRequest,
+  type ModelPickerSelection,
+} from '../session-chat-presentation/model-picker';
 import type { ChatLifecycle } from './lifecycle';
 import type { SessionChatOptionDispatchReceipt } from './option-state';
 
@@ -98,10 +102,21 @@ export function queuedModelSelection(select: NonNullable<SessionChatTransport['s
 
 export function modelSelectionUnchanged(
   selection: ModelPickerSelection,
-  desired: ModelPickerSelection | null | undefined,
+  desired: (ModelPickerSelection & { scope?: SessionChatModelSelectionScope }) | null | undefined,
   current: { model?: string; effort?: string },
-  request: ModelPickerRequest | null
+  request: ModelPickerRequest | null,
+  scope?: SessionChatModelSelectionScope
 ): boolean {
+  // Where the agent can tell the two scopes apart, the same model with the other scope is a change:
+  // it promotes a session-only choice to the saved default, or spares the default from a pending one.
+  if (scope && request && modelPickerSupportsSessionScope(request.provider)) {
+    if (desired) {
+      if ((desired.scope ?? 'default') !== scope) return false;
+    } else if (scope === 'default') {
+      // The session already runs this model; whether the saved default does is unknown here.
+      return false;
+    }
+  }
   if (desired) return desired.model === selection.model && desired.effort === selection.effort;
   return (
     selection.model === current.model &&
@@ -205,7 +220,11 @@ export function computeModelSelectionOutbox(
   }, [outbox, params.deliver, key, persistence]);
 
   const persist = useCallback(
-    (selection: ModelPickerSelection, options?: SessionChatSelectionOptions, scope?: SessionChatModelSelectionScope) => {
+    (
+      selection: ModelPickerSelection,
+      options?: SessionChatSelectionOptions,
+      scope?: SessionChatModelSelectionScope
+    ) => {
       // An options-only change carries no scope of its own, so it keeps the pending model choice's.
       const inherited = scope ?? latest.current?.scope;
       const next = {

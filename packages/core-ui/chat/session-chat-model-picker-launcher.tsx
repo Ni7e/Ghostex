@@ -160,7 +160,8 @@ export function SessionChatModelPickerLauncher(
           model: props.controller.state.model?.value,
           effort: props.controller.state.effort?.value,
         },
-        request
+        request,
+        scope
       )
     )
       return;

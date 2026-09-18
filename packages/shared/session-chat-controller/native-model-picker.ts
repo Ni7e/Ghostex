@@ -7,7 +7,7 @@ import {
   modelPickerLayout,
   modelPickerNextEffortIndex,
   modelPickerSupportsSessionScope,
-  MODEL_PICKER_CODEX_SESSION_SCOPE_REASON,
+  MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
   type ModelPickerRequest,
   type ModelPickerSelection,
 } from '../session-chat-presentation/model-picker';
@@ -66,7 +66,7 @@ export class NativeModelPicker {
       closing: this.closing,
       saving: this.saving,
       sessionScope: this.sessionScope,
-      scopeReason: this.sessionScope ? undefined : MODEL_PICKER_CODEX_SESSION_SCOPE_REASON,
+      scopeReason: this.sessionScope ? undefined : MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
       pressed: [...this.feedback.pressed],
       compactControls: this.size.width < 560,
       canUp: index > 0,

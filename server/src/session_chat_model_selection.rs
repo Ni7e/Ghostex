@@ -248,14 +248,24 @@ pub(crate) fn enqueue(
     if incoming_options.fast_mode.is_some() {
         options.fast_mode = incoming_options.fast_mode;
     }
-    // An options-only change carries no scope of its own, so it keeps the pending model choice's.
-    let scope = if params.get("scope").is_none() {
+    // CDXC:SessionChat 2026-09-19 WHY:
+    // Only a request that names a model carries a scope of its own; an absent one means `default`
+    // even while a session-only pick is pending, so an older client keeps its old behaviour. An
+    // options-only change keeps the pending model choice's scope so it cannot turn a session-only
+    // pick into a default one, and with no pending choice it is `default`: a session-only row without
+    // a model would be refused by the driver and retried every five seconds forever.
+    let replaces_model = !params
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .is_empty();
+    let scope = if replaces_model {
+        scope
+    } else {
         previous
             .as_ref()
-            .map_or(scope.as_str(), |pending| pending.scope.as_str())
+            .map_or(SCOPE_DEFAULT, |pending| pending.scope.as_str())
             .to_string()
-    } else {
-        scope
     };
     let id = uuid::Uuid::new_v4().to_string();
     transaction.execute(

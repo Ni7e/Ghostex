@@ -25,7 +25,7 @@ import {
   modelPickerChooseEffort,
   modelPickerNextEffortIndex,
   modelPickerSupportsSessionScope,
-  MODEL_PICKER_CODEX_SESSION_SCOPE_REASON,
+  MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
   type ModelPickerRequest,
   type ModelPickerSelection,
 } from '@/packages/shared/session-chat-presentation/model-picker';
@@ -508,7 +508,7 @@ export function SessionChatModelPicker({
                 type='button'
                 data-key-pressed={pressed.has('Enter') ? '' : undefined}
                 disabled={closing || committing || !sessionScope}
-                title={sessionScope ? undefined : MODEL_PICKER_CODEX_SESSION_SCOPE_REASON}
+                title={sessionScope ? undefined : MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON}
                 aria-describedby={sessionScope ? undefined : 'model-picker-scope-reason'}
                 onClick={() => finish(true, selection, 'session')}
               >
@@ -526,7 +526,7 @@ export function SessionChatModelPicker({
               </button>
               {sessionScope ? null : (
                 <span id='model-picker-scope-reason' className='model-picker-sr-only'>
-                  {MODEL_PICKER_CODEX_SESSION_SCOPE_REASON}
+                  {MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON}
                 </span>
               )}
               <button
