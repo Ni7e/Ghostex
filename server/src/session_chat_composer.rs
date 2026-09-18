@@ -717,7 +717,10 @@ pub fn detect_session_chat_composer_ready(
     }
     let matches = if agent == "codex" && screen_text.contains('\u{1b}') {
         session_chat_composer_input("codex", screen_text).is_some()
-    } else if matches!(agent.as_str(), "cursor" | "hermes-agent" | "pi" | "omp" | "zcode") {
+    } else if matches!(
+        agent.as_str(),
+        "cursor" | "hermes-agent" | "pi" | "omp" | "zcode"
+    ) {
         let raw_lines: Vec<_> = screen_text.lines().map(strip_ansi_sgr).collect();
         match agent.as_str() {
             "cursor" => input::cursor_input_region(&raw_lines).is_some(),

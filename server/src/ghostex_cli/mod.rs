@@ -1,7 +1,7 @@
 mod account_login;
-mod agents;
 pub mod actions;
 pub mod agent_sync;
+mod agents;
 pub mod args;
 pub mod attach;
 pub mod automations;

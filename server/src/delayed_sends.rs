@@ -5,8 +5,8 @@ use std::{
 };
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Map, Value, json};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::{json, Map, Value};
 use tokio::sync::broadcast;
 
 use crate::{
@@ -155,8 +155,7 @@ impl DelayedSendRuntime {
         if let Some(delay_ms) = delay_ms {
             // CDXC:DelayedSend 2026-09-15 WHY:
             // Specific time is converted to a remaining wait at submission, including partial minutes. Keep that precision in the ordinary timer path.
-            if !(1..=DELAYED_SEND_MAX_DELAY_MS).contains(&delay_ms)
-            {
+            if !(1..=DELAYED_SEND_MAX_DELAY_MS).contains(&delay_ms) {
                 return Err(DomainStateError::bad_request(
                     "Delayed Send delay must be positive and no longer than 24 days.",
                 ));
@@ -348,7 +347,8 @@ impl DelayedSendRuntime {
                 records.iter().any(|record| {
                     record.trigger != "timer"
                         && ((record.project_id == *project_id
-                            && (record.trigger == "allAgentsStop" || record.session_id == *session_id))
+                            && (record.trigger == "allAgentsStop"
+                                || record.session_id == *session_id))
                             || (record.watched_project_id.as_ref() == Some(project_id)
                                 && record.watched_session_id.as_ref() == Some(session_id)))
                 })
@@ -453,8 +453,14 @@ impl DelayedSendRuntime {
 
     fn transcript_is_working(&self, session: &Value) -> bool {
         let key = (
-            session["projectId"].as_str().unwrap_or_default().to_string(),
-            session["sessionId"].as_str().unwrap_or_default().to_string(),
+            session["projectId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            session["sessionId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
         );
         let Ok(mut gates) = self.transcript_gates.lock() else {
             return true;

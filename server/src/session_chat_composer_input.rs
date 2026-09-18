@@ -38,9 +38,13 @@ pub(super) fn unmarked_rule_input_region(lines: &[String]) -> Option<Range<usize
 pub(super) fn zcode_input_region(lines: &[String]) -> Option<Range<usize>> {
     let region = unmarked_rule_input_region(lines)?;
     let footer = lines.get(region.end + 1)?.trim();
-    (footer.starts_with('◈') && footer.contains("◉") && footer.contains("⚡")
-        && lines[region.end + 2..].iter().all(|line| line.trim().is_empty()))
-        .then_some(region)
+    (footer.starts_with('◈')
+        && footer.contains("◉")
+        && footer.contains("⚡")
+        && lines[region.end + 2..]
+            .iter()
+            .all(|line| line.trim().is_empty()))
+    .then_some(region)
 }
 
 pub(super) fn hermes_input_region(lines: &[String]) -> Option<Range<usize>> {
@@ -579,19 +583,15 @@ mod zcode_tests {
         let input = session_chat_composer_input("zcode", screen).unwrap();
         assert_eq!(input.text, "first line\nsecond line");
         assert_eq!(input.rows, 2);
-        assert!(
-            !detect_session_chat_composer_ready(Some("zcode"), screen)
-                .blocks_message_for(Some("zcode"))
-        );
+        assert!(!detect_session_chat_composer_ready(Some("zcode"), screen)
+            .blocks_message_for(Some("zcode")));
         for blocked in [
             String::new(),
             screen.replace("◈ zai", "other"),
             format!("{screen}Choose a model\n"),
         ] {
-            assert!(
-                detect_session_chat_composer_ready(Some("zcode"), &blocked)
-                    .blocks_message_for(Some("zcode"))
-            );
+            assert!(detect_session_chat_composer_ready(Some("zcode"), &blocked)
+                .blocks_message_for(Some("zcode")));
             assert!(session_chat_composer_input("zcode", &blocked).is_none());
         }
     }

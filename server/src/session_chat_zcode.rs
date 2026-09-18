@@ -4,7 +4,7 @@
 //! Its hook transcript_path is a temporary Claude-compatible export, so chat must follow the database instead.
 
 use rusqlite::{Connection, OpenFlags};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     fs,
