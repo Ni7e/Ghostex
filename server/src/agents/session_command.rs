@@ -261,12 +261,20 @@ fn shell_word(value: &str) -> String {
 /// CDXC:AgentProviders 2026-09-18 WHY:
 /// Appending selectors to a shell list can pass them to a later command, and a trailing comment can swallow them entirely. Only rewrite a single invocation; quoted or escaped prompt text remains literal.
 fn validate_model_option_command(command: &str) -> Result<(), DomainStateError> {
+    let unsupported_command = || {
+        DomainStateError::bad_request(
+            "Model and effort overrides require a single agent command without shell operators, command substitutions, comments, or line continuations.",
+        )
+    };
     let mut quote = None;
     let mut escaped = false;
     let mut word_start = true;
     let mut chars = command.trim().chars().peekable();
     while let Some(ch) = chars.next() {
         if escaped {
+            if matches!(ch, '\n' | '\r') {
+                return Err(unsupported_command());
+            }
             escaped = false;
             continue;
         }
@@ -286,9 +294,7 @@ fn validate_model_option_command(command: &str) -> Result<(), DomainStateError> 
             && (matches!(ch, ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\n' | '\r')
                 || (ch == '#' && word_start));
         if shell_expansion || shell_boundary {
-            return Err(DomainStateError::bad_request(
-                "Model and effort overrides require a single agent command without shell operators, command substitutions, or comments.",
-            ));
+            return Err(unsupported_command());
         }
         if quote == Some(ch) {
             quote = None;
