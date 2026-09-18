@@ -231,22 +231,24 @@ wrap_focus_handler! {
             let explicitly_active = native_view
                 .is_some_and(|native_view| {
                     active_cef_native_view() == Some(native_view as usize)
-                        || (cfg!(target_os = "windows")
+                        || (cfg!(any(target_os = "windows", target_os = "linux"))
                             && platform::native_view_owns_first_responder(native_view))
                 });
             let sidebar_editable_focus_granted = native_view.is_some_and(|native_view| {
                 SIDEBAR_EDITABLE_FOCUS_NATIVE_VIEW.load(Ordering::Acquire)
                     == native_view as usize
             });
-            #[cfg(target_os = "windows")]
+            // CDXC:FocusRouting 2026-09-18 WHY:
+            // Linux has no AppKit mouse hook to mark a clicked CEF view active, and `focus_gpui_root_view` clears the registry on every terminal, chat-composer and chrome-input handoff. Like Windows, a SYSTEM request from the view that already holds native focus (checked against the real X11 focus tree above) establishes ownership; requiring the previous registry owner stranded chat input after any sidebar interaction.
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             let cancel = hidden
                 || (source == FocusSource::NAVIGATION && !sidebar_editable_focus_granted);
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
             let cancel = hidden
                 || responder_outside
                 || !explicitly_active
                 || source == FocusSource::NAVIGATION;
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             if !cancel {
                 if let Some(native_view) = native_view {
                     set_active_cef_native_view(native_view as usize);

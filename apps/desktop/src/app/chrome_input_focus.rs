@@ -24,7 +24,7 @@ impl GhostexGpuiApp {
             cef::focus_gpui_root_view(self.parent_ns_view);
             self.end_programmatic_focus();
         }
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
         {
             if cef::gpui_root_view_has_native_focus(self.parent_ns_view) {
                 return;
@@ -37,7 +37,7 @@ impl GhostexGpuiApp {
     /// The native GPUI chat composer replaced the chat CEF page, so no responder transition marks the pane any more: a click on it after a click in a Chromium or Ghostty child view left that child view as AppKit first responder and the keys kept flowing there.
     /// Every keyboard handoff into the native composer therefore yanks the responder onto the GPUI root first, unconditionally, exactly like the composited terminal handoff.
     pub(crate) fn reclaim_gpui_root_for_native_chat_composer(&mut self, window: &gpui::Window) {
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             let focus_root = cef_parent_native_view(window).unwrap_or(self.parent_ns_view);
             #[cfg(target_os = "macos")]
@@ -46,7 +46,7 @@ impl GhostexGpuiApp {
             #[cfg(target_os = "macos")]
             self.end_programmatic_focus();
         }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         let _ = window;
     }
 }
