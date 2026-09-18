@@ -10,7 +10,11 @@ use super::appearance::SidebarAppearance;
 use crate::GhostexGpuiApp;
 
 impl GhostexGpuiApp {
-    pub(crate) fn render_native_sidebar(&mut self, cx: &mut gpui::Context<Self>) -> AnyElement {
+    pub(crate) fn render_native_sidebar(
+        &mut self,
+        window: &gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         if !cx.has_active_drag() {
             self.native_sidebar.drop_command = None;
             self.native_sidebar.dragging = None;
@@ -29,7 +33,7 @@ impl GhostexGpuiApp {
         let bounds_view = view.clone();
         let wheel_view = view.clone();
         let (space_offset, space_opacity) = self.native_sidebar.space_gesture.presentation();
-        let appearance = SidebarAppearance::from_hud(&snapshot.hud);
+        let appearance = SidebarAppearance::from_hud(&snapshot.hud, window);
         v_flex()
             .on_children_prepainted(move |bounds, window, cx| {
                 if bounds.len() >= 4 {
