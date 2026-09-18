@@ -320,7 +320,8 @@ impl SessionChatQueueRuntime {
             // Prompt activity, transcript and stability gates below do not apply to model selection. The serialized driver checks a fresh terminal screen.
             let snapshot = read_session_chat_queue_snapshot_with(&db, &project_id, &session_id);
             if let Some(selection) = snapshot.pending_model_selection.as_ref() {
-                if selection.retry_at > now.timestamp_millis() {
+                // A failed selection is kept only to explain itself in chat; never redeliver it.
+                if selection.state == "failed" || selection.retry_at > now.timestamp_millis() {
                     continue;
                 }
                 ready.push(ReadyDelivery {

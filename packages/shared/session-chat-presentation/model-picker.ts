@@ -19,6 +19,46 @@ export interface ModelPickerSelection {
   effort: string;
 }
 
+/**
+ * Whether this agent's own picker can apply a choice without changing its saved default.
+ * Claude Code's `/model` list answers `s` with "for this session only"; Codex's picker writes
+ * `model` and `model_reasoning_effort` into `~/.codex/config.toml` on every confirm.
+ */
+export function modelPickerSupportsSessionScope(provider: ModelPickerProvider): boolean {
+  return provider === 'claude';
+}
+
+export const MODEL_PICKER_CODEX_SESSION_SCOPE_REASON = "Codex's model picker always saves the choice as its default.";
+
+export const MODEL_SCOPE_DEFAULT_ROW_LABEL = 'Also set as default';
+
+/**
+ * The checkbox the composer's model and effort pills carry, in both renderers. An agent that cannot
+ * apply a pick to one session shows it checked and disabled, with the reason, rather than hiding it.
+ */
+export function modelScopeMenuRow(
+  provider: ModelPickerProvider | undefined,
+  alsoSetDefault: boolean
+): { label: string; description?: string; checked: boolean; disabled: boolean } | null {
+  if (!provider) return null;
+  if (!modelPickerSupportsSessionScope(provider))
+    return {
+      label: MODEL_SCOPE_DEFAULT_ROW_LABEL,
+      description: MODEL_PICKER_CODEX_SESSION_SCOPE_REASON,
+      checked: true,
+      disabled: true,
+    };
+  return { label: MODEL_SCOPE_DEFAULT_ROW_LABEL, checked: alsoSetDefault, disabled: false };
+}
+
+/** The scope a pill pick commits with. The big picker asks per pick instead. */
+export function modelScopeForPills(
+  provider: ModelPickerProvider | undefined,
+  alsoSetDefault: boolean
+): 'session' | 'default' {
+  return provider && modelPickerSupportsSessionScope(provider) && !alsoSetDefault ? 'session' : 'default';
+}
+
 export function modelPickerLayout(
   request: ModelPickerRequest,
   modelIndex: number,

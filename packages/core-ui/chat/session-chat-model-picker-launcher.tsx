@@ -22,7 +22,7 @@ import {
 import { useAgentModelCatalog } from '@/packages/shared/agent-model-catalog-store';
 import { createModelPickerRequest, modelPickerProvider } from './session-chat-model-picker-request';
 import type { SessionChatSessionOptionPillsProps } from './session-chat-option-pills';
-import type { SessionChatSelectionOptions } from '@/packages/shared/session-chat';
+import type { SessionChatModelSelectionScope, SessionChatSelectionOptions } from '@/packages/shared/session-chat';
 import type { ModelPickerRequest, ModelPickerSelection } from './session-chat-model-picker';
 import { QUICK_MODEL_PICKER_ENABLED } from './session-chat-model-picker-platform';
 
@@ -36,7 +36,11 @@ const SessionChatModelPicker =
 
 export interface ModelPickerActions {
   open: () => void;
-  select: (selection: ModelPickerSelection) => void;
+  select: (
+    selection: ModelPickerSelection,
+    options?: SessionChatSelectionOptions,
+    scope?: SessionChatModelSelectionScope
+  ) => void;
   selectOptions: (options: SessionChatSelectionOptions) => void;
 }
 /**
@@ -126,7 +130,7 @@ export function SessionChatModelPickerLauncher(
     };
     props.actionsRef.current = {
       open,
-      select: (value) => latestSelection.current.select(value),
+      select: (value, options, scope) => latestSelection.current.select(value, options, scope),
       selectOptions: (options) => latestSelection.current.selectOptions(options),
     };
     if (!QUICK_MODEL_PICKER_ENABLED) {
@@ -144,7 +148,7 @@ export function SessionChatModelPickerLauncher(
     };
   }, [catalog, props.actionsRef, props.controller.catalog?.modelIcon]);
 
-  const save = (selection: ModelPickerSelection) => {
+  const save = (selection: ModelPickerSelection, scope: SessionChatModelSelectionScope) => {
     requestRef.current = null;
     setRequest(null);
     if (openedSession.current !== props.controller.sessionKey) return;
@@ -160,7 +164,7 @@ export function SessionChatModelPickerLauncher(
       )
     )
       return;
-    latestSelection.current.select(selection);
+    latestSelection.current.select(selection, undefined, scope);
   };
   return (
     <>

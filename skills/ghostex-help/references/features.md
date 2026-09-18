@@ -538,6 +538,30 @@ Hover the model or effort to see the configured Model & Effort Picker shortcut
 (Option+P by default on macOS). Hover the context circle to read the agent's
 terminal status line.
 
+The Model & Effort Picker commits a choice in one of two ways. Use in this
+session (Enter) changes the model and effort for this session only and leaves
+the agent's saved default alone, so new sessions still start where they did
+before; waking this session later brings it back on the model you chose. Set as
+default (Shift+Enter) also saves the choice as the agent's default for new
+sessions, which is what the picker always did. Use in this session is available
+for Claude only: Codex's own model picker always writes the choice to its
+configuration file, so on a Codex session that action is greyed out and Enter
+sets the default.
+
+The model and effort dropdowns in the chat input row follow the same rule
+without asking each time. Each carries an Also set as default switch at the
+bottom of its menu, off by default, so picking a model or effort there changes
+this session and leaves the agent's saved default alone. Turn it on and picks
+from those two menus save the default as well; the menu stays open so you can
+set the switch and choose in one go, and the setting is remembered for that
+session. On a Codex session the switch is on and greyed out, because its picker
+cannot change a model without saving it.
+
+A choice that cannot be applied says so at the top of the model menu, under Not
+applied, with the reason. The usual reason is that the agent's own model list
+does not offer that model in this session, which it cannot then change for one
+session; picking another model clears the message.
+
 Unsent chat drafts are saved automatically. Switching between Chat and Terminal
 keeps a saved copy while the text moves, and a late transfer preserves anything
 you have typed since. Saving and sync retries happen quietly in the background;

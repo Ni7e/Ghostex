@@ -6,9 +6,12 @@ import {
   modelPickerChooseModel,
   modelPickerLayout,
   modelPickerNextEffortIndex,
+  modelPickerSupportsSessionScope,
+  MODEL_PICKER_CODEX_SESSION_SCOPE_REASON,
   type ModelPickerRequest,
   type ModelPickerSelection,
 } from '../session-chat-presentation/model-picker';
+import type { SessionChatModelSelectionScope } from '../session-chat';
 import {
   modelPickerControlForKey,
   ModelPickerWheelNavigation,
@@ -29,14 +32,22 @@ export class NativeModelPicker {
   private size = { width: 1, height: 1 };
   private controlsHeight = 56;
 
+  /** Claude's `/model` list can commit without saving a default; Codex's cannot. */
+  readonly sessionScope: boolean;
+
   constructor(
     request: ModelPickerRequest,
     private readonly changed: () => void,
-    private readonly finished: (selection: ModelPickerSelection | null) => void
+    private readonly finished: (selection: ModelPickerSelection | null, scope: SessionChatModelSelectionScope) => void
   ) {
     this.feedback = new ModelPickerKeyFeedback(() => this.changed());
     this.request = request;
     this.selection = { model: request.model, effort: request.effort };
+    this.sessionScope = modelPickerSupportsSessionScope(request.provider);
+  }
+
+  private get defaultScope(): SessionChatModelSelectionScope {
+    return this.sessionScope ? 'session' : 'default';
   }
 
   projection() {
@@ -54,6 +65,8 @@ export class NativeModelPicker {
       agent: { name: agent.name, icon: agent.icon },
       closing: this.closing,
       saving: this.saving,
+      sessionScope: this.sessionScope,
+      scopeReason: this.sessionScope ? undefined : MODEL_PICKER_CODEX_SESSION_SCOPE_REASON,
       pressed: [...this.feedback.pressed],
       compactControls: this.size.width < 560,
       canUp: index > 0,
@@ -120,6 +133,7 @@ export class NativeModelPicker {
       const next = modelPickerNextEffortIndex(this.request, this.selection, control === 'ArrowLeft' ? -1 : 1);
       if (next !== undefined) this.chooseEffort(next);
     }
+    if (control === 'EnterDefault') this.finish(true, 'default');
     if (control === 'Enter' || control === 'Escape') this.finish(control === 'Enter');
   }
 
@@ -142,11 +156,11 @@ export class NativeModelPicker {
     if (control) this.navigate(control);
   }
 
-  finish(save: boolean) {
+  finish(save: boolean, scope: SessionChatModelSelectionScope = this.defaultScope) {
     if (this.closing) return;
     this.closing = true;
     this.saving = save;
-    this.closeTimer = setTimeout(() => this.finished(save ? this.selection : null), 190);
+    this.closeTimer = setTimeout(() => this.finished(save ? this.selection : null, scope), 190);
   }
 
   dispose() {

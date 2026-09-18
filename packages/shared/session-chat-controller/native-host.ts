@@ -24,6 +24,7 @@ import { NativeModelPicker } from './native-model-picker';
 import { currentAgentModelCatalog } from '../agent-model-catalog-state';
 import { createModelPickerRequest } from '../session-chat-presentation/model-picker-request';
 import { modelSelectionUnchanged } from './model-selection';
+import { modelScopeForPills } from '../session-chat-presentation/model-picker';
 import { adoptAgentModelCatalog } from '../agent-model-catalog-state';
 import { computeNativeChatOptions, nativeOptionPersistence } from './native-options';
 import { dismissedNoticeState, isNoticeDismissed, sessionChatTerminalNoticeDismissKey, type DismissedNotice } from './notice-state';
@@ -442,7 +443,8 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         const delivery = command.exitPlan ? { ...descriptor, dispatch: { kind: 'key' as const, key: 'shift-tab' as const, marker: '' } } : descriptor;
         if (queueSessionChatOption(delivery, command.value, { catalog: options.catalog, state: options.state,
           queuedControls: options.catalog?.modelIcon === 'codex' || options.catalog?.modelIcon === 'claude',
-          quickPicker: !!chat.modelProvider, picker: chat.modelSelection })) break;
+          quickPicker: !!chat.modelProvider, picker: chat.modelSelection,
+          scope: modelScopeForPills(chat.modelProvider, chat.modelSelection.alsoSetDefault) })) break;
         if (optionDispatchId || chat.working) break;
         optionDispatchId = descriptor.id;
         publish(chat);
@@ -469,11 +471,11 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           desired?.model || chat.sessionOptions.state.model?.value, desired?.effort || chat.sessionOptions.state.effort?.value);
         if (!request) break;
         const sessionKey = chat.sessionOptions.sessionKey;
-        modelPicker = new NativeModelPicker(request, () => publish(controller.current()), selection => {
+        modelPicker = new NativeModelPicker(request, () => publish(controller.current()), (selection, scope) => {
           const current = controller.current();
           if (selection && current.sessionOptions.sessionKey === sessionKey && !modelSelectionUnchanged(selection,
             current.modelSelection.desired, { model: current.sessionOptions.state.model?.value, effort: current.sessionOptions.state.effort?.value }, request)) {
-            current.modelSelection.select(selection);
+            current.modelSelection.select(selection, undefined, scope);
           }
           modelPicker?.dispose();
           modelPicker = null;
@@ -491,6 +493,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'modelPickerModel': modelPicker?.chooseModel(command.index, command.save, command.pointer); break;
       case 'modelPickerEffort': modelPicker?.chooseEffort(command.index, command.save); break;
       case 'modelPickerCancel': modelPicker?.finish(false); break;
+      case 'setModelScopeDefault': controller.current().modelSelection.setAlsoSetDefault(command.value); break;
       case 'measureComposer': composerOverflow = fitChatComposerControls(command.measurements); break;
       case 'reportSendBlocked': operationError = sendBlockedReason(chat) ?? undefined; break;
       case 'toggleSummary': summaryMode = await composer('summary', { enabled: !summaryMode }); break;

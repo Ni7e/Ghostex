@@ -329,7 +329,7 @@ impl Render for ModelPickerWindow {
                 let key = &event.keystroke;
                 let name = match key.key.as_str() {"up"=>"ArrowUp","down"=>"ArrowDown","left"=>"ArrowLeft","right"=>"ArrowRight","enter"=>"Enter","escape"=>"Escape",name=>name};
                 if !key.modifiers.alt && !key.modifiers.control && !key.modifiers.platform && matches!(name,"ArrowUp"|"ArrowDown"|"ArrowLeft"|"ArrowRight"|"Enter"|"Escape"|"h"|"j"|"k"|"l"|","|".") {
-                    view.chat.update(cx,|chat,cx| chat.invoke(json!({"type":"modelPickerKey","key":{"key":name,"code":key.key}}),cx));
+                    view.chat.update(cx,|chat,cx| chat.invoke(json!({"type":"modelPickerKey","key":{"key":name,"code":key.key,"shiftKey":key.modifiers.shift}}),cx));
                     cx.stop_propagation(); window.prevent_default();
                 }
             }))

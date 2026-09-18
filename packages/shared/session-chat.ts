@@ -41,10 +41,23 @@ export interface SessionChatPendingModelSelection {
   id: string;
   model: string;
   effort: string;
-  state: 'queued' | 'applying';
+  /** `failed` is terminal: the row survives only to carry `errorMessage` to the chat. */
+  state: 'queued' | 'applying' | 'failed';
   options?: SessionChatSelectionOptions;
+  /** Omitted means `'default'`: an older client's choice still changes the agent's saved default. */
+  scope?: SessionChatModelSelectionScope;
   errorMessage?: string;
 }
+
+/**
+ * CDXC:SessionChat 2026-09-18 DECISION:
+ * User: a chat model pick can apply to this session alone instead of changing the agent's saved default.
+ * `'session'` is Claude-only: its `/model` picker answers `s` with "for this session only", while confirming Codex's
+ * picker rewrites `model` and `model_reasoning_effort` in `~/.codex/config.toml` with no way to opt out.
+ * SEE-ALSO: server/src/session_chat_codex_picker.rs drives both scopes; server/src/session_chat_model_selection.rs
+ * carries this through the durable queue.
+ */
+export type SessionChatModelSelectionScope = 'session' | 'default';
 
 export const SESSION_CHAT_SUPPORTED_AGENTS = new Set([
   'antigravity',

@@ -101,6 +101,9 @@ export function computeNativeChatOptions(
     canSendKey: !!chat.sendKey,
     draftAgents: chat.availableAgents,
     draftAgentId: chat.sessionAgentId,
+    provider,
+    alsoSetDefault: modelSelection.alsoSetDefault,
+    selectionError: modelSelection.selectionError,
   });
   const values = sessionChatOptionPillValues(
     sessionOptions.catalog,

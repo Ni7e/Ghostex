@@ -49,6 +49,32 @@ const CODEX_MODEL_CHANGED_PREFIX: &str = "Model changed to ";
 const CODEX_CURSOR: char = '\u{203a}';
 const CODEX_ULTRA_CURSOR: char = '\u{00bb}';
 
+/// Claude's own `/model` list, the only surface that can change a model without saving a default.
+/// Verified live 2026-09-18 against Claude Code 2.1.268: `s` applied the highlighted model and the
+/// arrow-set effort with "for this session only", and `~/.claude/settings.json` was byte-identical after.
+const CLAUDE_MODEL_COMMAND: &str = "/model";
+const CLAUDE_MODEL_PICKER_TITLE: &str = "Select model";
+/// Proof that this Claude build binds the session-only key. Without it `s` would type into the
+/// list's filter instead, so the driver refuses rather than guessing.
+const CLAUDE_SESSION_ONLY_FOOTER: &str = "to use this session only";
+const CLAUDE_SESSION_ONLY_KEY: &str = "s";
+const CLAUDE_APPLIED_PREFIX: &str = "⎿ Set model to ";
+const CLAUDE_SESSION_ONLY_SUFFIX: &str = " for this session only";
+const CLAUDE_CURSOR: char = '\u{276f}';
+/// Marks the model the session is on now, inside the label column.
+const CLAUDE_CURRENT_MARKER: char = '\u{2714}';
+const CLAUDE_ARROW_UP: &str = "\u{1b}[A";
+const CLAUDE_ARROW_DOWN: &str = "\u{1b}[B";
+const CLAUDE_ARROW_RIGHT: &str = "\u{1b}[C";
+/// The effort rail wraps, so every supported level is reachable; the bound stops a stuck rail.
+const CLAUDE_EFFORT_STEP_LIMIT: usize = 8;
+/// One press per row in each direction, plus slack for a list that grows.
+const CLAUDE_ROW_STEP_LIMIT: usize = 24;
+/// How long one arrow press has to move the highlight before the list counts as ended.
+const CLAUDE_ROW_SETTLE_MS: u64 = 900;
+/// The list numbers its rows from one, so this is the top.
+const CLAUDE_FIRST_ROW_NUMBER: u32 = 1;
+
 const PICKER_POLL_MS: u64 = 150;
 const PICKER_STEP_TIMEOUT_MS: u64 = 6_000;
 /// Error recovery gives the dialog time to close before checking its parent.
@@ -103,6 +129,20 @@ fn dialog_mismatch(step: &str, detail: &str) -> DomainStateError {
         message: format!(
             "Codex's model picker did not show what was expected at the {step} step: {detail}"
         ),
+    }
+}
+
+/// CDXC:SessionChat 2026-09-18 WHY:
+/// A model the terminal's own list does not offer can never be applied to one session, so the
+/// durable queue drops it instead of retyping `/model` into the user's pane every few seconds.
+/// One catalog entry that Claude Code does not list for an account retried 181 times before this.
+/// SEE-ALSO: server/src/session_chat_model_selection.rs sender treats this code as final.
+pub(crate) const UNSUPPORTED_SELECTION_CODE: &str = "unsupportedSelection";
+
+fn unsupported_selection(message: impl Into<String>) -> DomainStateError {
+    DomainStateError {
+        code: UNSUPPORTED_SELECTION_CODE,
+        message: message.into(),
     }
 }
 
@@ -187,6 +227,7 @@ fn any_picker_open(screen: &str) -> bool {
         line == CODEX_MODEL_PICKER_TITLE
             || line.starts_with(CODEX_EFFORT_PICKER_TITLE_PREFIX)
             || line == CODEX_ADVANCED_REASONING_TITLE
+            || line == CLAUDE_MODEL_PICKER_TITLE
     })
 }
 
@@ -252,6 +293,8 @@ struct CodexPickerPlan {
     model: String,
     effort: String,
     options: crate::session_chat_model_selection::SelectionOptions,
+    /// Apply the pick to this session without saving the agent's default. Claude only.
+    session_only: bool,
     claude_statusline: Option<(std::path::PathBuf, String)>,
 }
 
@@ -362,6 +405,128 @@ fn claude_switch_confirmation(
     matches.then_some(picker)
 }
 
+/// One row of Claude's `/model` list, read off the grid's own columns:
+/// `❯ 2. Opus (1M context) ✔    Opus 5 with 1M context · Best for everyday, complex tasks`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ClaudeModelRow {
+    number: u32,
+    label: String,
+    selected: bool,
+}
+
+/// ANSI-stripped but not space-collapsed: the run of spaces between the label and the
+/// description is what separates them, and `Opus` is a prefix of `Opus (1M context)`.
+fn screen_lines_spaced(screen: &str) -> Vec<String> {
+    screen
+        .split('\n')
+        .map(|line| crate::session_chat_options::strip_ansi_sgr(line))
+        .collect()
+}
+
+fn parse_claude_model_row(line: &str) -> Option<ClaudeModelRow> {
+    let trimmed = line.trim_start();
+    let selected = trimmed.starts_with(CLAUDE_CURSOR);
+    let rest = trimmed
+        .strip_prefix(CLAUDE_CURSOR)
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let dot = rest.find(". ")?;
+    let number = rest[..dot].parse::<u32>().ok()?;
+    let label = rest[dot + 2..].split("  ").next()?.trim();
+    let label = label
+        .strip_suffix(CLAUDE_CURRENT_MARKER)
+        .map(str::trim_end)
+        .unwrap_or(label);
+    (!label.is_empty()).then(|| ClaudeModelRow {
+        number,
+        label: label.to_string(),
+        selected,
+    })
+}
+
+/// CDXC:SessionChat 2026-09-18 WHY:
+/// The capture is the whole scrollback, so every repaint of the list is still in it and a frame
+/// caught mid-paint has only its first rows. Anchoring on the footer — the last line the list
+/// draws, and the proof this build binds the session-only key — takes the last COMPLETE frame
+/// instead. Reading from the last title alone picked up half-drawn lists, which is why choosing
+/// Sonnet or Haiku reported no such row while Opus, higher up, was already painted.
+fn claude_model_picker_frame(screen: &str) -> Option<(Vec<String>, usize, usize)> {
+    let lines = screen_lines_spaced(screen);
+    let footer = lines
+        .iter()
+        .rposition(|line| line.contains(CLAUDE_SESSION_ONLY_FOOTER))?;
+    let title = lines[..footer]
+        .iter()
+        .rposition(|line| line.trim() == CLAUDE_MODEL_PICKER_TITLE)?;
+    Some((lines, title, footer))
+}
+
+fn claude_model_picker_rows(screen: &str) -> Option<Vec<ClaudeModelRow>> {
+    let (lines, title, footer) = claude_model_picker_frame(screen)?;
+    let rows: Vec<ClaudeModelRow> = lines[title + 1..footer]
+        .iter()
+        .filter_map(|line| parse_claude_model_row(line))
+        .collect();
+    (!rows.is_empty()).then_some(rows)
+}
+
+/// The row whose label names `model`.
+fn claude_model_row_index(rows: &[ClaudeModelRow], model: &str) -> Option<usize> {
+    rows.iter()
+        .position(|row| claude_model_label_matches(&row.label, model))
+}
+
+/// `◉ xHigh effort ←/→ to adjust` → `xhigh`. The TUI prints the level's own label, which
+/// lowercases straight back to the catalog id; a model without effort prints no such line.
+fn claude_picker_effort(screen: &str) -> Option<String> {
+    let (lines, title, footer) = claude_model_picker_frame(screen)?;
+    // The effort rail sits between the rows and the footer, so scan that frame upward.
+    lines[title + 1..footer].iter().rev().find_map(|line| {
+        let line = collapse_spaces(line);
+        let head = line.split(" effort").next()?;
+        let label = head.split_once(' ')?.1.trim();
+        (!label.is_empty() && head != line).then(|| label.to_ascii_lowercase())
+    })
+}
+
+/// Claude's acknowledgement of a session-only pick, below the `/model` it echoed.
+///
+/// CDXC:SessionChat 2026-09-18 WHY:
+/// The line names the effort only when the picker's rail was moved: leaving an already-correct
+/// effort alone prints "Set model to Sonnet 5 for this session only" and nothing more. Requiring
+/// the suffix unconditionally made every pick whose effort already matched time out and retry.
+fn claude_session_only_applied(screen: &str, model: &str, effort: Option<&str>) -> bool {
+    if crate::session_chat_composer::detect_session_chat_composer_readiness(
+        Some("claude"),
+        screen,
+        None,
+    )
+    .state
+        != crate::session_chat_composer::SessionChatComposerState::Ready
+    {
+        return false;
+    }
+    let lines = screen_lines(screen);
+    let command = format!("❯ {CLAUDE_MODEL_COMMAND}");
+    let Some(command_index) = lines.iter().rposition(|line| line == &command) else {
+        return false;
+    };
+    let Some(reply) = lines[command_index + 1..]
+        .iter()
+        .find(|line| !line.is_empty())
+    else {
+        return false;
+    };
+    let Some(rest) = reply.strip_prefix(CLAUDE_APPLIED_PREFIX) else {
+        return false;
+    };
+    let Some((label, tail)) = rest.split_once(CLAUDE_SESSION_ONLY_SUFFIX) else {
+        return false;
+    };
+    claude_model_label_matches(label, model)
+        && effort.is_none_or(|effort| tail.trim() == format!("with {effort} effort"))
+}
+
 fn claude_option_applied(screen: &str, field: &str, value: &str) -> bool {
     if crate::session_chat_composer::detect_session_chat_composer_readiness(
         Some("claude"),
@@ -448,6 +613,52 @@ impl PickerDriver<'_> {
         }
     }
 
+    /// Polls briefly for `accept`. Unlike `wait_for`, a quiet screen is an answer — the end of a
+    /// list does not move when it is pressed, and waiting a full step timeout for that is wasted.
+    async fn settle<T>(
+        &self,
+        timeout_ms: u64,
+        mut accept: impl FnMut(&str) -> Option<T>,
+    ) -> Option<T> {
+        let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
+        loop {
+            if let Some(screen) = self.capture().await {
+                if let Some(value) = accept(&screen) {
+                    return Some(value);
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(PICKER_POLL_MS)).await;
+        }
+    }
+
+    /// The highlighted row of Claude's model list.
+    async fn claude_selected_row(&self) -> Result<ClaudeModelRow, DomainStateError> {
+        self.wait_for("read Claude model list", |screen| {
+            claude_model_picker_rows(screen)?
+                .into_iter()
+                .find(|row| row.selected)
+        })
+        .await
+    }
+
+    /// Presses one arrow and reports whether the highlight moved off `from`.
+    async fn step_claude_row(&self, key: &str, from: u32) -> Result<bool, DomainStateError> {
+        self.write(key).await?;
+        // Read each landed highlight before the next press; the list does not coalesce.
+        Ok(self
+            .settle(CLAUDE_ROW_SETTLE_MS, |screen| {
+                claude_model_picker_rows(screen)?
+                    .into_iter()
+                    .find(|row| row.selected)
+                    .filter(|row| row.number != from)
+            })
+            .await
+            .is_some())
+    }
+
     async fn cancel_dialog(&self) {
         for _ in 0..PICKER_CANCEL_ESCAPES {
             let still_open = self
@@ -528,7 +739,204 @@ impl PickerDriver<'_> {
         Ok(())
     }
 
+    /// CDXC:SessionChat 2026-09-18 WHY:
+    /// `/model <name>` and `/effort <name>` always save the pick as Claude's default for new
+    /// sessions, so a session-only pick drives the bare `/model` list instead: walk to the row,
+    /// set the effort on its rail, and answer `s`. Verified live 2026-09-18 on Claude Code
+    /// 2.1.268 — the acknowledgement read "for this session only with max effort" and
+    /// `~/.claude/settings.json` was unchanged afterwards.
+    /// The list is answered with arrows, never a row digit: its footer binds no digit shortcut,
+    /// so a number would reach the filter box instead of the row.
+    async fn drive_claude_session_only(
+        &self,
+        plan: &CodexPickerPlan,
+    ) -> Result<(), DomainStateError> {
+        let screen = self
+            .capture()
+            .await
+            .ok_or_else(|| session_not_running("The agent's input could not be read."))?;
+        if crate::session_chat_composer::detect_session_chat_composer_readiness(
+            Some("claude"),
+            &screen,
+            None,
+        )
+        .state
+            != crate::session_chat_composer::SessionChatComposerState::Ready
+        {
+            return Err(agent_busy("Waiting for Claude's input box."));
+        }
+        // Never replace a terminal draft while applying a queued setting.
+        if crate::session_chat_composer::claude_composer_input_text(&screen)
+            .is_some_and(|text| !text.trim().is_empty())
+        {
+            return Err(agent_busy(
+                "Waiting for the text in Claude's terminal input to be sent or cleared.",
+            ));
+        }
+        let selection = detect_session_chat_selection(SessionChatOptionAgent::Claude, &screen);
+        let applied = |field: Option<&crate::session_chat_options::SessionChatDetectedChoice>,
+                       value: &str| {
+            value.is_empty() || field.is_some_and(|choice| choice.value == value)
+        };
+        if applied(
+            selection.as_ref().and_then(|state| state.model.as_ref()),
+            &plan.model,
+        ) && applied(
+            selection.as_ref().and_then(|state| state.effort.as_ref()),
+            &plan.effort,
+        ) {
+            return Ok(());
+        }
+
+        self.write(&crate::session_chat_send::build_session_chat_paste_bytes(
+            CLAUDE_MODEL_COMMAND,
+        ))
+        .await?;
+        self.wait_for("type Claude model command", |screen| {
+            crate::session_chat_composer::claude_composer_input_text(screen)
+                .is_some_and(|text| text.trim() == CLAUDE_MODEL_COMMAND)
+                .then_some(())
+        })
+        .await?;
+        self.write(CODEX_SUBMIT).await?;
+        // CDXC:SessionChat 2026-09-18 WHY:
+        // The list paints only as many rows as the pane is tall — a short chat pane shows one,
+        // with "… +3 models" under it — so the wanted row usually is not on screen at all.
+        // Walking to the top and stepping down until its label appears is the only way to reach
+        // it. Reading the visible window and giving up was why Sonnet and Haiku reported no such
+        // row on every attempt while Opus, which happened to be the painted one, went through.
+        self.wait_for("open Claude model list", |screen| {
+            claude_model_picker_rows(screen).map(|_| ())
+        })
+        .await?;
+        for _ in 0..CLAUDE_ROW_STEP_LIMIT {
+            if (self.cancelled)() {
+                return Err(agent_busy(
+                    "The model change was cancelled by another action on this session.",
+                ));
+            }
+            let selected = self.claude_selected_row().await?;
+            if selected.number == CLAUDE_FIRST_ROW_NUMBER {
+                break;
+            }
+            if !self
+                .step_claude_row(CLAUDE_ARROW_UP, selected.number)
+                .await?
+            {
+                break;
+            }
+        }
+        let mut found = false;
+        for _ in 0..CLAUDE_ROW_STEP_LIMIT {
+            if (self.cancelled)() {
+                return Err(agent_busy(
+                    "The model change was cancelled by another action on this session.",
+                ));
+            }
+            let rows = self
+                .wait_for("read Claude model list", |screen| {
+                    claude_model_picker_rows(screen)
+                })
+                .await?;
+            let Some(selected) = rows.iter().find(|row| row.selected) else {
+                return Err(dialog_mismatch(
+                    "choose Claude model",
+                    "Claude's model list highlights no row, so its distance cannot be counted.",
+                ));
+            };
+            match claude_model_row_index(&rows, &plan.model) {
+                Some(index) if rows[index].number == selected.number => {
+                    found = true;
+                    break;
+                }
+                // Visible but not highlighted: step straight at it.
+                Some(index) => {
+                    let key = if rows[index].number > selected.number {
+                        CLAUDE_ARROW_DOWN
+                    } else {
+                        CLAUDE_ARROW_UP
+                    };
+                    self.step_claude_row(key, selected.number).await?;
+                }
+                // Not painted yet: scroll the window down one row and look again.
+                None => {
+                    if !self
+                        .step_claude_row(CLAUDE_ARROW_DOWN, selected.number)
+                        .await?
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+        if !found {
+            return Err(unsupported_selection(format!(
+                "Claude's model list does not offer {} in this session, so it cannot be applied without changing your default.",
+                plan.model
+            )));
+        }
+
+        let mut effort_adjusted = false;
+        if !plan.effort.is_empty() {
+            let mut steps = 0;
+            loop {
+                if (self.cancelled)() {
+                    return Err(agent_busy(
+                        "The effort change was cancelled by another action on this session.",
+                    ));
+                }
+                let current = self
+                    .wait_for("read Claude effort", |screen| claude_picker_effort(screen))
+                    .await?;
+                if current == plan.effort {
+                    break;
+                }
+                if steps == CLAUDE_EFFORT_STEP_LIMIT {
+                    return Err(dialog_mismatch(
+                        "choose Claude effort",
+                        &format!(
+                            "Claude's effort rail never offered {} for this model.",
+                            plan.effort
+                        ),
+                    ));
+                }
+                steps += 1;
+                effort_adjusted = true;
+                // The rail wraps, so one direction reaches every level this model supports.
+                self.write(CLAUDE_ARROW_RIGHT).await?;
+                self.wait_for("confirm Claude effort", |screen| {
+                    claude_picker_effort(screen).filter(|landed| *landed != current)
+                })
+                .await?;
+            }
+        }
+
+        let effort = effort_adjusted.then_some(plan.effort.as_str());
+        self.write(CLAUDE_SESSION_ONLY_KEY).await?;
+        self.wait_for("applied Claude session model", |screen| {
+            claude_session_only_applied(screen, &plan.model, effort).then_some(())
+        })
+        .await?;
+        Ok(())
+    }
+
     async fn drive_claude(&self, plan: &CodexPickerPlan) -> Result<(), DomainStateError> {
+        if plan.session_only {
+            let result = self.drive_claude_session_only(plan).await;
+            if result.is_err() && !(self.cancelled)() {
+                self.cancel_dialog().await;
+                if let Some(screen) = self.capture().await {
+                    if crate::session_chat_composer::claude_composer_input_text(&screen)
+                        .is_some_and(|text| text.trim() == CLAUDE_MODEL_COMMAND)
+                    {
+                        let _ = self
+                            .write(crate::session_chat_send::AGENT_TUI_CLEAR_INPUT_LINE)
+                            .await;
+                    }
+                }
+            }
+            return result;
+        }
         for (field, value) in [
             ("model", plan.model.as_str()),
             ("effort", plan.effort.as_str()),
@@ -904,6 +1312,67 @@ fn read_trimmed(params: &Map<String, Value>, key: &str) -> String {
         .to_string()
 }
 
+/// Rewrites the session's saved agent command so a resume relaunches on the model that is
+/// running now. Only `claude` and `codex` carry model and effort as launch options; every other
+/// provider keeps its command untouched.
+fn persist_session_chat_model_resume(
+    state: &AppState,
+    target: &crate::session_chat_send::SessionChatSendTarget,
+    model: &str,
+    effort: &str,
+) -> Result<(), DomainStateError> {
+    let agent = crate::session_chat_follower::session_chat_agent_for_session(&target.session)
+        .unwrap_or_default();
+    if !matches!(agent.as_str(), "claude" | "codex") || model.is_empty() {
+        return Ok(());
+    }
+    let db =
+        crate::storage::open_gxserver_database(&state.paths).map_err(|error| DomainStateError {
+            code: "internalError",
+            message: error.to_string(),
+        })?;
+    let repository = crate::domain::DomainRepository::new(&db, &state.metadata.server_id);
+    let session = repository
+        .get_session(&target.project_id, &target.session_id)?
+        .ok_or_else(|| DomainStateError {
+            code: "notFound",
+            message: "The session no longer exists.".into(),
+        })?;
+    let mut runtime = session
+        .get("runtimeSettings")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let Some(command) = runtime
+        .get("agentCommand")
+        .and_then(Value::as_str)
+        .filter(|command| !command.trim().is_empty())
+        .map(str::to_string)
+    else {
+        return Ok(());
+    };
+    let rewritten = crate::agents::with_agent_model_options(
+        &command,
+        &agent,
+        Some(model),
+        (!effort.is_empty()).then_some(effort),
+    )?;
+    if rewritten == command {
+        return Ok(());
+    }
+    runtime.insert("agentCommand".into(), json!(rewritten));
+    repository.update_session(
+        json!({
+            "projectId": target.project_id,
+            "sessionId": target.session_id,
+            "runtimeSettings": runtime,
+        })
+        .as_object()
+        .unwrap(),
+    )?;
+    Ok(())
+}
+
 pub(crate) async fn select_session_chat_model(
     state: &AppState,
     params: &Map<String, Value>,
@@ -928,6 +1397,16 @@ pub(crate) async fn select_session_chat_model(
         agent.as_deref().unwrap_or_default(),
         params,
     )?;
+    let scope = crate::session_chat_model_selection::read_scope(
+        agent.as_deref().unwrap_or_default(),
+        params,
+    )?;
+    let session_only = scope == crate::session_chat_model_selection::SCOPE_SESSION;
+    if session_only && model.is_empty() {
+        return Err(invalid_params(
+            "A session-only change needs the model to apply in this session.",
+        ));
+    }
     if !model.is_empty() || options.is_empty() {
         crate::session_chat_model_selection::validate_selection(
             agent.as_deref().unwrap_or_default(),
@@ -954,6 +1433,7 @@ pub(crate) async fn select_session_chat_model(
         model: model.clone(),
         effort: effort.clone(),
         options,
+        session_only,
         claude_statusline: crate::server::read_runtime_text(&target.session, "agentSessionId")
             .map(|id| (state.paths.app_state_dir.join("agent-hooks"), id)),
     });
@@ -978,12 +1458,12 @@ pub(crate) async fn select_session_chat_model(
             return Err(agent_busy(format!(
                 "{} The model was not changed.",
                 error.message
-            )))
+            )));
         }
         (Ok(()), None) => {
             return Err(agent_busy(
                 "The session's terminal queue dropped the model change before it ran.",
-            ))
+            ));
         }
         (Ok(()), Some(Ok(()))) => {}
     }
@@ -994,6 +1474,25 @@ pub(crate) async fn select_session_chat_model(
         &target.session_id,
         agent.as_deref(),
     );
+    // CDXC:SessionChat 2026-09-18 DECISION:
+    // User: every pick rewrites the session's saved resume command, so waking a slept pane comes
+    // back on the model that is running rather than the one it was launched with. Without this a
+    // session-only pick would silently mean "until this pane sleeps", and a default-changing pick
+    // on a session launched with --model/--effort would snap back to its launch flags.
+    // SEE-ALSO: server/src/agents/session_command.rs with_agent_model_options, server/src/agents/launch_plan.rs.
+    if let Err(error) = persist_session_chat_model_resume(state, &target, &model, &effort) {
+        log_picker(
+            LogLevel::Warn,
+            "sessionChatModelResumeCommandUnchanged",
+            json!({
+                "projectId": target.project_id,
+                "sessionId": target.session_id,
+                "model": model,
+                "effort": effort,
+            }),
+            Some(error.message),
+        );
+    }
     log_picker(
         LogLevel::Info,
         "sessionChatCodexModelPicked",
@@ -1002,10 +1501,11 @@ pub(crate) async fn select_session_chat_model(
             "sessionId": target.session_id,
             "model": model,
             "effort": effort,
+            "scope": scope,
         }),
         None,
     );
-    Ok(json!({ "ok": true, "model": model, "effort": effort }))
+    Ok(json!({ "ok": true, "model": model, "effort": effort, "scope": scope }))
 }
 
 #[cfg(test)]

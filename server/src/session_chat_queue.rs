@@ -549,7 +549,9 @@ pub fn session_has_pending_session_chat_queue(
     project_id: &str,
     session_id: &str,
 ) -> bool {
-    if crate::session_chat_model_selection::read_pending(db, project_id, session_id).is_some() {
+    if crate::session_chat_model_selection::read_pending(db, project_id, session_id)
+        .is_some_and(|selection| selection.state != "failed")
+    {
         return true;
     }
     db.query_row(

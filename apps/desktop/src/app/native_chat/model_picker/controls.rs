@@ -30,6 +30,12 @@ pub(super) fn footer(state: &Value, scale: f32, cx: &mut Context<ModelPickerWind
     let pressed = &state["pressed"];
     let accent = accent(state);
     let closing = state["closing"] == true;
+    // Codex's picker cannot commit without saving a default, so its session action stays disabled.
+    let session_scope = state["sessionScope"] == true;
+    let session_label = state["scopeReason"]
+        .as_str()
+        .map(|reason| format!("Use in this session — {reason}"))
+        .unwrap_or_else(|| "Use in this session".to_string());
     let key = |control: &str,
                label: &str,
                glyph: &str,
@@ -156,11 +162,34 @@ pub(super) fn footer(state: &Value, scale: f32, cx: &mut Context<ModelPickerWind
                 .child("Effort"),
         )
         .child(
-            key("Enter", "Save", "↵", !closing, cx)
-                .flex()
-                .items_center()
-                .gap(px(8.0 * scale))
-                .child("Save"),
+            key(
+                "Enter",
+                session_label.as_str(),
+                "↵",
+                !closing && session_scope,
+                cx,
+            )
+            .flex()
+            .items_center()
+            .gap(px(8.0 * scale))
+            .child("Use in this session"),
+        )
+        .child(
+            key(
+                if session_scope {
+                    "EnterDefault"
+                } else {
+                    "Enter"
+                },
+                "Set as default",
+                if session_scope { "⇧↵" } else { "↵" },
+                !closing,
+                cx,
+            )
+            .flex()
+            .items_center()
+            .gap(px(8.0 * scale))
+            .child("Set as default"),
         )
         .child(
             key("Escape", "Cancel", "Esc", !closing, cx)
