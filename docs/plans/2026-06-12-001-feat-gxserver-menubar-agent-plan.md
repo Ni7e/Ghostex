@@ -210,7 +210,8 @@ The per-unit `**Files:**` sections remain authoritative.
 - Display rule: all-idle `{0,0,3}` renders the single `available` badge; `{0,0,0}` renders no count badges.
 - Preference: `hideMenuBarSessionStatusIndicators = true` hides the count badges entirely.
 - Menu: first item is "Open Ghostex"; Stop/Restart/Open Logs enabled when health OK.
-- State: health unreachable → "Stopped" presentation, Start enabled, Stop/Restart disabled.
+- State: confirmed daemon absence (no PID or connection refused) shows "Stopped", with Start enabled and Stop/Restart disabled.
+- State: other health failures (timeouts, authentication failures, or unexpected responses) retain "Unreachable" rather than implying the daemon is stopped.
 - Client: requests carry `Authorization: Bearer <token>` and `x-gxserver-protocol-version: 1`; missing token surfaces a clear error state rather than crashing.
 - Edge: WS disconnect falls back to polling and recovers when the socket returns.
 - Integration: selecting "Open Ghostex" issues the expected `ghostex://` open.
