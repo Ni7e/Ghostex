@@ -294,7 +294,7 @@ impl GhostexGpuiApp {
                     this.titlebar_actions_snapshot = actions;
                     cx.notify();
                 }
-                this.refresh_extensions_in_background(cx);
+                this.refresh_extensions_if_stale(cx);
             });
         })
         .detach();
