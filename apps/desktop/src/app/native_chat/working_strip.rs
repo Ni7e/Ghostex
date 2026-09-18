@@ -6,8 +6,8 @@ use super::{
 use crate::assets::chat_working::VISUAL;
 use gpui::StatefulInteractiveElement as _;
 use gpui::{
-    Animation, AnimationExt, AnyElement, InteractiveElement, IntoElement, ParentElement, Styled,
-    div, px, relative, svg,
+    Animation, AnimationExt, AnyElement, FontFeatures, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Styled, div, px, relative, svg,
 };
 use std::time::Duration;
 
@@ -52,7 +52,7 @@ impl NativeChatView {
             let glyph = svg()
                 .path("titlebar/loader2.svg")
                 .size(px(14.0 * s))
-                .text_color(p.primary);
+                .text_color(p.control_primary);
             if reduced_motion {
                 glyph.into_any_element()
             } else {
@@ -69,7 +69,7 @@ impl NativeChatView {
                     .into_any_element()
             }
         } else {
-            let dot = div().size(px(6.0 * s)).rounded_full().bg(p.primary);
+            let dot = div().size(px(6.0 * s)).rounded_full().bg(p.control_primary);
             if reduced_motion {
                 dot.into_any_element()
             } else {
@@ -89,7 +89,8 @@ impl NativeChatView {
             }
         };
         let mut title = div()
-            .flex().items_center()
+            .flex()
+            .items_center()
             .flex_1()
             .min_w_0()
             .text_color(p.foreground)
@@ -123,7 +124,9 @@ impl NativeChatView {
             .items_center()
             .gap(px(8.0 * s))
             .flex_shrink_0()
-            .text_size(px(12.0 * s));
+            .text_size(px(14.0 * s))
+            .text_color(p.muted)
+            .font_features(FontFeatures(vec![("tnum".into(), 1)].into()));
         if let Some(elapsed) = activity["elapsedLabel"].as_str() {
             trailing = trailing.child(elapsed.to_owned());
         }
@@ -131,6 +134,7 @@ impl NativeChatView {
         if let Some(percent) = percent {
             trailing = trailing.child(
                 div()
+                    .font_weight(FontWeight::MEDIUM)
                     .text_color(p.foreground.opacity(0.8))
                     .child(format!("{percent}%")),
             );
@@ -153,7 +157,7 @@ impl NativeChatView {
             .child(trailing)
             .into_any_element();
         let mut body = Vec::new();
-        let primary = p.primary;
+        let primary = p.control_primary;
         if percent.is_some() || activity["indeterminate"] == true {
             let track = div()
                 .relative()
@@ -162,7 +166,7 @@ impl NativeChatView {
                 .rounded_full()
                 .overflow_hidden()
                 .bg(p.foreground.opacity(0.1));
-            let fill = div().h_full().rounded_full().bg(p.primary);
+            let fill = div().h_full().rounded_full().bg(primary);
             let track = if let Some(percent) = percent {
                 track
                     .child(fill.w(relative(percent as f32 / 100.0)))

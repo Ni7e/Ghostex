@@ -1,3 +1,4 @@
+import { canCollapseSessionChatComposer } from '@/packages/shared/session-chat-presentation/composer-scroll';
 import { composerSuggestions, completeComposerMention, composerNativeCommand } from '@/packages/shared/session-chat-presentation/composer-suggestions';
 import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS } from '@/packages/shared/session-chat-controller/composer-policy';
 import { deliverChatSubmission, editQueuedChatPrompt, restoreUndeliveredChatText } from '@/packages/shared/session-chat-controller/submission';
@@ -801,16 +802,15 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
     } = useSessionChatComposerCollapse({
       onCollapsedChange: onScrollCollapsedChange,
       enabled: scrollCollapseEnabled,
-      collapseEligible:
-        !maximized &&
-        !sessionNoteActive &&
-        !slashOpen &&
-        !skillOpen &&
-        !fileOpen &&
-        !sendError &&
-        pastedImages.length === 0 &&
-        pendingImagePastes === 0 &&
-        (queue?.prompts.length ?? 0) === 0,
+      collapseEligible: canCollapseSessionChatComposer({
+        maximized,
+        noteOpen: sessionNoteActive,
+        suggestionsOpen: slashOpen || skillOpen || fileOpen,
+        hasError: !!sendError,
+        attachmentCount: pastedImages.length,
+        pendingAttachments: pendingImagePastes,
+        queuedPrompts: queue?.prompts.length ?? 0,
+      }),
       transcriptRef,
     });
 

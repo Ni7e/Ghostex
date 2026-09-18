@@ -2,18 +2,34 @@ import type { SessionChatMessage } from '../session-chat';
 import { orderSessionChatMessages } from '@/packages/core-ui/chat/session-chat-assembler';
 import { normalizeSessionChatImageTranscriptMessages } from '@/packages/core-ui/chat/session-chat-image-transcript-markers';
 import { normalizeSessionChatLocalCommandMessages } from '@/packages/core-ui/chat/session-chat-local-command-transcript';
-import { dropSessionChatHiddenMessages, sessionChatSuppressedTurnLabel } from '@/packages/core-ui/chat/session-chat-noise';
+import {
+  dropSessionChatHiddenMessages,
+  sessionChatSuppressedTurnLabel,
+} from '@/packages/core-ui/chat/session-chat-noise';
 import { foldSessionChatToolMessages } from '@/packages/core-ui/chat/session-chat-tool-fold';
-import { completedWorkRenderItems, finalAssistantMessageIds, summaryModeTurns } from './turns';
+import { completedWorkRenderItems, finalAssistantMessageIds, summaryModeTurns, type CompletedWorkTurn } from './turns';
+import { mergeSessionChatMessagesWith } from '@/packages/core-ui/chat/session-chat-merge';
 
 export function normalizeChatTranscript(messages: readonly SessionChatMessage[]): SessionChatMessage[] {
   return dropSessionChatHiddenMessages(
-    normalizeSessionChatImageTranscriptMessages(normalizeSessionChatLocalCommandMessages(orderSessionChatMessages(messages)))
+    normalizeSessionChatImageTranscriptMessages(
+      normalizeSessionChatLocalCommandMessages(orderSessionChatMessages(messages))
+    )
   );
 }
 
 export function foldChatTranscript(messages: readonly SessionChatMessage[]): SessionChatMessage[] {
   return foldSessionChatToolMessages(messages, (message) => sessionChatSuppressedTurnLabel(message) !== null);
+}
+
+export function completedChatWork(turn: CompletedWorkTurn, deferred?: readonly SessionChatMessage[]) {
+  const rows = deferred
+    ? mergeSessionChatMessagesWith(
+        deferred.filter((message) => message.id !== turn.final?.id),
+        turn.work
+      )
+    : turn.work;
+  return foldChatTranscript(normalizeChatTranscript(rows));
 }
 
 export function projectChatTranscript(

@@ -122,11 +122,15 @@ impl PreviewWindow {
     }
 }
 impl Render for PreviewWindow {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let light = self.config["theme"] == "light";
+        // CDXC:SessionChat 2026-09-17 WHY:
+        // CEF rounds its native frame to whole pixels, so equal integer pane widths prevent the comparison layout itself from changing text wrapping.
+        let pane_width = px(((window.viewport_size().width.as_f32() - 1.0) / 2.0).floor());
         let pane = || {
             div()
-                .flex_1()
+                .w(pane_width)
+                .flex_shrink_0()
                 .min_w_0()
                 .min_h_0()
                 .h_full()
@@ -166,7 +170,8 @@ impl Render for PreviewWindow {
                     )
                     .child(
                         div()
-                            .w(px(1.0))
+                            .flex_1()
+                            .min_w(px(1.0))
                             .h_full()
                             .flex_shrink_0()
                             .bg(gpui::rgb(0x444444)),

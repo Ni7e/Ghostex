@@ -24,7 +24,7 @@ export function WindowsTerminalFields({
           label='Windows Environment'
           description='PowerShell is the default and runs native Windows projects and agents without WSL. WSL uses your Linux projects. Changing environments prompts you to restart Ghostex; existing sessions stay in their original environment.'
           options={[
-            { label: 'PowerShell (native Windows)', value: 'powershell' },
+            { label: 'PowerShell (Native)', value: 'powershell' },
             { label: 'WSL (Linux)', value: 'wsl' },
           ]}
           value={settings.windowsTerminalBackend}

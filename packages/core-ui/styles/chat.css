@@ -1168,12 +1168,9 @@ the markdown block) rather than pinned to a tier of its own.
   background: var(--background);
 }
 
-/* The transcript reserves the band's height below its last row. While the
-   composer is collapsed the inset holds the expanded height, so the rows the
-   expansion will cover again stay hidden instead of flashing into view. */
-.ghostex-session-chat-scope [data-slot='message-scroller-content'] {
-  padding-bottom: calc(var(--ghostex-chat-composer-inset, 0px) + 1rem);
-}
+/* The message list reserves the band's height plus the shared transcript end
+   padding below its last row. While collapsed, the inset holds the expanded
+   height so expansion does not flash previously hidden rows into view. */
 
 /* The viewport's bottom scroll fade sits under the opaque band, so lift its
    fade region to the band's top edge. --scroll-fade-b is what scroll-fade-b
@@ -2419,7 +2416,7 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 .ghostex-chat-markdown pre,
 .ghostex-chat-markdown .ghostex-chat-markdown-codeblock,
 .ghostex-chat-markdown .ghostex-chat-markdown-table {
-  margin: 0.65rem 0;
+  margin: var(--chat-paragraph-gap) 0;
 }
 
 /* Markers sit outside the padding box (`list-style-position: outside`), so a
@@ -2494,25 +2491,27 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 .ghostex-chat-markdown h5,
 .ghostex-chat-markdown h6 {
   font-weight: 600;
-  line-height: 1.3;
+  line-height: var(--chat-heading-line-height);
   margin: 1.25rem 0 0.5rem;
 }
 
 .ghostex-chat-markdown h1 {
-  font-size: 1.25rem;
+  font-size: var(--chat-heading-1-size);
 }
 .ghostex-chat-markdown h2 {
-  font-size: 1.125rem;
+  font-size: var(--chat-heading-2-size);
 }
 .ghostex-chat-markdown h3 {
-  font-size: 1rem;
+  font-size: var(--chat-heading-3-size);
 }
-.ghostex-chat-markdown h4,
-.ghostex-chat-markdown h5,
-.ghostex-chat-markdown h6 {
-  font-size: 0.875rem;
+.ghostex-chat-markdown h4 {
+  font-size: var(--chat-heading-4-size);
+}
+.ghostex-chat-markdown h5 {
+  font-size: var(--chat-heading-5-size);
 }
 .ghostex-chat-markdown h6 {
+  font-size: var(--chat-heading-6-size);
   color: var(--muted-foreground);
 }
 
@@ -2533,11 +2532,11 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
 
 .ghostex-chat-markdown :not(pre) > code {
   background: var(--chat-inline-code-surface, var(--muted));
-  border: 1px solid var(--chat-inline-code-border, var(--border));
-  border-radius: 0.375rem;
+  border: var(--chat-inline-code-border-width) solid var(--chat-inline-code-border, var(--border));
+  border-radius: var(--chat-inline-code-radius);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-  font-size: var(--chat-code-size);
-  padding: 0.1rem 0.35rem;
+  font-size: var(--chat-inline-code-size);
+  padding: var(--chat-inline-code-padding-y) var(--chat-inline-code-padding-x);
 }
 
 /* An inline-code span that is a file reference. Its visual chrome comes from

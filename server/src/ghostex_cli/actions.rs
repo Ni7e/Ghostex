@@ -919,7 +919,7 @@ fn create_gxserver_agent_session(payload: &Value, flags: &Flags) -> CliResult<Va
     for (key, flag) in [("agentModel", "--model"), ("agentEffort", "--effort")] {
         match payload.get(key) {
             None | Some(Value::Null) => {}
-            Some(Value::String(value)) => {
+            Some(Value::String(value)) if !value.trim().is_empty() => {
                 params.insert(key.to_string(), json!(value));
             }
             Some(_) => {

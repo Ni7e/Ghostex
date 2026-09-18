@@ -1946,7 +1946,7 @@ impl GhostexGpuiApp {
         );
         message["hud"]["commandSessionIndicators"] =
             gpui_sidebar_command_session_indicators_from_command_pane_sources(&commands, &sessions);
-        message
+        self.with_project_view_spaces(message)
     }
 
     pub(crate) fn apply_gpui_gxserver_agent_settings_hydration_result(
@@ -2217,6 +2217,7 @@ impl GhostexGpuiApp {
         let Some(handle) = self.app_modal_window.clone() else {
             return;
         };
+        let sidebar_state_message = self.with_project_view_spaces(sidebar_state_message);
         let update_result = handle.update(cx, |host, modal_window, cx| {
             host.refresh_sidebar_state_message(sidebar_state_message.clone(), cx);
             modal_window.refresh();

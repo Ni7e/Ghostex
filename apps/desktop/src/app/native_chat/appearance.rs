@@ -6,6 +6,13 @@ pub(crate) struct ChatAppearance {
     pub(crate) background: Hsla,
     pub(crate) foreground: Hsla,
     pub(crate) primary: Hsla,
+    pub(crate) control_primary: Hsla,
+    pub(crate) control_border: Hsla,
+    pub(crate) input_border: Hsla,
+    pub(crate) ring: Hsla,
+    pub(crate) card_background: Hsla,
+    pub(crate) prose: Hsla,
+    pub(crate) card_muted: Hsla,
     pub(crate) muted: Hsla,
     pub(crate) border: Hsla,
     pub(crate) input: Hsla,
@@ -23,14 +30,31 @@ pub(crate) struct ChatAppearance {
 impl ChatAppearance {
     pub(crate) fn current(state: &serde_json::Value) -> Self {
         let snapshot = crate::shared_settings::shared_sidebar_settings_snapshot();
-        let settings = state["previewSettings"].as_object().unwrap_or_else(|| snapshot.object());
+        let settings = state["previewSettings"]
+            .as_object()
+            .unwrap_or_else(|| snapshot.object());
         let light = gpui_session_chat_uses_light_theme(settings);
         let color = |dark, light_color| rgb(if light { light_color } else { dark }).into();
         let enabled = |name| settings.get(name).and_then(serde_json::Value::as_bool) == Some(true);
         Self {
             background: color(0x0d0d0d, 0xfcfcfc),
             foreground: color(0xfcfcfc, 0x27272a),
-            primary: color(0xb4b8c0, 0x4d4d50),
+            primary: color(0xb4b8c0, 0x27272a),
+            control_primary: color(0xe5e5e5, 0x18181b),
+            control_border: if light {
+                rgb(0xe4e4e7).into()
+            } else {
+                gpui::Hsla::from(rgb(0xffffff)).opacity(0.06)
+            },
+            input_border: if light {
+                rgb(0xe4e4e7).into()
+            } else {
+                gpui::Hsla::from(rgb(0xffffff)).opacity(0.08)
+            },
+            card_background: color(0x0d0d0d, 0xffffff),
+            ring: color(0x737373, 0x9f9fa9),
+            prose: color(0xb4b8c0, 0x4d4d50),
+            card_muted: color(0xb4b8bf, 0x71717b),
             muted: color(0x9e9e9e, 0x71717b),
             border: color(0x1c1c1c, 0xe4e4e7),
             input: color(0x141414, 0xf4f4f5),

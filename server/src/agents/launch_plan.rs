@@ -273,21 +273,10 @@ fn apply_requested_agent_model(
     params: &Map<String, Value>,
     command: Option<String>,
 ) -> Result<Option<String>, DomainStateError> {
-    let model = read_text(params, "agentModel");
-    let effort = read_text(params, "agentEffort");
+    let model = requested_agent_model_option(params, "agentModel")?;
+    let effort = requested_agent_model_option(params, "agentEffort")?;
     if model.is_none() && effort.is_none() {
         return Ok(command);
-    }
-    for value in model.iter().chain(effort.iter()) {
-        let valid = value.len() <= 160
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"-._[]():/".contains(&byte));
-        if !valid {
-            return Err(DomainStateError::bad_request(format!(
-                "\"{value}\" is not a valid model or effort."
-            )));
-        }
     }
     let family = resume_agent_family_id(Some(agent_id.to_string()), agent_config, launch_settings)
         .filter(|family| matches!(family.as_str(), "claude" | "codex"))
@@ -472,4 +461,30 @@ pub(crate) fn resolve_agent_launch_command(
         icon,
         accept_all_mode == Some("disabled"),
     )
+}
+
+/// Validate supplied launch options before an empty or non-string value can be mistaken for an omitted option.
+pub(crate) fn requested_agent_model_option(
+    params: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<String>, DomainStateError> {
+    let value = match params.get(key) {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => value.trim(),
+        _ => {
+            return Err(DomainStateError::bad_request(format!(
+                "{key} needs a non-empty string value."
+            )))
+        }
+    };
+    if value.len() > 160
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._[]():/".contains(&byte))
+    {
+        return Err(DomainStateError::bad_request(format!(
+            "\"{value}\" is not a valid model or effort."
+        )));
+    }
+    Ok(Some(value.to_string()))
 }

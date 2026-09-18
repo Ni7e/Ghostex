@@ -112,6 +112,19 @@ impl GhostexGpuiApp {
                 if let Some(menu) = self.native_sidebar.menu.as_mut() {
                     menu.refresh(&snapshot);
                 }
+                if let Some(spaces) = snapshot.hud.get("projectViewSpaces")
+                    && self
+                        .native_sidebar
+                        .snapshot
+                        .as_ref()
+                        .and_then(|previous| previous.hud.get("projectViewSpaces"))
+                        != Some(spaces)
+                    && let Some(handle) = self.app_modal_window
+                {
+                    let _ = handle.update(cx, |host, _, cx| {
+                        host.refresh_project_view_spaces(spaces, cx);
+                    });
+                }
                 self.native_sidebar.snapshot = Some(Arc::new(snapshot));
             }
             NativeSidebarUpdate::Flash {

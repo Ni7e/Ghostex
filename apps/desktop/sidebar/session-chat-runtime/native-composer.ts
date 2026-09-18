@@ -1,3 +1,4 @@
+import { asyncQuestionStorage } from '@/packages/shared/session-chat-controller/async-question-storage';
 import { nativeChatSettings } from './native-chat-settings';
 import { readSessionChatContextDetailsPreferences, writeSessionChatContextDetailsPreferences, type SessionChatContextDetailsPreferences } from '@/packages/shared/session-chat-presentation/context-details';
 import { currentAgentModelCatalog } from '@/packages/shared/agent-model-catalog-state';
@@ -24,7 +25,7 @@ import { readStoredSessionChatVerbose, writeStoredSessionChatVerbose } from '@/p
 import type { SessionChatDraftVersion, SessionChatDeliveredDraft } from '@/packages/shared/session-chat-queue';
 
 export interface NativeComposerRequest {
-  operation: 'contextSave' | 'optionWrite' | 'modelWrite' | 'modelAck' | 'read' | 'write' | 'flush' | 'submitted' | 'park' | 'deliveries' | 'receive' | 'summary' | 'verbose' | 'history' | 'claimReturned' | 'questionRead' | 'questionWrite' | 'questionClear' | 'dismissNotice';
+  operation: 'asyncQuestionRead' | 'asyncQuestionWrite' | 'asyncQuestionRetire' | 'contextSave' | 'optionWrite' | 'modelWrite' | 'modelAck' | 'read' | 'write' | 'flush' | 'submitted' | 'park' | 'deliveries' | 'receive' | 'summary' | 'verbose' | 'history' | 'claimReturned' | 'questionRead' | 'questionWrite' | 'questionClear' | 'dismissNotice';
   agent?: 'claude' | 'codex';
   preferences?: SessionChatContextDetailsPreferences;
   optionKey?: string;
@@ -33,6 +34,7 @@ export interface NativeComposerRequest {
   selectionId?: string;
   notice?: SessionChatTerminalNotice;
   promptKey?: string;
+  questionId?: string;
   answers?: AnswerDrafts;
   returnedId?: string;
   enabled?: boolean;
@@ -79,6 +81,16 @@ export async function nativeComposerRequest(sessionKey: string, request: NativeC
       await flushClientStorage(['notices']);
       return dismissed;
     }
+    case 'asyncQuestionRead': return asyncQuestionStorage(sessionKey).read();
+    case 'asyncQuestionWrite':
+      await asyncQuestionStorage(sessionKey).write(request.answers ?? {});
+      await flushClientStorage(['questionDrafts']);
+      return true;
+    case 'asyncQuestionRetire':
+      if (!request.questionId) throw new Error('A question identity is required.');
+      await asyncQuestionStorage(sessionKey).retire(request.questionId, request.answers ?? {});
+      await flushClientStorage(['questionDrafts', 'retiredQuestions']);
+      return true;
     case 'questionRead':
     case 'questionWrite':
     case 'questionClear': {

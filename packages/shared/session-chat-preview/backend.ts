@@ -1,3 +1,7 @@
+import {
+  pendingSessionChatAsyncQuestions,
+  sessionChatAsyncAnswerPrefix,
+} from '../session-chat-presentation/async-questions';
 import type { GxserverSessionChatEvent, GxserverReadSessionChatResult } from '../session-chat';
 import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
 import { normalizeSessionChatContextDetailsPreferences } from '../session-chat-presentation/context-details';
@@ -10,6 +14,8 @@ export class ChatPreviewBackend {
   private entry: any = { text: '', version: { draftId: 'preview-draft', revision: 1 } };
   private history: string[] = [];
   private questionAnswers = {};
+  private asyncAnswers = {};
+  private retiredQuestions: string[] = [];
   private note = '';
   private counter = 100;
   constructor(readonly config: ChatPreviewConfig) {
@@ -76,7 +82,22 @@ export class ChatPreviewBackend {
         this.publish();
         break;
       case 'answerSessionChatPrompt':
-        this.snapshot.prompt = undefined;
+        if (params.kind === 'asyncQuestion' || params.kind === 'dismissAsyncQuestion') {
+          const question = pendingSessionChatAsyncQuestions(this.snapshot.messages).find(
+            (question) => question.key === params.questionId
+          );
+          if (!question) throw new Error('That sample question is no longer available.');
+          if (params.kind === 'asyncQuestion')
+            this.snapshot.messages = [
+              ...this.snapshot.messages,
+              previewMessage(
+                String(++this.counter),
+                'user',
+                sessionChatAsyncAnswerPrefix(question.title) + params.text,
+                Date.now()
+              ),
+            ];
+        } else this.snapshot.prompt = undefined;
         this.publish();
         break;
       case 'setSessionChatDraft':
@@ -162,6 +183,14 @@ export class ChatPreviewBackend {
         return this.entry.version;
       case 'history':
         return this.history;
+      case 'asyncQuestionRead':
+        return { drafts: this.asyncAnswers, retired: this.retiredQuestions };
+      case 'asyncQuestionWrite':
+        this.asyncAnswers = params.answers;
+        return true;
+      case 'asyncQuestionRetire':
+        this.retiredQuestions.push(params.questionId);
+        return true;
       case 'questionRead':
         return this.questionAnswers;
       case 'questionWrite':

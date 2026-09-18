@@ -103,8 +103,10 @@ gx board start-work <bead-id> [--agent <agentId>] [--model <model>] [--effort <l
   starting another worker. Calling it and then starting your own worker puts
   two workers on the same card.
 - **Pick the worker's model with `--model` and `--effort`** (Claude and Codex
-  workers only). They apply to that worker session only, a resume keeps them,
-  and the user's default model is untouched. Ghostex releases whose
+  workers only, when `start-work` creates a new worker). A reused linked worker
+  keeps its existing model and effort. The choice applies to the new worker
+  session only, a resume keeps it, and the user's default model is untouched.
+  Ghostex releases whose
   `gx board --help` does not list them ignore the flags, and the worker starts
   on the default model.
 - **Already working the bead? Do not call it.** An agent that is itself doing

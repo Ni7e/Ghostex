@@ -94,7 +94,7 @@ export function createNativeProjectMembershipMenu(ui: NativeSidebarUiState, grou
   );
   const current = membership.get(projectId);
   const groupMenu: NativeSidebarMenuItem = {
-    label: 'Add to project group',
+    label: 'Add to Group',
     icon: 'plus',
     presentation: 'page',
     children: [

@@ -189,8 +189,8 @@ pub(crate) fn with_agent_model_options(
     let mut removed = Vec::new();
     let mut index = 0;
     while index < words.len() {
-        let (start, end, word) = &words[index];
-        let is_flag = command[*start..*end].starts_with('-');
+        let (start, _, word) = &words[index];
+        let is_flag = word.starts_with('-');
         let next_value = words.get(index + 1).map(|(_, _, value)| value.as_str());
         let (remove, takes_value) = match (agent, word.as_str()) {
             _ if !is_flag => (false, false),

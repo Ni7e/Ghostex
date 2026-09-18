@@ -708,6 +708,9 @@ impl GpuiUpdateAvailableModalWindow {
                 div()
                     .w_full()
                     .min_w_0()
+                    // CDXC:Release 2026-09-18 WHY:
+                    // Shrinking blocks to the 260px viewport hides their overflowing text from GPUI's scroll bounds, leaving release notes clipped and unable to scroll.
+                    .flex_shrink_0()
                     .mt(px(gap))
                     .mb(px(trailing))
                     .child(self.render_block(block)),

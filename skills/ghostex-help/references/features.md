@@ -103,6 +103,7 @@ Related settings: `terminalViewWidthMode`, `webLinkOpenTarget`,
 
 The sidebar lists projects and their sessions. Project headers carry the git
 branch and diff stats, an agent launcher, Add Worktree, and project actions.
+Right-click a project for Open Folder in the file manager or Add to Group.
 Close Project parks the project in Recent Projects; when it held the active
 session, Ghostex stays in the current Space and switches to an awake session
 of the next project in the list.
@@ -501,7 +502,7 @@ Code/Docs preferences as transcript links. Double-click a composer pill to edit
 its reference text. Right-click a file reference or file-change path for Open in
 Code, Open in Docs (Markdown, HTML, and Excalidraw), Copy Path, or Open File/Folder
 Location. Open File/Folder Location appears directly below the path-copy actions
-in chat, image previews, Git changed files, projects, and Docs menus, and opens
+in chat, image previews, Git changed files, and Docs menus, and opens
 the location in the machine’s file manager. It requires a local desktop path.
 Disabled Code and Docs views are omitted from the menu.
 Hosts without an editor copy the path on click.
@@ -732,7 +733,8 @@ Cross-agent orchestration also works through the `$ghostex-cli` skill. For
    To pick the worker's model and effort, add `--model <model> --effort <level>`
    to `create-agent` or `board start-work` (Claude and Codex). The choice
    applies to that session only, survives a resume, and leaves your default
-   model unchanged.
+   model unchanged. For `board start-work`, these flags apply only when a new
+   worker is created; a reused linked worker keeps its existing model and effort.
 3. The optional Fable 5.6 Orchestration skill (`$ghostex-fable-56-orchestration`)
    packages a plan-with-Claude, implement-with-Codex, verify-with-Claude
    pipeline.

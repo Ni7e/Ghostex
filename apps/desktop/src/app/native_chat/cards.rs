@@ -40,29 +40,51 @@ impl NativeChatView {
         p: &ChatAppearance,
     ) -> AnyElement {
         let s = p.scale;
+        let has_actions = !actions.is_empty();
+        let panel_color = gpui::rgb(if p.light { 0xfdfdfd } else { 0x1e1e1e });
+        let footer_color = gpui::rgb(if p.light { 0xf5f5f5 } else { 0x151515 });
         div()
             .w_full()
             .min_w_0()
             .flex()
             .flex_col()
             .border_1()
-            .border_color(p.border)
+            .border_color(p.input_border)
             .rounded(px(12.0 * s))
+            // CDXC:SessionChat 2026-09-18 WHY:
+            // GPUI overflow masks are rectangular, so a square child fill leaked beyond the status card's rounded corners.
+            // Paint the outer tone on the rounded shell and round only the inset panel's top corners when a footer supplies the bottom tone.
+            .bg(if has_actions {
+                footer_color
+            } else {
+                panel_color
+            })
             .overflow_hidden()
-            .text_color(p.muted)
+            .text_color(p.card_muted)
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .px(px(16.0 * s))
                     .py(px(12.0 * s))
-                    .bg(gpui::rgb(if p.light { 0xfdfdfd } else { 0x1e1e1e }))
+                    .when(has_actions, |panel| {
+                        panel
+                            .rounded_t(px((12.0 * s - 1.0).max(0.0)))
+                            .bg(panel_color)
+                    })
                     .child(header)
-                    .when(!body.is_empty(), |panel| panel.child(
-                        div().flex().flex_col().gap(px(12.0 * s)).pt(px(8.0 * s)).children(body)
-                    )),
+                    .when(!body.is_empty(), |panel| {
+                        panel.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(12.0 * s))
+                                .pt(px(8.0 * s))
+                                .children(body),
+                        )
+                    }),
             )
-            .when(!actions.is_empty(), |this| {
+            .when(has_actions, |this| {
                 this.child(
                     div()
                         .flex()
@@ -73,8 +95,7 @@ impl NativeChatView {
                         .px(px(16.0 * s))
                         .py(px(10.0 * s))
                         .border_t_1()
-                        .border_color(p.border.opacity(0.65))
-                        .bg(gpui::rgb(if p.light { 0xf5f5f5 } else { 0x151515 }))
+                        .border_color(p.control_border.opacity(0.65))
                         .children(actions),
                 )
             })
