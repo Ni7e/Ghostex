@@ -275,7 +275,7 @@ The iOS TestFlight runs through the [Discord](https://discord.gg/df7b3G92CS). Po
 
 ## Comparison
 
-| Feature                   | Ghostex | Codex app | cmux |
+| Feature                   | Ghostex | ChatGPT app | cmux |
 | ------------------------- | ------- | --------- | ---- |
 | macOS support             | Yes     | Yes       | Yes  |
 | Windows support           | Yes     | Yes       | No   |
