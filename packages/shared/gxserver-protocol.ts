@@ -3256,6 +3256,11 @@ export interface GxserverSelectSessionChatModelParams {
   model: string;
   /** Effort id the reasoning list must offer for that model (`high`). */
   effort: string;
+  /**
+   * `'session'` applies the choice to this session alone and leaves the agent's saved default untouched;
+   * `'default'` (the default when omitted) keeps the original behaviour. Only Claude can honour `'session'`.
+   */
+  scope?: import('./session-chat').SessionChatModelSelectionScope;
 }
 
 export interface GxserverSelectSessionChatModelResult {
@@ -3264,6 +3269,8 @@ export interface GxserverSelectSessionChatModelResult {
   pendingModelSelection?: import('./session-chat').SessionChatPendingModelSelection;
   model: string;
   effort: string;
+  /** Echoed so a client can tell a scope-aware daemon from one that ignored the field. */
+  scope?: import('./session-chat').SessionChatModelSelectionScope;
 }
 
 export interface GxserverTerminalTitleEventParams extends GxserverSessionLifecycleParams {

@@ -66,7 +66,8 @@ export function computeNativeChatControls(
   }, [provider, panelProvider, chat.sessionAgentId, chat.accountSwitch?.id, chat.accountSwitch?.phase]);
   const ready =
     (!chat.accountSwitch?.toAccountId || accounts?.session?.accountId === chat.accountSwitch.toAccountId) &&
-    !chat.pendingModelSelection;
+    chat.pendingModelSelection?.state !== 'queued' &&
+    chat.pendingModelSelection?.state !== 'applying';
   const accountStatus = computeAccountSwitchStatus(chat.accountSwitch, undefined, ready, lifecycle);
   return {
     accounts,

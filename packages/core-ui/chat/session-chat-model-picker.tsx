@@ -24,9 +24,12 @@ import {
   modelPickerChooseModel,
   modelPickerChooseEffort,
   modelPickerNextEffortIndex,
+  modelPickerSupportsSessionScope,
+  MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
   type ModelPickerRequest,
   type ModelPickerSelection,
 } from '@/packages/shared/session-chat-presentation/model-picker';
+import type { SessionChatModelSelectionScope } from '@/packages/shared/session-chat';
 
 /**
  * CDXC:SessionChat 2026-09-05 DECISION:
@@ -56,8 +59,8 @@ export function SessionChatModelPicker({
 }: {
   request: ModelPickerRequest;
   container: HTMLElement;
-  onSave: (selection: ModelPickerSelection) => void;
-  onCommit?: (selection: ModelPickerSelection) => Promise<void>;
+  onSave: (selection: ModelPickerSelection, scope: SessionChatModelSelectionScope) => void;
+  onCommit?: (selection: ModelPickerSelection, scope: SessionChatModelSelectionScope) => Promise<void>;
   notice?: ReactNode;
   onClose: () => void;
   cancelRequested?: boolean;
@@ -80,6 +83,8 @@ export function SessionChatModelPicker({
   const model = request.models[modelIndex]!;
   const effortIndex = request.efforts.findIndex((effort) => effort.value === selection.effort);
   const agent = getDefaultSidebarAgentById(request.provider)!;
+  const sessionScope = modelPickerSupportsSessionScope(request.provider);
+  const defaultScope: SessionChatModelSelectionScope = sessionScope ? 'session' : 'default';
   const {
     narrow,
     viewportHeight,
@@ -117,7 +122,7 @@ export function SessionChatModelPicker({
     if (!committing) selectedTile.current?.focus({ preventScroll: true });
   }, [selection.model, selection.effort, committing]);
 
-  const finish = (save: boolean, choice = selection) => {
+  const finish = (save: boolean, choice = selection, scope: SessionChatModelSelectionScope = defaultScope) => {
     if (closingRef.current) return;
     closingRef.current = true;
     setCommitting(save);
@@ -125,13 +130,13 @@ export function SessionChatModelPicker({
       if (!mounted.current) return;
       setClosing(true);
       timer.current = setTimeout(
-        () => (save ? onSave(choice) : onClose()),
+        () => (save ? onSave(choice, scope) : onClose()),
         window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 190
       );
     };
     // The terminal host must receive durable acceptance before its native window can close.
     if (save && onCommit) {
-      void onCommit(choice).then(animateClose, () => {
+      void onCommit(choice, scope).then(animateClose, () => {
         if (!mounted.current) return;
         closingRef.current = false;
         setCommitting(false);
@@ -176,6 +181,7 @@ export function SessionChatModelPicker({
     if (control === 'ArrowLeft') moveEffort(-1);
     if (control === 'ArrowRight') moveEffort(1);
     if (control === 'Enter') finish(true);
+    if (control === 'EnterDefault') finish(true, selection, 'default');
     if (control === 'Escape') finish(false);
   };
   useModelPickerWheelNavigation(popup, navigate);
@@ -501,12 +507,28 @@ export function SessionChatModelPicker({
               <button
                 type='button'
                 data-key-pressed={pressed.has('Enter') ? '' : undefined}
-                disabled={closing || committing}
-                onClick={() => finish(true)}
+                disabled={closing || committing || !sessionScope}
+                title={sessionScope ? undefined : MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON}
+                aria-describedby={sessionScope ? undefined : 'model-picker-scope-reason'}
+                onClick={() => finish(true, selection, 'session')}
               >
                 <kbd>↵</kbd>
-                <span>Save</span>
+                <span>Use in this session</span>
               </button>
+              <button
+                type='button'
+                data-key-pressed={pressed.has(sessionScope ? 'EnterDefault' : 'Enter') ? '' : undefined}
+                disabled={closing || committing}
+                onClick={() => finish(true, selection, 'default')}
+              >
+                <kbd>{sessionScope ? '⇧↵' : '↵'}</kbd>
+                <span>Set as default</span>
+              </button>
+              {sessionScope ? null : (
+                <span id='model-picker-scope-reason' className='model-picker-sr-only'>
+                  {MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON}
+                </span>
+              )}
               <button
                 type='button'
                 data-key-pressed={pressed.has('Escape') ? '' : undefined}

@@ -216,6 +216,14 @@ export const storageCatalog = Object.freeze({
     objectCodec,
     protectedDisk
   ),
+  modelScopeDefault: define(
+    'modelScopeDefault',
+    'Model pills that also set the default',
+    chat + 'session-chat-model-picker-launcher.tsx',
+    'ghostex.model-selection-also-default.',
+    boolean,
+    cache
+  ),
   retiredQuestions: define(
     'retiredQuestions',
     'Answered question receipts',

@@ -1,4 +1,4 @@
-import type { SessionChatSendKey, SessionChatSelectionOptions } from '../session-chat';
+import type { SessionChatModelSelectionScope, SessionChatSendKey, SessionChatSelectionOptions } from '../session-chat';
 import type { ModelPickerSelection } from '../session-chat-presentation/model-picker';
 import type { SessionChatOptionDispatchReceipt } from './option-state';
 import {
@@ -23,11 +23,14 @@ export function queueSessionChatOption(
     queuedControls,
     quickPicker,
     picker,
+    scope,
   }: OptionTarget & {
     queuedControls: boolean;
     quickPicker: boolean;
+    /** Where a model or effort pick from these pills lands; see modelScopeForPills. */
+    scope?: SessionChatModelSelectionScope;
     picker: {
-      select(selection: ModelPickerSelection): void;
+      select(selection: ModelPickerSelection, options?: SessionChatSelectionOptions, scope?: SessionChatModelSelectionScope): void;
       selectOptions(options: SessionChatSelectionOptions): void;
     } | null;
   }
@@ -51,7 +54,7 @@ export function queueSessionChatOption(
       effortOption?.defaultValue ??
       effortOption?.choices?.[0]?.value ??
       '';
-    picker?.select({ model, effort });
+    picker?.select({ model, effort }, undefined, scope);
     return true;
   }
   return false;

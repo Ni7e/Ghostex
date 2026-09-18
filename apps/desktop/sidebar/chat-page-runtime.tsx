@@ -397,6 +397,7 @@ made the chat's typeface impossible to change from CSS.
           defer: params.defer,
           options: params.options,
           model: params.model,
+          scope: params.scope,
           projectId,
           sessionId,
         });

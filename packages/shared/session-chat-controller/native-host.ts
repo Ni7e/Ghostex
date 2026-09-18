@@ -30,6 +30,7 @@ import { NativeModelPicker } from './native-model-picker';
 import { currentAgentModelCatalog } from '../agent-model-catalog-state';
 import { createModelPickerRequest } from '../session-chat-presentation/model-picker-request';
 import { modelSelectionUnchanged } from './model-selection';
+import { modelScopeForPills } from '../session-chat-presentation/model-picker';
 import { adoptAgentModelCatalog } from '../agent-model-catalog-state';
 import { computeNativeChatOptions, nativeOptionPersistence } from './native-options';
 import {
@@ -878,6 +879,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
             queuedControls: options.catalog?.modelIcon === 'codex' || options.catalog?.modelIcon === 'claude',
             quickPicker: !!chat.modelProvider,
             picker: chat.modelSelection,
+            scope: modelScopeForPills(chat.modelProvider, chat.modelSelection.alsoSetDefault),
           })
         )
           break;
@@ -930,7 +932,7 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         modelPicker = new NativeModelPicker(
           request,
           () => publish(controller.current()),
-          (selection) => {
+          (selection, scope) => {
             const current = controller.current();
             if (
               selection &&
@@ -942,10 +944,11 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
                   model: current.sessionOptions.state.model?.value,
                   effort: current.sessionOptions.state.effort?.value,
                 },
-                request
+                request,
+                scope
               )
             ) {
-              current.modelSelection.select(selection);
+              current.modelSelection.select(selection, undefined, scope);
             }
             modelPicker?.dispose();
             modelPicker = null;
@@ -981,6 +984,9 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         break;
       case 'modelPickerCancel':
         modelPicker?.finish(false);
+        break;
+      case 'setModelScopeDefault':
+        controller.current().modelSelection.setAlsoSetDefault(command.value);
         break;
       case 'measureComposer':
         composerOverflow = fitChatComposerControls(command.measurements);

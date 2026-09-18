@@ -47,6 +47,30 @@ impl ChatOptionMenuPanel {
                     cx,
                 )
             });
+        } else if row["keepOpen"] == true {
+            // CDXC:SessionChat 2026-09-18 DECISION:
+            // User: a checkbox in a pill menu has to stay open, so the box can be toggled and the model picked in one visit.
+            // The row flips its own check and its command's next value here; the controller owns the stored preference, and the label and description never change, so the panel keeps its measured heights.
+            let Some(command) = row.get("command").cloned() else {
+                return;
+            };
+            let rows = std::sync::Arc::make_mut(&mut self.rows);
+            let Some(row) = rows.get_mut(index) else {
+                return;
+            };
+            let checked = row["checked"] == true;
+            row["checked"] = Value::Bool(!checked);
+            row["command"]["value"] = Value::Bool(checked);
+            if let Some(chat) = self.menu.read(cx).chat.upgrade() {
+                chat.update(cx, |chat, cx| {
+                    chat.handle_action(
+                        &super::super::actions::NativeChatAction { command },
+                        window,
+                        cx,
+                    );
+                });
+            }
+            cx.notify();
         } else if let Some(command) = row.get("command") {
             let command = command.clone();
             if row["keepOpen"] == true {
@@ -365,7 +389,41 @@ impl Render for ChatOptionMenuPanel {
                         .child(detail.to_owned()),
                 );
             }
-            if children || row.get("checked").is_some() {
+            if row["toggle"] == true {
+                // CDXC:SessionChat 2026-09-18 DECISION:
+                // User: a row that turns something on or off wears the app's switch, not a check mark.
+                // Geometry and colours mirror the small size of packages/components/ui/switch.tsx: a 24x16 track with a 2px border and 6px radius, and a 12px thumb with a 4px radius that travels 8px.
+                let checked = row["checked"] == true;
+                item = item.child(
+                    div()
+                        .flex_shrink_0()
+                        .w(px(24.0 * scale))
+                        .h(px(16.0 * scale))
+                        .rounded(px(6.0 * scale))
+                        .border(px(2.0 * scale))
+                        .border_color(if checked {
+                            appearance.primary
+                        } else {
+                            gpui::transparent_black()
+                        })
+                        .bg(if checked {
+                            appearance.primary
+                        } else {
+                            appearance.input.opacity(0.9)
+                        })
+                        .child(
+                            div()
+                                .size(px(12.0 * scale))
+                                .ml(px(if checked { 8.0 } else { 0.0 } * scale))
+                                .rounded(px(4.0 * scale))
+                                .bg(if checked || appearance.light {
+                                    appearance.background
+                                } else {
+                                    appearance.foreground
+                                }),
+                        ),
+                );
+            } else if children || row.get("checked").is_some() {
                 item = item.child(div().flex_shrink_0().size(px(14.0 * scale)).when(
                     children || row["checked"] == true,
                     |item| {

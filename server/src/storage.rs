@@ -1662,6 +1662,10 @@ pub const GXSERVER_STORAGE_MIGRATIONS: &[Migration] = &[
         id: "0038_delayed_send_watched_session",
         sql: include_str!("storage/migrations/0038_delayed_send_watched_session.sql"),
     },
+    Migration {
+        id: "0039_session_chat_selection_scope",
+        sql: include_str!("storage/migrations/0039_session_chat_selection_scope.sql"),
+    },
 ];
 
 #[cfg(unix)]
@@ -1710,10 +1714,10 @@ mod tests {
         let journal_mode: String = db
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode");
-        assert_eq!(user_version, 38);
+        assert_eq!(user_version, 39);
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode, "wal");
-        assert_eq!(schema_migration_count(&db), 38);
+        assert_eq!(schema_migration_count(&db), 39);
         assert_eq!(
             explicit_index_names(&db),
             vec![

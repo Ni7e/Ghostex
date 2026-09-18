@@ -1,5 +1,6 @@
 export type PickerDirection = 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight';
-export type PickerControl = PickerDirection | 'Enter' | 'Escape';
+/** `EnterDefault` is Shift+Enter: commit the same choice, but to the agent's saved default. */
+export type PickerControl = PickerDirection | 'Enter' | 'EnterDefault' | 'Escape';
 
 const controls: Record<string, PickerControl> = {
   ArrowUp: 'ArrowUp',
@@ -27,8 +28,10 @@ export function modelPickerControlForKey(event: {
   altKey?: boolean;
   ctrlKey?: boolean;
   metaKey?: boolean;
+  shiftKey?: boolean;
 }): PickerControl | undefined {
   if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key === 'Enter' && event.shiftKey) return 'EnterDefault';
   return controls[event.key] ?? controls[event.key.toLowerCase()];
 }
 

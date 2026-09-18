@@ -1,13 +1,23 @@
 import { storageScope } from '@/packages/client-storage';
 import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
-import type { SessionChatPendingModelSelection, SessionChatSelectionOptions } from '../session-chat';
-import type { ModelPickerRequest, ModelPickerSelection } from '../session-chat-presentation/model-picker';
+import type {
+  SessionChatModelSelectionScope,
+  SessionChatPendingModelSelection,
+  SessionChatSelectionOptions,
+} from '../session-chat';
+import {
+  modelPickerSupportsSessionScope,
+  type ModelPickerRequest,
+  type ModelPickerSelection,
+} from '../session-chat-presentation/model-picker';
 import type { ChatLifecycle } from './lifecycle';
 import type { SessionChatOptionDispatchReceipt } from './option-state';
 
 export interface ModelSelectionIntent extends ModelPickerSelection {
   id: string;
   options?: SessionChatSelectionOptions;
+  /** Omitted means `'default'`, which is what every pick did before the scope existed. */
+  scope?: SessionChatModelSelectionScope;
 }
 
 export interface ModelSelectionPersistence {
@@ -17,6 +27,13 @@ export interface ModelSelectionPersistence {
 }
 
 const storage = storageScope(['modelOutbox']);
+/**
+ * CDXC:SessionChat 2026-09-18 DECISION:
+ * User: the composer's model and effort pills get a checkbox rather than silently becoming session-only.
+ * It is per session and off by default, so a pill pick leaves the agent's saved default alone until this session says otherwise.
+ */
+const scopeStorage = storageScope(['modelScopeDefault']);
+const scopeStorageKey = (key: string) => `ghostex.model-selection-also-default.${key}`;
 const storageKey = (key: string) => `ghostex.model-selection-outbox.${key}`;
 export function storedModelSelectionKeys(sessionKey: string): string[] {
   return storage
@@ -46,8 +63,27 @@ export const modelSelectionPersistence: ModelSelectionPersistence = {
   },
 };
 
+export const modelScopeDefaultPersistence = {
+  read(key: string): boolean {
+    try {
+      return scopeStorage.getItem(scopeStorageKey(key)) === 'true';
+    } catch {
+      return false;
+    }
+  },
+  write(key: string, value: boolean): void {
+    try {
+      scopeStorage.setItem(scopeStorageKey(key), value ? 'true' : 'false');
+    } catch {
+      /* The choice still applies to this mount. */
+    }
+  },
+};
+
 export function queuedModelSelection(select: NonNullable<SessionChatTransport['selectSessionChatModel']>) {
-  return async (params: ModelPickerSelection & { options?: SessionChatSelectionOptions }) => {
+  return async (
+    params: ModelPickerSelection & { options?: SessionChatSelectionOptions; scope?: SessionChatModelSelectionScope }
+  ) => {
     const result = await select({ ...params, defer: true });
     if (!result.queued || !result.pendingModelSelection)
       throw new Error('The server has not accepted this selection into its queue.');
@@ -57,16 +93,30 @@ export function queuedModelSelection(select: NonNullable<SessionChatTransport['s
       )
     )
       throw new Error('Waiting for the server to support queued mode changes.');
+    // An older daemon drops the field and would apply a session-only pick as the saved default.
+    if (params.scope === 'session' && result.pendingModelSelection.scope !== 'session')
+      throw new Error('Waiting for the server to support session-only model picks.');
     return result.pendingModelSelection;
   };
 }
 
 export function modelSelectionUnchanged(
   selection: ModelPickerSelection,
-  desired: ModelPickerSelection | null | undefined,
+  desired: (ModelPickerSelection & { scope?: SessionChatModelSelectionScope }) | null | undefined,
   current: { model?: string; effort?: string },
-  request: ModelPickerRequest | null
+  request: ModelPickerRequest | null,
+  scope?: SessionChatModelSelectionScope
 ): boolean {
+  // Where the agent can tell the two scopes apart, the same model with the other scope is a change:
+  // it promotes a session-only choice to the saved default, or spares the default from a pending one.
+  if (scope && request && modelPickerSupportsSessionScope(request.provider)) {
+    if (desired) {
+      if ((desired.scope ?? 'default') !== scope) return false;
+    } else if (scope === 'default') {
+      // The session already runs this model; whether the saved default does is unknown here.
+      return false;
+    }
+  }
   if (desired) return desired.model === selection.model && desired.effort === selection.effort;
   return (
     selection.model === current.model &&
@@ -97,6 +147,7 @@ export function computeModelSelectionOutbox(
   const persistence = params.persistence ?? modelSelectionPersistence;
   const key = params.sessionKey ?? '';
   const [outbox, setOutbox] = useState<ModelSelectionIntent | null>(() => persistence.read(key));
+  const [alsoSetDefault, setAlsoSetDefaultState] = useState(() => modelScopeDefaultPersistence.read(key));
   const latest = useRef(outbox);
   const receipt = useRef<{
     id: string;
@@ -104,11 +155,14 @@ export function computeModelSelectionOutbox(
     value: SessionChatOptionDispatchReceipt;
   } | null>(null);
   latest.current = outbox;
-  const desired = outbox ?? params.pending;
+  // A failed selection never applied, so it is not what this session is heading for.
+  const pending = params.pending?.state === 'failed' ? null : params.pending;
+  const desired = outbox ?? pending;
 
   useEffect(() => {
     latest.current = persistence.read(key);
     setOutbox(latest.current);
+    setAlsoSetDefaultState(modelScopeDefaultPersistence.read(key));
     receipt.current = null;
   }, [key, persistence]);
 
@@ -166,8 +220,19 @@ export function computeModelSelectionOutbox(
   }, [outbox, params.deliver, key, persistence]);
 
   const persist = useCallback(
-    (selection: ModelPickerSelection, options?: SessionChatSelectionOptions) => {
-      const next = { ...selection, options: { ...latest.current?.options, ...options }, id: crypto.randomUUID() };
+    (
+      selection: ModelPickerSelection,
+      options?: SessionChatSelectionOptions,
+      scope?: SessionChatModelSelectionScope
+    ) => {
+      // An options-only change carries no scope of its own, so it keeps the pending model choice's.
+      const inherited = scope ?? latest.current?.scope;
+      const next = {
+        ...selection,
+        options: { ...latest.current?.options, ...options },
+        ...(inherited ? { scope: inherited } : {}),
+        id: crypto.randomUUID(),
+      };
       // A storage failure must not discard the pending in-memory selection.
       try {
         void Promise.resolve(persistence.write(key, next)).catch(() => undefined);
@@ -180,6 +245,16 @@ export function computeModelSelectionOutbox(
   return {
     desired,
     outbox,
+    /** The reason the last selection was abandoned, for the surface that offered it. */
+    selectionError: params.pending?.state === 'failed' ? (params.pending.errorMessage ?? null) : null,
+    alsoSetDefault,
+    setAlsoSetDefault: useCallback(
+      (next: boolean) => {
+        modelScopeDefaultPersistence.write(key, next);
+        setAlsoSetDefaultState(next);
+      },
+      [key]
+    ),
     select: persist,
     selectOptions: useCallback(
       (options: SessionChatSelectionOptions) =>

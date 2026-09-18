@@ -85,6 +85,7 @@ export interface SessionChatTransport {
     options?: import('@/packages/shared/session-chat').SessionChatSelectionOptions;
     model: string;
     effort: string;
+    scope?: import('@/packages/shared/session-chat').SessionChatModelSelectionScope;
     defer?: boolean;
   }): Promise<GxserverSelectSessionChatModelResult>;
   /** Returns an unsubscribe function. Events must already be filtered to this session. */
