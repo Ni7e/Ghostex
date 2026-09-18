@@ -201,7 +201,9 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         let open = self.native_sidebar.menu.take().is_some();
-        if open { cx.notify(); }
+        if open {
+            cx.notify();
+        }
         open
     }
 }

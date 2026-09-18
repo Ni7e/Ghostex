@@ -48,7 +48,10 @@ impl GhostexGpuiApp {
             .extensions_snapshot
             .installed
             .values()
-            .filter(|extension| extension.enabled)
+            .filter(|extension| {
+                extension.enabled
+                    && self.view_scope_allows(&extension_view_scope_key(&extension.id))
+            })
             .cloned()
             .collect::<Vec<_>>();
         extensions.sort_by(|left, right| {
@@ -110,7 +113,17 @@ impl GhostexGpuiApp {
             .extensions_snapshot
             .installed
             .values()
-            .filter(|extension| extension.enabled && extension.pinned)
+            /*
+            CDXC:Extensions 2026-09-18 DECISION:
+            User: an extension's "Available in" scope decides where it is shown, so a pinned titlebar
+            button disappears in a project the extension is not scoped to, exactly like its view tab.
+            SEE-ALSO: apps/desktop/src/app/view_scopes.rs.
+            */
+            .filter(|extension| {
+                extension.enabled
+                    && extension.pinned
+                    && self.view_scope_allows(&extension_view_scope_key(&extension.id))
+            })
             .cloned()
             .collect::<Vec<_>>();
         extensions.sort_by(|left, right| {

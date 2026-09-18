@@ -139,7 +139,9 @@ impl GhostexGpuiApp {
         }
         if method == "composer" {
             let composer = &message["params"]["composer"];
-            if !composer.is_object() || composer.to_string().len() > 4 * 1024 * 1024 { return; }
+            if !composer.is_object() || composer.to_string().len() > 4 * 1024 * 1024 {
+                return;
+            }
             params.insert("composer".into(), composer.clone());
         }
         let client_id = message["clientId"]

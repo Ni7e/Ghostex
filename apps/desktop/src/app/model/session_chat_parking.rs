@@ -27,7 +27,8 @@ pub(crate) struct ParkedAgentsChatRuntime {
     pub(crate) page_states: HashMap<TerminalSessionId, SessionChatPageState>,
     /// Pending sends and handoffs remain protected until the owning project restores their runtime state.
     pub(crate) protected_sessions: HashSet<TerminalSessionId>,
-    pub(crate) native_views: HashMap<TerminalSessionId, Entity<crate::app::native_chat::state::NativeChatView>>,
+    pub(crate) native_views:
+        HashMap<TerminalSessionId, Entity<crate::app::native_chat::state::NativeChatView>>,
     pub(crate) surfaces: HashMap<TerminalSessionId, Entity<CefSurface>>,
     pub(crate) surface_hidden_since: HashMap<TerminalSessionId, Instant>,
     pub(crate) composer_ready_sessions: HashSet<TerminalSessionId>,

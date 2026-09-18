@@ -8,7 +8,7 @@
  * surfaces are separate components fed the same state object.
  */
 import { IconPuzzle, IconRefresh } from '@tabler/icons-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import type {
   GhostexExtensionCatalogEntry,
@@ -229,7 +229,22 @@ function ExtensionsErrorBanner({ error }: { error?: string }) {
 }
 
 /** The store/installed list, rendered inside the Extensions Store section. */
-export function ExtensionsBrowserList({ state }: { state: ExtensionsBrowserState }) {
+export function ExtensionsBrowserList({
+  onEditScope,
+  renderScopeEditor,
+  scopeSummaryFor,
+  state,
+}: {
+  /**
+   * CDXC:Extensions 2026-09-18 DECISION:
+   * User: an installed extension gets the same Edit button and "Available in" picker as a built-in view.
+   * The Settings page owns the `viewScopes` setting, so it supplies these; the standalone browser omits them.
+   */
+  onEditScope?: (extension: GhostexInstalledExtension) => void;
+  renderScopeEditor?: (extension: GhostexInstalledExtension) => ReactNode;
+  scopeSummaryFor?: (extension: GhostexInstalledExtension) => string | undefined;
+  state: ExtensionsBrowserState;
+}) {
   return (
     <div className='flex flex-col gap-3'>
       <ExtensionsErrorBanner error={state.error} />
@@ -258,6 +273,7 @@ export function ExtensionsBrowserList({ state }: { state: ExtensionsBrowserState
           iconUrlForInstalled={state.iconUrlForInstalled}
           installed={state.installed}
           loading={state.loading}
+          onEditScope={onEditScope}
           onInstalledDetails={(extension) => state.setSelectedInstalledId(extension.id)}
           onRefresh={() => void state.load()}
           onRemove={(extension) => void state.uninstallExtension(extension)}
@@ -267,6 +283,8 @@ export function ExtensionsBrowserList({ state }: { state: ExtensionsBrowserState
           onSetEnabled={(extension, enabled) => void state.setExtensionState(extension, { enabled })}
           onStoreDetails={(entry) => state.setSelectedStoreId(entry.name)}
           pendingIds={state.pendingIds}
+          renderScopeEditor={renderScopeEditor}
+          scopeSummaryFor={scopeSummaryFor}
         />
       )}
     </div>

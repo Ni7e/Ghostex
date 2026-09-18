@@ -906,6 +906,14 @@ docs directory), `hideProjectHeaderDiffStats`,
   Storybook, Linear, GitHub Issues, dev server commands, HTML reports).
   Extension commands use the active local project's folder unless the extension
   supplies a folder; relative folders are resolved inside the active project.
+  Every row on this page has an Edit (pencil) button that chooses where that
+  view, title bar button, or extension appears: All projects, Selected projects
+  (tick the projects), or Selected spaces (tick the spaces). Worktrees follow
+  their parent project, and a project inside a group follows the group. A row
+  narrowed this way shows its scope under its description, and the view or
+  button is simply absent while you work in a project it does not cover, so its
+  hotkeys and command palette entries go away with it. Custom views under Your
+  views use the same Available in picker inside their own editor.
   Its Titlebar account usage section lets you star saved Claude and Codex
   accounts to show their usage in the desktop titlebar, or unstar them to hide
   it. These are the same per-account stars available in Settings > Accounts.

@@ -541,6 +541,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   showAgentsPaneTabBarWhenUnsplit: false,
   customViews: [],
   customViewTemplates: [],
+  viewScopes: {},
   titlebarViewOrder: [],
   /**
    * CDXC:Titlebar 2026-05-11-00:22

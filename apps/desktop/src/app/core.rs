@@ -442,7 +442,8 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_chat_reconcile_scheduled: bool,
     pub(crate) agents_chat_eviction_requested: bool,
     pub(crate) session_chat_use_gpui: bool,
-    pub(crate) native_chat_views: HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,
+    pub(crate) native_chat_views:
+        HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,
     pub(crate) agents_chat_surfaces: HashMap<TerminalSessionId, Entity<CefSurface>>,
     pub(crate) session_chat_broker_endpoints: HashMap<String, (String, String)>,
     pub(crate) session_chat_broker_epoch: Option<String>,

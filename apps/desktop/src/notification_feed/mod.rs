@@ -348,11 +348,14 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn titlebar_notification_bell_visible(&self) -> bool {
+        // CDXC:Extensions 2026-09-18 SEE-ALSO:
+        // The bell is scoped like every other titlebar button; apps/desktop/src/app/view_scopes.rs owns the rule.
         !shared_settings::shared_sidebar_settings_snapshot()
             .object()
             .get(NOTIFICATIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY)
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
+            && self.official_view_scope_allows("notifications")
     }
 
     /// Toggles the Notifications dropdown anchored to the last painted bell

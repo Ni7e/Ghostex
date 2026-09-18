@@ -20,6 +20,7 @@ import { SessionChatDraftConflict } from './session-chat-draft-conflict';
 import { SessionChatExtensionPanel } from './session-chat-extension-panel';
 import { SessionChatGoalCard } from './session-chat-goal-card';
 import { SessionChatInteractiveCard } from './session-chat-interactive-card';
+import { SessionChatInterAgentMessageCard } from './session-chat-inter-agent-message-card';
 import { SessionChatTerminalNoticeCard } from './session-chat-terminal-notice-card';
 import { SessionChatTerminalToolRow } from './session-chat-terminal-tool-row';
 import { SessionChatWorkingStrip } from './session-chat-working-strip';
@@ -124,7 +125,11 @@ function StatusCardsPreview({ theme }: { theme: 'dark' | 'light' }) {
             />
           </Example>
         </Family>
-        <Family index={3} title='Transcript status' spec='Open cards whose chevron swaps a preview for the full text.'>
+        <Family
+          index={3}
+          title='Transcript status'
+          spec='Cards inside the transcript. The goal and the subagent message swap a preview for the full text with their chevron.'
+        >
           <Example label='Codex goal'>
             <SessionChatGoalCard
               objective='Unify the composer cards so every header shares one shape, then report which cards still differ. Keep each component responsible for its own state and let the shell own the look.'
@@ -136,6 +141,33 @@ function StatusCardsPreview({ theme }: { theme: 'dark' | 'light' }) {
             <SessionChatAgentMessageCard
               body='The card gallery now lists every composer card on the shared shell. Each component kept its own state and only lost its bespoke shell markup, so the next retune is one CSS edit.'
               sender='/root/windows_support'
+            />
+          </Example>
+          <Example label='Message from another agent'>
+            <SessionChatInterAgentMessageCard
+              message={{
+                agentName: 'Codex',
+                sessionTitle: 'Rebuild shared chat view',
+                sessionId: 'G88bs',
+                agentId: 'codex',
+                agentSessionId: '01a0ad50-b5b1-7bd1-9b67-f92a06a3d777',
+                replyTo: 'S90:P3lv0:G88bs',
+                body: 'Chat Lab package-only build is complete; host build control is released.\nMy `native_chat` Save Markdown and shared controller files remain uncommitted. I continue Tart-only CUA and will avoid your files.',
+              }}
+            />
+          </Example>
+          <Example label='Queued message from another agent'>
+            <SessionChatInterAgentMessageCard
+              message={{
+                agentName: 'Claude Code',
+                sessionTitle: 'Send message code header formatting',
+                sessionId: 'G3jlo',
+                agentId: 'claude',
+                agentSessionId: '',
+                replyTo: 'S90:P3lv0:G3jlo',
+                body: 'Header format changed. Can you rebuild the chat bundle once your build finishes?',
+              }}
+              queued
             />
           </Example>
         </Family>

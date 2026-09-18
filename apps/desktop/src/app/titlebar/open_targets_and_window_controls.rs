@@ -175,15 +175,26 @@ impl GhostexGpuiApp {
         let show_actions_button =
             cfg!(any(target_os = "macos", target_os = "windows")) || active_action.is_some();
         let settings = shared_settings::shared_sidebar_settings_snapshot();
-        let button_hidden = |key: &str| {
+        /*
+        CDXC:Extensions 2026-09-18 DECISION:
+        User: a titlebar button is scoped exactly like a workarea, so "hidden" now means either the
+        Extensions page switch is off OR the button's "Available in" scope excludes the active project.
+        Both live behind this one closure so every button stays one behaviour.
+        SEE-ALSO: apps/desktop/src/app/view_scopes.rs, packages/core-ui/settings-modal/tabs/extensions.tsx.
+        */
+        let button_hidden = |key: &str, official_extension_id: &str| {
             settings
                 .object()
                 .get(key)
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
+                || !self.official_view_scope_allows(official_extension_id)
         };
         let pinned_extension_buttons = self.render_titlebar_pinned_extension_buttons(window, cx);
-        let show_extensions_button = !button_hidden(EXTENSIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY);
+        let show_extensions_button = !button_hidden(
+            EXTENSIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
+            "extensionsButton",
+        );
         let buttons = h_flex()
             .flex_shrink_0()
             .mt(px(1.0))
@@ -215,11 +226,11 @@ impl GhostexGpuiApp {
                 this
             })
             .when(
-                !button_hidden(HELP_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
+                !button_hidden(HELP_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "help"),
                 |this| this.child(self.render_titlebar_help_button(window, cx)),
             )
             .when(
-                !button_hidden(TIPS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
+                !button_hidden(TIPS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "tips"),
                 |this| {
                     this.child(self.render_titlebar_native_popup_button(
                         GpuiTitlebarPopupKind::Tips,
@@ -232,7 +243,10 @@ impl GhostexGpuiApp {
                 },
             )
             .when(
-                !button_hidden(DEV_SERVERS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
+                !button_hidden(
+                    DEV_SERVERS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
+                    "devServers",
+                ),
                 |this| {
                     this.child(self.render_titlebar_native_popup_button(
                         GpuiTitlebarPopupKind::RemoteSites,
@@ -245,7 +259,7 @@ impl GhostexGpuiApp {
                 },
             )
             .when(
-                !button_hidden(RESOURCES_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
+                !button_hidden(RESOURCES_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "resources"),
                 |this| {
                     this.child(self.render_titlebar_native_popup_button(
                         GpuiTitlebarPopupKind::Resources,
@@ -258,18 +272,24 @@ impl GhostexGpuiApp {
                 },
             )
             .when(
-                !button_hidden(GIT_ACTIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
+                !button_hidden(
+                    GIT_ACTIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
+                    "gitActions",
+                ),
                 |this| this.child(self.render_titlebar_git_button(window, cx)),
             )
             .when(
                 show_actions_button
-                    && !button_hidden(QUICK_ACTIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
+                    && !button_hidden(
+                        QUICK_ACTIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
+                        "quickActions",
+                    ),
                 |this| {
                     this.child(self.render_titlebar_actions_button(actions_icon_path, window, cx))
                 },
             )
             .when(
-                !button_hidden(OPEN_IN_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY),
+                !button_hidden(OPEN_IN_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "openIn"),
                 |this| this.child(self.render_titlebar_open_targets_button(window, cx)),
             )
             .child(self.render_titlebar_extension_popup_panel(window, cx));

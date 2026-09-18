@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { SettingsModal, type TailcatSettingsRpc } from './settings-modal';
 import { DEFAULT_ghostex_SETTINGS, type ghostexSettings } from '../shared/ghostex-settings';
+import type { ProjectViewProject, ProjectViewSpace } from '../shared/ghostex-settings/project-views';
 import { normalizeSessionCardHoverButtons } from '../shared/session-card-hover-actions';
 import { DEFAULT_SIDEBAR_AGENTS } from '../shared/sidebar-agents';
 import { encodeEasyConnectCode, encodeTailscaleCode } from '../shared/ghostex-remote-pairing';
@@ -14,6 +15,7 @@ import type {
 import type {
   SidebarAgentHookStatusMessage,
   SidebarGhostexCliStatusMessage,
+  SidebarPluginSettingsStatusMessage,
   SidebarProjectSettingsItem,
 } from '../shared/session-grid-contract';
 
@@ -180,15 +182,30 @@ function SettingsModalStory({
   initialSettings = modalSettings,
   initialTab = 'settings',
   nativeWindow = false,
+  pluginSettingsStatus,
   projects,
+  projectViewProjects,
+  projectViewSpaces,
   remoteRpc,
 }: {
   cuaDriverInstalled?: boolean;
   cuaPermissionsGranted?: boolean;
   initialSettings?: ghostexSettings;
-  initialTab?: 'settings' | 'integrations' | 'projects' | 'agents' | 'actions' | 'openTargets' | 'hotkeys' | 'remote';
+  initialTab?:
+    | 'settings'
+    | 'integrations'
+    | 'projects'
+    | 'agents'
+    | 'actions'
+    | 'openTargets'
+    | 'hotkeys'
+    | 'remote'
+    | 'extensions';
   nativeWindow?: boolean;
+  pluginSettingsStatus?: SidebarPluginSettingsStatusMessage;
   projects?: SidebarProjectSettingsItem[];
+  projectViewProjects?: ProjectViewProject[];
+  projectViewSpaces?: ProjectViewSpace[];
   remoteRpc?: TailcatSettingsRpc;
 }) {
   const [settings, setSettings] = useState<ghostexSettings>(initialSettings);
@@ -316,7 +333,11 @@ function SettingsModalStory({
         onOpenScreenRecordingPreferences={() => undefined}
         onRequestAgentHookStatus={() => undefined}
         onRequestGhostexCliStatus={() => undefined}
+        onReinstallPlugin={pluginSettingsStatus ? () => undefined : undefined}
+        pluginSettingsStatus={pluginSettingsStatus}
         projects={projects}
+        projectViewProjects={projectViewProjects}
+        projectViewSpaces={projectViewSpaces}
         settings={settings}
         tailcatRpc={remoteRpc}
         theme={settings.sidebarTheme === 'plain-light' ? 'plain-light' : 'dark-blue'}
@@ -373,6 +394,59 @@ export const IntegrationsTrycuaMissing: Story = {
 
 export const Projects: Story = {
   render: () => <SettingsModalStory initialTab='projects' projects={storyProjects} />,
+};
+
+const storyScopeProjects: ProjectViewProject[] = storyProjects.map((project) => ({
+  name: project.name,
+  path: project.path,
+  projectId: project.projectId,
+}));
+
+const storySpaces: ProjectViewSpace[] = [
+  { name: 'Macbook', sectionKey: 'local', spaceId: 'space-1-a' },
+  { name: 'Ghostex', sectionKey: 'local', spaceId: 'space-2-b' },
+  { name: 'ShortPoint', sectionKey: 'local', spaceId: 'space-3-c' },
+  { name: 'My Apps', sectionKey: 'local', spaceId: 'space-4-d' },
+];
+
+/*
+ * CDXC:Extensions 2026-09-18:
+ * Settings -> Extensions with Spaces and Projects available, so the per-row Edit button and its
+ * "Available in" editor can be reviewed on the Workareas, Title bar buttons, and Your views lists.
+ * The Extensions Store section needs a gxserver bootstrap and is absent here by design.
+ */
+const storyPluginStatus: SidebarPluginSettingsStatusMessage = {
+  plugins: [
+    {
+      canReinstall: true,
+      id: 'code',
+      sizeBytes: 157_286_400,
+      status: 'installed',
+      statusLabel: 'Installed',
+      version: '1.136.1',
+    },
+    {
+      canReinstall: true,
+      id: 'cef',
+      sizeBytes: 419_430_400,
+      status: 'installed',
+      statusLabel: 'Installed',
+      version: '140.1.14',
+    },
+  ],
+  type: 'pluginSettingsStatus',
+};
+
+export const Extensions: Story = {
+  render: () => (
+    <SettingsModalStory
+      initialTab='extensions'
+      pluginSettingsStatus={storyPluginStatus}
+      projects={storyProjects}
+      projectViewProjects={storyScopeProjects}
+      projectViewSpaces={storySpaces}
+    />
+  ),
 };
 
 /*

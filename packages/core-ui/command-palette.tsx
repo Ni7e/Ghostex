@@ -49,6 +49,7 @@ import {
 import type { SidebarCommandButton } from '../shared/sidebar-commands';
 import { DEFAULT_SIDEBAR_COMMAND_ICON } from '../shared/sidebar-command-icons';
 import { DEFAULT_ghostex_SETTINGS, type ghostexSettings } from '../shared/ghostex-settings';
+import { ghostexViewScope, isViewScopeVisible, officialViewScopeKey } from '../shared/ghostex-settings/view-scopes';
 import {
   GHOSTEX_HOTKEY_DEFINITIONS,
   normalizeHotkeyText,
@@ -438,24 +439,47 @@ export function CommandPalette({
   const kanbanViewTabHidden = useSidebarStore(
     (state) => (state.hud.settings?.kanbanViewTabHidden ?? DEFAULT_ghostex_SETTINGS.kanbanViewTabHidden) === true
   );
+  /*
+   * CDXC:Extensions 2026-09-18 WHY:
+   * A view narrowed to other projects or other spaces is just as unreachable as one switched off, so it
+   * leaves the palette through the same list rather than through a second, differently-shaped filter.
+   * SEE-ALSO: packages/shared/ghostex-settings/view-scopes.ts, apps/desktop/src/app/view_scopes.rs.
+   */
+  const viewScopes = useSidebarStore((state) => state.hud.settings?.viewScopes);
+  const activeProjectId = useSidebarStore((state) => state.hud.activeProjectId);
+  const activeProjectSpaceRefs = useSidebarStore((state) => state.hud.activeProjectSpaceRefs);
   const hiddenWorkareaCommandIds = useMemo(() => {
+    const outOfScope = (officialExtensionId: string) =>
+      !isViewScopeVisible({
+        projectId: activeProjectId,
+        projectSpaceRefs: activeProjectSpaceRefs ?? [],
+        scope: ghostexViewScope(viewScopes, officialViewScopeKey(officialExtensionId)),
+      });
     const hidden = new Set<string>();
-    if (browserViewTabHidden) {
+    if (browserViewTabHidden || outOfScope('browser')) {
       hidden.add('switchGitHubView');
       hidden.add('openBrowserPane');
       hidden.add('quickBrowserTab');
     }
-    if (codeViewTabHidden) {
+    if (codeViewTabHidden || outOfScope('code')) {
       hidden.add('switchSourceView');
     }
-    if (docsViewTabHidden) {
+    if (docsViewTabHidden || outOfScope('docs')) {
       hidden.add('switchManageView');
     }
-    if (kanbanViewTabHidden) {
+    if (kanbanViewTabHidden || outOfScope('kanban')) {
       hidden.add('switchKanbanView');
     }
     return hidden;
-  }, [browserViewTabHidden, codeViewTabHidden, docsViewTabHidden, kanbanViewTabHidden]);
+  }, [
+    activeProjectId,
+    activeProjectSpaceRefs,
+    browserViewTabHidden,
+    codeViewTabHidden,
+    docsViewTabHidden,
+    kanbanViewTabHidden,
+    viewScopes,
+  ]);
   const normalizedHotkeys = useMemo(() => normalizeghostexHotkeySettings(hotkeys), [hotkeys]);
   const commandQuery = inputValue.trim();
   const createBuiltInCommand = (definition: ghostexHotkeyDefinition): HotkeyPaletteCommand => {

@@ -592,6 +592,7 @@ function preserveSidebarHudReferences(previousHud: SidebarHudState, nextHud: Sid
     mergedHud[key] = previousHud[key];
   };
 
+  preserveIfEqual('activeProjectSpaceRefs');
   preserveIfEqual('agents');
   preserveIfEqual('commands');
   preserveIfEqual('commandsByProject');
@@ -599,6 +600,8 @@ function preserveSidebarHudReferences(previousHud: SidebarHudState, nextHud: Sid
   preserveIfEqual('git');
   preserveIfEqual('globalCommands');
   preserveIfEqual('pendingAgentIds');
+  preserveIfEqual('projectViewProjects');
+  preserveIfEqual('projectViewSpaces');
   preserveIfEqual('projectSettingsProjects');
   preserveIfEqual('projectWorktrees');
   preserveIfEqual('recentProjects');

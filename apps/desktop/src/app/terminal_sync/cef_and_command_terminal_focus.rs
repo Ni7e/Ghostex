@@ -236,7 +236,11 @@ impl GhostexGpuiApp {
             ) {
                 Ok(service) => self.sidebar = Some(service),
                 Err(error) => {
-                    support_logs::append(support_logs::GpuiSupportLog::CrashReports, "gpui.nativeService.startFailed", serde_json::json!({"error": error}));
+                    support_logs::append(
+                        support_logs::GpuiSupportLog::CrashReports,
+                        "gpui.nativeService.startFailed",
+                        serde_json::json!({"error": error}),
+                    );
                     return;
                 }
             }

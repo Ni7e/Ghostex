@@ -1,4 +1,5 @@
 import { CustomViewEditor, type CustomViewEditorState } from '../project-views/editor';
+import { ViewScopeEditor, type ViewScopeEditorState } from '../project-views/scope-editor';
 import { ProjectViewTemplates } from '../project-views/templates';
 import {
   projectViewDescription,
@@ -23,7 +24,7 @@ import {
  */
 import { DragDropProvider, type DragDropEventHandlers } from '@dnd-kit/react';
 import { isSortableOperation, useSortable } from '@dnd-kit/react/sortable';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
 import { cn } from '@/packages/components/utils';
 import { Button } from '@/packages/components/ui/button';
 import { Switch } from '@/packages/components/ui/switch';
@@ -67,6 +68,13 @@ import {
   type GhostexCustomView,
   type ghostexSettings,
 } from '../../../shared/ghostex-settings';
+import {
+  extensionViewScopeKey,
+  ghostexViewScope,
+  officialViewScopeKey,
+  setGhostexViewScope,
+  viewScopeDescription,
+} from '../../../shared/ghostex-settings/view-scopes';
 import { type WebviewApi } from '../../webview-api';
 import { ExtensionsBrowserDetail, ExtensionsBrowserList, useExtensionsBrowserState } from '../../extensions-modal';
 import { createExtensionsModalTransport } from '../../extensions-modal/transport';
@@ -91,7 +99,7 @@ import {
 
 export type OfficialExtensionSettingKey = GhostexOfficialExtensionSettingsKey;
 type ExtensionPageSettingKey =
-  OfficialExtensionSettingKey | 'customViews' | 'titlebarViewOrder' | 'customViewTemplates';
+  OfficialExtensionSettingKey | 'customViews' | 'titlebarViewOrder' | 'customViewTemplates' | 'viewScopes';
 
 const GHOSTEX_EXTENSIONS_REPO_URL = 'https://github.com/maddada/ghostex-extensions';
 
@@ -122,8 +130,23 @@ const OFFICIAL_TITLEBAR_EXTENSIONS = GHOSTEX_OFFICIAL_EXTENSIONS.filter(
   (entry) => entry.placement === 'titlebar-button'
 );
 
+/**
+ * CDXC:Extensions 2026-09-18 DECISION:
+ * User: every view and extension row gets the same Edit button as a custom view, so its "Available in"
+ * scope can be narrowed to selected projects or selected spaces. One controls object carries the three
+ * things a row needs, so the official rows and the store rows stay one behaviour instead of two.
+ */
+type ViewScopeControls = {
+  /** The row's scope summary, or undefined while the view is available everywhere. */
+  describe: (key: string) => string | undefined;
+  edit: (key: string, title: string) => void;
+  /** The inline editor for this row, or null when another row (or none) is being edited. */
+  renderEditor: (key: string) => ReactNode;
+};
+
 export function ExtensionsSettingsTab({
   initialCustomViewId,
+  projects = [],
   spaces = [],
   isActive,
   onRequestStatus,
@@ -137,6 +160,7 @@ export function ExtensionsSettingsTab({
   vscode,
 }: {
   initialCustomViewId?: string;
+  projects?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewProject[];
   spaces?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewSpace[];
   isActive: boolean;
   onRequestStatus?: () => void;
@@ -150,6 +174,7 @@ export function ExtensionsSettingsTab({
   vscode?: WebviewApi;
 }) {
   const [customViewEditor, setCustomViewEditor] = useState<CustomViewEditorState>();
+  const [scopeEditor, setScopeEditor] = useState<ViewScopeEditorState>();
   const [choosingTemplate, setChoosingTemplate] = useState(false);
   const [viewOrderOpen, setViewOrderOpen] = useState(false);
   const customViewEditorRef = useRef<HTMLDivElement>(null);
@@ -195,6 +220,42 @@ export function ExtensionsSettingsTab({
 
   const updateCustomViews = (customViews: GhostexCustomView[]) => {
     onUpdateSetting('customViews', normalizeGhostexCustomViews(customViews));
+  };
+
+  const scopeControls: ViewScopeControls = {
+    describe: (key) => {
+      const scope = ghostexViewScope(settings.viewScopes, key);
+      return scope.availability === 'all' ? undefined : viewScopeDescription(scope, { projects, spaces });
+    },
+    edit: (key, title) => setScopeEditor({ draft: ghostexViewScope(settings.viewScopes, key), key, title }),
+    renderEditor: (key) =>
+      scopeEditor?.key === key ? (
+        <ViewScopeEditor
+          editor={scopeEditor}
+          onCancel={() => setScopeEditor(undefined)}
+          onChange={(apply) => setScopeEditor((current) => (current ? apply(current) : current))}
+          onSave={() => {
+            /*
+             * CDXC:Extensions 2026-09-18 WHY:
+             * "Selected projects" or "Selected spaces" with nothing ticked hides the view everywhere,
+             * which reads as the app losing a tab. Refuse the save the way the custom-view editor does.
+             */
+            const { draft } = scopeEditor;
+            if (draft.availability === 'selected' && !draft.projectIds.length) {
+              setScopeEditor({ ...scopeEditor, error: 'Choose at least one project.' });
+              return;
+            }
+            if (draft.availability === 'spaces' && !draft.spaceRefs.length) {
+              setScopeEditor({ ...scopeEditor, error: 'Choose at least one space.' });
+              return;
+            }
+            onUpdateSetting('viewScopes', setGhostexViewScope(settings.viewScopes, scopeEditor.key, draft));
+            setScopeEditor(undefined);
+          }}
+          projects={projects}
+          spaces={spaces}
+        />
+      ) : null,
   };
 
   const handleCustomViewDragEnd = ((event) => {
@@ -371,6 +432,7 @@ export function ExtensionsSettingsTab({
                   label='Workareas'
                   onReinstallPlugin={onReinstallPlugin}
                   onUpdateSetting={onUpdateSetting}
+                  scopeControls={scopeControls}
                   settings={settings}
                   showOfficial={showOfficial}
                   statusById={statusById}
@@ -380,6 +442,7 @@ export function ExtensionsSettingsTab({
                   label='Title bar buttons'
                   onReinstallPlugin={onReinstallPlugin}
                   onUpdateSetting={onUpdateSetting}
+                  scopeControls={scopeControls}
                   settings={settings}
                   showOfficial={showOfficial}
                   statusById={statusById}
@@ -428,7 +491,14 @@ export function ExtensionsSettingsTab({
                 descriptionClassName='pb-2'
                 title='Extensions Store'
               >
-                <ExtensionsBrowserList state={browser} />
+                <ExtensionsBrowserList
+                  onEditScope={(extension) =>
+                    scopeControls.edit(extensionViewScopeKey(extension.id), extension.manifest.title)
+                  }
+                  renderScopeEditor={(extension) => scopeControls.renderEditor(extensionViewScopeKey(extension.id))}
+                  scopeSummaryFor={(extension) => scopeControls.describe(extensionViewScopeKey(extension.id))}
+                  state={browser}
+                />
               </SettingsSection>
             ) : null}
 
@@ -603,6 +673,7 @@ function OfficialExtensionList({
   label,
   onReinstallPlugin,
   onUpdateSetting,
+  scopeControls,
   settings,
   showOfficial,
   statusById,
@@ -611,6 +682,7 @@ function OfficialExtensionList({
   label: string;
   onReinstallPlugin?: (pluginId: SidebarPluginSettingsItem['id']) => void;
   onUpdateSetting: <K extends ExtensionPageSettingKey>(key: K, value: ghostexSettings[K]) => void;
+  scopeControls: ViewScopeControls;
   settings: ghostexSettings;
   showOfficial: (key: string) => boolean;
   statusById: ReadonlyMap<SidebarPluginSettingsItem['id'], SidebarPluginSettingsItem>;
@@ -624,18 +696,23 @@ function OfficialExtensionList({
       {visible.map((extension) => {
         const runtimeId = OFFICIAL_EXTENSION_RUNTIME_IDS[extension.id];
         const runtime = runtimeId ? statusById.get(runtimeId) : undefined;
+        const scopeKey = officialViewScopeKey(extension.id);
         return (
-          <OfficialExtensionRow
-            description={extension.description}
-            enabled={isOfficialExtensionEnabled(settings, extension)}
-            icon={OFFICIAL_EXTENSION_ICONS[extension.id]}
-            key={extension.id}
-            onEnabledChange={(enabled) => onUpdateSetting(extension.settingsKey, !enabled)}
-            onReinstall={runtimeId && onReinstallPlugin ? () => onReinstallPlugin(runtimeId) : undefined}
-            reinstallAvailable={Boolean(onReinstallPlugin && runtime?.canReinstall)}
-            runtime={runtime}
-            title={extension.title}
-          />
+          <Fragment key={extension.id}>
+            <OfficialExtensionRow
+              description={extension.description}
+              enabled={isOfficialExtensionEnabled(settings, extension)}
+              icon={OFFICIAL_EXTENSION_ICONS[extension.id]}
+              onEditScope={() => scopeControls.edit(scopeKey, extension.title)}
+              onEnabledChange={(enabled) => onUpdateSetting(extension.settingsKey, !enabled)}
+              onReinstall={runtimeId && onReinstallPlugin ? () => onReinstallPlugin(runtimeId) : undefined}
+              reinstallAvailable={Boolean(onReinstallPlugin && runtime?.canReinstall)}
+              runtime={runtime}
+              scopeSummary={scopeControls.describe(scopeKey)}
+              title={extension.title}
+            />
+            {scopeControls.renderEditor(scopeKey)}
+          </Fragment>
         );
       })}
     </OfficialExtensionGroup>
@@ -655,19 +732,23 @@ function OfficialExtensionRow({
   description,
   enabled,
   icon: Icon,
+  onEditScope,
   onEnabledChange,
   onReinstall,
   reinstallAvailable,
   runtime,
+  scopeSummary,
   title,
 }: {
   description: string;
   enabled?: boolean;
   icon: TablerIcon;
+  onEditScope?: () => void;
   onEnabledChange?: (enabled: boolean) => void;
   onReinstall?: () => void;
   reinstallAvailable?: boolean;
   runtime?: SidebarPluginSettingsItem;
+  scopeSummary?: string;
   title: string;
 }) {
   const busy = runtime !== undefined && !['installed', 'notInstalled', 'failed'].includes(runtime.status);
@@ -693,6 +774,9 @@ function OfficialExtensionRow({
       <div className='min-w-0 flex-1'>
         <span className='block truncate text-sm font-normal text-foreground'>{title}</span>
         <p className='mt-0.5 text-[13px] font-normal leading-relaxed text-foreground/75'>{description}</p>
+        {scopeSummary ? (
+          <p className='mt-0.5 truncate text-[13px] font-normal text-muted-foreground'>{scopeSummary}</p>
+        ) : null}
       </div>
       {onReinstall ? (
         <div className='flex shrink-0 flex-col items-end gap-1'>
@@ -716,6 +800,18 @@ function OfficialExtensionRow({
             </p>
           ) : null}
         </div>
+      ) : null}
+      {onEditScope ? (
+        <Button
+          aria-label={`Choose where ${title} is shown`}
+          className='shrink-0'
+          onClick={onEditScope}
+          size='icon-sm'
+          type='button'
+          variant='ghost'
+        >
+          <IconPencil aria-hidden='true' className='size-4' />
+        </Button>
       ) : null}
       {onEnabledChange && enabled !== undefined ? (
         <div className='ml-1 flex shrink-0 items-center gap-2'>

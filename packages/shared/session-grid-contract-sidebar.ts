@@ -967,6 +967,17 @@ export type SidebarHudState = {
    */
   projectSettingsProjects?: SidebarProjectSettingsItem[];
   projectViewSpaces?: import('./ghostex-settings/project-views').ProjectViewSpace[];
+  projectViewProjects?: import('./ghostex-settings/project-views').ProjectViewProject[];
+  /**
+   * CDXC:Extensions 2026-09-18 WHY:
+   * Space membership lives on the owning daemon's collections and spaces documents, which the native
+   * titlebar cannot read. The active project's id and its resolved spaces (group and worktree-parent
+   * inheritance already applied) ride the HUD so a scoped view resolves synchronously while the titlebar
+   * renders, instead of each surface re-deriving sidebar membership or polling gxserver.
+   * SEE-ALSO: packages/shared/ghostex-settings/view-scopes.ts, apps/desktop/src/app/view_scopes.rs.
+   */
+  activeProjectId?: string;
+  activeProjectSpaceRefs?: import('./ghostex-settings/view-scopes').GhostexViewScopeSpaceRef[];
   /**
    * CDXC:Projects 2026-05-04-14:25
    * Combined sidebar hides projects without active/sleeping sessions in a

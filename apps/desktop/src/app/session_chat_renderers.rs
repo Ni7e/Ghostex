@@ -104,10 +104,13 @@ impl GhostexGpuiApp {
         if let Some(view) = self.native_chat_for_generation(generation) {
             if finish_request {
                 for state in self.agents_chat_page_states.values_mut().chain(
-                    self.parked_agents_chat_runtimes_by_project.values_mut().flat_map(|parked| parked.page_states.values_mut())
+                    self.parked_agents_chat_runtimes_by_project
+                        .values_mut()
+                        .flat_map(|parked| parked.page_states.values_mut()),
                 ) {
                     if state.generation == generation {
-                        state.pending_native_requests = state.pending_native_requests.saturating_sub(1);
+                        state.pending_native_requests =
+                            state.pending_native_requests.saturating_sub(1);
                         break;
                     }
                 }

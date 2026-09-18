@@ -102,37 +102,7 @@ impl Render for NativeChatView {
                 )
             })
             .when(self.list.item_count() == 0, |this| {
-                this.child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            state["emptyState"]["title"]
-                                .as_str()
-                                .unwrap_or("Loading conversation…")
-                                .to_owned(),
-                        )
-                        .child(
-                            div().text_color(p.muted).child(
-                                state["emptyState"]["detail"]
-                                    .as_str()
-                                    .unwrap_or_default()
-                                    .to_owned(),
-                            ),
-                        )
-                        .when(state["status"] == "error", |this| {
-                            this.child(self.chat_button(
-                                "retry-chat".into(),
-                                "Retry".into(),
-                                json!({"type":"retry"}),
-                                &p,
-                                cx,
-                            ))
-                        }),
-                )
+                this.child(self.render_empty_transcript_region(&state, &p, cx))
             })
             .when(self.list.item_count() > 0, |this| this.child(transcript))
             .child(composer)

@@ -23,6 +23,8 @@ import { Marker, MarkerContent, MarkerIcon } from '../../../components/ui/marker
 import { Message, MessageContent, MessageFooter } from '../../../components/ui/message';
 import { SESSION_CHAT_FORK_BOUNDARY_ID_PREFIX, type SessionChatMessage } from '../../../shared/session-chat';
 import { SessionChatAgentMessageCard, parseSessionChatAgentMessage } from '../session-chat-agent-message-card';
+import { SessionChatInterAgentMessageCard } from '../session-chat-inter-agent-message-card';
+import { parseSessionChatInterAgentMessage } from '@/packages/shared/session-chat-presentation/agent-message';
 import { SessionChatExpansion, centerSessionChatExpansion } from '../session-chat-expansion';
 import { SessionChatFileChangeCards } from '../session-chat-file-change-card';
 import { splitSessionChatFileChanges } from '../session-chat-file-changes';
@@ -798,6 +800,25 @@ export function MessageRowBody({
         />
         {fileCards}
       </>
+    );
+  }
+
+  const interAgentMessage = isUser ? parseSessionChatInterAgentMessage(markdown) : null;
+  if (interAgentMessage) {
+    return (
+      <SessionChatInterAgentMessageCard
+        footer={
+          message.startupDelivery ? (
+            <SessionChatStartupSendStatus
+              delivery={message.startupDelivery}
+              onRetryStartupSend={onRetryStartupSend}
+              onRemoveStartupSend={onRemoveStartupSend}
+            />
+          ) : undefined
+        }
+        message={interAgentMessage}
+        queued={message.queued === true}
+      />
     );
   }
 

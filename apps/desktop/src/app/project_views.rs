@@ -25,6 +25,9 @@ pub(crate) struct ProjectViewCommand {
     pub id: String,
     pub operation: String,
 }
+/// The HUD fields the app-modal Settings window needs to render the "Available in" pickers.
+pub(crate) const PROJECT_VIEW_SCOPE_OPTION_HUD_KEYS: [&str; 2] = ["projectViewSpaces", "projectViewProjects"];
+
 fn text<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
 }
@@ -33,14 +36,21 @@ impl GhostexGpuiApp {
     /// CDXC:Spaces 2026-09-18 WHY:
     /// Settings builds its own hydrate, which omitted the sidebar's spaces and showed an empty picker despite existing spaces.
     /// Reuse the shared runtime's complete local/remote options, including their computer-scoped identities.
-    pub(crate) fn with_project_view_spaces(&self, mut message: Value) -> Value {
-        if let Some(spaces) = self
+    /// The project list rides along for the same reason: the "Available in" picker lists the sidebar's own
+    /// rows, which only the sidebar runtime can enumerate.
+    pub(crate) fn with_project_view_scope_options(&self, mut message: Value) -> Value {
+        let Some(hud) = self
             .native_sidebar
             .snapshot
             .as_ref()
-            .and_then(|snapshot| snapshot.hud.get("projectViewSpaces"))
-        {
-            message["hud"]["projectViewSpaces"] = spaces.clone();
+            .map(|snapshot| &snapshot.hud)
+        else {
+            return message;
+        };
+        for key in PROJECT_VIEW_SCOPE_OPTION_HUD_KEYS {
+            if let Some(value) = hud.get(key) {
+                message["hud"][key] = value.clone();
+            }
         }
         message
     }

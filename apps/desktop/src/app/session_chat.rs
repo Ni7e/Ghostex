@@ -438,7 +438,8 @@ impl GhostexGpuiApp {
             self.reconcile_agents_chat_surfaces(cx);
             self.deliver_pending_session_chat_received_draft(session_id, cx);
             if self.agents_chat_mode_sessions.contains(&session_id)
-                && (self.agents_chat_surfaces.contains_key(&session_id) || self.native_chat_views.contains_key(&session_id))
+                && (self.agents_chat_surfaces.contains_key(&session_id)
+                    || self.native_chat_views.contains_key(&session_id))
             {
                 self.session_chat_composer_ready_sessions.insert(session_id);
                 self.flush_pending_chat_bar_extension_toggles(session_id, cx);
@@ -907,7 +908,9 @@ impl GhostexGpuiApp {
     ) {
         self.cancel_session_chat_eviction_probe(session_id);
         if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
-            view.update(cx,|view,cx|view.invoke(serde_json::json!({"type":"stash","text":view.draft}),cx));
+            view.update(cx, |view, cx| {
+                view.invoke(serde_json::json!({"type":"stash","text":view.draft}), cx)
+            });
             return;
         }
         let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
@@ -1066,7 +1069,8 @@ impl GhostexGpuiApp {
         self.cancel_session_chat_eviction_probe(session_id);
         if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
             if !view.read(cx).composer_ready {
-                self.pending_session_chat_composer_insert.insert(session_id, content.to_owned());
+                self.pending_session_chat_composer_insert
+                    .insert(session_id, content.to_owned());
                 return true;
             }
             view.update(cx, |view, cx| view.insert_prompt(content, cx));

@@ -11,25 +11,27 @@ mod async_questions;
 mod attachments;
 mod binding;
 mod cards;
-mod notice;
 mod choice_rows;
 mod composer_scroll;
-mod scroll_bottom;
-mod fonts;
 mod focus;
+mod fonts;
+mod inter_agent_message;
+mod new_session_welcome;
 mod note;
+mod notice;
 mod question;
 mod queue;
 mod rpc;
+mod scroll_bottom;
 
 mod keyboard;
-mod markdown_style;
 mod markdown_links;
-mod message_actions;
-mod transcript_layout;
+mod markdown_style;
 mod maximized;
+mod message_actions;
 mod send_control;
 mod toolbar;
+mod transcript_layout;
 
 mod terminal_dialog;
 
@@ -49,3 +51,5 @@ mod clipboard;
 
 mod working_spark;
 mod working_strip;
+
+mod save_markdown;

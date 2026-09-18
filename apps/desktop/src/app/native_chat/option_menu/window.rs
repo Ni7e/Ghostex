@@ -205,28 +205,27 @@ impl ChatOptionMenu {
                         crate::app::window::attach_gpui_app_modal_window_to_main_window(
                             window, parent,
                         );
-                        let panel = cx.new(|cx| {
-                            let focus = cx.focus_handle();
-                            focus.focus(window, cx);
-                            let activation = cx.observe_window_activation(
-                                window,
-                                |panel: &mut ChatOptionMenuPanel, window, cx| {
-                                    if window.is_window_active() {
-                                        panel.was_active = true;
-                                    } else if panel.was_active {
-                                        let menu = panel.menu.clone();
-                                        cx.defer(move |cx| {
-                                            menu.update(cx, |menu, cx| menu.check_active(cx))
-                                        });
-                                    }
-                                },
-                            );
-                            let chat_subscription = if rows
-                                .first()
-                                .is_some_and(|row| row["context"].is_object())
-                            {
-                                menu.read(cx).chat.upgrade().map(|chat| {
-                                    cx.observe_in(
+                        let panel =
+                            cx.new(|cx| {
+                                let focus = cx.focus_handle();
+                                focus.focus(window, cx);
+                                let activation = cx.observe_window_activation(
+                                    window,
+                                    |panel: &mut ChatOptionMenuPanel, window, cx| {
+                                        if window.is_window_active() {
+                                            panel.was_active = true;
+                                        } else if panel.was_active {
+                                            let menu = panel.menu.clone();
+                                            cx.defer(move |cx| {
+                                                menu.update(cx, |menu, cx| menu.check_active(cx))
+                                            });
+                                        }
+                                    },
+                                );
+                                let chat_subscription =
+                                    if rows.first().is_some_and(|row| row["context"].is_object()) {
+                                        menu.read(cx).chat.upgrade().map(|chat| {
+                                            cx.observe_in(
                                         &chat,
                                         window,
                                         |panel: &mut ChatOptionMenuPanel, chat, window, cx| {
@@ -275,25 +274,25 @@ impl ChatOptionMenu {
                                             cx.notify();
                                         },
                                     )
-                                })
-                            } else {
-                                None
-                            };
-                            ChatOptionMenuPanel {
-                                menu,
-                                depth,
-                                rows: Arc::new(rows),
-                                heights,
-                                focus,
-                                selected: None,
-                                scroll: Default::default(),
-                                child: None,
-                                hover_task: None,
-                                was_active: window.is_window_active(),
-                                _activation: activation,
-                                _chat_subscription: chat_subscription,
-                            }
-                        });
+                                        })
+                                    } else {
+                                        None
+                                    };
+                                ChatOptionMenuPanel {
+                                    menu,
+                                    depth,
+                                    rows: Arc::new(rows),
+                                    heights,
+                                    focus,
+                                    selected: None,
+                                    scroll: Default::default(),
+                                    child: None,
+                                    hover_task: None,
+                                    was_active: window.is_window_active(),
+                                    _activation: activation,
+                                    _chat_subscription: chat_subscription,
+                                }
+                            });
                         cx.new(|cx| Root::new(panel, window, cx).bg(gpui::transparent_black()))
                     }
                 },

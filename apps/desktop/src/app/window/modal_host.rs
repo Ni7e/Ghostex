@@ -347,12 +347,17 @@ impl GpuiAppModalHostWindow {
         }
     }
 
-    pub(crate) fn refresh_project_view_spaces(
+    /// CDXC:Extensions 2026-09-18 SEE-ALSO:
+    /// The Settings "Available in" pickers read the sidebar's spaces and its current project rows, so both
+    /// HUD fields are pushed into an already-open modal host together. See apps/desktop/src/app/project_views.rs.
+    pub(crate) fn refresh_project_view_scope_options(
         &mut self,
-        spaces: &serde_json::Value,
+        options: &[(&str, serde_json::Value)],
         cx: &mut gpui::Context<Self>,
     ) {
-        self.latest_sidebar_state_message["hud"]["projectViewSpaces"] = spaces.clone();
+        for (key, value) in options {
+            self.latest_sidebar_state_message["hud"][*key] = value.clone();
+        }
         if self.is_ready && self.current_modal.requires_sidebar_state() {
             self.dispatch_sidebar_state(cx);
         }

@@ -197,6 +197,7 @@ How to use this file:
 - **settingsModalNavigation** `settingsModalNavigation` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **hotkeys** `hotkeys` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **customViewTemplates** `customViewTemplates` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
+- **viewScopes** `viewScopes` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **customWorkspaceOpenTargets** `customWorkspaceOpenTargets` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **workspaceOpenTargetAvailability** `workspaceOpenTargetAvailability` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.
 - **workspaceOpenTargetHiddenIds** `workspaceOpenTargetHiddenIds` (structured value; change it in Settings, not with `ghostex settings set`): App-managed state saved with the settings; not a user preference.

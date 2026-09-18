@@ -1413,6 +1413,7 @@ function AppModalHost() {
   const commands = useSidebarStore((state) => state.hud.commands);
   const projectSettingsProjects = useSidebarStore((state) => state.hud.projectSettingsProjects ?? []);
   const projectViewSpaces = useSidebarStore((state) => state.hud.projectViewSpaces);
+  const projectViewProjects = useSidebarStore((state) => state.hud.projectViewProjects);
   const portless = useSidebarStore((state) => state.hud.portless);
   const customThemeColor = useSidebarStore((state) => state.hud.customThemeColor);
   const theme = useSidebarStore((state) => state.hud.theme);
@@ -2608,6 +2609,7 @@ function AppModalHost() {
         onClose={closeModal}
         portless={portless}
         projects={projectSettingsProjects}
+        projectViewProjects={projectViewProjects}
         projectViewSpaces={projectViewSpaces}
         settings={settings}
         tailcatRpc={gpuiBootstrapTailcatRpc()}

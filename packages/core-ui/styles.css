@@ -4332,6 +4332,62 @@ body.app-modal-host-body {
 }
 
 /*
+ * CDXC:Settings 2026-09-18 DECISION:
+ * User: the "Available in" scope choices are toggle cards, three to a row, instead of a checkbox list.
+ *
+ * Written as real CSS rather than Tailwind utilities because the app-modal Settings page loads the
+ * pre-generated `shadcn.generated.css`, so a utility that appears nowhere else in the tree (an arbitrary
+ * opacity, a 2.5 step) is simply absent at runtime and the cards fall back to unstyled blocks.
+ * SEE-ALSO: packages/core-ui/settings-modal/project-views/scope-editor.tsx.
+ */
+.ghostex-settings-shadcn .settings-scope-toggle-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+}
+
+.ghostex-settings-shadcn .settings-scope-toggle-card {
+  align-items: center;
+  background: var(--settings-raised);
+  border: 1px solid var(--settings-hairline);
+  border-radius: var(--settings-radius-control);
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0.5rem 0.625rem;
+  text-align: start;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+  width: 100%;
+}
+
+.ghostex-settings-shadcn .settings-scope-toggle-card:hover {
+  background: var(--settings-raised-hover);
+}
+
+.ghostex-settings-shadcn .settings-scope-toggle-card[aria-pressed='true'] {
+  background: var(--settings-raised-hover);
+  border-color: color-mix(in srgb, var(--ring) 70%, transparent);
+}
+
+.ghostex-settings-shadcn .settings-scope-toggle-card:focus-visible {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent);
+  outline: none;
+}
+
+.ghostex-settings-shadcn .settings-scope-toggle-card-label {
+  font-size: var(--settings-text-body);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
  * The field components size their controls for the stacked layout (full
  * width). In a list row the control hugs the right edge instead: segmented
  * controls size to their labels, dropdowns to their longest option, and a

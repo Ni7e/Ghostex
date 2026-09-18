@@ -19,6 +19,7 @@ import { normalizeSidebarSessionTagListItems } from '../session-tags';
 import { DEFAULT_ghostex_SETTINGS } from './defaults';
 import { normalizeGhostexCustomViews } from './custom-views';
 import { normalizeTitlebarViewOrder } from './titlebar-view-order';
+import { normalizeGhostexViewScopes } from './view-scopes';
 import { normalizeDiagnosticLoggingSettings } from './diagnostic-logging';
 import {
   AUTO_SLEEP_IDLE_MINUTE_OPTIONS,
@@ -903,6 +904,7 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
     ),
     customViews: normalizeGhostexCustomViews(source.customViews),
     customViewTemplates: normalizeProjectViewTemplates(source.customViewTemplates),
+    viewScopes: normalizeGhostexViewScopes(source.viewScopes),
     titlebarViewOrder: normalizeTitlebarViewOrder(source.titlebarViewOrder),
     /**
      * CDXC:Titlebar 2026-05-11-00:22

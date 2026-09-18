@@ -332,11 +332,16 @@ impl GhostexGpuiApp {
             GpuiTitlebarPopupKind::Actions => self.titlebar_actions_popup_content_height(),
             GpuiTitlebarPopupKind::BrowserActions(_) => self.browser_actions_popup_content_height(),
             GpuiTitlebarPopupKind::Extensions => {
+                // The popup lists exactly the extensions scoped to the active project, so its measured
+                // height must count the same rows `build_gpui_titlebar_extensions_popup_menu` renders.
                 let extension_count = self
                     .extensions_snapshot
                     .installed
                     .values()
-                    .filter(|extension| extension.enabled)
+                    .filter(|extension| {
+                        extension.enabled
+                            && self.view_scope_allows(&extension_view_scope_key(&extension.id))
+                    })
                     .count();
                 let mut rows = if extension_count == 0 {
                     vec![TITLEBAR_POPUP_MENU_ROW_HEIGHT]

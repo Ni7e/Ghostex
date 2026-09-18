@@ -1351,7 +1351,9 @@ impl GhostexGpuiApp {
                 .project_scoped_workarea_availability()
                 .titlebar_mode_available(mode),
         };
-        available && !gpui_titlebar_mode_hidden_from_settings(mode)
+        available
+            && !gpui_titlebar_mode_hidden_from_settings(mode)
+            && self.titlebar_mode_view_scope_allows(mode)
     }
 
     pub(crate) fn available_titlebar_mode_or_agents(&self, mode: TitlebarMode) -> TitlebarMode {
@@ -1365,7 +1367,10 @@ impl GhostexGpuiApp {
     pub(crate) fn titlebar_mode_switcher_items(&self) -> Vec<TitlebarModeSwitcherItem> {
         let mut items = titlebar_mode_switcher_items(self.project_scoped_workarea_availability())
             .into_iter()
-            .filter(|item| !gpui_titlebar_mode_hidden_from_settings(item.mode))
+            .filter(|item| {
+                !gpui_titlebar_mode_hidden_from_settings(item.mode)
+                    && self.titlebar_mode_view_scope_allows(item.mode)
+            })
             .collect::<Vec<_>>();
         let installed_extension_available = self
             .project_scoped_workarea_availability()
@@ -1383,6 +1388,9 @@ impl GhostexGpuiApp {
             .filter_map(|extension| {
                 let id = ExtensionId::new(&extension.id)?;
                 if gpui_custom_view(id).is_some() {
+                    return None;
+                }
+                if !self.view_scope_allows(&extension_view_scope_key(&extension.id)) {
                     return None;
                 }
                 let title = gpui_extension_view_presentation(id)?.title;

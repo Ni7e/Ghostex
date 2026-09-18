@@ -1,3 +1,6 @@
+import { SessionChatMarkdownSaveController } from './save-markdown';
+import { listProjectMarkdownDocumentPaths, saveProjectMarkdownDocument } from '../project-docs';
+import { nativeContextTitle } from './native-context';
 import { COLLAPSED_CHOICE_COUNT, collapsedChoiceLabel } from '../session-chat-presentation/notice-choices';
 import { classifySessionChatLinkHref, sessionChatFilePositionFromHref } from '../session-chat-presentation/links';
 import { SessionChatAsyncQuestionsController } from './async-questions';
@@ -39,6 +42,7 @@ import { chatHostActionDefinitions, COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS, AGEN
 import { insertChatReference, nativePathReference } from '../session-chat-presentation/references';
 import { flushSessionNote } from './note';
 import { sessionChatEmptyStateCopy } from '@/packages/core-ui/chat/session-chat-empty-state';
+import { SESSION_CHAT_LOADING_INDICATOR_DELAY_MS, SESSION_CHAT_LOADING_RETRY_DELAY_MS, sessionChatNewSessionWelcomeTitle, sessionChatShowsNewSessionWelcome, sessionChatWelcomeAgentIcon, sessionChatWelcomeAgentName, type SessionChatLoadingStage } from '../session-chat-presentation/new-session-welcome';
 import { ChatTransfers } from './transfers';
 import { computeSessionChat } from './controller';
 import { ChatComputation } from './lifecycle';
@@ -70,7 +74,7 @@ let retiredNoticeKey: string | null = null;
 let answeredNoticeKey: string | null = null;
 let activeNoticeKey: string | null = null;
 let dismissedNotice: DismissedNotice | null = null;
-let bootConfig: { clientId: string; initialSnapshot?: any; initialPresentation?: any };
+let bootConfig: { clientId: string; projectId: string; initialSnapshot?: any; initialPresentation?: any };
 let booting = false;
 let eventListener: ((event: GxserverSessionChatEvent) => void) | undefined;
 let transport: SessionChatTransport;
@@ -105,6 +109,13 @@ const note = { open: false, value: '', saved: '', edited: false, loading: false 
 const receivingHandoffs = new Set<string>();
 const receivedHandoffs = new Set<string>();
 const deferred = new Map<string, SessionChatMessage[]>();
+
+const markdownSave = new SessionChatMarkdownSaveController({
+  list: () => listProjectMarkdownDocumentPaths(bootConfig.projectId, (_, request) => rpc('runProjectDocsAction', request)),
+  save: params => saveProjectMarkdownDocument({ ...params, projectId: bootConfig.projectId }, (_, request) => rpc('runProjectDocsAction', request)),
+  saved: path => { requests.push({ kind: 'markdownSaved', method: 'save', params: { path } }); },
+});
+markdownSave.subscribe(() => { if (controller) publish(controller.current()); });
 
 function schedule(callback: () => void, delay = 0, interval = 0): number {
   const id = ++sequence;
@@ -154,6 +165,33 @@ function asyncQuestionsCanSend(state: NativeChatState): boolean {
     && state.status !== 'error' && state.status !== 'loading';
 }
 
+/*
+CDXC:SessionChat 2026-09-18 WHY:
+React holds the empty region blank for the first 600ms of a transcript read and only then
+admits to loading, so opening a chat does not flash "Loading conversation…" at the user.
+GPUI chat renders whatever the snapshot says, so the hold has to be computed here to match.
+*/
+let loadingStage: SessionChatLoadingStage = 'blank';
+let loadingStageTimers: ReturnType<typeof setTimeout>[] = [];
+let loadingStageActive = false;
+
+function trackTranscriptLoading(loading: boolean): void {
+  if (loading === loadingStageActive) return;
+  loadingStageActive = loading;
+  for (const timer of loadingStageTimers) clearTimeout(timer);
+  loadingStageTimers = [];
+  loadingStage = 'blank';
+  if (!loading) return;
+  const advance = (stage: SessionChatLoadingStage) => () => {
+    loadingStage = stage;
+    if (controller) publish(controller.current());
+  };
+  loadingStageTimers = [
+    setTimeout(advance('indicator'), SESSION_CHAT_LOADING_INDICATOR_DELAY_MS),
+    setTimeout(advance('retry'), SESSION_CHAT_LOADING_RETRY_DELAY_MS),
+  ];
+}
+
 function publish(state: NativeChatState): void {
   const nextNoticeKey = sessionChatTerminalNoticeDismissKey(state.terminalNotice);
   if (activeNoticeKey !== nextNoticeKey) { activeNoticeKey = nextNoticeKey; answeredNoticeKey = null; noticeError = undefined; }
@@ -193,6 +231,18 @@ function publish(state: NativeChatState): void {
     queuedPrompts: state.queue.prompts.length,
   });
   if (!composerCollapseEligible || (state.prompt?.kind === 'question' && promptKey !== dismissedPrompt)) composerCollapsed = false;
+  trackTranscriptLoading(state.view.kind === 'loading');
+  /*
+  The agent identity the welcome greets the user with. A draft's own row wins over the
+  transcript family, because a project custom agent built on Claude reports `claude` there
+  and would otherwise greet the user as its base family.
+  */
+  const draftAgentRow = state.availableAgents?.find(row => row.agentId === state.sessionAgentId) ?? null;
+  const welcomeAgentName = draftAgentRow?.name ?? sessionChatWelcomeAgentName(state.agent);
+  const welcomeAgentIcon = sessionChatWelcomeAgentIcon(state.agent, draftAgentRow?.icon);
+  const questionCardVisible = promptKey !== null && promptKey !== dismissedPrompt && !(state.prompt?.kind === 'approval' && state.terminalNotice?.kind === 'permissionPrompt' && (!!state.terminalNotice.choices?.length || !!state.terminalNotice.dialog) && `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey);
+  // The welcome drops its headline once a notice or question card takes the space below it.
+  const bottomCardVisible = noticeVisible(state) || questionCardVisible;
   snapshot = {
     ...viewState,
     composerCollapseEligible,
@@ -202,11 +252,24 @@ function publish(state: NativeChatState): void {
     suggestions: composerSuggestions,
     composerCommand: suggestions.nativeCommand(state),
     contextEditor: nativeContextEditor(state,state.accounts),
+    saveMarkdown: markdownSave.getSnapshot(),
     queue: { ...state.queue, prompts: state.queue.prompts.map(prompt => ({...prompt, preview: sessionChatQueueRowPreview(prompt.text), busy: isSessionChatQueueRowBusy(prompt) })) },
     hostActions: chatHostActionDefinitions.filter(action => !COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS.has(action.id)).map(action => ({
       ...action, group: AGENT_HOST_ACTION_IDS.has(action.id) ? 'agent' : 'session',
     })),
     emptyState: sessionChatEmptyStateCopy(state.status === "working" || state.status === "ready" ? "empty" : state.status, state.agent),
+    /*
+    The new-session welcome, projected for GPUI chat the same way React renders it: a
+    `starting` or `empty` transcript greets the user with the agent mark and headline
+    instead of falling through to the `emptyState` loading copy.
+    */
+    newSessionWelcome: sessionChatShowsNewSessionWelcome(state.view.kind) ? {
+      agentName: welcomeAgentName,
+      icon: welcomeAgentIcon ?? null,
+      showTitle: !bottomCardVisible,
+      title: sessionChatNewSessionWelcomeTitle(welcomeAgentName),
+    } : null,
+    loadingStage: state.view.kind === 'loading' ? loadingStage : null,
     noticeVisible: noticeVisible(state),
     noticeError,
     terminalNotice: state.terminalNotice ? { ...state.terminalNotice, collapsedChoiceCount: COLLAPSED_CHOICE_COUNT, dialog: state.terminalNotice.dialog ? { ...state.terminalNotice.dialog, presentation: terminalDialogPresentation(state.terminalNotice.dialog) } : undefined, choices: state.terminalNotice.choices?.filter(choice => choice.label.trim()).map(choice => ({ ...choice, collapsedLabel: collapsedChoiceLabel(state.terminalNotice?.dialog?.rows[choice.index]?.label ?? choice.label), answer: terminalNoticeChoiceAnswer(state.terminalNotice, choice.index) })), actions: state.terminalNotice.actions?.flatMap(action => { const answer = terminalNoticeActionAnswer(state.terminalNotice!, action); return action.kind === 'switchToTerminal' || answer ? [{ ...action, answer }] : []; }) } : null,
@@ -227,13 +290,13 @@ function publish(state: NativeChatState): void {
     incomingDraft,
     note: { ...note },
     asyncQuestions: asyncQuestions.project(state.messages, asyncQuestionsCanSend(state), state.working, state.retiredAsyncQuestionIds),
-    questionCard: { visible: promptKey !== null && promptKey !== dismissedPrompt && !(state.prompt?.kind === 'approval' && state.terminalNotice?.kind === 'permissionPrompt' && (!!state.terminalNotice.choices?.length || !!state.terminalNotice.dialog) && `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey), questionIndex, controls: questionAnswerControls(questionDrafts, questionIndex, state.prompt?.kind === 'question' ? state.prompt.questions.length : 0, answering), drafts: questionDrafts, answering, busy: answering || questionTransition, loading: questionDraftsLoading },
+    questionCard: { visible: questionCardVisible, questionIndex, controls: questionAnswerControls(questionDrafts, questionIndex, state.prompt?.kind === 'question' ? state.prompt.questions.length : 0, answering), drafts: questionDrafts, answering, busy: answering || questionTransition, loading: questionDraftsLoading },
     finalIds: projection.finalIds,
   };
   revision++;
 }
 
-function start(config: { clientId: string; initialSnapshot?: any; initialPresentation?: any; preview?: ChatPreviewConfig }): void {
+function start(config: { clientId: string; projectId: string; initialSnapshot?: any; initialPresentation?: any; preview?: ChatPreviewConfig }): void {
   if (config.preview) preview = new ChatPreviewBackend(config.preview);
   bootConfig = config;
   if (booting) return;
@@ -347,6 +410,11 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         if (completion && 'content' in completion) requests.push({ kind: 'composer', method: 'insert', params: completion });
         break;
       }
+      case 'markdownSaveOpen': markdownSave.open(nativeContextTitle() ?? '', command.markdown); break;
+      case 'markdownSaveFolder': markdownSave.folder(command.value); break;
+      case 'markdownSaveName': markdownSave.fileName(command.value); break;
+      case 'markdownSaveCancel': markdownSave.close(); break;
+      case 'markdownSaveSubmit': await markdownSave.submit(); break;
       case 'contextEdit': case 'contextCancel': case 'contextQuery': case 'contextShown': case 'contextStar': case 'contextReorder': case 'contextReset': case 'contextSave':
         await nativeContextEditorCommand(command, chat.sessionOptions.catalog?.modelIcon === 'codex' ? 'codex' : 'claude', (agent,preferences) => composer('contextSave',{agent,preferences}), () => publish(controller.current()));
         break;

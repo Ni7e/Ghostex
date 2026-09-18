@@ -258,6 +258,11 @@ impl NativeChatView {
             .when_some(reply_focus, |row, (focus, _)| {
                 row.track_focus(&focus).tab_stop(false)
             });
+        if message["role"] == "user" && message["interAgentMessage"].is_object() {
+            return row
+                .child(self.inter_agent_message_card(&id, message, p, cx))
+                .into_any_element();
+        }
         if message["role"] == "user" && message["suppressed"].is_null() {
             let copy = text(message, "copyText");
             // The prompt renders as markdown like the React bubble, which also makes it a selectable TextView; a plain string child cannot be selected.

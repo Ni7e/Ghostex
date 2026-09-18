@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 enum ReplyAction {
     Copy,
     Annotate,
+    SaveMarkdown,
 }
 
 impl NativeChatView {
@@ -172,14 +173,32 @@ impl NativeChatView {
                     ))
                 },
             )
+            .when(
+                message["actionContent"]["canSaveMarkdown"] == true,
+                |actions| {
+                    actions.child(button(
+                        ReplyAction::SaveMarkdown,
+                        "Save message to Markdown",
+                        "chat-actions/save",
+                    ))
+                },
+            )
             .into_any_element()
     }
 
-    fn perform_reply_action(&self, action: ReplyAction, markdown: &str, cx: &mut Context<Self>) {
+    fn perform_reply_action(
+        &mut self,
+        action: ReplyAction,
+        markdown: &str,
+        cx: &mut Context<Self>,
+    ) {
         match action {
             ReplyAction::Copy => {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(markdown.to_owned()));
                 crate::app::helpers::gpui_play_copy_sound();
+            }
+            ReplyAction::SaveMarkdown => {
+                self.invoke(json!({"type":"markdownSaveOpen","markdown":markdown}), cx)
             }
             ReplyAction::Annotate => self.host("annotateReply", json!({"markdown":markdown}), cx),
         }

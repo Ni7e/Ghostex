@@ -323,6 +323,7 @@ export type SettingsModalProps = {
   onTestAgentTaskCompletion?: () => void;
   projects?: SidebarProjectSettingsItem[];
   projectViewSpaces?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewSpace[];
+  projectViewProjects?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewProject[];
   settings?: ghostexSettings;
   /**
    * Talks to the gxserver that owns Easy Connect and SSH access. Absent where
@@ -405,6 +406,7 @@ export function SettingsModal({
   onTestAgentTaskCompletion,
   projects = [],
   projectViewSpaces = [],
+  projectViewProjects = [],
   settings,
   tailcatRpc,
   theme = 'dark-blue',
@@ -779,17 +781,16 @@ export function SettingsModal({
   const settingsSearch = getSettingsSearchSections(settingsSearchQuery, draft);
   const mainSettingsGroupSearch = getMainSettingsGroupSearch(settingsSearchQuery, settingsSearch);
   const mainSettingsSectionNavigation = getMainSettingsSectionNavigation(mainSettingsGroupSearch);
-  const { mainSectionVisible, mainSettingVisible, mainSubsectionVisible } =
-    createMainSettingsVisibility({
-      appIconPickerUnavailable,
-      draft,
-      firstLaunchSetupVisibleSettings,
-      isFirstLaunchSetup,
-      mainSettingsGroupSearch,
-      settingsSearch,
-      settingsSearchQuery,
-      showAdvancedSettings,
-    });
+  const { mainSectionVisible, mainSettingVisible, mainSubsectionVisible } = createMainSettingsVisibility({
+    appIconPickerUnavailable,
+    draft,
+    firstLaunchSetupVisibleSettings,
+    isFirstLaunchSetup,
+    mainSettingsGroupSearch,
+    settingsSearch,
+    settingsSearchQuery,
+    showAdvancedSettings,
+  });
   const mainSettingsSectionRefs: MainSettingsSectionRefs = {
     agents: agentsOnboardingSectionRef,
     advanced: betaSectionRef,
@@ -2060,8 +2061,8 @@ export function SettingsModal({
                                     The Ghostty controls also apply to your external Ghostty terminal because this
                                     Ghostty terminal uses the same settings file. ghostex reloads its embedded Ghostty
                                     terminal about 3 seconds after you stop changing these controls; external Ghostty
-                                    windows may still need {formatSidebarHotkeyLabel('cmd+shift+,')} to reload. Theme overrides and the terminal light
-                                    palette apply only to Ghostex.
+                                    windows may still need {formatSidebarHotkeyLabel('cmd+shift+,')} to reload. Theme
+                                    overrides and the terminal light palette apply only to Ghostex.
                                   </p>
                                 </div>
                                 <GhosttySettingsActions
@@ -2943,6 +2944,7 @@ export function SettingsModal({
                   <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='extensions'>
                     <ExtensionsSettingsTab
                       initialCustomViewId={initialCustomViewId}
+                      projects={projectViewProjects}
                       spaces={projectViewSpaces}
                       isActive={isOpen && activeTab === 'extensions'}
                       onRequestStatus={onRequestPluginSettingsStatus}

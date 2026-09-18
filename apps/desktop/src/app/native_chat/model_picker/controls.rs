@@ -1,7 +1,4 @@
-use super::{
-    style::accent,
-    window::ModelPickerWindow,
-};
+use super::{style::accent, window::ModelPickerWindow};
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, px, rgb,
@@ -54,16 +51,26 @@ pub(super) fn footer(state: &Value, scale: f32, cx: &mut Context<ModelPickerWind
                 .px(px(5.0 * scale))
                 .rounded(px(5.0 * scale))
                 .border_1()
-                .border_color(if pressed.as_array().is_some_and(|keys|keys.iter().any(|key|key==control)) {
-                    accent
-                } else {
-                    gpui::rgba(0x74788860).into()
-                })
-                .bg(if pressed.as_array().is_some_and(|keys|keys.iter().any(|key|key==control)) {
-                    super::style::mix(accent, rgb(0x181a20).into(), 0.35)
-                } else {
-                    gpui::rgba(0x181a2070).into()
-                })
+                .border_color(
+                    if pressed
+                        .as_array()
+                        .is_some_and(|keys| keys.iter().any(|key| key == control))
+                    {
+                        accent
+                    } else {
+                        gpui::rgba(0x74788860).into()
+                    },
+                )
+                .bg(
+                    if pressed
+                        .as_array()
+                        .is_some_and(|keys| keys.iter().any(|key| key == control))
+                    {
+                        super::style::mix(accent, rgb(0x181a20).into(), 0.35)
+                    } else {
+                        gpui::rgba(0x181a2070).into()
+                    },
+                )
                 .flex()
                 .items_center()
                 .justify_center()

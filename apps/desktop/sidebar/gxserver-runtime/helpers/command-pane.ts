@@ -23,6 +23,7 @@ import type {
 import { createGpuiSidebarSettings } from './bootstrap';
 import { createGpuiProjectSettingsProjects } from './presentation-projection';
 import { createGpuiRemotePresentationProjectId } from './remote-presentation';
+import { createGpuiActiveProjectSpaceRefs, createGpuiProjectViewProjects } from './view-scopes';
 import {
   compareGpuiRecentProjectsByClosedAt,
   createGpuiRecentProjects,
@@ -468,6 +469,13 @@ export function createGpuiSidebarHudState({
     );
   const visibleSessions = groups.flatMap((group) => group.sessions.filter((session) => session.isVisible));
   return {
+    ...(activeProjectId ? { activeProjectId } : {}),
+    activeProjectSpaceRefs: createGpuiActiveProjectSpaceRefs({
+      activeProjectId,
+      domainProjects,
+      presentation,
+      remotePresentationsByMachineId,
+    }),
     activeSessionsSortMode: 'lastActivity',
     agentManagerZoomPercent: settings.agentManagerZoomPercent,
     agents,
@@ -490,6 +498,7 @@ export function createGpuiSidebarHudState({
     isFocusModeActive: false,
     pendingAgentIds: [],
     projectSettingsProjects: createGpuiProjectSettingsProjects(domainProjects, presentation),
+    projectViewProjects: createGpuiProjectViewProjects(groups),
     projectViewSpaces: [
       ...projectViewSpaceOptions(presentation?.sidebarSpaces, 'local'),
       ...[...(remotePresentationsByMachineId ?? [])].flatMap(([machineId, snapshot]) =>

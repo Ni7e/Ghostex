@@ -276,10 +276,16 @@ impl Render for ChatOptionMenuPanel {
                     }
                 }))
                 .on_click(cx.listener(move |this, _, window, cx| this.activate(index, window, cx)));
-            if let Some(icon) = row["icon"].as_str() {
+            let icon_path = row["iconPath"].as_str().map(str::to_owned).or_else(|| {
+                row["icon"]
+                    .as_str()
+                    .map(|icon| format!("agent-icons/{icon}.svg"))
+            });
+            if let Some(icon_path) = icon_path {
                 item = item.child(
                     svg()
-                        .path(format!("agent-icons/{icon}.svg"))
+                        .path(icon_path)
+                        .flex_shrink_0()
                         .size(px(14.0 * scale))
                         .text_color(foreground),
                 );

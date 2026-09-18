@@ -21,6 +21,13 @@ export type ProjectViewBinding = {
   inherit?: boolean;
 };
 export type ProjectViewSpace = { sectionKey: string; spaceId: string; name: string };
+/**
+ * CDXC:Extensions 2026-09-18 DECISION:
+ * User: the scope picker lists only the projects currently in the sidebar, not every project the daemon
+ * still knows about, so what you tick is what you can see.
+ * SEE-ALSO: apps/desktop/sidebar/gxserver-runtime/helpers/view-scopes.ts derives it from the sidebar rows.
+ */
+export type ProjectViewProject = { name: string; path: string; projectId: string };
 export type ProjectViewOptions = {
   source?: ProjectViewSource;
   availability?: 'all' | 'matching' | 'selected' | 'spaces';

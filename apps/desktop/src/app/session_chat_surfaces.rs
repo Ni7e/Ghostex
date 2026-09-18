@@ -1088,8 +1088,15 @@ impl GhostexGpuiApp {
             .collect::<HashSet<_>>();
         self.agents_chat_mode_sessions
             .retain(|session_id| live_session_ids.contains(session_id));
-        let stale_native = self.native_chat_views.keys().copied().filter(|id| !live_session_ids.contains(id)).collect::<Vec<_>>();
-        for id in stale_native { self.remove_agents_chat_surface_for_session(id, cx); }
+        let stale_native = self
+            .native_chat_views
+            .keys()
+            .copied()
+            .filter(|id| !live_session_ids.contains(id))
+            .collect::<Vec<_>>();
+        for id in stale_native {
+            self.remove_agents_chat_surface_for_session(id, cx);
+        }
         /*
         CDXC:Diagnostics 2026-08-28:
         Only surfaces whose SESSION is gone are destroyed here. A live session

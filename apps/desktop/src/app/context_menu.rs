@@ -92,7 +92,13 @@ impl GpuiContextMenu {
         self.show_for_app(app, position, window, cx);
     }
 
-    pub(crate) fn show_for_app(mut self, app: Entity<GhostexGpuiApp>, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    pub(crate) fn show_for_app(
+        mut self,
+        app: Entity<GhostexGpuiApp>,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let source_window = Window::window_handle(window);
         self.source_window = Some(source_window);
         self.source_focus = window.focused(cx);

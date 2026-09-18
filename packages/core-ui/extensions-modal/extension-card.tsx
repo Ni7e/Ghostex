@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { IconArrowUpRight, IconPuzzle, IconTrash } from '@tabler/icons-react';
+import { IconArrowUpRight, IconPencil, IconPuzzle, IconTrash } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
 import { Switch } from '@/packages/components/ui/switch';
 import { cn } from '@/packages/components/utils';
@@ -52,18 +52,27 @@ export function InstalledExtensionCard({
   extension,
   iconUrl,
   onDetails,
+  onEditScope,
   onRemove,
   onSetChatBarAutoOpen,
   onSetEnabled,
   pending,
+  scopeSummary,
 }: {
   extension: GhostexInstalledExtension;
   iconUrl?: string;
   onDetails: () => void;
+  /**
+   * CDXC:Extensions 2026-09-18 DECISION:
+   * User: an installed extension gets the same Edit button as a built-in view, so it can be limited to
+   * selected projects or spaces. Absent on hosts that do not own the `viewScopes` setting.
+   */
+  onEditScope?: () => void;
   onRemove: () => void;
   onSetChatBarAutoOpen: (autoOpen: boolean) => void;
   onSetEnabled: (enabled: boolean) => void;
   pending?: boolean;
+  scopeSummary?: string;
 }) {
   const supportsChatBar = extension.manifest.placements?.includes('chat-bar') === true;
   return (
@@ -87,6 +96,7 @@ export function InstalledExtensionCard({
             `v${extension.state.version}`,
             placementLabel(extension),
             supportsChatBar && extension.state.chatBarAutoOpen ? 'Opens automatically in sessions' : undefined,
+            scopeSummary,
           ]
             .filter(Boolean)
             .join(' · ')}
@@ -108,6 +118,12 @@ export function InstalledExtensionCard({
         <Button className='font-normal' disabled={pending} onClick={onDetails} size='sm' type='button' variant='ghost'>
           Details
         </Button>
+        {onEditScope ? (
+          <Button disabled={pending} onClick={onEditScope} size='icon-sm' type='button' variant='ghost'>
+            <IconPencil />
+            <span className='sr-only'>{`Choose where ${extension.manifest.title} is shown`}</span>
+          </Button>
+        ) : null}
         <Button disabled={pending} onClick={onRemove} size='icon-sm' type='button' variant='ghost'>
           <IconTrash />
           <span className='sr-only'>Remove</span>

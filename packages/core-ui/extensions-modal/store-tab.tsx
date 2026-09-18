@@ -1,5 +1,5 @@
 import { IconRefresh, IconSearch } from '@tabler/icons-react';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import { Field, FieldLabel } from '@/packages/components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/packages/components/ui/input-group';
@@ -45,6 +45,7 @@ export function StoreTab({
   iconUrlForInstalled,
   installed,
   loading,
+  onEditScope,
   onInstalledDetails,
   onRefresh,
   onRemove,
@@ -52,12 +53,15 @@ export function StoreTab({
   onSetEnabled,
   onStoreDetails,
   pendingIds,
+  renderScopeEditor,
+  scopeSummaryFor,
 }: {
   catalog: readonly GhostexExtensionCatalogEntry[];
   iconUrlForCatalogEntry: (entry: GhostexExtensionCatalogEntry) => string | undefined;
   iconUrlForInstalled: (extension: GhostexInstalledExtension) => string | undefined;
   installed: readonly GhostexInstalledExtension[];
   loading: boolean;
+  onEditScope?: (extension: GhostexInstalledExtension) => void;
   onInstalledDetails: (extension: GhostexInstalledExtension) => void;
   onRefresh: () => void;
   onRemove: (extension: GhostexInstalledExtension) => void;
@@ -65,6 +69,8 @@ export function StoreTab({
   onSetEnabled: (extension: GhostexInstalledExtension, enabled: boolean) => void;
   onStoreDetails: (entry: GhostexExtensionCatalogEntry) => void;
   pendingIds: ReadonlySet<string>;
+  renderScopeEditor?: (extension: GhostexInstalledExtension) => ReactNode;
+  scopeSummaryFor?: (extension: GhostexInstalledExtension) => string | undefined;
 }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
@@ -167,16 +173,20 @@ export function StoreTab({
       {shownCount ? (
         <ExtensionGroup>
           {filteredInstalled.map((extension) => (
-            <InstalledExtensionCard
-              extension={extension}
-              iconUrl={iconUrlForInstalled(extension)}
-              key={extension.id}
-              onDetails={() => onInstalledDetails(extension)}
-              onRemove={() => onRemove(extension)}
-              onSetChatBarAutoOpen={(autoOpen) => onSetChatBarAutoOpen(extension, autoOpen)}
-              onSetEnabled={(enabled) => onSetEnabled(extension, enabled)}
-              pending={pendingIds.has(extension.id)}
-            />
+            <Fragment key={extension.id}>
+              <InstalledExtensionCard
+                extension={extension}
+                iconUrl={iconUrlForInstalled(extension)}
+                onDetails={() => onInstalledDetails(extension)}
+                onEditScope={onEditScope ? () => onEditScope(extension) : undefined}
+                onRemove={() => onRemove(extension)}
+                onSetChatBarAutoOpen={(autoOpen) => onSetChatBarAutoOpen(extension, autoOpen)}
+                onSetEnabled={(enabled) => onSetEnabled(extension, enabled)}
+                pending={pendingIds.has(extension.id)}
+                scopeSummary={scopeSummaryFor?.(extension)}
+              />
+              {renderScopeEditor?.(extension)}
+            </Fragment>
           ))}
           {filteredStore.map((entry) => (
             <StoreExtensionCard

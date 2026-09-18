@@ -7001,6 +7001,18 @@
       "agentWritable": false
     },
     {
+      "key": "viewScopes",
+      "title": "viewScopes",
+      "subtitle": "App-managed state saved with the settings; not a user preference.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "section": "internalState",
+      "sectionTitle": "Internal state (not user settings)",
+      "type": "json",
+      "default": {},
+      "agentWritable": false
+    },
+    {
       "key": "customWorkspaceOpenTargets",
       "title": "customWorkspaceOpenTargets",
       "subtitle": "App-managed state saved with the settings; not a user preference.",

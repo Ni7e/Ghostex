@@ -43,6 +43,7 @@ pub(crate) struct NativeChatView {
     pub(super) suggestion_selection: Option<(String, usize)>,
     input_window: Option<gpui::WindowId>,
     pub(super) option_menu: Option<Entity<super::option_menu::ChatOptionMenu>>,
+    pub(super) save_markdown_window: super::save_markdown::SaveMarkdownWindowState,
     pub(super) context_editor_window: super::context_editor::ContextEditorWindowState,
     pub(super) model_picker_window: super::model_picker::window::ModelPickerWindowState,
     pub(crate) maximized_window: Option<gpui::WindowHandle<gpui_component::Root>>,
@@ -88,7 +89,7 @@ impl NativeChatView {
         super::fonts::register(cx);
         super::keyboard::register(cx);
         let runtime = ChatRuntime::new(
-            &json!({"clientId":config.client_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+            &json!({"clientId":config.client_id,"projectId":config.project_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
         );
         let (runtime, error) = match runtime {
             Ok(value) => (Some(value), None),
@@ -135,6 +136,7 @@ impl NativeChatView {
             option_menu: None,
             model_picker_window: Default::default(),
             context_editor_window: Default::default(),
+            save_markdown_window: Default::default(),
             maximized_window: None,
             main_window: None,
             window_subscription: None,
@@ -174,14 +176,23 @@ impl NativeChatView {
     pub(crate) fn ensure_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.input.is_none() {
             let draft = self.draft.clone();
-            let input = cx.new(|cx| InputState::new(window, cx).multi_line(true).submit_on_enter(true).auto_grow(3, 7)
-                .default_value(draft));
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .multi_line(true)
+                    .submit_on_enter(true)
+                    .auto_grow(3, 7)
+                    .default_value(draft)
+            });
             self.input = Some(input);
         }
-        let placeholder = self.snapshot["composerPlaceholder"].as_str().unwrap_or_default();
+        let placeholder = self.snapshot["composerPlaceholder"]
+            .as_str()
+            .unwrap_or_default();
         if self.input_placeholder != placeholder {
             self.input_placeholder = placeholder.to_owned();
-            self.input.as_ref().unwrap().update(cx, |input, cx| input.set_placeholder(self.input_placeholder.clone(), window, cx));
+            self.input.as_ref().unwrap().update(cx, |input, cx| {
+                input.set_placeholder(self.input_placeholder.clone(), window, cx)
+            });
         }
         if self.input_window != Some(window.window_handle().window_id()) {
             self.input_window = Some(window.window_handle().window_id());
@@ -374,6 +385,7 @@ impl NativeChatView {
             self.snapshot = Arc::new(snapshot);
             self.sync_model_picker_window(cx);
             self.sync_context_editor_window(cx);
+            self.sync_save_markdown_window(cx);
             self.sync_suggestion_window(cx);
             cx.notify();
         }
@@ -429,6 +441,19 @@ impl NativeChatView {
                     let start = self.draft[..selection.start].encode_utf16().count();
                     let end = self.draft[..selection.end].encode_utf16().count();
                     self.invoke(json!({"type":"insertAttachments","paths":request["params"]["paths"],"text":self.draft,"start":start,"end":end}), cx);
+                }
+                Some("markdownSaved") => {
+                    let path = request["params"]["path"].as_str().unwrap_or_default().to_string();
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(path.clone()));
+                    crate::app::helpers::gpui_play_copy_sound();
+                    if let Some(main) = self.main_window {
+                        cx.defer(move |cx| {
+                            let _ = main.update(cx, |_, window, cx| {
+                                use gpui_component::WindowExt as _;
+                                window.push_notification(gpui_component::notification::Notification::success(format!("Saved to Markdown\n{path} was copied to the clipboard.")), cx);
+                            });
+                        });
+                    }
                 }
                 Some("host") => self.host(request["method"].as_str().unwrap_or_default(), request["params"].clone(), cx),
                 Some("actionError") => { cx.notify(); }

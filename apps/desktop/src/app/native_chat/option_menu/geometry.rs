@@ -38,7 +38,11 @@ pub(super) fn measure_rows(
                 } else {
                     0.0
                 };
-            let icon = if row["icon"].is_string() { 22.0 } else { 0.0 };
+            let icon = if row["icon"].is_string() || row["iconPath"].is_string() {
+                22.0
+            } else {
+                0.0
+            };
             let detail = row["detail"]
                 .as_str()
                 .map(|text| text_width(text) + 8.0)

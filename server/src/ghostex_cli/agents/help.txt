@@ -50,14 +50,15 @@ SENDER HEADER
   send and create --task/--body-file attach your identity automatically.
   Supply only the body. Queued messages retain the original sender header.
 
-  MESSAGE FROM
+  Message from another agent
   Agent: <agent name>
   Session: <session title>
   Session ID: <session ID>
   Agent ID: <configured agent ID>
   Agent Session ID: <conversation ID, or unavailable>
   Reply to: <global session reference>
-  ------------------------------------
+
+  <message body>
 
 DELIVERY
   Default       Submit normally. A busy agent may receive the message at

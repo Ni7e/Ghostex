@@ -119,15 +119,7 @@ impl RowDragPreview {
             .when(lock_x, |wrapper| {
                 wrapper.left(self.pointer_x - window.mouse_position().x)
             })
-            .child(
-                row.child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .child(title.to_owned()),
-                ),
-            )
+            .child(row.child(div().flex_1().min_w_0().truncate().child(title.to_owned())))
             .into_any_element()
     }
 }

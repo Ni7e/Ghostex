@@ -11,7 +11,9 @@ impl GhostexGpuiApp {
         if !self.agents_chat_mode_sessions.contains(&session_id) {
             return self.open_terminal_model_picker(session_id, cx);
         }
-        if self.native_chat_views.contains_key(&session_id) { return self.open_session_chat_model_picker(session_id, cx); }
+        if self.native_chat_views.contains_key(&session_id) {
+            return self.open_session_chat_model_picker(session_id, cx);
+        }
         let Some(surface) = self.agents_chat_surfaces.get(&session_id).cloned() else {
             return false;
         };
@@ -61,7 +63,11 @@ impl GhostexGpuiApp {
         self.open_session_chat_model_picker(session_id, cx)
     }
 
-    pub(crate) fn open_session_chat_model_picker(&mut self, session_id: TerminalSessionId, cx: &mut gpui::Context<Self>) -> bool {
+    pub(crate) fn open_session_chat_model_picker(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
         if let Some(chat) = self.native_chat_views.get(&session_id) {
             chat.update(cx, |chat, cx| chat.toggle_model_picker(cx));
             return true;

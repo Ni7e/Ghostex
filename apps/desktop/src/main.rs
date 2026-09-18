@@ -7,12 +7,12 @@ GPUI still has schema-sized privacy-boundary serde_json::json! payloads outside 
 */
 mod app;
 mod app_icon;
-mod chat_preview;
 mod assets;
 mod browser_history;
 mod cef;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 mod cef_component_window;
+mod chat_preview;
 mod component_store;
 mod ghostty_kit;
 mod ghostty_vt;
@@ -161,6 +161,9 @@ pub(crate) use crate::app::model::*;
 // crate-root re-export keeps `crate::GhostexGpuiApp` resolving for main(),
 // the sibling modules that hold `Entity<GhostexGpuiApp>`, and the FFI bridge.
 pub(crate) use crate::app::core::*;
+// CDXC:Extensions 2026-09-18 SEE-ALSO:
+// The per-view "Available in" scope keys are read from workarea.rs and the titlebar modules.
+pub(crate) use crate::app::view_scopes::*;
 
 fn main() {
     if std::env::var_os("GHOSTEX_CHAT_PREVIEW_STATE").is_some() {

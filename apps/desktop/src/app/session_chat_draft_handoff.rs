@@ -10,9 +10,15 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> bool {
         if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
-            if !view.read(cx).composer_ready { return false; }
+            if !view.read(cx).composer_ready {
+                return false;
+            }
             view.update(cx, |view, cx| {
-                let text = if view.draft.is_empty() { content.to_owned() } else { format!("{}\n\n{content}", view.draft) };
+                let text = if view.draft.is_empty() {
+                    content.to_owned()
+                } else {
+                    format!("{}\n\n{content}", view.draft)
+                };
                 view.insert_prompt(&text, cx);
             });
             return true;
@@ -129,7 +135,9 @@ impl GhostexGpuiApp {
             return;
         };
         if let Some(view) = self.native_chat_views.get(&session_id).cloned() {
-            if !view.read(cx).composer_ready { return; }
+            if !view.read(cx).composer_ready {
+                return;
+            }
             let mut command = payload.clone();
             command["type"] = "receiveHandoff".into();
             command["current"] = view.read(cx).draft.clone().into();

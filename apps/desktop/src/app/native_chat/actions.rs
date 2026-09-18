@@ -9,6 +9,23 @@ pub(crate) struct NativeChatAction {
     pub(crate) command: Value,
 }
 
+/// More actions row icons, matching `HOST_ACTION_ICONS` and the Sleep moon in
+/// `packages/core-ui/chat/session-chat-composer-actions.tsx`.
+fn host_action_icon(id: &str) -> Option<&'static str> {
+    Some(match id {
+        "splitSessionRight" => "titlebar/layout-columns.svg",
+        "closeAfterDone" => "titlebar/clock.svg",
+        "delayedActions" => "titlebar/clock-check.svg",
+        "exportTranscript" => "titlebar/file-export.svg",
+        "fork" => "titlebar/git-branch.svg",
+        "fullReload" => "titlebar/refresh.svg",
+        "rename" => "titlebar/pencil.svg",
+        "sleep" => "titlebar/moon.svg",
+        "switchAccount" => "titlebar/switch-horizontal.svg",
+        _ => return None,
+    })
+}
+
 impl NativeChatView {
     pub(crate) fn show_send_actions(
         &self,
@@ -55,14 +72,26 @@ impl NativeChatView {
             rows.push(json!({"separator":true}));
         }
         rows.push(json!({"heading":true,"label":"Chat"}));
-        rows.push(json!({"label":"Verbose mode","checked":appearance.verbose,"command":{"type":"setVerbose","enabled":!appearance.verbose}}));
-        rows.push(json!({"label":"Simple mode","checked":appearance.simple,"command":{"type":"host","action":"setSimpleMode","enabled":!appearance.simple}}));
+        let verbose_icon = if appearance.verbose {
+            "titlebar/eye-filled.svg"
+        } else {
+            "titlebar/eye-off.svg"
+        };
+        rows.push(json!({"label":"Verbose mode","iconPath":verbose_icon,"checked":appearance.verbose,"command":{"type":"setVerbose","enabled":!appearance.verbose}}));
+        rows.push(json!({"label":"Simple mode","iconPath":"titlebar/leaf.svg","checked":appearance.simple,"command":{"type":"host","action":"setSimpleMode","enabled":!appearance.simple}}));
         if self.composer_control_overflowed("summary") {
-            rows.push(json!({"label":"Summary mode","checked":self.snapshot["summaryMode"]==true,"command":{"type":"toggleSummary"}}));
+            let summary = self.snapshot["summaryMode"] == true;
+            let summary_icon = if summary {
+                "titlebar/list-check.svg"
+            } else {
+                "titlebar/list-details.svg"
+            };
+            rows.push(json!({"label":"Summary mode","iconPath":summary_icon,"checked":summary,"command":{"type":"toggleSummary"}}));
         }
         let host_row = |action: &Value| {
             json!({
                 "label":action["label"],"hotkeyAction":action["hotkey"],
+                "iconPath":host_action_icon(action["id"].as_str().unwrap_or_default()),
                 "command":{"type":"host","action":action["id"]},
             })
         };
@@ -79,15 +108,14 @@ impl NativeChatView {
         }) {
             rows.push(host_row(action));
         }
-        for (id, action, label, _) in super::toolbar::COMPOSER_CONTROLS {
+        for (id, action, label, icon) in super::toolbar::COMPOSER_CONTROLS {
             if id != "summary" && self.composer_control_overflowed(id) {
-                let label = if id == "maximize" && self.maximized_window.is_some() {
-                    "Exit maximize"
+                let (label, icon) = if id == "maximize" && self.maximized_window.is_some() {
+                    ("Exit maximize", "titlebar/minimize.svg")
                 } else {
-                    label
+                    (label, icon)
                 };
-                let mut row =
-                    json!({"label":label,"command":{"type":"composerHost","action":action}});
+                let mut row = json!({"label":label,"iconPath":icon,"command":{"type":"composerHost","action":action}});
                 if id == "note" {
                     row["checked"] = self.snapshot["note"]["open"].clone();
                 }
@@ -108,7 +136,7 @@ impl NativeChatView {
                         "command":{"type":"host","action":"switchAccount","agentId":account["agentId"]},
                     })).collect();
                     if !accounts.is_empty() {
-                        rows.push(json!({"label":"Switch Account","children":accounts}));
+                        rows.push(json!({"label":"Switch Account","iconPath":host_action_icon("switchAccount"),"children":accounts}));
                     }
                 } else {
                     rows.push(host_row(action));

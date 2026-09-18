@@ -160,7 +160,9 @@ pub(crate) fn workspace_tab_agent_icon_text_color(
         0xffffff | 0xedecec => chrome_color(accent, 0x262626),
         _ => rgb(accent),
     };
-    color.opacity(workspace_tab_agent_icon_opacity(visual_tone)).into()
+    color
+        .opacity(workspace_tab_agent_icon_opacity(visual_tone))
+        .into()
 }
 
 pub(crate) fn agent_terminal_tab_status_color(tab_status: AgentTerminalTabStatus) -> u32 {

@@ -549,6 +549,11 @@ fn main() {
     let gpui_sparkle_updater = manifest_dir.join("native/macos/GpuiSparkleUpdater.m");
     let gpui_standard_about_panel = manifest_dir.join("native/macos/GpuiStandardAboutPanel.m");
     let gpui_app_toast_window_chrome = manifest_dir.join("native/macos/GpuiAppToastWindowChrome.m");
+    let gpui_chat_dialog_window = manifest_dir.join("native/macos/GpuiChatDialogWindow.m");
+    println!(
+        "cargo:rerun-if-changed={}",
+        gpui_chat_dialog_window.display()
+    );
 
     println!("cargo:rerun-if-changed={}", gpui_hooks.display());
     println!(
@@ -709,6 +714,7 @@ fn main() {
     */
     gpui_macos_objc_build()
         .file(gpui_app_toast_window_chrome)
+        .file(gpui_chat_dialog_window)
         .compile("ghostex_gpui_app_toast_window_chrome");
 
     /*

@@ -15,20 +15,16 @@ headline once a card is up, so the remaining space belongs to the logo alone.
 import { IconRobot } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/packages/components/utils';
-import { getDefaultSidebarAgentById, isSidebarAgentIcon, type SidebarAgentIcon } from '../../shared/sidebar-agents';
-import { sessionChatAgentIconId } from '../../shared/session-chat';
+import type { SidebarAgentIcon } from '../../shared/sidebar-agents';
+import {
+  sessionChatNewSessionWelcomeTitle,
+  sessionChatWelcomeAgentIcon,
+  sessionChatWelcomeAgentName,
+} from '../../shared/session-chat-presentation/new-session-welcome';
 import { getBrandAgentLogoStyle } from '../agent-logos';
 
-export function displayAgentName(agentLabel?: string | null): string | null {
-  const normalized = agentLabel?.trim();
-  if (!normalized) {
-    return null;
-  }
-  return (
-    getDefaultSidebarAgentById(normalized)?.name ??
-    normalized.replace(/[-_]+/g, ' ').replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase())
-  );
-}
+/** Re-exported so the view keeps one import site; the rule itself is shared with GPUI chat. */
+export const displayAgentName = sessionChatWelcomeAgentName;
 
 /*
 CDXC:Drafts 2026-08-28:
@@ -64,13 +60,8 @@ export function NewSessionWelcome({
   agentName?: string;
   showTitle?: boolean;
 }) {
-  const defaultAgent = agentLabel ? getDefaultSidebarAgentById(agentLabel) : undefined;
-  // A read-state label is the transcript family id, which is not always the
-  // sidebar agent id the artwork is registered under.
-  const familyIconId = sessionChatAgentIconId(agentLabel) ?? undefined;
-  const familyIcon = isSidebarAgentIcon(familyIconId) ? familyIconId : undefined;
-  const icon = (isSidebarAgentIcon(agentIcon) ? agentIcon : undefined) ?? defaultAgent?.icon ?? familyIcon;
-  const agentName = agentNameOverride ?? displayAgentName(agentLabel);
+  const icon = sessionChatWelcomeAgentIcon(agentLabel, agentIcon);
+  const agentName = agentNameOverride ?? sessionChatWelcomeAgentName(agentLabel);
   const identity = `${icon ?? ''}|${agentName ?? ''}`;
   const [layers, setLayers] = useState<WelcomeAgentLayer[]>(() => [{ agentName, icon, id: 0, identity }]);
   /*
@@ -133,7 +124,7 @@ export function NewSessionWelcome({
         <div className='ghostex-chat-new-session-title'>
           {layers.map((layer, index) => (
             <span className={layerClassName(layer, index < layers.length - 1)} key={layer.id}>
-              {layer.agentName ? <>What should we build with {layer.agentName}?</> : 'What should we work on?'}
+              {sessionChatNewSessionWelcomeTitle(layer.agentName)}
             </span>
           ))}
         </div>

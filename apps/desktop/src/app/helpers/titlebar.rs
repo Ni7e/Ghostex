@@ -1547,7 +1547,12 @@ pub(crate) fn apply_gpui_component_theme(cx: &mut App) {
     theme.scrollbar_show = gpui_component::scroll::ScrollbarShow::Hover;
     // CDXC:DesignSystem 2026-09-16 SEE-ALSO:
     // Exact app scrollbar colors are shared with packages/components/ui/scrollbar-theme.css.
-    let thumb: Hsla = gpui::rgb(if titlebar_uses_light_theme() { 0xbcbcbd } else { 0x424346 }).into();
+    let thumb: Hsla = gpui::rgb(if titlebar_uses_light_theme() {
+        0xbcbcbd
+    } else {
+        0x424346
+    })
+    .into();
     theme.tokens.scrollbar_thumb = thumb.into();
     theme.tokens.scrollbar_thumb_hover = thumb.into();
 }

@@ -1,3 +1,4 @@
+import { listProjectMarkdownDocumentPaths, saveProjectMarkdownDocument } from '../project-docs';
 import {
   pendingSessionChatAsyncQuestions,
   sessionChatAsyncAnswerPrefix,
@@ -18,6 +19,7 @@ export class ChatPreviewBackend {
   private retiredQuestions: string[] = [];
   private note = '';
   private counter = 100;
+  private markdownDocuments = new Map<string, string>();
   constructor(readonly config: ChatPreviewConfig) {
     this.snapshot = chatPreviewSnapshot(config);
   }
@@ -42,6 +44,17 @@ export class ChatPreviewBackend {
   async rpc<T = any>(method: string, params: any = {}): Promise<T> {
     let result: unknown;
     switch (method) {
+      case 'runProjectDocsAction': {
+        const base = { action: params.action, requestId: params.requestId };
+        if (params.action === 'list')
+          result = { ...base, entries: [...this.markdownDocuments.keys()].map((path) => ({ kind: 'file', path })) };
+        else if (params.action === 'save') {
+          this.markdownDocuments.set(params.path, params.content);
+          result = { ...base, file: { path: params.path } };
+        } else if (params.action === 'copyFullPath') result = { ...base, fullPath: `/sample/project/${params.path}` };
+        else throw new Error('That Docs action is unavailable in the sample.');
+        break;
+      }
       case 'readSessionChat':
         result = this.snapshot;
         break;
@@ -237,6 +250,12 @@ export class ChatPreviewBackend {
   }
   transport(): SessionChatTransport {
     return {
+      listMessageMarkdownPaths: () =>
+        listProjectMarkdownDocumentPaths('preview', (_, params) => this.rpc('runProjectDocsAction', params)),
+      saveMessageMarkdown: (params) =>
+        saveProjectMarkdownDocument({ ...params, projectId: 'preview' }, (_, request) =>
+          this.rpc('runProjectDocsAction', request)
+        ),
       getCachedSnapshot: () => this.snapshot,
       read: () => this.rpc('readSessionChat'),
       subscribe: ({ onEvent }) => this.subscribe(onEvent),

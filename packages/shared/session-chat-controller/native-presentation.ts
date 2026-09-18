@@ -5,7 +5,11 @@ import {
   splitReasoningHeadline,
   userTurnCopyMarkdown,
 } from '../session-chat-presentation/message-text';
-import { parseSessionChatAgentMessage, agentDisplayName } from '../session-chat-presentation/agent-message';
+import {
+  parseSessionChatAgentMessage,
+  parseSessionChatInterAgentMessage,
+  agentDisplayName,
+} from '../session-chat-presentation/agent-message';
 import { completedChatWork, projectChatTranscript } from '../session-chat-presentation/transcript';
 import {
   sessionChatMessageText,
@@ -27,16 +31,18 @@ function projectMessage(message: SessionChatMessage) {
   const { tools, prose } = splitSessionChatBlocks(message.blocks);
   const images = prose.filter((block) => block.type === 'image-ref');
   const body = sessionChatMessageText(message);
+  const displayedBody = message.role === 'user' ? normalizeUserMessageMarkdown(body) : body;
   const agentMessage = parseSessionChatAgentMessage(body);
   const changes = splitSessionChatFileChanges(tools);
   return {
     ...message,
-    text: message.role === 'user' ? normalizeUserMessageMarkdown(body) : body,
-    copyText: message.role === 'user' ? userTurnCopyMarkdown(normalizeUserMessageMarkdown(body), images) : body,
+    text: displayedBody,
+    copyText: message.role === 'user' ? userTurnCopyMarkdown(displayedBody, images) : body,
     actionContent: sessionChatMessageActionContent(body),
-    markdownReferences: sessionChatMarkdownReferences(body),
+    markdownReferences: sessionChatMarkdownReferences(displayedBody),
     reasoning: splitReasoningHeadline(body),
     agentMessage: agentMessage ? { ...agentMessage, name: agentDisplayName(agentMessage.sender) } : null,
+    interAgentMessage: message.role === 'user' ? parseSessionChatInterAgentMessage(body) : null,
     questions: pairSessionChatToolBlocks(tools).map(answeredSessionChatQuestionExchange).filter(Boolean),
     images,
     suppressed: sessionChatSuppressedTurnPresentation(message),

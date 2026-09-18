@@ -40,6 +40,11 @@ import { ghostexHotkeyTextFromKeyboardEvent, type ghostexHotkeySettings } from '
 import { useSessionChatScrollToBottom } from './use-session-chat-scroll-to-bottom';
 import { AppTooltip, TooltipProvider } from '../app-tooltip';
 import { displayAgentName, NewSessionWelcome } from './session-chat-new-session-welcome';
+import {
+  SESSION_CHAT_LOADING_INDICATOR_DELAY_MS,
+  SESSION_CHAT_LOADING_RETRY_DELAY_MS,
+  sessionChatShowsNewSessionWelcome,
+} from '@/packages/shared/session-chat-presentation/new-session-welcome';
 import { SessionChatComposer, type SessionChatComposerHandle } from './session-chat-composer';
 import { sessionChatKeyboardPopupOpen } from './session-chat-caret-navigation';
 import { sessionChatEditingShortcut, sessionChatHasTranscriptSelection } from './session-chat-edit-shortcuts';
@@ -139,8 +144,8 @@ return below), but a stalled read must not leave the pane blank forever. These
 stage that hold: a short hold nobody perceives, then a quiet indicator, then
 the manual recycle once waiting has clearly stopped being normal.
 */
-const LOADING_INDICATOR_DELAY_MS = 600;
-const LOADING_RETRY_DELAY_MS = 12_000;
+const LOADING_INDICATOR_DELAY_MS = SESSION_CHAT_LOADING_INDICATOR_DELAY_MS;
+const LOADING_RETRY_DELAY_MS = SESSION_CHAT_LOADING_RETRY_DELAY_MS;
 
 /*
 CDXC:Drafts 2026-08-28:
@@ -1613,10 +1618,7 @@ export function SessionChatView({
   const emptyKind =
     chat.view.kind === 'ready' ? null : chat.view.kind === 'error' ? ('error' as const) : chat.view.kind;
   const bottomCardVisible = noticeCardVisible || interactiveCardVisible;
-  const showNewSessionWelcome =
-    // A new agent reports `starting` until its first transcript file exists.
-    // Keep the designed welcome visible throughout that pre-transcript window.
-    emptyKind === 'starting' || emptyKind === 'empty';
+  const showNewSessionWelcome = sessionChatShowsNewSessionWelcome(emptyKind);
 
   return (
     <SessionChatPresentationProvider

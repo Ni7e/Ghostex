@@ -111,6 +111,21 @@ export {
   type GhostexCustomView,
 } from './ghostex-settings/custom-views';
 export {
+  DEFAULT_GHOSTEX_VIEW_SCOPE,
+  extensionViewScopeKey,
+  ghostexViewScope,
+  isViewScopeVisible,
+  normalizeGhostexViewScope,
+  normalizeGhostexViewScopes,
+  officialViewScopeKey,
+  setGhostexViewScope,
+  viewScopeDescription,
+  type GhostexViewScope,
+  type GhostexViewScopeAvailability,
+  type GhostexViewScopeSpaceRef,
+  type GhostexViewScopes,
+} from './ghostex-settings/view-scopes';
+export {
   WEB_LINK_OPEN_TARGET_OPTIONS,
   CHAT_FILE_OPEN_VIEW_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,

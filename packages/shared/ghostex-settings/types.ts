@@ -10,6 +10,7 @@ import { type SidebarSessionTagListItem } from '../session-tags';
 import { type SessionCardHoverButtonItem } from '../session-card-hover-actions';
 import type { ProjectViewTemplate } from './project-views';
 import { type GhostexCustomView } from './custom-views';
+import { type GhostexViewScopes } from './view-scopes';
 import { type DiagnosticLoggingSettings } from './diagnostic-logging';
 import { type RemoteMachineSettings } from './remote-machines';
 import { type SettingsModalNavigationState } from './settings-modal-navigation';
@@ -718,6 +719,13 @@ export type ghostexSettings = {
   showAgentsPaneTabBarWhenUnsplit: boolean;
   customViews: GhostexCustomView[];
   customViewTemplates: ProjectViewTemplate[];
+  /**
+   * CDXC:Extensions 2026-09-18 DECISION:
+   * User: built-in views and extensions get the same "Available in" picker as custom views, so each one can be
+   * limited to selected projects or selected spaces. Keyed by `officialViewScopeKey` / `extensionViewScopeKey`;
+   * a view with no entry is available everywhere.
+   */
+  viewScopes: GhostexViewScopes;
   titlebarViewOrder: string[];
   customWorkspaceOpenTargets: CustomWorkspaceOpenTarget[];
   workspaceOpenTargetAvailability: WorkspaceOpenTargetAvailability;
