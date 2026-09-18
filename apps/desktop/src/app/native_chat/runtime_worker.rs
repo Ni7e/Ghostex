@@ -1,7 +1,11 @@
 use ghostex_chat_runtime::ChatRuntime;
 use serde_json::Value;
 use std::{
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -30,12 +34,16 @@ enum Command {
 pub(crate) struct ChatRuntimeWorker {
     commands: mpsc::Sender<Command>,
     outputs: mpsc::Receiver<ChatRuntimeOutput>,
+    /// True while the thread waits for work, so a synchronous query knows an answer is imminent.
+    idle: Arc<AtomicBool>,
 }
 
 impl ChatRuntimeWorker {
     pub(crate) fn start(config: Value, wake: impl Fn() + Send + Sync + 'static) -> Self {
         let (commands, command_rx) = mpsc::channel::<Command>();
         let (output_tx, outputs) = mpsc::channel();
+        let idle = Arc::new(AtomicBool::new(false));
+        let idle_flag = idle.clone();
         thread::Builder::new()
             .name("ghostex-chat-runtime".into())
             .spawn(move || {
@@ -72,6 +80,7 @@ impl ChatRuntimeWorker {
                     };
                 drain(&mut runtime, &mut next_wake);
                 loop {
+                    idle_flag.store(true, Ordering::Release);
                     let command = match next_wake {
                         Some(at) => {
                             match command_rx
@@ -87,6 +96,7 @@ impl ChatRuntimeWorker {
                             Err(_) => return,
                         },
                     };
+                    idle_flag.store(false, Ordering::Release);
                     match command {
                         Some(Command::Call { method, arguments }) => {
                             if let Err(error) = runtime.call(method, &arguments) {
@@ -111,7 +121,11 @@ impl ChatRuntimeWorker {
                 }
             })
             .expect("spawn the chat runtime thread");
-        Self { commands, outputs }
+        Self {
+            commands,
+            outputs,
+            idle,
+        }
     }
 
     /// Queue a controller call; its output arrives through the wake callback.
@@ -120,12 +134,18 @@ impl ChatRuntimeWorker {
     }
 
     /// Run a pure controller helper and wait for its answer, or give up after `timeout`.
+    /// CDXC:SessionChat 2026-09-18 WHY:
+    /// The composer asks this on every paint. While the thread boots a transcript or backfills projections it cannot answer for hundreds of milliseconds, and waiting out the timeout on each frame made the UI stutter right after a session click.
+    /// A busy thread answers `None` immediately; only an idle one, which replies in well under a millisecond, is waited for.
     pub(crate) fn query(
         &self,
         method: &'static str,
         arguments: Vec<Value>,
         timeout: Duration,
     ) -> Option<Value> {
+        if !self.idle.load(Ordering::Acquire) {
+            return None;
+        }
         let (reply, answer) = mpsc::channel();
         self.commands
             .send(Command::Query {
