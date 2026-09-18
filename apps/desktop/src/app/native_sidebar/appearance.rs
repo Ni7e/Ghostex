@@ -80,9 +80,17 @@ fn sidebar_content_scale(window: &Window) -> f32 {
             width: (bounds.size.width.as_f32() * scale).round() as i32,
             height: (bounds.size.height.as_f32() * scale).round() as i32,
         };
-        let display = ::cef::display_get_matching_bounds(Some(&bounds), 1)
-            .expect("native sidebar requires an initialized CEF display");
-        display.device_scale_factor() / scale
+        // A missing display (CEF not initialised yet, or a window off every known screen) falls back to
+        // GPUI's own scale: a panic here would take the whole render pass down with it.
+        let Some(display) = ::cef::display_get_matching_bounds(Some(&bounds), 1) else {
+            return 1.0;
+        };
+        let content_scale = display.device_scale_factor() / scale;
+        if content_scale.is_finite() && content_scale > 0.0 {
+            content_scale
+        } else {
+            1.0
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
