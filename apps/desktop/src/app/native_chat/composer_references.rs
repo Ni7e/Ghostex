@@ -150,6 +150,10 @@ impl NativeChatView {
         event: &gpui::MouseDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
+        // React drops a pending open on any press inside the composer, so a press that is not on
+        // the same pill can never be followed by the earlier one opening a view.
+        self.composer_reference_click += 1;
+        self.composer_reference_task = None;
         let Some(input) = self.input.clone() else {
             return false;
         };
@@ -164,9 +168,7 @@ impl NativeChatView {
         else {
             return false;
         };
-        self.composer_reference_click += 1;
         if event.click_count >= 2 {
-            self.composer_reference_task = None;
             if let Some((draft, caret)) = revealed(&self.draft, &reference) {
                 self.insert_prompt(&draft, cx);
                 self.input_caret = Some(caret);
