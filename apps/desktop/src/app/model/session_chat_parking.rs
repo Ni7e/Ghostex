@@ -1,0 +1,94 @@
+// Per-project parking bundle for the Agents session-chat CEF surfaces and the
+// companion state keyed by the same project-local shell session ids.
+
+use crate::*;
+
+/*
+CDXC:SessionChat 2026-08-26:
+Inactive project workspaces keep their live chat pages beside their parked shell
+models, exactly like `ParkedAgentsTerminalRuntime` keeps their terminal owners.
+Dropping the `Entity<CefSurface>` closes the Chromium browser, so a project
+switch that destroyed them forced a visible kill + reload of every chat pane on
+the way back.
+
+Shell session ids are per-`WorkspaceModel` counters and therefore collide across
+projects, so every companion map keyed by those ids travels in the same bundle:
+leaving one behind would let the incoming project's ids read the outgoing
+project's composer readiness, emptiness reports, or one-shot composer messages.
+None of this is serialized; it returns only to the exact project that parked it.
+*/
+#[derive(Default)]
+pub(crate) struct ParkedAgentsChatRuntime {
+    /// CDXC:SessionChat 2026-09-06 DECISION:
+    /// User: a session switched to Terminal must remain there when visiting another project and returning, until switched back manually.
+    /// Keep default-view observations with their project so restoring a session does not apply the Chat default again.
+    pub(crate) auto_switch_observed_sessions:
+        HashMap<TerminalSessionId, GpuiPreferredAgentInterface>,
+    pub(crate) page_states: HashMap<TerminalSessionId, SessionChatPageState>,
+    /// Pending sends and handoffs remain protected until the owning project restores their runtime state.
+    pub(crate) protected_sessions: HashSet<TerminalSessionId>,
+    pub(crate) native_views: HashMap<TerminalSessionId, Entity<crate::app::native_chat::state::NativeChatView>>,
+    pub(crate) surfaces: HashMap<TerminalSessionId, Entity<CefSurface>>,
+    pub(crate) surface_hidden_since: HashMap<TerminalSessionId, Instant>,
+    pub(crate) composer_ready_sessions: HashSet<TerminalSessionId>,
+    pub(crate) composer_empty_reports: HashMap<TerminalSessionId, bool>,
+    pub(crate) pending_composer_insert: HashMap<TerminalSessionId, String>,
+}
+
+impl ParkedAgentsChatRuntime {
+    pub(crate) fn surface_evictable(
+        &self,
+        session_id: TerminalSessionId,
+        require_empty: bool,
+    ) -> bool {
+        self.page_states
+            .get(&session_id)
+            .is_some_and(|state| state.pending_native_requests == 0)
+            && self.composer_ready_sessions.contains(&session_id)
+            && (!require_empty || self.composer_empty_reports.get(&session_id) == Some(&true))
+            && !self.protected_sessions.contains(&session_id)
+            && !self.pending_composer_insert.contains_key(&session_id)
+    }
+}
+
+/// CDXC:SessionChat 2026-09-05 WHY:
+/// Numeric shell session IDs collide across projects, and a browser can finish posting after its replacement exists.
+/// The binding generation travels through parking and changes when its renderer is reused; a hidden-page probe is cancelled whenever that binding is shown again.
+pub(crate) struct SessionChatPageState {
+    pub(crate) generation: u64,
+    pub(crate) renderer_id: u64,
+    pub(crate) awaiting_activation: bool,
+    pub(crate) force_fresh_renderer: bool,
+    pub(crate) pending_native_requests: usize,
+    pub(crate) account_key: Option<GpuiWorkspaceTerminalSessionKey>,
+    pub(crate) pending_probe: Option<(u64, Option<futures::channel::oneshot::Sender<bool>>)>,
+}
+
+impl SessionChatPageState {
+    pub(crate) fn next_identity() -> u64 {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn new() -> Self {
+        let generation = Self::next_identity();
+        Self {
+            generation,
+            renderer_id: generation,
+            awaiting_activation: false,
+            force_fresh_renderer: false,
+            pending_native_requests: 0,
+            account_key: None,
+            pending_probe: None,
+        }
+    }
+}
+
+/// Presentation of a pending account change, shared by the sidebar and chat menu.
+pub(crate) struct SessionAccountSwitchProgress {
+    pub(crate) title: String,
+    pub(crate) email: String,
+    pub(crate) provider: &'static str,
+    pub(crate) indicator: String,
+    pub(crate) page_generation: Option<u64>,
+}

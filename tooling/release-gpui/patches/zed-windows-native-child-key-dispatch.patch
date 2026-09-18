@@ -1,0 +1,20 @@
+diff --git a/crates/gpui_windows/src/platform.rs b/crates/gpui_windows/src/platform.rs
+index 9ba94563a4..e008518070 100644
+--- a/crates/gpui_windows/src/platform.rs
++++ b/crates/gpui_windows/src/platform.rs
+@@ -349,6 +349,15 @@ fn translate_accelerator(msg: &MSG) -> Option<()> {
+         return None;
+     }
+ 
++    // GPUI's private key-down translation belongs only to GPUI top-level
++    // windows. Native child HWNDs (for example an embedded CEF browser) own
++    // their normal Win32 keyboard dispatch; sending the private message to
++    // one reaches DefWindowProc, whose zero result would otherwise be
++    // mistaken for "handled" and skip TranslateMessage/DispatchMessage.
++    if unsafe { GetAncestor(msg.hwnd, GA_ROOT) } != msg.hwnd {
++        return None;
++    }
++
+     let result = unsafe {
+         SendMessageW(
+             msg.hwnd,

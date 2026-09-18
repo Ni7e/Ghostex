@@ -1,0 +1,132 @@
+.ghostex-chat-composer-lexical {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 72px;
+  margin-right: -0.75rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 14px;
+  line-height: 24px;
+}
+
+/* CDXC:SessionChat 2026-09-08 DECISION:
+ * User: the input's right text padding must match its left padding.
+ * The 12px text inset balances the wrapper's 12px extension; the shared floating scrollbar reserves no gutter.
+ */
+.ghostex-chat-composer-lexical-content {
+  min-height: 72px;
+  max-height: 160px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none !important;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+  padding-right: 12px;
+  tab-size: 4;
+  --scroll-fade-size: min(12%, 1lh);
+  --scroll-fade-reveal: 1lh;
+  scroll-padding-block: 1lh;
+}
+
+/* CDXC:SessionChat 2026-09-15 WHY: A scroll timeline that goes inactive leaves the reveal-t animation holding its last progress, so the top fade survives after the content fits. The editor measures overflow into data-overflowing; without overflow there is nothing to fade, and dropping the animation restarts it cleanly when overflow returns. */
+.ghostex-chat-composer-lexical-content[data-overflowing='false'] {
+  animation: none;
+}
+
+.ghostex-chat-composer-lexical-content > p {
+  margin: 0;
+  min-height: 1lh;
+}
+.ghostex-chat-composer-lexical-content[data-empty='true']::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  opacity: 0.6;
+  float: left;
+  height: 0;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+.ghostex-chat-composer-lexical[data-fill-height='true'] {
+  height: 100%;
+  min-height: 0;
+}
+.ghostex-chat-composer-lexical[data-fill-height='true'] > .ghostex-chat-composer-lexical-content {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+}
+.ghostex-chat-composer-lexical[data-collapsed='true'],
+.ghostex-chat-composer-lexical[data-collapsed='true'] > .ghostex-chat-composer-lexical-content {
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  line-height: 32px;
+}
+.ghostex-chat-composer-lexical[data-word-wrap='false'] > .ghostex-chat-composer-lexical-content {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+/* CDXC:SessionChat 2026-09-15 DECISION:
+ * User: keep the chat input scrollbar visible only while scrolling and fading afterward, while other app scrollbars appear on hover.
+ * Shared app-scrollbars uses data-scrolling from the editor; this replaces the native scrollbar's fixed #606060 color and reserved gutter.
+ */
+.ghostex-chat-composer-lexical[data-editor-theme] span.ghostex-chat-reference-pill[data-selected='true'] {
+  background: Highlight;
+  color: HighlightText;
+}
+.ghostex-chat-composer-saved-caret {
+  position: absolute;
+  width: 2px;
+  background: currentColor;
+  pointer-events: none;
+  visibility: hidden;
+}
+.ghostex-chat-composer-lexical[data-editor-panel-open='true'] {
+  min-height: 280px;
+}
+.ghostex-chat-editor-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 6px;
+  margin-right: 12px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.ghostex-chat-editor-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ghostex-chat-editor-panel input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  background: var(--background);
+  border: 1px solid var(--border);
+  padding: 2px 5px;
+}
+.ghostex-chat-editor-panel button {
+  padding: 2px 5px;
+  text-align: left;
+}
+.ghostex-chat-editor-panel button:is(:hover, [aria-selected='true'], [aria-pressed='true']) {
+  background: var(--accent);
+}
+.ghostex-chat-editor-command-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 180px;
+  overflow: auto;
+}
+.ghostex-chat-editor-command-list > button {
+  flex-shrink: 0;
+}

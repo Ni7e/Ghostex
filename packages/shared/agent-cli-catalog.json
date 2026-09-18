@@ -1,0 +1,202 @@
+[
+  {
+    "agentId": "codex",
+    "binary": "codex",
+    "docsUrl": "https://github.com/openai/codex#installing-and-running-codex-cli",
+    "npmPackage": "@openai/codex",
+    "brewFormula": "codex",
+    "brewCask": true,
+    "miseTool": "codex"
+  },
+  {
+    "agentId": "claude",
+    "binary": "claude",
+    "docsUrl": "https://code.claude.com/docs/en/setup",
+    "npmPackage": "@anthropic-ai/claude-code",
+    "brewFormula": "claude-code",
+    "brewCask": true,
+    "native": {
+      "install": "curl -fsSL https://claude.ai/install.sh | bash",
+      "update": "claude update",
+      "windowsInstall": "irm https://claude.ai/install.ps1 | iex"
+    },
+    "wingetId": "Anthropic.ClaudeCode",
+    "miseTool": "claude"
+  },
+  {
+    "agentId": "cursor",
+    "binary": "cursor-agent",
+    "docsUrl": "https://cursor.com/docs/cli/installation",
+    "native": {
+      "install": "curl -fsSL https://cursor.com/install | bash",
+      "update": "cursor-agent update",
+      "windowsInstall": "irm 'https://cursor.com/install?win32=true' | iex"
+    },
+    "miseTool": "cursor-agent"
+  },
+  {
+    "agentId": "pi",
+    "binary": "pi",
+    "docsUrl": "https://pi.dev/docs/latest",
+    "npmPackage": "@earendil-works/pi-coding-agent",
+    "npmFlags": ["--ignore-scripts"],
+    "miseTool": "pi"
+  },
+  {
+    "agentId": "opencode",
+    "binary": "opencode",
+    "docsUrl": "https://opencode.ai/docs/",
+    "npmPackage": "opencode-ai",
+    "brewFormula": "opencode",
+    "native": {
+      "install": "curl -fsSL https://opencode.ai/install | bash",
+      "update": "opencode upgrade"
+    },
+    "miseTool": "opencode"
+  },
+  {
+    "agentId": "gemini",
+    "binary": "gemini",
+    "docsUrl": "https://github.com/google-gemini/gemini-cli#installation",
+    "npmPackage": "@google/gemini-cli",
+    "brewFormula": "gemini-cli",
+    "miseTool": "gemini"
+  },
+  {
+    "agentId": "copilot",
+    "binary": "copilot",
+    "docsUrl": "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
+    "npmPackage": "@github/copilot",
+    "brewFormula": "copilot-cli",
+    "brewCask": true,
+    "wingetId": "GitHub.Copilot",
+    "miseTool": "copilot"
+  },
+  {
+    "agentId": "droid",
+    "binary": "droid",
+    "docsUrl": "https://docs.factory.ai/droid-cli/cli-reference",
+    "npmPackage": "droid",
+    "native": {
+      "install": "curl -fsSL https://app.factory.ai/cli | sh",
+      "update": "droid update"
+    }
+  },
+  {
+    "agentId": "grok",
+    "binary": "grok",
+    "docsUrl": "https://docs.x.ai/build/overview",
+    "versionArgs": ["version"],
+    "native": {
+      "install": "curl -fsSL https://x.ai/cli/install.sh | bash",
+      "update": "grok update"
+    },
+    "miseTool": "grok"
+  },
+  {
+    "agentId": "antigravity",
+    "binary": "agy",
+    "docsUrl": "https://antigravity.google/docs/cli/install/",
+    "native": {
+      "install": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+      "windowsInstall": "irm https://antigravity.google/cli/install.ps1 | iex"
+    },
+    "miseTool": "agy"
+  },
+  {
+    "agentId": "amp",
+    "binary": "amp",
+    "docsUrl": "https://ampcode.com/docs/cli",
+    "native": {
+      "install": "curl -fsSL https://ampcode.com/install.sh | bash",
+      "update": "amp update"
+    },
+    "miseTool": "amp"
+  },
+  {
+    "agentId": "hermes-agent",
+    "binary": "hermes",
+    "docsUrl": "https://hermes-agent.nousresearch.com/docs/getting-started/installation/",
+    "native": {
+      "install": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+      "update": "hermes update --yes",
+      "windowsInstall": "irm https://hermes-agent.nousresearch.com/install.ps1 | iex"
+    }
+  },
+  {
+    "agentId": "rovodev",
+    "binary": "acli",
+    "docsUrl": "https://developer.atlassian.com/cloud/acli/guides/install/",
+    "brewFormula": "atlassian/acli/acli",
+    "miseTool": "acli"
+  },
+  {
+    "agentId": "codebuddy",
+    "binary": "codebuddy",
+    "docsUrl": "https://www.codebuddy.ai/docs/cli/quickstart",
+    "npmPackage": "@tencent-ai/codebuddy-code"
+  },
+  {
+    "agentId": "qoder",
+    "binary": "qodercli",
+    "docsUrl": "https://docs.qoder.com/cli/installation",
+    "npmPackage": "@qoder-ai/qodercli"
+  },
+  {
+    "agentId": "kiro",
+    "binary": "kiro-cli",
+    "docsUrl": "https://kiro.dev/downloads/",
+    "native": {
+      "install": "curl -fsSL https://cli.kiro.dev/install | bash"
+    }
+  },
+  {
+    "agentId": "omp",
+    "binary": "omp",
+    "docsUrl": "https://github.com/can1357/oh-my-pi#install",
+    "npmPackage": "@oh-my-pi/pi-coding-agent",
+    "packageManagers": ["bun"],
+    "brewFormula": "can1357/tap/omp"
+  },
+  {
+    "agentId": "kimi",
+    "binary": "kimi",
+    "docsUrl": "https://github.com/MoonshotAI/kimi-code/tree/main/apps/kimi-code#readme",
+    "npmPackage": "@moonshot-ai/kimi-code"
+  },
+  {
+    "agentId": "openclaude",
+    "binary": "openclaude",
+    "docsUrl": "https://github.com/Gitlawb/openclaude#install",
+    "npmPackage": "@gitlawb/openclaude"
+  },
+  {
+    "agentId": "command-code",
+    "binary": "commandcode",
+    "docsUrl": "https://commandcode.ai/docs",
+    "npmPackage": "command-code"
+  },
+  {
+    "agentId": "devin",
+    "binary": "devin",
+    "docsUrl": "https://cli.devin.ai/",
+    "native": {
+      "install": "curl -fsSL https://cli.devin.ai/install.sh | bash",
+      "windowsInstall": "irm https://static.devin.ai/cli/setup.ps1 | iex"
+    }
+  },
+  {
+    "agentId": "mastra",
+    "binary": "mastracode",
+    "docsUrl": "https://www.npmjs.com/package/mastracode",
+    "npmPackage": "mastracode"
+  },
+  {
+    "agentId": "zcode",
+    "binary": "zcode",
+    "docsUrl": "https://github.com/kingsword09/zcode-cli",
+    "npmPackage": "zcode-app-cli",
+    "packageManagers": ["npm"],
+    "miseTool": "npm:zcode-app-cli[prerelease=true]"
+  }
+]

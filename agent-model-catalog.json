@@ -1,0 +1,602 @@
+{
+  "_readme": "Do not edit blind. docs/important/agent-model-catalog.md explains the schema, how every Ghostex client loads this file from GitHub (with the bundled copy as the offline source), how to publish a change, and how to re-collect models, efforts and fast mode from the agent CLIs' own /model pickers.",
+  "schemaVersion": 1,
+  "updatedAt": "2026-09-09",
+  "effortLabels": {
+    "none": "None",
+    "minimal": "Minimal",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "xhigh": "Extra High",
+    "max": "Max",
+    "ultra": "Ultra",
+    "ultracode": "Ultracode"
+  },
+  "agents": {
+    "claude": {
+      "name": "Claude Code",
+      "cliVersion": "2.1.260",
+      "modelCommand": "/model <value>",
+      "effortCommand": "/effort <value>",
+      "efforts": ["low", "medium", "high", "xhigh", "max", "ultracode"],
+      "defaultEffort": "high",
+      "fastMode": {
+        "available": true,
+        "command": "/fast",
+        "scope": "model",
+        "notes": "Opus 5 only; needs usage credits (research preview)."
+      },
+      "models": [
+        {
+          "value": "fable",
+          "label": "Fable 5.1",
+          "pickerLabel": "Fable",
+          "description": "Most capable for your hardest and longest-running tasks",
+          "fastMode": false
+        },
+        {
+          "value": "opus[1m]",
+          "label": "Opus 5 (1M)",
+          "pickerLabel": "Opus (1M context)",
+          "description": "Best for everyday, complex tasks, with a 1M-token context window",
+          "default": true,
+          "fastMode": true
+        },
+        {
+          "value": "opus",
+          "label": "Opus 5",
+          "pickerLabel": "Opus",
+          "description": "Best for everyday, complex tasks",
+          "fastMode": true
+        },
+        {
+          "value": "sonnet",
+          "label": "Sonnet 5",
+          "pickerLabel": "Sonnet",
+          "description": "Efficient for routine tasks",
+          "fastMode": false
+        },
+        {
+          "value": "haiku",
+          "label": "Haiku 4.5",
+          "pickerLabel": "Haiku",
+          "description": "Fastest for quick answers",
+          "efforts": [],
+          "fastMode": false,
+          "notes": "The /model picker shows its effort row for every model, but Haiku 4.5 has no effort tiers, so none are offered."
+        }
+      ],
+      "notes": "The picker's first row, 'Default (recommended)', is the same model as 'Opus (1M context)', so it is not listed twice. `claude --model` also accepts sonnet[1m] and fable[1m], but the picker offers no row for them, so neither is listed."
+    },
+    "codex": {
+      "name": "Codex CLI",
+      "cliVersion": "0.153.3",
+      "modelCommand": "/model",
+      "effortCommand": null,
+      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+      "fastMode": {
+        "available": true,
+        "command": "/fast",
+        "scope": "session",
+        "notes": "Toggles the service tier between priority and default; the footer appends 'fast'."
+      },
+      "groups": [
+        {
+          "id": "legacy",
+          "label": "Legacy",
+          "description": "Previous generations"
+        }
+      ],
+      "models": [
+        {
+          "value": "gpt-6-astra",
+          "label": "GPT 6 Astra",
+          "description": "Our most capable model for complex, demanding work.",
+          "default": true,
+          "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+          "defaultEffort": "medium",
+          "fastMode": true
+        },
+        {
+          "value": "gpt-5.6-sol",
+          "label": "GPT 5.6 Sol",
+          "description": "Reliable agentic workhorse for everyday tasks.",
+          "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+          "defaultEffort": "low",
+          "fastMode": true
+        },
+        {
+          "value": "gpt-5.6-terra",
+          "label": "GPT 5.6 Terra",
+          "description": "Balanced agentic coding model for everyday work.",
+          "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+          "defaultEffort": "medium",
+          "fastMode": true
+        },
+        {
+          "value": "gpt-5.6-luna",
+          "label": "GPT 5.6 Luna",
+          "description": "Fast and affordable agentic coding model.",
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "defaultEffort": "medium",
+          "fastMode": true
+        },
+        {
+          "value": "gpt-5.5",
+          "label": "GPT 5.5",
+          "description": "Proven previous-generation model for coding and general work.",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "defaultEffort": "medium",
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.4",
+          "label": "GPT 5.4",
+          "description": "Strong model for everyday coding.",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "defaultEffort": "medium",
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.4-mini",
+          "label": "GPT 5.4 Mini",
+          "description": "Small, fast, and cost-efficient model for simpler coding tasks.",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "defaultEffort": "medium",
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.3-codex-spark",
+          "label": "GPT 5.3 Codex Spark",
+          "description": "Ultra-fast coding model.",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "defaultEffort": "high",
+          "fastMode": true,
+          "group": "legacy"
+        }
+      ]
+    },
+    "cursor": {
+      "name": "Cursor CLI",
+      "cliVersion": "2026.08.31-4057e58",
+      "modelCommand": "/model <pickerLabel>",
+      "effortCommand": null,
+      "efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+      "fastMode": {
+        "available": true,
+        "command": null,
+        "scope": "model",
+        "notes": "A 'Fast' checkbox in the model's Tab panel inside /model."
+      },
+      "groups": [
+        {
+          "id": "legacy",
+          "label": "Legacy"
+        }
+      ],
+      "models": [
+        {
+          "value": "auto",
+          "label": "Auto",
+          "pickerLabel": "Auto",
+          "efforts": [],
+          "fastMode": false
+        },
+        {
+          "value": "cursor-grok-4.6",
+          "label": "Grok 4.6",
+          "pickerLabel": "Cursor Grok 4.6",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "fastMode": true
+        },
+        {
+          "value": "claude-opus-5",
+          "label": "Opus 5",
+          "pickerLabel": "Claude Opus 5",
+          "contextWindows": ["300K", "1M"],
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "thinking": true,
+          "fastMode": true
+        },
+        {
+          "value": "claude-fable-5-1",
+          "label": "Fable 5.1",
+          "pickerLabel": "Claude Fable 5.1",
+          "contextWindows": ["300K", "1M"],
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "thinking": true,
+          "fastMode": false
+        },
+        {
+          "value": "claude-sonnet-5",
+          "label": "Sonnet 5",
+          "pickerLabel": "Claude Sonnet 5",
+          "contextWindows": ["300K", "1M"],
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "thinking": true,
+          "fastMode": false
+        },
+        {
+          "value": "gpt-5.6-sol",
+          "label": "GPT-5.6 Sol",
+          "pickerLabel": "GPT-5.6 Sol",
+          "contextWindows": ["272K", "1M"],
+          "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+          "fastMode": true
+        },
+        {
+          "value": "gemini-3.8-flash",
+          "label": "Gemini 3.8 Flash",
+          "pickerLabel": "Gemini 3.8 Flash",
+          "efforts": ["low", "medium", "high"],
+          "defaultEffort": "high",
+          "fastMode": false
+        },
+        {
+          "value": "claude-opus-4-8",
+          "label": "Opus 4.8",
+          "pickerLabel": "Claude Opus 4.8",
+          "contextWindows": ["300K", "1M"],
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "thinking": true,
+          "fastMode": true
+        },
+        {
+          "value": "gpt-5.6-terra",
+          "label": "GPT-5.6 Terra",
+          "pickerLabel": "GPT-5.6 Terra",
+          "contextWindows": ["272K", "1M"],
+          "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+          "fastMode": true
+        },
+        {
+          "value": "gpt-5.6-luna",
+          "label": "GPT-5.6 Luna",
+          "pickerLabel": "GPT-5.6 Luna",
+          "contextWindows": ["272K", "1M"],
+          "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+          "fastMode": true
+        },
+        {
+          "value": "composer-2.5",
+          "label": "Composer 2.5",
+          "pickerLabel": "Composer 2.5",
+          "efforts": [],
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "claude-fable-5",
+          "label": "Fable 5",
+          "pickerLabel": "Claude Fable 5",
+          "contextWindows": ["300K", "1M"],
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "thinking": true,
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "claude-sonnet-4-6",
+          "label": "Sonnet 4.6",
+          "pickerLabel": "Claude Sonnet 4.6",
+          "contextWindows": ["200K", "1M"],
+          "efforts": ["low", "medium", "high", "max"],
+          "thinking": true,
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "claude-opus-4-7",
+          "label": "Opus 4.7",
+          "pickerLabel": "Claude Opus 4.7",
+          "contextWindows": ["300K", "1M"],
+          "efforts": ["low", "medium", "high", "xhigh", "max"],
+          "thinking": true,
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "claude-opus-4-6",
+          "label": "Opus 4.6",
+          "pickerLabel": "Claude Opus 4.6",
+          "contextWindows": ["200K", "1M"],
+          "efforts": ["low", "medium", "high", "max"],
+          "thinking": true,
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "claude-opus-4-5",
+          "label": "Opus 4.5",
+          "pickerLabel": "Claude Opus 4.5",
+          "efforts": [],
+          "thinking": true,
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "claude-haiku-4-5",
+          "label": "Haiku 4.5",
+          "pickerLabel": "Claude Haiku 4.5",
+          "efforts": [],
+          "thinking": true,
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "claude-sonnet-4-5",
+          "label": "Sonnet 4.5",
+          "pickerLabel": "Claude Sonnet 4.5",
+          "efforts": [],
+          "thinking": true,
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "claude-sonnet-4",
+          "label": "Sonnet 4",
+          "pickerLabel": "Claude Sonnet 4",
+          "efforts": [],
+          "thinking": false,
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.5",
+          "label": "GPT-5.5",
+          "pickerLabel": "GPT-5.5",
+          "contextWindows": ["272K", "1M"],
+          "efforts": ["none", "low", "medium", "high", "xhigh"],
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.3-codex",
+          "label": "Codex 5.3",
+          "pickerLabel": "Codex 5.3",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.4",
+          "label": "GPT-5.4",
+          "pickerLabel": "GPT-5.4",
+          "contextWindows": ["272K", "1M"],
+          "efforts": ["none", "low", "medium", "high", "xhigh"],
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.2",
+          "label": "GPT-5.2",
+          "pickerLabel": "GPT-5.2",
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.4-mini",
+          "label": "GPT-5.4 Mini",
+          "pickerLabel": "GPT-5.4 Mini",
+          "efforts": ["none", "low", "medium", "high", "xhigh"],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.4-nano",
+          "label": "GPT-5.4 Nano",
+          "pickerLabel": "GPT-5.4 Nano",
+          "efforts": ["none", "low", "medium", "high", "xhigh"],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5.1",
+          "label": "GPT-5.1",
+          "pickerLabel": "GPT-5.1",
+          "efforts": ["low", "medium", "high"],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gpt-5-mini",
+          "label": "GPT-5 Mini",
+          "pickerLabel": "GPT-5 Mini",
+          "efforts": [],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gemini-3.7-flash",
+          "label": "Gemini 3.7 Flash",
+          "pickerLabel": "Gemini 3.7 Flash",
+          "efforts": ["low", "medium", "high"],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gemini-3.6-flash",
+          "label": "Gemini 3.6 Flash",
+          "pickerLabel": "Gemini 3.6 Flash",
+          "efforts": ["minimal", "low", "medium", "high"],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gemini-3.1-pro",
+          "label": "Gemini 3.1 Pro",
+          "pickerLabel": "Gemini 3.1 Pro",
+          "efforts": [],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gemini-3.5-flash",
+          "label": "Gemini 3.5 Flash",
+          "pickerLabel": "Gemini 3.5 Flash",
+          "efforts": [],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gemini-3-flash",
+          "label": "Gemini 3 Flash",
+          "pickerLabel": "Gemini 3 Flash",
+          "efforts": [],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "cursor-grok-4.5",
+          "label": "Grok 4.5",
+          "pickerLabel": "Cursor Grok 4.5",
+          "efforts": ["low", "medium", "high"],
+          "fastMode": true,
+          "group": "legacy"
+        },
+        {
+          "value": "kimi-k3",
+          "label": "Kimi K3",
+          "pickerLabel": "Kimi K3",
+          "efforts": ["low", "high", "max"],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "kimi-k2.7-code",
+          "label": "Kimi K2.7 Code",
+          "pickerLabel": "Kimi K2.7 Code",
+          "efforts": [],
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "glm-5.2",
+          "label": "GLM 5.2",
+          "pickerLabel": "GLM 5.2",
+          "efforts": ["high", "max"],
+          "fastMode": false,
+          "group": "legacy"
+        }
+      ],
+      "notes": "Labels drop the 'Claude' and 'Cursor' words the TUI shows; pickerLabel is the exact row text the /model filter needs. Row count re-read on 2026-09-03 (36 rows; Gemini 3.8 Flash added between Cursor Grok 4.5 and Gemini 3.7 Flash)."
+    },
+    "grok": {
+      "name": "Grok Build",
+      "cliVersion": "1.0.12",
+      "modelCommand": "/model <pickerLabel> [effort]",
+      "effortCommand": null,
+      "efforts": ["low", "medium", "high", "xhigh"],
+      "defaultEffort": "medium",
+      "fastMode": {
+        "available": false,
+        "command": null,
+        "scope": null
+      },
+      "models": [
+        {
+          "value": "grok-4.6",
+          "label": "Grok 4.6",
+          "pickerLabel": "Grok 4.6",
+          "description": "SpaceXAI's latest frontier model",
+          "default": true,
+          "efforts": ["low", "medium", "high", "xhigh"],
+          "fastMode": false
+        },
+        {
+          "value": "grok-4.5",
+          "label": "Grok 4.5",
+          "pickerLabel": "Grok 4.5",
+          "efforts": ["low", "medium", "high"],
+          "fastMode": false
+        }
+      ]
+    },
+    "antigravity": {
+      "name": "Antigravity CLI",
+      "cliVersion": "1.1.24",
+      "modelCommand": "/model <value>-<effort> for models with efforts, /model <value> otherwise; ids from `agy models`",
+      "effortCommand": null,
+      "efforts": ["low", "medium", "high"],
+      "fastMode": {
+        "available": false,
+        "command": null,
+        "scope": null,
+        "notes": "No /fast entry in the slash-command list; no Fast toggle in /model."
+      },
+      "notes": "The /model picker is a list with an Effort slider under models that have one (←/→). `agy models` flattens model and effort into one id (gemini-3.8-flash-high); Ghostex keys rows by the model part and appends the effort when it types the command. Labels drop the parenthetical the TUI shows; pickerLabel keeps it.",
+      "groups": [
+        {
+          "id": "legacy",
+          "label": "Legacy"
+        }
+      ],
+      "models": [
+        {
+          "value": "gemini-3.8-flash",
+          "label": "Gemini 3.8 Flash",
+          "pickerLabel": "Gemini 3.8 Flash",
+          "default": true,
+          "efforts": ["low", "medium", "high"],
+          "defaultEffort": "high",
+          "fastMode": false
+        },
+        {
+          "value": "claude-sonnet-4-6",
+          "label": "Claude Sonnet 4.6",
+          "pickerLabel": "Claude Sonnet 4.6 (Thinking)",
+          "description": "Thinking",
+          "efforts": [],
+          "fastMode": false
+        },
+        {
+          "value": "claude-opus-4-6-thinking",
+          "label": "Claude Opus 4.6",
+          "pickerLabel": "Claude Opus 4.6 (Thinking)",
+          "description": "Thinking",
+          "efforts": [],
+          "fastMode": false
+        },
+        {
+          "value": "gpt-oss-120b-medium",
+          "label": "GPT-OSS 120B",
+          "pickerLabel": "GPT-OSS 120B (Medium)",
+          "description": "Medium reasoning",
+          "efforts": [],
+          "fastMode": false
+        },
+        {
+          "value": "gemini-3.1-pro",
+          "label": "Gemini 3.1 Pro",
+          "pickerLabel": "Gemini 3.1 Pro",
+          "efforts": ["low", "high"],
+          "defaultEffort": "low",
+          "fastMode": false
+        },
+        {
+          "value": "gemini-3.7-flash",
+          "label": "Gemini 3.7 Flash",
+          "pickerLabel": "Gemini 3.7 Flash",
+          "efforts": ["low", "medium", "high"],
+          "defaultEffort": "low",
+          "fastMode": false,
+          "group": "legacy"
+        },
+        {
+          "value": "gemini-3.6-flash",
+          "label": "Gemini 3.6 Flash",
+          "pickerLabel": "Gemini 3.6 Flash",
+          "efforts": ["low", "medium", "high"],
+          "defaultEffort": "low",
+          "fastMode": false,
+          "group": "legacy"
+        }
+      ]
+    }
+  }
+}

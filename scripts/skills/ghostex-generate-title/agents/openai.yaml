@@ -1,7 +1,0 @@
-interface:
-  display_name: "ghostex-generate-title"
-  short_description: "Generate and submit a Ghostex session title"
-  default_prompt: "Use $ghostex-generate-title to create a title under 60 characters and submit `/rename <title>` in the current Ghostex session."
-
-policy:
-  allow_implicit_invocation: true

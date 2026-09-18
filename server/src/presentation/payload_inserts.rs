@@ -1,0 +1,522 @@
+use std::collections::HashMap;
+
+use rusqlite::Connection;
+use serde_json::{json, Value};
+
+use crate::domain::DomainStateError;
+use crate::portless::read_portless_presentation_payload;
+
+pub(crate) fn insert_workspace_groups_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) -> Result<(), DomainStateError> {
+    /*
+    CDXC:Sessions 2026-07-12-00:00:
+    Mobile and CLI consumers read the GPUI-authored named-group overlay from the
+    same presentation snapshot they already poll, so grouped ordering needs no
+    extra round trip.
+    */
+    let groups = crate::workspace_groups::read_workspace_session_groups(db)?;
+    if let Some(snapshot) = snapshot.as_object_mut() {
+        snapshot.insert("workspaceGroups".to_string(), groups);
+    }
+    Ok(())
+}
+
+pub(crate) fn insert_sidebar_project_collections_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) -> Result<(), DomainStateError> {
+    /*
+    CDXC:Projects 2026-07-18-00:00:
+    Mobile and CLI consumers read the colored project-collection overlay from
+    the same presentation snapshot they already poll, so grouped project
+    rendering needs no extra round trip.
+    */
+    let collections = crate::sidebar_project_collections::read_sidebar_project_collections(db)?;
+    if let Some(snapshot) = snapshot.as_object_mut() {
+        snapshot.insert("sidebarProjectCollections".to_string(), collections);
+    }
+    Ok(())
+}
+
+pub(crate) fn insert_sidebar_spaces_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) -> Result<(), DomainStateError> {
+    /*
+    CDXC:Spaces 2026-08-27:
+    The saved-filter overlay rides the same presentation snapshot every client
+    already polls, so a Space row and its filtered project list need no second
+    round trip and stay in step with the collections overlay beside it.
+    */
+    let spaces = crate::sidebar_spaces::read_sidebar_spaces(db)?;
+    if let Some(snapshot) = snapshot.as_object_mut() {
+        snapshot.insert("sidebarSpaces".to_string(), spaces);
+    }
+    Ok(())
+}
+
+pub(crate) fn insert_custom_session_tags_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) -> Result<(), DomainStateError> {
+    /*
+    CDXC:Sessions 2026-09-11 WHY:
+    Session rows in this same snapshot carry custom tag ids, so the catalog
+    that resolves them to a name, icon, and color rides along; a client that
+    had to fetch it separately would render "Custom tag" placeholders until the
+    second round trip landed.
+    */
+    let tags = crate::custom_session_tags::read_custom_session_tags(db)?;
+    if let Some(snapshot) = snapshot.as_object_mut() {
+        snapshot.insert("customSessionTags".to_string(), tags);
+    }
+    Ok(())
+}
+
+/*
+CDXC:SessionChat 2026-08-21:
+`queuedPromptCount` is the sidebar badge's whole input: how many Ghostex-owned
+prompts are waiting for this session. It rides the presentation projection for
+the same reason Delayed Send's countdown does — the sidebar already renders
+every session from this snapshot, so the badge needs no second round trip and
+no per-session chat subscription.
+
+The count mirrors `SessionChatQueueSnapshot::queued_count` in
+`session_chat_queue.rs`: EVERY row counts, `failed` included. A queue stalled
+behind a failed row is the one state that needs the user to act, and hiding it
+here made a dead queue indistinguishable from no queue on every surface outside
+the chat view. `queuedPromptFailedCount` rides alongside so the same badge can
+turn red instead of yellow, and so a consumer that means "more work is coming"
+(gpui Auto Sleep) can subtract it rather than guess. Both are published as
+ABSENT keys at zero, never `0`, so a session that drained its queue clears the
+badge through the same whole-object session upsert every other field uses.
+
+Cost: one grouped read of a table that is empty on almost every daemon, mirroring
+`read_all_delayed_send_projections`. Never one query per session — presentation
+snapshots publish many times a second on a busy sidebar.
+*/
+#[derive(Clone, Copy, Default)]
+pub(crate) struct SessionChatQueuePresentationCounts {
+    total: u64,
+    failed: u64,
+}
+
+pub(crate) fn read_session_chat_queue_counts(
+    db: &Connection,
+) -> HashMap<(String, String), SessionChatQueuePresentationCounts> {
+    let Ok(mut statement) = db.prepare(&format!(
+        r#"
+        SELECT
+          projectId,
+          sessionId,
+          COUNT(*),
+          SUM(CASE WHEN state = '{failed}' THEN 1 ELSE 0 END)
+        FROM session_chat_queued_prompts
+        GROUP BY projectId, sessionId
+        "#,
+        failed = crate::session_chat_queue::SESSION_CHAT_QUEUE_STATE_FAILED,
+    )) else {
+        return HashMap::new();
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok((
+            (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
+            SessionChatQueuePresentationCounts {
+                total: row.get::<_, i64>(2)?.max(0) as u64,
+                failed: row.get::<_, i64>(3).unwrap_or(0).max(0) as u64,
+            },
+        ))
+    }) else {
+        return HashMap::new();
+    };
+    rows.filter_map(Result::ok)
+        .filter(|(_, counts)| counts.total > 0)
+        .collect()
+}
+
+pub(crate) fn insert_session_chat_queue_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) {
+    let counts = read_session_chat_queue_counts(db);
+    if counts.is_empty() {
+        return;
+    }
+    let Some(sessions) = snapshot.get_mut("sessions").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for session in sessions {
+        let Some(object) = session.as_object_mut() else {
+            continue;
+        };
+        let key = (
+            object
+                .get("projectId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            object
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        );
+        if let Some(counts) = counts.get(&key) {
+            object.insert("queuedPromptCount".to_string(), json!(counts.total));
+            if counts.failed > 0 {
+                object.insert("queuedPromptFailedCount".to_string(), json!(counts.failed));
+            }
+        }
+    }
+}
+
+pub(crate) fn insert_session_chat_queue_session_projection(
+    session: &mut Value,
+    db: &Connection,
+    project_id: &str,
+    session_id: &str,
+) {
+    let snapshot = crate::session_chat_queue::read_session_chat_queue_snapshot_with(
+        db, project_id, session_id,
+    );
+    let count = snapshot.queued_count();
+    if count == 0 {
+        return;
+    }
+    let failed_count = snapshot.failed_count();
+    if let Some(object) = session.as_object_mut() {
+        object.insert("queuedPromptCount".to_string(), json!(count));
+        if failed_count > 0 {
+            object.insert("queuedPromptFailedCount".to_string(), json!(failed_count));
+        }
+    }
+}
+
+/*
+CDXC:SessionNotes 2026-08-24:
+`sessionNote` is the sidebar row's whole note input: the hover tooltip line and
+the note dot both read it, and the row must show it for SLEEPING sessions too,
+so it rides the presentation projection instead of a per-row round trip — same
+reasoning as `queuedPromptCount` above.
+
+The join key is the session's `agentSessionId`, not its ghostex id, because the
+note follows the provider conversation across close/resume. Notes are published
+as an ABSENT key when there is none, never `''`, so clearing a note clears the
+dot through the same whole-object session upsert every other field uses.
+
+Cost: one full read of a table with at most one row per noted conversation
+(empty on almost every daemon), mirroring the queue counts above. Never one
+query per session — presentation snapshots publish many times a second.
+*/
+fn read_session_agent_notes(db: &Connection) -> HashMap<String, String> {
+    let Ok(mut statement) =
+        db.prepare("SELECT agentSessionId, note FROM session_agent_notes WHERE note <> ''")
+    else {
+        return HashMap::new();
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) else {
+        return HashMap::new();
+    };
+    rows.filter_map(Result::ok)
+        .filter_map(|(agent_session_id, note)| {
+            let note = note.trim().to_string();
+            (!agent_session_id.is_empty() && !note.is_empty()).then_some((agent_session_id, note))
+        })
+        .collect()
+}
+
+pub(crate) fn insert_session_agent_note_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) {
+    let notes = read_session_agent_notes(db);
+    if notes.is_empty() {
+        return;
+    }
+    let Some(sessions) = snapshot.get_mut("sessions").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for session in sessions {
+        let Some(object) = session.as_object_mut() else {
+            continue;
+        };
+        let Some(agent_session_id) = object.get("agentSessionId").and_then(Value::as_str) else {
+            continue;
+        };
+        if let Some(note) = notes.get(agent_session_id) {
+            object.insert("sessionNote".to_string(), json!(note));
+        }
+    }
+}
+
+pub(crate) fn insert_session_agent_note_session_projection(session: &mut Value, db: &Connection) {
+    let Some(agent_session_id) = session
+        .get("agentSessionId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    let Ok(Some(note)) = crate::domain::repository::session_notes::read_session_agent_note_text(
+        db,
+        &agent_session_id,
+    ) else {
+        return;
+    };
+    if let Some(object) = session.as_object_mut() {
+        object.insert("sessionNote".to_string(), json!(note));
+    }
+}
+
+#[derive(Clone)]
+struct StashedPromptSessionOwner {
+    agent_session_id: Option<String>,
+    project_id: Option<String>,
+    session_id: Option<String>,
+}
+
+/*
+CDXC:SavedPrompts 2026-08-26:
+The terminal action bar badges Saved Prompts with the number filed against the
+current agent conversation. Read the bounded stash table once per presentation
+snapshot, then match each session using the same union as the chat composer:
+the durable provider conversation id, plus the raw project/session ids for
+legacy rows created before conversation ownership was recorded. A row that
+matches both predicates still counts once because each database row is visited
+only once.
+*/
+fn read_stashed_prompt_session_owners(db: &Connection) -> Vec<StashedPromptSessionOwner> {
+    let Ok(mut statement) =
+        db.prepare("SELECT projectId, sessionId, agentSessionId FROM stashed_prompts")
+    else {
+        return Vec::new();
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok(StashedPromptSessionOwner {
+            project_id: row.get(0)?,
+            session_id: row.get(1)?,
+            agent_session_id: row.get(2)?,
+        })
+    }) else {
+        return Vec::new();
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
+fn stashed_prompt_count_for_session(
+    prompts: &[StashedPromptSessionOwner],
+    session: &Value,
+) -> usize {
+    let project_id = session.get("projectId").and_then(Value::as_str);
+    let session_id = session.get("sessionId").and_then(Value::as_str);
+    let agent_session_id = session.get("agentSessionId").and_then(Value::as_str);
+    prompts
+        .iter()
+        .filter(|prompt| {
+            agent_session_id.is_some_and(|id| prompt.agent_session_id.as_deref() == Some(id))
+                || project_id
+                    .zip(session_id)
+                    .is_some_and(|(project_id, session_id)| {
+                        prompt.project_id.as_deref() == Some(project_id)
+                            && prompt.session_id.as_deref() == Some(session_id)
+                    })
+        })
+        .count()
+}
+
+pub(crate) fn insert_stashed_prompt_counts_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) {
+    let prompts = read_stashed_prompt_session_owners(db);
+    if prompts.is_empty() {
+        return;
+    }
+    let Some(sessions) = snapshot.get_mut("sessions").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for session in sessions {
+        let count = stashed_prompt_count_for_session(&prompts, session);
+        if count > 0 {
+            if let Some(object) = session.as_object_mut() {
+                object.insert("stashedPromptCount".to_string(), json!(count));
+            }
+        }
+    }
+}
+
+pub(crate) fn insert_stashed_prompt_count_session_projection(session: &mut Value, db: &Connection) {
+    let count = stashed_prompt_count_for_session(&read_stashed_prompt_session_owners(db), session);
+    if count > 0 {
+        if let Some(object) = session.as_object_mut() {
+            object.insert("stashedPromptCount".to_string(), json!(count));
+        }
+    }
+}
+
+/*
+CDXC:Drafts 2026-08-28:
+A draft's sidebar row shows the first line of the text the user is typing into
+it, not "Claude Session". The text lives in the synced `session_chat_drafts`
+table rather than in the session row, so — exactly like the queue counts and
+session notes above — it rides the presentation projection as a post-projection
+overlay instead of a per-row round trip, and `/api/setSessionChatDraft` publishes
+a session delta so every client's title follows the typing live.
+
+The durable `title` is deliberately left alone: it is still the agent default,
+which is what the row goes back to showing the moment the draft is promoted.
+Only the DISPLAY title and its tooltip are rewritten, and `titleSource` is set
+to `draft` so a client can tell this string apart from a real session title.
+*/
+fn apply_draft_display_title(session: &mut Value, content: &str) {
+    let Some(display_title) = crate::agents::draft_display_title(content) else {
+        return;
+    };
+    let Some(object) = session.as_object_mut() else {
+        return;
+    };
+    if object.get("isDraft").and_then(Value::as_bool) != Some(true) {
+        return;
+    }
+    object.insert(
+        "displayTitle".to_string(),
+        Value::String(display_title.clone()),
+    );
+    object.insert(
+        "displayTitleTooltip".to_string(),
+        Value::String(display_title.clone()),
+    );
+    object.insert("primaryTitle".to_string(), Value::String(display_title));
+    object.insert(
+        "titleSource".to_string(),
+        Value::String("draft".to_string()),
+    );
+    object.insert("isTemporaryTitle".to_string(), Value::Bool(false));
+    // The string is the user's unsent text, never something the terminal
+    // painted, so clients must not apply their live-terminal-title treatment
+    // (or the "(Unsynced title)" marker) to it.
+    object.insert(
+        "isPrimaryTitleTerminalTitle".to_string(),
+        Value::Bool(false),
+    );
+}
+
+/*
+CDXC:Drafts 2026-09-04 DECISION:
+User: the sidebar shows a white dot on the top-right of the agent icon when the
+session's chat composer holds text, tracking the chat box only (the terminal's
+own input line is deliberately not tracked). `hasComposerDraft` is that dot's
+whole input. It rides the presentation projection for the same reason
+`queuedPromptCount` does: the sidebar renders every session from this snapshot
+and holds no per-session chat subscription, and the synced draft is already the
+durable cross-client copy, so no client has to report its own typing. The flag
+is published as an ABSENT key when there is no draft, never `false`, and
+whitespace-only text counts as no draft (`read_non_blank_session_chat_draft_contents`
+already trims). It shares the one grouped drafts read with the draft display
+title below rather than adding a second query per snapshot.
+*/
+pub(crate) fn insert_session_chat_draft_presentation_payload(
+    snapshot: &mut Value,
+    db: &Connection,
+) {
+    let Some(sessions) = snapshot.get_mut("sessions").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let drafts = crate::session_chat_queue::read_non_blank_session_chat_draft_contents(db);
+    if drafts.is_empty() {
+        return;
+    }
+    for session in sessions {
+        let key = (
+            session
+                .get("projectId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        );
+        if let Some(content) = drafts.get(&key) {
+            apply_composer_draft_flag(session);
+            apply_draft_display_title(session, content);
+        }
+    }
+}
+
+pub(crate) fn insert_session_chat_draft_session_projection(
+    session: &mut Value,
+    db: &Connection,
+    project_id: &str,
+    session_id: &str,
+) {
+    // A failed read here only costs this delta its draft flag and title; the
+    // next one republishes them. Nothing is destroyed by guessing.
+    let Ok(Some(content)) =
+        crate::session_chat_queue::read_session_chat_draft_content(db, project_id, session_id)
+    else {
+        return;
+    };
+    apply_composer_draft_flag(session);
+    apply_draft_display_title(session, &content);
+}
+
+fn apply_composer_draft_flag(session: &mut Value) {
+    if let Some(object) = session.as_object_mut() {
+        object.insert("hasComposerDraft".to_string(), Value::Bool(true));
+    }
+}
+
+pub(crate) fn insert_auto_settle_window_presentation_payload(
+    snapshot: &mut Value,
+    auto_settle_after_days: Option<f64>,
+) {
+    /*
+    CDXC:StateSync 2026-07-29-00:00:
+    One sidebar renders rows from several daemons and each daemon reads its OWN
+    `sidebarAutoSettleAfterDays`, so a client that applied the local window to
+    every machine would park remote sessions the remote daemon still considers
+    active (the recorded P2 minor). The key is therefore ALWAYS published — an
+    explicit `null` says "this daemon settles nothing", while an ABSENT key can
+    only mean a daemon too old to state its window.
+    */
+    if let Some(snapshot) = snapshot.as_object_mut() {
+        snapshot.insert(
+            "autoSettleAfterDays".to_string(),
+            match auto_settle_after_days {
+                Some(days) => auto_settle_window_value(days),
+                None => Value::Null,
+            },
+        );
+    }
+}
+
+/*
+The window is carried as an f64 because the sweep computes with one, but the
+setting users actually write is a whole number of days. Publishing `3` rather
+than `3.0` round-trips their value byte for byte, which keeps the wire readable
+and comparable; a fractional window (a test or a power user's `1.5`) publishes as
+the float it is.
+*/
+pub(crate) fn auto_settle_window_value(days: f64) -> Value {
+    if days.fract() == 0.0 && days.abs() < 9_007_199_254_740_992.0 {
+        return json!(days as i64);
+    }
+    json!(days)
+}
+
+pub(crate) fn insert_portless_presentation_payload(snapshot: &mut Value, db: &Connection) {
+    if let Some(snapshot) = snapshot.as_object_mut() {
+        snapshot.insert(
+            "portless".to_string(),
+            serde_json::to_value(read_portless_presentation_payload(db))
+                .expect("Portless presentation payload serializes"),
+        );
+    }
+}

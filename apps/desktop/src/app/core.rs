@@ -1,0 +1,1205 @@
+use crate::app::terminal_sync::{
+    GpuiRetiringTerminalViewer, GpuiTerminalChatClaimState, GpuiTerminalViewerOwner,
+    GpuiTerminalViewerRecipe,
+};
+// C1 wave-4 extraction: the `GhostexGpuiApp` god object itself -- its 301
+// (now `pub(crate)`) fields plus the three trait impls that only it can own:
+// `Drop`, `EntityInputHandler`, and `Render`. Every other `impl GhostexGpuiApp`
+// block lives in a sibling app/*.rs module. Pure move, no logic changes.
+// See docs/2026-08-22/repo-restructure/SPLITS.md C1.
+
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::VecDeque;
+use std::ops::Range;
+use std::rc::Rc;
+use std::time::Instant;
+
+// RefCell backs cross-platform runtime state (window frame persistence), not
+// just the macOS-only shims that first introduced the import.
+use std::cell::Cell;
+
+use crate::terminal_surface_host::NativeTerminalSurfaceHost;
+use crate::terminal_surface_lifecycle::NativeTerminalSurfaceLifecycleState;
+use gpui::Bounds;
+use gpui::Entity;
+use gpui::EntityInputHandler;
+use gpui::FocusHandle;
+use gpui::Pixels;
+use gpui::Point;
+use gpui::ScrollHandle;
+use gpui::UTF16Selection;
+use gpui::Window;
+use gpui::WindowHandle;
+use gpui_component::input::InputState;
+
+use crate::app::element::*;
+use crate::app::helpers::*;
+use crate::app::model::*;
+use crate::app::native_app_modal_lifecycle::NativeAppModal;
+use crate::app::terminal_sync::GpuiEngineTerminalAnnouncedVisibility;
+use crate::app::window::*;
+use crate::*;
+
+pub struct GhostexGpuiApp {
+    pub(crate) parent_ns_view: *mut std::ffi::c_void,
+    pub(crate) project_name: String,
+    pub(crate) sidebar_url: String,
+    pub(crate) browser_url: String,
+    pub(crate) active_mode: TitlebarMode,
+    pub(crate) shell_focus: ShellFocusTarget,
+    pub(crate) previous_non_command_focus: Option<ShellFocusTarget>,
+    pub(crate) first_responder_target: FirstResponderTarget,
+    pub(crate) first_responder_transition_suppressed_by_programmatic_focus: bool,
+    #[cfg(target_os = "macos")]
+    pub(crate) source_workarea_cef_menu_passthrough_active: bool,
+    #[cfg(target_os = "macos")]
+    pub(crate) renderer_edit_hotkey_passthrough_active: bool,
+    pub(crate) programmatic_focus_depth: u32,
+    pub(crate) sidebar_focus_border_handoff: Option<SidebarFocusBorderHandoff>,
+    pub(crate) agents_workspace: WorkspaceModel,
+    /*
+    Agents split/tab topology is owned by the exact project/worktree id. The
+    live model belongs to `agents_workspace_project_id`; inactive project
+    models are parked instead of being destructively reconciled with another
+    project's session projection.
+    */
+    pub(crate) agents_workspace_project_id: Option<String>,
+    pub(crate) parked_agents_workspaces_by_project: HashMap<String, serde_json::Value>,
+    pub(crate) parked_agents_terminal_runtimes_by_project:
+        HashMap<String, ParkedAgentsTerminalRuntime>,
+    /*
+    CDXC:SessionChat 2026-08-26:
+    The chat pages of inactive projects, parked beside their terminal owners on
+    the same switch path instead of being destroyed and reloaded. Runtime-only,
+    and dropped with the app because the entity owns the Chromium browser.
+    */
+    pub(crate) parked_agents_chat_runtimes_by_project: HashMap<String, ParkedAgentsChatRuntime>,
+    /*
+    CDXC:Navigation 2026-07-29:
+    Leading-edge + trailing-debounce state for project switches. `until` is the
+    end of the settle window opened by the switch that is currently executing,
+    the queue holds at most one collapsed request per bridge kind (newest wins,
+    arrival order preserved), and the scheduled flag keeps one trailing timer in
+    flight instead of one per superseded click.
+    */
+    pub(crate) project_switch_settling_until: Option<Instant>,
+    pub(crate) project_switch_pending_requests: Vec<GpuiPendingProjectSwitchRequest>,
+    pub(crate) project_switch_flush_scheduled: bool,
+    pub(crate) command_pane: CommandPaneModel,
+    pub(crate) command_pane_auto_minimize:
+        super::command_pane_auto_minimize::CommandPaneAutoMinimize,
+    /*
+    CDXC:CommandPane 2026-07-10:
+    Command panes are per-project state like macOS `NativeProject.commandsPanel`.
+    The live `command_pane` belongs to `command_pane_project_id`; inactive
+    projects keep their panes parked as writer-owned shell-state JSON so a
+    project switch swaps panels instead of sharing one global panel. Parking
+    must never kill daemon-side gxserver sessions; only explicit tab close
+    does. The epoch invalidates in-flight attach-plan completions so a
+    completion from before a swap cannot mutate or kill the wrong project's
+    sessions.
+    */
+    pub(crate) command_pane_project_id: Option<String>,
+    pub(crate) parked_command_panes_by_project: HashMap<String, serde_json::Value>,
+    pub(crate) command_pane_project_epoch: u64,
+    pub(crate) project_editor_shell: ProjectEditorShellModel,
+    pub(crate) project_editor_auto_sleep_epochs: ProjectEditorAutoSleepEpochs,
+    pub(crate) project_editor_auto_sleep_policy: ProjectEditorAutoSleepPolicySnapshot,
+    pub(crate) browser_profiles: BrowserProfileModel,
+    pub(crate) browser_tabs: BrowserTabModel,
+    pub(crate) browser_tabs_project_id: Option<String>,
+    pub(crate) parked_browser_tabs_by_project: HashMap<String, BrowserTabModel>,
+    /*
+    CDXC:Browser 2026-08-26:
+    The live browser pages of inactive projects, parked beside their tab models
+    on the same switch path instead of being destroyed. Dropping the
+    `Entity<CefSurface>` closes the Chromium browser, so a project switch that
+    cleared `browser_surfaces` slept every browser tab of the project the user
+    just left and reloaded its pages from scratch on the way back.
+    */
+    pub(crate) parked_browser_runtimes_by_project: HashMap<String, ParkedBrowserRuntime>,
+    pub(crate) browser_tabs_project_epoch: u64,
+    /*
+    CDXC:Browser 2026-08-26:
+    Identity of the browser tab model currently mounted in the Browser workarea.
+    BrowserTabIds are project-local counters, so a surface's async CEF callbacks
+    capture the key that was live when the surface was created and resolve it
+    back to their own model — live or parked — instead of applying a title,
+    favicon, address, or load update to whichever project happens to hold the
+    same tab id now.
+    */
+    pub(crate) browser_tabs_runtime_key: u64,
+    pub(crate) sidebar_browser_tabs_snapshot: String,
+    /*
+    CDXC:SessionSleep 2026-08-20:
+    Last published set of local gxserver sessions this shell is actually showing
+    (terminal body or chat surface). The sidebar runtime's Auto Sleep sweep
+    otherwise decides visibility from its own click history, which cannot see a
+    parked terminal behind a chat surface and is wiped on a daemon reconnect.
+    */
+    pub(crate) sidebar_displayed_sessions_snapshot: String,
+    /*
+    CDXC:Browser 2026-08-18:
+    A Browser tab the user just opened, waiting to be revealed in the sidebar.
+    The reveal is deferred to the tab-snapshot publish instead of being sent at
+    creation time because the sidebar can only expand and scroll to a row it
+    already knows about, and the row reaches it in that same snapshot.
+    */
+    pub(crate) pending_sidebar_browser_tab_reveal: Option<PendingSidebarBrowserTabReveal>,
+    pub(crate) sidebar_browser_tab_reveal_request_id: u64,
+    /*
+    CDXC:TranscriptExport 2026-08-20:
+    The path of the markdown file the open Export Transcript result dialog is
+    describing, captured from the dialog's own open message. Reveal in Finder
+    reads this instead of trusting a path posted back by the modal page, and it
+    stays `None` for remote sessions because their export lives on the remote
+    machine's disk, not this one.
+    */
+    pub(crate) pending_export_transcript_reveal_path: Option<String>,
+    pub(crate) latest_sidebar_project_snapshot: Option<GpuiProjectSnapshot>,
+    /*
+    CDXC:Navigation 2026-08-19:
+    Back/Forward availability plus their tooltips, pushed by the sidebar runtime
+    whenever gxserver's trail changes. The render path may only read this cached
+    value — see `navigation_history` for why the titlebar owns no trail state.
+    */
+    pub(crate) navigation_history_state: navigation_history::GpuiNavigationHistoryState,
+    /// The notification feed rows and unread count, pushed by the sidebar
+    /// runtime whenever gxserver's feed changes. Render-path read only; see
+    /// `notification_feed` for the ownership split.
+    pub(crate) notification_feed_state: notification_feed::GpuiNotificationFeedState,
+    /// Last painted bounds of the titlebar bell, so the `openNotifications`
+    /// hotkey can anchor the Notifications popup without a click.
+    pub(crate) titlebar_notification_bell_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    pub(crate) titlebar_git_menu_state: Option<GpuiTitlebarGitMenuState>,
+    // Titlebar Actions are projected from gxserver's `/api/readSidebarHud`.
+    // The render path must only read this cached snapshot; the RPC runs on
+    // the background executor (startup, active-project change, and the shared
+    // 2s policy poll), never per frame on the main thread.
+    pub(crate) titlebar_actions_snapshot: Vec<GpuiTitlebarAction>,
+    pub(crate) titlebar_actions_refresh_in_flight: bool,
+    pub(crate) project_views: crate::app::project_views::ProjectViews,
+    pub(crate) extensions_snapshot: GpuiExtensionsSnapshot,
+    pub(crate) extension_projects: HashMap<String, GpuiExtensionProjectMetadata>,
+    pub(crate) extension_session_details: HashMap<String, serde_json::Value>,
+    pub(crate) extensions_refresh_in_flight: bool,
+    pub(crate) titlebar_accounts: Vec<serde_json::Value>,
+    pub(crate) titlebar_accounts_refresh_in_flight: std::collections::HashSet<String>,
+    pub(crate) titlebar_accounts_revision: u64,
+    pub(crate) titlebar_tips_unread_count: u64,
+    // Platform-neutral updater state drives the native titlebar. Sparkle owns
+    // macOS delivery and Velopack owns Windows delivery; only the Windows
+    // backend retains release metadata for the confirmation child window.
+    pub(crate) updater_started: bool,
+    #[allow(dead_code)] // read by the windows update path (begin_windows_update_check)
+    pub(crate) update_checking: bool,
+    pub(crate) update_available: bool,
+    pub(crate) update_downloading: bool,
+    pub(crate) update_download_progress: Option<f64>,
+    #[cfg(target_os = "windows")]
+    pub(crate) windows_updater: Option<windows_updater::WindowsUpdater>,
+    #[cfg(target_os = "windows")]
+    pub(crate) windows_update: Option<windows_updater::WindowsUpdate>,
+    #[cfg(target_os = "windows")]
+    pub(crate) windows_ready_update: Option<windows_updater::WindowsReadyUpdate>,
+    #[cfg(target_os = "windows")]
+    pub(crate) windows_first_run_setup_state: GpuiWindowsFirstRunSetupState,
+    // True while the standalone GhostexEditor daemon reports at least one
+    // open editor window (polled over its unix socket). Drives the titlebar
+    // "Prompt Editor" bring-to-front affordance.
+    pub(crate) prompt_editor_daemon_open: bool,
+    // Portless setup prompt suppression is memory-only for this app run
+    // (macOS `portlessSetupPromptSuppressedUntilRestart` /
+    // `activePortlessSetupPromptMode` parity).
+    pub(crate) portless_setup_prompt_suppressed_until_restart: bool,
+    pub(crate) active_portless_setup_prompt_mode: Option<GpuiPortlessSetupPromptMode>,
+    /*
+    CDXC:Portless 2026-08-18:
+    GPUI hosts a single app-modal window, so a Portless prompt resolved while
+    the user already has a modal open cannot be shown right away. Remember that
+    deferral instead of dropping the prompt for the rest of the run, and let
+    the next modal close re-run the check.
+    */
+    pub(crate) portless_setup_prompt_pending_modal_close: bool,
+    /*
+    CDXC:Onboarding 2026-08-18:
+    First-run onboarding markers are now persisted only after their surface is
+    actually shown, so the on-disk flags can no longer dedupe the entry points
+    that start onboarding (gxserver bootstrap, CEF init, daemon respawn). This
+    memory-only latch owns that dedupe for the process.
+    */
+    pub(crate) first_run_onboarding_started: bool,
+    pub(crate) active_open_target_id: Option<String>,
+    pub(crate) active_action_command_id: Option<String>,
+    /*
+    CDXC:AgentLauncher 2026-08-27:
+    Clicking the titlebar Quick Actions button now restarts a still-running
+    Action's terminal, so rapid re-clicks would churn kill/create cycles. The
+    button holds a short runtime-only cooldown after each terminal launch;
+    nothing about it is persisted or logged.
+    */
+    pub(crate) titlebar_quick_action_cooldown_until: Option<std::time::Instant>,
+    /*
+    CDXC:Titlebar 2026-06-27-09:26:
+    The GPUI titlebar Action button needs the same click-time Debug rerun decision as the shared command palette, but Rust owns that native control. Keep only command ids, active run ids, and coarse run state in memory so titlebar clicks can mirror close-on-exit failure reruns without storing command text, URLs, cwd/env, paths, status-file paths, terminal output, logs, or shell-state data.
+    */
+    pub(crate) sidebar_command_run_feedback_states:
+        HashMap<String, GpuiSidebarCommandRunFeedbackState>,
+    pub(crate) keep_awake_runtime: Option<GpuiKeepAwakeRuntime>,
+    pub(crate) keep_awake_runtime_generation: u64,
+    /*
+    CDXC:KeepAwake 2026-06-25-23:49:
+    GPUI Keep Awake automation is runtime-only. Store only the GPUI-owned caffeinate child, autostart suppression, power-rule ticker state, and active working-session count/grace state; do not persist runtime state, shell commands, probe output, session names, paths, titles, or renderer-provided power data.
+
+    CDXC:KeepAwake 2026-06-26-00:09:
+    Closed-lid prevention is a lease attached to the active GPUI Keep Awake runtime. Track only runtime ids and helper lease booleans so async helper enable/heartbeat completions can disable stale leases without storing helper paths, installer output, pmset text, commands, project data, or user content.
+
+    CDXC:KeepAwake 2026-06-26-00:29:
+    Working-session automation now uses only GPUI's safe terminal activity enums and lifecycle booleans. Cache the last observed count plus the 20-minute grace deadline in memory so Settings parity can react to Working-to-idle transitions without persisting or logging terminal titles, commands, paths, output, project data, or renderer-provided session metadata.
+    */
+    pub(crate) keep_awake_auto_start_suppressed: bool,
+    pub(crate) keep_awake_power_ticker_active: bool,
+    pub(crate) keep_awake_previous_working_session_count: usize,
+    pub(crate) keep_awake_working_session_grace_until: Option<Instant>,
+    /*
+    CDXC:RemoteMachines 2026-06-24-14:34:
+    GPUI Remote Settings reconnect owns only live SSH tunnel processes and runtime auth needed to talk to the remote gxserver. Keep remote tokens out of settings, logs, sidebar state, Browser/workarea CEF clients, and persistent progress; terminate the old tunnel before replacing it so Settings reconnect behaves like the macOS app.
+    */
+    /*
+    CDXC:RemoteMachines 2026-08-07:
+    Latest bounded connect wire state per saved machine, written at the single
+    status dispatch choke point. The terminal body renders a status overlay
+    from this while a surfaced remote session's machine is unreachable, so a
+    restored remote tab explains itself instead of showing an empty rectangle.
+    */
+    pub(crate) remote_machine_connect_states: HashMap<String, String>,
+    pub(crate) remote_gxserver_connections: HashMap<String, GpuiRemoteGxserverConnection>,
+    pub(crate) remote_browser: crate::app::remote_browser::RemoteBrowserRuntime,
+    pub(crate) remote_gxserver_connect_generations: HashMap<String, u64>,
+    pub(crate) remote_gxserver_watchdog_probe_in_flight: bool,
+    /*
+    CDXC:RemoteMachines 2026-06-24-19:54:
+    Live remote presentation streams are owned by Rust beside the saved-machine tunnel. Use a runtime generation counter plus per-connection cancel flag so reconnect/disconnect prevents stale WebSocket snapshots or deltas from mutating a newer machine-scoped sidebar cache.
+    */
+    pub(crate) remote_gxserver_presentation_stream_generation: u64,
+    /*
+    CDXC:AddProject 2026-06-24-19:35:
+    Remote repository clone progress is runtime-only GPUI bookkeeping keyed by the modal request id and remote gxserver job id. Store no repository URLs, remote paths, folder names, branch names, stdout/stderr, daemon bodies, SSH targets, tokens, or prompts; Rust uses this map only to poll/cancel the daemon-owned job through the live tunnel.
+    */
+    pub(crate) remote_repository_clone_requests: HashMap<String, GpuiRemoteRepositoryCloneRequest>,
+    /*
+    CDXC:RemoteMachines 2026-08-06:
+    Remote attach focus state maps the bounded saved-machine/project/session
+    identity to the GPUI terminal tab that owns the process-local SSH attach.
+    Only that canonical identity and shell tab id cross the shell-state boundary
+    so restored tabs reconcile one-to-one; SSH targets, tokens, remote paths,
+    command text, titles, project/session names, logs, and runtime payloads do
+    not.
+    */
+    pub(crate) remote_attach_sessions: HashMap<GpuiRemoteAttachSessionKey, TerminalSessionId>,
+    /*
+    CDXC:Workarea 2026-08-07:
+    Project keys (local or machine-scoped remote) whose restored-from-disk
+    Agents workspace has not yet run its one-shot resume pass. The first
+    authoritative sidebar snapshot for such a project wakes the sleeping
+    sessions its rendered panes actively surface, so reopening the app (or
+    revisiting a restored project) resumes what the user was looking at
+    instead of showing dead placeholders until a click. Consuming the key
+    makes every later sleep a user decision this pass must not override.
+    */
+    pub(crate) startup_restore_wake_pending: HashSet<String>,
+    /*
+    In-flight surfaced-restore SSH plan preparations, so the repeated
+    authoritative snapshots that arrive during startup cannot stack duplicate
+    remote round trips for the same tab.
+    */
+    pub(crate) remote_workspace_attach_pending: HashSet<GpuiRemoteAttachSessionKey>,
+    // CDXC:Navigation 2026-08-07: last workarea + companion
+    // arrangement per canonical workspace project key. See GpuiProjectViewState.
+    pub(crate) project_view_states_by_project: HashMap<String, GpuiProjectViewState>,
+    // CDXC:Workarea 2026-09-12: app-wide Agents and Wide pane layouts. See GpuiViewPaneLayouts.
+    pub(crate) view_pane_layouts: GpuiViewPaneLayouts,
+    pub(crate) sidebar_visibility_memory: GpuiSidebarVisibilityMemory,
+    #[cfg(target_os = "macos")]
+    pub(crate) remote_attach_askpass_scripts:
+        HashMap<GpuiRemoteAttachSessionKey, GpuiRemoteAskpassScript>,
+    /*
+    CDXC:CodeEditor 2026-06-24-23:17:
+    GPUI Source uses a runtime-only code-server owner equivalent to macOS's shared editor process. It may hold the owned Child and current in-memory folder URL target while the app runs, but it must not persist paths, URLs, command text, stdout/stderr, tokens, page titles, or project names into shell state or support logs.
+
+    CDXC:Workarea 2026-06-29-00:02:
+    Source readiness is represented by this direct code-server runtime owner, not by a parallel sidebar proof store. Kanban, Automate, and Manage readiness likewise derives from current project URL gates and owned CEF surfaces instead of stored readiness messages.
+    */
+    pub(crate) source_code_server_runtime: SourceCodeServerRuntimeOwner,
+    pub(crate) pending_source_file_open: Option<PendingSourceFileOpen>,
+    /*
+    CDXC:SessionChat 2026-08-03:
+    A chat file link that routes to Docs parks its project-relative path here
+    until the Manage surface exists and accepts the app-owned open script.
+    In-memory only: the path is a private project fact and never reaches shell
+    state or logs.
+    */
+    pub(crate) pending_docs_file_open: Option<String>,
+    /// An agent reply waiting to open in the Docs review (JSON payload for
+    /// `window.ghostexOpenDocsReview`), parked like `pending_docs_file_open`.
+    pub(crate) pending_docs_review_open: Option<String>,
+    /*
+    CDXC:Workarea 2026-06-24-10:12:
+    Source, Kanban, Automate, and Manage real CEF panes now have permanent app-owned runtime surface storage keyed by the safe workarea slot. The map owns Entity<CefSurface> plus the process-local direct runtime URL identity required to reject stale slot reuse; it must not store project names/paths, page titles, bridge payloads, file contents, tokens, cookies, shell text, or fallback navigation state, and creation is allowed only through a helper that receives a real runtime URL value.
+
+    CDXC:Workarea 2026-06-28-17:09:
+    Runtime surface ownership no longer keeps slot, URL-issuance, or owner-gate proof maps. The direct runtime URL gate is the only authority for retaining already-created project workarea CefSurface entities.
+
+    CDXC:Workarea 2026-06-29-00:15:
+    The map stores the current direct runtime URL identity only as process-local ownership metadata so Source/Kanban/Automate/Manage cannot reuse a valid-but-stale slot surface after active project changes. Do not persist, log, expose, or treat this as sidebar readiness proof.
+    */
+    pub(crate) project_workarea_runtime_cef_surfaces:
+        HashMap<ProjectWorkareaCefSurfaceSlotKey, ProjectWorkareaRuntimeCefSurface>,
+    /*
+    CDXC:CefRuntime 2026-06-23-08:23:
+    GPUI stores the last sidebar runtime settings snapshot it installed or sent so polling and Settings-save refreshes can no-op unchanged strict debug/beta plus saved-settings payloads and refresh only the sidebar CEF bridge when they change. Docs titlebar visibility and active-mode fallback use project-context availability instead of this settings snapshot.
+    */
+    pub(crate) sidebar_runtime_settings_snapshot: cef::SidebarRuntimeSettingsSnapshot,
+    pub(crate) system_color_scheme_is_light: bool,
+    /*
+    CDXC:ServerDaemon 2026-06-24-11:17:
+    The GPUI sidebar gxserver bootstrap is runtime memory only and may contain the localhost base URL plus bearer token read through the existing gxserver token helper. Store only the last sidebar-sent snapshot for change detection; never persist it, log it, copy it to Browser/workarea/modal CEF clients, or derive optional project/session ids from paths, titles, shell placeholders, or fixtures.
+
+    CDXC:ServerDaemon 2026-06-24-13:34:
+    The sidebar's live active-project snapshot is now the GPUI-owned source for `initialActiveProjectId` when it carries an explicit gxserver project id. Do not use that project snapshot as a fallback source for focused or visible session ids; Worker 39 owns those separately only after real gxserver presentation session ids exist.
+
+    CDXC:FocusRouting 2026-06-24-21:07:
+    Focused and visible gxserver session ids are now a separate runtime-only GPUI state sourced only from React's gxserver presentation session ids or Rust's remote attach session references. Store raw local gxserver ids and machine-scoped remote ids only; never derive this state from terminal shell ids, titles, paths, project names, command text, logs, or persisted layout.
+    */
+    pub(crate) sidebar_gxserver_bootstrap: Option<cef::SidebarGxserverBootstrap>,
+    pub(crate) sidebar_gxserver_presentation_focus_state: GpuiGxserverPresentationFocusState,
+    /*
+    CDXC:FocusRouting 2026-06-26-06:08:
+    Local sidebar session clicks need a runtime-only bridge from gxserver project/session identity to the GPUI Agents shell tab that owns the real attach process. Keep the latest focus key, map, pending attach set, and native tab lifecycle request ids process-local, prune them against the shell workspace, and store no titles, paths, commands, tokens, daemon bodies, terminal text, or persistent layout metadata here.
+
+    CDXC:Workarea 2026-06-26-07:25:
+    Mapped GPUI workspace tab Close is local-first: mutate the Rust shell immediately, then notify the sidebar runtime for best-effort gxserver cleanup. Sleep/Wake still apply only from typed lifecycle results because their visible state depends on the backend transition. This mirrors macOS lifecycle ownership without logging or persisting project names, session titles, commands, paths, terminal content, or raw renderer payloads.
+
+    CDXC:SessionTitles 2026-06-27-02:27:
+    Mapped workspace rename uses this same runtime-only gxserver project/session to shell-tab map, then requires a currently mounted Running Agents Ghostty surface before sending `/rename <title>` and a real Return key. Do not store rename titles, raw renderer JSON, command text, paths, output, or fallback target choices here.
+    */
+    pub(crate) local_workspace_latest_focus_key: Option<GpuiLocalWorkspaceSessionKey>,
+    pub(crate) local_workspace_session_mappings:
+        HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
+    pub(crate) local_workspace_attach_pending: HashSet<GpuiLocalWorkspaceSessionKey>,
+    /*
+    CDXC:SessionChat 2026-07-31:
+    Session Chat view mode is a runtime-only per-shell-session flag plus a
+    session-to-renderer binding. Keyed by shell TerminalSessionId because
+    the binding follows a tab across pane drags. Hidden idle pages pass a
+    fresh release probe before their renderer can serve another session.
+    Local chat surfaces
+    use the local gxserver bootstrap; remote attach chat surfaces use the
+    already-owned localhost SSH tunnel for that machine.
+
+    CDXC:SessionChat 2026-07-31:
+    The set of chat-mode session ids IS persisted (bare shell session ids in
+    shell-state JSON, `agentsChatModeSessions`) so each session reopens in its
+    last-used view after an app restart. The CEF surfaces stay runtime-only.
+    */
+    pub(crate) agents_chat_mode_sessions: HashSet<TerminalSessionId>,
+    /// The one terminal agent action bar whose "More actions" menu is open, by
+    /// shell session id. Runtime-only, and single-valued because opening a
+    /// second bar's menu closes the first, exactly like the chat composer's
+    /// dropdown.
+    pub(crate) agents_terminal_action_bar_menu_session: Option<TerminalSessionId>,
+    /// The open ⋯ menu's "Switch Account" flyout is showing. Reset whenever
+    /// the menu itself closes or moves to another session.
+    pub(crate) agents_terminal_action_bar_account_submenu_open: bool,
+    /// A companion-pane maximize route waiting for the matching Agents bar's
+    /// minimize action to restore its exact project view and companion slot.
+    pub(crate) terminal_agent_bar_companion_focus_return:
+        Option<TerminalAgentBarCompanionFocusReturn>,
+    /// Sessions whose current compatibility state has already been considered
+    /// for the saved automatic Chat preference, together with the effective
+    /// Default Agent View each one was considered under. These observations
+    /// survive temporary eligibility gaps and park with their project until
+    /// the shell session is removed. A session is swept again when its
+    /// effective value changes, whether the user flipped the global
+    /// preference or only this agent's per-agent override.
+    pub(crate) agents_chat_auto_switch_observed_sessions:
+        HashMap<TerminalSessionId, GpuiPreferredAgentInterface>,
+    /// One-shot Chat launch requests waiting for a shell-session mapping. The
+    /// mapped session enters Chat mode before any terminal focus handoff.
+    pub(crate) pending_agents_chat_launch_intents: HashSet<GpuiWorkspaceTerminalSessionKey>,
+    /// CDXC:Navigation 2026-09-11 WHY:
+    /// Remote session opens travel as a native project-path action and finish
+    /// asynchronously through several attach helpers with many callers, so the
+    /// keep-view intent of `GpuiSidebarWorkspaceTerminalFocusMessage.keep_view`
+    /// is parked here per remote key, like the Chat launch intent above, and
+    /// consumed by the helper that would otherwise switch to Agents.
+    pub(crate) pending_keep_view_remote_focus: HashSet<GpuiRemoteAttachSessionKey>,
+    pub(crate) agents_chat_page_states: HashMap<TerminalSessionId, SessionChatPageState>,
+    pub(crate) session_chat_diagnostics: super::session_chat_diagnostics::SessionChatDiagnostics,
+    pub(crate) agents_chat_eviction_running: bool,
+    pub(crate) agents_chat_eviction_retry_scheduled: bool,
+    pub(crate) agents_chat_reconcile_scheduled: bool,
+    pub(crate) agents_chat_eviction_requested: bool,
+    pub(crate) session_chat_use_gpui: bool,
+    pub(crate) native_chat_views: HashMap<TerminalSessionId, Entity<super::native_chat::state::NativeChatView>>,
+    pub(crate) agents_chat_surfaces: HashMap<TerminalSessionId, Entity<CefSurface>>,
+    pub(crate) session_chat_broker_endpoints: HashMap<String, (String, String)>,
+    pub(crate) session_chat_broker_epoch: Option<String>,
+    pub(crate) session_chat_shared_snapshots:
+        Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
+    pub(crate) session_chat_presentations:
+        Vec<(GpuiWorkspaceTerminalSessionKey, serde_json::Value)>,
+    pub(crate) reusable_chat_renderers: Vec<(
+        Entity<CefSurface>,
+        u64,
+        Option<GpuiWorkspaceTerminalSessionKey>,
+        Instant,
+    )>,
+    pub(crate) account_switch_progress:
+        HashMap<GpuiWorkspaceTerminalSessionKey, SessionAccountSwitchProgress>,
+    /// When each currently hidden chat surface last became hidden, the clock the
+    /// RAM eviction pass ages out. A surface that is visible has no entry, so a
+    /// transient hide (a tab drag hides every surface for its duration) neither
+    /// resets a running timer nor starts a spurious one.
+    pub(crate) agents_chat_surface_hidden_since: HashMap<TerminalSessionId, Instant>,
+    /// Chat surfaces whose page-side composer bridge has registered.
+    pub(crate) session_chat_composer_ready_sessions: HashSet<TerminalSessionId>,
+    /// Last composer-content report per chat page: `true` = the page said its
+    /// composer is empty, `false` = it holds draft text or attached images.
+    /// Reported by the page on composer mount, on every empty↔non-empty
+    /// transition, and re-asserted on composer blur (which fires when the
+    /// surface is hidden). RAM eviction requires an explicit `true`: a missing
+    /// entry means the state is unknown (report lost or page never loaded) and
+    /// unknown must never read as "empty" to a pass that destroys pages.
+    pub(crate) session_chat_composer_empty_reports: HashMap<TerminalSessionId, bool>,
+    pub(crate) pending_session_chat_composer_insert: HashMap<TerminalSessionId, String>,
+    /// Chat-to-terminal drafts waiting for the exact terminal owner to remount.
+    /// Each entry names the Saved Prompts row that holds the same text, so
+    /// dropping the entry (teardown, a session that never comes back) leaves a
+    /// recoverable copy behind instead of destroying the draft.
+    pub(crate) pending_session_terminal_composer_insert:
+        HashMap<TerminalSessionId, crate::app::session_chat::GpuiSessionChatDraftHandoff>,
+    pub(crate) pending_session_chat_draft_handoffs: HashSet<TerminalSessionId>,
+    pub(crate) session_chat_draft_capture_in_flight: HashSet<TerminalSessionId>,
+    pub(crate) pending_session_chat_received_drafts: HashMap<TerminalSessionId, serde_json::Value>,
+    pub(crate) pending_session_chat_image_saves: HashMap<
+        (TerminalSessionId, String),
+        crate::app::session_chat_image_save::GpuiPendingSessionChatImageSave,
+    >,
+    /// Queued Ghostex prompts per on-screen terminal-view session, the input to
+    /// the pane's "Queued: N" chrome row. Absent means zero.
+    pub(crate) session_chat_queued_counts: HashMap<TerminalSessionId, GpuiSessionChatQueuedCounts>,
+    pub(crate) session_chat_queued_count_refresh_in_flight: bool,
+    pub(crate) local_workspace_lifecycle_requests: HashMap<u64, GpuiLocalWorkspaceLifecycleRequest>,
+    pub(crate) next_local_workspace_lifecycle_request_id: u64,
+    /*
+    CDXC:StatusPet 2026-06-26-04:38:
+    Status indicator and pet overlay bridge state is runtime-only GPUI presentation input from the sidebar CEF surface. Store only parsed bounded counts, booleans, size/pet ids, project/session ids, order, and short titles; do not persist it, log raw JSON, or use it as authority for filesystem, command, URL, token, terminal-content, or renderer side effects.
+
+    CDXC:StatusPet 2026-06-26-05:42:
+    The compact GPUI menu-bar badge must be driven from this already parsed Rust status state, not from a renderer-owned menu-bar bridge.
+
+    CDXC:StatusPet 2026-06-26-06:05:
+    The primary-click Running Agents dropdown shares this state. Only counts, hide booleans, and bounded dropdown project/session ids/titles/status/order/timestamps may cross to AppKit; focus routing stays in fixed Rust/sidebar callbacks.
+
+    CDXC:Notifications 2026-06-26-06:56:
+    GPUI macOS attention banners are derived only from this sanitized status snapshot on attention transition edges. Keep first-snapshot replay suppression, per-session/global rate state, and notification click routing in runtime memory only; never persist or log titles, ids, paths, URLs, commands, stdout/stderr, settings JSON, tokens, raw payloads, or terminal content.
+    2026-09-11: the persisted notification history is gxserver's notification feed (`notification_feed_state` above is a cached copy of it); this banner path still keeps nothing.
+    */
+    pub(crate) sidebar_global_actions: Vec<GpuiSidebarGlobalActionState>,
+    pub(crate) tab_strip_built_in_buttons: shared_settings::SharedTabStripBuiltInButtons,
+    pub(crate) sidebar_session_status_indicators: GpuiSidebarSessionStatusIndicatorsState,
+    pub(crate) sidebar_session_status_indicators_snapshot_seen: bool,
+    pub(crate) session_attention_notification_rate_limiter:
+        GpuiSessionAttentionNotificationRateLimiter,
+    pub(crate) sidebar_pet_overlay: GpuiSidebarPetOverlayState,
+    /*
+    CDXC:AppShots 2026-06-25-23:28:
+    App Shot insertion needs a bounded runtime-only map from local gxserver presentation session ids to GPUI Agents shell tabs because those id spaces may differ. Populate it only from explicit sidebar focus-state handoffs and currently mounted Agents surfaces; store no prompts, app/window metadata, project paths, titles, command text, terminal output, or persistent state.
+    */
+    pub(crate) local_app_shot_session_mappings: HashMap<String, TerminalSessionId>,
+    /*
+    CDXC:CommandPane 2026-06-25-10:50:
+    Sidebar command-session indicator refresh is change-detected against a sanitized JSON summary of command-pane sessions. Cache only that safe summary string for CEF bridge dedupe; do not store command text, paths, status-file paths, env, output, or persisted shell-state JSON here.
+    */
+    pub(crate) sidebar_command_pane_sessions_snapshot: String,
+    /*
+    Agents Delayed Send sidebar chrome crosses CEF as a sanitized list of
+    combined project/session ids plus timer deadlines, labels, and remaining
+    milliseconds. Cache only that display projection for bridge dedupe; never
+    include terminal text, commands, paths, titles, agent prompts, or output.
+    */
+    pub(crate) sidebar_agents_delayed_sends_snapshot: String,
+    pub(crate) sidebar_timer_presentations_replayed_after_ready: bool,
+    /// The sidebar page's last-used launcher agent id, published over the native host bridge for the native New Thread picker.
+    pub(crate) sidebar_primary_agent_launcher_id: Option<String>,
+    /// The open native GPUI app modal, if any; see app/native_app_modal_lifecycle.rs.
+    pub(crate) native_app_modal: Option<NativeAppModal>,
+    pub(crate) new_thread_picker_window: Option<WindowHandle<Root>>,
+    pub(crate) new_thread_picker: Option<Entity<GpuiNewThreadPickerWindow>>,
+    pub(crate) new_thread_picker_visible: bool,
+    pub(crate) new_thread_picker_preloaded_agent_count: usize,
+    /// Cached local accounts list so a preloaded picker opens with its badges and rows filled.
+    pub(crate) new_thread_picker_accounts: Option<serde_json::Value>,
+    /// Cached sidebar HUD agent buttons so the New Thread picker opens without a gxserver round trip.
+    pub(crate) new_thread_picker_agents: Option<Vec<serde_json::Value>>,
+    pub(crate) new_thread_picker_agents_refresh_in_flight: bool,
+    /*
+    CDXC:DelayedSend 2026-06-25-15:11:
+    GPUI Delayed Send timers for command-pane terminals are runtime-owned session timers. Store only shell session ids, UTC deadlines, and cancellation generations in memory; persist only the bounded restart checkpoint described below.
+
+    CDXC:DelayedSend 2026-06-25-16:41:
+    The runtime map remains process-owned, but shell persistence may snapshot the UTC deadline plus remaining milliseconds for restart re-arm parity with macOS. Never expand that snapshot to command text, terminal content, titles, paths, runtime ids, stdout/stderr, or countdown labels.
+    */
+    pub(crate) command_delayed_send_timers: HashMap<CommandSessionId, GpuiCommandDelayedSendTimer>,
+    pub(crate) command_delayed_send_generation: u64,
+    pub(crate) command_delayed_send_countdown_ticker_active: bool,
+    pub(crate) command_delayed_send_persistence_ticker_active: bool,
+    /*
+    CDXC:CommandPane 2026-07-04:
+    Command-pane GPUI-engine terminals are local shell tabs only until their
+    gxserver command-surface session has been created and attached. Keep the
+    real daemon project/session identity beside the command tab id so launch
+    payloads, OSC state, close cleanup, and Phase 2 restore can use the
+    daemon-owned zmx session without persisting project paths, command text, or
+    attach commands.
+    */
+    pub(crate) command_gxserver_session_mappings:
+        HashMap<CommandSessionId, GpuiLocalWorkspaceSessionKey>,
+    pub(crate) command_gxserver_attach_pending: HashSet<CommandSessionId>,
+    /*
+    CDXC:RemoteMachines 2026-08-29:
+    The command-tab-scoped mirror of `command_gxserver_session_mappings` for
+    remote Action tabs. It exists for the same reason the local map does: a tab
+    close removes the session from the command model *before* the close cleanup
+    runs, so the identity needed to close the owning session has to survive
+    outside the model. Rebuilt from the incoming pane on a per-project swap,
+    exactly like the local map.
+    */
+    pub(crate) command_remote_action_sessions:
+        HashMap<CommandSessionId, GpuiRemoteAttachSessionReference>,
+    /*
+    CDXC:RemoteMachines 2026-08-29:
+    A remote Action tab spawns its own ssh, so it owns the saved-password
+    askpass helper for the lifetime of that terminal — the command-pane
+    equivalent of `remote_attach_askpass_scripts`. Dropping the handle deletes
+    the temp script and stops its password server, so it must outlive the
+    terminal and no longer.
+    */
+    #[cfg(target_os = "macos")]
+    pub(crate) command_remote_attach_askpass_scripts:
+        HashMap<CommandSessionId, GpuiRemoteAskpassScript>,
+    pub(crate) pending_command_gxserver_cleanup: HashSet<GpuiLocalWorkspaceSessionKey>,
+    pub(crate) command_gxserver_cleanup_in_flight: HashSet<GpuiLocalWorkspaceSessionKey>,
+    /*
+    CDXC:Workarea 2026-08-01:
+    Agents shell sessions that were just dragged out of the command pane and
+    whose gxserver row has not finished moving from the `commands` surface to
+    `workspace`. Sidebar-driven tab reconciliation deletes Agents sessions that
+    are absent from the sidebar projection, and a `commands`-surface row is
+    absent by definition, so these ids are held out of that prune until the
+    daemon confirms the move. Runtime-only: never persisted, and cleared on
+    success or after the bounded retry budget so a stuck update cannot pin a
+    session out of reconciliation forever.
+    */
+    pub(crate) agents_sessions_pending_surface_transfer: HashSet<TerminalSessionId>,
+    /*
+    CDXC:Sessions 2026-06-25-15:24:
+    Command Close After Done deadlines are runtime-only countdowns derived from armed command sessions that are currently done. Store only command session ids, deadlines, and cancellation generations here; the persisted shell state carries only the safe armed boolean.
+    */
+    pub(crate) command_close_after_done_timers:
+        HashMap<CommandSessionId, GpuiCommandCloseAfterDoneTimer>,
+    pub(crate) command_close_after_done_generation: u64,
+    pub(crate) command_close_after_done_countdown_ticker_active: bool,
+    /*
+    CDXC:AgentProviders 2026-06-24-12:14:
+    Startup and Settings-open hydration may both ask local gxserver for canonical agent policy. Keep only a runtime in-flight guard here so a missing daemon row is not seeded twice concurrently; the persisted values still live only in gxserver plus the central shared Settings render cache.
+    */
+    pub(crate) gxserver_agent_settings_reconciliation_in_flight: bool,
+    pub(crate) workspace_drop_feedback: Option<WorkspaceDropFeedback>,
+    pub(crate) command_drop_feedback: Option<CommandPaneDropFeedback>,
+    pub(crate) workspace_tab_drag_active: bool,
+    pub(crate) pending_workspace_tab_click: Option<WorkspacePendingTabClick>,
+    pub(crate) command_tab_drag_active: bool,
+    pub(crate) pending_command_tab_click: Option<CommandPanePendingTabClick>,
+    pub(crate) browser_tab_drop_feedback: Option<BrowserDropFeedback>,
+    pub(crate) browser_tab_drag_active: bool,
+    pub(crate) workspace_leaf_layout_bounds: HashMap<WorkspacePaneId, Bounds<Pixels>>,
+    pub(crate) browser_leaf_layout_bounds: HashMap<BrowserPaneId, Bounds<Pixels>>,
+    pub(crate) command_group_layout_bounds: HashMap<CommandPaneGroupId, Bounds<Pixels>>,
+    pub(crate) command_group_minimize_tooltip_visible: HashMap<CommandPaneGroupId, bool>,
+    pub(crate) command_pane_layout_bounds: Option<Bounds<Pixels>>,
+    pub(crate) project_editor_surface_layout_bounds: Option<ProjectEditorFocusBounds>,
+    pub(crate) project_editor_companion_layout_bounds: Option<ProjectEditorFocusBounds>,
+    pub(crate) agents_terminal_mount_slot_bounds:
+        HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
+    pub(crate) command_terminal_mount_slot_bounds:
+        HashMap<CommandTerminalBodyMountSlotId, Bounds<Pixels>>,
+    pub(crate) project_editor_companion_terminal_session_id: Option<TerminalSessionId>,
+    pub(crate) project_editor_companion_secondary_terminal_session_id: Option<TerminalSessionId>,
+    pub(crate) project_editor_companion_focused_terminal_slot: ProjectEditorCompanionTerminalSlot,
+    pub(crate) project_editor_companion_terminal_mount_slot_bounds:
+        HashMap<ProjectEditorCompanionTerminalBodyMountSlotId, Bounds<Pixels>>,
+    /*
+    CDXC:Zmx 2026-07-06:
+    Runtime-only zmx conditional-refresh triggers mirroring macOS
+    `scheduleZmxPersistenceTerminalRefreshAfterResize` and the focus-changed
+    refresh path: a trailing-edge resize debounce generation and the last
+    focused terminal slot identity. Both stay out of shell-state JSON and logs.
+    */
+    pub(crate) zmx_persistence_resize_refresh_generation: u64,
+    pub(crate) zmx_persistence_last_focused_terminal_slot:
+        Option<ZmxPersistenceFocusedTerminalSlot>,
+    /*
+    CDXC:Zmx 2026-07-11:
+    The mount-slot bounds maps above are per-render measurement state and are
+    cleared at every render start, so they cannot answer "was this slot
+    already surfaced with these bounds?". Using them for that (as the bounds
+    hooks originally did) made every frame look like a first surfacing: one
+    zmx refresh-if-stale subprocess per visible terminal slot per frame, and
+    a dead resize-debounce branch. These sibling maps persist across renders
+    for exactly that question; they are pruned at render start against the
+    currently rendered slots so a slot that leaves and returns still gets its
+    surfaced refresh. Runtime-only, never serialized or logged.
+    */
+    // One-shot guard for the delayed sidebar-surface creation retry
+    // (CDXC:CefRuntime 2026-07-11).
+    pub(crate) cef_sidebar_creation_retried: bool,
+    pub(crate) cef_context_initialization_waiting: bool,
+    pub(crate) agents_terminal_zmx_refresh_recorded_bounds:
+        HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
+    pub(crate) command_terminal_zmx_refresh_recorded_bounds:
+        HashMap<CommandTerminalBodyMountSlotId, Bounds<Pixels>>,
+    pub(crate) project_editor_companion_zmx_refresh_recorded_bounds:
+        HashMap<ProjectEditorCompanionTerminalBodyMountSlotId, Bounds<Pixels>>,
+    /*
+    CDXC:Terminal 2026-06-23-10:45:
+    Terminal IME/preedit ownership uses one app-level GPUI focus handle that is focused only through mounted terminal body focus paths. The text-service state may remember only runtime slot identity and sanitized UTF-16 marked ranges, never raw typed text, preedit text, terminal content, paths, commands, output, URLs, titles, tokens, cookies, or secrets.
+    */
+    pub(crate) terminal_text_focus_handle: FocusHandle,
+    pub(crate) terminal_text_marked_range: Option<TerminalTextMarkedRange>,
+    /// The one outstanding keyboard handoff; see keyboard_owner.rs.
+    /// Session and command creation, wake, and chat launch paths become type-ready through it: the request waits until the terminal surface or chat composer actually exists, then focuses it once.
+    pub(crate) pending_keyboard_handoff: Option<PendingKeyboardHandoff>,
+    /// The composited terminal the keyboard router currently treats as owner, with the native root it was claimed on, so a terminal that stops rendering can be released.
+    pub(crate) composited_terminal_keyboard_owner: Option<(usize, GpuiEngineTerminalEventTarget)>,
+    pub(crate) agents_terminal_startup_body_slot_geometries:
+        HashMap<AgentsTerminalStartupBodySlotId, AgentsTerminalStartupBodyGeometry>,
+    pub(crate) agents_terminal_parked_owner_body_slot_geometries:
+        HashMap<AgentsTerminalBodyMountSlotId, AgentsTerminalParkedOwnerBodyGeometry>,
+    pub(crate) agents_terminal_runtime_sessions: AgentsTerminalRuntimeSessionRegistry,
+    pub(crate) agents_terminal_startup_coordinator: AgentsTerminalStartupCoordinator,
+    pub(crate) agents_terminal_startup_launch_payload_source:
+        AgentsTerminalStartupLaunchPayloadSource,
+    pub(crate) agents_terminal_launch_payload_source: AgentsTerminalLaunchPayloadSource,
+    pub(crate) command_terminal_launch_payload_source: CommandTerminalLaunchPayloadSource,
+    pub(crate) project_editor_companion_terminal_launch_payload_source:
+        ProjectEditorCompanionTerminalLaunchPayloadSource,
+    pub(crate) project_editor_companion_terminal_attach_plan_pending:
+        HashSet<ProjectEditorCompanionTerminalBodyMountSlotId>,
+    pub(crate) project_editor_companion_remote_attach_states: HashMap<
+        ProjectEditorCompanionTerminalBodyMountSlotId,
+        GpuiProjectEditorCompanionRemoteAttachState,
+    >,
+    pub(crate) agents_terminal_surface_host: NativeTerminalSurfaceHost,
+    pub(crate) agents_terminal_surface_lifecycle: NativeTerminalSurfaceLifecycleState,
+    pub(crate) command_terminal_surface_host:
+        NativeTerminalSurfaceHost<CommandTerminalBodyMountSlotId>,
+    pub(crate) command_terminal_surface_lifecycle:
+        NativeTerminalSurfaceLifecycleState<CommandTerminalBodyMountSlotId>,
+    pub(crate) project_editor_companion_terminal_surface_host:
+        NativeTerminalSurfaceHost<ProjectEditorCompanionTerminalBodyMountSlotId>,
+    pub(crate) project_editor_companion_terminal_surface_lifecycle:
+        NativeTerminalSurfaceLifecycleState<ProjectEditorCompanionTerminalBodyMountSlotId>,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_ghostty_surfaces:
+        HashMap<AgentsTerminalBodyMountSlotId, terminal_ghostty_surface::GhosttySurfaceOwner>,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_parked_runtime_owners:
+        HashMap<AgentsTerminalRuntimeSessionId, AgentsTerminalParkedRuntimeOwner>,
+    #[cfg(target_os = "macos")]
+    pub(crate) command_terminal_ghostty_surfaces: HashMap<
+        CommandTerminalBodyMountSlotId,
+        terminal_ghostty_surface::GhosttySurfaceOwner<CommandTerminalBodyMountSlotId>,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) project_editor_companion_terminal_ghostty_surfaces: HashMap<
+        ProjectEditorCompanionTerminalBodyMountSlotId,
+        terminal_ghostty_surface::GhosttySurfaceOwner<
+            ProjectEditorCompanionTerminalBodyMountSlotId,
+        >,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) command_terminal_parked_runtime_owners:
+        HashMap<AgentsTerminalRuntimeSessionId, CommandTerminalParkedRuntimeOwner>,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_close_confirms: AgentsTerminalCloseConfirmState,
+    #[cfg(target_os = "macos")]
+    pub(crate) command_terminal_close_confirms: CommandTerminalCloseConfirmState,
+    #[cfg(target_os = "macos")]
+    pub(crate) terminal_close_confirm_dialog_key: Option<TerminalCloseConfirmDialogKey>,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_startup_ghostty_surfaces: HashMap<
+        AgentsTerminalStartupBodySlotId,
+        terminal_ghostty_surface::StartupGhosttySurfaceOwner,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_ghostty_app: Option<terminal_ghostty_surface::GhosttyAppOwner>,
+    #[cfg(target_os = "macos")]
+    pub(crate) command_terminal_ghostty_app: Option<terminal_ghostty_surface::GhosttyAppOwner>,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_host_native_views: HashMap<
+        AgentsTerminalBodyMountSlotId,
+        terminal_native_view::AppOwnedTerminalHostNativeView,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) command_terminal_host_native_views: HashMap<
+        CommandTerminalBodyMountSlotId,
+        terminal_native_view::AppOwnedTerminalHostNativeView<CommandTerminalBodyMountSlotId>,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) project_editor_companion_terminal_host_native_views: HashMap<
+        ProjectEditorCompanionTerminalBodyMountSlotId,
+        terminal_native_view::AppOwnedTerminalHostNativeView<
+            ProjectEditorCompanionTerminalBodyMountSlotId,
+        >,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_startup_host_native_views: HashMap<
+        AgentsTerminalStartupBodySlotId,
+        terminal_native_view::AppOwnedTerminalStartupHostNativeView,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_appkit_focused_host:
+        Option<terminal_native_view::AppOwnedTerminalHostFocusIdentity>,
+    #[cfg(target_os = "macos")]
+    pub(crate) command_terminal_appkit_focused_host: Option<
+        terminal_native_view::AppOwnedTerminalHostFocusIdentity<CommandTerminalBodyMountSlotId>,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) project_editor_companion_terminal_appkit_focused_host: Option<
+        terminal_native_view::AppOwnedTerminalHostFocusIdentity<
+            ProjectEditorCompanionTerminalBodyMountSlotId,
+        >,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_ghostty_surface_config_requests: HashMap<
+        AgentsTerminalBodyMountSlotId,
+        terminal_ghostty_surface::GhosttySurfaceConfigRequest,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) command_terminal_ghostty_surface_config_requests: HashMap<
+        CommandTerminalBodyMountSlotId,
+        terminal_ghostty_surface::GhosttySurfaceConfigRequest,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) project_editor_companion_terminal_ghostty_surface_config_requests: HashMap<
+        ProjectEditorCompanionTerminalBodyMountSlotId,
+        terminal_ghostty_surface::GhosttySurfaceConfigRequest,
+    >,
+    #[cfg(target_os = "macos")]
+    pub(crate) agents_terminal_startup_ghostty_surface_config_requests: HashMap<
+        AgentsTerminalStartupBodySlotId,
+        terminal_ghostty_surface::GhosttySurfaceConfigRequest,
+    >,
+    pub(crate) workspace_tab_scroll_handles: HashMap<WorkspacePaneId, ScrollHandle>,
+    pub(crate) browser_tab_scroll_handles: HashMap<BrowserPaneId, ScrollHandle>,
+    pub(crate) command_tab_scroll_handles: HashMap<CommandPaneGroupId, ScrollHandle>,
+    pub(crate) command_collapsed_tab_scroll_handle: ScrollHandle,
+    pub(crate) workspace_split_layout_metrics: HashMap<WorkspaceSplitId, SplitResizeMetrics>,
+    pub(crate) command_split_layout_metrics: HashMap<CommandPaneSplitId, SplitResizeMetrics>,
+    pub(crate) browser_split_layout_metrics: HashMap<BrowserSplitId, SplitResizeMetrics>,
+    pub(crate) project_editor_companion_layout_metrics: Option<SplitResizeMetrics>,
+    pub(crate) project_editor_companion_split_layout_metrics: Option<SplitResizeMetrics>,
+    pub(crate) workspace_split_drag: Option<WorkspaceSplitResizeDragState>,
+    pub(crate) workspace_split_hovering: Option<WorkspaceSplitId>,
+    pub(crate) workspace_split_hover_visible: Option<WorkspaceSplitId>,
+    pub(crate) workspace_split_hover_epoch: u64,
+    pub(crate) command_split_drag: Option<CommandPaneSplitResizeDragState>,
+    pub(crate) browser_split_drag: Option<BrowserSplitResizeDragState>,
+    pub(crate) project_editor_companion_drag: Option<ProjectEditorCompanionResizeDragState>,
+    pub(crate) project_editor_companion_split_drag:
+        Option<ProjectEditorCompanionSplitResizeDragState>,
+    pub(crate) project_editor_companion_divider_hovering: Option<TitlebarMode>,
+    pub(crate) project_editor_companion_divider_hover_visible: Option<TitlebarMode>,
+    pub(crate) project_editor_companion_divider_hover_epoch: u64,
+    pub(crate) project_editor_companion_split_divider_hovering: Option<TitlebarMode>,
+    pub(crate) project_editor_companion_split_divider_hover_visible: Option<TitlebarMode>,
+    pub(crate) project_editor_companion_split_divider_hover_epoch: u64,
+    pub(crate) hovered_workspace_tab: Option<WorkspaceHoverTab>,
+    pub(crate) hovered_command_tab: Option<CommandPaneHoverTab>,
+    pub(crate) hovered_browser_tab: Option<BrowserHoverTab>,
+    pub(crate) command_resize_hovering: Option<CommandPaneResizeHoverTarget>,
+    pub(crate) command_resize_hover_visible: Option<CommandPaneResizeHoverTarget>,
+    pub(crate) command_resize_hover_epoch: u64,
+    /*
+    CDXC:StatusPet 2026-06-26-11:17:
+    Worker 53 keeps Pet Overlay interaction state inside the existing visible GPUI stack. The avatar's expanded/collapsed activity-card boolean is persisted with shell state to match native restart behavior, but the only stored pet UI data is this boolean; do not store activity titles, session/project ids, paths, settings JSON, commands, URLs, terminal output, tokens, detached panel origin, or drag state.
+
+    CDXC:StatusPet 2026-06-26-07:31:
+    GPUI Pet Overlay Reduce Motion is a runtime-only macOS accessibility display option. When enabled, keep the avatar on a stable semantic state frame and do not start the pet animation ticker; unsupported/non-macOS reads default to animated behavior without persisting or logging system settings.
+    */
+    pub(crate) gpui_pet_overlay_activities_visible: bool,
+    pub(crate) gpui_pet_overlay_avatar_hovered: bool,
+    pub(crate) gpui_pet_overlay_animation_state: GpuiPetOverlayAnimationState,
+    pub(crate) gpui_pet_overlay_animation_started_at: Instant,
+    pub(crate) gpui_pet_overlay_animation_ticker_active: bool,
+    pub(crate) gpui_pet_overlay_reduce_motion_enabled: bool,
+    pub(crate) command_pane_side: GpuiCommandPaneSide,
+    pub(crate) sidebar_width: f32,
+    pub(crate) sidebar_collapsed: bool,
+    #[cfg(target_os = "macos")]
+    pub(crate) companion_reveal: Option<crate::app::companion_reveal::CompanionReveal>,
+    pub(crate) sidebar_drag: Option<SidebarDragState>,
+    pub(crate) sidebar_divider_hovering: bool,
+    pub(crate) sidebar_divider_hover_visible: bool,
+    pub(crate) sidebar_divider_hover_epoch: u64,
+    pub(crate) app_modal_window: Option<WindowHandle<GpuiAppModalHostWindow>>,
+    pub(crate) app_modal_window_id: Rc<Cell<Option<gpui::WindowId>>>,
+    pub(crate) app_modal_open_attempt_id: u64,
+    pub(crate) app_modal_ready_retry_used: bool,
+    pub(crate) app_modal_command_return_focus_target: Option<CommandPaneAppModalReturnFocusTarget>,
+    pub(crate) plugins_modal_window: Option<WindowHandle<plugins_modal::GpuiPluginsModalWindow>>,
+    pub(crate) plugin_settings_action_progress:
+        HashMap<&'static str, component_store::ComponentStoreProgressPhase>,
+    pub(crate) plugin_settings_action_errors: HashMap<&'static str, String>,
+    pub(crate) plugin_settings_action_generations: HashMap<&'static str, u64>,
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    pub(crate) cef_component_window:
+        Option<WindowHandle<cef_component_window::GpuiCefComponentWindow>>,
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    pub(crate) cef_component_install_generation: u64,
+    /*
+    CDXC:AppModal 2026-08-18:
+    The last-known frame and display of the main workspace window, refreshed
+    from this entity's render pass and main-window bounds observer. Child
+    window placement must never read the ambient
+    `&mut Window` of whatever context happens to deliver the toast: gpui
+    resolves `WeakEntity::update_in` through `current_window_by_entity`, which
+    points at the last window that drew after this entity was touched. Any
+    child popup (titlebar dropdown, app modal, or the toast panel itself) can
+    win that race, which put toasts on top of the wrong window and walked the
+    stack up the screen one toast at a time.
+    */
+    pub(crate) main_window_bounds: Bounds<Pixels>,
+    pub(crate) main_window_display_id: Option<gpui::DisplayId>,
+    pub(crate) app_toast_window: Option<WindowHandle<GpuiAppToastWindow>>,
+    pub(crate) app_toast_window_height: Pixels,
+    pub(crate) app_toast_anchor: Option<Point<Pixels>>,
+    pub(crate) app_toasts: Vec<GpuiAppToast>,
+    pub(crate) app_toast_epoch: u64,
+    pub(crate) app_toast_id_counter: u64,
+    pub(crate) agents_terminal_runtime_osc_states:
+        HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
+    pub(crate) command_terminal_runtime_osc_states:
+        HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
+    /*
+    CDXC:Terminal 2026-07-04:
+    Runtime-only GPUI-engine terminal views keyed by shell session identity.
+    On every OS, sessions are claimed exactly when their queued launch payload
+    is consumed. Agents, command-pane, companion, restored, and newly launched
+    terminals render the composited TerminalElement in the same body slot.
+    GhosttyKit owners remain available in the macOS build but are never selected
+    while this engine is enabled. Records are never persisted.
+    */
+    pub(crate) agents_gpui_engine_terminals:
+        HashMap<TerminalSessionId, terminal_gpui_engine::GpuiEngineTerminalRecord>,
+    pub(crate) agents_terminal_chat_claims: HashMap<TerminalSessionId, GpuiTerminalChatClaimState>,
+    pub(crate) terminal_viewer_reconcile_pending: bool,
+    pub(crate) retiring_gpui_terminal_viewers:
+        HashMap<GpuiTerminalViewerOwner, GpuiRetiringTerminalViewer>,
+    pub(crate) agents_gpui_terminal_viewer_recipes:
+        HashMap<TerminalSessionId, GpuiTerminalViewerRecipe>,
+    pub(crate) command_gpui_terminal_viewer_recipes:
+        HashMap<CommandSessionId, GpuiTerminalViewerRecipe>,
+    pub(crate) command_gpui_engine_terminals:
+        HashMap<CommandSessionId, terminal_gpui_engine::GpuiEngineTerminalRecord>,
+    /// Last zmx visibility claim (visible/hidden plus the announced grid)
+    /// per Agents engine terminal, so parked clients rest at the daemon's
+    /// wide grid instead of pinning it narrow
+    /// (CDXC:Terminal 2026-09-03). Runtime-only.
+    pub(crate) agents_gpui_engine_terminal_zmx_visibility:
+        HashMap<TerminalSessionId, GpuiEngineTerminalAnnouncedVisibility>,
+    /// Pending close confirmations for GPUI-engine slots. Kept separate from
+    /// the native Ghostty close-confirm state machines because engine
+    /// liveness is checked at close-request time instead of via runtime
+    /// close callbacks.
+    pub(crate) agents_gpui_engine_close_confirms: HashSet<AgentsTerminalBodyMountSlotId>,
+    pub(crate) command_gpui_engine_close_confirms: HashSet<CommandTerminalBodyMountSlotId>,
+    pub(crate) pending_terminal_paste_confirmation: Option<PendingGpuiTerminalPasteConfirmation>,
+    pub(crate) terminal_paste_confirmation_dialog_open: bool,
+    /*
+    CDXC:Diagnostics 2026-07-04-12:40:
+    Runtime-only last-logged grid per live command engine terminal, so the
+    gated `native.terminal.focus` diagnostic can record spawn and every
+    applied cols/rows change without per-frame log spam. A command engine
+    terminal whose grid stays at a degenerate size (for example rows == 1
+    while the pinned panel is expanded) renders as a visually blank body, and
+    this breadcrumb is the decisive signal separating "element never rendered"
+    from "element rendered with a collapsed body rectangle". Never persisted;
+    numeric ids and cell counts only.
+    */
+    pub(crate) command_gpui_engine_grid_log_states: HashMap<CommandSessionId, (u16, u16)>,
+    pub(crate) terminal_search_inputs: HashMap<AgentsTerminalRuntimeSessionId, Entity<InputState>>,
+    pub(crate) terminal_search_input_subscriptions:
+        HashMap<AgentsTerminalRuntimeSessionId, gpui::Subscription>,
+    pub(crate) terminal_search_focus_pending: Option<AgentsTerminalRuntimeSessionId>,
+    /// Live Delayed Send timers for mounted Agents terminals. Shell state keeps
+    /// only stable project/session identity plus a bounded remaining-time or
+    /// status-trigger checkpoint; deadlines, generations, and mount owners stay
+    /// process-local.
+    pub(crate) agents_delayed_send_timers: HashMap<TerminalSessionId, GpuiCommandDelayedSendTimer>,
+    pub(crate) agents_send_when_stopped_watchers:
+        HashMap<TerminalSessionId, GpuiAgentsSendWhenStoppedWatcher>,
+    pub(crate) agents_delayed_send_generation: u64,
+    pub(crate) agents_delayed_send_countdown_ticker_active: bool,
+    pub(crate) agents_delayed_send_persistence_ticker_active: bool,
+    /*
+    CDXC:Onboarding 2026-06-24-23:17:
+    The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside an app-owned anchored GPUI overlay positioned directly below TITLEBAR_HEIGHT. Store only the panel entity, open boolean, and transient focus handoff state so closing the overlay can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
+    */
+    pub(crate) titlebar_dropdown_focus_handle: FocusHandle,
+    pub(crate) titlebar_dropdown_previous_focus_handle: Option<FocusHandle>,
+    pub(crate) titlebar_popup_menu: Option<GpuiTitlebarPopupState>,
+    pub(crate) context_menu: Option<crate::app::context_menu::GpuiContextMenu>,
+    pub(crate) titlebar_popup_window: Option<WindowHandle<GpuiTitlebarPopupWindow>>,
+    /// Last painted bounds of the titlebar Help button, so the `openGhostexHelp`
+    /// hotkey can anchor the Help popup without a click.
+    pub(crate) titlebar_help_button_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    pub(crate) titlebar_extension_popup_generation: u64,
+    pub(crate) titlebar_extension_popup: Option<GpuiTitlebarExtensionPopupState>,
+    pub(crate) titlebar_tips_panel_open: bool,
+    pub(crate) titlebar_tips_panel: Option<Entity<GpuiTitlebarTipsPanel>>,
+    pub(crate) titlebar_resources_panel_open: bool,
+    pub(crate) titlebar_resources_panel_ready: bool,
+    pub(crate) titlebar_resources_panel_open_generation: u64,
+    pub(crate) titlebar_resources_panel: Option<Entity<GpuiTitlebarResourcesPanel>>,
+    /*
+    CDXC:Resources 2026-07-26:
+    Resources attributes a localhost listener to a project by matching the
+    listener's cwd against the project paths in the resource groups GPUI sends.
+    Sending only the active project's mounted panes hid every dev server started
+    from another project or from a session this window has not mounted, so the
+    panel also receives project groups projected from the gxserver presentation
+    snapshot. Cache only that projection; the snapshot itself is refetched on
+    each Resources open.
+    */
+    pub(crate) titlebar_resources_presentation_groups: Vec<serde_json::Value>,
+    pub(crate) titlebar_tips_cli_status: Option<serde_json::Value>,
+    pub(crate) titlebar_tips_agent_hook_status: Option<serde_json::Value>,
+    /// Built-in agent ids the sidebar launchers map to; `None` until the first HUD read completes.
+    pub(crate) titlebar_tips_sidebar_agent_ids: Option<HashSet<String>>,
+    pub(crate) agent_hook_status_request_in_flight: bool,
+    pub(crate) sidebar: Option<Entity<crate::app::native_service::NativeService>>,
+    pub(crate) native_sidebar: crate::app::native_sidebar::state::NativeSidebarState,
+    pub(crate) browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
+    pub(crate) browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,
+    pub(crate) browser_address_input_subscriptions: HashMap<BrowserPaneId, gpui::Subscription>,
+    pub(crate) browser_address_input_editing: HashSet<BrowserPaneId>,
+    pub(crate) browser_find_states: HashMap<BrowserTabId, GpuiBrowserFindState>,
+    pub(crate) browser_media_permission_prompts:
+        HashMap<BrowserTabId, VecDeque<GpuiBrowserMediaPermissionPrompt>>,
+    pub(crate) browser_media_permission_decisions: GpuiBrowserMediaPermissionDecisions,
+    pub(crate) browser_find_inputs: HashMap<BrowserTabId, Entity<InputState>>,
+    pub(crate) browser_find_input_subscriptions: HashMap<BrowserTabId, gpui::Subscription>,
+    pub(crate) pending_browser_find_focus: Option<BrowserTabId>,
+    pub(crate) pending_browser_address_focus: Option<BrowserPaneId>,
+}
+
+impl Drop for GhostexGpuiApp {
+    fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        if let Some(reveal) = self.companion_reveal.as_ref() {
+            reveal.dispose_native_host();
+        }
+        #[cfg(target_os = "macos")]
+        unregister_gpui_app_shots_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_menu_bar_status_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_sidebar_pointer_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_session_attention_notification_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_accessibility_display_options_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_workspace_power_events_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_sparkle_updater_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_os_integration_callback_target();
+        #[cfg(target_os = "macos")]
+        unregister_gpui_first_responder_callback_target(self.parent_ns_view);
+        #[cfg(target_os = "macos")]
+        unregister_gpui_keyboard_router_target(self.parent_ns_view);
+        #[cfg(target_os = "macos")]
+        unregister_gpui_terminal_key_event_callback_target(self.parent_ns_view);
+        hide_gpui_menu_bar_status_item();
+        self.source_code_server_runtime.stop();
+        self.stop_gpui_keep_awake_runtime();
+        self.stop_all_gpui_remote_gxserver_connections();
+    }
+}
+
+impl EntityInputHandler for GhostexGpuiApp {
+    fn text_for_range(
+        &mut self,
+        range: Range<usize>,
+        adjusted_range: &mut Option<Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> Option<String> {
+        /*
+        CDXC:Terminal 2026-06-23-10:45:
+        Terminal text services must not expose terminal document content back to GPUI/AppKit. IME queries may learn only sanitized selection/marked ranges and candidate bounds; raw terminal text, commands, paths, stdout/stderr, URLs, titles, tokens, cookies, and secrets stay behind the Ghostty surface boundary.
+        */
+        let _ = range;
+        *adjusted_range = None;
+        None
+    }
+
+    fn selected_text_range(
+        &mut self,
+        _ignore_disabled_input: bool,
+        window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> Option<UTF16Selection> {
+        self.terminal_text_service_accepts_text_input(window)
+            .then(|| UTF16Selection {
+                range: 0..0,
+                reversed: false,
+            })
+    }
+
+    fn marked_text_range(
+        &self,
+        window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> Option<Range<usize>> {
+        if !self.terminal_text_service_accepts_text_input(window) {
+            return None;
+        }
+        let target = self.exact_focused_terminal_text_surface_target()?;
+        self.terminal_text_marked_range
+            .as_ref()
+            .and_then(|marked_range| {
+                (marked_range.target == target).then(|| marked_range.range.clone())
+            })
+    }
+
+    fn unmark_text(&mut self, window: &mut Window, _cx: &mut gpui::Context<Self>) {
+        if let Some(marked_target) = self
+            .terminal_text_marked_range
+            .as_ref()
+            .map(|marked_range| marked_range.target)
+        {
+            let _ = self.set_preedit_on_terminal_text_target(marked_target, b"");
+            self.terminal_text_marked_range = None;
+            return;
+        }
+
+        if self.terminal_text_focus_handle.is_focused(window) {
+            self.clear_focused_terminal_preedit();
+        }
+    }
+
+    fn replace_text_in_range(
+        &mut self,
+        _range: Option<Range<usize>>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.terminal_text_focus_handle.is_focused(window) {
+            if let Some(marked_target) = self
+                .terminal_text_marked_range
+                .as_ref()
+                .map(|marked_range| marked_range.target)
+            {
+                let _ = self.set_preedit_on_terminal_text_target(marked_target, b"");
+            }
+            self.terminal_text_marked_range = None;
+            return;
+        }
+
+        /*
+        CDXC:Terminal 2026-06-23-10:52:
+        IME commit must clear Ghostty preedit before forwarding final committed text, matching terminal text-service behavior without retaining or logging raw composition content.
+        */
+        if let Some(marked_target) = self
+            .terminal_text_marked_range
+            .as_ref()
+            .map(|marked_range| marked_range.target)
+        {
+            let _ = self.set_preedit_on_terminal_text_target(marked_target, b"");
+            self.terminal_text_marked_range = None;
+        } else {
+            let _ = self.set_preedit_on_focused_terminal_surface(b"");
+        }
+        if !text.is_empty() {
+            let _ = self.send_text_to_focused_terminal_surface(text, cx);
+        }
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        range: Option<Range<usize>>,
+        new_text: &str,
+        _new_selected_range: Option<Range<usize>>,
+        window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.terminal_text_focus_handle.is_focused(window) {
+            if let Some(marked_target) = self
+                .terminal_text_marked_range
+                .as_ref()
+                .map(|marked_range| marked_range.target)
+            {
+                let _ = self.set_preedit_on_terminal_text_target(marked_target, b"");
+            }
+            self.terminal_text_marked_range = None;
+            return;
+        }
+
+        let Some(target) = self.exact_focused_terminal_text_surface_target() else {
+            self.terminal_text_marked_range = None;
+            return;
+        };
+        if self.set_preedit_on_terminal_text_target(target, new_text.as_bytes()) {
+            self.terminal_text_marked_range =
+                terminal_text_marked_range_for_preedit(range, new_text)
+                    .map(|range| TerminalTextMarkedRange { target, range });
+        } else {
+            self.terminal_text_marked_range = None;
+        }
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        range_utf16: Range<usize>,
+        element_bounds: Bounds<Pixels>,
+        window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        let _ = range_utf16;
+        if !self.terminal_text_service_accepts_text_input(window) {
+            return None;
+        }
+        self.bounds_for_focused_terminal_ime_point(element_bounds)
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        point: Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> Option<usize> {
+        let _ = point;
+        None
+    }
+
+    fn accepts_text_input(&self, window: &mut Window, _cx: &mut gpui::Context<Self>) -> bool {
+        self.terminal_text_service_accepts_text_input(window)
+    }
+}

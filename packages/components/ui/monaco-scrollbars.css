@@ -1,0 +1,27 @@
+@import './scrollbar-theme.css';
+
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-scrollable-element > .scrollbar {
+  background: transparent !important;
+}
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-scrollable-element > .scrollbar.vertical,
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-scrollable-element > .scrollbar.vertical > .slider {
+  width: 5px !important;
+}
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-scrollable-element > .scrollbar.horizontal,
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-scrollable-element > .scrollbar.horizontal > .slider {
+  height: 5px !important;
+}
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-scrollable-element > .scrollbar > .slider {
+  border-radius: 999px;
+  background: var(--gx-scrollbar-thumb) !important;
+}
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-scrollable-element:not(:hover) > .scrollbar {
+  opacity: 0 !important;
+}
+
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-editor.vs {
+  color-scheme: light;
+}
+:is(.gx-app-scrollbars, .gx-code-scrollbars) .monaco-editor:is(.vs-dark, .hc-black) {
+  color-scheme: dark;
+}

@@ -1,0 +1,131 @@
+pub const GXSERVER_PRODUCT: &str = "gxserver";
+pub const GXSERVER_PROTOCOL_VERSION: u64 = 1;
+pub const GXSERVER_PROTOCOL_HEADER: &str = "x-gxserver-protocol-version";
+pub const GXSERVER_LOCAL_API_HOST: &str = "127.0.0.1";
+pub const GXSERVER_LOCAL_API_PORT: u16 = 58744;
+pub const GXSERVER_DEV_LOCAL_API_PORT_ENV: &str = "GHOSTEX_GXSERVER_DEV_PORT";
+pub const GXSERVER_REMOTE_API_HOST: &str = "0.0.0.0";
+pub const GXSERVER_REMOTE_API_PORT: u16 = 58745;
+pub const GXSERVER_JSON_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+/*
+CDXC:Clipboard 2026-08-01:
+saveSessionChatImage carries a pasted image as base64 inside the JSON body.
+The terminal paste path caps images at 12 MiB on disk; base64 inflates that
+by 4/3, so 20 MiB leaves headroom for the JSON envelope without opening the
+general RPC surface to oversized bodies.
+*/
+pub const GXSERVER_IMAGE_BODY_LIMIT_BYTES: usize = 20 * 1024 * 1024;
+/*
+Chat attachments cap at 32 MiB on disk (saveSessionChatAttachment); the same
+4/3 base64 inflation plus envelope headroom lands at 44 MiB.
+*/
+pub const GXSERVER_ATTACHMENT_BODY_LIMIT_BYTES: usize = 44 * 1024 * 1024;
+pub const GXSERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub const GXSERVER_CAPABILITIES: &[&str] = &[
+    "health",
+    "events",
+    "localFullApi",
+    "remoteLimitedApi",
+    "strictProtocolVersion",
+    /*
+    CDXC:PlatformSupport 2026-08-03:
+    Windows shells can outlive or temporarily bundle an older WSL gxserver.
+    Advertise the atomic create/start/attach operation explicitly so clients
+    select it before sending a request instead of inferring endpoint support
+    from a 404 response.
+    */
+    "atomicWorkspaceTerminalCreate",
+    /*
+    CDXC:StateSync 2026-07-29-00:00:
+    Sidebar V2 hides its settle/snooze affordances against daemons that cannot
+    persist the lifecycle. The presentation snapshot carries the machine-scoped
+    `capabilities` object clients actually read; these strings keep
+    /api/health/server's capability inventory in step for diagnostics.
+    */
+    "sessionSettlement",
+    "sessionSnooze",
+    /*
+    CDXC:Git 2026-07-29-00:00:
+    Sidebar V2's card row hides its branch/PR affordances against daemons that
+    cannot resolve per-session git state. Same split as the lifecycle flags: the
+    presentation snapshot's `capabilities` object is what clients read, this
+    string keeps /api/health/server's inventory in step for diagnostics.
+    */
+    "sessionGitStatus",
+    /*
+    CDXC:Worktrees 2026-07-29-00:00:
+    Sidebar V2 hides "New worktree session…" against daemons that cannot create
+    a worktree session atomically. Same split as the flags above: the
+    presentation snapshot's `capabilities` object is what clients read, this
+    string keeps /api/health/server's inventory in step for diagnostics.
+    */
+    "worktreeSessions",
+    /*
+    CDXC:RemoteMachines 2026-08-20:
+    A remote machine runs the gxserver package its client installed, so it can
+    be older than the client that talks to it. `promptEditor: "code-server"` is
+    rejected outright by daemons built before that mode existed, which turned a
+    New Terminal click on a remote project into a bare 400. Advertise the mode
+    explicitly, exactly like `atomicWorkspaceTerminalCreate`, so clients choose
+    the prompt-editor selector this daemon accepts before sending the create.
+    */
+    "codeServerPromptEditor",
+    /*
+    CDXC:SessionNotes 2026-08-24:
+    Session notes are keyed by the agent session id and published on the
+    presentation snapshot, so a client talking to an older remote daemon must
+    be able to tell "this daemon has no notes table" apart from "this session
+    has no note" before it offers the Session Note affordances.
+    */
+    "sessionAgentNotes",
+    /*
+    CDXC:Spaces 2026-08-27:
+    Spaces are the daemon-owned saved sidebar filter. Same split as the flags
+    above: the presentation snapshot's `capabilities` object is what clients
+    read before offering the Space row and the Spaces context submenu; this
+    string keeps /api/health/server's inventory in step for diagnostics.
+    */
+    "spaces",
+];
+
+pub const GXSERVER_MIGRATION_IDS: &[&str] = &[
+    "0001_foundation",
+    "0002_domain_state",
+    "0003_session_sidebar_order",
+    "0004_previous_session_history_quality",
+    "0005_session_tags",
+    "0006_expand_session_tags",
+    "0007_expand_session_tags_in_progress_and_type",
+    "0008_remove_retired_session_type_tags",
+    "0009_remove_legacy_zmux_chat_projects",
+    "0010_portless_persistence_model",
+    "0011_t3_session_kind",
+    "0012_recent_projects",
+    "0013_app_user_data",
+    "0014_automations",
+    "0015_project_visibility",
+    "0016_session_settle_snooze_lifecycle",
+    "0017_stashed_prompts",
+    "0018_global_sidebar_commands",
+    "0019_remove_unsupported_session_kinds",
+    "0020_delayed_sends",
+    "0021_session_chat_queue",
+    "0022_stashed_prompt_tags",
+    "0023_session_parking",
+    "0024_stashed_prompt_tag",
+    "0025_session_agent_notes",
+    "0026_stashed_prompt_agent_session",
+    "0027_tailcat_state",
+    "0028_remote_pairing",
+    "0029_session_chat_model_selections",
+    "0030_session_chat_draft_versions",
+    "0031_session_chat_selection_options",
+    "0032_session_chat_delivered_drafts",
+    "0033_session_chat_draft_recovery",
+    "0034_session_chat_startup_sends",
+    "0035_notification_feed",
+    "0036_custom_session_tags",
+    "0037_session_fork_revision",
+    "0038_delayed_send_watched_session",
+];

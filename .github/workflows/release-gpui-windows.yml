@@ -1,0 +1,529 @@
+name: GPUI release - Windows
+
+# CDXC:ReleaseChangeAwarePlanning 2026-08-13, amended 2026-09-01 and 2026-09-02:
+# No `needs: gxserver_*` edge, and (since 2026-09-01) no `needs: validate_windows`
+# edge either. This job starts as soon as `prepare` is done. The gxserver tarball
+# and the code-server component archive are awaited just in time: since
+# 2026-09-02 that is immediately before the packaging phase of windows.ps1,
+# AFTER the Rust compile, because the compile does not read either archive.
+# Measured on 8.5.0 (run 33462783752) the await step idled for 226 s in front
+# of a cold `cargo build`; now the ~7 minutes of runner setup AND the whole
+# compile overlap the gxserver jobs instead of queueing behind them. Release
+# 7.7's one-line Windows-only compile error surfaced an hour after dispatch
+# purely because of the old `needs:` edges.
+#
+# The code-server component identity is resolved locally from the pinned
+# submodule instead of being threaded through workflow outputs: the identity is
+# a pure function of the checkout, and codeServerComponentNames() stays the
+# single source of the artifact name (risk R9).
+#
+# CDXC:Release 2026-09-16 WHY:
+# The native Windows editor is no longer compiled inside the packaging phase
+# (28 min on x64, 50 min on ARM64 in 9.6.0). release-gpui-code-server-windows.yml
+# builds or reuses it as the immutable windows-native-<arch> asset of the
+# code-server component tag; this job awaits that artifact just in time, right
+# before the packaging phase, downloads it, and hands it to
+# build-windows-code-server.ps1 as GHOSTEX_WINDOWS_NATIVE_CODE_SERVER_ARCHIVE,
+# which verifies and unpacks it instead of building. The editor build tools are
+# only prepared for a standalone dispatch, where the script falls through to the
+# source build when nothing is published yet.
+#
+# Zig dependency prefetching is deliberately Linux/macOS only: ZIG_GLOBAL_CACHE_DIR
+# must be a native Windows path, which the bash prefetch helper cannot produce.
+# Windows gets the same protection from the restored Zig package cache.
+#
+# CDXC:WindowsSccache 2026-09-02:
+# The Cargo caches below only ever held ~/.cargo/registry and ~/.cargo/git, so
+# every release recompiled every third-party crate from scratch (8.5.0
+# windows_x64: 1175 s inside windows.ps1, almost all of it rustc). sccache with
+# the GitHub Actions cache backend caches compiled artifacts across runs. It is
+# purely additive: RUSTC_WRAPPER only interposes sccache in front of the same
+# rustc with the same flags, so the produced binaries are unchanged.
+# SCCACHE_GHA_VERSION namespaces the cache per architecture; bump the trailing
+# number to invalidate it deliberately. CARGO_INCREMENTAL=0 is what sccache
+# requires (incremental artifacts are not cacheable) and is already the
+# default for the release profile the build uses.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      arch:
+        required: true
+        type: string
+      sign:
+        required: false
+        default: false
+        type: boolean
+      runtime_artifacts_ready:
+        required: false
+        default: false
+        type: boolean
+      plan:
+        description: Resolved release plan JSON from the prepare job
+        required: false
+        default: ''
+        type: string
+    secrets:
+      WINDOWS_CODE_SIGN_PFX_BASE64:
+        required: false
+      WINDOWS_CODE_SIGN_PFX_PASSWORD:
+        required: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver release version
+        required: true
+        type: string
+      arch:
+        description: Windows architecture
+        required: true
+        default: x64
+        type: choice
+        options: [x64, arm64]
+
+permissions:
+  attestations: write
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ${{ inputs.arch == 'arm64' && 'windows-11-vs2026-arm' || 'windows-2025' }}
+    # CDXC:WindowsWedgedRunnerWatchdog 2026-09-01 (supersedes
+    # CDXC:WindowsArm64BuildBudget 2026-08-19):
+    # This job has now wedged twice, both times on windows-11-vs2026-arm, both
+    # times mid-`cargo build` with the process alive and completely silent:
+    # 7.11.0 sat inside the ghostex-gpui crate for 103 minutes (retry: 13m33s),
+    # and 8.4.0 emitted its last line at 05:42:59 and nothing at all for the
+    # next 101 minutes until this budget killed it (retry of byte-identical
+    # source, with a cold CEF *and* cold Zig cache: 23m59s). A wedged runner is
+    # not a slow build, so the budget is not the mechanism that should catch it
+    # — the stdout-silence watchdog on the build steps below is. This budget is
+    # only the backstop for a wedge the watchdog itself cannot see (a hung
+    # runner agent, a hung `taskkill`).
+    #
+    # 90, not 120, and not 60. The watchdog can legitimately consume one full
+    # silence window plus a second full build inside this one job:
+    #   ~7m setup + up to ~24m of attempt 1 + 15m silence detection
+    #   + ~24m of attempt 2 + ~5m packaging/upload  =  ~75m worst case.
+    # 60 would kill a legitimately-recovering job; 120 buys nothing the
+    # watchdog does not already cover, it only burns runner minutes.
+    # Since 2026-09-02 the build runs as two watched phases (compile, then
+    # package); each phase gets its own restart-once-on-wedge, and the same
+    # arithmetic still fits because a wedge in both phases of one job has
+    # never been observed and the compile phase is now sccache-warm.
+    #
+    # CDXC:Release 2026-09-15 WHY:
+    # 9.6.0's Windows ARM64 job was killed by the 90-minute budget while still
+    # making steady progress: 21 min compile, then the native editor build
+    # inside the packaging phase ran past minute 90. x64 finishes in about 60
+    # minutes; ARM64 needs more. That is a slow job, not a wedge, and the
+    # silence watchdog still catches wedges, so the budget only has to cover
+    # real work.
+    timeout-minutes: ${{ inputs.arch == 'arm64' && 150 || 100 }}
+    env:
+      GHOSTEX_RELEASE_SOURCE_SHA: ${{ github.sha }}
+      GHOSTEX_RELEASE_WORKFLOW_SHA: ${{ github.sha }}
+      OUTPUT_DIR: build/release-gpui/${{ inputs.version }}/windows-${{ inputs.arch }}
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: windows-${{ inputs.arch }}-1
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      # Component tags are published to a separate repository that
+      # github.token cannot write; fail before any build work when the PAT is
+      # missing (see tooling/release-gpui/components-repo-setup.md).
+      - name: Require the components publishing token
+        shell: bash
+        env:
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "$COMPONENTS_GITHUB_TOKEN" ]]; then
+            echo "::error::COMPONENTS_GITHUB_TOKEN is not configured; component tags are published to $(node tooling/release-gpui/components-repo.mjs) and github.token cannot write there. See tooling/release-gpui/components-repo-setup.md."
+            exit 1
+          fi
+      - name: Restore code-server source identity input
+        run: git submodule update --init --depth=1 -- .dependencies/code-server
+      - name: Set up the pinned native editor Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .dependencies/code-server/.node-version
+          architecture: ${{ inputs.arch }}
+      # A release run consumes the native editor component built by
+      # code_server_windows_<arch>; only a standalone dispatch may need to build
+      # the editor from source here, so only it prepares the editor toolchain.
+      - name: Prepare native editor build tools for a standalone dispatch
+        if: ${{ ! inputs.runtime_artifacts_ready }}
+        shell: pwsh
+        run: tooling/release-gpui/prepare-windows-editor-tools.ps1 -Arch '${{ inputs.arch }}'
+      - name: Resolve immutable code-server component identity
+        id: code_server_identity
+        shell: bash
+        run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform "linux-${{ inputs.arch }}" --github-output >> "$GITHUB_OUTPUT"
+      - name: Resolve the native editor component artifact name
+        id: code_server_native
+        shell: bash
+        run: node tooling/release-gpui/code-server-component-identity.mjs --root .dependencies/code-server --platform "windows-native-${{ inputs.arch }}" --github-output >> "$GITHUB_OUTPUT"
+      - name: Resolve dependency cache keys
+        id: cache_keys
+        shell: bash
+        run: |
+          {
+            printf 'cef=%s\n' "$(git rev-parse HEAD:.dependencies/cef-rs)"
+            printf 'zig=%s\n' "$(git rev-parse HEAD:.dependencies/ghostty)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Restore Cargo registry cache
+        uses: actions/cache@v6
+        id: cargo_cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-reg-windows-${{ inputs.arch }}-${{ hashFiles('apps/desktop/Cargo.lock', 'server/Cargo.lock') }}
+          restore-keys: cargo-reg-windows-${{ inputs.arch }}-
+      # CDXC:WindowsSccache 2026-09-02: installs sccache, puts it on PATH for
+      # every later step (and therefore for the watched child pwsh processes,
+      # which inherit this step environment), and exports the Actions cache
+      # endpoint/token that the GHA backend needs into GITHUB_ENV.
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Restore CEF distribution cache
+        uses: actions/cache@v6
+        id: cef_cache
+        with:
+          path: apps/desktop/build/cef-cache
+          key: cef-windows-${{ inputs.arch }}-${{ steps.cache_keys.outputs.cef }}
+      - name: Restore Zig package cache
+        uses: actions/cache@v6
+        id: zig_cache
+        with:
+          path: build/zig-global-cache
+          key: zig-windows-${{ inputs.arch }}-${{ steps.cache_keys.outputs.zig }}
+          restore-keys: zig-windows-${{ inputs.arch }}-
+      - name: Install pinned Zig
+        shell: pwsh
+        run: tooling/release-gpui/prepare-zig.ps1 -Arch "${{ inputs.arch }}"
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+      - name: Install pinned Velopack CLI
+        shell: bash
+        run: tooling/release-gpui/retry.sh 3 5 -- dotnet tool install --global vpk --version 1.2.0
+      - name: Install JavaScript dependencies
+        shell: bash
+        run: tooling/release-gpui/retry.sh 3 5 -- bun install --frozen-lockfile
+      - name: Restore Windows code-signing certificate
+        if: ${{ inputs.sign }}
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\ghostex-code-signing.pfx", [Convert]::FromBase64String($env:PFX_BASE64))
+      # CDXC:WindowsWedgedRunnerWatchdog 2026-09-01, split into phases 2026-09-02:
+      # windows.ps1 is the only long work in this job (cargo build + zig +
+      # vite + vpk pack + signtool), and it is where both documented
+      # windows_arm64 wedges died. It runs as a watched child process instead
+      # of directly, so the job can tell "wedged" apart from "slow" and recover
+      # without a human redispatching the release.
+      #
+      # The signal is ABSENCE OF OUTPUT, never elapsed time. A healthy build
+      # is chatty end to end: cargo prints a line per crate, zig per step, vpk
+      # per package. The wedges were the opposite — an alive, silent process.
+      # Elapsed-time budgets cannot separate the two; silence can.
+      #
+      # Why 15 minutes: the whole healthy build is ~18 minutes inside a ~24
+      # minute cold-cache job (8.4.0 windows_arm64 retry: 23m59s with a cold
+      # CEF distribution cache and a cold Zig package cache). A 15 minute
+      # silent stretch therefore cannot fit inside a healthy run — the longest
+      # single silent unit is one crate's rustc invocation — while the two
+      # observed wedges were silent for 101 and 103 minutes. It is ~5x the
+      # longest plausible healthy gap and ~1/7 of an observed wedge, so there
+      # is no ambiguity in either direction. Tune it with
+      # GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS if the build's shape changes.
+      #
+      # A watchdog kill is the ONLY thing that retries. A non-zero exit code —
+      # a real compile error, a signing failure, a missing artifact — is
+      # surfaced and fails the step on the first attempt, with the child's
+      # full stdout and stderr already streamed into this log. The second
+      # wedge in a row fails the job for real; we never loop.
+      #
+      # The build is two watched phases of the same script, so the watchdog
+      # is written once here (to RUNNER_TEMP, still sourced from this file)
+      # and invoked per phase. Steps share no shell state; each phase gets
+      # its own attempt counter, its own log files, and the identical restart-
+      # once-on-wedge semantics. Everything a later phase needs from an
+      # earlier one is on disk (apps/desktop/target, apps/desktop/dist,
+      # .dependencies references), never in process env.
+      - name: Write the wedged-runner watchdog
+        shell: pwsh
+        run: |
+          $watchdog = @'
+          param(
+              [Parameter(Mandatory = $true)][string]$Phase,
+              [Parameter(Mandatory = $true)][string]$Version,
+              [Parameter(Mandatory = $true)][string]$Arch
+          )
+          $ErrorActionPreference = 'Stop'
+
+          $SilenceLimitSeconds = [int]$env:GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS
+          if ($SilenceLimitSeconds -le 0) { $SilenceLimitSeconds = 900 }
+          $PollSeconds = 10
+          $MaxAttempts = 2
+
+          $BuildScript = Join-Path $env:GITHUB_WORKSPACE 'tooling/release-gpui/windows.ps1'
+          $ExitCode = $null
+
+          for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+              if ($attempt -gt 1) {
+                  Write-Host "::notice::Windows $Arch ${Phase}: restarting from scratch (attempt $attempt of $MaxAttempts) after the wedged-runner watchdog killed attempt $($attempt - 1)"
+              }
+              Write-Host "::group::Windows $Arch $Phase attempt $attempt of $MaxAttempts (stdout-silence watchdog: ${SilenceLimitSeconds}s)"
+
+              $stdoutPath = Join-Path $env:RUNNER_TEMP "ghostex-windows-$Phase-$attempt.out.log"
+              $stderrPath = Join-Path $env:RUNNER_TEMP "ghostex-windows-$Phase-$attempt.err.log"
+              foreach ($logPath in @($stdoutPath, $stderrPath)) {
+                  Set-Content -LiteralPath $logPath -Value '' -NoNewline -Encoding utf8
+              }
+              $offsets = @{ $stdoutPath = [int64]0; $stderrPath = [int64]0 }
+
+              # No -UseNewEnvironment: the child inherits this step's full
+              # environment block, including PATH (sccache, cargo, zig) and the
+              # sccache/RUSTC_WRAPPER variables from the job env.
+              $proc = Start-Process -FilePath 'pwsh' -PassThru -NoNewWindow `
+                  -WorkingDirectory $env:GITHUB_WORKSPACE `
+                  -RedirectStandardOutput $stdoutPath `
+                  -RedirectStandardError $stderrPath `
+                  -ArgumentList @('-NoProfile', '-NonInteractive', '-File', $BuildScript, '-Version', $Version, '-Arch', $Arch, '-Phase', $Phase)
+
+              $lastOutput = Get-Date
+              $wedged = $false
+
+              while ($true) {
+                  Start-Sleep -Seconds $PollSeconds
+                  # Sample the exit state BEFORE draining, so the final drain
+                  # after the child exits cannot miss its last bytes.
+                  $exited = $proc.HasExited
+                  $sawOutput = $false
+                  foreach ($logPath in @($stdoutPath, $stderrPath)) {
+                      $length = (Get-Item -LiteralPath $logPath).Length
+                      if ($length -le $offsets[$logPath]) { continue }
+                      $stream = [IO.File]::Open($logPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                      try {
+                          $stream.Seek($offsets[$logPath], [IO.SeekOrigin]::Begin) | Out-Null
+                          $buffer = [byte[]]::new([int]($length - $offsets[$logPath]))
+                          $read = $stream.Read($buffer, 0, $buffer.Length)
+                      }
+                      finally {
+                          $stream.Dispose()
+                      }
+                      if ($read -le 0) { continue }
+                      $offsets[$logPath] += $read
+                      [Console]::Out.Write([Text.Encoding]::UTF8.GetString($buffer, 0, $read))
+                      [Console]::Out.Flush()
+                      $sawOutput = $true
+                  }
+                  if ($sawOutput) { $lastOutput = Get-Date }
+                  if ($exited) { break }
+
+                  $silentFor = (Get-Date) - $lastOutput
+                  if ($silentFor.TotalSeconds -ge $SilenceLimitSeconds) {
+                      $wedged = $true
+                      $silenceLabel = '{0}m{1}s' -f [int]$silentFor.TotalMinutes, $silentFor.Seconds
+                      $nextAction = if ($attempt -lt $MaxAttempts) { 'killing and retrying once' } else { 'killing and failing the job' }
+                      Write-Host "::error::Windows $Arch $Phase (attempt $attempt of $MaxAttempts): no stdout or stderr for $silenceLabel - assuming wedged runner, $nextAction"
+                      & taskkill.exe /T /F /PID $proc.Id 2>&1 | ForEach-Object { Write-Host $_ }
+                      if (-not $proc.WaitForExit(60000)) {
+                          Write-Host "::warning::Windows $Arch ${Phase}: the wedged process tree did not exit within 60s of taskkill"
+                      }
+                      break
+                  }
+              }
+
+              Write-Host '::endgroup::'
+
+              if (-not $wedged) {
+                  $ExitCode = $proc.ExitCode
+                  break
+              }
+              if ($attempt -ge $MaxAttempts) {
+                  throw "Windows $Arch $Phase wedged $MaxAttempts times in a row (no output for ${SilenceLimitSeconds}s each time). This is not a slow build and not a source problem - the runner instance is stuck. Failing instead of retrying again."
+              }
+              if (-not [string]::IsNullOrEmpty($env:GITHUB_STEP_SUMMARY)) {
+                  Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Wedged-runner watchdog fired on $Phase attempt $attempt (no output for ${SilenceLimitSeconds}s); rebuilt that phase from scratch"
+              }
+              Start-Sleep -Seconds 15
+          }
+
+          if ($ExitCode -ne 0) {
+              throw "Windows $Arch $Phase failed with exit code $ExitCode"
+          }
+          '@
+          $watchdogPath = Join-Path $env:RUNNER_TEMP 'ghostex-windows-watchdog.ps1'
+          [IO.File]::WriteAllText($watchdogPath, $watchdog, [Text.UTF8Encoding]::new($false))
+          "GHOSTEX_WINDOWS_WATCHDOG=$watchdogPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      # Phase 1 of windows.ps1: GPUI reference checkout, sidebar bundle (vite),
+      # and `cargo build --release` of the four desktop binaries. Reads no
+      # runtime artifact, so it runs while the gxserver job is still building.
+      - name: Compile the desktop app (sidebar bundle + cargo build)
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          GHOSTEX_WINDOWS_SIGNING_PFX: ${{ runner.temp }}\ghostex-code-signing.pfx
+          GHOSTEX_WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
+          GHOSTEX_WINDOWS_REQUIRE_SIGNING: ${{ inputs.sign && '1' || '0' }}
+          GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME: ${{ inputs.runtime_artifacts_ready && '1' || '0' }}
+          GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\gxserver-linux-${{ inputs.arch }}.tar.gz
+          GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
+          GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\${{ steps.code_server_identity.outputs.archive_name }}
+          GHOSTEX_WINDOWS_NATIVE_CODE_SERVER_ARCHIVE: ${{ inputs.runtime_artifacts_ready && format('{0}\build\runtime-artifacts\native-editor-{1}\{2}', github.workspace, inputs.arch, steps.code_server_native.outputs.archive_name) || '' }}
+          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: '900'
+        run: |
+          & $env:GHOSTEX_WINDOWS_WATCHDOG -Phase compile -Version '${{ inputs.version }}' -Arch '${{ inputs.arch }}'
+      # The runtime artifacts are only read by the packaging phase (WSL
+      # gxserver staging + code-server component resealing), so they are
+      # awaited here, after the compile, not before it.
+      - name: Await the runtime artifacts of this run
+        if: ${{ inputs.runtime_artifacts_ready }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tooling/release-gpui/await-run-artifacts.mjs \
+            --names "release-gxserver-linux-${{ inputs.arch }},${{ steps.code_server_identity.outputs.artifact_name }}" \
+            --producer-pattern '^(gxserver_${{ inputs.arch }}|code_server_${{ inputs.arch }}|reuse)' \
+            --timeout-minutes 45
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: release-gxserver-linux-${{ inputs.arch }}
+          path: build/runtime-artifacts/${{ inputs.arch }}
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: ${{ steps.code_server_identity.outputs.artifact_name }}
+          path: build/runtime-artifacts/${{ inputs.arch }}
+      - name: Reuse the published Source component for standalone runs
+        if: ${{ ! inputs.runtime_artifacts_ready }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tooling/release-gpui/retry.sh 4 2 -- node tooling/release-gpui/publish-component.mjs \
+            --reuse-published \
+            --metadata-only \
+            --require-sha256-sidecars \
+            --component code-server \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform "linux-${{ inputs.arch }}" \
+            --asset-dir "build/runtime-artifacts/${{ inputs.arch }}" \
+            --output build/runtime-artifacts/code-server-components.json
+      - name: Validate the Source component archive
+        shell: bash
+        run: |
+          node tooling/release-gpui/verify-code-server-archive.mjs \
+            --archive "build/runtime-artifacts/${{ inputs.arch }}/${{ steps.code_server_identity.outputs.archive_name }}" \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform "linux-${{ inputs.arch }}"
+      # The native editor component is published by its own job and is only
+      # read by the packaging phase, so it is awaited here, after the compile.
+      # A cold editor build takes about 28 minutes on x64 and 50 on ARM64 after
+      # its own runner setup, and both jobs start together, so the window is
+      # longer than the runtime artifacts above and longer still on ARM64; it
+      # still fits the job budget with the compile and packaging phases.
+      - name: Await the native editor component of this run
+        if: ${{ inputs.runtime_artifacts_ready }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tooling/release-gpui/await-run-artifacts.mjs \
+            --names "${{ steps.code_server_native.outputs.artifact_name }}" \
+            --producer-pattern '^(code_server_windows_${{ inputs.arch }})' \
+            --timeout-minutes ${{ inputs.arch == 'arm64' && 90 || 60 }}
+      - uses: actions/download-artifact@v8
+        if: ${{ inputs.runtime_artifacts_ready }}
+        with:
+          name: ${{ steps.code_server_native.outputs.artifact_name }}
+          path: build/runtime-artifacts/native-editor-${{ inputs.arch }}
+      - name: Validate the native editor component archive
+        if: ${{ inputs.runtime_artifacts_ready }}
+        shell: bash
+        run: |
+          node tooling/release-gpui/verify-windows-native-code-server-archive.mjs \
+            --archive "build/runtime-artifacts/native-editor-${{ inputs.arch }}/${{ steps.code_server_native.outputs.archive_name }}" \
+            --version '${{ steps.code_server_identity.outputs.component_version }}' \
+            --platform "windows-native-${{ inputs.arch }}"
+      # Phase 2 of windows.ps1: stage the app directory from the compiled
+      # binaries, seal the CEF / code-server components, verify the staged
+      # tree, sign the binaries, vpk pack, bundle and sign the launcher, and
+      # write manifest.json. Same env as phase 1.
+      - name: Stage, package, and sign the installer and portable package
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          COMPONENTS_GITHUB_TOKEN: ${{ secrets.COMPONENTS_GITHUB_TOKEN }}
+          GHOSTEX_WINDOWS_SIGNING_PFX: ${{ runner.temp }}\ghostex-code-signing.pfx
+          GHOSTEX_WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
+          GHOSTEX_WINDOWS_REQUIRE_SIGNING: ${{ inputs.sign && '1' || '0' }}
+          GHOSTEX_WINDOWS_REQUIRE_WSL_RUNTIME: ${{ inputs.runtime_artifacts_ready && '1' || '0' }}
+          GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\gxserver-linux-${{ inputs.arch }}.tar.gz
+          GHOSTEX_CODE_SERVER_COMPONENT_VERSION: ${{ steps.code_server_identity.outputs.component_version }}
+          GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE: ${{ github.workspace }}\build\runtime-artifacts\${{ inputs.arch }}\${{ steps.code_server_identity.outputs.archive_name }}
+          GHOSTEX_WINDOWS_NATIVE_CODE_SERVER_ARCHIVE: ${{ inputs.runtime_artifacts_ready && format('{0}\build\runtime-artifacts\native-editor-{1}\{2}', github.workspace, inputs.arch, steps.code_server_native.outputs.archive_name) || '' }}
+          GHOSTEX_WINDOWS_BUILD_SILENCE_SECONDS: '900'
+        run: |
+          & $env:GHOSTEX_WINDOWS_WATCHDOG -Phase package -Version '${{ inputs.version }}' -Arch '${{ inputs.arch }}'
+      - name: Write release provenance
+        if: ${{ inputs.plan != '' }}
+        shell: bash
+        env:
+          GHOSTEX_RELEASE_PLAN: ${{ inputs.plan }}
+        run: node tooling/release-gpui/write-provenance.mjs --dir "$OUTPUT_DIR"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ${{ env.OUTPUT_DIR }}/*.exe
+            ${{ env.OUTPUT_DIR }}/*.zip
+            ${{ env.OUTPUT_DIR }}/*.nupkg
+            ${{ env.OUTPUT_DIR }}/releases.*.json
+            ${{ env.OUTPUT_DIR }}/assets.*.json
+            ${{ env.OUTPUT_DIR }}/RELEASES-*
+      - name: Record job observability
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "- Cargo registry cache: ${{ steps.cargo_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- CEF distribution cache: ${{ steps.cef_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+            echo "- Zig package cache: ${{ steps.zig_cache.outputs.cache-hit == 'true' && 'hit' || 'miss' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Report sccache statistics
+        if: ${{ always() }}
+        shell: pwsh
+        run: sccache --show-stats
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-${{ inputs.arch }}
+          path: build/release-gpui/${{ inputs.version }}/windows-${{ inputs.arch }}/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.plan != '' }}
+        with:
+          name: release-provenance-windows-${{ inputs.arch }}
+          path: build/release-gpui/${{ inputs.version }}/windows-${{ inputs.arch }}/provenance.json
+          if-no-files-found: error
+          retention-days: 14

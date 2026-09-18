@@ -1,5 +1,9 @@
 node_modules/
 build/
+!.dependencies/tui2/vendor/libghostty-vt/src/build/
+!.dependencies/tui2/vendor/libghostty-vt/src/build/**
+!.dependencies/tui2/vendor/libghostty-vt/src/apprt/gtk/build/
+!.dependencies/tui2/vendor/libghostty-vt/src/apprt/gtk/build/**
 dist/
 out/
 artifacts/
@@ -17,18 +21,22 @@ tmp/imagegen/
 .fresh/
 .agents/skills/
 .agents/skills/ghostex-release-to-brew/SKILL.md
+.claude/skills/
 storybook-static/
-native/macos/ghostexHost/Web/
-native/macos/ghostexHost/CLI/
-native/macos/zmuxHost/Web/
-native/macos/ghostexHost/Vendor/
-native/macos/ghostexHost/build/
-native/macos/ghostexHost/ghostexHost.xcodeproj/
-native/macos/ghostexHost/ghostex.xcodeproj/
+apps/desktop/runtime/
+apps/editor/macos/.build/
+packages/paths/target/
+packages/paths/Cargo.lock
 tmp/
+.dependencies/ghostty/zig-pkg/
+.zig-cache/
 # CDXC:PublicRelease 2026-04-27-05:36: Keep generated Storybook output,
 # native build products, and runtime logs out of the public repository while
 # preserving each developer's local copies.
+# CDXC:GhostexTui2 2026-06-16-16:02: The vendored libghostty-vt dependency has
+# source directories literally named src/build. Unignore those exact source
+# paths so the packaged `gx 2` TUI can build from a fresh clone while ordinary
+# generated build/ directories remain ignored.
 # CDXC:AgentInstructions 2026-06-13-09:26: Track the repo AGENTS.md so Ghostex
 # native layout and hit-testing requirements travel with app source instead of
 # living only as a local ignored instruction file. Keep private agent skill
@@ -42,7 +50,17 @@ tmp/
 # CDXC:Distribution 2026-06-04-01:42: Local Android APK artifacts moved under
 # release/downloads so release outputs are grouped together while the old
 # downloads/*.apk ignore remains as a guard for stale local scripts.
-# CDXC:CliInstall 2026-06-07-13:53: The macOS build stages app-bundled CLI launchers under native/macos/ghostexHost/CLI before Xcode copies them into Contents/Resources/CLI. Keep that folder ignored like Web because it is generated from scripts/ghostex-cli.mjs, scripts/ghostex-cli-launcher.sh, and scripts/skills.
+# CDXC:RepoSafety 2026-07-01-02:45: Ghostty Zig package fetches can materialize under ghostty/zig-pkg during release builds. Keep that generated dependency cache out of release commits while source dependencies stay pinned by build.zig.zon.
+# CDXC:RepoSafety 2026-07-06: The standalone GhostexEditor SwiftPM build writes
+# compiler outputs under apps/editor/macos/.build. Keep those local build products
+# ignored so release commits contain source changes only.
+# CDXC:RepoSafety 2026-08-05: The standalone packages/paths library writes Cargo
+# build output and a library-local lockfile. Keep those generated files out of
+# release commits while the workspace lockfile remains the source of truth.
+# CDXC:GPUIRuntimeOwnership 2026-07-14: GPUI-owned macOS runtime staging contains
+# generated native binaries, bundled Node/code-server payloads, and compiled web
+# assets. Keep it local like the retired host's Web staging tree; source inputs
+# and the preparation script remain tracked separately.
 # CDXC:RepoSafety 2026-05-27-10:44: Image-generation scratch outputs under
 # tmp/imagegen are intermediate asset experiments, not source assets. Commit
 # only the selected asset destination so releases stay source-only and
@@ -66,3 +84,18 @@ react-doctor.config.json
 # published with product docs live under `.ignored/` instead of needing
 # per-file ignore rules.
 .tmp-*
+
+# CDXC:LocalDocs 2026-08-09: Keep the entire docs/ tree on this machine only.
+# Planning notes, product drafts, and agent reports are local working material
+# and are not part of the public Ghostex source tree.
+docs/
+
+
+# Beads runtime lock files. The CLI creates these while it holds a board or
+# embedded-database gate; they are machine state, not board content.
+.beads.gate.lock
+.beads/*.gate.lock
+
+# Python bytecode caches from the tooling scripts. Machine state, not source.
+__pycache__/
+*.pyc
