@@ -61,11 +61,7 @@ import { sameSessionChatMessage } from '../session-chat-message-equality';
 import { SessionChatMinimap } from '../session-chat-minimap';
 import { isSessionChatCommandTurn } from '../session-chat-noise';
 import { isSessionChatPendingMessageId } from '../session-chat-pending';
-import {
-  SessionChatQuestionExchangeCard,
-  answeredSessionChatQuestionExchange,
-  type SessionChatQuestionExchange,
-} from '../session-chat-question-exchange';
+import { SessionChatQuestionExchangeCard } from '../session-chat-question-exchange';
 import {
   SessionChatRewindDialog,
   type RewindSessionChatToMessage,
@@ -83,7 +79,7 @@ import {
 } from '../session-chat-scroll-bottom-button';
 import { type SessionChatStartupSendActions } from '../session-chat-startup-send-status';
 import { SESSION_CHAT_STREAMING_ID } from '../session-chat-streaming';
-import { pairSessionChatToolBlocks, splitSessionChatBlocks } from '../session-chat-tool-fold';
+import { splitSessionChatBlocks } from '../session-chat-tool-fold';
 import { useSessionChatScrollMomentum } from '../use-session-chat-scroll-momentum';
 import {
   SESSION_CHAT_HISTORY_NAVIGATION_EVENT,
@@ -160,29 +156,9 @@ export interface SessionChatMessageListProps extends SessionChatStartupSendActio
   summaryMode?: boolean;
 }
 
-/**
- * Answered agent questions buried inside a completed turn's work. The user's
- * answer never writes a user row to the transcript — the whole ask/answer
- * exchange lives in tool blocks between two user turns — so without hoisting
- * it would vanish into the collapsed "Worked for Xs" section. The raw tool
- * rows stay in the expanded work log (questionPairsAsRows), so nothing renders
- * twice.
- */
-function hoistedQuestionExchanges(
-  work: readonly SessionChatMessage[]
-): { exchange: SessionChatQuestionExchange; key: string }[] {
-  const out: { exchange: SessionChatQuestionExchange; key: string }[] = [];
-  for (const message of work) {
-    const { tools } = splitSessionChatBlocks(message.blocks);
-    pairSessionChatToolBlocks(tools).forEach((pair, index) => {
-      const exchange = answeredSessionChatQuestionExchange(pair);
-      if (exchange) {
-        out.push({ exchange, key: `${message.id}:${index}` });
-      }
-    });
-  }
-  return out;
-}
+// Answered agent questions buried inside a completed turn's work are hoisted out of the
+// fold by the rule GPUI chat reads too (question-hoisting.ts).
+import { hoistedSessionChatQuestionExchanges as hoistedQuestionExchanges } from '@/packages/shared/session-chat-presentation/question-hoisting';
 
 /** CDXC:SessionChat 2026-09-10 DECISION:
  * User: when a turn shows "Worked for", collapse all its file changes under a separate "N files changed" section directly below it.

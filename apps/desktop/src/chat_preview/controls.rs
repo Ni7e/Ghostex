@@ -63,6 +63,13 @@ impl PreviewWindow {
             "async",
             "queue",
             "empty",
+            "tools",
+            "files",
+            "images",
+            "system",
+            "rich-markdown",
+            "agents",
+            "history",
         ] {
             scenarios = scenarios.child(button(
                 name.into(),

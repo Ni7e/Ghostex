@@ -1,5 +1,5 @@
 import { canCollapseSessionChatComposer } from '@/packages/shared/session-chat-presentation/composer-scroll';
-import { composerSuggestions, completeComposerMention, composerNativeCommand } from '@/packages/shared/session-chat-presentation/composer-suggestions';
+import { SESSION_CHAT_FILE_SUGGESTION_HEADING, composerSuggestions, completeComposerMention, composerNativeCommand } from '@/packages/shared/session-chat-presentation/composer-suggestions';
 import { SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS, DESKTOP_SESSION_CHAT_PLACEHOLDER } from '@/packages/shared/session-chat-controller/composer-policy';
 import { deliverChatSubmission, editQueuedChatPrompt, restoreUndeliveredChatText } from '@/packages/shared/session-chat-controller/submission';
 import { nextFileReferenceIndex, insertChatReference } from '@/packages/shared/session-chat-presentation/references';
@@ -2608,7 +2608,7 @@ export const SessionChatComposer = forwardRef<SessionChatComposerHandle, Session
                 role='listbox'
               >
                 <div className='px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'>
-                  {fileHeading ?? 'Files'}
+                  {fileHeading ?? SESSION_CHAT_FILE_SUGGESTION_HEADING}
                 </div>
                 {fileMatches.length === 0 ? (
                   <div className='flex items-center gap-2.5 px-3 py-2 text-sm text-muted-foreground'>

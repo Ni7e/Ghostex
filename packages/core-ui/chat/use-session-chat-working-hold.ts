@@ -8,9 +8,10 @@
 // the hold period. Going working again is applied instantly.
 
 import { useEffect, useState } from 'react';
+// The hold is also applied outside React, by GPUI chat's subagent viewer.
+import { SESSION_CHAT_SETTLE_HOLD_MS } from '@/packages/shared/session-chat-presentation/working-hold';
 
-/** How long the session must stay non-working before the transcript settles. */
-export const SESSION_CHAT_SETTLE_HOLD_MS = 8_000;
+export { SESSION_CHAT_SETTLE_HOLD_MS };
 
 export function useSessionChatWorkingHold(working: boolean, holdMs: number = SESSION_CHAT_SETTLE_HOLD_MS): boolean {
   // Seeded with the mount value: a session opened already-settled folds

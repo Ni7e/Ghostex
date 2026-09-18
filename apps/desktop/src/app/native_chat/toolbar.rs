@@ -47,6 +47,14 @@ impl NativeChatView {
             .is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(id)))
     }
 
+    /// React renders each of these controls only when the host handed it the handler
+    /// (`onSessionNote`, `onStash`, `onAttach`, the Terminal View switch); the shared host projects
+    /// the same answer under `composerActions` so a control that cannot do anything is not drawn.
+    pub(super) fn composer_control_available(&self, id: &str) -> bool {
+        let actions = &self.snapshot["composerActions"];
+        actions.is_null() || actions[id] != false
+    }
+
     pub(super) fn perform_composer_action(
         &mut self,
         action: &str,
@@ -74,15 +82,24 @@ impl NativeChatView {
             .gap(px(6.0 * p.scale))
             .child(self.host_button("moreActions", "titlebar/dots.svg", p, cx));
         for (id, action, _, icon) in COMPOSER_CONTROLS {
-            if self.composer_collapsed() || self.composer_control_overflowed(id) {
+            if self.composer_collapsed()
+                || self.composer_control_overflowed(id)
+                || !self.composer_control_available(id)
+            {
                 continue;
             }
-            let icon = if id == "maximize" && self.maximized_window.is_some() {
-                "titlebar/minimize.svg"
-            } else {
-                icon
+            let icon = match id {
+                "maximize" if self.maximized_window.is_some() => "titlebar/minimize.svg",
+                // React swaps the Summary glyph with the mode, the way the More actions row does.
+                "summary" if self.snapshot["summaryMode"] == true => "titlebar/list-check.svg",
+                _ => icon,
             };
-            toolbar = toolbar.child(self.host_button(action, icon, p, cx));
+            // The Terminal View control also carries the agent CLI's readiness tint and screen preview.
+            toolbar = toolbar.child(if id == "terminal" {
+                self.render_terminal_view_button(p, cx)
+            } else {
+                self.host_button(action, icon, p, cx)
+            });
         }
         toolbar
             .child(self.render_send_control(p, cx))
@@ -99,13 +116,19 @@ impl NativeChatView {
         let scale = p.scale;
         let has_overflow_options = self.snapshot["optionLabels"]["showOptions"] == true
             || self.snapshot["contextMeter"].is_object();
+        // A control the host cannot serve is never drawn, so it must not claim room either.
+        let controls: Vec<Value> = COMPOSER_CONTROLS
+            .iter()
+            .filter(|(id, _, _, _)| self.composer_control_available(id))
+            .map(|(id, _, _, _)| json!({"id":id,"width":28.0*scale}))
+            .collect();
         let chat = cx.weak_entity();
         gpui::canvas(move |bounds,window,cx| {
             let measurements = json!({
                 "available":bounds.size.width.as_f32(), "options":options_width,
                 "actions":262.0*scale, "footerGap":8.0*scale, "actionGap":6.0*scale,
                 "clearance":16.0*scale, "hasOverflowOptions":has_overflow_options,
-                "controls":COMPOSER_CONTROLS.iter().map(|(id,_,_,_)|json!({"id":id,"width":28.0*scale})).collect::<Vec<Value>>(),
+                "controls":controls.clone(),
             });
             let chat = chat.clone();
             window.defer(cx,move |_,cx| {

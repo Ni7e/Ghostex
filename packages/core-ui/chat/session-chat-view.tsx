@@ -2044,7 +2044,6 @@ export function SessionChatView({
                               files={files}
                               filesLoading={filesLoading}
                               onRequestFiles={requestFiles}
-                              fileHeading='Project files'
                               skillHeading={`${draftAgentRow?.name ?? displayAgentName(resolvedAgentLabel) ?? 'Agent'} skills`}
                             />
                             <SessionChatStatusLine

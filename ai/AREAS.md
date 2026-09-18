@@ -3,7 +3,7 @@
 The canonical list of `CDXC:<Area>` tags. Every CDXC comment in `apps/`,
 `packages/`, `server/`, `tooling/`, and the edited parts of `.dependencies/`
 uses one of these names. The rules for writing CDXC comments are in
-`AGENTS.md` ("CDXC comments: why the code exists, and what the user decided").
+`AGENTS.md` ("CDXC comments"), with the full text and examples in `ai/cdxc-comments.md`.
 
 How to use this file:
 

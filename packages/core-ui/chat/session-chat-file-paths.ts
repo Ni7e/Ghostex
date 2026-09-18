@@ -46,182 +46,28 @@
 
 import { IconFile, IconFileCode, IconMarkdown } from '@tabler/icons-react';
 
-import {
-  splitSessionChatFilePosition,
-  sessionChatFilePositionSuffix,
-  type SessionChatFilePosition,
-} from '@/packages/shared/session-chat-presentation/file-position';
+import { sessionChatFilePositionSuffix } from '@/packages/shared/session-chat-presentation/file-position';
 export {
   splitSessionChatFilePosition,
   sessionChatFilePositionSuffix,
   type SessionChatFilePosition,
 } from '@/packages/shared/session-chat-presentation/file-position';
-
-export interface SessionChatFilePathRef {
-  /**
-   * Final path segment. Only the icon and the layout use it: the chip's label
-   * is the whole path, and this is the part of it that may not be truncated.
-   */
-  basename: string;
-  /** The path as the agent wrote it, minus its line, range, or column suffix. */
-  path: string;
-  /** Present only when the span carried editor coordinates. */
-  position?: SessionChatFilePosition;
-}
+// The decisions themselves live in the shared presentation package so the GPUI
+// transcript can reach them without React; this module keeps the React icons
+// and the remark passes that feed react-markdown.
+import {
+  sessionChatBareFilePaths,
+  sessionChatFilePathIconName,
+  type SessionChatFilePathRef,
+} from '@/packages/shared/session-chat-presentation/file-paths';
+export {
+  resolveSessionChatFenceTitleFilePath,
+  resolveSessionChatInlineCodeFilePath,
+  type SessionChatFilePathRef,
+} from '@/packages/shared/session-chat-presentation/file-paths';
 
 /** Exposes a file chip's unadorned path to the transcript context menu. */
 export const SESSION_CHAT_FILE_PATH_ATTRIBUTE = 'data-session-chat-file-path';
-
-/** Long enough for any real path; past this it is a blob, not a reference. */
-const MAX_CANDIDATE_LENGTH = 240;
-/** Whitespace or a backtick means this span holds more than one token. */
-const DISQUALIFYING_CHARACTER = /[\s`]/;
-const WINDOWS_DRIVE_PREFIX = /^[A-Za-z]:[\\/]/;
-const WINDOWS_UNC_PREFIX = /^\\\\/;
-const RELATIVE_PATH_PREFIX = /^(?:~\/|\.{1,2}\/)/;
-const PATH_SEGMENT = /^[A-Za-z0-9._+@~-]+$/;
-/**
- * A file type starts with a letter. `.ts`, `.rs`, `.zshrc` are extensions;
- * `.2` in `v1.2` and `.9` in `p99.9` are version fragments.
- */
-const LETTER_EXTENSION = /\.[A-Za-z][A-Za-z0-9_+-]*$/;
-const DOTTED_NUMBER = /^\d+(?:\.\d+)+$/;
-
-/**
- * Conventional filenames that carry no extension. Any other extensionless
- * basename stays plain: `src/utils`, `origin/main`, and `text/plain` are all
- * shaped like paths and none of them is one.
- */
-const EXTENSIONLESS_FILE_NAMES = new Set([
-  'AUTHORS',
-  'BUILD',
-  'Brewfile',
-  'CHANGELOG',
-  'CODEOWNERS',
-  'COPYING',
-  'Caddyfile',
-  'Containerfile',
-  'Dockerfile',
-  'Fastfile',
-  'GNUmakefile',
-  'Gemfile',
-  'Jenkinsfile',
-  'Justfile',
-  'LICENCE',
-  'LICENSE',
-  'Makefile',
-  'NOTICE',
-  'Podfile',
-  'Procfile',
-  'README',
-  'Rakefile',
-  'Vagrantfile',
-  'WORKSPACE',
-  'justfile',
-  'makefile',
-]);
-
-/**
- * Enough of a generic-TLD list to catch a bare hostname written without a
- * scheme. Country codes are deliberately absent: `.pl`, `.pt`, `.es`, and
- * `.in` are all real file extensions, and refusing them would cost more real
- * paths than the fake hostnames it would save.
- */
-const HOSTNAME_TLDS = new Set([
-  'ai',
-  'app',
-  'biz',
-  'cloud',
-  'co',
-  'com',
-  'dev',
-  'edu',
-  'gov',
-  'info',
-  'io',
-  'net',
-  'org',
-  'xyz',
-]);
-
-/** `example.com`, `localhost`, `127.0.0.1`, `1.2.3` — a host or a version. */
-function looksLikeHostOrVersion(segment: string): boolean {
-  if (segment === 'localhost') return true;
-  if (DOTTED_NUMBER.test(segment)) return true;
-  const labels = segment.toLowerCase().split('.');
-  const lastLabel = labels[labels.length - 1];
-  return labels.length > 1 && lastLabel !== undefined && HOSTNAME_TLDS.has(lastLabel);
-}
-
-/**
- * Decides whether one inline-code span is a file reference. Returns null for
- * everything the module doc refuses.
- */
-export function resolveSessionChatInlineCodeFilePath(text: string): SessionChatFilePathRef | null {
-  return resolveFilePathReference(text, { requirePathEvidence: true });
-}
-
-/**
- * The same decision for the title a fenced code block names
- * (```ts src/main.ts, ```json file=package.json), so a path in a fence header
- * and the same path mid-sentence are judged by one rule.
- *
- * One clause is dropped, and only one: rule 3, the demand that a bare word
- * carry a separator or a `:line` before it counts as a path. That rule exists
- * because inline code is ambiguous — an agent naming `README.md` in a sentence
- * usually means the words, not the file. A fence title is not ambiguous: the
- * fence says "this block is that file", which is why the header already draws
- * a file glyph beside it. Everything else still applies, so `v1.2.3`,
- * `example.com`, `showLineNumbers`, and `{1,3-5}` are refused here too.
- */
-export function resolveSessionChatFenceTitleFilePath(title: string): SessionChatFilePathRef | null {
-  return resolveFilePathReference(title, { requirePathEvidence: false });
-}
-
-function resolveFilePathReference(
-  text: string,
-  { requirePathEvidence }: { requirePathEvidence: boolean }
-): SessionChatFilePathRef | null {
-  const trimmed = text.trim();
-  if (trimmed.length === 0 || trimmed.length > MAX_CANDIDATE_LENGTH) return null;
-  if (DISQUALIFYING_CHARACTER.test(trimmed)) return null;
-
-  const { path, position } = splitSessionChatFilePosition(trimmed);
-  if (path.length === 0) return null;
-
-  const isWindowsPath = WINDOWS_DRIVE_PREFIX.test(path) || WINDOWS_UNC_PREFIX.test(path);
-  // Backslashes only separate directories on a path that announced itself as a
-  // Windows path; anywhere else a backslash is an escape, and the segment check
-  // below rejects it.
-  const normalized = isWindowsPath ? path.replaceAll('\\', '/') : path;
-  // The drive letter and the UNC leader carry a colon and a doubled slash that
-  // no segment may contain, so they are peeled off before the segment check.
-  const body = isWindowsPath ? normalized.replace(/^(?:[A-Za-z]:|\/\/)/, '') : normalized;
-
-  const segments = body.split('/').filter((segment) => segment.length > 0);
-  const basename = segments[segments.length - 1];
-  if (basename === undefined) return null;
-  if (segments.some((segment) => !PATH_SEGMENT.test(segment))) return null;
-
-  const announcesItselfAsAPath = isWindowsPath || normalized.startsWith('/') || RELATIVE_PATH_PREFIX.test(normalized);
-  const hasSeparator = announcesItselfAsAPath || segments.length > 1;
-  if (requirePathEvidence && !hasSeparator && position === undefined) return null;
-
-  const firstSegment = segments[0];
-  if (!announcesItselfAsAPath && firstSegment !== undefined && looksLikeHostOrVersion(firstSegment)) {
-    return null;
-  }
-
-  if (!LETTER_EXTENSION.test(basename) && !EXTENSIONLESS_FILE_NAMES.has(basename)) {
-    return null;
-  }
-
-  return {
-    basename,
-    path,
-    ...(position === undefined ? {} : { position }),
-  };
-}
 
 /**
  * The chip's visible text, split where it is allowed to be cut.
@@ -261,67 +107,13 @@ export function sessionChatFilePathTitle(ref: SessionChatFilePathRef): string {
  * three-way switch and nothing else — so rather than pull in a new icon
  * dependency for this, the chip picks from @tabler/icons-react, which is
  * already the house set. Three glyphs is the whole vocabulary: prose, source,
- * and everything else.
+ * and everything else; which of the three a basename gets is decided in the
+ * shared module so the GPUI transcript draws the same glyph.
  */
-const MARKDOWN_EXTENSIONS = new Set(['markdown', 'md', 'mdown', 'mdx', 'mkdn', 'rst']);
-const CODE_EXTENSIONS = new Set([
-  'bash',
-  'c',
-  'cc',
-  'cjs',
-  'cpp',
-  'cs',
-  'css',
-  'dart',
-  'ex',
-  'exs',
-  'fish',
-  'go',
-  'gradle',
-  'h',
-  'hpp',
-  'hs',
-  'html',
-  'java',
-  'js',
-  'json',
-  'jsonc',
-  'jsx',
-  'kt',
-  'kts',
-  'lua',
-  'm',
-  'mjs',
-  'mm',
-  'php',
-  'pl',
-  'py',
-  'rb',
-  'rs',
-  'scala',
-  'scss',
-  'sh',
-  'sql',
-  'svelte',
-  'swift',
-  'toml',
-  'ts',
-  'tsx',
-  'vue',
-  'xml',
-  'yaml',
-  'yml',
-  'zig',
-  'zsh',
-]);
+const FILE_PATH_ICONS = { file: IconFile, 'file-code': IconFileCode, markdown: IconMarkdown } as const;
 
 export function sessionChatFilePathIcon(basename: string): typeof IconFile {
-  const extension = basename.slice(basename.lastIndexOf('.') + 1).toLowerCase();
-  if (MARKDOWN_EXTENSIONS.has(extension)) return IconMarkdown;
-  if (CODE_EXTENSIONS.has(extension) || EXTENSIONLESS_FILE_NAMES.has(basename)) {
-    return IconFileCode;
-  }
-  return IconFile;
+  return FILE_PATH_ICONS[sessionChatFilePathIconName(basename)];
 }
 
 /*
@@ -340,11 +132,6 @@ interface MarkdownAstNode {
   value?: unknown;
 }
 
-/** Composer mentions may quote paths containing spaces; ordinary prose is tokenized on whitespace. */
-const BARE_PROSE_TOKEN = /[([{'"<]*@"[^\r\n]+?"(?=$|[\s)\]},.!?;'">])|\S+/g;
-/** Sentence punctuation that cannot be part of a path under PATH_SEGMENT. */
-const LEADING_PROSE_PUNCTUATION = /^[([{'"<]+/;
-const TRAILING_PROSE_PUNCTUATION = /[)\]},.!?;'">]+$/;
 const NON_PROSE_CONTAINERS = new Set(['code', 'definition', 'html', 'inlineCode', 'link', 'linkReference']);
 
 function taggedInlineCode(value: string): MarkdownAstNode {
@@ -389,47 +176,17 @@ export function remarkSessionChatBareFilePaths() {
 
         const value = child.value;
         let cursor = 0;
-        const pattern = new RegExp(BARE_PROSE_TOKEN.source, 'g');
-        let match = pattern.exec(value);
-        while (match !== null) {
-          const rawToken = match[0];
-          const leading = LEADING_PROSE_PUNCTUATION.exec(rawToken)?.[0].length ?? 0;
-          const withoutLeading = rawToken.slice(leading);
-          const quotedMention = withoutLeading.startsWith('@"') && withoutLeading.endsWith('"');
-          let trailing = quotedMention ? 0 : (TRAILING_PROSE_PUNCTUATION.exec(withoutLeading)?.[0].length ?? 0);
-          if (withoutLeading.startsWith('@') && !quotedMention) {
-            // Keep closing delimiters owned by the filename, such as @report(final).pdf or @reports/(final).
-            while (trailing > 0) {
-              const closing = withoutLeading[withoutLeading.length - trailing];
-              const opening = closing === ')' ? '(' : closing === ']' ? '[' : closing === '}' ? '{' : null;
-              if (!opening) break;
-              const kept = withoutLeading.slice(0, withoutLeading.length - trailing);
-              if (kept.split(opening).length <= kept.split(closing!).length) break;
-              trailing -= 1;
-            }
+        for (const found of sessionChatBareFilePaths(value)) {
+          changed = true;
+          if (found.start > cursor) {
+            rebuilt.push({ type: 'text', value: value.slice(cursor, found.start) });
           }
-          const candidate = withoutLeading.slice(0, withoutLeading.length - trailing);
-          const mentionPath = quotedMention
-            ? candidate.slice(2, -1)
-            : candidate.startsWith('@') && !candidate.startsWith('@"')
-              ? candidate.slice(1)
-              : '';
-          const reference = mentionPath === '' ? resolveSessionChatInlineCodeFilePath(candidate) : null;
-          if (mentionPath !== '' || reference) {
-            changed = true;
-            const candidateStart = match.index + leading;
-            const candidateEnd = candidateStart + candidate.length;
-            if (candidateStart > cursor) {
-              rebuilt.push({ type: 'text', value: value.slice(cursor, candidateStart) });
-            }
-            rebuilt.push(
-              mentionPath !== ''
-                ? { type: 'link', url: mentionPath, children: [{ type: 'text', value: mentionPath }] }
-                : taggedInlineCode(candidate)
-            );
-            cursor = candidateEnd;
-          }
-          match = pattern.exec(value);
+          rebuilt.push(
+            found.mention
+              ? { type: 'link', url: found.path, children: [{ type: 'text', value: found.path }] }
+              : taggedInlineCode(found.path)
+          );
+          cursor = found.end;
         }
         if (cursor < value.length) {
           rebuilt.push({ type: 'text', value: value.slice(cursor) });

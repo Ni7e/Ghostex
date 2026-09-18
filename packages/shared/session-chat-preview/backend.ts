@@ -7,7 +7,67 @@ import type { GxserverSessionChatEvent, GxserverReadSessionChatResult } from '..
 import type { SessionChatTransport } from '@/packages/core-ui/chat/session-chat-transport';
 import { normalizeSessionChatContextDetailsPreferences } from '../session-chat-presentation/context-details';
 import { currentAgentModelCatalog } from '../agent-model-catalog-state';
-import { chatPreviewSnapshot, previewMessage, type ChatPreviewConfig } from './fixture';
+import type { AgentAccountsRequest } from '../agent-accounts';
+import { chatPreviewAccounts, chatPreviewSnapshot, previewMessage, type ChatPreviewConfig } from './fixture';
+import {
+  chatPreviewForkBranches,
+  chatPreviewHistoryPage,
+  chatPreviewSubagentPage,
+  PREVIEW_IMAGE_FILES,
+} from './scenarios';
+
+const PREVIEW_PROJECT_ROOT = '/sample/project';
+
+/**
+ * The sample project the composer's `@` popup walks, and the skills its `$` popup lists. Without
+ * them both chats open an empty picker, so neither popup can be compared.
+ */
+function chatPreviewFiles() {
+  return {
+    rootPath: PREVIEW_PROJECT_ROOT,
+    generatedAt: new Date().toISOString(),
+    files: [
+      'AGENTS.md',
+      'README.md',
+      'package.json',
+      'apps/desktop/src/app/native_chat/transcript.rs',
+      'apps/desktop/src/app/native_chat/composer.rs',
+      'packages/core-ui/chat/session-chat-view.tsx',
+      'packages/core-ui/chat/session-chat-composer.tsx',
+      'packages/core-ui/styles/chat.css',
+      'packages/shared/session-chat.ts',
+      'packages/shared/session-chat-presentation/references.ts',
+      'server/src/session_chat_files.rs',
+      'src/chat.ts',
+      'src/notes/meeting notes.md',
+      'tooling/release-notes.md',
+    ],
+    truncated: false,
+  };
+}
+
+function chatPreviewSkills() {
+  return {
+    agentId: 'codex',
+    generatedAt: new Date().toISOString(),
+    skills: [
+      { name: 'ghostex-help', sourceKind: 'global' as const },
+      { name: 'code-review', sourceKind: 'global' as const },
+      { name: 'release-notes', sourceKind: 'repository' as const },
+      { name: 'ux-mockups', sourceKind: 'repository' as const },
+    ].map((skill) => ({
+      ...skill,
+      directoryPath:
+        skill.sourceKind === 'global'
+          ? `/sample/home/.ghostex/skills/${skill.name}`
+          : `${PREVIEW_PROJECT_ROOT}/skills/${skill.name}`,
+      skillFilePath:
+        skill.sourceKind === 'global'
+          ? `/sample/home/.ghostex/skills/${skill.name}/SKILL.md`
+          : `${PREVIEW_PROJECT_ROOT}/skills/${skill.name}/SKILL.md`,
+    })),
+  };
+}
 
 export class ChatPreviewBackend {
   snapshot: GxserverReadSessionChatResult;
@@ -20,6 +80,7 @@ export class ChatPreviewBackend {
   private note = '';
   private counter = 100;
   private markdownDocuments = new Map<string, string>();
+  private accounts = chatPreviewAccounts();
   constructor(readonly config: ChatPreviewConfig) {
     this.snapshot = chatPreviewSnapshot(config);
   }
@@ -56,21 +117,35 @@ export class ChatPreviewBackend {
         break;
       }
       case 'readSessionChat':
-        result = this.snapshot;
+        result =
+          typeof params.subagent === 'string' && params.subagent
+            ? chatPreviewSubagentPage(params.subagent)
+            : typeof params.beforeOffset === 'number' && params.beforeOffset > 0
+              ? chatPreviewHistoryPage(params.beforeOffset)
+              : this.snapshot;
+        break;
+      case 'readSessionChatImage': {
+        const file = PREVIEW_IMAGE_FILES[params.path];
+        if (!file) throw new Error(`${params.path} is not part of the sample conversation.`);
+        result = { ...file, bytes: Math.ceil((file.base64Data.length * 3) / 4) };
+        break;
+      }
+      /*
+      Only the history scenario has a fork family. Every other sample answers with the single
+      session that asked, which is what an unforked conversation looks like: the switcher stays
+      hidden instead of showing a one-row menu.
+      */
+      case 'sessionForkBranches':
+        result = this.config.scenario === 'history' ? chatPreviewForkBranches() : { branches: [] };
         break;
       case 'readSessionChatSkills':
-        result = { skills: [] };
+        result = chatPreviewSkills();
         break;
       case 'readSessionChatFiles':
-        result = { files: [], truncated: false };
+        result = chatPreviewFiles();
         break;
       case 'agentAccounts':
-        result = {
-          accounts: [],
-          helpers: [],
-          sessions: [],
-          policy: { enabled: false, atLimit: 'wait', priority: 'soonestReset', retryErrors: false },
-        };
+        result = this.accountsRequest(params);
         break;
       case 'sendSessionChatMessage':
         if (!params.text) break;
@@ -189,6 +264,44 @@ export class ChatPreviewBackend {
     }
     return result as T;
   }
+  private accountsRequest(params: AgentAccountsRequest) {
+    const session = this.accounts.session!;
+    if (params.operation === 'sessionPolicy') session.override = params.policy;
+    if (params.operation === 'stopRecovery') delete session.recovery;
+    if (params.operation === 'select' && params.accountId) this.switchAccount(params.accountId);
+    return JSON.parse(JSON.stringify(this.accounts));
+  }
+  /** Walks the switch card through gxserver's phases; the spare account fails to sign in. */
+  private switchAccount(toAccountId: string) {
+    const session = this.accounts.session!;
+    const progress = {
+      id: `preview-switch-${++this.counter}`,
+      provider: 'codex' as const,
+      source: 'manual' as const,
+      fromAccountId: session.accountId,
+      toAccountId,
+    };
+    const fails = toAccountId === 'spare';
+    const phases = [
+      ['switching', 0],
+      ['resuming', 2500],
+      [fails ? 'failed' : 'success', 5000],
+    ] as const;
+    for (const [phase, delay] of phases) {
+      setTimeout(() => {
+        if (phase === 'success') session.accountId = toAccountId;
+        this.snapshot.accountSwitch = {
+          ...progress,
+          phase,
+          updatedAt: new Date().toISOString(),
+          ...(phase === 'failed'
+            ? { reason: 'We couldn’t confirm the spare@example.com login. Sign in again in Settings.' }
+            : {}),
+        };
+        this.publish();
+      }, delay);
+    }
+  }
   async composer(operation: string, params: any = {}): Promise<any> {
     switch (operation) {
       case 'read':
@@ -257,7 +370,13 @@ export class ChatPreviewBackend {
           this.rpc('runProjectDocsAction', request)
         ),
       getCachedSnapshot: () => this.snapshot,
-      read: () => this.rpc('readSessionChat'),
+      read: (params) => this.rpc('readSessionChat', params),
+      readHistory: (params) => this.rpc('readSessionChat', params),
+      readSubagent: (params) => this.rpc('readSessionChat', params),
+      forkBranches: () => this.rpc('sessionForkBranches'),
+      loadImage: (params) => this.rpc('readSessionChatImage', params),
+      readFiles: () => this.rpc('readSessionChatFiles'),
+      readSkills: () => this.rpc('readSessionChatSkills'),
       subscribe: ({ onEvent }) => this.subscribe(onEvent),
       send: (text) => this.rpc('sendSessionChatMessage', { text }),
       interrupt: () => this.rpc('interruptSessionChat'),
@@ -269,6 +388,7 @@ export class ChatPreviewBackend {
       reorderQueue: (params) => this.rpc('reorderSessionChatQueue', params),
       setDraft: (params) => this.rpc('setSessionChatDraft', params),
       selectSessionChatModel: (params) => this.rpc('selectSessionChatModel', params),
+      accounts: (params) => this.rpc('agentAccounts', params),
     };
   }
 }

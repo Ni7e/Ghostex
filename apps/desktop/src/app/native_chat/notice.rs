@@ -181,6 +181,40 @@ impl NativeChatView {
                 body.push(tail.into_any_element());
             }
         }
+        // CDXC:AgentProviders 2026-09-18 SEE-ALSO: NoticeAccountMenu in session-chat-terminal-notice-card.tsx; only sign-in and usage-limit notices offer the account panel.
+        if !collapsed
+            && snapshot["accountPanel"].is_object()
+            && matches!(notice["kind"].as_str(), Some("loginExpired" | "usageLimit"))
+        {
+            actions.push(
+                div()
+                    .id("notice-switch-account")
+                    .role(gpui::Role::Button)
+                    .aria_label("Switch account")
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0 * p.scale))
+                    .px(px(8.0 * p.scale))
+                    .py(px(4.0 * p.scale))
+                    .rounded(px(6.0 * p.scale))
+                    .border_1()
+                    .border_color(p.border)
+                    .text_color(p.primary)
+                    .hover(|style| style.bg(p.border))
+                    .child(
+                        gpui::svg()
+                            .path("titlebar/switch-horizontal.svg")
+                            .size(px(14.0 * p.scale))
+                            .text_color(p.primary),
+                    )
+                    .child("Switch account")
+                    .on_click(cx.listener(|this, event: &gpui::ClickEvent, window, cx| {
+                        this.show_account_panel(event.position(), window, cx)
+                    }))
+                    .into_any_element(),
+            );
+        }
         for action in notice["actions"]
             .as_array()
             .into_iter()

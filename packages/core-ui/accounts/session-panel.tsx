@@ -10,7 +10,11 @@ import { useState } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import type { AgentAccount, AgentAccountsRequest, AgentAccountsState } from '@/packages/shared/agent-accounts';
 import { openAppModal } from '../app-modal-host-bridge';
-import { AccountIdentity, PolicyControls, UsageBars, accountFigureWindows, resetsLine } from './controls';
+import { AccountIdentity, PolicyControls, UsageBars } from './controls';
+import {
+  sessionAccountPolicySummary,
+  switchAccountRowDetail,
+} from '@/packages/shared/session-chat-presentation/accounts';
 /** CDXC:Settings 2026-09-09 DECISION: Account management and provider defaults belong in Settings > Accounts, replacing the section under Agents. The chat panel keeps session switching and recovery controls; its settings icon opens Accounts. Use menu dismissal instead of a Close button, omit the heading subtitle, make Refresh an unframed icon, and keep session controls flat instead of inside a card. */
 export function SessionAccountsPanel({
   data,
@@ -206,11 +210,7 @@ export function SessionAccountsPanel({
                     </Button>
                   )}
                 </div>
-                <p>
-                  {session.override
-                    ? 'Custom settings · This session only'
-                    : `Session defaults · ${session.policy.enabled ? (session.policy.atLimit === 'wait' ? 'Wait for reset' : 'Switch when eligible') : 'Automatic continuation off'}`}
-                </p>
+                <p>{sessionAccountPolicySummary(session)}</p>
                 {customize || session.override ? (
                   <>
                     <PolicyControls
@@ -242,25 +242,12 @@ export function SessionAccountsPanel({
   );
 }
 
-/**
- * CDXC:AgentProviders 2026-09-11 DECISION:
- * User: the chat panel must not print an account's email twice. The account name is the email whenever the login helper has no alias, so the second line of a Switch account row is the email only when the account has a name of its own; otherwise it shows the reset countdowns of the two limits in the badge, in the same order. A usage error takes the line instead, as in Settings. The current-account block above drops the line because the usage bars beneath it already show each reset.
- */
+/** The second line of a Switch account row; the rule lives in switchAccountRowDetail. */
 function SwitchAccountDetail({ account }: { account: AgentAccount }) {
-  if (account.usageError) {
-    return (
-      <small>
-        <AccountText text={account.usageError} />
-      </small>
-    );
-  }
-  if (account.email && account.email !== account.name) {
-    return (
-      <small>
-        <AccountText text={account.email} />
-      </small>
-    );
-  }
-  const windows = accountFigureWindows(account).filter((window) => window !== undefined);
-  return windows.length ? <small>{resetsLine(windows)}</small> : null;
+  const detail = switchAccountRowDetail(account);
+  return detail ? (
+    <small>
+      <AccountText text={detail} />
+    </small>
+  ) : null;
 }

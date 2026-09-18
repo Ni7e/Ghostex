@@ -108,20 +108,24 @@ impl GhostexGpuiApp {
         if group.show_list_toggle {
             actions.insert(0, json!({ "label": if group.expanded { "Compact" } else { "Full" }, "icon": if group.expanded { "chevron-up" } else { "chevron-down" }, "command": { "type": "toggleList", "groupId": group.storage_id } }));
         }
+        // CDXC:Projects 2026-09-18 DECISION:
+        // User: the project header row has the same insets, side padding, rounding, and hover fill as a session card.
         h_flex()
             .id(format!("native-sidebar-project-{id}"))
             .relative()
             .h(px(30.0 * scale))
-            .w_full()
-            .px(px(8.0 * scale))
+            .mx(px(3.0 * scale))
+            .pl(px(5.0 * scale))
+            .pr(px(6.0 * scale))
             .gap(px(10.0 * scale))
+            .rounded(px(5.0 * scale))
             .cursor_default()
             .when(group.is_stale, |row| row.opacity(0.55))
-            .hover(|row| row.bg(appearance.hover))
+            .hover(|row| row.bg(appearance.session_hover))
             .child(
                 div()
                     .absolute()
-                    .left(px(-15.0 * scale))
+                    .left(px(-18.0 * scale))
                     .top(px(7.0 * scale))
                     .child(
                         gpui::svg()
@@ -152,7 +156,6 @@ impl GhostexGpuiApp {
             )
             .when(group.collapsed && group.is_active, |row| {
                 row.bg(appearance.selected)
-                    .rounded(px(5.0 * scale))
                     .child(super::decorations::selected_outline(appearance))
             })
             .when_some(drop_position, |row, position| {

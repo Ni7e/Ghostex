@@ -10,6 +10,16 @@ import {
   type SessionChatSlashCommand,
 } from '@/packages/core-ui/chat/session-chat-slash-commands';
 
+/**
+ * The heading above the composer's `@` file list.
+ *
+ * CDXC:SessionChat 2026-09-18 SEE-ALSO:
+ * Read by React's composer (`session-chat-composer.tsx`) and by the native
+ * projection (`session-chat-controller/native-suggestions.ts`), so the GPUI and
+ * React pickers cannot drift apart on what the list is called.
+ */
+export const SESSION_CHAT_FILE_SUGGESTION_HEADING = 'Project files';
+
 export interface ComposerSuggestionInput {
   draft: string;
   caret: number;

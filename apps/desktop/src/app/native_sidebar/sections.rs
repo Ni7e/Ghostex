@@ -50,14 +50,16 @@ impl GhostexGpuiApp {
                     )
                 },
             );
+        // CDXC:Sidebar 2026-09-18 DECISION:
+        // User: a section heading is exactly as wide as a session card (the same 3px insets) with the card's 5px/6px side padding, and it has bottom padding too so the label sits centred in its rounded hover fill.
+        // This supersedes the 2026-09-16 rule of letting the heading run through the sidebar's right edge for the native sidebar.
         h_flex()
             .id(format!("native-sidebar-section-{key}"))
-            .ml(px(3.0 * scale))
-            .mr(px(-5.0 * scale))
-            .h(px(17.0 * scale))
-            .pt(px(3.0 * scale))
+            .mx(px(3.0 * scale))
+            .h(px(20.0 * scale))
+            .py(px(3.0 * scale))
             .pl(px(5.0 * scale))
-            .pr(px(18.0 * scale))
+            .pr(px(6.0 * scale))
             .gap(px(5.0 * scale))
             .text_size(px(12.0 * scale))
             .font_weight(FontWeight::LIGHT)

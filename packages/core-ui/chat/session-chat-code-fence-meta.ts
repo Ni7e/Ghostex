@@ -64,27 +64,12 @@ export function sessionChatFenceMeta(node: unknown): string | null {
   return typeof meta === 'string' && meta !== '' ? meta : null;
 }
 
-const FENCE_TITLE_ATTRIBUTE = /(?:^|\s)(?:title|file(?:name)?)=(?:"([^"]+)"|'([^']+)'|(\S+))/i;
-/*
- * A bare token only counts as a filename when it reads like one: something
- * before a dot, an extension after it, and nothing but path characters in
- * between. Prose meta such as `showLineNumbers` or `{1,3-5}` must stay out of
- * the header, and so must a version number sitting on its own.
+/**
+ * The filename this fence names, or null when it names none. Decided in the
+ * shared presentation package so the GPUI code-block header shows the same
+ * name this one does.
  */
-const FENCE_FILENAME_TOKEN = /^[\w@][\w@./-]*\.[A-Za-z0-9]+$/;
-
-/** The filename this fence names, or null when it names none. */
-export function sessionChatFenceTitle(meta: string | null): string | null {
-  if (meta === null) {
-    return null;
-  }
-  const attribute = FENCE_TITLE_ATTRIBUTE.exec(meta);
-  const named = attribute?.[1] ?? attribute?.[2] ?? attribute?.[3];
-  if (named) {
-    return named;
-  }
-  return meta.split(/\s+/).find((token) => FENCE_FILENAME_TOKEN.test(token)) ?? null;
-}
+export { sessionChatFenceTitle } from '@/packages/shared/session-chat-presentation/file-paths';
 
 /**
  * The same three-glyph vocabulary the inline-code file chips use, so a path
