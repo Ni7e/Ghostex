@@ -18,6 +18,13 @@ impl GhostexGpuiApp {
         let Some(snapshot) = self.native_sidebar.snapshot.clone() else {
             return div().size_full().into_any_element();
         };
+        // The list keeps showing the outgoing Space while its exit fade runs; the selector row above it already shows the new one.
+        let content = self
+            .native_sidebar
+            .space_gesture
+            .exiting_snapshot()
+            .cloned()
+            .unwrap_or_else(|| snapshot.clone());
         let view = cx.entity().clone();
         let bounds_view = view.clone();
         let wheel_view = view.clone();
@@ -122,29 +129,29 @@ impl GhostexGpuiApp {
                             .relative()
                             .left(px(space_offset * appearance.scale))
                             .opacity(space_opacity)
-                            .when(snapshot.order.is_empty(), |column| {
+                            .when(content.order.is_empty(), |column| {
                                 column.child(self.render_native_sidebar_empty(
-                                    &snapshot,
+                                    &content,
                                     &appearance,
                                     cx,
                                 ))
                             })
-                            .children(snapshot.order.iter().filter_map(|item| {
+                            .children(content.order.iter().filter_map(|item| {
                                 if item.kind == "collection" {
-                                    snapshot
+                                    content
                                         .collections
                                         .iter()
                                         .find(|collection| collection.collection_id == item.id)
                                         .map(|collection| {
                                             self.render_native_collection(
                                                 collection,
-                                                &snapshot,
+                                                &content,
                                                 &appearance,
                                                 cx,
                                             )
                                         })
                                 } else {
-                                    snapshot
+                                    content
                                         .groups
                                         .iter()
                                         .find(|group| group.group_id == item.id)
@@ -155,7 +162,7 @@ impl GhostexGpuiApp {
                                                 .mb(px(10.0 * appearance.scale))
                                                 .child(self.render_native_sidebar_group(
                                                     group,
-                                                    &snapshot.hud,
+                                                    &content.hud,
                                                     &appearance,
                                                     cx,
                                                 ))
@@ -195,7 +202,7 @@ impl GhostexGpuiApp {
                 .absolute()
                 .inset_0(),
             )
-            .children(self.render_native_sticky_project(&snapshot, &appearance, cx))
+            .children(self.render_native_sticky_project(&content, &appearance, cx))
             .children(self.render_native_sidebar_menu(cx))
             .into_any_element()
     }
