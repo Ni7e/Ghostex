@@ -32,15 +32,21 @@ pub(crate) fn browser_tab_model_to_shell_state_json(model: &BrowserTabModel) -> 
                     None
                 };
                 /*
-                CDXC:Browser 2026-07-12:
-                Persist the tab's last displayed title so restart shows the
-                same sidebar/tab-strip label instead of regressing to the
-                URL-host fallback (e.g. "Google.com" for a tab that showed
-                "New Tab"). Only Loaded tabs with a sanitized URL carry a
-                cached title, and it is bounded before serialization.
+                CDXC:Browser 2026-09-18 WHY:
+                Persist only a page-reported title, never display_title(): when
+                no CEF title callback has run, display_title() falls back to the
+                URL host ("localhost"), and restoring that fallback as
+                runtime_page_title made it masquerade as a real page title — the
+                Dev servers menu then overwrote freshly probed page titles with
+                "localhost". Supersedes the 2026-07-12 wording. Restart labels
+                are unchanged because restore regenerates the same URL-host
+                fallback into `title` for tabs without a cached title, and it is
+                still bounded before serialization.
                 */
                 let cached_title = if state == BrowserTabState::Loaded {
-                    sanitize_browser_tab_cached_title(&tab.display_title())
+                    tab.runtime_page_title
+                        .as_deref()
+                        .and_then(sanitize_browser_tab_cached_title)
                 } else {
                     None
                 };
