@@ -664,7 +664,7 @@ export function getSettingsSearchSectionDefinitions() {
                 subtitle:
                   'PowerShell (default) runs native Windows projects and agents. WSL runs Linux projects. Changing environments prompts you to restart Ghostex.',
                 options: [
-                  { label: 'PowerShell (native Windows)', value: 'powershell' },
+                  { label: 'PowerShell (Native)', value: 'powershell' },
                   { label: 'WSL (Linux)', value: 'wsl' },
                 ],
               },

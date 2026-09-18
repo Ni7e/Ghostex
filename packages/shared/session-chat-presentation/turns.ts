@@ -4,7 +4,7 @@ import { SESSION_CHAT_STREAMING_ID } from '@/packages/core-ui/chat/session-chat-
 
 /**
  * CDXC:SessionChat 2026-09-17 DECISION:
- * User: desktop chat renders with GPUI and mobile chat keeps React, with shared behavior and identical presentation and settings.
+ * User: keep React as the desktop default, make GPUI chat opt-in, and share behavior, presentation rules, and settings with the retained React chat.
  * Turn boundaries, completed work, final replies, and summaries have one implementation consumed by both renderers.
  */
 export interface CompletedWorkTurn {
@@ -70,6 +70,15 @@ export function isVisibleAssistantArtifact(message: SessionChatMessage): boolean
   return message.role === 'assistant' && message.blocks.some((block) => block.type === 'image-ref');
 }
 
+export function partitionCompletedChatWork(messages: readonly SessionChatMessage[]) {
+  const visibleArtifacts: SessionChatMessage[] = [];
+  const collapsedWork: SessionChatMessage[] = [];
+  for (const message of messages) {
+    (isVisibleAssistantArtifact(message) || message.role === 'user' ? visibleArtifacts : collapsedWork).push(message);
+  }
+  return { visibleArtifacts, collapsedWork };
+}
+
 /**
  * Where the response the agent is CURRENTLY producing begins: the last user
  * row that is a genuine prompt the agent has accepted for delivery. A
@@ -97,7 +106,10 @@ function activeResponseStartIndex(messages: readonly SessionChatMessage[]): numb
 }
 
 /** One copy affordance per response: the last assistant text before the next user turn. */
-export function finalAssistantMessageIds(messages: readonly SessionChatMessage[], isWorking: boolean): ReadonlySet<string> {
+export function finalAssistantMessageIds(
+  messages: readonly SessionChatMessage[],
+  isWorking: boolean
+): ReadonlySet<string> {
   const ids = new Set<string>();
   let finalAssistantId: string | null = null;
   const activeStart = isWorking ? activeResponseStartIndex(messages) : messages.length;
@@ -240,4 +252,3 @@ export function workedDurationLabel(startedAt: number | null, completedAt: numbe
   const remainder = seconds % 60;
   return `Worked for ${minutes}m${remainder > 0 ? ` ${remainder}s` : ''}`;
 }
-

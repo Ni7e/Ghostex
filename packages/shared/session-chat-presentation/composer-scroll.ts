@@ -52,3 +52,23 @@ export function recordSessionChatComposerScrollGesture(
   gesture.accumulatedDeltaPx = 0;
   return true;
 }
+
+export function canCollapseSessionChatComposer(input: {
+  maximized: boolean;
+  noteOpen: boolean;
+  suggestionsOpen: boolean;
+  hasError: boolean;
+  attachmentCount: number;
+  pendingAttachments: number;
+  queuedPrompts: number;
+}): boolean {
+  return (
+    !input.maximized &&
+    !input.noteOpen &&
+    !input.suggestionsOpen &&
+    !input.hasError &&
+    input.attachmentCount === 0 &&
+    input.pendingAttachments === 0 &&
+    input.queuedPrompts === 0
+  );
+}

@@ -6,6 +6,8 @@ use std::{collections::BTreeMap, sync::LazyLock};
 
 #[path = "assets/chat_working.rs"]
 pub(crate) mod chat_working;
+#[path = "assets/chat_message_actions.rs"]
+mod chat_message_actions;
 
 static MODEL_PICKER_ARTWORK: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
     serde_json::from_str(include_str!(
@@ -31,6 +33,11 @@ impl AssetSource for GhostexAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if path.is_empty() {
             return Ok(None);
+        }
+        if let Some(key) = path.strip_prefix("chat-actions/") {
+            return chat_message_actions::asset(key)
+                .map(|svg| Some(Cow::Owned(svg.into_bytes())))
+                .ok_or_else(|| anyhow!("unknown message action asset {key:?}"));
         }
         if let Some(key) = path.strip_prefix("chat-working/") {
             return chat_working::asset(key)

@@ -85,6 +85,7 @@ impl NativeChatView {
             .input
             .iter()
             .chain(this.answer_input.iter().map(|(_, input)| input))
+            .chain(this.async_answer_input.iter().map(|(_, input)| input))
         {
             if input.read(cx).focus_handle(cx).is_focused(window)
                 && input.update(cx, |input, cx| {
@@ -94,11 +95,51 @@ impl NativeChatView {
                 return;
             }
         }
-        if this.snapshot["questionCard"]["visible"] == true {
-            let editing = this.input.iter().chain(this.answer_input.iter().map(|(_, input)| input))
+        if key.key == "enter" && !key.modifiers.shift {
+            let focused = |input: &gpui::Entity<gpui_component::input::InputState>| {
+                input.read(cx).focus_handle(cx).is_focused(window)
+            };
+            let command = if this
+                .async_answer_input
+                .as_ref()
+                .is_some_and(|(_, input)| focused(input))
+            {
+                Some("asyncQuestionSend")
+            } else if this
+                .answer_input
+                .as_ref()
+                .is_some_and(|(_, input)| focused(input))
+            {
+                Some("questionNext")
+            } else {
+                None
+            };
+            if let Some(command) = command {
+                if !event.is_held {
+                    this.invoke(json!({"type":command}), cx);
+                }
+                cx.stop_propagation();
+                window.prevent_default();
+                return;
+            }
+        }
+        if this.snapshot["questionCard"]["visible"] == true
+            && this.snapshot["prompt"]["kind"] == "question"
+        {
+            let editing = this
+                .input
+                .iter()
+                .chain(this.answer_input.iter().map(|(_, input)| input))
+                .chain(this.async_answer_input.iter().map(|(_, input)| input))
                 .any(|input| input.read(cx).focus_handle(cx).is_focused(window));
-            let collapsed = this.collapsed.contains(&format!("question:{}", this.snapshot["prompt"]));
-            if !editing && !collapsed && !key.modifiers.platform && !key.modifiers.control && !key.modifiers.alt
+            let collapsed = this
+                .collapsed
+                .contains(&format!("question:{}", this.snapshot["prompt"]));
+            if !editing
+                && !collapsed
+                && !key.modifiers.platform
+                && !key.modifiers.control
+                && !key.modifiers.alt
                 && let Ok(digit @ 1..=9) = key.key.parse::<usize>()
             {
                 this.invoke(json!({"type":"questionOption","index":digit - 1}), cx);

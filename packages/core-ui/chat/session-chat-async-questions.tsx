@@ -1,17 +1,15 @@
-import { storageScope } from '@/packages/client-storage';
+import { storageFailure, subscribeStorage } from '@/packages/client-storage';
+import { SessionChatAsyncQuestionsController } from '@/packages/shared/session-chat-controller/async-questions';
+import { asyncQuestionStorage } from '@/packages/shared/session-chat-controller/async-question-storage';
 import { IconChevronDown, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
-import { useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useSyncExternalStore } from 'react';
 import { Button } from '@/packages/components/ui/button';
 import type { SessionChatMessage, SessionChatTheme } from '@/packages/shared/session-chat';
 import { SessionChatChoiceRows } from './session-chat-choice-rows';
 import { SessionQuestionIndicator } from '../session-question-indicator';
-import { pendingSessionChatAsyncQuestions } from './session-chat-async-questions-state';
-import { useSessionChatQuestionDrafts } from './session-chat-question-drafts';
 import { SessionChatAnswerInput } from './session-chat-answer-input';
 import type { SaveSessionChatImage } from './session-chat-image-attachments';
 import './session-chat-async-questions.css';
-
-const clientStorage = storageScope(["retiredQuestions"]);
 
 /**
  * CDXC:SessionChat 2026-09-12 DECISION:
@@ -37,82 +35,30 @@ export function SessionChatAsyncQuestions({
   onPasteImage?: SaveSessionChatImage;
   theme?: SessionChatTheme;
 }) {
-  const storageKey = sessionKey ? `ghostex:async-questions:${sessionKey}` : null;
-  const [retired, setRetired] = useState<string[]>(() => {
-    if (!storageKey) return [];
-    try {
-      const value: unknown = JSON.parse(clientStorage.getItem(storageKey) ?? '[]');
-      return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-    } catch {
-      return [];
-    }
-  });
-  const pending = useMemo(
-    () => pendingSessionChatAsyncQuestions(messages).filter((question) => !retired.includes(question.key)),
-    [messages, retired]
+  const controller = useMemo(
+    () => new SessionChatAsyncQuestionsController(asyncQuestionStorage(sessionKey)),
+    [sessionKey]
   );
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-  const { drafts, saveDrafts, updateDraft, clearDrafts, saveError } = useSessionChatQuestionDrafts(sessionKey, 'async');
-  const [savingImages, setSavingImages] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const submittingRef = useRef(false);
+  useSyncExternalStore(controller.subscribe, controller.version, controller.version);
+  useEffect(() => {
+    void controller.load();
+  }, [controller]);
+  const persistenceError = useSyncExternalStore(
+    subscribeStorage,
+    () => storageFailure('questionDrafts'),
+    () => undefined
+  );
+  const state = controller.project(messages, canSend, working);
+  const { question, draft, answer, disabled, collapsed, submitting, loading, index, count } = state;
+  const error =
+    state.error ||
+    (persistenceError
+      ? 'Your answer could not be saved on this computer. Keep this view open until saving succeeds.'
+      : '');
   const panelId = useId();
-  const index = Math.max(
-    0,
-    pending.findIndex((question) => question.key === activeKey)
-  );
-  const question = pending[index];
   if (!question) return null;
-  const draft = drafts[question.key] ?? { indices: [0], other: '' };
-  const answer = draft.other.trim() || question.options?.[draft.indices[0] ?? 0] || '';
-  const disabled = !canSend || submitting || savingImages;
-
-  const retire = (key: string): void => {
-    if (drafts[key]) clearDrafts({ [key]: drafts[key] });
-    setRetired((current) => {
-      const next = [...current, key].slice(-1000);
-      if (storageKey) {
-        try {
-          clientStorage.setItem(storageKey, JSON.stringify(next));
-        } catch {
-          /* The mounted view still retains accepted answers. */
-        }
-      }
-      return next;
-    });
-  };
-  const submit = async (): Promise<void> => {
-    if (disabled || submittingRef.current || !answer.trim()) return;
-    submittingRef.current = true;
-    setSubmitting(true);
-    setError(null);
-    try {
-      await onSend(question.key, answer.trim());
-      retire(question.key);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not send your answer. Please try again.');
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  };
-  const skip = async (): Promise<void> => {
-    if (disabled || submittingRef.current) return;
-    submittingRef.current = true;
-    setSubmitting(true);
-    setError(null);
-    try {
-      await onDismiss(question.key);
-      retire(question.key);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not skip this question. Please try again.');
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  };
+  const submit = (skip = false) =>
+    controller.submit(messages, canSend, skip, (key, text, dismiss) => (dismiss ? onDismiss(key) : onSend(key, text)));
 
   return (
     <section
@@ -121,7 +67,7 @@ export function SessionChatAsyncQuestions({
       data-chat-async-questions='true'
     >
       <span className='sr-only' role='status'>
-        {pending.length} unanswered question{pending.length === 1 ? '' : 's'} from Codex.
+        {count} unanswered question{count === 1 ? '' : 's'} from Codex.
         {working ? ' The agent is still working.' : ''}
       </span>
       <button
@@ -130,14 +76,14 @@ export function SessionChatAsyncQuestions({
         type='button'
         aria-expanded={!collapsed}
         aria-controls={panelId}
-        onClick={() => setCollapsed((value) => !value)}
+        onClick={() => controller.toggle()}
       >
         <SessionQuestionIndicator working={working} />
-        <span className='font-medium'>Question{pending.length > 1 ? 's' : ''} from Codex</span>
+        <span className='font-medium'>Question{count > 1 ? 's' : ''} from Codex</span>
         {/* CDXC:SessionChat 2026-09-14 DECISION: User: remove the idle "Reply when ready" label from the Codex questions card. */}
         <span className='min-w-0 flex-1 text-muted-foreground'>{working ? 'Still working' : null}</span>
         <span className='text-muted-foreground'>
-          {index + 1}/{pending.length}
+          {index + 1}/{count}
         </span>
         {collapsed ? <IconChevronRight size={16} /> : <IconChevronDown size={16} />}
       </button>
@@ -149,9 +95,9 @@ export function SessionChatAsyncQuestions({
           {question.options?.length ? (
             <SessionChatChoiceRows
               options={question.options.map((label) => ({ label }))}
-              selected={draft.other.trim() ? [] : draft.indices}
+              selected={state.selected}
               readOnly={disabled}
-              onSelect={(selected) => saveDrafts({ ...drafts, [question.key]: { indices: [selected], other: '' } })}
+              onSelect={(selected) => controller.select(question.key, selected)}
             />
           ) : null}
           <SessionChatAnswerInput
@@ -160,24 +106,21 @@ export function SessionChatAsyncQuestions({
             aria-label='Your answer'
             aria-describedby={`${panelId}-question`}
             placeholder={question.options?.length ? 'Or write your own answer…' : 'Write your answer…'}
-            disabled={submitting}
+            disabled={submitting || loading}
             value={draft.other}
             onPasteImage={onPasteImage}
-            onPendingChange={setSavingImages}
-            onUpdate={(update) =>
-              updateDraft(question.key, (current) => ({ ...current, other: update(current.other) }))
-            }
+            onPendingChange={(value) => controller.imagesPending(value)}
+            onUpdate={(update) => controller.edit(question.key, update)}
             // CDXC:SessionChat 2026-09-12 DECISION: User: Enter sends a question answer; Shift+Enter inserts a newline.
             onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229)
-                return;
+              if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
               event.preventDefault();
               if (!event.repeat) void submit();
             }}
           />
-          {error || saveError ? (
+          {error ? (
             <p className='text-destructive' role='alert'>
-              {error || saveError}
+              {error}
             </p>
           ) : null}
           {!canSend ? (
@@ -186,16 +129,15 @@ export function SessionChatAsyncQuestions({
             </p>
           ) : null}
           <div className='ghostex-chat-async-questions-actions'>
-            {pending.length > 1 ? (
+            {count > 1 ? (
               <>
                 <Button
                   aria-label='Previous question'
                   size='icon-sm'
                   variant='ghost'
-                  disabled={submitting || savingImages || index === 0}
+                  disabled={state.previousDisabled}
                   onClick={() => {
-                    setActiveKey(pending[index - 1]!.key);
-                    setError(null);
+                    controller.navigate(state.previousKey);
                   }}
                 >
                   <IconChevronLeft size={16} />
@@ -204,17 +146,16 @@ export function SessionChatAsyncQuestions({
                   aria-label='Next question'
                   size='icon-sm'
                   variant='ghost'
-                  disabled={submitting || savingImages || index === pending.length - 1}
+                  disabled={state.nextDisabled}
                   onClick={() => {
-                    setActiveKey(pending[index + 1]!.key);
-                    setError(null);
+                    controller.navigate(state.nextKey);
                   }}
                 >
                   <IconChevronRight size={16} />
                 </Button>
               </>
             ) : null}
-            <Button className='ml-auto' size='sm' variant='ghost' disabled={disabled} onClick={() => void skip()}>
+            <Button className='ml-auto' size='sm' variant='ghost' disabled={disabled} onClick={() => void submit(true)}>
               Skip
             </Button>
             <Button

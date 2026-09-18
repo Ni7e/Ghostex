@@ -35,48 +35,7 @@ impl NativeChatView {
         let mut body = Vec::new();
         let mut actions = Vec::new();
         if prompt["kind"] == "approval" {
-            body.push(
-                div()
-                    .flex()
-                    .justify_between()
-                    .child("Allow this command?")
-                    .child(text(&prompt, "tool"))
-                    .into_any_element(),
-            );
-            let summary = text(&prompt, "summary");
-            if !summary.is_empty() {
-                body.push(
-                    div()
-                        .id("approval-command")
-                        .max_h(px(160.0 * s))
-                        .overflow_y_scroll()
-                        .p(px(12.0 * s))
-                        .border_1()
-                        .border_color(p.border)
-                        .rounded(px(8.0 * s))
-                        .bg(p.background)
-                        .font_family("JetBrainsMono Nerd Font")
-                        .text_size(px(12.0 * s))
-                        .child(summary)
-                        .into_any_element(),
-                );
-            }
-            for (label, send) in [("Deny", ""), ("Allow", "1")] {
-                actions.push(self.chat_button(
-                    format!("approval-{label}"),
-                    label.into(),
-                    json!({"type":"answer","answer":{"kind":"approval","approvalSend":send}}),
-                    p,
-                    cx,
-                ));
-            }
-            return Some(self.status_card(
-                "Approval request".into(),
-                "titlebar/shield-check.svg",
-                body,
-                actions,
-                p,
-            ));
+            return Some(self.render_approval(&prompt, p, cx));
         }
         let index = self.snapshot["questionCard"]["questionIndex"]
             .as_u64()
@@ -97,7 +56,7 @@ impl NativeChatView {
                 .child(
                     div()
                         .flex_1()
-                        .text_color(p.muted)
+                        .text_color(p.card_muted)
                         .line_height(px(19.6 * s))
                         .child(text(question, "question")),
                 )
@@ -139,97 +98,33 @@ impl NativeChatView {
                 });
             let label = text(option, "label");
             let description = text(option, "description");
-            choices = choices.child(
-                div()
-                    .id(format!("question-option:{index}:{option_index}"))
-                    .role(gpui::Role::Button)
-                    .aria_label(label.clone())
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0 * s))
-                    .w_full()
-                    .px(px(12.0 * s))
-                    .py(px(8.0 * s))
-                    .rounded(px(8.0 * s))
-                    .border_1()
-                    .border_color(if selected {
-                        p.primary.opacity(0.3)
-                    } else {
-                        p.border
-                    })
-                    .text_color(p.foreground)
-                    .when(p.light, |row| row.bg(p.background))
-                    .when(selected, |row| row.bg(p.primary.opacity(0.1)))
-                    .when(busy, |row| row.opacity(0.6))
-                    .when(!busy, |row| {
-                        row.cursor_pointer()
-                            .hover(|style| style.bg(p.input.opacity(0.3)))
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0 * s))
-                            .child(div().line_height(px(19.25 * s)).child(label.clone()))
-                            .when(!description.is_empty() && description != label, |column| {
-                                column.child(
-                                    div()
-                                        .text_size(px(14.0 * s))
-                                        .line_height(px(19.25 * s))
-                                        .text_color(p.muted)
-                                        .child(description),
-                                )
-                            }),
-                    )
-                    .when(selected, |row| {
-                        row.child(
-                            gpui::svg()
-                                .path("titlebar/check.svg")
-                                .size(px(16.0 * s))
-                                .text_color(p.primary),
-                        )
-                    })
-                    .when(!selected && option_index < 9, |row| {
-                        row.child(
-                            div()
-                                .h(px(20.0 * s))
-                                .min_w(px(20.0 * s))
-                                .px(px(4.0 * s))
-                                .flex_shrink_0()
-                                .border_1()
-                                .border_color(p.border.opacity(0.6))
-                                .bg(p.background.opacity(0.4))
-                                .rounded(px(4.0 * s))
-                                .flex()
-                                .justify_center()
-                                .items_center()
-                                .text_size(px(13.0 * s))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(p.muted)
-                                .child((option_index + 1).to_string()),
-                        )
-                    })
-                    .when(!busy, |row| {
-                        row.on_click(cx.listener(move |this, _, _, cx| {
-                            this.invoke(json!({"type":"questionOption","index":option_index}), cx);
-                        }))
-                    }),
-            );
-        }
-        body.push(choices.into_any_element());
-        if index > 0 {
-            actions.push(self.question_button(
-                "question-back",
-                "←",
-                json!({"type":"questionBack"}),
+            choices = choices.child(self.question_choice(
+                format!("question-option:{index}:{option_index}"),
+                label,
+                description,
+                selected,
+                (option_index < 9).then_some(option_index + 1),
                 busy,
-                true,
-                false,
+                json!({"type":"questionOption","index":option_index}),
                 p,
                 cx,
             ));
+        }
+        body.push(choices.into_any_element());
+        if index > 0 {
+            actions.push(
+                self.question_button(
+                    "question-back",
+                    "←",
+                    json!({"type":"questionBack"}),
+                    busy,
+                    true,
+                    false,
+                    p,
+                    cx,
+                )
+                .into_any_element(),
+            );
         }
         if question["allowCustom"] != false {
             let key = format!("{}:{index}", prompt);
@@ -246,16 +141,19 @@ impl NativeChatView {
                         .placeholder("Write a custom answer…")
                         .default_value(text(&draft, "other"))
                 });
-                self.answer_subscription = Some(cx.subscribe_in(&input,window,|this,input,event:&InputEvent,_,cx| match event {
+                self.answer_subscription = Some(cx.subscribe_in(&input,window,|this,input,event:&InputEvent,window,cx| match event {
                     InputEvent::Change => this.invoke(json!({"type":"questionText","text":input.read(cx).value().to_string()}),cx),
                     InputEvent::PressEnter { shift:false,.. } => this.invoke(json!({"type":"questionNext"}),cx),
+                    InputEvent::Focus => super::focus::reclaim_keyboard_focus(window),
                     _=>{},
                 }));
                 self.answer_input = Some((key, input));
             }
             actions.push(
                 Input::new(&self.answer_input.as_ref().unwrap().1)
+                    .aria_label("Your answer")
                     .disabled(self.snapshot["questionCard"]["busy"] == true)
+                    .placeholder_color(p.muted.opacity(0.6))
                     .appearance(false)
                     .bordered(false)
                     .focus_bordered(false)
@@ -270,26 +168,32 @@ impl NativeChatView {
         } else {
             actions.push(div().min_w_0().flex_1().into_any_element());
         }
-        actions.push(self.question_button(
-            "question-cancel",
-            "Cancel",
-            json!({"type":"questionCancel"}),
-            busy,
-            true,
-            false,
-            p,
-            cx,
-        ));
-        actions.push(self.question_button(
-            "question-next",
-            &text(&self.snapshot["questionCard"]["controls"], "label"),
-            json!({"type":"questionNext"}),
-            busy || self.snapshot["questionCard"]["controls"]["disabled"] == true,
-            false,
-            true,
-            p,
-            cx,
-        ));
+        actions.push(
+            self.question_button(
+                "question-cancel",
+                "Cancel",
+                json!({"type":"questionCancel"}),
+                busy,
+                true,
+                false,
+                p,
+                cx,
+            )
+            .into_any_element(),
+        );
+        actions.push(
+            self.question_button(
+                "question-next",
+                &text(&self.snapshot["questionCard"]["controls"], "label"),
+                json!({"type":"questionNext"}),
+                busy || self.snapshot["questionCard"]["controls"]["disabled"] == true,
+                false,
+                true,
+                p,
+                cx,
+            )
+            .into_any_element(),
+        );
         let collapse_key = format!("question:{}", prompt);
         let collapsed = self.collapsed.contains(&collapse_key);
         let header = div()
@@ -364,7 +268,7 @@ impl NativeChatView {
         ))
     }
 
-    fn question_button(
+    pub(super) fn question_button(
         &self,
         id: &'static str,
         label: &str,
@@ -374,7 +278,7 @@ impl NativeChatView {
         wide: bool,
         p: &ChatAppearance,
         cx: &Context<Self>,
-    ) -> AnyElement {
+    ) -> gpui::Stateful<gpui::Div> {
         let s = p.scale;
         div()
             .id(id)
@@ -391,7 +295,7 @@ impl NativeChatView {
             .border_color(if ghost {
                 gpui::transparent_black()
             } else {
-                p.border
+                p.control_border
             })
             .text_color(p.foreground)
             .font_weight(gpui::FontWeight::NORMAL)
@@ -405,6 +309,5 @@ impl NativeChatView {
             .when(!disabled, |button| {
                 button.on_click(cx.listener(move |this, _, _, cx| this.invoke(action.clone(), cx)))
             })
-            .into_any_element()
     }
 }

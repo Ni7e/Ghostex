@@ -72,6 +72,10 @@ impl NativeChatView {
             self.close_maximized(cx);
             return;
         }
+        self.invoke(
+            serde_json::json!({"type":"composerExpand","editor":true}),
+            cx,
+        );
         let pane = self.bounds.get();
         let bounds = gpui::Bounds::new(window.bounds().origin + pane.origin, pane.size);
         let parent_native_view = self.config.parent_native_view;

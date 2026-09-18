@@ -1,8 +1,13 @@
-import { normalizeChatTranscript, foldChatTranscript } from '@/packages/shared/session-chat-presentation/transcript';
+import {
+  normalizeChatTranscript,
+  foldChatTranscript,
+  completedChatWork,
+} from '@/packages/shared/session-chat-presentation/transcript';
+import transcriptLayout from '@/packages/shared/session-chat-presentation/transcript-layout.json';
 import {
   completedWorkRenderItems,
   finalAssistantMessageIds,
-  isVisibleAssistantArtifact,
+  partitionCompletedChatWork,
   summaryModeTurns,
   workedDurationLabel,
   type CompletedWorkTurn,
@@ -41,11 +46,9 @@ import { Separator } from '../../../components/ui/separator';
 import { normalizeghostexHotkeySettings } from '../../../shared/ghostex-hotkeys';
 import { type SessionChatMessage, type SessionChatTheme } from '../../../shared/session-chat';
 import { formatSidebarHotkeyLabel } from '../../hotkey-label';
-import { orderSessionChatMessages } from '../session-chat-assembler';
 import { SessionChatDisclosure, SessionChatExpansion, anchorSessionChatExpansionTop } from '../session-chat-expansion';
 import { SessionChatFileChangeCards, SessionChatFileChangeInteractionContext } from '../session-chat-file-change-card';
 import { splitSessionChatFileChanges } from '../session-chat-file-changes';
-import { normalizeSessionChatImageTranscriptMessages } from '../session-chat-image-transcript-markers';
 import {
   SessionChatInteractionProvider,
   SessionChatInteractionScope,
@@ -53,14 +56,9 @@ import {
   sessionChatInteractionState,
   useSessionChatDisclosureState,
 } from '../session-chat-interaction-state';
-import { normalizeSessionChatLocalCommandMessages } from '../session-chat-local-command-transcript';
 import { sameSessionChatMessage } from '../session-chat-message-equality';
 import { SessionChatMinimap } from '../session-chat-minimap';
-import {
-  dropSessionChatHiddenMessages,
-  isSessionChatCommandTurn,
-  sessionChatSuppressedTurnLabel,
-} from '../session-chat-noise';
+import { isSessionChatCommandTurn } from '../session-chat-noise';
 import { isSessionChatPendingMessageId } from '../session-chat-pending';
 import {
   SessionChatQuestionExchangeCard,
@@ -84,11 +82,7 @@ import {
 } from '../session-chat-scroll-bottom-button';
 import { type SessionChatStartupSendActions } from '../session-chat-startup-send-status';
 import { SESSION_CHAT_STREAMING_ID } from '../session-chat-streaming';
-import {
-  foldSessionChatToolMessages,
-  pairSessionChatToolBlocks,
-  splitSessionChatBlocks,
-} from '../session-chat-tool-fold';
+import { pairSessionChatToolBlocks, splitSessionChatBlocks } from '../session-chat-tool-fold';
 import { useSessionChatScrollMomentum } from '../use-session-chat-scroll-momentum';
 import {
   SESSION_CHAT_HISTORY_NAVIGATION_EVENT,
@@ -100,7 +94,6 @@ import {
   useDeferredSessionChatWork,
 } from '../session-chat-deferred-work';
 import type { SessionChatTransport } from '../session-chat-transport';
-import { mergeSessionChatMessagesWith } from '../session-chat-merge';
 
 const LOAD_EARLIER_SCROLL_TOP_PX = 320;
 const AUTO_SCROLL_EDGE_THRESHOLD_PX = 10;
@@ -242,26 +235,13 @@ function CompletedWorkBody({
   const [open, setOpen] = useSessionChatDisclosureState('completed-work', verboseMode);
   const [filesOpen, setFilesOpen] = useState(false);
   const deferred = useDeferredSessionChatWork(turn.user.deferredWork, open || filesOpen);
-  const work = useMemo(() => {
-    const rows = deferred.messages
-      ? mergeSessionChatMessagesWith(
-          deferred.messages.filter((message) => message.id !== turn.final?.id),
-          turn.work
-        )
-      : turn.work;
-    return foldSessionChatToolMessages(
-      dropSessionChatHiddenMessages(
-        normalizeSessionChatImageTranscriptMessages(
-          normalizeSessionChatLocalCommandMessages(orderSessionChatMessages(rows))
-        )
-      ),
-      (message) => sessionChatSuppressedTurnLabel(message) !== null
-    );
-  }, [deferred.messages, turn.final?.id, turn.work]);
+  const work = useMemo(
+    () => completedChatWork(turn, deferred.messages),
+    [deferred.messages, turn.final?.id, turn.work]
+  );
   const simpleMode = useContext(SessionChatSimpleModeContext);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const visibleArtifacts = work.filter((message) => isVisibleAssistantArtifact(message) || message.role === 'user');
-  const collapsedWork = work.filter((message) => !isVisibleAssistantArtifact(message) && message.role !== 'user');
+  const { visibleArtifacts, collapsedWork } = partitionCompletedChatWork(work);
   const hasWork = collapsedWork.length > 0 || Boolean(turn.user.deferredWork);
   const questionExchanges = useMemo(() => hoistedQuestionExchanges(work), [work]);
   const fileChanges = useMemo(
@@ -674,16 +654,8 @@ export function SessionChatMessageList({
     [loadEarlierIfNearTop]
   );
 
-  const normalizedMessages = useMemo(
-    () =>
-      normalizeChatTranscript(messages),
-    [messages]
-  );
-  const rendered = useMemo(
-    () =>
-      foldChatTranscript(normalizedMessages),
-    [normalizedMessages]
-  );
+  const normalizedMessages = useMemo(() => normalizeChatTranscript(messages), [messages]);
+  const rendered = useMemo(() => foldChatTranscript(normalizedMessages), [normalizedMessages]);
   const renderItems = useMemo(
     () => completedWorkRenderItems(rendered, isWorking, interactedMessageIds, normalizedMessages),
     [isWorking, rendered, interactedMessageIds, normalizedMessages]
@@ -895,7 +867,13 @@ export function SessionChatMessageList({
                 onScroll={handleScroll}
                 ref={viewportRef}
               >
-                <MessageScrollerContent className='mx-auto w-full max-w-3xl' ref={contentRef}>
+                <MessageScrollerContent
+                  className='mx-auto w-full max-w-3xl'
+                  ref={contentRef}
+                  style={{
+                    paddingBottom: `calc(var(--ghostex-chat-composer-inset, 0px) + ${transcriptLayout.endPadding / 16}rem)`,
+                  }}
+                >
                   {summaryMode
                     ? virtualTranscript.virtualItems.map((virtualItem) => {
                         const turn = summaryTurns[virtualItem.index]!;

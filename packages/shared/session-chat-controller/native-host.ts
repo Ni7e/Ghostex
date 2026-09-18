@@ -1,3 +1,5 @@
+import { SessionChatAsyncQuestionsController } from './async-questions';
+import { canCollapseSessionChatComposer } from '../session-chat-presentation/composer-scroll';
 import { COMPOSER_SCROLL_RESET_MS, COMPOSER_SCROLL_THRESHOLD_PX, COMPOSER_BOTTOM_THRESHOLD_PX,
   createSessionChatComposerScrollGesture, resetSessionChatComposerScrollGesture,
   recordSessionChatComposerScrollGesture, suppressSessionChatComposerScrollGesture } from '../session-chat-presentation/composer-scroll';
@@ -83,6 +85,12 @@ let questionDraftsLoading = false;
 let questionTransition = false;
 let questionDrafts: QuestionDraft[] = [];
 let answering = false;
+const asyncQuestions = new SessionChatAsyncQuestionsController({
+  read: () => composer('asyncQuestionRead'),
+  write: async (answers) => { await composer('asyncQuestionWrite', { answers }); },
+  retire: async (questionId, answers) => { await composer('asyncQuestionRetire', { questionId, answers }); },
+});
+asyncQuestions.subscribe(() => { if (controller) publish(controller.current()); });
 let submissionAttempt: { cancelled: boolean } | undefined;
 let incomingDraft: any = null;
 let summaryMode = false;
@@ -134,6 +142,15 @@ function sendBlockedReason(state: NativeChatState): string | null {
     terminalChoicePending, noticeCardVisible: noticeVisible(state), sessionOptionSwitching: optionSwitching });
 }
 
+function asyncQuestionsCanSend(state: NativeChatState): boolean {
+  const notice = state.terminalNotice;
+  const terminalChoicePending = !!notice && !!(notice.choices?.length || notice.dialog || notice.conversationLock)
+    && `${notice.kind}:${notice.detectedAt}` !== retiredNoticeKey;
+  return !terminalChoicePending && !optionSwitching && !state.accountStatus.busy
+    && !(state.prompt?.kind === 'question' && promptKey !== dismissedPrompt)
+    && state.status !== 'error' && state.status !== 'loading';
+}
+
 function publish(state: NativeChatState): void {
   const nextNoticeKey = sessionChatTerminalNoticeDismissKey(state.terminalNotice);
   if (activeNoticeKey !== nextNoticeKey) { activeNoticeKey = nextNoticeKey; answeredNoticeKey = null; }
@@ -162,12 +179,24 @@ function publish(state: NativeChatState): void {
   const projection = presentation.update(state.messages, state.workingSignal, summaryMode, deferred, detailRevision);
   transcriptItems = projection.items;
   const { messages: _messages, skills: _skills, files: _files, requestSkills: _requestSkills, requestFiles: _requestFiles, ...viewState } = state;
+  const composerSuggestions = suggestions.projection(state);
+  const composerCollapseEligible = canCollapseSessionChatComposer({
+    maximized: false,
+    noteOpen: note.open,
+    suggestionsOpen: composerSuggestions !== null,
+    hasError: !!operationError,
+    attachmentCount: 0,
+    pendingAttachments,
+    queuedPrompts: state.queue.prompts.length,
+  });
+  if (!composerCollapseEligible || (state.prompt?.kind === 'question' && promptKey !== dismissedPrompt)) composerCollapsed = false;
   snapshot = {
     ...viewState,
+    composerCollapseEligible,
     ...(preview ? { previewSettings: { sessionChatTheme: preview.config.theme, sessionChatZoomPercent: preview.config.zoom, sessionChatVerboseMode: preview.config.verbose, sessionChatSimpleMode: preview.config.simple } } : {}),
     modelPicker: modelPicker?.projection() ?? null,
     contextStatusRows,
-    suggestions: suggestions.projection(state),
+    suggestions: composerSuggestions,
     composerCommand: suggestions.nativeCommand(state),
     contextEditor: nativeContextEditor(state,state.accounts),
     queue: { ...state.queue, prompts: state.queue.prompts.map(prompt => ({...prompt, preview: sessionChatQueueRowPreview(prompt.text), busy: isSessionChatQueueRowBusy(prompt) })) },
@@ -189,6 +218,7 @@ function publish(state: NativeChatState): void {
     interaction: { queueLongPressMs: SESSION_CHAT_QUEUE_LONG_PRESS_MS, stopButtonCooldownMs: SESSION_CHAT_STOP_BUTTON_COOLDOWN_MS },
     incomingDraft,
     note: { ...note },
+    asyncQuestions: asyncQuestions.project(state.messages, asyncQuestionsCanSend(state), state.working),
     questionCard: { visible: promptKey !== null && promptKey !== dismissedPrompt && !(state.prompt?.kind === 'approval' && state.terminalNotice?.kind === 'permissionPrompt' && (!!state.terminalNotice.choices?.length || !!state.terminalNotice.dialog) && `${state.terminalNotice.kind}:${state.terminalNotice.detectedAt}` !== retiredNoticeKey), questionIndex, controls: questionAnswerControls(questionDrafts, questionIndex, state.prompt?.kind === 'question' ? state.prompt.questions.length : 0, answering), drafts: questionDrafts, answering, busy: answering || questionTransition, loading: questionDraftsLoading },
     finalIds: projection.finalIds,
   };
@@ -214,6 +244,7 @@ function start(config: { clientId: string; initialSnapshot?: any; initialPresent
     summaryMode = result.summaryMode === true;
     verboseOverride = result.verboseOverride ?? null;
     startController({ ...config, clientId: result.clientId });
+    void asyncQuestions.load();
   }).catch((error) => {
     transcriptItems = [];
     snapshot = { status: 'error', error: String(error) };
@@ -561,6 +592,24 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
           if (command.answer.kind === 'terminalChoice' && chat.terminalNotice) retiredNoticeKey = `${chat.terminalNotice.kind}:${chat.terminalNotice.detectedAt}`;
           throw error;
         } finally { answering = false; }
+        break;
+      case 'asyncQuestionToggle': asyncQuestions.toggle(); break;
+      case 'asyncQuestionNavigate': {
+        const state = asyncQuestions.project(chat.messages, asyncQuestionsCanSend(chat), chat.working);
+        asyncQuestions.navigate(command.direction === 'previous' ? state.previousKey : state.nextKey);
+        break;
+      }
+      case 'asyncQuestionText': asyncQuestions.edit(command.key, () => command.text); break;
+      case 'asyncQuestionOption': {
+        const state = asyncQuestions.project(chat.messages, asyncQuestionsCanSend(chat), chat.working);
+        if (!state.disabled && state.question?.key === command.key && state.question.options?.[command.index] !== undefined)
+          asyncQuestions.select(command.key, command.index);
+        break;
+      }
+      case 'asyncQuestionSend':
+      case 'asyncQuestionSkip':
+        await asyncQuestions.submit(chat.messages, asyncQuestionsCanSend(chat), command.type === 'asyncQuestionSkip',
+          (questionId, text, skip) => chat.answerPrompt(skip ? { kind: 'dismissAsyncQuestion', questionId } : { kind: 'asyncQuestion', questionId, text }));
         break;
       case 'questionText': {
         if (answering || questionTransition || questionDraftsLoading || !questionDrafts[questionIndex]) break;
