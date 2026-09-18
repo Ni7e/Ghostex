@@ -468,10 +468,11 @@ impl<'a> DomainRepository<'a> {
             .collect()
     }
 
-    /// The project's rows that can satisfy `identities_match` for an agent
-    /// identity: same agent session id or same agent session path. A superset
-    /// of the in-memory match (agent-family checks stay with the caller), read
-    /// without hydrating the rest of the project.
+    /// The project's rows that can satisfy `identities_match_strength` for an
+    /// agent identity: same agent session id or same agent session path. A
+    /// superset of the in-memory match (agent-family checks and the
+    /// shared-store carve-out stay with the caller), read without hydrating
+    /// the rest of the project.
     ///
     /// CDXC:SessionIdentity 2026-09-11 WHY:
     /// The live-process identity pass runs on every presentation poll and, while a session's title is still a placeholder, re-hunts a trusted title among the project's other rows each time.
