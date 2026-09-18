@@ -70,7 +70,7 @@ impl Render for FloatingSidebarWindow {
                         .w(px(width))
                         .h_full()
                         .ml(px(offset))
-                        .child(app.render_native_sidebar(cx)),
+                        .child(app.render_native_sidebar(window, cx)),
                 )
                 .into_any_element()
         })

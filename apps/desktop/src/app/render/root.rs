@@ -1162,7 +1162,7 @@ impl Render for GhostexGpuiApp {
                                 .h_full()
                                 .border_t_1()
                                 .border_color(titlebar_button_border_color())
-                                .child(self.render_native_sidebar(cx)),
+                                .child(self.render_native_sidebar(window, cx)),
                         )
                     })
                     .when(sidebar_chrome_visible, |this| {
