@@ -10,6 +10,7 @@ use serde_json::json;
 impl Render for NativeChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         super::scroll_bottom::register(cx);
+        self.last_render = Some(std::time::Instant::now());
         self.main_window = Some(window.window_handle());
         if self.maximized_window.is_none() {
             self.ensure_input(window, cx);

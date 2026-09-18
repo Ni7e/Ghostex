@@ -147,6 +147,7 @@ impl GhostexGpuiApp {
                 GpuiEngineTerminalZmxVisibility::Visible
             };
             let is_displayed = visibility == GpuiEngineTerminalZmxVisibility::Visible;
+            view.update(cx, |view, _cx| view.set_displayed(is_displayed));
             if is_displayed {
                 let (cols, rows) = view.read(cx).model().size();
                 if previous != Some(GpuiEngineTerminalZmxVisibility::Visible) {

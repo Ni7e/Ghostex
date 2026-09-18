@@ -23,6 +23,7 @@ mod notice;
 mod question;
 mod queue;
 mod rpc;
+mod runtime_worker;
 mod scroll_bottom;
 
 mod keyboard;

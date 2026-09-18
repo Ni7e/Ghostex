@@ -1,5 +1,6 @@
 use crate::app::{helpers::*, model::*};
-use ghostex_chat_runtime::ChatRuntime;
+use super::runtime_worker::{ChatRuntimeOutput, ChatRuntimeWorker};
+use futures::StreamExt as _;
 use gpui::{AppContext as _, Context, Entity, EventEmitter, Focusable as _, Subscription, Window};
 use gpui_component::input::{InputEvent, InputState};
 use serde_json::{Value, json};
@@ -31,7 +32,7 @@ pub(crate) enum NativeChatEvent {
 
 pub(crate) struct NativeChatView {
     pub(crate) config: NativeChatConfig,
-    pub(crate) runtime: Option<ChatRuntime>,
+    pub(crate) runtime: Option<ChatRuntimeWorker>,
     pub(crate) snapshot: Arc<Value>,
     pub(crate) items: Arc<Vec<Value>>,
     pub(crate) error: Option<String>,
@@ -84,7 +85,8 @@ pub(crate) struct NativeChatView {
     pub(crate) pane_focused: bool,
     pub(crate) focus_requested: bool,
     pub(crate) subscriptions: Vec<Subscription>,
-    pump_task: Option<gpui::Task<()>>,
+    /// When this view last rendered; a parked chat keeps applying frames without redrawing the window.
+    pub(crate) last_render: Option<std::time::Instant>,
 }
 
 impl EventEmitter<NativeChatEvent> for NativeChatView {}
@@ -93,19 +95,22 @@ impl NativeChatView {
     pub(crate) fn new(config: NativeChatConfig, cx: &mut Context<Self>) -> Self {
         super::fonts::register(cx);
         super::keyboard::register(cx);
-        let runtime = ChatRuntime::new(
-            &json!({"clientId":config.client_id,"projectId":config.project_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+        let (wake, mut wakes) = futures::channel::mpsc::unbounded::<()>();
+        let runtime = ChatRuntimeWorker::start(
+            json!({"clientId":config.client_id,"projectId":config.project_id,"initialSnapshot":config.initial_snapshot,"initialPresentation":config.initial_presentation,"preview":config.preview}),
+            move || {
+                let _ = wake.unbounded_send(());
+            },
         );
-        let (runtime, error) = match runtime {
-            Ok(value) => (Some(value), None),
-            Err(error) => (None, Some(error.to_string())),
-        };
-        let pump_task = cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(16))
-                .await;
-            let _ = this.update(cx, |this, cx| this.pump(cx));
-        });
+        cx.spawn(async move |this, cx| {
+            while wakes.next().await.is_some() {
+                if this.update(cx, |this, cx| this.pump(cx)).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+        let (runtime, error) = (Some(runtime), None);
         let list = gpui::ListState::new(0, gpui::ListAlignment::Top, gpui::px(400.0));
         list.set_follow_mode(gpui::FollowMode::Tail);
         let chat = cx.weak_entity();
@@ -178,7 +183,7 @@ impl NativeChatView {
             pane_focused: false,
             focus_requested: false,
             subscriptions: Vec::new(),
-            pump_task: Some(pump_task),
+            last_render: None,
         }
     }
 
@@ -283,12 +288,10 @@ impl NativeChatView {
             action["size"] =
                 json!({"width":size.width.as_f32()/scale,"height":size.height.as_f32()/scale});
         }
-        if let Some(runtime) = &mut self.runtime
-            && let Err(error) = runtime.call("action", &[action])
-        {
-            self.error = Some(error.to_string());
+        if let Some(runtime) = &self.runtime {
+            runtime.call("action", vec![action]);
         }
-        self.pump(cx);
+        let _ = cx;
     }
 
     pub(crate) fn receive_callback(
@@ -298,16 +301,13 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) {
         if callback == "onSessionChatRuntimeMessage" {
-            if let Some(runtime) = &mut self.runtime
-                && let Err(error) = runtime.call("brokerMessage", &[payload.clone()])
-            {
-                self.error = Some(error.to_string());
+            if let Some(runtime) = &self.runtime {
+                runtime.call("brokerMessage", vec![payload.clone()]);
             }
         }
         if callback == "onSessionChatAttachmentsPicked" {
             self.invoke(json!({"type":"attachPaths","paths":payload["paths"]}), cx);
         }
-        self.pump(cx);
     }
 
     pub(crate) fn insert_prompt(&mut self, content: &str, cx: &mut Context<Self>) {
@@ -347,26 +347,35 @@ impl NativeChatView {
         cx.emit(NativeChatEvent::Host(Value::Object(message)));
     }
 
+    /// Apply everything the runtime thread has drained since the last wake.
     pub(crate) fn pump(&mut self, cx: &mut Context<Self>) {
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &self.runtime else {
             return;
         };
-        let mut output = match runtime.drain() {
-            Ok(value) => value,
-            Err(error) => {
-                self.error = Some(error.to_string());
-                cx.notify();
-                return;
+        for output in runtime.take_outputs() {
+            match output {
+                ChatRuntimeOutput::Drained(output) => self.apply_output(output, cx),
+                ChatRuntimeOutput::Error(error) => {
+                    self.error = Some(error);
+                    cx.notify();
+                }
             }
-        };
-        self.pump_task = output["nextWakeMs"].as_u64().map(|delay| {
-            cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_millis(delay.max(1)))
-                    .await;
-                let _ = this.update(cx, |this, cx| this.pump(cx));
-            })
-        });
+        }
+    }
+
+    /// CDXC:SessionChat 2026-09-18 WHY:
+    /// Retained chat views stay subscribed while parked, and every state frame (several a second across working sessions) notified, which redraws the whole window for a view nobody sees.
+    /// The state is applied either way; only a view that rendered recently asks for a redraw, and a parked one paints the latest state when it comes back.
+    fn notify_if_shown(&self, cx: &mut Context<Self>) {
+        if self
+            .last_render
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
+        {
+            cx.notify();
+        }
+    }
+
+    fn apply_output(&mut self, mut output: Value, cx: &mut Context<Self>) {
         if let Some(mut splice) = output
             .as_object_mut()
             .and_then(|output| output.remove("itemsSplice"))
@@ -386,7 +395,7 @@ impl NativeChatView {
             let inserted_len = inserted.len();
             items.splice(start..end, inserted);
             self.list.splice(start..end, inserted_len);
-            cx.notify();
+            self.notify_if_shown(cx);
         }
         if let Some(snapshot) = output
             .as_object_mut()
@@ -397,7 +406,7 @@ impl NativeChatView {
             self.sync_context_editor_window(cx);
             self.sync_save_markdown_window(cx);
             self.sync_suggestion_window(cx);
-            cx.notify();
+            self.notify_if_shown(cx);
         }
         for request in output["requests"].as_array().into_iter().flatten() {
             match request["kind"].as_str() {
@@ -482,19 +491,12 @@ impl NativeChatView {
             return;
         };
         if method == "readNativeComposer" {
-            if let Some(runtime) = &mut self.runtime
-                && let Err(error) = runtime.call(
+            if let Some(runtime) = &self.runtime {
+                runtime.call(
                     "resolve",
-                    &[
-                        request["id"].clone(),
-                        self.draft.clone().into(),
-                        Value::Null,
-                    ],
-                )
-            {
-                self.error = Some(error.to_string());
+                    vec![request["id"].clone(), self.draft.clone().into(), Value::Null],
+                );
             }
-            self.pump(cx);
             return;
         }
         let endpoint = format!("/api/{method}");
@@ -518,12 +520,10 @@ impl NativeChatView {
                     Ok(value) => (value, Value::Null),
                     Err(error) => (Value::Null, error),
                 };
-                if let Some(runtime) = &mut this.runtime
-                    && let Err(error) = runtime.call("resolve", &[id, value, error])
-                {
-                    this.error = Some(error.to_string());
+                if let Some(runtime) = &this.runtime {
+                    runtime.call("resolve", vec![id, value, error]);
                 }
-                this.pump(cx);
+                let _ = cx;
             });
         })
         .detach();

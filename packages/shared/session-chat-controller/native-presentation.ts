@@ -67,6 +67,10 @@ function projectMessage(message: SessionChatMessage) {
 type ProjectedMessage = ReturnType<typeof projectMessage>;
 type TranscriptItem = Record<string, unknown> & { kind: string };
 
+/** Items from the tail that are fully projected before the first publish; the rest backfill in batches. */
+const EAGER_TAIL_ITEMS = 12;
+const BACKFILL_BATCH = 24;
+
 function transcriptItemKey(item: TranscriptItem): string {
   return `${item.kind}:${item.kind === 'message' ? (item.message as ProjectedMessage).id : item.id}`;
 }
@@ -103,6 +107,17 @@ export class NativeChatPresentation {
   private detailRevision = -1;
   private projection?: ReturnType<typeof projectChatTranscript>;
   private result?: { items: unknown[]; finalIds: string[] };
+  /**
+   * CDXC:SessionChat 2026-09-18 WHY:
+   * Projecting a message parses its markdown twice (bare file paths, then references), and a 139-message transcript took about 800ms of QuickJS before its first item existed.
+   * The transcript follows its tail, so only the newest items are projected before the first publish; older ones ship as plain-text placeholders and are backfilled in batches on the runtime's timer, newest first, each batch republishing.
+   */
+  private placeholders = new WeakMap<SessionChatMessage, ProjectedMessage>();
+  private backfill: SessionChatMessage[] = [];
+  private backfillTimer: ReturnType<typeof setTimeout> | undefined;
+  private backfillRevision = 0;
+  private appliedBackfill = 0;
+  onBackfill?: () => void;
 
   private message = (message: SessionChatMessage) => {
     let result = this.models.get(message);
@@ -113,6 +128,40 @@ export class NativeChatPresentation {
     this.modelsById.set(message.id, { source: message, model: result });
     return result;
   };
+
+  private projected(message: SessionChatMessage): ProjectedMessage | undefined {
+    const direct = this.models.get(message);
+    if (direct) return direct;
+    const cached = this.modelsById.get(message.id);
+    return cached && sameSessionChatMessage(cached.source, message) ? this.message(message) : undefined;
+  }
+
+  /** The full projection when it is cheap or the row is near the tail; otherwise a stable plain-text stand-in queued for backfill. */
+  private messageOrPlaceholder = (message: SessionChatMessage, eager: boolean): ProjectedMessage => {
+    const projected = this.projected(message);
+    if (projected || eager) return projected ?? this.message(message);
+    let placeholder = this.placeholders.get(message);
+    if (!placeholder) {
+      const text = message.blocks
+        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+        .join('\n')
+        .trim();
+      placeholder = { ...message, text, copyText: text, pending: true } as unknown as ProjectedMessage;
+      this.placeholders.set(message, placeholder);
+    }
+    this.backfill.push(message);
+    return placeholder;
+  };
+
+  private scheduleBackfill() {
+    if (this.backfillTimer !== undefined || this.backfill.length === 0) return;
+    this.backfillTimer = setTimeout(() => {
+      this.backfillTimer = undefined;
+      for (const message of this.backfill.splice(-BACKFILL_BATCH)) this.message(message);
+      this.backfillRevision++;
+      this.onBackfill?.();
+    }, 0);
+  }
 
   private reuseItems(items: TranscriptItem[]): TranscriptItem[] {
     const previous = new Map<string, TranscriptItem>();
@@ -143,21 +192,35 @@ export class NativeChatPresentation {
       this.working = working;
       this.projection = projectChatTranscript(messages, working);
     }
-    if (changed || summary !== this.summary || detailRevision !== this.detailRevision || !this.result) {
+    if (
+      changed ||
+      summary !== this.summary ||
+      detailRevision !== this.detailRevision ||
+      this.appliedBackfill !== this.backfillRevision ||
+      !this.result
+    ) {
       this.summary = summary;
       this.detailRevision = detailRevision;
+      this.appliedBackfill = this.backfillRevision;
+      this.backfill = [];
       const projection = this.projection;
+      const eagerFrom = (summary ? projection.summaryTurns.length : projection.items.length) - EAGER_TAIL_ITEMS;
       const items: TranscriptItem[] = summary
-        ? projection.summaryTurns.map((turn) => ({
-            kind: 'summary',
-            id: turn.user.id,
-            user: this.message(turn.user),
-            final: turn.final ? this.message(turn.final) : null,
-            active: turn.active,
-            work: turn.activeWork.map(this.message),
-          }))
-        : projection.items.map((item) => {
-            if (item.kind === 'message') return { kind: item.kind, message: this.message(item.message) };
+        ? projection.summaryTurns.map((turn, index) => {
+            const eager = index >= eagerFrom;
+            return {
+              kind: 'summary',
+              id: turn.user.id,
+              user: this.messageOrPlaceholder(turn.user, eager),
+              final: turn.final ? this.messageOrPlaceholder(turn.final, eager) : null,
+              active: turn.active,
+              work: turn.activeWork.map((message) => this.messageOrPlaceholder(message, eager)),
+            };
+          })
+        : projection.items.map((item, index) => {
+            const eager = index >= eagerFrom;
+            const project = (message: SessionChatMessage) => this.messageOrPlaceholder(message, eager);
+            if (item.kind === 'message') return { kind: item.kind, message: project(item.message) };
             const { collapsedWork, visibleArtifacts } = partitionCompletedChatWork(
               completedChatWork(item.turn, deferred.get(item.turn.user.id))
             );
@@ -170,13 +233,14 @@ export class NativeChatPresentation {
               ),
               expandable: collapsedWork.length > 0 || Boolean(item.turn.user.deferredWork),
               deferred: item.turn.user.deferredWork,
-              work: collapsedWork.map(this.message),
-              artifacts: visibleArtifacts.map(this.message),
-              final: item.turn.final ? this.message(item.turn.final) : undefined,
+              work: collapsedWork.map(project),
+              artifacts: visibleArtifacts.map(project),
+              final: item.turn.final ? project(item.turn.final) : undefined,
             };
           });
       this.result = { items: this.reuseItems(items), finalIds: projection.finalIds };
       this.pruneModels(messages, deferred);
+      this.scheduleBackfill();
     }
     return this.result;
   }

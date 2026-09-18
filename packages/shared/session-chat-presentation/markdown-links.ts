@@ -31,7 +31,12 @@ export function sessionChatMarkdownReference(href: string, label: string) {
 
 /** Parse once when a message changes, preserving Markdown definitions and escaped destinations. */
 export function sessionChatMarkdownReferences(markdown: string) {
-  if (!markdown.includes('[') && !markdown.includes('<')) return [];
+  /*
+  CDXC:SessionChat 2026-09-18 WHY:
+  The full mdast parse ran for every tool output that merely contained a bracket, and it was most of the cost of opening a long transcript in the native runtime.
+  A link needs an inline destination `](`, a definition `]:`, or an autolink scheme `<scheme:`; text without any of them cannot carry one, so it skips the parser.
+  */
+  if (!/\]\(|\]:|<[a-z][a-z0-9+.-]*:/i.test(markdown)) return [];
   const tree = fromMarkdown(markdown);
   const definitions = new Map<string, string>();
   const walk = (nodes: RootContent[], visit: (node: RootContent) => void) => {

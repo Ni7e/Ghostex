@@ -628,6 +628,12 @@ pub struct TerminalView {
     /// (CDXC:Terminal 2026-09-03).
     pending_zmx_visible_announce: bool,
     zmx_visibility_claims_enabled: bool,
+    /// CDXC:Terminal 2026-09-18 WHY:
+    /// Every PTY wakeup used to refresh the grid snapshot and notify, and gpui redraws the whole window on any notify, so a hidden agent terminal streaming output behind its chat view redrew the window on every chunk.
+    /// A parked or chat-mode terminal only marks its snapshot stale; the next prepaint of a displayed slot takes the fresh frame. Titles and pwd still sync so the sidebar stays current.
+    displayed: bool,
+    snapshot_stale: bool,
+    last_prepaint: Option<std::time::Instant>,
 }
 
 pub(crate) use crate::hotkey_label::terminal_overlay_hotkey_chord_label;
@@ -749,6 +755,9 @@ impl TerminalView {
             search: None,
             pending_zmx_visible_announce: false,
             zmx_visibility_claims_enabled: false,
+            displayed: true,
+            snapshot_stale: false,
+            last_prepaint: None,
         }
     }
 
@@ -798,6 +807,11 @@ impl TerminalView {
     /// must not be reported to the daemon as a displayed size.
     pub fn zmx_visible_announce_pending(&self) -> bool {
         self.pending_zmx_visible_announce
+    }
+
+    /// Whether the app currently shows this terminal in a slot; hidden terminals stop redrawing the window on output.
+    pub fn set_displayed(&mut self, displayed: bool) {
+        self.displayed = displayed;
     }
 
     /// Resize the cell grid outside a layout pass, keeping the cell pixel
@@ -967,9 +981,17 @@ impl TerminalView {
         }
         match event {
             TerminalEvent::Wakeup => {
-                self.refresh_snapshot();
-                self.sync_title_and_pwd(cx);
-                cx.notify();
+                let drawn_recently = self
+                    .last_prepaint
+                    .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1));
+                if self.displayed || drawn_recently {
+                    self.refresh_snapshot();
+                    self.sync_title_and_pwd(cx);
+                    cx.notify();
+                } else {
+                    self.snapshot_stale = true;
+                    self.sync_title_and_pwd(cx);
+                }
             }
             TerminalEvent::Exited(exit) => {
                 // Contents stay readable after exit; the final Wakeup may
@@ -2297,6 +2319,11 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> TerminalLayout {
         self.terminal_bounds = Some(bounds);
+        self.last_prepaint = Some(std::time::Instant::now());
+        if self.snapshot_stale {
+            self.snapshot_stale = false;
+            self.refresh_snapshot();
+        }
         // Focus edges send focus reports (mode 1004) and toggle the hollow
         // cursor; gpui refreshes the window on focus changes, so prepaint
         // always observes them.

@@ -67,6 +67,7 @@ let snapshot: unknown;
 let transcriptItems: unknown[] = [];
 let sentTranscriptItems: unknown[] | undefined;
 const presentation = new NativeChatPresentation();
+presentation.onBackfill = () => { if (controller) publish(controller.current()); };
 const suggestions = new NativeComposerSuggestions();
 const composerScrollGesture = createSessionChatComposerScrollGesture();
 let composerCollapsed = false;

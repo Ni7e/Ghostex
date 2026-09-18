@@ -62,6 +62,8 @@ impl GhostexGpuiApp {
             .text_size(px(12.0 * scale))
             .font_weight(FontWeight::LIGHT)
             .text_color(chrome_color(0xd8d8d8, 0x292929).opacity(0.34))
+            // CDXC:Sidebar 2026-09-18 DECISION: User: the section heading's hover fill has rounded corners, like the session rows; this supersedes the 2026-09-16 square-corner decision for the native sidebar.
+            .rounded(px(5.0 * scale))
             .hover(|row| {
                 row.bg(chrome_ink().opacity(0.06))
                     .text_color(chrome_color(0xd8d8d8, 0x292929).opacity(0.58))
