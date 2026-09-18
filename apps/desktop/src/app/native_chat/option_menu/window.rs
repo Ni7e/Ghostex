@@ -5,6 +5,8 @@ use gpui::{
 };
 use gpui_component::Root;
 use serde_json::Value;
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub(in crate::app::native_chat) struct ChatOptionMenu {
@@ -16,6 +18,8 @@ pub(in crate::app::native_chat) struct ChatOptionMenu {
     pub(super) windows: Vec<gpui::WindowHandle<Root>>,
     pub(super) opening: bool,
     pub(super) closed: bool,
+    /// Where each depth's panel was anchored, so a panel can reopen in place.
+    anchors: Vec<(Bounds<Pixels>, f32, bool)>,
     parent: *mut std::ffi::c_void,
 }
 
@@ -29,6 +33,10 @@ pub(super) struct ChatOptionMenuPanel {
     pub(super) scroll: ScrollHandle,
     pub(super) child: Option<usize>,
     pub(super) hover_task: Option<gpui::Task<()>>,
+    /// The Switch Account panel's Customize state (`SessionAccountsPanel`'s local `customize`).
+    pub(super) accounts_customize: bool,
+    /// Screen bounds of the panel's account preference select, where its dropdown opens.
+    pub(super) select_bounds: Rc<Cell<Bounds<Pixels>>>,
     was_active: bool,
     _activation: Subscription,
     _chat_subscription: Option<Subscription>,
@@ -99,6 +107,14 @@ impl ChatOptionMenu {
         }
     }
 
+    /// Runs a chat command without closing the menu (Switch Account panel controls).
+    pub(super) fn dispatch(&mut self, command: Value, cx: &mut Context<Self>) {
+        let chat = self.chat.clone();
+        cx.defer(move |cx| {
+            let _ = chat.update(cx, |chat, cx| chat.invoke(command, cx));
+        });
+    }
+
     pub(super) fn truncate(&mut self, depth: usize, focus_parent: bool, cx: &mut Context<Self>) {
         if self.windows.len() <= depth {
             return;
@@ -117,15 +133,49 @@ impl ChatOptionMenu {
 
     pub(super) fn open_panel(
         &mut self,
-        mut rows: Vec<Value>,
+        rows: Vec<Value>,
         anchor: Bounds<Pixels>,
         width: f32,
         depth: usize,
         cx: &mut Context<Self>,
     ) {
+        self.open_panel_at(rows, anchor, width, depth, false, cx);
+    }
+
+    /// A select's list: below its trigger (above when there is no room), left edges aligned.
+    pub(super) fn open_dropdown(
+        &mut self,
+        rows: Vec<Value>,
+        anchor: Bounds<Pixels>,
+        width: f32,
+        depth: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_panel_at(rows, anchor, width, depth, true, cx);
+    }
+
+    /// Reopens the panel at `depth` with new rows, re-placed against its original anchor.
+    /// The Switch Account panel uses this when it grows past the room below its top edge.
+    pub(super) fn reopen(&mut self, depth: usize, rows: Vec<Value>, cx: &mut Context<Self>) {
+        if let Some(&(anchor, width, below)) = self.anchors.get(depth) {
+            self.open_panel_at(rows, anchor, width, depth, below, cx);
+        }
+    }
+
+    fn open_panel_at(
+        &mut self,
+        mut rows: Vec<Value>,
+        anchor: Bounds<Pixels>,
+        width: f32,
+        depth: usize,
+        below: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.closed || rows.is_empty() {
             return;
         }
+        self.anchors.truncate(depth);
+        self.anchors.push((anchor, width, below));
         for row in &mut rows {
             if let Some(action) = row["hotkeyAction"].as_str() {
                 row["detail"] = crate::app::hotkeys::gpui_configured_hotkey_label(action).into();
@@ -156,14 +206,16 @@ impl ChatOptionMenu {
             * scale)
         .min(available.size.height - px(24.0 * scale));
         let margin = px(12.0 * scale);
-        let x = if depth == 0 {
+        let x = if below {
+            anchor.left()
+        } else if depth == 0 {
             anchor.right() - width
         } else if anchor.right() + px(4.0 * scale) + width < available.right() - margin {
             anchor.right() + px(4.0 * scale)
         } else {
             anchor.left() - width - px(4.0 * scale)
         };
-        let y = if depth == 0 {
+        let y = if depth == 0 || below {
             if anchor.bottom() + px(4.0 * scale) + height < available.bottom() - margin {
                 anchor.bottom() + px(4.0 * scale)
             } else {
@@ -183,6 +235,7 @@ impl ChatOptionMenu {
         );
         let menu = cx.entity();
         let parent = self.parent;
+        let accounts_customize = rows.first().is_some_and(|row| row["customize"] == true);
         self.opening = true;
         cx.defer(move |cx| {
             let result = cx.open_window(
@@ -205,27 +258,50 @@ impl ChatOptionMenu {
                         crate::app::window::attach_gpui_app_modal_window_to_main_window(
                             window, parent,
                         );
-                        let panel =
-                            cx.new(|cx| {
-                                let focus = cx.focus_handle();
-                                focus.focus(window, cx);
-                                let activation = cx.observe_window_activation(
-                                    window,
-                                    |panel: &mut ChatOptionMenuPanel, window, cx| {
-                                        if window.is_window_active() {
-                                            panel.was_active = true;
-                                        } else if panel.was_active {
-                                            let menu = panel.menu.clone();
-                                            cx.defer(move |cx| {
-                                                menu.update(cx, |menu, cx| menu.check_active(cx))
-                                            });
-                                        }
-                                    },
-                                );
-                                let chat_subscription =
-                                    if rows.first().is_some_and(|row| row["context"].is_object()) {
-                                        menu.read(cx).chat.upgrade().map(|chat| {
-                                            cx.observe_in(
+                        let panel = cx.new(|cx| {
+                            let focus = cx.focus_handle();
+                            focus.focus(window, cx);
+                            let activation = cx.observe_window_activation(
+                                window,
+                                |panel: &mut ChatOptionMenuPanel, window, cx| {
+                                    if window.is_window_active() {
+                                        panel.was_active = true;
+                                    } else if panel.was_active {
+                                        let menu = panel.menu.clone();
+                                        cx.defer(move |cx| {
+                                            menu.update(cx, |menu, cx| menu.check_active(cx))
+                                        });
+                                    }
+                                },
+                            );
+                            let chat_subscription = if rows
+                                .first()
+                                .is_some_and(|row| row["accounts"].is_object())
+                            {
+                                menu.read(cx).chat.upgrade().map(|chat| {
+                                    cx.observe_in(
+                                        &chat,
+                                        window,
+                                        |panel: &mut ChatOptionMenuPanel, chat, window, cx| {
+                                            let next = &chat.read(cx).snapshot["accountPanel"];
+                                            if !next.is_object()
+                                                || panel
+                                                    .rows
+                                                    .first()
+                                                    .is_some_and(|row| &row["accounts"] == next)
+                                            {
+                                                return;
+                                            }
+                                            panel.rows = Arc::new(vec![
+                                                serde_json::json!({"accounts":next.clone()}),
+                                            ]);
+                                            panel.refit_accounts(window, cx);
+                                        },
+                                    )
+                                })
+                            } else if rows.first().is_some_and(|row| row["context"].is_object()) {
+                                menu.read(cx).chat.upgrade().map(|chat| {
+                                    cx.observe_in(
                                         &chat,
                                         window,
                                         |panel: &mut ChatOptionMenuPanel, chat, window, cx| {
@@ -274,25 +350,27 @@ impl ChatOptionMenu {
                                             cx.notify();
                                         },
                                     )
-                                        })
-                                    } else {
-                                        None
-                                    };
-                                ChatOptionMenuPanel {
-                                    menu,
-                                    depth,
-                                    rows: Arc::new(rows),
-                                    heights,
-                                    focus,
-                                    selected: None,
-                                    scroll: Default::default(),
-                                    child: None,
-                                    hover_task: None,
-                                    was_active: window.is_window_active(),
-                                    _activation: activation,
-                                    _chat_subscription: chat_subscription,
-                                }
-                            });
+                                })
+                            } else {
+                                None
+                            };
+                            ChatOptionMenuPanel {
+                                menu,
+                                depth,
+                                rows: Arc::new(rows),
+                                heights,
+                                focus,
+                                selected: None,
+                                scroll: Default::default(),
+                                child: None,
+                                hover_task: None,
+                                accounts_customize,
+                                select_bounds: Rc::new(Cell::new(Bounds::default())),
+                                was_active: window.is_window_active(),
+                                _activation: activation,
+                                _chat_subscription: chat_subscription,
+                            }
+                        });
                         cx.new(|cx| Root::new(panel, window, cx).bg(gpui::transparent_black()))
                     }
                 },
@@ -341,11 +419,46 @@ impl NativeChatView {
         );
     }
 
+    /// A menu opened at the pointer instead of under a trigger.
+    ///
+    /// React's context menus drop down and to the right of the press, which is
+    /// the placement a select's list uses, not the right-aligned placement a
+    /// toolbar button's menu uses.
+    pub(in crate::app::native_chat) fn show_chat_menu_at(
+        &mut self,
+        rows: Vec<Value>,
+        at: Point<Pixels>,
+        width: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_chat_menu(
+            rows,
+            Bounds::new(at, size(px(0.0), px(0.0))),
+            width,
+            true,
+            window,
+            cx,
+        );
+    }
+
     pub(in crate::app::native_chat) fn show_chat_menu(
         &mut self,
         rows: Vec<Value>,
         trigger: Bounds<Pixels>,
         width: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_chat_menu(rows, trigger, width, false, window, cx);
+    }
+
+    fn open_chat_menu(
+        &mut self,
+        rows: Vec<Value>,
+        trigger: Bounds<Pixels>,
+        width: f32,
+        below: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -370,10 +483,17 @@ impl NativeChatView {
             windows: vec![],
             opening: false,
             closed: false,
+            anchors: vec![],
             parent,
         });
         let anchor = Bounds::new(source_bounds.origin + trigger.origin, trigger.size);
-        menu.update(cx, |menu, cx| menu.open_panel(rows, anchor, width, 0, cx));
+        menu.update(cx, |menu, cx| {
+            if below {
+                menu.open_dropdown(rows, anchor, width, 0, cx);
+            } else {
+                menu.open_panel(rows, anchor, width, 0, cx);
+            }
+        });
         self.option_menu = Some(menu);
     }
 }

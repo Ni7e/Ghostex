@@ -18,7 +18,7 @@ unsafe extern "C" {
 }
 
 pub(crate) struct CompanionReveal {
-    pub(crate) window: WindowHandle<FloatingCompanionWindow>,
+    pub(crate) window: WindowHandle<gpui_component::Root>,
     pub(crate) native_view: *mut c_void,
     pub(crate) mode: TitlebarMode,
     pub(crate) project_id: Option<String>,
@@ -151,10 +151,17 @@ impl GhostexGpuiApp {
                 }
             };
             let observed_app = app.clone();
-            let result = cx.open_window(options, move |_, cx| {
-                cx.new(|cx| FloatingCompanionWindow {
+            let result = cx.open_window(options, move |window, cx| {
+                let companion = cx.new(|cx| FloatingCompanionWindow {
                     app: observed_app.downgrade(),
                     _subscription: cx.observe(&observed_app, |_, _, cx| cx.notify()),
+                });
+                /*
+                CDXC:SessionChat 2026-09-18 WHY:
+                gpui-component drives transcript text selection from the window's `gpui_component::Root`, so a window that hosts the native chat without one cannot select any text. The companion paints its own background, so the Root's surface stays clear.
+                */
+                cx.new(|cx| {
+                    gpui_component::Root::new(companion, window, cx).bg(gpui::transparent_black())
                 })
             });
             let handle = match result {

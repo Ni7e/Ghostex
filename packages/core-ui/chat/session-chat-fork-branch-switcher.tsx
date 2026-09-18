@@ -31,7 +31,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
-import { formatRelativeTimeLabel } from '../relative-time';
+import {
+  SESSION_CHAT_FORK_BRANCH_CURRENT_LABEL,
+  SESSION_CHAT_FORK_BRANCH_MENU_LABEL,
+  sessionChatForkBranchRows,
+  sessionChatForkBranchTooltip,
+  type SessionChatForkBranchTone,
+} from '../../shared/session-chat-presentation/fork-branches';
 
 export interface SessionChatForkBranchSwitcherProps {
   /** Stable identity of the conversation; a change re-asks for the family. */
@@ -48,22 +54,12 @@ export interface SessionChatForkBranchSwitcherProps {
 /** Answers already fetched on this page, keyed by session. */
 const branchCache = new Map<string, readonly GxserverSessionForkBranch[]>();
 
-function branchLifecycleDotClassName(branch: GxserverSessionForkBranch): string {
-  if (branch.lifecycleState === 'running') {
-    return 'bg-emerald-500';
-  }
-  if (branch.lifecycleState === 'sleeping') {
-    return 'bg-muted-foreground/60';
-  }
-  return 'bg-muted-foreground/35';
-}
-
-function branchLastActiveLabel(branch: GxserverSessionForkBranch): string {
-  if (!Number.isFinite(branch.lastActiveMs) || branch.lastActiveMs <= 0) {
-    return '';
-  }
-  return formatRelativeTimeLabel(new Date(branch.lastActiveMs).toISOString());
-}
+/** The tones of `sessionChatForkBranchTone`, in this renderer's colours. */
+const BRANCH_DOT_CLASS_NAMES: Readonly<Record<SessionChatForkBranchTone, string>> = {
+  running: 'bg-emerald-500',
+  sleeping: 'bg-muted-foreground/60',
+  stopped: 'bg-muted-foreground/35',
+};
 
 export function SessionChatForkBranchSwitcher({
   loadBranches,
@@ -105,12 +101,12 @@ export function SessionChatForkBranchSwitcher({
     };
   }, [loadBranches, sessionKey]);
 
-  // One branch is not a family: there is nothing to switch to.
-  if (branches.length < 2) {
+  const rows = sessionChatForkBranchRows(branches);
+  if (!rows) {
     return null;
   }
 
-  const tooltip = `This conversation has ${branches.length} branches that share earlier history.`;
+  const tooltip = sessionChatForkBranchTooltip(rows.length);
 
   return (
     <DropdownMenu>
@@ -126,7 +122,7 @@ export function SessionChatForkBranchSwitcher({
         }
       >
         <IconGitBranch aria-hidden='true' className='size-3.5' stroke={2} />
-        {branches.length}
+        {rows.length}
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end' className='w-72 min-w-72'>
         {/*
@@ -134,39 +130,32 @@ export function SessionChatForkBranchSwitcher({
         With no error boundary in the chat page that unmounted the whole transcript.
         */}
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Branches</DropdownMenuLabel>
-          {branches.map((branch) => {
-            const lastActive = branchLastActiveLabel(branch);
-            return (
-              <DropdownMenuItem
-                disabled={branch.current || !onSelectBranch}
-                key={`${branch.projectId}:${branch.sessionId}`}
-                onClick={() => {
-                  if (!branch.current) {
-                    onSelectBranch?.(branch);
-                  }
-                }}
-              >
-                <span
-                  aria-hidden='true'
-                  className={cn('size-1.5 shrink-0 rounded-full', branchLifecycleDotClassName(branch))}
-                />
-                <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                  <span className='truncate'>{branch.title || 'Untitled session'}</span>
-                  <span className='truncate text-[11px] text-muted-foreground'>
-                    {[
-                      branch.ancestor ? 'Earlier thread' : '',
-                      branch.lifecycleState === 'stopped' && !branch.current ? 'Resumes when opened' : '',
-                      lastActive,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </span>
+          <DropdownMenuLabel>{SESSION_CHAT_FORK_BRANCH_MENU_LABEL}</DropdownMenuLabel>
+          {rows.map((row) => (
+            <DropdownMenuItem
+              disabled={row.current || !onSelectBranch}
+              key={row.key}
+              onClick={() => {
+                if (!row.current) {
+                  onSelectBranch?.(row.branch);
+                }
+              }}
+            >
+              <span
+                aria-hidden='true'
+                className={cn('size-1.5 shrink-0 rounded-full', BRANCH_DOT_CLASS_NAMES[row.tone])}
+              />
+              <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                <span className='truncate'>{row.title}</span>
+                <span className='truncate text-[11px] text-muted-foreground'>{row.subtitle}</span>
+              </span>
+              {row.current ? (
+                <span className='shrink-0 text-[11px] text-muted-foreground'>
+                  {SESSION_CHAT_FORK_BRANCH_CURRENT_LABEL}
                 </span>
-                {branch.current ? <span className='shrink-0 text-[11px] text-muted-foreground'>Current</span> : null}
-              </DropdownMenuItem>
-            );
-          })}
+              ) : null}
+            </DropdownMenuItem>
+          ))}
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>

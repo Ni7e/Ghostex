@@ -127,6 +127,14 @@ impl NativeChatView {
                 || SPEC.label.clone(),
                 |key| format!("{} ({key})", SPEC.label),
             );
+        // The pill wears the composer's own chrome: the same opaque card fill, the 1px outline and
+        // the inset top highlight session-chat-composer-focus.css gives both of them.
+        let outline = if p.light {
+            gpui::black().opacity(0.08)
+        } else {
+            gpui::white().opacity(0.05)
+        };
+        let highlight = gpui::white().opacity(if p.light { 0.0 } else { 0.03 });
         div()
             .absolute()
             .bottom(px(SPEC.bottom * p.scale))
@@ -140,17 +148,31 @@ impl NativeChatView {
                     .role(gpui::Role::Button)
                     .aria_label(label.clone())
                     .cursor_pointer()
+                    .relative()
+                    .overflow_hidden()
                     .flex()
                     .items_center()
                     .justify_center()
                     .h(px(SPEC.height * p.scale))
                     .px(px(SPEC.padding_x * p.scale))
                     .rounded_full()
+                    .border_1()
+                    .border_color(outline)
                     .bg(p.composer_background)
                     .text_color(p.primary)
                     .text_size(px(SPEC.font_size * p.scale))
                     .font_weight(FontWeight::MEDIUM)
-                    .focus_visible(|style| style.border_1().border_color(p.ring))
+                    .focus_visible(|style| style.border_color(p.ring))
+                    .child(
+                        // Visual only, and inside the pill's own frame: the `inset 0 1px` highlight.
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(1.0))
+                            .bg(highlight),
+                    )
                     .child(label)
                     .on_click(cx.listener(|chat, _, _, cx| chat.jump_to_bottom(cx))),
             )

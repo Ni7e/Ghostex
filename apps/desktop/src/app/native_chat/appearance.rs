@@ -28,6 +28,11 @@ pub(crate) struct ChatAppearance {
 }
 
 impl ChatAppearance {
+    /// The `--destructive` tone the React transcript paints failed tool results and failed writes in.
+    pub(crate) fn error(&self) -> Hsla {
+        rgb(if self.light { 0xc53030 } else { 0xef9999 }).into()
+    }
+
     pub(crate) fn current(state: &serde_json::Value) -> Self {
         let snapshot = crate::shared_settings::shared_sidebar_settings_snapshot();
         let settings = state["previewSettings"]

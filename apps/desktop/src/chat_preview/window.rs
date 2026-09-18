@@ -88,7 +88,14 @@ impl PreviewWindow {
             initial_presentation: None,
             preview: Some(config.clone()),
         };
-        cx.new(|cx| NativeChatView::new(native, cx))
+        cx.new(|cx| {
+            let mut chat = NativeChatView::new(native, cx);
+            // The lab has no app shell to report which pane the reader is in, and the composer's
+            // @ / $ / slash suggestion window only opens for a focused pane, so the comparison
+            // would show React's list beside nothing at all.
+            chat.pane_focused = true;
+            chat
+        })
     }
     fn new(path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let config: Value =

@@ -1,0 +1,264 @@
+/*
+ * The rich-Markdown decisions the GPUI transcript cannot make for itself.
+ *
+ * The native transcript hands one Markdown string to a single `TextView`, which
+ * parses and lays it out in Rust. React reaches the same features through
+ * remark and rehype passes over its own AST (session-chat-code-fence-meta.ts,
+ * session-chat-github-alerts.ts, session-chat-file-paths.ts), and none of that
+ * is reachable from Rust. So every decision stays here and travels to the
+ * native renderer inside the Markdown itself, marked with a private-use
+ * character no agent writes:
+ *
+ *   * a fenced block that names a file gets its header's label, icon, and
+ *     open-file target appended to the fence's info string, where the Rust code
+ *     block header reads them back;
+ *   * a GitHub alert quote (`> [!NOTE]`) becomes a marked, unquoted section the
+ *     native renderer draws as a tinted callout;
+ *   * a picture written into prose (`![alt](src)`, or a link to an image file)
+ *     becomes a marked token carrying its image source, so the native renderer
+ *     draws the thumbnail React draws instead of a chip or a blank band;
+ *   * a path somebody typed into a prompt becomes a real Markdown link, so the
+ *     native reference pill and the React file chip point at the same file.
+ *
+ * Rust only splits on the markers and lays the pieces out.
+ *
+ * CDXC:SessionChat 2026-09-18 SEE-ALSO:
+ * The marker vocabulary below is mirrored in apps/desktop/src/app/native_chat/rich_markdown.rs
+ * and apps/desktop/src/app/native_chat/code_block.rs. Change them together.
+ */
+
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { RootContent } from 'mdast';
+import type { SessionChatImageRefBlock } from '../session-chat';
+import { sessionChatFilePositionSuffix } from './file-position';
+import {
+  resolveSessionChatFenceTitleFilePath,
+  sessionChatBareFilePaths,
+  sessionChatFenceTitle,
+  sessionChatFilePathIconName,
+} from './file-paths';
+import { sessionChatImageSource } from './images';
+
+/** Private-use character: never written by an agent, never rendered. */
+export const SESSION_CHAT_NATIVE_MARK = '\u{E000}';
+export const SESSION_CHAT_NATIVE_ALERT_OPEN = `${SESSION_CHAT_NATIVE_MARK}alert:`;
+export const SESSION_CHAT_NATIVE_ALERT_CLOSE = `${SESSION_CHAT_NATIVE_MARK}/alert`;
+export const SESSION_CHAT_NATIVE_TABLE_OPEN = `${SESSION_CHAT_NATIVE_MARK}table`;
+export const SESSION_CHAT_NATIVE_TABLE_CLOSE = `${SESSION_CHAT_NATIVE_MARK}/table`;
+export const SESSION_CHAT_NATIVE_IMAGE_OPEN = `${SESSION_CHAT_NATIVE_MARK}image:`;
+
+/** What the native code-block header shows, as JSON on the fence's info string. */
+export interface SessionChatNativeFenceHeader {
+  /** The file the fence names, shown instead of the bare language. */
+  label: string;
+  /** Which of the three file glyphs goes beside it. */
+  icon: string;
+  /** Present only when the name really is a path the host can open. */
+  href?: string;
+}
+
+const FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+const QUOTE_LINE = /^ {0,3}>/;
+const QUOTE_MARKER = /^ {0,3}> ?/;
+const ALERT_MARKER = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$/i;
+const QUOTED_ALERT = /^ {0,3}> ?\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i;
+/** GFM's delimiter row, the one line that tells a table from prose with pipes in it. */
+const TABLE_DELIMITER = /^ {0,3}\|?(?: *:?-+:? *\|)+ *(?::?-+:? *\|? *)?$/;
+const PATH_EVIDENCE = /[\\/@]|:\d/;
+/** The extensions React's `isSessionChatImageHref` accepts, on a destination with its query and hash cut off. */
+const IMAGE_EXTENSION = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i;
+/** Cheap enough to run on every message: no bang and no picture extension means nothing to mark. */
+const IMAGE_EVIDENCE = /!\[|\]\([^)\r\n]*\.(?:avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)/i;
+/** A Markdown image or link, with the loose destination a composer image reference needs. */
+const INLINE_IMAGE = /(!?)\[([^\]\r\n]*)\]\(([^)\r\n]+)\)/g;
+/** A picture written inside backticks is code, and stays code. */
+const CODE_SPAN = /`[^`\r\n]*`/g;
+
+function fenceHeader(info: string): string | null {
+  const trimmed = info.trim();
+  const language = trimmed.split(/\s+/)[0] ?? '';
+  const title = sessionChatFenceTitle(trimmed.slice(language.length).trim() || null);
+  if (title === null) return null;
+  const separator = Math.max(title.lastIndexOf('/'), title.lastIndexOf('\\'));
+  const reference = resolveSessionChatFenceTitleFilePath(title);
+  const header: SessionChatNativeFenceHeader = {
+    label: title,
+    icon: sessionChatFilePathIconName(title.slice(separator + 1)),
+    ...(reference === null ? {} : { href: `${reference.path}${sessionChatFilePositionSuffix(reference.position)}` }),
+  };
+  return `${SESSION_CHAT_NATIVE_MARK}${JSON.stringify(header)}`;
+}
+
+/**
+ * One picture, as the native renderer needs it: the same source fields the
+ * projected image blocks carry, so `images.rs` loads an authored picture
+ * through the transport it already uses for attachments.
+ *
+ * `label` is overwritten with React's own stand-in text (the link's words, or
+ * the alt), because that is what React shows when the bytes cannot be read.
+ */
+function imageMark(href: string, fallback: string, alt: string): string {
+  const destination = href.trim();
+  let block: SessionChatImageRefBlock;
+  if (/^(https?:|data:)/i.test(destination)) {
+    block = { type: 'image-ref', url: destination, alt };
+  } else {
+    let path = destination;
+    try {
+      // Markdown destinations arrive percent-encoded; a machine path needs the literal characters back.
+      path = decodeURI(destination);
+    } catch {
+      // Malformed escapes: the raw destination is the best reading of it.
+    }
+    block = { type: 'image-ref', path, alt };
+  }
+  const source = { ...sessionChatImageSource(block), label: fallback };
+  return `${SESSION_CHAT_NATIVE_IMAGE_OPEN}${JSON.stringify(source)}${SESSION_CHAT_NATIVE_MARK}`;
+}
+
+/**
+ * Marks the pictures on one line: every Markdown image, and every link whose
+ * destination names a picture. React draws both as a real thumbnail at the
+ * position they were written (SessionChatInlineImage), which is what the marked
+ * line lets the native renderer do.
+ */
+function markInlineImages(line: string): string {
+  if (!line.includes('](')) return line;
+  const code: [number, number][] = [];
+  for (const span of line.matchAll(CODE_SPAN)) code.push([span.index, span.index + span[0].length]);
+  let result = '';
+  let cursor = 0;
+  for (const match of line.matchAll(INLINE_IMAGE)) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (code.some(([from, to]) => start < to && end > from)) continue;
+    const href = match[3] ?? '';
+    const text = (match[2] ?? '').trim();
+    const picture = match[1] === '!';
+    if (!picture && !IMAGE_EXTENSION.test(href.trim().split(/[?#]/, 1)[0] ?? '')) continue;
+    result += line.slice(cursor, start);
+    result += imageMark(href, text || 'Image', picture ? text : text || 'Image');
+    cursor = end;
+  }
+  return cursor === 0 ? line : result + line.slice(cursor);
+}
+
+/**
+ * One pass over the lines: annotate fenced blocks, mark the pictures written
+ * into prose, and lift GitHub alert quotes out of the Markdown into a marked
+ * section. All three are line-structured, so this costs a scan rather than a
+ * second parse of every streaming message.
+ */
+function markBlocks(markdown: string): string {
+  const lines = markdown.split('\n');
+  const result: string[] = [];
+  let fence: { character: string; length: number } | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (fence !== null) {
+      const closing = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+      if (closing && closing[1]![0] === fence.character && closing[1]!.length >= fence.length) {
+        fence = null;
+      }
+      result.push(line);
+      continue;
+    }
+    const opening = FENCE_OPEN.exec(line);
+    if (opening) {
+      fence = { character: opening[2]![0]!, length: opening[2]!.length };
+      const header = fenceHeader(opening[3] ?? '');
+      result.push(header === null ? line : `${line} ${header}`);
+      continue;
+    }
+    if (!QUOTE_LINE.test(line)) {
+      // A table is marked rather than rewritten: the native renderer draws its
+      // toolbar around the section and copies these very lines.
+      if (line.includes('|') && TABLE_DELIMITER.test(lines[index + 1] ?? '')) {
+        let last = index + 1;
+        while (last + 1 < lines.length && (lines[last + 1] ?? '').includes('|')) last += 1;
+        result.push(SESSION_CHAT_NATIVE_TABLE_OPEN, ...lines.slice(index, last + 1), SESSION_CHAT_NATIVE_TABLE_CLOSE);
+        index = last;
+        continue;
+      }
+      result.push(markInlineImages(line));
+      continue;
+    }
+    let end = index;
+    while (end + 1 < lines.length && QUOTE_LINE.test(lines[end + 1] ?? '')) end += 1;
+    const body = lines.slice(index, end + 1).map((quoted) => quoted.replace(QUOTE_MARKER, ''));
+    const marker = ALERT_MARKER.exec(body[0] ?? '');
+    if (!marker) {
+      result.push(...lines.slice(index, end + 1));
+      index = end;
+      continue;
+    }
+    result.push(
+      `${SESSION_CHAT_NATIVE_ALERT_OPEN}${marker[1]!.toLowerCase()}`,
+      // The body is ordinary Markdown once the quote markers are gone, so its
+      // own fences still get their headers.
+      markBlocks(body.slice(1).join('\n')),
+      SESSION_CHAT_NATIVE_ALERT_CLOSE
+    );
+    index = end;
+  }
+  return result.join('\n');
+}
+
+/**
+ * Turns the paths somebody typed into a prompt into real Markdown links, which
+ * is what the native renderer draws reference pills from. React reaches the
+ * same paths through remarkSessionChatBareFilePaths and draws file chips.
+ */
+function linkBareFilePaths(markdown: string): string {
+  const tree = fromMarkdown(markdown);
+  const edits: { start: number; end: number; text: string }[] = [];
+  const walk = (nodes: RootContent[]) => {
+    for (const node of nodes) {
+      if (node.type === 'link' || node.type === 'linkReference' || node.type === 'definition') continue;
+      if (node.type === 'code' || node.type === 'inlineCode' || node.type === 'html') continue;
+      if (node.type === 'blockquote' && QUOTED_ALERT.test(markdown.slice(node.position?.start.offset ?? 0, 60))) {
+        continue;
+      }
+      if ('children' in node) {
+        walk(node.children);
+        continue;
+      }
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (node.type !== 'text' || start === undefined || end === undefined) continue;
+      // Scanned against the source rather than the node's value: an escape in
+      // the text would otherwise shift every offset after it.
+      const source = markdown.slice(start, end);
+      for (const found of sessionChatBareFilePaths(source)) {
+        edits.push({ start: start + found.start, end: start + found.end, text: `[${found.path}](${found.path})` });
+      }
+    }
+  };
+  walk(tree.children);
+  let result = markdown;
+  for (const edit of edits.reverse()) {
+    result = `${result.slice(0, edit.start)}${edit.text}${result.slice(edit.end)}`;
+  }
+  return result;
+}
+
+/**
+ * The Markdown the GPUI transcript renders for one message.
+ *
+ * `barePaths` follows React's `chatText` mode: a path is only spotted in prose
+ * somebody typed, never in an agent's answer, where a path that matters is
+ * already inline code or a link.
+ */
+export function sessionChatNativeMarkdown(markdown: string, barePaths = false): string {
+  if (markdown === '') return markdown;
+  const pathsWanted = barePaths && PATH_EVIDENCE.test(markdown);
+  const blocksWanted =
+    markdown.includes('```') ||
+    markdown.includes('~~~') ||
+    markdown.includes('>') ||
+    markdown.includes('|') ||
+    IMAGE_EVIDENCE.test(markdown);
+  if (!pathsWanted && !blocksWanted) return markdown;
+  const linked = pathsWanted ? linkBareFilePaths(markdown) : markdown;
+  return blocksWanted ? markBlocks(linked) : linked;
+}

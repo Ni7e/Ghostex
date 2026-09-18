@@ -312,6 +312,10 @@ the rename is saved only in Ghostex and ZCode's later automatic naming may
 replace it.
 Fork starts the new session as `Fork: <original name>` and saves that name
 through the agent's own rename command so it survives reopening the conversation.
+Once a conversation has forks, a small branch button above the chat transcript
+lists every session that shares the earlier history, including the thread you
+forked away from, and switches to the one you pick; a stopped branch is resumed
+when you open it.
 
 - Sleeping frees RAM; Auto Sleep does it after idle minutes; Resources in the
   titlebar sleeps many at once and shows CPU and RAM per session. Clean RAM

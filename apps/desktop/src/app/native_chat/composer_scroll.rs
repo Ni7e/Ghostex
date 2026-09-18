@@ -20,6 +20,7 @@ impl NativeChatView {
         cx: &Context<Self>,
     ) -> AnyElement {
         let chat = cx.weak_entity();
+        let p = super::appearance::ChatAppearance::current(&self.snapshot);
         div()
             .relative()
             .flex()
@@ -27,7 +28,25 @@ impl NativeChatView {
             .flex_1()
             .min_h_0()
             .w_full()
-            .child(transcript)
+            .child(self.minimap_row(transcript.into_any_element(), cx))
+            .child(
+                // React masks the viewport's last rows into the composer band
+                // (`--scroll-fade-mask` on `[data-slot='message-scroller-viewport']` in chat.css).
+                // GPUI cannot mask a scrolling list, so the same shape is painted: a plain div with
+                // no id and no interactivity, which registers no hitbox and takes no input.
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(24.0 * p.scale))
+                    .bg(gpui::linear_gradient(
+                        180.0,
+                        gpui::linear_color_stop(p.background.opacity(0.0), 0.0),
+                        gpui::linear_color_stop(p.background, 1.0),
+                    )),
+            )
+            .child(self.transcript_scrollbar(&p))
             .child(self.scroll_bottom_button(cx))
             .child(
                 gpui::canvas(

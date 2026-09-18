@@ -67,6 +67,7 @@ pub(crate) mod session_chat_diagnostics;
 mod session_chat_draft_handoff;
 pub(crate) mod session_chat_eviction;
 pub(crate) mod session_chat_focus;
+mod session_chat_fork_branches;
 pub(crate) mod session_chat_image_save;
 mod session_chat_launch;
 pub(crate) mod session_chat_model_picker;

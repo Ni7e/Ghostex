@@ -1,7 +1,13 @@
-import { accountHeadlineWindows } from '@/packages/shared/account-usage-windows';
 import { useId } from 'react';
 import { accountUsageLabel } from '@/packages/shared/account-usage-label';
-import { formatResetCountdown } from '@/packages/shared/reset-countdown';
+import {
+  accountFigures,
+  accountPolicyAtLimitDescription,
+  accountResetLabel,
+  accountResetsLine,
+  ACCOUNT_POLICY_PRIORITY_OPTIONS,
+  ACCOUNT_POLICY_RETRY_DESCRIPTION,
+} from '@/packages/shared/session-chat-presentation/accounts';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/packages/components/ui/select';
 import { Switch } from '@/packages/components/ui/switch';
 import { SegmentedControl, SegmentedControlItem } from '@/packages/components/ui/segmented-control';
@@ -32,28 +38,9 @@ export function AccountLogo({
     </span>
   );
 }
-/**
- * CDXC:AgentProviders 2026-09-08 DECISION:
- * User: Codex account badges show the five-hour percentage on the second line when that limit exists; otherwise show available resets as "2rs" or "0rs".
- * Use the main account windows so Spark's separate five-hour limit does not stand in for an absent account limit.
- * Claude figures are the two tightest of weekly, five-hour, and Fable (see accountHeadlineWindows).
- */
-export function accountFigureWindows(
-  account: AgentAccount
-): [AccountUsageWindow | undefined, AccountUsageWindow | undefined] {
-  const [first, second] = accountHeadlineWindows(account);
-  return [first, second];
-}
+export { accountFigureWindows } from '@/packages/shared/session-chat-presentation/accounts';
 export function AccountIdentity({ account }: { account: AgentAccount }) {
-  const [first, second] = accountFigureWindows(account);
-  const figures = [
-    { label: first?.label, value: first ? `${Math.round(first.usedPercent)}%` : '·' },
-    second
-      ? { label: second.label, value: `${Math.round(second.usedPercent)}%` }
-      : account.provider === 'codex' && account.resetCredits != null
-        ? { label: 'Available usage resets', value: `${account.resetCredits}rs` }
-        : { label: undefined, value: '·' },
-  ];
+  const figures = accountFigures(account);
   return (
     <span className='gx-account-identity'>
       <AccountLogo provider={account.provider} slot={account.selector} />
@@ -68,19 +55,11 @@ export function AccountIdentity({ account }: { account: AgentAccount }) {
   );
 }
 export function resetLabel(value?: string) {
-  if (!value) return 'Reset time unavailable';
-  const time = new Date(value);
-  if (!Number.isFinite(time.getTime())) return 'Reset time unavailable';
-  const remainingMs = time.getTime() - Date.now();
-  return remainingMs > 0 ? `Resets ${formatResetCountdown(remainingMs)}` : 'Reset due';
+  return accountResetLabel(value);
 }
 /** One "Resets 2h 14m · 3d 6h" line for several limits, in the order given, skipping limits without a reset time. */
 export function resetsLine(windows: AccountUsageWindow[]): string {
-  const remaining = windows
-    .map((window) => (window.resetsAt ? new Date(window.resetsAt).getTime() - Date.now() : Number.NaN))
-    .filter((ms) => Number.isFinite(ms));
-  if (remaining.length === 0) return 'Reset time unavailable';
-  return `Resets ${remaining.map((ms) => (ms > 0 ? formatResetCountdown(ms) : 'due')).join(' · ')}`;
+  return accountResetsLine(windows);
 }
 export function UsageBars({ windows }: { windows: AccountUsageWindow[] }) {
   return (
@@ -143,11 +122,7 @@ export function PolicyControls({
           <SegmentedControlItem value='wait'>Wait for reset</SegmentedControlItem>
           <SegmentedControlItem value='switch'>Use another account</SegmentedControlItem>
         </SegmentedControl>
-        <p>
-          {policy.atLimit === 'wait'
-            ? 'Pick up on this account when its usage resets.'
-            : 'Use another eligible login for this model. Wait when every account is at its limit.'}
-        </p>
+        <p>{accountPolicyAtLimitDescription(policy)}</p>
         {policy.atLimit === 'switch' && (
           <label className='gx-account-field'>
             Account preference
@@ -161,10 +136,11 @@ export function PolicyControls({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className='ghostex-session-chat-popup'>
-                <SelectItem value='leastUsed'>Lowest usage first</SelectItem>
-                <SelectItem value='mostUsed'>Highest usage first</SelectItem>
-                <SelectItem value='soonestReset'>Earliest reset first</SelectItem>
-                <SelectItem value='latestReset'>Latest reset first</SelectItem>
+                {ACCOUNT_POLICY_PRIORITY_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </label>
@@ -177,10 +153,7 @@ export function PolicyControls({
             onCheckedChange={(retryErrors) => onChange({ ...policy, retryErrors })}
           />
         </div>
-        <p>
-          Retry after 5, 10, 20, 40, then every 60 minutes. Login and permission requests need your attention. Stop
-          cancels recovery for the current task.
-        </p>
+        <p>{ACCOUNT_POLICY_RETRY_DESCRIPTION}</p>
       </fieldset>
     </div>
   );

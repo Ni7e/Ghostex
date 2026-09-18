@@ -1,5 +1,8 @@
 import type { GxserverReadSessionChatResult, SessionChatMessage } from '../session-chat';
+import { DEFAULT_ACCOUNT_POLICY, type AgentAccount, type AgentAccountsState } from '../agent-accounts';
 import { MARKDOWN_PREVIEW } from './markdown-fixture';
+import { previewMessage } from './message';
+import { chatPreviewScenarioOverride } from './scenarios';
 
 export const PREVIEW_SCENARIOS = [
   'conversation',
@@ -14,6 +17,13 @@ export const PREVIEW_SCENARIOS = [
   'async',
   'queue',
   'empty',
+  'tools',
+  'files',
+  'images',
+  'system',
+  'rich-markdown',
+  'agents',
+  'history',
 ] as const;
 export type PreviewScenario = (typeof PREVIEW_SCENARIOS)[number];
 export interface ChatPreviewConfig {
@@ -33,20 +43,7 @@ export const DEFAULT_CHAT_PREVIEW: ChatPreviewConfig = {
   revision: 1,
 };
 
-export function previewMessage(
-  id: string,
-  role: SessionChatMessage['role'],
-  text: string,
-  timestamp?: number
-): SessionChatMessage {
-  return {
-    id,
-    role,
-    blocks: [{ type: 'text', text }],
-    timestamp: timestamp ?? 1_789_632_000_000 + Number(id.replace(/\D/g, '') || 0) * 1000,
-    source: 'transcript',
-  };
-}
+export { previewMessage };
 
 /** CDXC:SessionChat 2026-09-17 DECISION: User: provide a standalone sample-conversation app to compare the real GPUI and React chat renderers while the native port evolves. Both previews use this fixture and the same simulated transport. */
 export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSessionChatResult {
@@ -99,7 +96,7 @@ export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSess
       ],
     });
   }
-  return {
+  const result: GxserverReadSessionChatResult = {
     messages:
       config.scenario === 'empty'
         ? []
@@ -211,5 +208,54 @@ export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSess
           },
         }
       : {}),
+  };
+  // Scenarios with a transcript of their own live in their own file beside this
+  // registry; everything they do not name keeps the shared sample's state.
+  const override = chatPreviewScenarioOverride(config.scenario);
+  return override ? { ...result, ...override } : result;
+}
+
+/**
+ * Sample Codex accounts for Switch Account and the account-switch card. Picking the
+ * spare account simulates a failed switch; the signed-out one asks for Settings.
+ */
+export function chatPreviewAccounts(now = Date.now()): AgentAccountsState {
+  const at = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
+  const account = (
+    id: string,
+    name: string,
+    email: string,
+    fiveHour: number,
+    weekly: number,
+    status: AgentAccount['status'] = 'ready'
+  ): AgentAccount => ({
+    id,
+    provider: 'codex',
+    selector: id,
+    name,
+    email,
+    color: 'neutral',
+    eligible: true,
+    registered: true,
+    sharedHistory: true,
+    status,
+    sessionCount: id === 'work' ? 1 : 0,
+    resetCredits: 2,
+    usage: [
+      { id: 'fiveHour', label: '5h', usedPercent: fiveHour, limitWindowSeconds: 18_000, resetsAt: at(2.2) },
+      { id: 'sevenDay', label: '7d', usedPercent: weekly, limitWindowSeconds: 604_800, resetsAt: at(78) },
+    ],
+  });
+  return {
+    accounts: [
+      account('work', 'work@example.com', 'work@example.com', 96, 82),
+      account('personal', 'Personal', 'me@example.com', 12, 31),
+      account('spare', 'spare@example.com', 'spare@example.com', 40, 55),
+      account('old', 'old@example.com', 'old@example.com', 0, 0, 'loginRequired'),
+    ],
+    helpers: [],
+    defaults: { claude: DEFAULT_ACCOUNT_POLICY, codex: DEFAULT_ACCOUNT_POLICY },
+    defaultAccounts: {},
+    session: { provider: 'codex', accountId: 'work', policy: DEFAULT_ACCOUNT_POLICY, override: null },
   };
 }

@@ -90,6 +90,7 @@ impl NativeChatView {
 
     /// CDXC:SessionChat 2026-09-18 SEE-ALSO:
     /// React's CopyFooter and .ghostex-chat-final-actions place plain-reply actions in the marker gutter without adding a footer to the transcript height.
+    /// The gutter rail is three fixed slots, one row apart, in the order Copy, Reply by Annotating, Save to Markdown: a reply that cannot be annotated leaves that slot empty rather than pulling Save up under Copy, so an action is always in the same place.
     pub(super) fn reply_actions(
         &self,
         message: &Value,
@@ -154,6 +155,9 @@ impl NativeChatView {
                     chat.perform_reply_action(action, &click_markdown, cx)
                 }))
         };
+        let can_annotate =
+            self.config.app.is_some() && message["actionContent"]["canAnnotate"] == true;
+        let can_save = message["actionContent"]["canSaveMarkdown"] == true;
         div()
             .flex()
             .tab_group()
@@ -163,26 +167,174 @@ impl NativeChatView {
                 "Copy message",
                 "chat-actions/copy",
             ))
-            .when(
-                self.config.app.is_some() && message["actionContent"]["canAnnotate"] == true,
-                |actions| {
-                    actions.child(button(
-                        ReplyAction::Annotate,
-                        "Reply by Annotating",
-                        "chat-actions/annotate",
-                    ))
-                },
+            .when(can_annotate, |actions| {
+                actions.child(button(
+                    ReplyAction::Annotate,
+                    "Reply by Annotating",
+                    "chat-actions/annotate",
+                ))
+            })
+            .when(rail && !can_annotate && can_save, |actions| {
+                actions.child(div().size(px(24.0 * p.scale)).flex_shrink_0())
+            })
+            .when(can_save, |actions| {
+                actions.child(button(
+                    ReplyAction::SaveMarkdown,
+                    "Save message to Markdown",
+                    "chat-actions/save",
+                ))
+            })
+            .into_any_element()
+    }
+
+    /// CDXC:SavedPrompts 2026-09-06 DECISION:
+    /// User: add Save prompt between Copy and Rewind on user messages, using the input box's stack-push icon.
+    ///
+    /// The prompt's own rail (React: `CopyFooter` on a user row). Rewind is offered only when the
+    /// host can reach `/api/rewindSessionChat`, the session runs an agent whose rewind Ghostex
+    /// drives, and the composer could send right now, because the daemon types the rewind into that
+    /// same pane. Which prompt is a rewind target at all is decided in
+    /// packages/shared/session-chat-presentation/message-rewind.ts.
+    pub(super) fn user_actions(
+        &self,
+        message: &Value,
+        p: &ChatAppearance,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = text(message, "id");
+        let prompt = text(message, "copyText");
+        // Nothing to copy, save, or rewind to: an empty prompt keeps its rail off entirely.
+        if prompt.is_empty() {
+            return div().into_any_element();
+        }
+        let saved = self.snapshot["savedPrompts"][id.as_str()]
+            .as_str()
+            .unwrap_or("");
+        // A rewind types into the session's own pane, so a child transcript never offers one
+        // (React's subagent viewer mounts its list without `rewindToMessage` for the same reason).
+        let rewindable = !self.in_subagent
+            && message["canRewind"] == true
+            && self.snapshot["rewindAvailable"] == true
+            && self.snapshot["rewindEnabled"] == true;
+        // React passes `onSavePrompt` only when the host has a stash bridge, the same capability
+        // behind the composer's Stash control, so a host without one offers Copy alone.
+        let savable = self.snapshot["composerActions"]["stash"] == true;
+        /*
+        CDXC:SessionChat 2026-09-18 SEE-ALSO:
+        `.ghostex-chat-user-message` in packages/core-ui/styles/chat.css carries the user decision
+        this mirrors: the rail sits left of the bubble, horizontal for one- or two-line prompts and
+        vertical for longer ones. React measures the rendered bubble
+        (`SessionChatUserMessageLayout`); GPUI measures the row the rail stretches to, the taller of
+        bubble and rail, so the threshold also allows for the rail's own column height.
+        */
+        let s = p.scale;
+        let buttons = 1.0 + f32::from(savable) + f32::from(rewindable);
+        let measured = window.use_keyed_state(
+            gpui::SharedString::from(format!("user-actions-height:{id}")),
+            cx,
+            |_, _| 0.0_f32,
+        );
+        let compact =
+            *measured.read(cx) <= ((12.0 + buttons * 24.0) * s).max((2.0 * 22.75 + 26.0) * s + 1.0);
+        let button = |key: &str, label: String, icon: &'static str, action: Value| {
+            let icon_color = p.muted;
+            div()
+                .id(gpui::SharedString::from(format!("{key}:{id}")))
+                .group("native-chat-user-action")
+                .role(gpui::Role::Button)
+                .aria_label(label.clone())
+                .tab_index(0)
+                .size(px(24.0 * p.scale))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.0 * p.scale))
+                .cursor_pointer()
+                .hover(|style| style.bg(p.border.opacity(0.4)))
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(label.clone()).build(window, cx)
+                })
+                .child(
+                    svg()
+                        .path(icon)
+                        .size(px(12.0 * p.scale))
+                        .text_color(icon_color)
+                        .group_hover("native-chat-user-action", |style| {
+                            style.text_color(p.foreground)
+                        }),
+                )
+                .on_click(cx.listener(move |chat, _, _, cx| {
+                    if action["type"] == "copyPrompt" {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text(
+                            &action, "text",
+                        )));
+                        crate::app::helpers::gpui_play_copy_sound();
+                    } else {
+                        chat.invoke(action.clone(), cx);
+                    }
+                }))
+        };
+        div()
+            .self_stretch()
+            .relative()
+            .flex()
+            .flex_shrink_0()
+            .when(compact, |rail| rail.items_center())
+            .when(!compact, |rail| {
+                rail.flex_col().child(div().h(px(12.0 * s)).flex_shrink_0())
+            })
+            .opacity(0.0)
+            .group_hover("native-chat-message", |style| style.opacity(1.0))
+            .child(
+                gpui::canvas(
+                    move |bounds, _, cx| {
+                        let height = bounds.size.height.as_f32();
+                        measured.update(cx, |value, cx| {
+                            if (*value - height).abs() > 0.5 {
+                                *value = height;
+                                cx.notify();
+                            }
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
             )
-            .when(
-                message["actionContent"]["canSaveMarkdown"] == true,
-                |actions| {
-                    actions.child(button(
-                        ReplyAction::SaveMarkdown,
-                        "Save message to Markdown",
-                        "chat-actions/save",
-                    ))
-                },
-            )
+            .child(button(
+                "copy",
+                "Copy message".into(),
+                "chat-actions/copy",
+                json!({"type":"copyPrompt","text":prompt.clone()}),
+            ))
+            .when(savable, |rail| {
+                rail.child(button(
+                    "save-prompt",
+                    match saved {
+                        "saved" => "Prompt saved",
+                        "saving" => "Saving prompt",
+                        "error" => "Could not save prompt. Click to retry.",
+                        _ => "Save prompt",
+                    }
+                    .into(),
+                    if saved == "saved" {
+                        "chat-actions/saved"
+                    } else {
+                        "chat-actions/savePrompt"
+                    },
+                    json!({"type":"savePrompt","messageId":id.clone(),"prompt":prompt.clone()}),
+                ))
+            })
+            .when(rewindable, |rail| {
+                rail.child(button(
+                    "rewind",
+                    "Rewind to here".into(),
+                    "chat-actions/rewind",
+                    json!({"type":"rewindOpen","messageId":id.clone(),"prompt":prompt.clone()}),
+                ))
+            })
             .into_any_element()
     }
 

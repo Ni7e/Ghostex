@@ -1,0 +1,440 @@
+//! The file-change cards under a message: the Activity-rail design React paints
+//! in `session-chat-file-change-card.tsx`, with the circle marker, the single
+//! start-truncated path line, the +/- counts that toggle the diff, the left
+//! rail, the failed-write result, and the footer toggle.
+//!
+//! The counts, the shortened path, and "can this open" come from
+//! `packages/shared/session-chat-presentation/file-change-rows.ts`, which the
+//! React card reads too; this file only lays them out.
+
+use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use gpui::prelude::FluentBuilder as _;
+use gpui::{
+    AnyElement, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, div, px, rgb,
+};
+use serde_json::{Value, json};
+
+/// The card palette, mirroring the tokens in `session-chat-file-change-card.css`.
+struct Palette {
+    surface: Hsla,
+    code: Hsla,
+    border: Hsla,
+    rail: Hsla,
+    added: Hsla,
+    removed: Hsla,
+    added_row: Hsla,
+    removed_row: Hsla,
+}
+
+impl Palette {
+    fn of(p: &ChatAppearance) -> Self {
+        Self {
+            surface: if p.light {
+                p.input
+            } else {
+                rgb(0x141414).into()
+            },
+            code: if p.light {
+                p.input
+            } else {
+                rgb(0x151515).into()
+            },
+            border: if p.light {
+                p.border
+            } else {
+                rgb(0x2b2b2e).into()
+            },
+            rail: if p.light {
+                p.border
+            } else {
+                rgb(0x747475).into()
+            },
+            added: rgb(if p.light { 0x16803d } else { 0x94caaa }).into(),
+            removed: rgb(if p.light { 0xc53030 } else { 0xe5a0a4 }).into(),
+            added_row: Hsla::from(rgb(0x22c55e)).opacity(0.12),
+            removed_row: Hsla::from(rgb(0xef4444)).opacity(0.12),
+        }
+    }
+}
+
+impl NativeChatView {
+    pub(super) fn file_change_cards(
+        &mut self,
+        message: &Value,
+        p: &ChatAppearance,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let files = message["files"].as_array().cloned().unwrap_or_default();
+        // React passes `hideFileChanges` to every row of a finished turn: the writes belong to that
+        // turn's "N files changed" fold instead, and a card must never be drawn in both places.
+        if files.is_empty() || self.hide_file_changes {
+            return Vec::new();
+        }
+        let id = text(message, "id");
+        let mut rows = Vec::new();
+        let simple_key = format!("files:{id}");
+        let simple_expanded = self.expanded.contains(&simple_key);
+        if p.simple {
+            rows.push(self.disclosure(
+                simple_key,
+                text(message, "simpleFileLabel"),
+                simple_expanded,
+                None,
+                p,
+                cx,
+            ));
+            if !simple_expanded {
+                return rows;
+            }
+        }
+        rows.push(self.file_change_stack(&id, &files, p, cx));
+        rows
+    }
+
+    /// The turn's writes, folded behind "N files changed" the way React groups a finished turn
+    /// (the decision in `session-chat-message-list/list.tsx`). The label and the rows are projected
+    /// together in `native-presentation.ts`, so both renderers count the same files.
+    pub(super) fn completed_files_fold(
+        &mut self,
+        item: &Value,
+        p: &ChatAppearance,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let files = item["files"].as_array().cloned().unwrap_or_default();
+        if files.is_empty() {
+            return None;
+        }
+        let id = text(item, "id");
+        let key = format!("work-files:{id}");
+        let expanded = self.is_expanded(&key, false);
+        let label = text(
+            item,
+            if p.simple {
+                "simpleFilesLabel"
+            } else {
+                "filesLabel"
+            },
+        );
+        let mut group = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .min_w_0()
+            .gap(px(8.0 * p.scale))
+            .child(self.disclosure(key, label, expanded, None, p, cx));
+        if expanded {
+            group = group.child(self.file_change_stack(&format!("work:{id}"), &files, p, cx));
+        }
+        Some(group.into_any_element())
+    }
+
+    fn file_change_stack(
+        &mut self,
+        id: &str,
+        files: &[Value],
+        p: &ChatAppearance,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let palette = Palette::of(p);
+        let s = p.scale;
+        let mut stack = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .min_w_0()
+            .gap(px(12.0 * s))
+            .py(px(8.0 * s))
+            .px(px(10.0 * s))
+            .rounded(px(10.0 * s))
+            .bg(palette.surface);
+        let last = files.len().saturating_sub(1);
+        for (index, file) in files.iter().enumerate() {
+            stack =
+                stack.child(self.file_change_card(id, index, index == last, file, &palette, p, cx));
+        }
+        stack.into_any_element()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn file_change_card(
+        &mut self,
+        message_id: &str,
+        index: usize,
+        last: bool,
+        file: &Value,
+        palette: &Palette,
+        p: &ChatAppearance,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let s = p.scale;
+        let key = format!("file:{message_id}:{index}");
+        let expanded = self.expanded.contains(&key);
+        let failed = file["failed"] == true;
+        // React's rule with the half GPUI owns: previews already show everything a short change has.
+        let can_expand = !p.file_previews || file["expandableWithPreviews"] == true;
+        let show_body = expanded || p.file_previews;
+        let added = file["added"].as_u64().unwrap_or(0);
+        let removed = file["removed"].as_u64().unwrap_or(0);
+        let parent = text(file, "parent");
+
+        let marker_group = format!("marker:{key}");
+        let marker_key = key.clone();
+        let marker = div()
+            .id(format!("marker:{key}"))
+            .group(marker_group.clone())
+            .size(px(17.0 * s))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .border(px(1.0))
+            .border_color(p.muted.opacity(0.65))
+            .when(can_expand, |this| this.cursor_pointer())
+            .child(
+                div()
+                    .size(px(8.0 * s))
+                    .rounded_full()
+                    .bg(palette.rail)
+                    .group_hover(marker_group, |style| style.bg(gpui::white())),
+            )
+            .on_click(cx.listener(move |view, _, _, cx| {
+                if can_expand {
+                    view.toggle_disclosure(&marker_key, cx);
+                }
+            }));
+
+        let open_path = text(file, "path");
+        let name = div()
+            .id(format!("path:{key}"))
+            .flex()
+            .min_w_0()
+            .flex_shrink(1.0)
+            .cursor_pointer()
+            .text_color(p.prose)
+            .hover(|style| style.text_color(p.foreground))
+            // React shortens only the folder half (`direction: rtl` on the parent, `flex: 0 0 auto`
+            // on the name), so the file being written is always readable. The shared row hands over
+            // the whole folder, the way React's card asks for it, and this gives up what is too wide.
+            //
+            // The folder gives up its head, never its tail: the separator before the filename stays
+            // on screen. `truncate()` cannot do that here. It ellipsises from the end, which eats
+            // the separator, and it decides from a per-character width sum that disagrees with the
+            // kerned width the row was measured at, so a folder that fits was still being cut. The
+            // text keeps its own width and the folder box clips what does not fit, from the left.
+            .when(!parent.is_empty(), |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .min_w_0()
+                        .flex_shrink(1.0)
+                        .overflow_hidden()
+                        .text_color(p.muted)
+                        .child(div().flex_shrink_0().whitespace_nowrap().child(parent)),
+                )
+            })
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(text(file, "filename")),
+            )
+            .on_click(cx.listener(move |view, _, _, cx| {
+                view.invoke(
+                    json!({"type":"openMarkdownLink","href":open_path,"external":false}),
+                    cx,
+                )
+            }));
+
+        let counts_key = key.clone();
+        let counts = div()
+            .id(format!("counts:{key}"))
+            .flex()
+            .flex_shrink_0()
+            .gap(px(6.0 * s))
+            .ml_auto()
+            .px(px(8.0 * s))
+            .py(px(4.0 * s))
+            .rounded(px(6.0 * s))
+            .text_size(px(12.25 * s))
+            .when(can_expand, |this| {
+                this.cursor_pointer()
+                    .hover(|style| style.bg(p.muted.opacity(0.16)))
+            })
+            .child(div().text_color(palette.added).child(format!("+{added}")))
+            .child(
+                div()
+                    .text_color(palette.removed)
+                    .child(format!("\u{2212}{removed}")),
+            )
+            .on_click(cx.listener(move |view, _, _, cx| {
+                if can_expand {
+                    view.toggle_disclosure(&counts_key, cx);
+                }
+            }));
+
+        let mut card = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .min_w_0()
+            .relative()
+            .child(
+                // The hairline React draws down the marker column joining one circle to the next
+                // (`.ghostex-chat-file-change-card::before`); visual only, and it reaches into the
+                // gap below every card but the last.
+                div()
+                    .absolute()
+                    .left(px(8.0 * s))
+                    .top(px(22.0 * s))
+                    .bottom(px(if last { 0.0 } else { -12.0 * s }))
+                    .w(px(1.0))
+                    .bg(palette.rail),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w_full()
+                    .min_w_0()
+                    .gap(px(12.0 * s))
+                    .min_h(px(32.0 * s))
+                    .child(marker)
+                    .child(name)
+                    .when(failed, |this| {
+                        this.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(12.25 * s))
+                                .text_color(p.error())
+                                .child("Failed"),
+                        )
+                    })
+                    .child(counts),
+            );
+        if !show_body {
+            return card.into_any_element();
+        }
+        let mut code = div()
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .flex_1()
+            .py(px(10.0 * s))
+            .border_1()
+            .border_color(palette.border)
+            .rounded(px(11.0 * s))
+            .bg(palette.code)
+            .overflow_hidden();
+        let lines: Vec<&Value> = file["lines"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|line| expanded || line["kind"] != "meta")
+            .take(if expanded { usize::MAX } else { 7 })
+            .collect();
+        if lines.is_empty() {
+            code = code.child(div().px(px(12.0 * s)).text_color(p.muted).child(
+                if file["action"] == "Delete" {
+                    "File removed"
+                } else {
+                    "Empty file"
+                },
+            ));
+        }
+        for line in lines {
+            let (color, background, sign) = match line["kind"].as_str() {
+                Some("add") => (palette.added, Some(palette.added_row), "+"),
+                Some("del") => (palette.removed, Some(palette.removed_row), "-"),
+                Some("meta") => (p.muted, None, " "),
+                _ => (p.prose, None, " "),
+            };
+            code = code.child(
+                div()
+                    .flex()
+                    .px(px(10.0 * s))
+                    .when_some(background, |this, background| this.bg(background))
+                    .font_family("JetBrainsMono Nerd Font")
+                    .text_size(px(12.6 * s))
+                    .text_color(color)
+                    .child(
+                        div()
+                            .w(px(14.0 * s))
+                            .flex_shrink_0()
+                            .opacity(0.6)
+                            .child(sign),
+                    )
+                    .child(div().min_w_0().child(text(line, "text"))),
+            );
+        }
+        let body_key = key.clone();
+        card = card.child(
+            div()
+                .id(format!("body:{key}"))
+                .flex()
+                .w_full()
+                .min_w_0()
+                .mt(px(8.0 * s))
+                .gap(px(12.0 * s))
+                .when(can_expand, |this| this.cursor_pointer())
+                .child(
+                    // The rail is the grab target React gives the open code, not an invisible overlay.
+                    div()
+                        .w(px(17.0 * s))
+                        .flex_shrink_0()
+                        .flex()
+                        .justify_center()
+                        .child(div().w(px(1.0)).h_full().bg(palette.rail)),
+                )
+                .child(code)
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    if can_expand {
+                        view.toggle_disclosure(&body_key, cx);
+                    }
+                })),
+        );
+        if expanded && failed {
+            card = card.child(
+                div()
+                    .ml(px(29.0 * s))
+                    .mt(px(8.0 * s))
+                    .min_w_0()
+                    .text_color(p.error())
+                    .child(text(file, "error")),
+            );
+        }
+        if can_expand {
+            let footer_key = key.clone();
+            card = card.child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .w_full()
+                    .pt(px(12.0 * s))
+                    .pb(px(7.0 * s))
+                    .child(
+                        div()
+                            .id(format!("footer:{key}"))
+                            .px(px(8.0 * s))
+                            .py(px(4.0 * s))
+                            .rounded(px(6.0 * s))
+                            .text_size(px(12.25 * s))
+                            .text_color(p.muted)
+                            .cursor_pointer()
+                            .hover(|style| style.bg(p.muted.opacity(0.16)))
+                            .child(if expanded {
+                                "Collapse changes"
+                            } else {
+                                "Show all changes"
+                            })
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.toggle_disclosure(&footer_key, cx)
+                            })),
+                    ),
+            );
+        }
+        card.into_any_element()
+    }
+}

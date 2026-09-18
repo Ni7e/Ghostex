@@ -32,6 +32,11 @@ impl ChatOptionMenuPanel {
                     anchor,
                     if children
                         .first()
+                        .is_some_and(|row| row["accounts"].is_object())
+                    {
+                        super::accounts::ACCOUNT_PANEL_WIDTH
+                    } else if children
+                        .first()
                         .is_some_and(|row| row["context"]["details"].is_array())
                     {
                         320.0
@@ -68,8 +73,17 @@ impl ChatOptionMenuPanel {
             cx.notify();
         } else if let Some(command) = row.get("command") {
             let command = command.clone();
-            self.menu
-                .update(cx, |menu, cx| menu.close(Some(command), cx));
+            if row["keepOpen"] == true {
+                // A select opened from a panel: apply the pick, close only the list.
+                let depth = self.depth;
+                self.menu.update(cx, |menu, cx| {
+                    menu.dispatch(command, cx);
+                    menu.truncate(depth, true, cx);
+                });
+            } else {
+                self.menu
+                    .update(cx, |menu, cx| menu.close(Some(command), cx));
+            }
         }
     }
 
@@ -100,6 +114,22 @@ impl ChatOptionMenuPanel {
 
     fn key(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
+        if self
+            .rows
+            .first()
+            .is_some_and(|row| row["accounts"].is_object())
+        {
+            match key {
+                "escape" => self.menu.update(cx, |menu, cx| menu.close(None, cx)),
+                "left" if self.depth > 0 => self
+                    .menu
+                    .update(cx, |menu, cx| menu.truncate(self.depth, true, cx)),
+                _ => return,
+            }
+            window.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
         if let Some(context) = self.rows.first().and_then(|row| row.get("context")) {
             let has_details = context["details"].is_array();
             let compact_enabled = context["compactDisabled"] != true;
@@ -203,7 +233,7 @@ impl ChatOptionMenuPanel {
 }
 
 impl Render for ChatOptionMenuPanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let appearance = self.menu.read(cx).appearance.clone();
         let scale = appearance.scale;
         let foreground = gpui::rgb(if appearance.light { 0x292929 } else { 0xfcfcfc });
@@ -225,6 +255,11 @@ impl Render for ChatOptionMenuPanel {
         for (index, row) in self.rows.iter().enumerate() {
             if row["context"].is_object() {
                 body = body.child(self.render_context(&row["context"], cx));
+                continue;
+            }
+            if row["accounts"].is_object() {
+                body =
+                    body.child(self.render_accounts(&row["accounts"], window.bounds().origin, cx));
                 continue;
             }
             if row["separator"] == true {
@@ -314,6 +349,19 @@ impl Render for ChatOptionMenuPanel {
                         .text_color(foreground),
                 );
             }
+            // A lifecycle dot instead of a glyph (the fork branch list).
+            if let Some(tone) = row["dot"].as_str() {
+                item = item.child(
+                    div()
+                        .flex_shrink_0()
+                        .size(px(6.0 * scale))
+                        .rounded_full()
+                        .bg(super::super::fork_branches::branch_dot_color(
+                            tone,
+                            &appearance,
+                        )),
+                );
+            }
             item = item.child(
                 div()
                     .flex_1()
@@ -321,10 +369,13 @@ impl Render for ChatOptionMenuPanel {
                     .child(div().text_ellipsis().child(label))
                     .when_some(description, |this, description| {
                         this.child(
+                            // One line, like React's menu rows: a long subtitle ends in an ellipsis
+                            // instead of growing the row to two lines (`measure_rows` agrees).
                             div()
                                 .mt(px(2.0 * scale))
                                 .text_size(px(12.0 * scale))
                                 .line_height(px(16.0 * scale))
+                                .truncate()
                                 .text_color(foreground.opacity(0.58))
                                 .child(description),
                         )

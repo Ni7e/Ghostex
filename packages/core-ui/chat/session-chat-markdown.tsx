@@ -60,6 +60,7 @@ import remarkGfm from 'remark-gfm';
 /** CDXC:SessionChat 2026-09-17 SEE-ALSO: Native Markdown consumes these same typography and inline code metrics in native_chat/markdown_style.rs. */
 const markdownMetrics = {
   '--chat-paragraph-gap': `${markdownVisual.paragraphGap / 16}rem`,
+  '--chat-heading-gap-before': `${markdownVisual.headingGapBefore / 16}rem`,
   '--chat-heading-line-height': markdownVisual.headingLineHeight,
   ...Object.fromEntries(
     markdownVisual.headingFontSizes.map((size, index) => [`--chat-heading-${index + 1}-size`, `${size / 16}rem`])

@@ -15,19 +15,17 @@ mounted once by the composer).
 */
 
 import { Toaster, toast } from 'sonner';
-import { createAppToastRequest } from '@/packages/shared/app-toast-contract';
+import {
+  SESSION_CHAT_SEND_BLOCKED_TITLE as SEND_BLOCKED_TITLE,
+  sessionChatSendBlockedToastRequest,
+} from '@/packages/shared/session-chat-presentation/send-blocked';
 import type { SessionChatTheme } from '@/packages/shared/session-chat';
 import { postAppModalHostMessage } from '../app-modal-host-bridge';
-
-const SEND_BLOCKED_TITLE = 'Message not sent';
 
 export function showSessionChatSendBlockedToast(reason: string, toasterId: string): void {
   const description = reason.trim();
   if (window.webkit?.messageHandlers?.ghostexAppModalHost !== undefined) {
-    postAppModalHostMessage(
-      createAppToastRequest('error', SEND_BLOCKED_TITLE, description === '' ? undefined : description),
-      'SessionChatComposer:sendBlockedToast'
-    );
+    postAppModalHostMessage(sessionChatSendBlockedToastRequest(reason), 'SessionChatComposer:sendBlockedToast');
     return;
   }
   toast.error(SEND_BLOCKED_TITLE, {

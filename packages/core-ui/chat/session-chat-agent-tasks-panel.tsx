@@ -34,7 +34,11 @@ inside each group, so the eye lands on what is happening now first.
 
 import { useEffect, useState } from 'react';
 import { IconCircleCheckFilled, IconLoader2, IconListCheck } from '@tabler/icons-react';
-import type { SessionChatAgentTask, SessionChatAgentTasks } from '../../shared/session-chat';
+import type { SessionChatAgentTasks } from '../../shared/session-chat';
+import {
+  sessionChatAgentTaskPanel,
+  type SessionChatAgentTaskRow,
+} from '@/packages/shared/session-chat-presentation/agent-tasks';
 import { SessionChatStatusCard, SessionChatStatusCardLead } from './session-chat-status-card';
 
 const clientStorage = storageScope(['tasksCollapsed']);
@@ -44,24 +48,6 @@ const COLLAPSED_STORAGE_KEY = 'ghostex.chat.agentTasks.collapsed';
 export interface SessionChatAgentTasksPanelProps {
   /** Null or empty renders nothing: no tasks is not a state worth a box. */
   tasks: SessionChatAgentTasks | null;
-}
-
-type TaskGroup = 'in_progress' | 'pending' | 'completed';
-
-function taskGroup(task: SessionChatAgentTask): TaskGroup {
-  if (task.status === 'in_progress' || task.status === 'completed') {
-    return task.status;
-  }
-  return 'pending';
-}
-
-function taskOrder(task: SessionChatAgentTask): number {
-  const parsed = Number.parseInt(task.id, 10);
-  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
-}
-
-function byCliOrder(left: SessionChatAgentTask, right: SessionChatAgentTask): number {
-  return taskOrder(left) - taskOrder(right) || left.id.localeCompare(right.id);
 }
 
 function readCollapsed(): boolean {
@@ -94,39 +80,15 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
     setShowCompleted(false);
   }, [listSignature]);
 
-  if (list.length === 0) {
+  const panel = sessionChatAgentTaskPanel(tasks, { collapsed, showCompleted });
+  if (!panel) {
     return null;
   }
-
-  const running = list.filter((task) => taskGroup(task) === 'in_progress').sort(byCliOrder);
-  const waiting = list.filter((task) => taskGroup(task) === 'pending').sort(byCliOrder);
-  const done = list.filter((task) => taskGroup(task) === 'completed').sort(byCliOrder);
-  const doneCount = done.length;
-  const total = list.length;
-  // Only OPEN tasks can still block: a finished blocker is no longer a wait.
-  const subjectById = new Map(
-    list.filter((task) => taskGroup(task) !== 'completed').map((task) => [task.id, task.subject])
-  );
-  // The latest completed task stays visible as the "just did" marker, like the
-  // CLI; the rest fold behind the count until asked for.
-  const latestDone = done.length > 0 ? done[done.length - 1] : null;
-  const foldedDone = done.slice(0, -1);
-  const visibleDone = showCompleted ? done : latestDone ? [latestDone] : [];
-  const headline = running[0] ?? waiting[0] ?? null;
 
   const setOpen = (open: boolean) => {
     setCollapsed(!open);
     writeCollapsed(!open);
   };
-  const countText = `${doneCount} of ${total} done`;
-  const headlineText = headline
-    ? headline.status === 'in_progress'
-      ? (headline.activeForm ?? headline.subject)
-      : headline.subject
-    : null;
-  const foldLabel = showCompleted
-    ? 'Show less tasks'
-    : `${foldedDone.length} more task${foldedDone.length === 1 ? '' : 's'}`;
 
   return (
     <SessionChatStatusCard
@@ -136,7 +98,7 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
       lead={<SessionChatStatusCardLead icon={IconListCheck} />}
       // Only the collapsed header carries the running task: expanded, the
       // rows below say it, and saying it twice reads as a glitch.
-      meta={collapsed && headlineText ? `${countText} · ${headlineText}` : countText}
+      meta={panel.meta}
       onOpenChange={setOpen}
       open={!collapsed}
       title='Tasks'
@@ -144,26 +106,17 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
       trailing={
         <span aria-hidden='true' className='ghostex-chat-status-card-lead'>
           <span className='ghostex-chat-agent-tasks-bar'>
-            <span
-              className='ghostex-chat-agent-tasks-bar-fill'
-              style={{ width: `${total === 0 ? 0 : Math.round((doneCount / total) * 100)}%` }}
-            />
+            <span className='ghostex-chat-agent-tasks-bar-fill' style={{ width: `${panel.percent}%` }} />
           </span>
         </span>
       }
     >
       <ul className='ghostex-chat-agent-tasks-rows'>
-        {running.map((task) => (
-          <TaskRow group='in_progress' key={task.id} subjectById={subjectById} task={task} />
-        ))}
-        {waiting.map((task) => (
-          <TaskRow group='pending' key={task.id} subjectById={subjectById} task={task} />
-        ))}
-        {visibleDone.map((task) => (
-          <TaskRow group='completed' key={task.id} subjectById={subjectById} task={task} />
+        {panel.rows.map((row) => (
+          <TaskRow key={row.id} row={row} />
         ))}
       </ul>
-      {foldedDone.length > 0 ? (
+      {panel.foldLabel ? (
         <div className='ghostex-chat-agent-tasks-fold'>
           <button
             aria-expanded={showCompleted}
@@ -171,7 +124,7 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
             onClick={() => setShowCompleted((value) => !value)}
             type='button'
           >
-            {foldLabel}
+            {panel.foldLabel}
           </button>
         </div>
       ) : null}
@@ -179,35 +132,22 @@ export function SessionChatAgentTasksPanel({ tasks }: SessionChatAgentTasksPanel
   );
 }
 
-function TaskRow({
-  group,
-  subjectById,
-  task,
-}: {
-  group: TaskGroup;
-  subjectById: Map<string, string>;
-  task: SessionChatAgentTask;
-}) {
-  const blockers = (task.blockedBy ?? []).filter((id) => id !== task.id && subjectById.has(id));
-  const blockedTitle =
-    blockers.length > 0
-      ? `Waits for ${blockers.map((id) => `#${id} ${subjectById.get(id) ?? ''}`.trim()).join(', ')}`
-      : null;
+function TaskRow({ row }: { row: SessionChatAgentTaskRow }) {
   return (
-    <li className='ghostex-chat-agent-tasks-row' data-status={group} title={blockedTitle ?? task.subject}>
+    <li className='ghostex-chat-agent-tasks-row' data-status={row.group} title={row.title}>
       <span aria-hidden='true' className='ghostex-chat-agent-tasks-marker'>
-        {group === 'in_progress' ? (
+        {row.group === 'in_progress' ? (
           <IconLoader2 className='ghostex-chat-agent-tasks-spinner' size={13} stroke={2} />
-        ) : group === 'completed' ? (
+        ) : row.group === 'completed' ? (
           <IconCircleCheckFilled size={13} stroke={2} />
         ) : (
           <span className='ghostex-chat-agent-tasks-dot' />
         )}
       </span>
-      <span className='ghostex-chat-card-content ghostex-chat-agent-tasks-subject'>{task.subject}</span>
-      {group === 'pending' && blockers.length > 0 ? (
+      <span className='ghostex-chat-card-content ghostex-chat-agent-tasks-subject'>{row.subject}</span>
+      {row.blockedLabel ? (
         <span className='ghostex-chat-card-hint [--chat-card-hint-base:0.6875rem] ghostex-chat-agent-tasks-blocked'>
-          waits for #{blockers.join(', #')}
+          {row.blockedLabel}
         </span>
       ) : null}
     </li>
