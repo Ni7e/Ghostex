@@ -2,8 +2,8 @@ use super::{appearance::SidebarAppearance, model::NativeSidebarSnapshot};
 use crate::{GhostexGpuiApp, app::helpers::*};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Animation, AnimationExt, AnyElement, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, StatefulInteractiveElement, Styled, div, px, rgb,
+    AnyElement, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    StatefulInteractiveElement, Styled, div, px, rgb,
 };
 use gpui_component::h_flex;
 use serde_json::json;
@@ -29,7 +29,7 @@ impl GhostexGpuiApp {
                 let failed = matches!(machine.state.as_str(), "failed" | "error");
                 let tooltip = machine.message.as_ref().map(|message| format!("{}: {message}", machine.label)).unwrap_or_else(|| machine.label.clone());
                 let icon = gpui::svg().path(if id == "local" { "titlebar/device-desktop.svg" } else if busy { "titlebar/loader2.svg" } else { "titlebar/cloud.svg" }).size(px(14.0 * scale)).text_color(if failed { rgb(0xff9494).into() } else { appearance.muted });
-                let glyph = if busy { icon.with_animation(format!("native-machine-busy-{id}"), Animation::new(std::time::Duration::from_millis(900)).repeat(), |icon, progress| icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(progress)))).into_any_element() } else { icon.into_any_element() };
+                let glyph = if busy { icon.with_throttled_animation(format!("native-machine-busy-{id}"), std::time::Duration::from_millis(900), |icon, progress| icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(progress)))).into_any_element() } else { icon.into_any_element() };
                 h_flex().id(format!("native-sidebar-machine-{id}")).flex_1().min_w_0().h_full().px(px(6.0 * scale)).justify_center().gap(px(4.0 * scale)).text_size(px(12.0 * scale))
                     .when(index > 0, |row| row.border_l_1().border_color(appearance.foreground.opacity(0.12)))
                     .when(selected, |row| row.bg(appearance.selected)).hover(|row| row.bg(appearance.hover))

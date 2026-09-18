@@ -367,24 +367,25 @@ impl NativeChatView {
                 let _ = this.update(cx, |this, cx| this.pump(cx));
             })
         });
-        if let Some(Value::Array(items)) = output
+        if let Some(mut splice) = output
             .as_object_mut()
-            .and_then(|output| output.remove("items"))
+            .and_then(|output| output.remove("itemsSplice"))
+            .filter(Value::is_object)
         {
-            let old = self.items.as_slice();
-            let next = items.as_slice();
-            let prefix = old.iter().zip(next).take_while(|(a, b)| a == b).count();
-            let suffix = old[prefix..]
-                .iter()
-                .rev()
-                .zip(next[prefix..].iter().rev())
-                .take_while(|(a, b)| a == b)
-                .count();
-            if prefix + suffix < old.len().max(next.len()) {
-                self.list
-                    .splice(prefix..old.len() - suffix, next.len() - prefix - suffix);
-            }
-            self.items = Arc::new(items);
+            // The host ships only the changed window of transcript items (see transcriptItemsSplice in native-host.ts).
+            let inserted = splice
+                .get_mut("items")
+                .and_then(Value::as_array_mut)
+                .map(std::mem::take)
+                .unwrap_or_default();
+            let items = Arc::make_mut(&mut self.items);
+            let start = (splice["start"].as_u64().unwrap_or(0) as usize).min(items.len());
+            let end = start
+                .saturating_add(splice["deleteCount"].as_u64().unwrap_or(0) as usize)
+                .min(items.len());
+            let inserted_len = inserted.len();
+            items.splice(start..end, inserted);
+            self.list.splice(start..end, inserted_len);
             cx.notify();
         }
         if let Some(snapshot) = output

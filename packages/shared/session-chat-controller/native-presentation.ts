@@ -26,6 +26,7 @@ import { partitionCompletedChatWork, workedDurationLabel } from '../session-chat
 import type { SessionChatMessage } from '../session-chat';
 import { sessionChatMessageActionContent } from '../session-chat-presentation/message-actions';
 import { sessionChatMarkdownReferences } from '../session-chat-presentation/markdown-links';
+import { sameSessionChatMessage } from '@/packages/core-ui/chat/session-chat-message-equality';
 
 function projectMessage(message: SessionChatMessage) {
   const { tools, prose } = splitSessionChatBlocks(message.blocks);
@@ -63,8 +64,39 @@ function projectMessage(message: SessionChatMessage) {
   };
 }
 
+type ProjectedMessage = ReturnType<typeof projectMessage>;
+type TranscriptItem = Record<string, unknown> & { kind: string };
+
+function transcriptItemKey(item: TranscriptItem): string {
+  return `${item.kind}:${item.kind === 'message' ? (item.message as ProjectedMessage).id : item.id}`;
+}
+
+/** Two projected items with the same key are interchangeable when every field is the same object or the same list of objects. */
+function sameTranscriptItem(previous: TranscriptItem, next: TranscriptItem): boolean {
+  const keys = Object.keys(next);
+  if (keys.length !== Object.keys(previous).length) return false;
+  return keys.every((key) => {
+    const left = previous[key];
+    const right = next[key];
+    if (Object.is(left, right)) return true;
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => Object.is(value, right[index]))
+    );
+  });
+}
+
 export class NativeChatPresentation {
-  private models = new WeakMap<SessionChatMessage, ReturnType<typeof projectMessage>>();
+  private models = new WeakMap<SessionChatMessage, ProjectedMessage>();
+  /**
+   * CDXC:SessionChat 2026-09-18 WHY:
+   * Transcript normalization recreates every user turn object on each controller run, and a working session publishes a state frame once a second.
+   * Keyed by identity alone, the cache re-parsed the markdown of every user turn per frame (about 380ms of QuickJS time on a 139-message transcript, on the UI thread).
+   * A recreated message that is data-identical keeps its projection, the same rule React's memoized rows apply, and unchanged items keep their identity so the host only ships the changed window.
+   */
+  private modelsById = new Map<string, { source: SessionChatMessage; model: ProjectedMessage }>();
   private messages?: readonly SessionChatMessage[];
   private working?: boolean;
   private summary?: boolean;
@@ -74,12 +106,29 @@ export class NativeChatPresentation {
 
   private message = (message: SessionChatMessage) => {
     let result = this.models.get(message);
-    if (!result) {
-      result = projectMessage(message);
-      this.models.set(message, result);
-    }
+    if (result) return result;
+    const cached = this.modelsById.get(message.id);
+    result = cached && sameSessionChatMessage(cached.source, message) ? cached.model : projectMessage(message);
+    this.models.set(message, result);
+    this.modelsById.set(message.id, { source: message, model: result });
     return result;
   };
+
+  private reuseItems(items: TranscriptItem[]): TranscriptItem[] {
+    const previous = new Map<string, TranscriptItem>();
+    for (const item of (this.result?.items ?? []) as TranscriptItem[]) previous.set(transcriptItemKey(item), item);
+    return items.map((item) => {
+      const candidate = previous.get(transcriptItemKey(item));
+      return candidate && sameTranscriptItem(candidate, item) ? candidate : item;
+    });
+  }
+
+  private pruneModels(messages: readonly SessionChatMessage[], deferred: ReadonlyMap<string, SessionChatMessage[]>) {
+    if (this.modelsById.size <= messages.length * 2 + 64) return;
+    const live = new Set(messages.map((message) => message.id));
+    for (const rows of deferred.values()) for (const row of rows) live.add(row.id);
+    for (const id of [...this.modelsById.keys()]) if (!live.has(id)) this.modelsById.delete(id);
+  }
 
   update(
     messages: readonly SessionChatMessage[],
@@ -98,7 +147,7 @@ export class NativeChatPresentation {
       this.summary = summary;
       this.detailRevision = detailRevision;
       const projection = this.projection;
-      const items = summary
+      const items: TranscriptItem[] = summary
         ? projection.summaryTurns.map((turn) => ({
             kind: 'summary',
             id: turn.user.id,
@@ -126,7 +175,8 @@ export class NativeChatPresentation {
               final: item.turn.final ? this.message(item.turn.final) : undefined,
             };
           });
-      this.result = { items, finalIds: projection.finalIds };
+      this.result = { items: this.reuseItems(items), finalIds: projection.finalIds };
+      this.pruneModels(messages, deferred);
     }
     return this.result;
   }

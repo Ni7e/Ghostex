@@ -21,3 +21,8 @@ function sameValue(left: unknown, right: unknown): boolean {
 export function sameSessionChatMessage(left: SessionChatMessage, right: SessionChatMessage): boolean {
   return sameValue(left, right);
 }
+
+/** Structural equality for the small JSON carriers that ride along with chat frames (queue rows, options). */
+export function sameSessionChatValue(left: unknown, right: unknown): boolean {
+  return sameValue(left, right);
+}

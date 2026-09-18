@@ -1,10 +1,10 @@
 use super::super::{appearance::ChatAppearance, transcript::text};
 use super::window::SaveMarkdownWindow;
+use crate::app::helpers::ThrottledAnimationExt as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, Context, Focusable as _, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window,
-    div, px,
+    AnyElement, Context, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use gpui_component::input::Input;
 use serde_json::json;
@@ -48,9 +48,9 @@ impl SaveMarkdownWindow {
                 item.child(
                     gpui_component::Icon::new(gpui_component::IconName::Loader)
                         .size(px(16.0))
-                        .with_animation(
+                        .with_throttled_animation(
                             "save-spinner",
-                            Animation::new(std::time::Duration::from_secs(1)).repeat(),
+                            std::time::Duration::from_secs(1),
                             |icon, progress| {
                                 icon.transform(gpui::Transformation::rotate(gpui::percentage(
                                     progress,

@@ -2,8 +2,8 @@ use super::{appearance::SidebarAppearance, model::NativeSidebarSnapshot};
 use crate::{GhostexGpuiApp, app::helpers::*};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Animation, AnimationExt, AnyElement, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, StatefulInteractiveElement, Styled, div, px, relative,
+    AnyElement, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    StatefulInteractiveElement, Styled, div, px, relative,
 };
 use gpui_component::{h_flex, v_flex};
 use serde_json::json;
@@ -39,9 +39,9 @@ impl GhostexGpuiApp {
                                 .rounded(px(4.0 * scale))
                                 .bg(appearance.foreground),
                         )
-                        .with_animation(
+                        .with_throttled_animation(
                             format!("sidebar-loading-{width}"),
-                            Animation::new(std::time::Duration::from_millis(1400)).repeat(),
+                            std::time::Duration::from_millis(1400),
                             |row, progress| {
                                 row.opacity(0.1 + 0.1 * (std::f32::consts::PI * progress).sin())
                             },

@@ -114,7 +114,21 @@ impl ServiceRuntime {
         Ok(true)
     }
 
+    /// CDXC:Sidebar 2026-09-18 WHY:
+    /// The 16ms timer tick used to evaluate source text, so QuickJS parsed and compiled it about sixty times a second on the service thread (a steady 14% of a core in a sample). Call the installed function instead.
     pub fn tick(&mut self) -> Result<()> {
-        self.evaluate("nativeService.tick(); void 0;")
+        self.context.with(|ctx| {
+            ctx.globals()
+                .get::<_, rquickjs::Object>("nativeService")
+                .and_then(|service| service.get::<_, Function>("tick"))
+                .and_then(|tick| tick.call::<_, ()>(()))
+                .map_err(|error| {
+                    anyhow!(
+                        "Native service tick: {}",
+                        CaughtError::from_error(&ctx, error)
+                    )
+                })
+        })?;
+        self.jobs()
     }
 }

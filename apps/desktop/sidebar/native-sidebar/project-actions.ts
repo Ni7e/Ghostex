@@ -44,14 +44,24 @@ export function createNativeProjectHeaderActions(group: SidebarSessionGroup): Na
   }
   const agents = hud.agents;
   const primary = agents.find((agent) => agent.agentId === readPrimaryAgentLauncherId()) ?? agents[0];
+  /**
+   * CDXC:AgentLauncher 2026-09-18 DECISION:
+   * User: remove the gap between the last-used agent button and the Select agent button in the project header. Both halves render as the one split button the React header shows.
+   */
   actions.push({
     label: `Create ${primary?.name ?? 'Agent'}`,
     icon: 'sparkles',
     agentIcon: primary?.icon,
     imageDataUrl: primary?.icon ? COLORED_AGENT_LOGOS[primary.icon] : undefined,
     command: { type: 'projectAction', action: 'agent', groupId, agentId: primary?.agentId },
+    split: 'start',
   });
-  actions.push({ label: 'Select Agent', icon: 'chevron-down', children: nativeAgentLauncherItems(groupId) });
+  actions.push({
+    label: 'Select Agent',
+    icon: 'chevron-down',
+    children: nativeAgentLauncherItems(groupId),
+    split: 'end',
+  });
   return actions;
 }
 

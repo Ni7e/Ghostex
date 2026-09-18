@@ -1,8 +1,9 @@
 use super::appearance::ChatAppearance;
+use crate::app::helpers::ThrottledAnimationExt;
 use crate::assets::chat_working::VISUAL;
 use gpui::{
-    Animation, AnimationExt, AnyElement, IntoElement, ParentElement, Styled, Transformation, div,
-    percentage, px, rgb, size, svg,
+    AnyElement, IntoElement, ParentElement, Styled, Transformation, div, percentage, px, rgb, size,
+    svg,
 };
 use std::time::Duration;
 
@@ -42,9 +43,9 @@ pub(super) fn spark(p: &ChatAppearance, reduced_motion: bool) -> AnyElement {
     }
     let p = p.clone();
     container
-        .with_animation(
+        .with_throttled_animation(
             "chat-working-spark",
-            Animation::new(Duration::from_secs(72)).repeat(),
+            Duration::from_secs(72),
             move |container, frame| {
                 let elapsed = frame * 72_000.0;
                 let phase = (elapsed / VISUAL.pulse_ms).fract();

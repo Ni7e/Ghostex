@@ -424,6 +424,8 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
         break;
       case 'measureContextStatus': if (command.available > 0) contextStatusRows = balancedRowStarts(command.widths,command.available,command.separator); break;
       case 'contextCompact': if (!chat.working) await chat.send('/compact'); break;
+      // Switch Account panel and switch-card requests (select, refresh, policy, stop recovery, retry).
+      case 'accounts': await chat.requestAccounts(command.request); break;
       case 'switchDraftAgent': {
         if (!chat.availableAgents?.some(agent => agent.agentId === command.agentId) || chat.sessionAgentId === command.agentId) break;
         await composer('flush');
@@ -836,6 +838,26 @@ function composerReferences(text: string) {
   }));
 }
 
+/**
+ * CDXC:SessionChat 2026-09-18 WHY:
+ * A live status row changes once a second, and shipping the whole transcript for it cost about 1MB of JSON per frame on a 139-message session, serialized in QuickJS and parsed again in Rust on the UI thread.
+ * Unchanged items keep their identity (native-presentation.ts), so only the changed window crosses the bridge; GPUI splices its item list and list state the same way.
+ * SEE-ALSO: apps/desktop/src/app/native_chat/state.rs (pump).
+ */
+function transcriptItemsSplice(): { start: number; deleteCount: number; items: unknown[]; length: number } | undefined {
+  const next = transcriptItems;
+  const previous = sentTranscriptItems;
+  if (previous === next) return undefined;
+  sentTranscriptItems = next;
+  if (!previous) return { start: 0, deleteCount: 0, items: next, length: next.length };
+  const limit = Math.min(previous.length, next.length);
+  let start = 0;
+  while (start < limit && previous[start] === next[start]) start++;
+  let end = 0;
+  while (end < limit - start && previous[previous.length - 1 - end] === next[next.length - 1 - end]) end++;
+  return { start, deleteCount: previous.length - start - end, items: next.slice(start, next.length - end), length: next.length };
+}
+
 Object.assign(globalThis, { nativeChat: {
   brokerMessage,
   start,
@@ -857,10 +879,8 @@ Object.assign(globalThis, { nativeChat: {
     }
   },
   take: (lastRevision: number) => {
-    const items = sentTranscriptItems === transcriptItems ? undefined : transcriptItems;
-    sentTranscriptItems = transcriptItems;
     return JSON.stringify({
-    items,
+    itemsSplice: transcriptItemsSplice(),
     revision, snapshot: lastRevision === revision ? undefined : snapshot, requests: requests.splice(0),
     nextWakeMs: timers.size ? Math.max(0, Math.min(...[...timers.values()].map(timer => timer.at)) - Date.now()) : null,
     });

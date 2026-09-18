@@ -1,9 +1,10 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::helpers::ThrottledAnimationExt;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    Animation, AnimationExt, AnyElement, AppContext as _, Context, Focusable as _,
-    InteractiveElement as _, IntoElement, ParentElement as _, StatefulInteractiveElement as _,
-    Styled as _, Window, div, px, relative, rgb, svg,
+    AnyElement, AppContext as _, Context, Focusable as _, InteractiveElement as _, IntoElement,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, div, px, relative,
+    rgb, svg,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use serde_json::json;
@@ -32,9 +33,9 @@ impl NativeChatView {
                 } else {
                     div()
                         .size_full()
-                        .with_animation(
+                        .with_throttled_animation(
                             "async-question-working",
-                            Animation::new(Duration::from_millis(820)).repeat(),
+                            Duration::from_millis(820),
                             move |ring, progress| ring.child(question_spinner(s, progress)),
                         )
                         .into_any_element()

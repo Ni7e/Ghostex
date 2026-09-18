@@ -32,6 +32,7 @@ import {
   stampSessionChatArrivalOrder,
 } from '@/packages/core-ui/chat/session-chat-assembler';
 import { surfaceSkillInvocationUserTurns } from '@/packages/core-ui/chat/session-chat-command-envelope';
+import { sameSessionChatValue } from '@/packages/core-ui/chat/session-chat-message-equality';
 import {
   applySessionChatMergerAppend,
   createSessionChatMerger,
@@ -551,7 +552,9 @@ export function computeSessionChat(
       if (carrier.accountSwitch !== undefined) setAccountSwitch(carrier.accountSwitch);
       if (carrier.pendingModelSelection !== undefined) setPendingModelSelection(carrier.pendingModelSelection);
       if (carrier.queue !== undefined) {
-        setQueuePrompts(carrier.queue);
+        const queue = carrier.queue;
+        // Every state frame repeats the (usually empty) queue as a fresh array; a new identity for the same rows would dirty every memo that lists it, down to the transcript projection.
+        setQueuePrompts((current) => (current !== null && sameSessionChatValue(current, queue) ? current : queue));
       }
       if (carrier.draft !== undefined) {
         setSyncedDraft((current) => mergeSessionChatDraftState(current, carrier.draft!));

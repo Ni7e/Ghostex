@@ -1,5 +1,6 @@
+use crate::app::helpers::ThrottledAnimationExt;
 use gpui::prelude::FluentBuilder;
-use gpui::{Animation, AnimationExt, AnyElement, IntoElement, ParentElement, Styled, div, px, rgb};
+use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use std::time::Duration;
 
 /// CDXC:SessionStatus 2026-09-17 DECISION:
@@ -31,9 +32,9 @@ fn working_spinner(size: f32, scale: f32) -> AnyElement {
     div()
         .size(px(size * scale))
         .flex_shrink_0()
-        .with_animation(
+        .with_throttled_animation(
             "native-sidebar-working",
-            Animation::new(Duration::from_millis(820)).repeat(),
+            Duration::from_millis(820),
             move |icon, delta| {
                 icon.child(
                     gpui::canvas(

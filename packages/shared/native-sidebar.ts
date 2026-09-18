@@ -209,6 +209,8 @@ export type NativeSidebarMenuItem = {
   separator?: boolean;
   command?: NativeSidebarCommand;
   children?: NativeSidebarMenuItem[];
+  /** Header actions that form one split button: the `start` half is the action, the `end` half opens its menu. */
+  split?: 'start' | 'end';
 };
 
 export type NativeSidebarClockRow = { sessionId: string; timerLabel?: string; lastInteractionLabel?: string };

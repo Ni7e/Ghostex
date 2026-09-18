@@ -174,6 +174,9 @@ impl GhostexGpuiApp {
                             let label = item["label"].as_str().unwrap_or("").to_owned();
                             let command = item.get("command").cloned();
                             let children = item.get("children").cloned();
+                            // CDXC:AgentLauncher 2026-09-18 DECISION:
+                            // User: no gap between the last-used agent button and the Select agent chevron; the two halves join into one split button like the React header (24px action, 17px chevron, only the outer corners rounded).
+                            let split = item["split"].as_str();
                             let image = item["imageDataUrl"].as_str().and_then(|value| {
                                 super::images::agent_image(
                                     value,
@@ -193,11 +196,22 @@ impl GhostexGpuiApp {
                             };
                             div()
                                 .id(format!("native-project-action-{id}-{index}"))
-                                .size(px(22.0 * scale))
+                                .h(px(22.0 * scale))
+                                .w(px(match split {
+                                    Some("start") => 24.0,
+                                    Some("end") => 17.0,
+                                    _ => 22.0,
+                                } * scale))
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(px(4.0 * scale))
+                                .map(|button| match split {
+                                    Some("start") => button.rounded_l(px(4.0 * scale)),
+                                    Some("end") => {
+                                        button.rounded_r(px(4.0 * scale)).ml(px(-2.0 * scale))
+                                    }
+                                    _ => button.rounded(px(4.0 * scale)),
+                                })
                                 .cursor_pointer()
                                 .hover(|button| button.bg(appearance.hover))
                                 .child(glyph)

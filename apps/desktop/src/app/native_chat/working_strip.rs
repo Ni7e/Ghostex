@@ -3,11 +3,12 @@ use super::{
     state::NativeChatView,
     working_spark::{css_ease_in_out, spark},
 };
+use crate::app::helpers::ThrottledAnimationExt;
 use crate::assets::chat_working::VISUAL;
 use gpui::StatefulInteractiveElement as _;
 use gpui::{
-    Animation, AnimationExt, AnyElement, FontFeatures, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Styled, div, px, relative, svg,
+    AnyElement, FontFeatures, FontWeight, InteractiveElement, IntoElement, ParentElement, Styled,
+    div, px, relative, svg,
 };
 use std::time::Duration;
 
@@ -57,9 +58,9 @@ impl NativeChatView {
                 glyph.into_any_element()
             } else {
                 glyph
-                    .with_animation(
+                    .with_throttled_animation(
                         "chat-shells-running",
-                        Animation::new(Duration::from_secs(1)).repeat(),
+                        Duration::from_secs(1),
                         |glyph, progress| {
                             glyph.with_transformation(gpui::Transformation::rotate(
                                 gpui::percentage(progress),
@@ -73,9 +74,9 @@ impl NativeChatView {
             if reduced_motion {
                 dot.into_any_element()
             } else {
-                dot.with_animation(
+                dot.with_throttled_animation(
                     "chat-activity-dot",
-                    Animation::new(Duration::from_millis(1600)).repeat(),
+                    Duration::from_millis(1600),
                     |dot, phase| {
                         let progress = css_ease_in_out(if phase < 0.5 {
                             phase * 2.0
@@ -179,9 +180,9 @@ impl NativeChatView {
                     .into_any_element()
             } else {
                 track
-                    .with_animation(
+                    .with_throttled_animation(
                         "chat-compaction-progress",
-                        Animation::new(Duration::from_millis(1800)).repeat(),
+                        Duration::from_millis(1800),
                         move |track, phase| {
                             track.child(
                                 div()
