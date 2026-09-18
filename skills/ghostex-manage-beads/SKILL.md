@@ -90,7 +90,7 @@ not for an agent that is already doing the bead's work.
 To dispatch a bead through Ghostex, run:
 
 ```bash
-gx board start-work <bead-id> [--agent <agentId>] [--project-path <path>|--project-id <id>] [--json]
+gx board start-work <bead-id> [--agent <agentId>] [--model <model>] [--effort <level>] [--project-path <path>|--project-id <id>] [--json]
 ```
 
 - **The command is the dispatch.** It creates and starts the visible worker
@@ -102,6 +102,13 @@ gx board start-work <bead-id> [--agent <agentId>] [--project-path <path>|--proje
   worker session yourself — it is not a preparation step before separately
   starting another worker. Calling it and then starting your own worker puts
   two workers on the same card.
+- **Pick the worker's model with `--model` and `--effort`** (Claude and Codex
+  workers only, when `start-work` creates a new worker). A reused linked worker
+  keeps its existing model and effort. The choice applies to the new worker
+  session only, a resume keeps it, and the user's default model is untouched.
+  Ghostex releases whose
+  `gx board --help` does not list them ignore the flags, and the worker starts
+  on the default model.
 - **Already working the bead? Do not call it.** An agent that is itself doing
   the bead's work must not run the command; that would create an additional
   worker for work that is already underway.

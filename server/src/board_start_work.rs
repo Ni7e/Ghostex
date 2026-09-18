@@ -9,6 +9,7 @@ use serde_json::{json, Map, Value};
 
 use crate::agents::{
     apply_created_session_identity, create_agent_session_params_for_project, read_agent_settings,
+    requested_agent_model_option,
 };
 use crate::domain::{DomainRepository, DomainStateError};
 use crate::presentation::list_previous_sessions;
@@ -47,6 +48,8 @@ pub fn start_board_work(
     params: &Map<String, Value>,
     bd_executable_path: &str,
 ) -> Result<StartBoardWorkOutcome, DomainStateError> {
+    let model = requested_agent_model_option(params, "agentModel")?;
+    let effort = requested_agent_model_option(params, "agentEffort")?;
     let bead_id = read_trimmed(params, "beadId")
         .ok_or_else(|| DomainStateError::bad_request("startBoardWork requires a bead id."))?;
     let projects = repository.list_projects()?;
@@ -133,6 +136,11 @@ pub fn start_board_work(
         Value::String("workspace".to_string()),
     );
     create_params.insert("requireLaunchCommand".to_string(), Value::Bool(true));
+    for (key, value) in [("agentModel", model), ("agentEffort", effort)] {
+        if let Some(value) = value {
+            create_params.insert(key.to_string(), Value::String(value));
+        }
+    }
     let mut launch_settings = Map::new();
     if let Some(command) = agent_button.and_then(|button| button.get("command")) {
         launch_settings.insert("agentCommand".to_string(), command.clone());

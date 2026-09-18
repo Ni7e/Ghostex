@@ -147,11 +147,11 @@ pub fn usage() -> String {
             "Create a Quick chat workspace with its first terminal session",
         ),
         format_help_command(
-            "create-agent <agentId> --project-id id [--group-id id] [--first-input-draft text] [--defer-start]",
-            "Create and start a configured agent session; --first-input-draft stages text in its input without sending",
+            "create-agent <agentId> --project-id id [--group-id id] [--model m] [--effort e] [--first-input-draft text] [--defer-start]",
+            "Create and start a configured agent session; --model/--effort (Claude, Codex) apply to this session only; --first-input-draft stages text in its input without sending",
         ),
         format_help_command(
-            "board start-work <bead-id> [--agent id] [--project-path path|--project-id id] [--json]",
+            "board start-work <bead-id> [--agent id] [--model m] [--effort e] [--project-path path|--project-id id] [--json]",
             "Dispatch a Project Board bead: reuse its usable linked session or create the worker",
         ),
         format_help_command(
@@ -784,7 +784,7 @@ Inspect:
 pub fn board_usage() -> String {
     let commands = [
         format_help_command(
-            "board start-work <bead-id> [--agent id] [--project-path path|--project-id id] [--json]",
+            "board start-work <bead-id> [--agent id] [--model m] [--effort e] [--project-path path|--project-id id] [--json]",
             "Dispatch a Project Board bead through gxserver",
         ),
         format_help_command(
@@ -802,7 +802,7 @@ pub fn board_usage() -> String {
         "Ghostex Project Board - dispatch bead work through gxserver
 
 Usage:
-  ghostex board start-work <bead-id> [--agent <agentId>] [--project-path <path>|--project-id <id>] [--json]
+  ghostex board start-work <bead-id> [--agent <agentId>] [--model <model>] [--effort <level>] [--project-path <path>|--project-id <id>] [--json]
   ghostex board associate <bead-id> [--session-id <alias|id|title>] [--project-id <id>] [--json]
   gx board start-work <bead-id>
   gx board associate <bead-id>
@@ -817,6 +817,9 @@ Behavior:
   is returned as {{ \"projectId\": ..., \"sessionId\": ..., \"created\": false }} instead of creating a second worker.
   Without --agent, the bead assignee is matched case-insensitively against configured agents,
   falling back to the default prompt agent.
+  --model and --effort start a new Claude or Codex worker on that model and effort for this session
+  only; your default model is unchanged, and a resumed worker keeps them. A reused worker keeps
+  whatever it already runs.
   Pass --project-path <repo> (or --project-id) to start the worker in the project the card is
   about; the bead is still looked up on that project's board. Without either, the worker starts
   in the project whose own path is the Beads directory - the board itself - never in a sibling

@@ -166,3 +166,152 @@ fn option_takes_value(agent: &str, word: &str) -> bool {
         _ => false,
     }
 }
+
+/// CDXC:AgentProviders 2026-09-17 WHY:
+/// Codex rejects a repeated `--model`, and a custom agent command may already pin one, so a launch-time choice replaces the existing option instead of appending a second copy.
+/// Values of other options are skipped so a quoted instruction such as `--append-system-prompt '--model'` stays untouched.
+pub(crate) fn with_agent_model_options(
+    command: &str,
+    agent: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<String, DomainStateError> {
+    validate_model_option_command(command)?;
+    let mut words = Vec::new();
+    let mut offset = 0;
+    while !command[offset..].trim().is_empty() {
+        let word = command_word(command, offset).ok_or_else(|| {
+            DomainStateError::bad_request("The agent command has unfinished shell quoting.")
+        })?;
+        offset = word.1;
+        words.push(word);
+    }
+    let codex_effort = |value: &str| value.starts_with("model_reasoning_effort=");
+    let mut removed = Vec::new();
+    let mut index = 0;
+    while index < words.len() {
+        let (start, _, word) = &words[index];
+        let is_flag = word.starts_with('-');
+        let next_value = words.get(index + 1).map(|(_, _, value)| value.as_str());
+        let (remove, takes_value) = match (agent, word.as_str()) {
+            _ if !is_flag => (false, false),
+            ("claude" | "codex", "--model") | ("codex", "-m") if model.is_some() => (true, true),
+            ("claude" | "codex", value) if model.is_some() && value.starts_with("--model=") => {
+                (true, false)
+            }
+            ("claude", "--effort") if effort.is_some() => (true, true),
+            ("claude", value) if effort.is_some() && value.starts_with("--effort=") => {
+                (true, false)
+            }
+            ("codex", "-c" | "--config")
+                if effort.is_some() && next_value.is_some_and(codex_effort) =>
+            {
+                (true, true)
+            }
+            ("codex", value)
+                if effort.is_some()
+                    && value.strip_prefix("--config=").is_some_and(codex_effort) =>
+            {
+                (true, false)
+            }
+            (_, value) => (false, option_takes_value(agent, value)),
+        };
+        if remove
+            && takes_value
+            && words
+                .get(index + 1)
+                .is_none_or(|(start, end, _)| command[*start..*end].starts_with('-'))
+        {
+            return Err(DomainStateError::bad_request(format!(
+                "The agent command option {word} needs a value before a model or effort override can be applied."
+            )));
+        }
+        let last = if takes_value && index + 1 < words.len() {
+            index + 1
+        } else {
+            index
+        };
+        if remove {
+            removed.push((command[..*start].trim_end().len(), words[last].1));
+        }
+        index = last + 1;
+    }
+    let mut result = command.to_string();
+    for (start, end) in removed.into_iter().rev() {
+        result.replace_range(start..end, "");
+    }
+    let mut result = result.trim().to_string();
+    if let Some(model) = model {
+        result.push_str(&format!(" --model {}", shell_word(model)));
+    }
+    if let Some(effort) = effort {
+        match agent {
+            "codex" => result.push_str(&format!(
+                " -c {}",
+                shell_word(&format!("model_reasoning_effort={effort}"))
+            )),
+            _ => result.push_str(&format!(" --effort {}", shell_word(effort))),
+        }
+    }
+    Ok(result)
+}
+
+/// Model ids such as `opus[1m]` carry shell glob characters, so only plain words stay unquoted.
+fn shell_word(value: &str) -> String {
+    if value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || b"-._:/=".contains(&byte))
+    {
+        value.to_string()
+    } else {
+        super::quote_shell_arg(value)
+    }
+}
+
+/// CDXC:AgentProviders 2026-09-18 WHY:
+/// Appending selectors to a shell list can pass them to a later command, and a trailing comment can swallow them entirely. Only rewrite a single invocation; quoted or escaped prompt text remains literal.
+fn validate_model_option_command(command: &str) -> Result<(), DomainStateError> {
+    let unsupported_command = || {
+        DomainStateError::bad_request(
+            "Model and effort overrides require a single agent command without shell operators, command substitutions, comments, or line continuations.",
+        )
+    };
+    let mut quote = None;
+    let mut escaped = false;
+    let mut word_start = true;
+    let mut chars = command.trim().chars().peekable();
+    while let Some(ch) = chars.next() {
+        if escaped {
+            if matches!(ch, '\n' | '\r') {
+                return Err(unsupported_command());
+            }
+            escaped = false;
+            continue;
+        }
+        if quote == Some('\'') {
+            if ch == '\'' {
+                quote = None;
+            }
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            word_start = false;
+            continue;
+        }
+        let shell_expansion = ch == '`' || (ch == '$' && chars.peek() == Some(&'('));
+        let shell_boundary = quote.is_none()
+            && (matches!(ch, ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\n' | '\r')
+                || (ch == '#' && word_start));
+        if shell_expansion || shell_boundary {
+            return Err(unsupported_command());
+        }
+        if quote == Some(ch) {
+            quote = None;
+        } else if quote.is_none() && matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+        }
+        word_start = quote.is_none() && ch.is_whitespace();
+    }
+    Ok(())
+}
