@@ -40,6 +40,10 @@ import type { GxserverRpcErrorCode } from '../gxserver-protocol';
 import { sessionChatCardDismissKey, selectQuestionOption, questionAnswerControls, type QuestionDraft } from '../session-chat-presentation/interactive';
 import { chatHostActionDefinitions, COMPOSER_MENU_EXCLUDED_HOST_ACTION_IDS, AGENT_HOST_ACTION_IDS } from '../session-chat-presentation/actions';
 import { insertChatReference, nativePathReference } from '../session-chat-presentation/references';
+import {
+  sessionChatComposerReferences,
+  sessionChatReferencePillText,
+} from '../session-chat-presentation/reference-pills';
 import { flushSessionNote } from './note';
 import { sessionChatEmptyStateCopy } from '@/packages/core-ui/chat/session-chat-empty-state';
 import { SESSION_CHAT_LOADING_INDICATOR_DELAY_MS, SESSION_CHAT_LOADING_RETRY_DELAY_MS, sessionChatNewSessionWelcomeTitle, sessionChatShowsNewSessionWelcome, sessionChatWelcomeAgentIcon, sessionChatWelcomeAgentName, type SessionChatLoadingStage } from '../session-chat-presentation/new-session-welcome';
@@ -815,10 +819,28 @@ function brokerMessage(message: any): void {
   }
 }
 
+/**
+ * CDXC:SessionChat 2026-09-18 DECISION:
+ * User: the GPUI composer shows `[Image #1](/path)` as the same clickable reference pill the React
+ * composer shows. Both read this one projection so a pill's kind, label, and width cannot drift.
+ * Offsets count UTF-16 code units, which is what a JS string index is; the host converts them.
+ */
+function composerReferences(text: string) {
+  return sessionChatComposerReferences(text).map((reference) => ({
+    start: reference.start,
+    end: reference.end,
+    kind: reference.kind,
+    label: reference.label,
+    path: reference.path,
+    pill: sessionChatReferencePillText(reference.label, reference.kind),
+  }));
+}
+
 Object.assign(globalThis, { nativeChat: {
   brokerMessage,
   start,
   action,
+  composerReferences,
   event: (event: GxserverSessionChatEvent) => eventListener?.(event),
   resolve(id: number, value: unknown, error?: { code?: GxserverRpcErrorCode; message: string; endpoint: string }) {
     const call = pending.get(id);

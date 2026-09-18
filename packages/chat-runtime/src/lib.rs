@@ -52,6 +52,15 @@ impl ChatRuntime {
         Ok(())
     }
 
+    /// Run a synchronous helper on the shared controller and decode its JSON result.
+    pub fn query(&mut self, method: &str, arguments: &[Value]) -> Result<Value> {
+        let serialized = self.context.with(|ctx| {
+            call::json_result(&ctx, "nativeChat", method, arguments)
+                .map_err(|error| anyhow!("Chat query: {}", CaughtError::from_error(&ctx, error)))
+        })?;
+        Ok(serde_json::from_str(&serialized)?)
+    }
+
     pub fn drain(&mut self) -> Result<Value> {
         self.call("tick", &[])?;
         let source = format!("nativeChat.take({})", self.revision);
