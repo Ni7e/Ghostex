@@ -176,6 +176,7 @@ pub(crate) fn with_agent_model_options(
     model: Option<&str>,
     effort: Option<&str>,
 ) -> Result<String, DomainStateError> {
+    validate_model_option_command(command)?;
     let mut words = Vec::new();
     let mut offset = 0;
     while !command[offset..].trim().is_empty() {
@@ -255,4 +256,46 @@ fn shell_word(value: &str) -> String {
     } else {
         super::quote_shell_arg(value)
     }
+}
+
+/// CDXC:AgentProviders 2026-09-18 WHY:
+/// Appending selectors to a shell list can pass them to a later command, and a trailing comment can swallow them entirely. Only rewrite a single invocation; quoted or escaped prompt text remains literal.
+fn validate_model_option_command(command: &str) -> Result<(), DomainStateError> {
+    let mut quote = None;
+    let mut escaped = false;
+    let mut word_start = true;
+    let mut chars = command.trim().chars().peekable();
+    while let Some(ch) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quote == Some('\'') {
+            if ch == '\'' {
+                quote = None;
+            }
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            word_start = false;
+            continue;
+        }
+        let shell_expansion = ch == '`' || (ch == '$' && chars.peek() == Some(&'('));
+        let shell_boundary = quote.is_none()
+            && (matches!(ch, ';' | '&' | '|' | '<' | '>' | '(' | ')' | '\n' | '\r')
+                || (ch == '#' && word_start));
+        if shell_expansion || shell_boundary {
+            return Err(DomainStateError::bad_request(
+                "Model and effort overrides require a single agent command without shell operators, command substitutions, or comments.",
+            ));
+        }
+        if quote == Some(ch) {
+            quote = None;
+        } else if quote.is_none() && matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+        }
+        word_start = quote.is_none() && ch.is_whitespace();
+    }
+    Ok(())
 }
