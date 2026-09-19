@@ -654,6 +654,16 @@ impl GhostexGpuiApp {
             true,
         )
         .shows_cef_child_view();
+        /*
+        CDXC:Browser 2026-09-19 WHY:
+        GPUI paints this colour under the CEF child view, and it is what the
+        pane shows in the frames between the child view being hidden (a project
+        or Space switch parks it) and the next GPUI frame. A fixed white here
+        was the white flash on every switch away from a Browser page in dark
+        mode. Keep it in sync on theme changes (`refresh_workarea_page_themes`).
+        CDXC:Browser 2026-09-19 DECISION:
+        User: the colour behind a Browser page is #0d0d0d in dark mode, not black.
+        */
         let surface = match CefSurface::try_new(
             surface_id,
             parent_ns_view,
@@ -661,7 +671,7 @@ impl GhostexGpuiApp {
             profile,
             pane_prepaint_background_color(),
             true,
-            rgb(0xFFFFFF).into(),
+            chrome_color(0x0d0d0d, 0xffffff).into(),
             None,
             initially_visible,
             Some(popup_open_handler),

@@ -297,6 +297,18 @@ impl ProjectEditorShellModel {
         }
     }
 
+    /// CDXC:Browser 2026-09-19 DECISION:
+    /// User: after the app loads, web panes sleep until clicked, even when a browser tab or view was open last time, so launch never pays for a web page nobody asked for yet.
+    /// Only the awake flag changes: recency, tabs, and companion layout are kept, and the normal sleeping placeholder wakes the view on click. A restored custom view is included because an unknown extension id otherwise reads as awake.
+    pub(crate) fn sleep_all_modes_for_launch(&mut self, active_mode: TitlebarMode) {
+        for mode in project_editor_modes() {
+            self.mark_mode_sleeping(mode);
+        }
+        if matches!(active_mode, TitlebarMode::Extension(_)) {
+            self.mark_mode_sleeping(active_mode);
+        }
+    }
+
     pub(crate) fn mark_mode_sleeping(&mut self, mode: TitlebarMode) -> bool {
         let Some(lifecycle) = self.lifecycle_mut(mode) else {
             return false;
