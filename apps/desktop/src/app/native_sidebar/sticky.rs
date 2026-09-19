@@ -60,13 +60,18 @@ impl GhostexGpuiApp {
             .min(bounds.bottom() - height)
             .max(viewport.top() - height);
         let root = self.native_sidebar.bounds;
+        // CDXC:Projects 2026-09-19 WHY:
+        // The recorded bounds are the header row's, which already sit inside its 3px side margins, and the chevron hangs 18px left of the row. The pinned box adds both back (margins outside, chevron gutter as left padding) so the clipped copy keeps the resting width and its chevron.
+        let margin = px(3.0 * appearance.scale);
+        let gutter = px(18.0 * appearance.scale);
         Some(
             deferred(
                 div()
                     .absolute()
-                    .left(bounds.left() - root.left())
+                    .left(bounds.left() - margin - gutter - root.left())
                     .top(y - root.top())
-                    .w(bounds.size.width)
+                    .w(bounds.size.width + margin * 2.0 + gutter)
+                    .pl(gutter)
                     .h(height)
                     .overflow_hidden()
                     .bg(crate::app::helpers::titlebar_background())
