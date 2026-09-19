@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{
     ActiveGroup, Core, Event, ExternalFocusUpdate, FocusField, Intent, Loadable, MachineId,
-    ProjectKey, SessionKey, TabSession, default_group_for_project,
+    PresentationStore, ProjectKey, SessionKey, TabSession, default_group_for_project,
 };
 
 use crate::app::helpers::{
@@ -451,13 +451,25 @@ fn names_remote_focus(old_state: &GpuiGxserverPresentationFocusState) -> bool {
 }
 
 /// Whether a sidebar group the old runtime named belongs to the project it also named. A group of
-/// another project, or of another machine, is not this payload's to apply.
-fn group_belongs_to(group: &ActiveGroup, project: &ProjectKey) -> bool {
+/// another project, of another machine, or the Chats collection of a project that is not a chat
+/// project is not this payload's to apply: the store's own reconcile would replace it on the next
+/// event anyway, and until then it would name a tab list that is not the project's.
+fn group_belongs_to(store: &PresentationStore, group: &ActiveGroup, project: &ProjectKey) -> bool {
     match group {
-        ActiveGroup::Project(owner) | ActiveGroup::Subgroup { project: owner, .. } => {
+        ActiveGroup::Project(owner) => owner == project && !store.is_chat_project(project),
+        ActiveGroup::Subgroup {
+            project: owner,
+            group_id,
+        } => {
             owner == project
+                && store
+                    .user_groups_of_project(project)
+                    .iter()
+                    .any(|group| group.group_id == *group_id)
         }
-        ActiveGroup::Chats(machine) => *machine == project.machine,
+        ActiveGroup::Chats(machine) => {
+            *machine == project.machine && store.is_chat_project(project)
+        }
     }
 }
 
@@ -522,7 +534,7 @@ fn external_focus_update(
                     .active_group_id
                     .as_deref()
                     .and_then(ActiveGroup::parse_sidebar_group_id)
-                    .filter(|group| group_belongs_to(group, project));
+                    .filter(|group| group_belongs_to(store, group, project));
                 update = update.with_active_group(
                     selected.unwrap_or_else(|| default_group_for_project(store, project)),
                 );

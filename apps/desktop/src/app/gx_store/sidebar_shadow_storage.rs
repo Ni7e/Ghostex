@@ -1,9 +1,9 @@
-//! The one sidebar UI state the published snapshot cannot reveal: the projects and collections
-//! the user hid. A hidden row is simply absent from the snapshot, so the value is read from the
-//! client storage the sidebar persists it in (`ghostex.sidebar.hidden-items.v1`).
+//! The two pieces of sidebar state the published snapshot cannot carry: the projects and
+//! collections the user hid (a hidden row is simply absent), and the sidebar's own copy of the
+//! project collections, which it shows until the daemon's document arrives.
 //!
-//! The read is a single row of a second, read-only connection to the same SQLite file the service
-//! thread owns, and it runs on a background thread.
+//! Both are read from the client storage the sidebar persists them in, on a background thread,
+//! through a second read-only connection to the same SQLite file the service thread owns.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,6 +13,15 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::Value;
 
 const HIDDEN_ITEMS_KEY: &str = "ghostex.sidebar.hidden-items.v1";
+const PROJECT_COLLECTIONS_KEY: &str = "ghostex.sidebar.projectCollections.v1";
+
+/// What one read brought back.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct StoredSidebarState {
+    pub(super) hidden_items: SidebarHiddenItems,
+    /// The stored collections, as JSON; the view model reads them only while the daemon has none.
+    pub(super) project_collections: Option<Value>,
+}
 
 fn client_storage_path() -> PathBuf {
     crate::shared_settings::ghostex_storage_paths()
@@ -20,27 +29,33 @@ fn client_storage_path() -> PathBuf {
         .join("client-storage.sqlite3")
 }
 
-/// Reads the hidden projects and collections. `Err` means the value could not be read at all (no
-/// database yet, or it is busy), which is different from "nothing is hidden".
-pub(super) fn read_hidden_items() -> Result<SidebarHiddenItems, String> {
-    let path = client_storage_path();
+/// Reads both values. `Err` is a fixed word saying which step failed, never the database's own
+/// message, which can carry the file's path.
+pub(super) fn read_sidebar_state() -> Result<StoredSidebarState, &'static str> {
     let connection = Connection::open_with_flags(
-        &path,
+        &client_storage_path(),
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|_| "open")?;
     connection
         .busy_timeout(Duration::from_millis(250))
-        .map_err(|error| error.to_string())?;
-    let raw: Option<String> = connection
-        .query_row(
-            "SELECT value FROM preferences WHERE key=?1",
-            [HIDDEN_ITEMS_KEY],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    Ok(parse_hidden_items(raw.as_deref()))
+        .map_err(|_| "busyTimeout")?;
+    let read = |key: &str| -> Result<Option<String>, &'static str> {
+        connection
+            .query_row("SELECT value FROM preferences WHERE key=?1", [key], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()
+            .map_err(|_| "query")
+    };
+    let hidden_items = parse_hidden_items(read(HIDDEN_ITEMS_KEY)?.as_deref());
+    let project_collections = read(PROJECT_COLLECTIONS_KEY)?
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .filter(Value::is_object);
+    Ok(StoredSidebarState {
+        hidden_items,
+        project_collections,
+    })
 }
 
 /// `readSidebarHiddenItems`: two lists of unique, non-empty strings; anything else reads as empty.

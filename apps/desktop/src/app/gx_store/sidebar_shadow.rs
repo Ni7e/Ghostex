@@ -7,14 +7,14 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{
-    ChangeSummary, LOCAL_MACHINE_ID, SidebarHiddenItems, SidebarInputs, SidebarSettings,
-    SidebarViewModel, UnavailableState,
+    ChangeSummary, LOCAL_MACHINE_ID, SidebarInputs, SidebarSettings, SidebarViewModel,
+    UnavailableState,
 };
 use serde_json::Value;
 
 use super::sidebar_shadow_compare::compare;
 use super::sidebar_shadow_inputs::{mirror_inputs, sort_mode};
-use super::sidebar_shadow_storage::read_hidden_items;
+use super::sidebar_shadow_storage::{StoredSidebarState, read_sidebar_state};
 use crate::GhostexGpuiApp;
 use crate::app::native_sidebar::model::NativeSidebarSnapshot;
 
@@ -27,8 +27,14 @@ const SETTLE: Duration = Duration::from_millis(1500);
 const MAX_CONFIRMED_SIGNATURES: usize = 1024;
 /// How often the incremental list is also built from scratch and the two compared.
 const SCRATCH_CHECK_EVERY: u32 = 20;
-/// How long a read hidden-items value is used before it is read again.
-const HIDDEN_ITEMS_MAX_AGE: Duration = Duration::from_secs(5);
+/// How long a read of the stored sidebar state is used before it is read again.
+const STORED_STATE_MAX_AGE: Duration = Duration::from_secs(5);
+/// How long the "is the scenario on" verdict is reused. Asking costs a stat of the settings file
+/// and a clone of its map under a global lock, and a sidebar publish asks several times a second.
+const GATE_MAX_AGE: Duration = Duration::from_millis(1000);
+/// How often a difference that never settles is allowed to book its own judgement before it waits
+/// for the next publish instead.
+const MAX_SETTLE_REBOOKS: u8 = 4;
 
 /// What happened since the app started. Memory only; the log lines are built from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -52,10 +58,18 @@ pub(crate) struct SidebarShadowCounters {
     /// already published its unavailable placeholder. The two disagree about availability by
     /// design until remote machines and the unavailable state move into the store.
     pub(crate) skipped_not_live: u64,
-    /// The hidden projects have not been read from client storage yet.
-    pub(crate) skipped_hidden_unknown: u64,
-    /// Rows whose only difference is the question count the old sidebar store freezes.
+    /// The state only client storage holds has not been read yet.
+    pub(crate) skipped_stored_unknown: u64,
+    /// That read failed; while it does, nothing is compared at all.
+    pub(crate) stored_read_failures: u64,
+    /// Confirmed differences whose every row difference is one the old sidebar store freezes
+    /// (the question count, and the tooltip lines that are derived from fields its row equality
+    /// leaves out). Those are the old side standing still, not this list moving.
     pub(crate) question_count_only: u64,
+    pub(crate) frozen_fields_only: u64,
+    /// Differences that were replaced by another shape before they could settle. A number that
+    /// keeps climbing while `matches` and `mismatches` stand still means something flapping.
+    pub(crate) never_settled: u64,
     pub(crate) scratch_checks: u64,
     pub(crate) scratch_mismatches: u64,
     pub(crate) update_max_us: u64,
@@ -67,10 +81,12 @@ pub(crate) struct SidebarShadowCounters {
 struct PendingDifference {
     since: Instant,
     signature: u64,
+    /// How often this difference booked its own judgement; bounded so a flapping one cannot keep
+    /// a timer, an update and a comparison running for the rest of the app's life.
+    rebooks: u8,
 }
 
 /// The Rust list, the difference it has with the published one, and what it costs.
-#[derive(Default)]
 pub(crate) struct SidebarShadow {
     model: SidebarViewModel,
     /// What the store changed since the last comparison.
@@ -82,12 +98,19 @@ pub(crate) struct SidebarShadow {
     pending: Option<PendingDifference>,
     confirmed_signatures: HashSet<u64>,
     settings: Option<(u64, SidebarSettings)>,
-    hidden_items: Option<SidebarHiddenItems>,
-    hidden_items_read_at: Option<Instant>,
-    hidden_items_reading: bool,
+    stored: Option<StoredSidebarState>,
+    stored_read_at: Option<Instant>,
+    stored_reading: bool,
     unavailable: UnavailableState,
+    /// The newest "is the scenario on" verdict and when it was taken.
+    gate: Option<(Instant, bool)>,
+    /// The last error the client-storage read gave, as a bounded code.
+    stored_error: Option<&'static str>,
     /// A comparison is booked; further snapshots join it.
     scheduled: bool,
+    /// Identity of the published snapshot the comparison last saw, so a rejected payload, a clock
+    /// row update, a flash and a menu answer do not book one.
+    snapshot_identity: usize,
     /// Host time the newest published snapshot arrived.
     snapshot_at_ms: u64,
     /// A difference is waiting to be judged and its timer is already booked.
@@ -95,9 +118,48 @@ pub(crate) struct SidebarShadow {
     compares_since_scratch_check: u32,
 }
 
+impl Default for SidebarShadow {
+    fn default() -> Self {
+        Self {
+            model: SidebarViewModel::new(),
+            changes: ChangeSummary::default(),
+            // Nothing is derived and nothing is remembered until the comparison is switched on.
+            needs_reset: true,
+            counters: SidebarShadowCounters::default(),
+            pending: None,
+            confirmed_signatures: HashSet::new(),
+            settings: None,
+            stored: None,
+            stored_read_at: None,
+            stored_reading: false,
+            unavailable: UnavailableState::default(),
+            gate: None,
+            stored_error: None,
+            scheduled: false,
+            snapshot_identity: 0,
+            snapshot_at_ms: 0,
+            settle_scheduled: false,
+            compares_since_scratch_check: 0,
+        }
+    }
+}
+
 impl SidebarShadow {
     fn is_pending(&self) -> bool {
         self.pending.is_some()
+    }
+
+    /// Whether the comparison runs at all. The verdict is reused for a second, because asking
+    /// stats the settings file and clones its map under a global lock.
+    fn enabled(&mut self) -> bool {
+        if let Some((taken_at, enabled)) = self.gate {
+            if taken_at.elapsed() < GATE_MAX_AGE {
+                return enabled;
+            }
+        }
+        let enabled = super::diagnostics::routine_logging_enabled();
+        self.gate = Some((Instant::now(), enabled));
+        enabled
     }
 
     /// Folds what one pump changed into what the next comparison must apply. Nothing is kept
@@ -109,12 +171,14 @@ impl SidebarShadow {
         self.changes.merge(changes.clone());
     }
 
-    /// Drops the derived list; the next comparison starts over.
-    fn reset(&mut self) {
+    /// Frees the derived list and everything kept for it. Nothing is accumulated again until a
+    /// comparison runs, which rebuilds from scratch.
+    fn drop_cache(&mut self) {
         self.model = SidebarViewModel::new();
         self.changes = ChangeSummary::default();
         self.pending = None;
-        self.needs_reset = false;
+        self.settle_scheduled = false;
+        self.needs_reset = true;
     }
 
     /// Tracks how long the local daemon has been unavailable, which the empty-state copy reads.
@@ -147,10 +211,23 @@ impl GhostexGpuiApp {
     /// A sidebar update arrived from the old projection. Books one coalesced comparison; the
     /// whole path is skipped while the diagnostic scenario is off.
     pub(crate) fn gx_store_sidebar_snapshot_received(&mut self, cx: &mut gpui::Context<Self>) {
-        if !super::diagnostics::routine_logging_enabled() {
-            self.gx_store.sidebar_shadow.needs_reset = true;
+        if !self.gx_store.sidebar_shadow.enabled() {
+            if !self.gx_store.sidebar_shadow.needs_reset {
+                self.gx_store.sidebar_shadow.drop_cache();
+            }
             return;
         }
+        // Only an accepted snapshot or patch replaces the published list; a rejected payload, a
+        // clock row update, a flash and a menu answer leave it as it was and are not compared.
+        let identity = self
+            .native_sidebar
+            .snapshot
+            .as_ref()
+            .map_or(0, |snapshot| std::sync::Arc::as_ptr(snapshot) as usize);
+        if identity == 0 || identity == self.gx_store.sidebar_shadow.snapshot_identity {
+            return;
+        }
+        self.gx_store.sidebar_shadow.snapshot_identity = identity;
         // The list is built for the moment the old projection published, not for the moment the
         // comparison runs: both sides then judge the same clock-based rules (a new session leading
         // the list, a snooze ending) against the same instant.
@@ -172,8 +249,10 @@ impl GhostexGpuiApp {
 
     /// Builds the Rust list for the moment of the newest published snapshot and compares the two.
     fn gx_store_compare_sidebar_view(&mut self, cx: &mut gpui::Context<Self>) {
-        if !super::diagnostics::routine_logging_enabled() {
-            self.gx_store.sidebar_shadow.needs_reset = true;
+        if !self.gx_store.sidebar_shadow.enabled() {
+            if !self.gx_store.sidebar_shadow.needs_reset {
+                self.gx_store.sidebar_shadow.drop_cache();
+            }
             return;
         }
         let Some(snapshot) = self.native_sidebar.snapshot.clone() else {
@@ -191,9 +270,9 @@ impl GhostexGpuiApp {
         });
         {
             let shadow = &mut self.gx_store.sidebar_shadow;
-            if shadow.needs_reset {
-                shadow.reset();
-            }
+            // The cache was dropped; it is rebuilt from scratch below and starts collecting
+            // changes again from here.
+            shadow.needs_reset = false;
             shadow.note_machine_state(loaded, now_ms);
             if snapshot.selected_machine_id != LOCAL_MACHINE_ID {
                 shadow.counters.skipped_remote += 1;
@@ -218,27 +297,29 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_shadow.pending = None;
             return;
         }
-        if self.gx_store_sidebar_hidden_items(cx).is_none() {
-            self.gx_store.sidebar_shadow.counters.skipped_hidden_unknown += 1;
+        if self.gx_store_sidebar_stored_state(cx).is_none() {
+            self.gx_store.sidebar_shadow.counters.skipped_stored_unknown += 1;
+            self.gx_store.sidebar_shadow.pending = None;
+            // Nothing can be compared at all while this fails, so the summary says so rather than
+            // reading as a quiet run with no differences.
+            let counters = self.gx_store.sidebar_shadow.counters;
+            let error = self.gx_store.sidebar_shadow.stored_error;
+            self.gx_store
+                .diagnostics
+                .sidebar_summary(&counters, true, error, 0, 0);
             return;
         }
 
         let browser_tabs = self.sidebar_browser_tabs_snapshot.clone();
         let settings = self.gx_store.sidebar_shadow.settings(&snapshot);
-        let hidden_items = self
+        let stored = self
             .gx_store
             .sidebar_shadow
-            .hidden_items
+            .stored
             .clone()
             .unwrap_or_default();
         let unavailable = self.gx_store.sidebar_shadow.unavailable;
-        let inputs = mirror_inputs(
-            &snapshot,
-            &browser_tabs,
-            settings,
-            hidden_items,
-            unavailable,
-        );
+        let inputs = mirror_inputs(&snapshot, &browser_tabs, settings, stored, unavailable);
 
         let changes = std::mem::take(&mut self.gx_store.sidebar_shadow.changes);
         let update_started = Instant::now();
@@ -273,29 +354,46 @@ impl GhostexGpuiApp {
                 None
             }
             Some(difference) => {
-                shadow.counters.question_count_only += difference.question_count_only as u64;
                 let signature = difference.signature();
-                match &shadow.pending {
-                    Some(pending)
-                        if pending.signature == signature && pending.since.elapsed() >= SETTLE =>
+                let settled = shadow.pending.as_ref().is_some_and(|pending| {
+                    pending.signature == signature && pending.since.elapsed() >= SETTLE
+                });
+                if settled {
+                    shadow.pending = None;
+                    shadow.counters.mismatches += 1;
+                    shadow.counters.question_count_only += difference.question_count_only as u64;
+                    if difference.only_frozen_fields {
+                        shadow.counters.frozen_fields_only += 1;
+                    }
+                    if shadow.confirmed_signatures.len() < MAX_CONFIRMED_SIGNATURES
+                        && shadow.confirmed_signatures.insert(signature)
                     {
-                        shadow.pending = None;
-                        shadow.counters.mismatches += 1;
-                        if shadow.confirmed_signatures.len() < MAX_CONFIRMED_SIGNATURES
-                            && shadow.confirmed_signatures.insert(signature)
-                        {
-                            shadow.counters.distinct_mismatches += 1;
+                        shadow.counters.distinct_mismatches += 1;
+                    }
+                    Some(difference)
+                } else {
+                    match &mut shadow.pending {
+                        // The same difference, still inside its window: nothing to do but wait.
+                        Some(pending) if pending.signature == signature => {}
+                        // Another shape before the first one could settle. A difference that keeps
+                        // changing shape never counts as anything, so it is counted here.
+                        Some(_) => {
+                            shadow.counters.never_settled += 1;
+                            shadow.pending = Some(PendingDifference {
+                                since: Instant::now(),
+                                signature,
+                                rebooks: 0,
+                            });
                         }
-                        Some(difference)
+                        None => {
+                            shadow.pending = Some(PendingDifference {
+                                since: Instant::now(),
+                                signature,
+                                rebooks: 0,
+                            });
+                        }
                     }
-                    Some(pending) if pending.signature == signature => None,
-                    _ => {
-                        shadow.pending = Some(PendingDifference {
-                            since: Instant::now(),
-                            signature,
-                        });
-                        None
-                    }
+                    None
                 }
             }
         };
@@ -307,6 +405,7 @@ impl GhostexGpuiApp {
         }
         let counters = self.gx_store.sidebar_shadow.counters;
         let pending = self.gx_store.sidebar_shadow.is_pending();
+        let stored_error = self.gx_store.sidebar_shadow.stored_error;
         let (groups, rows) = {
             let view = self.gx_store.sidebar_shadow.model.view();
             (
@@ -319,11 +418,20 @@ impl GhostexGpuiApp {
         };
         self.gx_store
             .diagnostics
-            .sidebar_summary(&counters, pending, groups, rows);
-        if self.gx_store.sidebar_shadow.pending.is_some()
-            && !self.gx_store.sidebar_shadow.settle_scheduled
-        {
-            // A difference that no later snapshot resolves still has to be judged, once.
+            .sidebar_summary(&counters, pending, stored_error, groups, rows);
+        // A difference that no later snapshot resolves still has to be judged, so it books one
+        // judgement of its own. A stable difference is settled by the first of them; a shape that
+        // keeps changing would book for ever, so the bookings are bounded and it then waits for
+        // the next publish like everything else.
+        let may_rebook = !self.gx_store.sidebar_shadow.settle_scheduled
+            && match &mut self.gx_store.sidebar_shadow.pending {
+                Some(pending) if pending.rebooks < MAX_SETTLE_REBOOKS => {
+                    pending.rebooks += 1;
+                    true
+                }
+                _ => false,
+            };
+        if may_rebook {
             self.gx_store.sidebar_shadow.settle_scheduled = true;
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(SETTLE + COALESCE).await;
@@ -355,44 +463,46 @@ impl GhostexGpuiApp {
         Some(scratch != *self.gx_store.sidebar_shadow.model.view())
     }
 
-    /// The hidden projects and collections, re-read from client storage now and then. `None`
-    /// while the first read is still on its way.
-    fn gx_store_sidebar_hidden_items(
+    /// The sidebar state that only client storage holds, re-read now and then. `None` while the
+    /// first read is still on its way or while it fails, which is when nothing is compared.
+    fn gx_store_sidebar_stored_state(
         &mut self,
         cx: &mut gpui::Context<Self>,
-    ) -> Option<&SidebarHiddenItems> {
+    ) -> Option<&StoredSidebarState> {
         let shadow = &mut self.gx_store.sidebar_shadow;
         let stale = shadow
-            .hidden_items_read_at
-            .is_none_or(|read_at| read_at.elapsed() >= HIDDEN_ITEMS_MAX_AGE);
-        if stale && !shadow.hidden_items_reading {
-            shadow.hidden_items_reading = true;
+            .stored_read_at
+            .is_none_or(|read_at| read_at.elapsed() >= STORED_STATE_MAX_AGE);
+        if stale && !shadow.stored_reading {
+            shadow.stored_reading = true;
             cx.spawn(async move |this, cx| {
-                let hidden_items = cx
+                let stored = cx
                     .background_executor()
-                    .spawn(async move { read_hidden_items() })
+                    .spawn(async move { read_sidebar_state() })
                     .await;
                 let _ = this.update(cx, |this, _| {
                     let shadow = &mut this.gx_store.sidebar_shadow;
-                    shadow.hidden_items_reading = false;
-                    shadow.hidden_items_read_at = Some(Instant::now());
-                    match hidden_items {
-                        Ok(hidden_items) => {
-                            if shadow.hidden_items.as_ref() != Some(&hidden_items) {
-                                shadow.hidden_items = Some(hidden_items);
-                                // The list is derived from them, so it starts over.
-                                shadow.needs_reset = true;
+                    shadow.stored_reading = false;
+                    shadow.stored_read_at = Some(Instant::now());
+                    match stored {
+                        Ok(stored) => {
+                            shadow.stored_error = None;
+                            if shadow.stored.as_ref() != Some(&stored) {
+                                shadow.stored = Some(stored);
+                                // The list is derived from it, so it starts over.
+                                shadow.drop_cache();
                             }
                         }
-                        Err(error) => this
-                            .gx_store
-                            .diagnostics
-                            .sidebar_hidden_items_failed(&error),
+                        Err(code) => {
+                            shadow.stored_error = Some(code);
+                            shadow.counters.stored_read_failures += 1;
+                            this.gx_store.diagnostics.sidebar_stored_state_failed(code);
+                        }
                     }
                 });
             })
             .detach();
         }
-        self.gx_store.sidebar_shadow.hidden_items.as_ref()
+        self.gx_store.sidebar_shadow.stored.as_ref()
     }
 }

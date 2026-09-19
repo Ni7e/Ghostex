@@ -37,7 +37,21 @@ pub(super) struct SidebarMismatch {
     /// Rows whose only difference is the question count, which the old sidebar store freezes on
     /// a row nothing else touched.
     pub(super) question_count_only: usize,
+    /// Every difference in this record is a field the old sidebar store freezes, so it is that
+    /// side standing still rather than this list moving.
+    pub(super) only_frozen_fields: bool,
 }
+
+/// The fields a difference can appear in when the old sidebar store kept a row it should have
+/// replaced.
+///
+/// `haveSameSidebarSessionItem` (packages/core-ui/sidebar-store-model.ts) decides whether a row
+/// changed, and it does not look at `pendingQuestionCount`, `isLive`, `providerSessionState`,
+/// `nativePaneState`, `sessionRoutingId`, `forkedFromSessionId`, `forkFamilySessionIds`,
+/// `workingStartedAt` or the account and agent-name fields. A row whose only change is one of
+/// those keeps its previous object, and with Debugging Mode on, which is the only state this
+/// comparison runs in, several of them are tooltip lines.
+const FROZEN_FIELDS: [&str; 2] = ["pendingQuestionCount", "titleTooltip"];
 
 impl SidebarMismatch {
     pub(super) fn signature(&self) -> u64 {
@@ -113,6 +127,18 @@ pub(super) fn compare(
             .map(|group| group.group_id.as_str())
             .ne(view.groups.iter().map(|group| group.core.group_id.as_str()));
 
+    mismatch.only_frozen_fields = mismatch.only_old_groups.is_empty()
+        && mismatch.only_store_groups.is_empty()
+        && !mismatch.group_order_differs
+        && mismatch.top_level.is_empty()
+        && mismatch.groups.is_empty()
+        && mismatch.only_old_sessions.is_empty()
+        && mismatch.only_store_sessions.is_empty()
+        && !mismatch.sessions.is_empty()
+        && mismatch
+            .sessions
+            .iter()
+            .all(|(_, fields)| fields.iter().all(|field| FROZEN_FIELDS.contains(field)));
     mismatch.bound();
     mismatch.differs().then_some(mismatch)
 }
@@ -485,14 +511,7 @@ fn compare_session(
     if fields.is_empty() {
         return;
     }
-    // The old sidebar store does not compare the question count when it decides whether a row
-    // changed, so a row whose count moved on its own keeps the previous value until something
-    // else moves. Those are counted, and still reported.
-    if fields
-        .iter()
-        .all(|field| matches!(*field, "pendingQuestionCount" | "titleTooltip"))
-        && fields.contains(&"pendingQuestionCount")
-    {
+    if fields.contains(&"pendingQuestionCount") {
         mismatch.question_count_only += 1;
     }
     mismatch.sessions.push((old.session_id.clone(), fields));

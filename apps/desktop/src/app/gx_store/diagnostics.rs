@@ -312,6 +312,7 @@ impl GxStoreDiagnostics {
                 "onlyOldSessions": mismatch.only_old_sessions,
                 "onlyStoreSessions": mismatch.only_store_sessions,
                 "questionCountOnly": mismatch.question_count_only,
+                "onlyFrozenFields": mismatch.only_frozen_fields,
             }),
         );
     }
@@ -322,6 +323,7 @@ impl GxStoreDiagnostics {
         &mut self,
         counters: &SidebarShadowCounters,
         pending: bool,
+        stored_error: Option<&'static str>,
         groups: usize,
         rows: usize,
     ) {
@@ -350,8 +352,12 @@ impl GxStoreDiagnostics {
                 "skippedForeignFocus": counters.skipped_foreign_focus,
                 "skippedNotLoaded": counters.skipped_not_loaded,
                 "skippedNotLive": counters.skipped_not_live,
-                "skippedHiddenUnknown": counters.skipped_hidden_unknown,
+                "skippedStoredUnknown": counters.skipped_stored_unknown,
+                "storedReadFailures": counters.stored_read_failures,
+                "storedReadError": stored_error,
                 "questionCountOnly": counters.question_count_only,
+                "frozenFieldsOnly": counters.frozen_fields_only,
+                "neverSettled": counters.never_settled,
                 "scratchChecks": counters.scratch_checks,
                 "scratchMismatches": counters.scratch_mismatches,
                 "updateUs": counters.last_update_us,
@@ -365,14 +371,15 @@ impl GxStoreDiagnostics {
         );
     }
 
-    /// The hidden projects could not be read from client storage, so the comparison waits.
-    pub(super) fn sidebar_hidden_items_failed(&mut self, error: &str) {
+    /// The sidebar state only client storage holds could not be read, so nothing is compared.
+    /// The code is a fixed word: a database error string can carry the file's path.
+    pub(super) fn sidebar_stored_state_failed(&mut self, error: &'static str) {
         if self.sidebar_storage_warnings >= 3 {
             return;
         }
         self.sidebar_storage_warnings += 1;
         self.warning(
-            "gxStore.sidebarShadow.hiddenItems.warning",
+            "gxStore.sidebarShadow.storedState.warning",
             json!({ "error": error }),
         );
     }

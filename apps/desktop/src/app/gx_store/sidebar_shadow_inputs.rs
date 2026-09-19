@@ -13,6 +13,7 @@ use ghostex_gx_core::{
 };
 use serde_json::Value;
 
+use super::sidebar_shadow_storage::StoredSidebarState;
 use crate::app::native_sidebar::model::{NativeSidebarSession, NativeSidebarSnapshot};
 
 /// Most browser tabs the host publishes; the same bound the sidebar runtime applies.
@@ -24,12 +25,12 @@ pub(super) fn mirror_inputs(
     snapshot: &NativeSidebarSnapshot,
     browser_tabs_json: &str,
     settings: SidebarSettings,
-    hidden_items: ghostex_gx_core::SidebarHiddenItems,
+    stored: StoredSidebarState,
     unavailable: UnavailableState,
 ) -> SidebarInputs {
     let mut ui = SidebarUiState {
         selected_machine_id: snapshot.selected_machine_id.clone(),
-        hidden_items,
+        hidden_items: stored.hidden_items,
         ..SidebarUiState::default()
     };
     let section_key = ui.section_key();
@@ -83,13 +84,24 @@ pub(super) fn mirror_inputs(
     ui.show_hidden = show_hidden;
     ui.selected_tag_filters = tag_filters;
 
+    let recent_projects = snapshot
+        .hud
+        .get("recentProjects")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let mut host = SidebarHostInputs {
         browser_tabs: browser_tabs(browser_tabs_json),
-        recent_project_count: snapshot
-            .hud
-            .get("recentProjects")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len),
+        // The projection hides a parked project by its own id; a remote machine's entry carries a
+        // machine-scoped one and belongs to that machine's section.
+        recent_project_ids: recent_projects
+            .iter()
+            .filter(|project| project.get("remoteMachineId").is_none())
+            .filter_map(|project| project.get("projectId").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect(),
+        recent_project_count: recent_projects.len(),
+        stored_project_collections: stored.project_collections,
         unavailable,
         ..SidebarHostInputs::default()
     };
