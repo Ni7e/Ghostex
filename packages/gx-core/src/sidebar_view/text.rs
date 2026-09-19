@@ -94,11 +94,15 @@ pub(crate) fn utf16_suffix(value: &str, start_units: usize) -> &str {
 pub(crate) use crate::keys::encode_uri_component;
 
 /// `Date.parse` for the ISO-8601 forms gxserver and the app write: `YYYY-MM-DD`,
-/// `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`, optional fraction, and `Z` or `±HH:MM`. `None` where
-/// JavaScript would give `NaN`.
+/// `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`, optional fraction, and `Z` or `±HH:MM`. The date
+/// separator and the zone letter may be upper or lower case, and a day past the end of its month
+/// rolls over the way `MakeDay` does (`2026-02-31` is 3 March), which is what both QuickJS and V8
+/// accept.
 ///
-/// A date-time without an offset is read as UTC. JavaScript reads it as local time, which the core
-/// cannot know (it reads no clock or time zone); every writer of these fields emits `Z`.
+/// Two deliberate differences from a JavaScript engine, neither reachable from a daemon stamp:
+/// this takes only the format above, where an engine also parses its legacy and locale forms; and
+/// a date-time without an offset is read as UTC, where an engine reads local time, which the core
+/// cannot know because it reads no clock and no time zone. Every writer of these fields emits `Z`.
 pub(crate) fn parse_iso_ms(value: &str) -> Option<i64> {
     let bytes = value.as_bytes();
     let digits = |from: usize, count: usize| -> Option<i64> {
@@ -118,14 +122,16 @@ pub(crate) fn parse_iso_ms(value: &str) -> Option<i64> {
     }
     let month = digits(5, 2)?;
     let day = digits(8, 2)?;
-    if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
+    // The field bounds an engine enforces; a day past the end of its month is carried into the
+    // next one by the arithmetic below rather than rejected.
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
     let mut millis = days_from_civil(year, month, day) * 86_400_000;
     if bytes.len() == 10 {
         return Some(millis);
     }
-    if bytes.get(10) != Some(&b'T') {
+    if !matches!(bytes.get(10), Some(b'T') | Some(b't')) {
         return None;
     }
     let hour = digits(11, 2)?;
@@ -165,7 +171,7 @@ pub(crate) fn parse_iso_ms(value: &str) -> Option<i64> {
     }
     let offset_minutes = match bytes.get(index) {
         None => 0,
-        Some(b'Z') if index + 1 == bytes.len() => 0,
+        Some(b'Z') | Some(b'z') if index + 1 == bytes.len() => 0,
         Some(sign @ (b'+' | b'-')) => {
             let offset_hour = digits(index + 1, 2)?;
             if bytes.get(index + 3) != Some(&b':') || index + 6 != bytes.len() {
@@ -183,15 +189,6 @@ pub(crate) fn parse_iso_ms(value: &str) -> Option<i64> {
     };
     millis += ((hour * 60 + minute - offset_minutes) * 60 + second) * 1000 + fraction_ms;
     Some(millis)
-}
-
-fn days_in_month(year: i64, month: i64) -> i64 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        _ if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
-        _ => 28,
-    }
 }
 
 /// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's algorithm).

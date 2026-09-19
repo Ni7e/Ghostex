@@ -295,7 +295,9 @@ pub(crate) fn assemble(input: AssembleInput<'_>) -> SidebarView {
     }
 
     SidebarView {
-        ready: true,
+        // The machine's rows are in hand, or the host has already seen it unavailable and the
+        // empty state below says which. A host that draws before either has nothing to draw.
+        ready: input.machine_loaded || input.host.unavailable.since_ms.is_some(),
         supported: input.ui.selected_machine_id == LOCAL_MACHINE_ID,
         selected_machine_id: input.ui.selected_machine_id.clone(),
         scroll_scope: format!(
@@ -329,6 +331,8 @@ fn empty_state(input: &AssembleInput<'_>, selection: Option<&SpaceSelection>) ->
     let known = input.meta.project_settings_count > 0
         || input.host.recent_project_count > 0
         || input.plans.iter().any(|plan| plan.kind != GroupKind::Chats);
+    // A remote machine also allows it once its connection is up, which is a fact of the remote
+    // transport rather than of the store; remote machines join the list in M4d and bring it.
     let can_add_project = input.ui.selected_machine_id == LOCAL_MACHINE_ID;
     let copy = if error {
         "Unable to load sessions."

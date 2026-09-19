@@ -143,7 +143,7 @@ pub(crate) fn session_row(
         alias: &alias,
         display_title: session.display_title.as_deref(),
         display_title_tooltip: session.display_title_tooltip.as_deref(),
-        is_browser: false,
+        is_browser: session_kind(&session.kind) == "browser",
         is_primary_title_terminal_title: session.is_primary_title_terminal_title,
         primary_title: primary_title.as_deref(),
         terminal_title: session.terminal_title.as_deref(),
@@ -179,9 +179,12 @@ pub(crate) fn session_row(
         .or_else(|| session.last_active_at.clone())
         .or_else(|| Some(session.updated_at.clone()));
 
+    let session_kind = session_kind(&session.kind);
     SessionRow {
         sidebar_session_id: sidebar_session_id(&key.project_id, &key.session_id),
-        is_browser: false,
+        // `kind === 'browser' || sessionKind === 'browser'` everywhere in the TypeScript; a
+        // daemon row of that kind is a browser row wherever the sidebar asks.
+        is_browser: session_kind == "browser",
         browser_is_active: false,
         browser_is_visible: false,
         alias,
@@ -194,7 +197,7 @@ pub(crate) fn session_row(
         activity: session.activity.as_str().to_string(),
         pending_question_count: session.pending_question_count,
         agent_icon: agent_icon.map(str::to_string),
-        session_kind: Some(session_kind(&session.kind)),
+        session_kind: Some(session_kind),
         lifecycle_state: lifecycle_state.to_string(),
         is_pinned: session.is_pinned,
         is_parked: session.is_parked,

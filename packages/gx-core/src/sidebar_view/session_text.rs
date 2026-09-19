@@ -331,42 +331,43 @@ fn strip_agent_tooltip_text(value: Option<&str>, agent_icon: Option<&str>) -> Op
     Some(normalized.to_string())
 }
 
-/// `FILESYSTEM_PATH_TOOLTIP_PATTERN`.
+/// `FILESYSTEM_PATH_TOOLTIP_PATTERN`. Every candidate is a slice of the value, so a long tooltip
+/// line costs no allocation.
 fn contains_filesystem_path(value: &str) -> bool {
-    let characters: Vec<char> = value.chars().collect();
-    for index in 0..characters.len() {
-        let at_boundary = index == 0 || super::text::is_js_whitespace(characters[index - 1]);
+    const ROOTS: [&str; 14] = [
+        "~/",
+        "file://",
+        "/Applications/",
+        "/Library/",
+        "/System/",
+        "/Users/",
+        "/Volumes/",
+        "/etc/",
+        "/home/",
+        "/opt/",
+        "/private/",
+        "/tmp/",
+        "/usr/",
+        "/var/",
+    ];
+    let mut previous: Option<char> = None;
+    for (index, character) in value.char_indices() {
+        let at_boundary = previous.is_none_or(super::text::is_js_whitespace);
+        previous = Some(character);
         if !at_boundary {
             continue;
         }
-        let rest: String = characters[index..].iter().collect();
-        if rest.starts_with("~/") || rest.starts_with("file://") {
+        let rest = &value[index..];
+        if ROOTS.iter().any(|root| rest.starts_with(root)) {
             return true;
         }
-        for root in [
-            "/Applications/",
-            "/Library/",
-            "/System/",
-            "/Users/",
-            "/Volumes/",
-            "/etc/",
-            "/home/",
-            "/opt/",
-            "/private/",
-            "/tmp/",
-            "/usr/",
-            "/var/",
-        ] {
-            if rest.starts_with(root) {
-                return true;
-            }
-        }
         // `[A-Za-z]:[\\/]`
-        if characters
-            .get(index)
-            .is_some_and(|character| character.is_ascii_alphabetic())
-            && characters.get(index + 1) == Some(&':')
-            && matches!(characters.get(index + 2), Some('\\') | Some('/'))
+        let mut drive = rest.chars();
+        if drive
+            .next()
+            .is_some_and(|letter| letter.is_ascii_alphabetic())
+            && drive.next() == Some(':')
+            && matches!(drive.next(), Some('\\') | Some('/'))
         {
             return true;
         }

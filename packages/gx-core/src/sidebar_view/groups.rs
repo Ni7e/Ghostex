@@ -49,6 +49,15 @@ pub(crate) struct FocusKey {
     pub(crate) visible_session_ids: Vec<String>,
 }
 
+/// One row of a group, with the number the cache minted for it. A row keeps its number while it
+/// is reused, so a group can tell whether its rows moved by comparing numbers rather than the
+/// addresses behind them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RowRef {
+    pub(crate) id: u64,
+    pub(crate) row: Arc<SessionRow>,
+}
+
 /// One group before its rows are ordered and filtered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct GroupPlan {
@@ -57,7 +66,7 @@ pub(crate) struct GroupPlan {
     pub(crate) title: String,
     pub(crate) kind: GroupKind,
     /// The project's own rows in the daemon's order, then the group's members.
-    pub(crate) rows: Vec<Arc<SessionRow>>,
+    pub(crate) rows: Vec<RowRef>,
     pub(crate) project: Option<Arc<ProjectContextInput>>,
 }
 
@@ -87,18 +96,17 @@ pub(crate) fn build_group(
     settings: &SidebarSettings,
     now_ms: u64,
 ) -> GroupBuild {
+    let rows: Vec<Arc<SessionRow>> = plan.rows.iter().map(|row| row.row.clone()).collect();
     let is_active = focus.active_group_id.as_deref() == Some(plan.group_id.as_str());
     let project_is_active = plan.project.as_ref().is_some_and(|project| {
         focus.active_project_id.as_deref() == Some(project.project_id.as_str())
     });
     // A focused browser tab takes the focus mark away from every session row of the group.
     let browser_owns_focus = is_active
-        && plan
-            .rows
+        && rows
             .iter()
             .any(|row| row.is_browser && project_is_active && row.browser_is_active);
-    let store_rows: Vec<SessionView> = plan
-        .rows
+    let store_rows: Vec<SessionView> = rows
         .iter()
         .map(|row| {
             let (is_focused, is_visible) = if row.is_browser {
@@ -135,7 +143,7 @@ pub(crate) fn build_group(
         .collect();
 
     let ordered = order_rows_for_display(
-        &plan.rows,
+        &rows,
         settings.sort_mode,
         settings.enable_session_parking,
         now_ms,
@@ -204,8 +212,7 @@ pub(crate) fn build_group(
         sessions,
     };
     GroupBuild {
-        deadline_ms: plan
-            .rows
+        deadline_ms: rows
             .iter()
             .filter_map(|row| row_deadline_ms(row, now_ms))
             .min(),

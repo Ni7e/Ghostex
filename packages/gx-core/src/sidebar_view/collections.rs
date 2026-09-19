@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use ghostex_gx_protocol::SidebarProjectCollectionsState as WireCollectionsState;
+use serde_json::Value;
 
 use super::text::{js_trim, utf16_prefix};
 
@@ -30,9 +31,17 @@ pub(crate) struct CollectionsState {
     pub(crate) collections: Vec<Collection>,
 }
 
+/// One collection as it arrives, before the client sanitizer.
+struct RawCollection<'a> {
+    collection_id: &'a str,
+    title: &'a str,
+    color: &'a str,
+    project_ids: Vec<&'a str>,
+}
+
 impl CollectionsState {
     /// `parseSidebarProjectCollectionsFromGxserver`: the order array first, then anything the map
-    /// holds beyond it, each row sanitized and each project kept in one collection only.
+    /// holds beyond it.
     pub(crate) fn from_wire(state: &WireCollectionsState) -> Self {
         let mut ordered_ids: Vec<&String> = Vec::new();
         for entry in &state.order {
@@ -45,16 +54,65 @@ impl CollectionsState {
                 ordered_ids.push(collection_id);
             }
         }
+        Self::sanitize(
+            ordered_ids
+                .into_iter()
+                .filter_map(|collection_id| {
+                    let raw = state.collections.get(collection_id)?;
+                    Some(RawCollection {
+                        // The map key wins over the row's own id, as the spread in the
+                        // TypeScript does.
+                        collection_id,
+                        title: &raw.title,
+                        color: &raw.color,
+                        project_ids: raw.project_ids.iter().map(String::as_str).collect(),
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// `readSidebarProjectCollections`: the client-storage copy, an ordered array rather than the
+    /// daemon's map.
+    ///
+    /// CDXC:Projects 2026-09-20 WHY:
+    /// The sidebar seeds its collections from this key and keeps them when the daemon's document has none yet, pushing them up instead (`native-sidebar/metadata.ts`, first adoption). A list built from the daemon alone would show no collections, no colours and another top-level order for the whole window between a cold start and that first echo, so the same fallback is made here. Once the daemon answers, both sides read the daemon: the sidebar writes the adopted document straight back to this key.
+    pub(crate) fn from_local_json(value: &Value) -> Self {
+        let collections = value
+            .get("collections")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        Self::sanitize(
+            collections
+                .iter()
+                .filter_map(|raw| {
+                    let text = |key: &'static str| raw.get(key).and_then(Value::as_str);
+                    Some(RawCollection {
+                        collection_id: text("collectionId")?,
+                        title: text("title").unwrap_or_default(),
+                        color: text("color").unwrap_or_default(),
+                        project_ids: raw
+                            .get("projectIds")
+                            .and_then(Value::as_array)
+                            .map(|ids| ids.iter().filter_map(Value::as_str).collect())
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// `sanitizeSidebarProjectCollections`: bounded id, title and project ids, a colour from the
+    /// palette when the stored one is not a hex value, a project in one collection only, and no
+    /// empty collection.
+    fn sanitize(raw_collections: Vec<RawCollection<'_>>) -> Self {
         let mut sanitized = Self::default();
         let mut seen_projects: Vec<String> = Vec::new();
-        for collection_id in ordered_ids {
-            let Some(raw) = state.collections.get(collection_id) else {
-                continue;
-            };
-            // The map key wins over the row's own id, as the spread in the TypeScript does.
-            let id = utf16_prefix(js_trim(collection_id), 120).to_string();
-            let title = utf16_prefix(js_trim(&raw.title), 80).to_string();
-            let color = sanitize_color(&raw.color, sanitized.collections.len());
+        for raw in raw_collections {
+            let id = utf16_prefix(js_trim(raw.collection_id), 120).to_string();
+            let title = utf16_prefix(js_trim(raw.title), 80).to_string();
+            let color = sanitize_color(raw.color, sanitized.collections.len());
             if id.is_empty()
                 || title.is_empty()
                 || sanitized
@@ -65,7 +123,7 @@ impl CollectionsState {
                 continue;
             }
             let mut project_ids: Vec<String> = Vec::new();
-            for project_id in &raw.project_ids {
+            for project_id in raw.project_ids {
                 let project_id = utf16_prefix(js_trim(project_id), 300).to_string();
                 if project_id.is_empty() || seen_projects.contains(&project_id) {
                     continue;
@@ -112,15 +170,17 @@ impl CollectionsState {
     }
 }
 
+/// The colour rule of `sanitizeSidebarProjectCollections`, which tests the RAW value: unlike the
+/// Space sanitizer beside it, a padded `" #abcdef "` falls back to the palette here, and the
+/// stored spelling is kept rather than lowercased.
 fn sanitize_color(value: &str, position: usize) -> String {
-    let color = js_trim(value);
-    let is_hex = color.len() == 7
-        && color.starts_with('#')
-        && color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit);
+    let is_hex = value.len() == 7
+        && value.starts_with('#')
+        && value.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit);
     if is_hex {
-        return color.to_string();
+        return value.to_string();
     }
-    if color == "transparent" {
+    if value == "transparent" {
         return COLLECTION_COLORS[0].to_string();
     }
     COLLECTION_COLORS[position % COLLECTION_COLORS.len()].to_string()

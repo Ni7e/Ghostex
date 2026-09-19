@@ -6,6 +6,11 @@
 //! The second file is the body of a `listProjects` response, which carries the domain rows the
 //! project overlays (chat projects, icons, worktrees) are built from.
 //!
+//! The replay does not only feed frames: it drives focus, churns the sidebar's own UI state and
+//! settings on a rotation, and walks the clock a few seconds per frame so the time-based rules
+//! (a new session leading the list, a snooze ending) fire. Every frame is compared both ways, so
+//! anything the incremental path forgets to invalidate shows up here.
+//!
 //! Recordings contain private data: keep them outside the repository. This is tooling, not a test
 //! suite: it reports what the view model makes of real traffic.
 
@@ -14,13 +19,16 @@ use std::time::{Duration, Instant};
 
 use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
-    Core, Event, Intent, MachineId, SessionSortMode, SidebarInputs, SidebarView, SidebarViewModel,
+    Core, Event, Intent, MachineId, SectionId, SessionSortMode, SidebarInputs, SidebarView,
+    SidebarViewModel,
 };
 use serde_json::Value;
 
-/// One clock for the whole replay: the frames carry no timestamps, so the sidebar's time-based
-/// rules (a new session leading the list, a snooze ending) are judged against a fixed moment.
-const NOW_MS: u64 = 1_790_000_000_000;
+/// Where the replay's clock starts. The frames carry no timestamps of their own.
+const START_MS: u64 = 1_790_000_000_000;
+/// How far the clock moves per frame, so a recording of a few thousand frames covers hours and
+/// the ten-minute new-session window and any snooze in the rows expire while it runs.
+const CLOCK_STEP_MS: u64 = 3_000;
 
 fn main() -> ExitCode {
     let Some(path) = std::env::args().nth(1) else {
@@ -39,12 +47,10 @@ fn main() -> ExitCode {
         println!("domain project rows: {}", projects.len());
     }
 
-    // Two passes: the whole list of the machine, and the same traffic with Spaces on, which is
-    // what a filtered sidebar costs.
-    let unfiltered = run_pass("Spaces off", &text, domain_projects.clone(), false);
-    let filtered = run_pass("Spaces on", &text, domain_projects, true);
+    let churned = run_pass("churned inputs", &text, domain_projects.clone(), true);
+    let steady = run_pass("steady inputs", &text, domain_projects, false);
 
-    if unfiltered.mismatches == 0 && filtered.mismatches == 0 {
+    if churned.mismatches == 0 && steady.mismatches == 0 {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
@@ -71,13 +77,12 @@ fn run_pass(
     label: &str,
     frames: &str,
     domain_projects: Option<Vec<Value>>,
-    spaces_enabled: bool,
+    churn: bool,
 ) -> PassResult {
     let machine = MachineId::Local;
     let mut core = Core::new();
     let mut model = SidebarViewModel::new();
     let mut inputs = SidebarInputs::default();
-    inputs.settings.sidebar_spaces_enabled = spaces_enabled;
     inputs.settings.sort_mode = SessionSortMode::LastActivity;
     if let Some(projects) = domain_projects {
         core.handle(
@@ -85,16 +90,18 @@ fn run_pass(
                 machine: machine.clone(),
                 projects,
             },
-            NOW_MS,
+            START_MS,
         );
     }
 
-    let mut incremental: Vec<Duration> = Vec::new();
+    let mut cold_build: Option<Duration> = None;
+    let mut store_changed: Vec<Duration> = Vec::new();
+    let mut inputs_changed: Vec<Duration> = Vec::new();
     let mut idle: Vec<Duration> = Vec::new();
     let mut scratch: Vec<Duration> = Vec::new();
     let mut handled = 0u64;
-    let mut changed_updates = 0u64;
     let mut focus_intents = 0u64;
+    let mut churn_steps = 0u64;
     let mut mismatches = 0u64;
     let mut first_mismatch: Option<String> = None;
     let started = Instant::now();
@@ -107,12 +114,13 @@ fn run_pass(
             continue;
         };
         handled += 1;
+        let now_ms = START_MS + index as u64 * CLOCK_STEP_MS;
         let output = core.handle(
             Event::Frame {
                 machine: machine.clone(),
                 frame: Box::new(frame),
             },
-            NOW_MS,
+            now_ms,
         );
         let mut changes = output.changes.clone();
         // Drive focus the way a user would, so the focus-dependent parts of the list are
@@ -124,41 +132,45 @@ fn run_pass(
                         session: session.clone(),
                         visible: Some(vec![session.clone()]),
                     }),
-                    NOW_MS,
+                    now_ms,
                 );
                 changes.merge(focus_output.changes);
                 focus_intents += 1;
             }
         }
-        // Toggle a little UI state now and then: collapse and expand the first project.
-        if index % 500 == 0 {
-            if let Some(group) = model.view().groups.first() {
-                let group_id = group.core.group_id.clone();
-                if !inputs.ui.collapse.collapsed_groups.remove(&group_id) {
-                    inputs.ui.collapse.collapsed_groups.insert(group_id);
-                }
+        let store_moved = !changes.is_empty();
+        let before = inputs.clone();
+        if churn {
+            churn_inputs(&mut inputs, model.view(), index);
+            if inputs != before {
+                churn_steps += 1;
             }
         }
+        let inputs_moved = inputs != before;
 
+        let empty_before = model.view().groups.is_empty();
         let update_started = Instant::now();
-        model.update(&core, &inputs, &changes, NOW_MS);
+        model.update(&core, &inputs, &changes, now_ms);
         let elapsed = update_started.elapsed();
-        if changes.is_empty() {
-            idle.push(elapsed);
+        // The first update that produces a list is the cold build: the store's first snapshot.
+        // Everything before it runs against an empty store and says nothing about the cost.
+        if cold_build.is_none() && empty_before && !model.view().groups.is_empty() {
+            cold_build = Some(elapsed);
+        } else if store_moved {
+            store_changed.push(elapsed);
+        } else if inputs_moved {
+            inputs_changed.push(elapsed);
         } else {
-            incremental.push(elapsed);
-            changed_updates += 1;
+            idle.push(elapsed);
         }
 
-        if index % 25 == 0 {
-            let scratch_started = Instant::now();
-            let fresh = SidebarViewModel::build_from_scratch(&core, &inputs, NOW_MS);
-            scratch.push(scratch_started.elapsed());
-            if fresh != *model.view() {
-                mismatches += 1;
-                if first_mismatch.is_none() {
-                    first_mismatch = Some(describe_difference(&fresh, model.view(), index + 1));
-                }
+        let scratch_started = Instant::now();
+        let fresh = SidebarViewModel::build_from_scratch(&core, &inputs, now_ms);
+        scratch.push(scratch_started.elapsed());
+        if fresh != *model.view() {
+            mismatches += 1;
+            if first_mismatch.is_none() {
+                first_mismatch = Some(describe_difference(&fresh, model.view(), index + 1));
             }
         }
     }
@@ -167,8 +179,9 @@ fn run_pass(
 
     println!("\n== {label} ==");
     println!(
-        "{handled} frames in {} ms, {focus_intents} focus intents, {changed_updates} updates with changes",
-        wall.as_millis()
+        "{handled} frames in {} ms, {focus_intents} focus intents, {churn_steps} input changes, clock walked {} minutes",
+        wall.as_millis(),
+        handled * CLOCK_STEP_MS / 60_000
     );
     if let Some(loaded) = core.presentation().loaded(&machine) {
         println!(
@@ -192,8 +205,12 @@ fn run_pass(
         "machine counts: {} working, {} needing attention; empty state copy: {:?}",
         view.machine.working_count, view.machine.attention_count, view.empty_state.copy
     );
-    report("incremental update (something changed)", &mut incremental);
-    report("update with an empty change summary", &mut idle);
+    if let Some(cold) = cold_build {
+        println!("{:<38} {:>9}", "cold build (first snapshot)", micros(cold));
+    }
+    report("incremental update (store changed)", &mut store_changed);
+    report("incremental update (inputs churned)", &mut inputs_changed);
+    report("update with nothing changed", &mut idle);
     report("build from scratch", &mut scratch);
     println!(
         "incremental against from scratch: {} comparisons, {mismatches} differences",
@@ -204,6 +221,99 @@ fn run_pass(
     }
 
     PassResult { mismatches }
+}
+
+/// Moves one piece of the sidebar's own state per frame, so every input the view model reads is
+/// changed and changed back while the store moves underneath it.
+fn churn_inputs(inputs: &mut SidebarInputs, view: &SidebarView, index: usize) {
+    let group_id = view
+        .groups
+        .get(index % view.groups.len().max(1))
+        .map(|group| group.core.group_id.clone());
+    let storage_id = view
+        .groups
+        .get(index % view.groups.len().max(1))
+        .map(|group| group.core.storage_id.clone());
+    let session_id = view
+        .groups
+        .iter()
+        .flat_map(|group| group.core.sessions.iter())
+        .nth(index % 17)
+        .map(|session| session.row.sidebar_session_id.clone());
+    match index % 11 {
+        0 => {
+            if let Some(group_id) = group_id {
+                toggle(&mut inputs.ui.collapse.collapsed_groups, group_id);
+            }
+        }
+        1 => {
+            if let Some(storage_id) = storage_id {
+                toggle(&mut inputs.ui.collapse.expanded_session_lists, storage_id);
+            }
+        }
+        2 => {
+            if let Some(storage_id) = storage_id {
+                toggle(&mut inputs.ui.collapse.expanded_hover_actions, storage_id);
+            }
+        }
+        3 => {
+            if let Some(storage_id) = storage_id {
+                let mut sections = inputs
+                    .ui
+                    .collapse
+                    .section_collapse
+                    .get(&storage_id)
+                    .copied()
+                    .unwrap_or_default();
+                let section = SectionId::ORDER[index % 6];
+                sections.set(section, !sections.get(section));
+                inputs
+                    .ui
+                    .collapse
+                    .section_collapse
+                    .insert(storage_id, sections);
+            }
+        }
+        4 => {
+            if let Some(session_id) = session_id {
+                if let Some(position) = inputs
+                    .ui
+                    .selected_session_ids
+                    .iter()
+                    .position(|selected| *selected == session_id)
+                {
+                    inputs.ui.selected_session_ids.remove(position);
+                } else {
+                    inputs.ui.selected_session_ids.push(session_id);
+                }
+            }
+        }
+        5 => inputs.settings.enable_session_parking = !inputs.settings.enable_session_parking,
+        6 => {
+            inputs.settings.project_session_list_collapsed_count = 1 + (index as u32 % 20);
+        }
+        7 => {
+            inputs.settings.sort_mode = match inputs.settings.sort_mode {
+                SessionSortMode::LastActivity => SessionSortMode::Manual,
+                SessionSortMode::Manual => SessionSortMode::LastActivity,
+            };
+        }
+        8 => inputs.settings.sidebar_spaces_enabled = !inputs.settings.sidebar_spaces_enabled,
+        9 => inputs.ui.show_hidden = !inputs.ui.show_hidden,
+        _ => {
+            inputs.ui.selected_tag_filters = if inputs.ui.selected_tag_filters.is_empty() {
+                vec!["favorite".to_string(), "untagged".to_string()]
+            } else {
+                Vec::new()
+            };
+        }
+    }
+}
+
+fn toggle(set: &mut std::collections::BTreeSet<String>, value: String) {
+    if !set.remove(&value) {
+        set.insert(value);
+    }
 }
 
 fn report(label: &str, samples: &mut [Duration]) {

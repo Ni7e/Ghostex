@@ -12,9 +12,10 @@ use super::tags::TagPresentation;
 /// The whole list for one machine tab.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarView {
-    /// A first snapshot of the machine has been applied, or it is known to be unavailable.
+    /// A first snapshot of the machine has been applied, or the host has seen it unavailable.
     pub ready: bool,
-    /// The selected machine is one this view model can build (the local daemon, for now).
+    /// The selected machine is one this view model can build (the local daemon, for now). A host
+    /// that selects a machine tab this says `false` for must keep drawing whatever it had.
     pub supported: bool,
     pub selected_machine_id: String,
     /// `<machine>|<space or all>`: the scope a scroll position belongs to.

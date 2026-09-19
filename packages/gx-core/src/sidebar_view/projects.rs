@@ -96,7 +96,9 @@ fn is_quick_domain_project(project: &Value) -> bool {
         || is_chat_domain_project(project)
 }
 
-/// `gpuiPresentationProjectIconDataUrl`: the user's attached image, else the stored data URL.
+/// `gpuiPresentationProjectIconDataUrl`: the user's attached image, else the stored data URL. A
+/// typed image icon whose data URL does not validate is no icon at all, and the legacy field is
+/// read instead (`normalizeWorkspaceProjectIcon` returns nothing for it).
 fn project_icon_data_url(project: &Value) -> Option<String> {
     let identity_icon = project.get("identityIcon")?;
     let icon = identity_icon.get("icon");
@@ -112,7 +114,6 @@ fn project_icon_data_url(project: &Value) -> Option<String> {
         {
             return Some(data_url.to_string());
         }
-        return None;
     }
     identity_icon
         .get("iconDataUrl")
@@ -184,11 +185,17 @@ fn resolve_worktree_parent(
 }
 
 /// Builds every project fact of one machine.
+///
+/// `parked_project_ids` are the projects the daemon keeps as Recent Projects. They are normally
+/// out of the presentation already, but the list is the authoritative one, so a project that is
+/// still in a snapshot while it is being parked is hidden here too.
 pub(crate) fn build_project_meta(
     machine: &MachinePresentation,
     project_order: &[String],
+    parked_project_ids: &BTreeSet<String>,
 ) -> ProjectMeta {
     let mut meta = ProjectMeta::default();
+    meta.hidden_project_ids = parked_project_ids.clone();
     let Some(loaded) = machine.loaded() else {
         return meta;
     };
@@ -362,6 +369,9 @@ impl ProjectOverlayPatch {
 
 /// `orderGxserverPresentationSidebarProjects`: the manual order when there is one, else the
 /// daemon's sort key, then worktrees under their parent projects.
+///
+/// CDXC:StateSync 2026-09-20 SEE-ALSO:
+/// packages/shared/gxserver-presentation-sidebar-projection.ts compares these keys with `localeCompare`, which in the desktop's QuickJS is NFC normalization plus a code-point comparison, so the byte order used here is the same order for every string a daemon sends today. It is NOT the same in V8, whose `localeCompare` collates through ICU, so the web build and any other V8 consumer of this crate (M9) needs the difference decided on purpose rather than rediscovered; a string that is not in NFC already differs even on the desktop.
 fn order_sidebar_projects<'a>(
     projects: impl Iterator<Item = &'a PresentationProject>,
     meta: &ProjectMeta,
@@ -393,8 +403,22 @@ fn order_sidebar_projects<'a>(
     order_projects_with_worktrees(&ids, meta)
 }
 
-/// `orderProjectsWithWorktrees` over ids, using the overlay's worktree metadata.
+/// `orderProjectsWithWorktrees` over ids, using the overlay's worktree metadata: the chat
+/// projects keep their order untouched and lead, then the code projects with their worktrees
+/// nested under their parents.
 fn order_projects_with_worktrees(ids: &[String], meta: &ProjectMeta) -> Vec<String> {
+    let is_chat = |project_id: &String| {
+        meta.overlay(project_id)
+            .is_some_and(|overlay| overlay.is_chat_project || overlay.is_quick_project)
+    };
+    let (chat_ids, code_ids): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(is_chat);
+    let mut ordered = chat_ids;
+    ordered.extend(order_code_projects_with_worktrees(&code_ids, meta));
+    ordered
+}
+
+/// `orderCodeProjectsWithWorktrees`.
+fn order_code_projects_with_worktrees(ids: &[String], meta: &ProjectMeta) -> Vec<String> {
     let parent_of = |project_id: &str| -> Option<String> {
         meta.overlay(project_id)
             .and_then(|overlay| overlay.worktree.as_ref())

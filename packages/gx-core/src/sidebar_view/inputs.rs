@@ -37,7 +37,7 @@ pub enum SectionId {
 
 impl SectionId {
     /// Render order of the headings.
-    pub(crate) const ORDER: [SectionId; 6] = [
+    pub const ORDER: [SectionId; 6] = [
         SectionId::Browser,
         SectionId::Pinned,
         SectionId::Drafts,
@@ -301,13 +301,21 @@ pub struct UnavailableState {
 pub struct SidebarHostInputs {
     /// In the order the host publishes them.
     pub browser_tabs: Vec<BrowserTabInput>,
+    /// The sidebar's own copy of the project collections, as client storage holds it. Read only
+    /// while the daemon has published none: the sidebar shows this copy until its first adoption.
+    pub stored_project_collections: Option<Value>,
+    /// Projects the daemon parked as Recent Projects, by their own id. The daemon keeps them out
+    /// of the presentation, so this list only matters while a project is being parked or
+    /// restored, but it is the authoritative one and the list hides them either way.
+    pub recent_project_ids: BTreeSet<String>,
     /// By project id.
     pub project_diff_stats: BTreeMap<String, ProjectDiffStats>,
     /// By sidebar session id (`combined-session:<project>:<session>`).
     pub close_after_done: BTreeMap<String, CloseAfterDoneInput>,
     /// By sidebar session id.
     pub local_delayed_sends: BTreeMap<String, DelayedSendInput>,
-    /// Parked projects the daemon keeps out of the presentation; only their count is read.
+    /// How many Recent Projects the host knows of, this machine's and every remote machine's.
+    /// The empty state reads it to tell a first run from a list the user emptied.
     pub recent_project_count: usize,
     pub unavailable: UnavailableState,
 }

@@ -41,6 +41,11 @@ pub(crate) fn project_session_sections(
     } else {
         countable[..compact_count].to_vec()
     };
+    // Membership is asked once per row per section, so it is a flag per row rather than a scan.
+    let mut is_visible = vec![false; sessions.len()];
+    for index in &visible {
+        is_visible[*index] = true;
+    }
     let sections = SectionId::ORDER
         .into_iter()
         .filter_map(|id| {
@@ -73,7 +78,7 @@ pub(crate) fn project_session_sections(
                     .count(),
                 session_ids: members
                     .iter()
-                    .filter(|index| visible.contains(index))
+                    .filter(|index| is_visible[**index])
                     .map(|index| row(index).sidebar_session_id.clone())
                     .collect(),
             })

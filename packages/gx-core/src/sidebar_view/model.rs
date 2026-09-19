@@ -15,20 +15,23 @@ use crate::presentation_store::PresentationStore;
 
 use super::assemble::{assemble, AssembleInput};
 use super::collections::CollectionsState;
-use super::groups::{build_group, FocusKey, GroupBuild, GroupKind, GroupPlan, ProjectContextInput};
+use super::groups::{
+    build_group, FocusKey, GroupBuild, GroupKind, GroupPlan, ProjectContextInput, RowRef,
+};
 use super::inputs::{BrowserTabInput, SectionCollapse, SidebarInputs, LOCAL_MACHINE_ID};
 use super::membership::{project_members, ProjectMembers};
 use super::projects::ProjectMeta;
 use super::rows::{browser_row, session_row, RowContext};
 use super::spaces::SpacesState;
 use super::tags::TagCatalog;
-use super::view::{SessionRow, SidebarView};
+use super::view::SidebarView;
 
 /// The inputs of one group, so a group that nothing touched is kept as it is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct GroupKey {
-    /// Identity of every row of the group, in order.
-    rows: Vec<usize>,
+    /// The cache's number for every row of the group, in order. A rebuilt row gets a new number,
+    /// so this says both "the same rows" and "the same values" without holding on to anything.
+    rows: Vec<u64>,
     title: String,
     storage_id: String,
     /// Identity of the project facts; a changed project gives a new one.
@@ -62,8 +65,10 @@ struct CacheState {
     meta: Arc<ProjectMeta>,
     membership: BTreeMap<String, Arc<ProjectMembers>>,
     project_contexts: BTreeMap<String, Arc<ProjectContextInput>>,
-    rows: BTreeMap<String, BTreeMap<String, Arc<SessionRow>>>,
-    browser_rows: BTreeMap<String, (Vec<BrowserTabInput>, Vec<Arc<SessionRow>>)>,
+    rows: BTreeMap<String, BTreeMap<String, RowRef>>,
+    browser_rows: BTreeMap<String, (Vec<BrowserTabInput>, Vec<RowRef>)>,
+    /// The next row number to mint; monotonic while the cache lives.
+    next_row_id: u64,
     groups: BTreeMap<String, CachedGroup>,
     view: SidebarView,
     next_deadline_ms: Option<u64>,
@@ -149,12 +154,13 @@ impl SidebarViewModel {
             state.catalog != catalog
                 || state.inputs.settings.debugging_mode != inputs.settings.debugging_mode
         });
-        let meta_dirty = previous.as_ref().is_none_or(|_| {
+        let meta_dirty = previous.as_ref().is_none_or(|previous| {
             !changes.projects_changed.is_empty()
                 || !changes.projects_removed.is_empty()
                 || !changes.project_order_changed.is_empty()
                 || !changes.chat_collection_changed.is_empty()
                 || changes.side_state.workspace_groups
+                || previous.inputs.host.recent_project_ids != inputs.host.recent_project_ids
         });
         // The projection prunes the ticked filters to the ones the Sort & Filter menu still
         // offers before it reads them, so a filter whose tag was turned off in settings (or whose
@@ -192,6 +198,7 @@ impl SidebarViewModel {
                         .and_then(|local| local.side_state().workspace_groups.as_ref())
                         .map(|groups| groups.project_order.as_slice())
                         .unwrap_or_default(),
+                    &inputs.host.recent_project_ids,
                 ),
                 None => ProjectMeta::default(),
             }),
@@ -243,6 +250,10 @@ impl SidebarViewModel {
             dirty_rows.insert((project_id.as_str(), session_id.as_str()));
         }
 
+        let next_row_id = previous
+            .as_ref()
+            .filter(|_| !rows_all_dirty)
+            .map_or(1, |previous| previous.next_row_id);
         // 3. The rows themselves: kept from the previous round unless the store or a host timer
         // touched them.
         // The rows are moved out of the previous round rather than copied: a machine with two
@@ -299,6 +310,7 @@ impl SidebarViewModel {
             project_contexts: BTreeMap::new(),
             rows,
             browser_rows: BTreeMap::new(),
+            next_row_id,
             groups: BTreeMap::new(),
             view: SidebarView::default(),
             next_deadline_ms: None,
@@ -350,7 +362,7 @@ impl SidebarViewModel {
                 .get(project_id)
                 .cloned()
                 .unwrap_or_default();
-            let mut rows: Vec<Arc<SessionRow>> = browser_rows_for_project(
+            let mut rows: Vec<RowRef> = browser_rows_for_project(
                 &mut state,
                 previous.as_ref(),
                 project_id,
@@ -399,7 +411,7 @@ impl SidebarViewModel {
                 project,
             });
             for subgroup in &members.subgroups {
-                let mut rows: Vec<Arc<SessionRow>> = Vec::new();
+                let mut rows: Vec<RowRef> = Vec::new();
                 for session_id in &subgroup.session_ids {
                     if let Some(row) = resolve_row(
                         &mut state,
@@ -469,6 +481,14 @@ impl SidebarViewModel {
             collections: side_state
                 .and_then(|side| side.project_collections.as_ref())
                 .map(CollectionsState::from_wire)
+                .filter(|collections| !collections.collections.is_empty())
+                .or_else(|| {
+                    effective
+                        .host
+                        .stored_project_collections
+                        .as_ref()
+                        .map(CollectionsState::from_local_json)
+                })
                 .unwrap_or_default(),
             machine_loaded,
             now_ms,
@@ -488,7 +508,7 @@ fn browser_rows_for_project(
     project_id: &str,
     inputs: &SidebarInputs,
     context: &RowContext<'_>,
-) -> Vec<Arc<SessionRow>> {
+) -> Vec<RowRef> {
     let tabs: Vec<BrowserTabInput> = inputs
         .host
         .browser_tabs
@@ -505,7 +525,13 @@ fn browser_rows_for_project(
         .map(|(_, rows)| rows.clone());
     let rows = reuse.unwrap_or_else(|| {
         tabs.iter()
-            .map(|tab| Arc::new(browser_row(tab, context)))
+            .map(|tab| {
+                state.next_row_id += 1;
+                RowRef {
+                    id: state.next_row_id,
+                    row: Arc::new(browser_row(tab, context)),
+                }
+            })
             .collect()
     });
     state
@@ -524,7 +550,7 @@ fn resolve_row(
     session_id: &str,
     inputs: &SidebarInputs,
     context: &RowContext<'_>,
-) -> Option<Arc<SessionRow>> {
+) -> Option<RowRef> {
     if let Some(row) = state
         .rows
         .get(project_id)
@@ -541,13 +567,17 @@ fn resolve_row(
         session_id: session_id.to_string(),
     };
     let sidebar_id = super::rows::sidebar_session_id(project_id, session_id);
-    let row = Arc::new(session_row(
-        key,
-        &session,
-        inputs.host.close_after_done.get(&sidebar_id),
-        inputs.host.local_delayed_sends.get(&sidebar_id),
-        context,
-    ));
+    state.next_row_id += 1;
+    let row = RowRef {
+        id: state.next_row_id,
+        row: Arc::new(session_row(
+            key,
+            &session,
+            inputs.host.close_after_done.get(&sidebar_id),
+            inputs.host.local_delayed_sends.get(&sidebar_id),
+            context,
+        )),
+    };
     state
         .rows
         .entry(project_id.to_string())
@@ -568,13 +598,14 @@ fn project_context(
     let project = loaded.project(project_id)?;
     let overlay = meta.overlay(project_id);
     let worktree = overlay.and_then(|overlay| overlay.worktree.clone());
+    // `project-sections.ts` counts the GROUPS the sidebar holds, so a parked or otherwise
+    // unlisted worktree project does not raise the number.
     let worktree_count = meta
-        .overlays
-        .values()
+        .project_order
+        .iter()
         .filter(|candidate| {
-            candidate
-                .worktree
-                .as_ref()
+            meta.overlay(candidate)
+                .and_then(|overlay| overlay.worktree.as_ref())
                 .is_some_and(|worktree| worktree.parent_project_id == project_id)
         })
         .count();
@@ -598,11 +629,7 @@ fn project_context(
 fn group_key(plan: &GroupPlan, focus: &FocusKey, inputs: &SidebarInputs) -> GroupKey {
     let is_active = focus.active_group_id.as_deref() == Some(plan.group_id.as_str());
     GroupKey {
-        rows: plan
-            .rows
-            .iter()
-            .map(|row| Arc::as_ptr(row) as usize)
-            .collect(),
+        rows: plan.rows.iter().map(|row| row.id).collect(),
         title: plan.title.clone(),
         storage_id: plan.storage_id.clone(),
         project: plan
@@ -630,7 +657,7 @@ fn group_key(plan: &GroupPlan, focus: &FocusKey, inputs: &SidebarInputs) -> Grou
                     .ui
                     .selected_session_ids
                     .iter()
-                    .any(|selected| *selected == row.sidebar_session_id)
+                    .any(|selected| *selected == row.row.sidebar_session_id)
             })
             .map(|(index, _)| index)
             .collect(),
