@@ -14,6 +14,10 @@ const sessionCardsCssSource = readFileSync(
   'utf8'
 );
 const sidebarStoreSource = readFileSync(new URL('../../../packages/core-ui/sidebar-store.ts', import.meta.url), 'utf8');
+const sessionCardCapabilitiesSource = readFileSync(
+  new URL('../../../packages/core-ui/session-card-capabilities.ts', import.meta.url),
+  'utf8'
+);
 
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
@@ -88,7 +92,11 @@ describe('remote presentation sidebar source', () => {
     expect(menuActionsSource).toContain("label: 'Advanced'");
     expect(menuActionsSource).toContain("label: 'Note'");
     expect(menuActionsSource).not.toContain('Pop Out Pane');
-    expect(sortableSessionCardSource).toContain('supportsFork(session)');
-    expect(sortableSessionCardSource).toContain('supportsFullReloadMenuAction(session, isRemoteSession)');
+    // Fork and Full Reload gating lives in the one eligibility resolver the card reads.
+    expect(sortableSessionCardSource).toContain('getSidebarSessionContextMenuEligibility({');
+    expect(sortableSessionCardSource).toContain('if (canForkSession) {');
+    expect(sortableSessionCardSource).toContain('if (canFullReloadSession) {');
+    expect(sessionCardCapabilitiesSource).toContain('supportsFork(session)');
+    expect(sessionCardCapabilitiesSource).toContain('supportsFullReloadMenuAction(session, isRemoteSession)');
   });
 });

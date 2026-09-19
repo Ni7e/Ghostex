@@ -373,11 +373,11 @@ describe('getGroupContextMenuItemCount', () => {
      */
     const menuStart = sessionGroupSectionSource.indexOf('CDXC:Worktrees 2026-05-28-07:46');
     // The slice has to reach the END of the worktree branch, not its first
-    // shared item: anchored on "Add to project group" it stopped short of Delete
+    // shared item: anchored on "Add to Group" it stopped short of Delete
     // Worktree and Remove Worktree, so a reintroduced label-only Rename placed
     // below that item would have passed the negative assertions untouched.
     const menuEnd = sessionGroupSectionSource.indexOf('Remove Worktree', menuStart);
-    const collectionsAnchor = sessionGroupSectionSource.indexOf('Add to project group', menuStart);
+    const collectionsAnchor = sessionGroupSectionSource.indexOf('Add to Group', menuStart);
     expect(menuStart).toBeGreaterThanOrEqual(0);
     expect(collectionsAnchor).toBeGreaterThan(menuStart);
     expect(menuEnd).toBeGreaterThan(collectionsAnchor);
