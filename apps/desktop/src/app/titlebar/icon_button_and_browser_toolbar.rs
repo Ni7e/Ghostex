@@ -47,15 +47,9 @@ impl GhostexGpuiApp {
             .relative()
             .flex()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .w(px(if id == "settings" {
-                TITLEBAR_SETTINGS_BUTTON_WIDTH
-            } else {
-                TITLEBAR_BUTTON_WIDTH
-            }))
+            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
             .items_center()
             .justify_center()
-            .border_l_1()
-            .border_color(titlebar_button_border_color())
             .text_color(titlebar_icon_color())
             .cursor_default()
             .hover(|this| {
@@ -158,7 +152,7 @@ impl GhostexGpuiApp {
                 this.child(
                     div()
                         .absolute()
-                        .right(px(8.0))
+                        .right(px(2.0))
                         .top(px(5.0))
                         .size(px(7.5))
                         .rounded_full()

@@ -53,6 +53,7 @@ pub(crate) mod terminal_parked_owner_reattach;
 pub(crate) mod terminal_session_state;
 pub(crate) mod terminal_surface_lifecycle;
 pub(crate) mod titlebar_mode;
+pub(crate) mod titlebar_mode_highlight;
 pub(crate) mod titlebar_panels;
 pub(crate) mod view_pane_layouts;
 pub(crate) mod windows_first_run_setup;
@@ -107,6 +108,7 @@ pub(crate) use terminal_parked_owner_reattach::*;
 pub(crate) use terminal_session_state::*;
 pub(crate) use terminal_surface_lifecycle::*;
 pub(crate) use titlebar_mode::*;
+pub(crate) use titlebar_mode_highlight::*;
 pub(crate) use titlebar_panels::*;
 pub(crate) use view_pane_layouts::*;
 #[allow(unused_imports)]

@@ -55,11 +55,9 @@ impl GhostexGpuiApp {
             .flex()
             .flex_shrink_0()
             .h(px(BROWSER_TOOLBAR_HEIGHT - 1.0))
-            .w(px(BROWSER_TOOLBAR_BUTTON_WIDTH))
+            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
             .items_center()
             .justify_center()
-            .border_l_1()
-            .border_color(titlebar_button_border_color())
             .cursor_default()
             .hover(|this| this.bg(chrome_color(0x212121, 0xe5e5e5)))
             .on_mouse_down(
@@ -214,16 +212,9 @@ impl GhostexGpuiApp {
             .flex()
             .flex_shrink_0()
             .h(px(BROWSER_TOOLBAR_HEIGHT - 1.0))
-            .w(px(if id == "back" {
-                BROWSER_TOOLBAR_BUTTON_WIDTH - 1.0
-            } else {
-                BROWSER_TOOLBAR_BUTTON_WIDTH
-            }))
+            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
             .items_center()
             .justify_center()
-            .when(id != "back", |this| this.border_l_1())
-            .when(id == "home", |this| this.border_r_1())
-            .border_color(titlebar_button_border_color())
             .cursor_default()
             .text_color(if enabled {
                 titlebar_icon_color()

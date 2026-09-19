@@ -34,7 +34,7 @@ use gpui_component::tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement};
 
 use crate::{
     GhostexGpuiApp, GpuiTitlebarPopupKind, NOTIFICATIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
-    TITLEBAR_LEADING_BUTTON_WIDTH, TITLEBAR_LEADING_TALL_BUTTON_HEIGHT, shared_settings,
+    TITLEBAR_BUTTON_HORIZONTAL_PADDING, TITLEBAR_LEADING_TALL_BUTTON_HEIGHT, shared_settings,
     titlebar_background, titlebar_button_hover_color, titlebar_icon_color,
     titlebar_icon_hover_color, titlebar_svg_icon, titlebar_tooltip,
 };
@@ -405,7 +405,7 @@ impl GhostexGpuiApp {
             .relative()
             .flex()
             .h(px(TITLEBAR_LEADING_TALL_BUTTON_HEIGHT))
-            .w(px(TITLEBAR_LEADING_BUTTON_WIDTH))
+            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
             .flex_shrink_0()
             .items_center()
             .justify_center()

@@ -197,11 +197,6 @@ impl GhostexGpuiApp {
             .cloned()
             .collect::<Vec<_>>();
         let show_badge = !badge_lines.is_empty();
-        let button_width = if show_badge {
-            58.0
-        } else {
-            TITLEBAR_BUTTON_WIDTH
-        };
         let account_button = button.account;
         let tooltip = button.title.clone();
         let icon_image = button.icon_image.clone();
@@ -247,12 +242,10 @@ impl GhostexGpuiApp {
             .relative()
             .flex()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .w(px(button_width))
+            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
             .items_center()
             .justify_center()
             .when(cfg!(target_os = "windows"), |this| this.occlude())
-            .border_l_1()
-            .border_color(titlebar_button_border_color())
             .cursor_default()
             .when(open, |this| this.bg(titlebar_active_segment_color()))
             .hover(move |this| {

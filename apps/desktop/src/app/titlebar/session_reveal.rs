@@ -58,7 +58,7 @@ impl GhostexGpuiApp {
             .id("ghostex-gpui-titlebar-reveal-active-session")
             .flex()
             .h(px(TITLEBAR_LEADING_TALL_BUTTON_HEIGHT))
-            .w(px(TITLEBAR_LEADING_BUTTON_WIDTH))
+            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
             .flex_shrink_0()
             .items_center()
             .justify_center()

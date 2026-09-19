@@ -33,7 +33,7 @@ use gpui::{
 use gpui_component::h_flex;
 
 use crate::{
-    GhostexGpuiApp, TITLEBAR_CONTROL_HEIGHT, TITLEBAR_LEADING_BUTTON_WIDTH,
+    GhostexGpuiApp, TITLEBAR_BUTTON_HORIZONTAL_PADDING, TITLEBAR_CONTROL_HEIGHT,
     TITLEBAR_LEADING_TALL_BUTTON_HEIGHT, titlebar_button_hover_color, titlebar_disabled_text_color,
     titlebar_icon_color, titlebar_svg_icon,
 };
@@ -123,8 +123,6 @@ impl GhostexGpuiApp {
     ) -> impl IntoElement {
         h_flex()
             .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .ml(px(4.0))
-            .mr(px(2.0))
             .mt(px(2.0))
             .flex_shrink_0()
             .items_center()
@@ -173,7 +171,7 @@ impl GhostexGpuiApp {
             toggle next to them.
             */
             .h(px(TITLEBAR_LEADING_TALL_BUTTON_HEIGHT))
-            .w(px(TITLEBAR_LEADING_BUTTON_WIDTH))
+            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
             .flex_shrink_0()
             .items_center()
             .justify_center()
