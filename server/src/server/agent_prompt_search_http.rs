@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::agent_prompt_search::PromptLaunchSession;
+
 /*
 CDXC:PromptSearch 2026-08-20:
 The Find surface's four RPCs. All of them go through the one warm
@@ -112,11 +114,12 @@ pub(crate) fn read_agent_accept_all_enabled_for_prompt_launch(state: &AppState) 
         .unwrap_or(false)
 }
 
-/// Every stored session row, so the launch resolver can decide whether a live
+/// Every stored session row, each paired with the agent family its launch
+/// configuration resumes with, so the launch resolver can decide whether a live
 /// Ghostex session already owns the selected agent conversation.
 pub(crate) fn read_all_sessions_for_prompt_launch(
     state: &AppState,
-) -> Result<Vec<Value>, crate::agent_prompt_search::PromptSearchError> {
+) -> Result<Vec<PromptLaunchSession>, crate::agent_prompt_search::PromptSearchError> {
     let db = open_gxserver_database(&state.paths).map_err(|error| {
         crate::agent_prompt_search::PromptSearchError {
             code: "internalError",
@@ -124,10 +127,37 @@ pub(crate) fn read_all_sessions_for_prompt_launch(
         }
     })?;
     let repository = DomainRepository::new(&db, state.metadata.server_id.as_str());
-    repository
-        .list_sessions(None)
-        .map_err(|error| crate::agent_prompt_search::PromptSearchError {
-            code: error.code,
-            message: error.message,
+    let domain_error = |error: DomainStateError| crate::agent_prompt_search::PromptSearchError {
+        code: error.code,
+        message: error.message,
+    };
+    let projects = repository
+        .list_projects()
+        .map_err(domain_error)?
+        .into_iter()
+        .filter_map(|project| {
+            let project_id = project
+                .get("projectId")
+                .and_then(Value::as_str)?
+                .to_string();
+            Some((project_id, project))
         })
+        .collect::<HashMap<String, Value>>();
+    let sessions = repository.list_sessions(None).map_err(domain_error)?;
+    Ok(sessions
+        .into_iter()
+        .map(|session| {
+            let project = session
+                .get("projectId")
+                .and_then(Value::as_str)
+                .and_then(|project_id| projects.get(project_id))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let agent_family_id = crate::agents::session_agent_family_id(&project, &session);
+            PromptLaunchSession {
+                session,
+                agent_family_id,
+            }
+        })
+        .collect())
 }

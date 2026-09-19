@@ -416,10 +416,28 @@ pub enum PromptLaunchPlan {
     },
 }
 
+/// A stored session row paired with the CLI family its launch agent resumes
+/// with (`claude` for a `custom-…` Claude configuration). The caller resolves
+/// the family because only it holds the project row that declares it.
+#[derive(Debug, Clone)]
+pub struct PromptLaunchSession {
+    pub session: Value,
+    pub agent_family_id: Option<String>,
+}
+
 /// True when a session row is a live owner of `agent_session_id`.
 /// Mirrors `isLive` in the CLI session projection: a running lifecycle or a
 /// provider that still exists.
-fn session_owns_agent_conversation(session: &Value, agent_session_id: &str, agent: Agent) -> bool {
+///
+/// CDXC:PromptSearch 2026-09-19 WHY:
+/// A session launched from a custom agent configuration stores that configuration's `custom-…` id as its agent, never the family the transcript belongs to, so the family resolved the way resume planning resolves it must count as a match too. Comparing the raw id alone made Find open a second `claude --resume` writer onto a conversation a running custom Claude session already owned.
+/// SEE-ALSO: `resolve_live_agent_session_owner` in server/src/ghostex_cli/wait.rs, the same rule for the `gx f` picker.
+fn session_owns_agent_conversation(
+    candidate: &PromptLaunchSession,
+    agent_session_id: &str,
+    agent: Agent,
+) -> bool {
+    let session = &candidate.session;
     let runtime_settings = session.get("runtimeSettings");
     let stored = runtime_settings
         .and_then(|settings| settings.get("agentSessionId"))
@@ -444,7 +462,12 @@ fn session_owns_agent_conversation(session: &Value, agent_session_id: &str, agen
         .get("agentId")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    session_agent.is_empty() || session_agent.eq_ignore_ascii_case(agent.label())
+    session_agent.is_empty()
+        || session_agent.eq_ignore_ascii_case(agent.label())
+        || candidate
+            .agent_family_id
+            .as_deref()
+            .is_some_and(|family| family.trim().eq_ignore_ascii_case(agent.label()))
 }
 
 /// `POST /api/resolveAgentPromptLaunch`
@@ -455,7 +478,7 @@ fn session_owns_agent_conversation(session: &Value, agent_session_id: &str, agen
 pub fn resolve_agent_prompt_launch(
     paths: &crate::paths::GxserverPaths,
     params: &Map<String, Value>,
-    live_sessions: &[Value],
+    live_sessions: &[PromptLaunchSession],
     accept_all_default: bool,
 ) -> Result<Value, PromptSearchError> {
     let action = params
@@ -492,9 +515,12 @@ pub fn resolve_agent_prompt_launch(
                         rec.agent.label()
                     )));
                 }
-                let owner = live_sessions.iter().find(|session| {
-                    session_owns_agent_conversation(session, &rec.session, rec.agent)
-                });
+                let owner = live_sessions
+                    .iter()
+                    .find(|candidate| {
+                        session_owns_agent_conversation(candidate, &rec.session, rec.agent)
+                    })
+                    .map(|candidate| &candidate.session);
                 match owner {
                     Some(session) => PromptLaunchPlan::Focus {
                         project_id: session
@@ -626,7 +652,7 @@ mod tests {
         assert_eq!(truncate_on_char_boundary(text, 100), text);
     }
 
-    fn session(agent_session_id: &str, lifecycle: &str, agent: &str) -> Value {
+    fn session_row(agent_session_id: &str, lifecycle: &str, agent: &str) -> Value {
         json!({
             "projectId": "p1",
             "sessionId": "s1",
@@ -634,6 +660,13 @@ mod tests {
             "lifecycleState": lifecycle,
             "runtimeSettings": { "agentSessionId": agent_session_id },
         })
+    }
+
+    fn session(agent_session_id: &str, lifecycle: &str, agent: &str) -> PromptLaunchSession {
+        PromptLaunchSession {
+            session: session_row(agent_session_id, lifecycle, agent),
+            agent_family_id: None,
+        }
     }
 
     #[test]
@@ -657,7 +690,7 @@ mod tests {
     #[test]
     fn an_existing_provider_counts_as_live_even_when_the_lifecycle_lags() {
         let mut value = session("abc", "stopped", "claude");
-        value["providerState"] = json!({ "lifecycleState": "exists" });
+        value.session["providerState"] = json!({ "lifecycleState": "exists" });
         assert!(session_owns_agent_conversation(
             &value,
             "abc",

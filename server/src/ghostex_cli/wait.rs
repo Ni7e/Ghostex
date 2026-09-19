@@ -229,10 +229,7 @@ fn resolve_live_agent_session_owner(
             let Some(expected_agent) = normalized_agent.as_deref() else {
                 return true;
             };
-            ["agentId", "agent"]
-                .iter()
-                .filter_map(|key| session.get(*key).and_then(Value::as_str))
-                .any(|value| value.eq_ignore_ascii_case(expected_agent))
+            listed_session_runs_agent(session, expected_agent)
         })
         .collect();
     match matches.as_slice() {
@@ -248,6 +245,42 @@ fn resolve_live_agent_session_owner(
             )
         ))),
     }
+}
+
+/// CDXC:PromptSearch 2026-09-19 WHY:
+/// A session launched from a custom agent configuration is listed with that configuration's `custom-…` id, so the family it runs is read from the projected agent icon the way resume planning does. Comparing ids alone made `gx f` report no live owner for a running custom Claude session and start a second `claude --resume` writer.
+/// SEE-ALSO: `session_owns_agent_conversation` in server/src/agent_prompt_search.rs, the same rule for the Find surface.
+fn listed_session_runs_agent(session: &Value, expected_agent: &str) -> bool {
+    let matches_id = ["agentId", "agent"]
+        .iter()
+        .filter_map(|key| session.get(*key).and_then(Value::as_str))
+        .any(|value| value.trim().eq_ignore_ascii_case(expected_agent));
+    if matches_id {
+        return true;
+    }
+    let is_custom_configuration =
+        session
+            .get("agentId")
+            .and_then(Value::as_str)
+            .is_some_and(|value| {
+                value
+                    .trim()
+                    .to_ascii_lowercase()
+                    .starts_with(crate::custom_session_tags::CUSTOM_SESSION_TAG_ID_PREFIX)
+            });
+    if !is_custom_configuration {
+        return false;
+    }
+    session
+        .get("agentIcon")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|icon| !icon.is_empty())
+        .is_some_and(|icon| {
+            crate::agents::default_agent_icon_to_id(icon)
+                .unwrap_or(icon)
+                .eq_ignore_ascii_case(expected_agent)
+        })
 }
 
 pub fn read_session_text_command(args: &[String]) -> CliResult<()> {
