@@ -2,15 +2,19 @@
 
 use std::borrow::Cow;
 
-use super::store::PresentationStore;
+use ghostex_gx_protocol::PresentationSession;
+
+use super::store::{MachinePresentation, PresentationStore};
 use crate::change::{ChangeSummary, IgnoredReason};
 use crate::keys::{ProjectKey, SessionKey};
-use crate::overlay::SessionPatch;
+use crate::overlay::{PatchVerdict, SessionPatch, StoredPatch};
 
 impl PresentationStore {
     /// Hides a session locally (a local-first close). Returns whether it was visible before.
     pub fn hide_session(&mut self, key: &SessionKey) -> ChangeSummary {
-        let entry = self.machine_mut(&key.machine);
+        let Some(entry) = self.machines.get_mut(&key.machine) else {
+            return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+        };
         let was_visible = entry
             .effective_session(&key.project_id, &key.session_id)
             .is_some();
@@ -28,7 +32,9 @@ impl PresentationStore {
 
     /// Takes a local hide back (the close request failed).
     pub fn unhide_session(&mut self, key: &SessionKey) -> ChangeSummary {
-        let entry = self.machine_mut(&key.machine);
+        let Some(entry) = self.machines.get_mut(&key.machine) else {
+            return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+        };
         let mut summary = ChangeSummary::default();
         if entry
             .overlays
@@ -47,7 +53,9 @@ impl PresentationStore {
 
     /// Hides a project locally (close to recent) until the daemon's removal arrives.
     pub fn hide_project(&mut self, key: &ProjectKey) -> ChangeSummary {
-        let entry = self.machine_mut(&key.machine);
+        let Some(entry) = self.machines.get_mut(&key.machine) else {
+            return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+        };
         let mut summary = ChangeSummary::default();
         let exists = entry
             .loaded()
@@ -65,7 +73,9 @@ impl PresentationStore {
     }
 
     pub fn unhide_project(&mut self, key: &ProjectKey) -> ChangeSummary {
-        let entry = self.machine_mut(&key.machine);
+        let Some(entry) = self.machines.get_mut(&key.machine) else {
+            return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+        };
         let mut summary = ChangeSummary::default();
         let exists = entry
             .loaded()
@@ -77,43 +87,65 @@ impl PresentationStore {
         summary
     }
 
-    /// Overlays an optimistic patch on a session. The revision is untouched. A patch for a session
-    /// the store does not hold is refused: there is nothing to overlay.
+    /// Overlays an optimistic patch on a session. The revision is untouched.
+    ///
+    /// Refused when the store does not hold the session (there is nothing to overlay). A patch the
+    /// daemon row already agrees with is not stored: it would have nothing to do, and would later
+    /// look like a pending overlay to a newer daemon value.
     pub fn patch_session(&mut self, key: &SessionKey, patch: SessionPatch) -> ChangeSummary {
-        let entry = self.machine_mut(&key.machine);
-        let exists = entry.loaded().is_some_and(|loaded| {
-            loaded
-                .server_session(&key.project_id, &key.session_id)
-                .is_some()
-        });
-        if !exists {
+        let Some(entry) = self.machines.get_mut(&key.machine) else {
             return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
-        }
+        };
+        let Some(server) = entry
+            .loaded()
+            .and_then(|loaded| loaded.server_session(&key.project_id, &key.session_id))
+        else {
+            return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+        };
         let before = entry
             .effective_session(&key.project_id, &key.session_id)
             .map(Cow::into_owned);
-        if patch.is_empty() {
+        let stored = StoredPatch::new(patch, server);
+        if stored.verdict(server) == PatchVerdict::Pending {
             entry
                 .overlays
                 .session_patches
-                .remove(&key.project_id, &key.session_id);
+                .insert(&key.project_id, &key.session_id, stored);
         } else {
             entry
                 .overlays
                 .session_patches
-                .insert(&key.project_id, &key.session_id, patch);
+                .remove(&key.project_id, &key.session_id);
         }
+        Self::session_change_since(entry, key, before)
+    }
+
+    /// Drops a session's optimistic patch (the request it anticipated failed).
+    pub fn clear_session_patch(&mut self, key: &SessionKey) -> ChangeSummary {
+        let Some(entry) = self.machines.get_mut(&key.machine) else {
+            return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+        };
+        let before = entry
+            .effective_session(&key.project_id, &key.session_id)
+            .map(Cow::into_owned);
+        entry
+            .overlays
+            .session_patches
+            .remove(&key.project_id, &key.session_id);
+        Self::session_change_since(entry, key, before)
+    }
+
+    fn session_change_since(
+        entry: &MachinePresentation,
+        key: &SessionKey,
+        before: Option<PresentationSession>,
+    ) -> ChangeSummary {
         let after = entry.effective_session(&key.project_id, &key.session_id);
         let mut summary = ChangeSummary::default();
         if before.as_ref() != after.as_deref() {
             summary.note_session_changed(key.clone());
         }
         summary
-    }
-
-    /// Drops a session's optimistic patch (the request it anticipated failed).
-    pub fn clear_session_patch(&mut self, key: &SessionKey) -> ChangeSummary {
-        self.patch_session(key, SessionPatch::default())
     }
 
     /// Drops every patch whose expiry has passed.
@@ -124,7 +156,7 @@ impl PresentationStore {
                 .overlays
                 .session_patches
                 .iter()
-                .filter(|(_, _, patch)| patch.expires_at_ms.is_some_and(|at| at <= now_ms))
+                .filter(|(_, _, stored)| stored.patch.expires_at_ms <= now_ms)
                 .map(|(project_id, session_id, _)| (project_id.to_string(), session_id.to_string()))
                 .collect();
             for (project_id, session_id) in expired {

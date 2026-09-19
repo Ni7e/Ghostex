@@ -1,14 +1,18 @@
 //! The top-level state machine: events in, state plus effects out.
 
-use ghostex_gx_protocol::{EventParseError, PresentationSnapshot, ServerEvent};
+use ghostex_gx_protocol::{
+    EventParseError, PresentationSnapshot, ServerEvent, GXSERVER_PROTOCOL_VERSION,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::change::{ChangeSummary, IgnoredReason};
-use crate::focus::{ActiveGroup, ExternalFocusUpdate, FocusOutcome, FocusState};
+use crate::connection::ConnectionUpdate;
+use crate::focus::{ExternalFocusUpdate, FocusOutcome, FocusState};
 use crate::keys::{MachineId, ProjectKey, SessionKey};
 use crate::overlay::SessionPatch;
 use crate::presentation_store::{PresentationStore, SideStateUpdate, SnapshotOrigin};
+use crate::selectors::{Loadable, TabDirection, TabSession};
 
 /// Something the user or the host did. Applied synchronously; never waits on the daemon.
 ///
@@ -18,10 +22,10 @@ use crate::presentation_store::{PresentationStore, SideStateUpdate, SnapshotOrig
 #[non_exhaustive]
 pub enum Intent {
     /// Focus a session. `visible` is the host's exact rendered set when the selection came from
-    /// the workspace (tab click, next or previous tab); leave it `None` for a sidebar click.
+    /// the workspace (tab click, next or previous tab); leave it `None` for a sidebar click. The
+    /// active project and group follow from where the session lives.
     FocusSession {
         session: SessionKey,
-        group: Option<ActiveGroup>,
         visible: Option<Vec<SessionKey>>,
     },
     /// Make a project active without choosing a session.
@@ -36,7 +40,8 @@ pub enum Intent {
     SetDisplayedSessions {
         sessions: Vec<SessionKey>,
     },
-    /// A focus update that did not start here; dropped when older than the newest local intent.
+    /// A focus update that did not start here; dropped when older than the newest local intent,
+    /// and anything it names that the store does not hold is dropped too.
     ExternalFocus(ExternalFocusUpdate),
     /// Local-first close: hide the row now, let the daemon catch up.
     HideSession {
@@ -53,7 +58,8 @@ pub enum Intent {
     UnhideProject {
         project: ProjectKey,
     },
-    /// Show an optimistic lifecycle or activity value until the daemon reports it.
+    /// Show an optimistic lifecycle or activity value until the daemon reports it, reports
+    /// something newer, or the patch expires.
     PatchSession {
         session: SessionKey,
         patch: SessionPatch,
@@ -84,6 +90,11 @@ pub enum Event {
         machine: MachineId,
         projects: Vec<Value>,
     },
+    /// What the socket client reports about a machine's event stream.
+    Connection {
+        machine: MachineId,
+        update: ConnectionUpdate,
+    },
     /// A machine was removed or its state must be forgotten.
     MachineUnloaded {
         machine: MachineId,
@@ -111,26 +122,41 @@ pub enum ResubscribeReason {
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub enum Effect {
-    /// Send `subscribePresentation` again. `last_revision` is what to quote; `None` forces a full
-    /// snapshot.
+    /// Send `subscribePresentation` again without `lastRevision`, which forces a full snapshot.
+    /// Asked once per cause: further frames that have to be ignored until the snapshot arrives do
+    /// not repeat it.
     ResubscribePresentation {
         machine: MachineId,
-        last_revision: Option<i64>,
         reason: ResubscribeReason,
     },
     /// `globalSidebarCommandsChanged` carries no payload: read `/api/readSidebarHud`.
     RefetchSidebarHud { machine: MachineId },
     /// `notificationFeedChanged` carries no payload: read `/api/readNotificationFeed`.
     RefetchNotificationFeed { machine: MachineId },
-    /// Persist the user's last selected session of a project (it must survive restarts).
+    /// Persist the user's last selected session of a project (it must survive restarts, and the
+    /// project being closed and reopened).
+    ///
+    /// This fires for every focus change to another session, so a held "next tab" key produces
+    /// one per repeat. The host must coalesce: keep only the newest per project and write it after
+    /// the burst (a short debounce, and on quit), never once per effect on the UI thread.
     RememberProjectSession {
         project: ProjectKey,
         session: SessionKey,
+    },
+    /// A snapshot carried rows that did not fit their type and were left out. The machine still
+    /// loaded; the host logs this, because it means a damaged daemon row or a moved wire contract.
+    ReportSkippedRows {
+        machine: MachineId,
+        projects: usize,
+        groups: usize,
+        sessions: usize,
+        first_error: String,
     },
 }
 
 /// The result of handling one event.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Output {
     pub effects: Vec<Effect>,
     pub changes: ChangeSummary,
@@ -141,6 +167,7 @@ pub struct Output {
 pub struct Core {
     presentation: PresentationStore,
     focus: FocusState,
+    tabs_generation: u64,
 }
 
 impl Core {
@@ -157,24 +184,41 @@ impl Core {
     }
 
     /// Seeds focus from persisted state before anything else happens (startup restore). Does not
-    /// count as a local intent.
+    /// count as a local intent. What it names is checked against each machine's rows once that
+    /// machine loads.
     pub fn restore_focus(&mut self, focus: FocusState) {
         self.focus = focus;
     }
 
     /// The workspace tabs of the active group. `NotLoaded` until the owning machine's first
-    /// snapshot arrived, and when no group is active.
-    pub fn active_tab_sessions(
-        &self,
-    ) -> crate::selectors::Loadable<Vec<crate::selectors::TabSession>> {
+    /// snapshot arrived and while no group is active; never `Missing` after an event was handled,
+    /// because focus is re-homed when its project goes away.
+    pub fn active_tab_sessions(&self) -> Loadable<Vec<TabSession>> {
         match &self.focus.active_group {
             Some(group) => self.presentation.tab_sessions(group),
-            None => crate::selectors::Loadable::NotLoaded,
+            None => Loadable::NotLoaded,
         }
     }
 
-    /// Parses and handles one raw frame. For tools and tests of the wire path; a real client
-    /// parses on its socket thread and sends [`Event::Frame`].
+    /// The tab next to the focused session in the active group, wrapping. For a held "next tab"
+    /// key: follow it with [`Intent::FocusSession`]. Allocates only the returned key.
+    pub fn adjacent_tab_session(&self, direction: TabDirection) -> Option<SessionKey> {
+        self.presentation.adjacent_tab_session(
+            self.focus.active_group.as_ref()?,
+            self.focus.focused_session.as_ref(),
+            direction,
+        )
+    }
+
+    /// Changes whenever the ordered keys of some group's tab list may have changed, and only then.
+    /// A tab strip keeps the list it built and rebuilds it when this number moves; row content
+    /// (title, activity) is reported separately through `sessions_changed`.
+    pub fn tabs_generation(&self) -> u64 {
+        self.tabs_generation
+    }
+
+    /// Parses and handles one raw frame. For tools; a real client parses on its socket thread and
+    /// sends [`Event::Frame`].
     pub fn handle_raw_frame(
         &mut self,
         machine: MachineId,
@@ -191,18 +235,41 @@ impl Core {
         ))
     }
 
+    /// Applies a burst of events and returns one combined output, so the host repaints once.
+    pub fn handle_batch(&mut self, events: impl IntoIterator<Item = Event>, now_ms: u64) -> Output {
+        let mut combined = Output::default();
+        for event in events {
+            let output = self.handle(event, now_ms);
+            combined.changes.merge(output.changes);
+            for effect in output.effects {
+                // A later request of the same kind replaces the earlier one.
+                combined
+                    .effects
+                    .retain(|earlier| !supersedes(&effect, earlier));
+                combined.effects.push(effect);
+            }
+        }
+        combined
+    }
+
     /// Applies one event. Synchronous and free of I/O; `now_ms` is the host's clock.
     pub fn handle(&mut self, event: Event, now_ms: u64) -> Output {
         let mut output = Output::default();
         match event {
-            Event::Frame { machine, frame } => self.handle_frame(&machine, *frame, &mut output),
+            Event::Frame { machine, frame } => {
+                self.handle_frame(&machine, *frame, now_ms, &mut output)
+            }
             Event::SnapshotRead { machine, snapshot } => {
+                report_skipped_rows(&machine, &snapshot, &mut output);
                 output.changes =
                     self.presentation
                         .apply_snapshot(&machine, "", *snapshot, SnapshotOrigin::Read);
             }
             Event::DomainProjectsRead { machine, projects } => {
                 output.changes = self.presentation.set_domain_projects(&machine, projects);
+            }
+            Event::Connection { machine, update } => {
+                output.changes = self.presentation.apply_connection(&machine, update, now_ms);
             }
             Event::MachineUnloaded { machine } => {
                 output.changes = self.presentation.unload_machine(&machine);
@@ -212,19 +279,41 @@ impl Core {
             Event::Intent(intent) => self.handle_intent(intent, now_ms, &mut output),
             Event::Tick => output.changes = self.presentation.expire_patches(now_ms),
         }
-        self.reconcile_focus_with_presentation(&mut output);
+        // Focus can only fall out of step with the store when something changed.
+        if !output.changes.is_empty() {
+            let focus = self.focus.reconcile(&self.presentation);
+            self.note_focus(focus, &mut output);
+        }
+        if output.changes.tab_lists_changed() {
+            self.tabs_generation += 1;
+        }
         output
     }
 
-    fn handle_frame(&mut self, machine: &MachineId, frame: ServerEvent, output: &mut Output) {
+    fn handle_frame(
+        &mut self,
+        machine: &MachineId,
+        frame: ServerEvent,
+        now_ms: u64,
+        output: &mut Output,
+    ) {
+        if let Some(received) = frame.protocol_version() {
+            if received != GXSERVER_PROTOCOL_VERSION {
+                output.changes =
+                    ChangeSummary::ignored(IgnoredReason::ProtocolMismatch { received });
+                return;
+            }
+        }
         match frame {
             ServerEvent::PresentationSnapshot(frame) => {
+                report_skipped_rows(machine, &frame.snapshot, output);
                 output.changes = self.presentation.apply_snapshot(
                     machine,
                     &frame.header.server_id,
                     *frame.snapshot,
                     SnapshotOrigin::Stream,
                 );
+                self.note_stream_acknowledged(machine, now_ms, output);
             }
             ServerEvent::PresentationSnapshotCurrent(frame) => {
                 output.changes = self.presentation.apply_snapshot_current(
@@ -232,12 +321,14 @@ impl Core {
                     &frame.header.server_id,
                     frame.revision,
                 );
-                if output.changes.ignored == Some(IgnoredReason::NotLoaded) {
-                    output.effects.push(Effect::ResubscribePresentation {
-                        machine: machine.clone(),
-                        last_revision: None,
-                        reason: ResubscribeReason::CurrentWithoutSnapshot,
-                    });
+                match output.changes.ignored {
+                    Some(IgnoredReason::NotLoaded) => self.request_resubscribe(
+                        machine,
+                        ResubscribeReason::CurrentWithoutSnapshot,
+                        output,
+                    ),
+                    Some(_) => self.resubscribe_if_server_changed(machine, output),
+                    None => self.note_stream_acknowledged(machine, now_ms, output),
                 }
             }
             ServerEvent::PresentationDelta(frame) => {
@@ -320,23 +411,37 @@ impl Core {
         self.resubscribe_if_server_changed(machine, output);
     }
 
-    fn resubscribe_if_server_changed(&self, machine: &MachineId, output: &mut Output) {
+    /// A stream snapshot or a snapshot-current answer means the stream is live.
+    fn note_stream_acknowledged(&mut self, machine: &MachineId, now_ms: u64, output: &mut Output) {
+        let connection =
+            self.presentation
+                .apply_connection(machine, ConnectionUpdate::Live, now_ms);
+        output.changes.merge(connection);
+    }
+
+    fn resubscribe_if_server_changed(&mut self, machine: &MachineId, output: &mut Output) {
         if output.changes.ignored == Some(IgnoredReason::ServerChanged) {
+            self.request_resubscribe(machine, ResubscribeReason::ServerChanged, output);
+        }
+    }
+
+    fn request_resubscribe(
+        &mut self,
+        machine: &MachineId,
+        reason: ResubscribeReason,
+        output: &mut Output,
+    ) {
+        if self.presentation.begin_resubscribe(machine) {
             output.effects.push(Effect::ResubscribePresentation {
                 machine: machine.clone(),
-                last_revision: None,
-                reason: ResubscribeReason::ServerChanged,
+                reason,
             });
         }
     }
 
     fn handle_intent(&mut self, intent: Intent, now_ms: u64, output: &mut Output) {
         match intent {
-            Intent::FocusSession {
-                session,
-                group,
-                visible,
-            } => {
+            Intent::FocusSession { session, visible } => {
                 // Before the first snapshot the target cannot be checked (startup restore); once
                 // the machine is loaded a session that does not exist is refused.
                 let loaded = self.presentation.loaded(&session.machine).is_some();
@@ -344,9 +449,9 @@ impl Core {
                     output.changes = ChangeSummary::ignored(IgnoredReason::UnknownTarget);
                     return;
                 }
-                let focus =
-                    self.focus
-                        .focus_session(&self.presentation, session, group, visible, now_ms);
+                let focus = self
+                    .focus
+                    .focus_session(&self.presentation, session, visible, now_ms);
                 self.note_focus(focus, output);
             }
             Intent::FocusProject { project } => {
@@ -403,11 +508,12 @@ impl Core {
             ));
         }
         if focus.changed || focus.displayed_changed {
-            output.changes.merge(ChangeSummary {
+            let changes = ChangeSummary {
                 focus_changed: focus.changed,
                 displayed_changed: focus.displayed_changed,
                 ..ChangeSummary::default()
-            });
+            };
+            output.changes.merge(changes);
         }
         if let Some((project, session)) = focus.remembered {
             output
@@ -415,48 +521,40 @@ impl Core {
                 .push(Effect::RememberProjectSession { project, session });
         }
     }
+}
 
-    /// Focus must never point at a session that is gone. Runs after every event: sessions the
-    /// daemon removed or the user hid leave focus, and after a machine's (re)load everything
-    /// focus holds for that machine is checked against the new rows.
-    fn reconcile_focus_with_presentation(&mut self, output: &mut Output) {
-        let mut gone: Vec<SessionKey> = output.changes.sessions_removed.clone();
-        for project in &output.changes.projects_removed {
-            gone.extend(self.focus_sessions_where(|key| key.project_key() == *project));
-        }
-        let forgotten = gone.len();
-        for machine in &output.changes.machines_reloaded {
-            if self.presentation.loaded(machine).is_none() {
-                continue;
-            }
-            let missing = self
-                .focus_sessions_where(|key| key.machine == *machine)
-                .into_iter()
-                .filter(|key| self.presentation.session(key).is_none());
-            gone.extend(missing);
-        }
-        if gone.is_empty() {
-            return;
-        }
-        // Only sessions the daemon or the user removed are forgotten as a project's last
-        // session. A reload must not forget them: the remembered session of a closed project is
-        // not in the presentation, and the user still expects it back.
-        let (removed, missing_after_reload) = gone.split_at(forgotten);
-        let mut focus = self.focus.sessions_gone(removed, true);
-        let reload = self.focus.sessions_gone(missing_after_reload, false);
-        focus.changed |= reload.changed;
-        focus.displayed_changed |= reload.displayed_changed;
-        self.note_focus(focus, output);
+/// Whether `later` makes `earlier` pointless inside one batch.
+fn supersedes(later: &Effect, earlier: &Effect) -> bool {
+    match (later, earlier) {
+        (
+            Effect::RememberProjectSession { project, .. },
+            Effect::RememberProjectSession {
+                project: earlier_project,
+                ..
+            },
+        ) => project == earlier_project,
+        _ => later == earlier,
     }
+}
 
-    fn focus_sessions_where(&self, matches: impl Fn(&SessionKey) -> bool) -> Vec<SessionKey> {
-        self.focus
-            .focused_session
-            .iter()
-            .chain(&self.focus.visible_sessions)
-            .chain(&self.focus.displayed_sessions)
-            .filter(|key| matches(key))
-            .cloned()
-            .collect()
+fn report_skipped_rows(machine: &MachineId, snapshot: &PresentationSnapshot, output: &mut Output) {
+    if snapshot.skipped_row_count() == 0 {
+        return;
     }
+    let first_error = snapshot
+        .projects
+        .skipped
+        .iter()
+        .chain(&snapshot.groups.skipped)
+        .chain(&snapshot.sessions.skipped)
+        .next()
+        .map(|row| row.error.clone())
+        .unwrap_or_default();
+    output.effects.push(Effect::ReportSkippedRows {
+        machine: machine.clone(),
+        projects: snapshot.projects.skipped.len(),
+        groups: snapshot.groups.skipped.len(),
+        sessions: snapshot.sessions.skipped.len(),
+        first_error,
+    });
 }

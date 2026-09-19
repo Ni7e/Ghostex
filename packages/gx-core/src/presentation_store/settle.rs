@@ -6,6 +6,7 @@ use super::loaded::{project_id_order, LoadedPresentation};
 use super::store::{MachinePresentation, PresentationState};
 use crate::change::ChangeSummary;
 use crate::keys::{MachineId, ProjectKey, SessionKey};
+use crate::overlay::PatchVerdict;
 
 /// Lists what differs between two loaded states of one machine.
 pub(super) fn diff_loaded(
@@ -93,7 +94,7 @@ pub(super) fn settle_overlays_after_snapshot(
         .filter(|(project_id, session_id, patch)| {
             // A patch is finished when its session is gone or the daemon row agrees with it.
             match loaded.server_session(project_id, session_id) {
-                Some(server) => patch.is_caught_up(server),
+                Some(server) => patch.verdict(server) != PatchVerdict::Pending,
                 None => true,
             }
         })

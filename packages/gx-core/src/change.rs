@@ -23,6 +23,8 @@ pub enum IgnoredReason {
     },
     /// The intent named something the store does not hold.
     UnknownTarget,
+    /// The frame carries another `protocolVersion` than this client speaks.
+    ProtocolMismatch { received: u64 },
     /// A frame type the core has no state for yet (chat frames until the chat milestone, renderer
     /// commands, lifecycle notices).
     NotOwnedYet,
@@ -48,8 +50,11 @@ impl SideStateChanges {
 ///
 /// "Changed" means the effective value (server state with local overlays applied) may differ
 /// from before. A removed key is only in the `removed` list.
+///
+/// Build one with `ChangeSummary::default()`; fold several with [`ChangeSummary::merge`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct ChangeSummary {
     /// Set when the input was dropped; every other field is then empty.
     pub ignored: Option<IgnoredReason>,
@@ -63,6 +68,10 @@ pub struct ChangeSummary {
     pub project_order_changed: Vec<MachineId>,
     /// The order or membership of sessions in these projects changed (tab strips, sidebar rows).
     pub session_order_changed: Vec<ProjectKey>,
+    /// The membership or order of the Chats collection of these machines changed.
+    pub chat_collection_changed: Vec<MachineId>,
+    /// The connection state of these machines changed.
+    pub connection_changed: Vec<MachineId>,
     pub side_state: SideStateChanges,
     /// Active project, active group, focused session, or the visible set changed.
     pub focus_changed: bool,
@@ -87,6 +96,8 @@ impl ChangeSummary {
             && self.sessions_removed.is_empty()
             && self.project_order_changed.is_empty()
             && self.session_order_changed.is_empty()
+            && self.chat_collection_changed.is_empty()
+            && self.connection_changed.is_empty()
             && !self.side_state.any()
             && !self.focus_changed
             && !self.displayed_changed
@@ -116,23 +127,54 @@ impl ChangeSummary {
         push_unique(&mut self.project_order_changed, machine);
     }
 
-    /// Folds `other` into `self` (used when one event runs several steps).
-    pub(crate) fn merge(&mut self, other: ChangeSummary) {
+    pub(crate) fn note_chat_collection_changed(&mut self, machine: MachineId) {
+        push_unique(&mut self.chat_collection_changed, machine);
+    }
+
+    pub(crate) fn note_connection_changed(&mut self, machine: MachineId) {
+        push_unique(&mut self.connection_changed, machine);
+    }
+
+    /// True when the ordered keys of some group's tab list may have changed (as opposed to the
+    /// content of a row, which `sessions_changed` reports).
+    pub fn tab_lists_changed(&self) -> bool {
+        !self.machines_reloaded.is_empty()
+            || !self.projects_changed.is_empty()
+            || !self.projects_removed.is_empty()
+            || !self.session_order_changed.is_empty()
+            || !self.chat_collection_changed.is_empty()
+            || self.side_state.workspace_groups
+    }
+
+    /// Folds `other` into `self`, so a host can coalesce a burst of events into one repaint. `other`
+    /// must be the later of the two: its verdict on a key (changed or removed) replaces the earlier one.
+    pub fn merge(&mut self, other: ChangeSummary) {
         let ignored = self.ignored.take().or(other.ignored);
         for machine in other.machines_reloaded {
             push_unique(&mut self.machines_reloaded, machine);
         }
+        // `other` happened after `self`, so its verdict on a key replaces the earlier one.
         for key in other.projects_changed {
+            self.projects_removed.retain(|removed| *removed != key);
             self.note_project_changed(key);
         }
         for key in other.projects_removed {
+            self.projects_changed.retain(|changed| *changed != key);
             self.note_project_removed(key);
         }
         for key in other.sessions_changed {
+            self.sessions_removed.retain(|removed| *removed != key);
             self.note_session_changed(key);
         }
         for key in other.sessions_removed {
+            self.sessions_changed.retain(|changed| *changed != key);
             self.note_session_removed(key);
+        }
+        for machine in other.chat_collection_changed {
+            self.note_chat_collection_changed(machine);
+        }
+        for machine in other.connection_changed {
+            self.note_connection_changed(machine);
         }
         for machine in other.project_order_changed {
             self.note_project_order_changed(machine);

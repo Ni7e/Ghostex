@@ -7,7 +7,7 @@ use ghostex_gx_protocol::{
 use super::loaded::{project_id_order, sort_groups, sort_projects, LoadedPresentation};
 use crate::change::ChangeSummary;
 use crate::keys::{MachineId, ProjectKey, SessionKey};
-use crate::overlay::Overlays;
+use crate::overlay::{Overlays, PatchVerdict};
 
 pub(super) fn upsert_session(
     machine: &MachineId,
@@ -25,11 +25,12 @@ pub(super) fn upsert_session(
         session_id: session_id.clone(),
     };
 
-    // The daemon has caught up with a local patch once its row says the same thing.
+    // A patch ends when the daemon row says the same thing, or says something newer than the
+    // value the patch was made against.
     let patch_done = overlays
         .session_patches
         .get(&project_id, &session_id)
-        .is_some_and(|patch| patch.is_caught_up(&session));
+        .is_some_and(|stored| stored.verdict(&session) != PatchVerdict::Pending);
     if patch_done {
         overlays.session_patches.remove(&project_id, &session_id);
     }
@@ -52,7 +53,21 @@ pub(super) fn upsert_session(
         summary.note_session_changed(key);
     }
 
-    let mut order_changed = loaded.rebuild_group_session_ids(&project_id, &group_id);
+    // A row can enter or leave the tab lists without moving in its group: a session that stops
+    // keeps its place in `sessionIds` but is no longer listed in the sidebar.
+    let listing = |session: &PresentationSession| {
+        (
+            session.visible_in_sidebar_by_default,
+            session.surface.clone(),
+            session.kind.clone(),
+        )
+    };
+    let listing_changed = match (&previous, loaded.sessions.get(&project_id, &session_id)) {
+        (Some(previous), Some(current)) => listing(previous) != listing(current),
+        _ => false,
+    };
+    let mut order_changed =
+        loaded.rebuild_group_session_ids(&project_id, &group_id) || listing_changed;
     if let Some(previous) = previous.filter(|previous| previous.group_id != group_id) {
         order_changed |= loaded.rebuild_group_session_ids(&project_id, &previous.group_id);
     }

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use ghostex_gx_protocol::{PresentationDelta, PresentationSnapshot};
+use ghostex_gx_protocol::{PresentationDelta, PresentationSnapshot, WorkspaceSessionGroupsState};
 use serde_json::Value;
 
 use super::loaded::{sort_groups, LoadedPresentation};
@@ -10,6 +10,7 @@ use super::reducers::{remove_project, remove_session, upsert_project, upsert_ses
 use super::settle::{diff_loaded, settle_overlays_after_snapshot};
 use super::store::{PresentationState, PresentationStore, SideStateUpdate};
 use crate::change::{ChangeSummary, IgnoredReason};
+use crate::connection::{ConnectionPhase, ConnectionUpdate};
 use crate::keys::{MachineId, ProjectKey};
 
 /// Where a snapshot came from, which decides whether it may be older than what is held.
@@ -50,7 +51,12 @@ impl PresentationStore {
         let mut summary = ChangeSummary::default();
         let side = &mut entry.side;
         if let Some(groups) = snapshot.workspace_groups.take() {
-            summary.side_state.workspace_groups = side.workspace_groups.as_ref() != Some(&groups);
+            note_workspace_groups_change(
+                machine,
+                side.workspace_groups.as_ref(),
+                &groups,
+                &mut summary,
+            );
             side.workspace_groups = Some(groups);
         }
         if let Some(collections) = snapshot.sidebar_project_collections.take() {
@@ -82,6 +88,9 @@ impl PresentationStore {
                 diff_loaded(machine, previous, &next, &mut summary);
             }
         }
+        if origin == SnapshotOrigin::Stream {
+            entry.resubscribe_requested = false;
+        }
         entry.state = PresentationState::Loaded(Box::new(next));
         settle_overlays_after_snapshot(machine, entry, &mut summary);
         summary
@@ -100,6 +109,13 @@ impl PresentationStore {
         match &mut self.machine_mut(machine).state {
             PresentationState::NotLoaded => ChangeSummary::ignored(IgnoredReason::NotLoaded),
             PresentationState::Loaded(loaded) => {
+                // "Current" from another daemon says nothing about the rows held from this one.
+                if !server_id.is_empty()
+                    && !loaded.server_id.is_empty()
+                    && server_id != loaded.server_id
+                {
+                    return ChangeSummary::ignored(IgnoredReason::ServerChanged);
+                }
                 if loaded.server_id.is_empty() {
                     loaded.server_id = server_id.to_string();
                 }
@@ -252,8 +268,12 @@ impl PresentationStore {
         let side = &mut entry.side;
         match update {
             SideStateUpdate::WorkspaceGroups(state) => {
-                summary.side_state.workspace_groups =
-                    side.workspace_groups.as_ref() != Some(&state);
+                note_workspace_groups_change(
+                    machine,
+                    side.workspace_groups.as_ref(),
+                    &state,
+                    &mut summary,
+                );
                 side.workspace_groups = Some(state);
             }
             SideStateUpdate::ProjectCollections(state) => {
@@ -285,6 +305,10 @@ impl PresentationStore {
     }
 
     /// Replaces the full list of domain project rows (from `listProjects`).
+    ///
+    /// A row can flip a project between "chat" and "code", which moves its sessions between the
+    /// project's own tab list and the Chats collection, so such a flip is reported as an order
+    /// change.
     pub fn set_domain_projects(
         &mut self,
         machine: &MachineId,
@@ -297,17 +321,82 @@ impl PresentationStore {
                 next.insert(project_id.to_string(), project);
             }
         }
+        let changed: Vec<String> = next
+            .keys()
+            .chain(entry.domain_projects.keys())
+            .filter(|project_id| next.get(*project_id) != entry.domain_projects.get(*project_id))
+            .cloned()
+            .collect();
+        let chat_before: Vec<bool> = changed
+            .iter()
+            .map(|project_id| entry.is_chat_project(project_id))
+            .collect();
+        entry.domain_projects = next;
+
         let mut summary = ChangeSummary::default();
-        for project_id in next.keys().chain(entry.domain_projects.keys()) {
-            if next.get(project_id) != entry.domain_projects.get(project_id) {
-                summary.note_project_changed(ProjectKey {
-                    machine: machine.clone(),
-                    project_id: project_id.clone(),
-                });
+        for (project_id, was_chat) in changed.into_iter().zip(chat_before) {
+            let key = ProjectKey {
+                machine: machine.clone(),
+                project_id,
+            };
+            if entry.is_chat_project(&key.project_id) != was_chat {
+                summary.note_session_order_changed(key.clone());
+                summary.note_chat_collection_changed(machine.clone());
+            }
+            summary.note_project_changed(key);
+        }
+        summary
+    }
+
+    /// Records what the socket client reports about a machine's event stream.
+    pub fn apply_connection(
+        &mut self,
+        machine: &MachineId,
+        update: ConnectionUpdate,
+        now_ms: u64,
+    ) -> ChangeSummary {
+        let entry = self.machine_mut(machine);
+        let mut next = entry.connection.clone();
+        match update {
+            ConnectionUpdate::Connecting { attempt } => {
+                next.phase = ConnectionPhase::Connecting;
+                next.attempt = attempt;
+            }
+            ConnectionUpdate::Live => {
+                next.phase = ConnectionPhase::Live;
+                next.attempt = 0;
+                next.last_error = None;
+            }
+            ConnectionUpdate::Lost { error } => {
+                next.phase = if entry.is_loaded() {
+                    ConnectionPhase::Stale
+                } else {
+                    ConnectionPhase::Disconnected
+                };
+                next.last_error = error;
             }
         }
-        entry.domain_projects = next;
+        // A new socket starts a new subscribe, so an earlier resubscribe request is settled.
+        entry.resubscribe_requested = false;
+        let mut summary = ChangeSummary::default();
+        if next.phase != entry.connection.phase
+            || next.last_error != entry.connection.last_error
+            || next.attempt != entry.connection.attempt
+        {
+            if next.phase != entry.connection.phase {
+                next.changed_at_ms = now_ms;
+            }
+            entry.connection = next;
+            summary.note_connection_changed(machine.clone());
+        }
         summary
+    }
+
+    /// Marks that the core asked the host to resubscribe. Returns `false` when a request is
+    /// already outstanding, so one daemon change yields one request, not one per ignored frame.
+    pub fn begin_resubscribe(&mut self, machine: &MachineId) -> bool {
+        let entry = self.machine_mut(machine);
+        !std::mem::replace(&mut entry.resubscribe_requested, true)
     }
 
     /// Drops a machine's daemon state (a removed or disconnected machine). Overlays go with it.
@@ -335,4 +424,43 @@ pub(super) fn frame_rejection(
         held: loaded.revision,
         received: revision,
     })
+}
+
+/// Reports what a new workspace-groups document moves.
+///
+/// User-made groups take sessions out of their project's own tab list, so a document that changes
+/// a project's groups changes that project's tab lists even though no session row changed. Only
+/// the local machine's document holds user-made groups (keyed by workspace project id, local and
+/// remote); every machine's document orders that machine's projects, which orders its Chats
+/// collection.
+fn note_workspace_groups_change(
+    machine: &MachineId,
+    previous: Option<&WorkspaceSessionGroupsState>,
+    next: &WorkspaceSessionGroupsState,
+    summary: &mut ChangeSummary,
+) {
+    if previous == Some(next) {
+        return;
+    }
+    summary.side_state.workspace_groups = true;
+    if previous.map(|state| &state.project_order) != Some(&next.project_order) {
+        summary.note_chat_collection_changed(machine.clone());
+    }
+    if !machine.is_local() {
+        return;
+    }
+    let empty = BTreeMap::new();
+    let before = previous.map_or(&empty, |state| &state.projects);
+    for workspace_project_id in before.keys().chain(next.projects.keys()) {
+        let groups_before = before.get(workspace_project_id).map(|entry| &entry.groups);
+        let groups_after = next
+            .projects
+            .get(workspace_project_id)
+            .map(|entry| &entry.groups);
+        if groups_before != groups_after {
+            if let Some(project) = ProjectKey::parse_workspace_project_id(workspace_project_id) {
+                summary.note_session_order_changed(project);
+            }
+        }
+    }
 }

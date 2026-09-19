@@ -55,20 +55,85 @@ impl ActiveGroup {
     }
 }
 
+/// One field of an external focus update: leave it, empty it, or set it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FocusField<T> {
+    /// The sender knows nothing about this field; it stays as it is.
+    #[default]
+    Keep,
+    /// The sender says this field is empty.
+    Clear,
+    Set(T),
+}
+
+impl<T> FocusField<T> {
+    fn apply_to(self, slot: &mut Option<T>) {
+        match self {
+            Self::Keep => {}
+            Self::Clear => *slot = None,
+            Self::Set(value) => *slot = Some(value),
+        }
+    }
+}
+
 /// A focus update that did not originate from a local intent: a daemon `focusSession` renderer
 /// command, the old runtime's echo while it still runs beside the store, or a bootstrap hint.
+///
+/// Every field defaults to "keep", so a sender that knows only a session id says only that:
+/// `ExternalFocusUpdate::new(stamp).with_focused_session(key)`. The active project and group then
+/// follow from the session, because the focused session owns the active project.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct ExternalFocusUpdate {
     /// The value of [`FocusState::local_stamp`] the sender had seen when it produced this update.
     /// An update that observed an older stamp than the current one lost the race to a newer local
     /// intent and is dropped.
     pub observed_stamp: u64,
-    pub active_project: Option<ProjectKey>,
-    pub active_group: Option<ActiveGroup>,
-    pub focused_session: Option<SessionKey>,
-    /// `None` leaves the visible set as it is.
-    pub visible_sessions: Option<Vec<SessionKey>>,
+    pub active_project: FocusField<ProjectKey>,
+    pub active_group: FocusField<ActiveGroup>,
+    pub focused_session: FocusField<SessionKey>,
+    /// `Clear` empties the visible set.
+    pub visible_sessions: FocusField<Vec<SessionKey>>,
+}
+
+impl ExternalFocusUpdate {
+    /// An update that changes nothing yet; add fields with the `with_` and `clear_` methods.
+    pub fn new(observed_stamp: u64) -> Self {
+        Self {
+            observed_stamp,
+            active_project: FocusField::Keep,
+            active_group: FocusField::Keep,
+            focused_session: FocusField::Keep,
+            visible_sessions: FocusField::Keep,
+        }
+    }
+
+    pub fn with_active_project(mut self, project: ProjectKey) -> Self {
+        self.active_project = FocusField::Set(project);
+        self
+    }
+
+    pub fn with_active_group(mut self, group: ActiveGroup) -> Self {
+        self.active_group = FocusField::Set(group);
+        self
+    }
+
+    pub fn with_focused_session(mut self, session: SessionKey) -> Self {
+        self.focused_session = FocusField::Set(session);
+        self
+    }
+
+    pub fn clear_focused_session(mut self) -> Self {
+        self.focused_session = FocusField::Clear;
+        self
+    }
+
+    pub fn with_visible_sessions(mut self, sessions: Vec<SessionKey>) -> Self {
+        self.visible_sessions = FocusField::Set(sessions);
+        self
+    }
 }
 
 /// What a focus reducer call did.
@@ -123,15 +188,15 @@ impl FocusState {
 
     /// Local intent: focus a session.
     ///
-    /// `group` names the sidebar group the click came from; without it the session's project
-    /// group is used (the Chats collection for a chat project). `exact_visible` is the host's
-    /// rendered set when the selection came from the workspace (tab click, next or previous tab);
-    /// without it the visible set is updated by [`next_visible_sessions_for_local_focus`].
+    /// The active project and group follow from the session (see [`Self::reconcile`]); a caller
+    /// cannot name a group that disagrees with where the session lives, because the tab list of
+    /// such a group would not contain the focused session. `exact_visible` is the host's rendered
+    /// set when the selection came from the workspace (tab click, next or previous tab); without
+    /// it the visible set is updated by [`next_visible_sessions_for_local_focus`].
     pub fn focus_session(
         &mut self,
         store: &PresentationStore,
         session: SessionKey,
-        group: Option<ActiveGroup>,
         exact_visible: Option<Vec<SessionKey>>,
         now_ms: u64,
     ) -> FocusOutcome {
@@ -139,7 +204,6 @@ impl FocusState {
         self.stamp(now_ms);
 
         let project = session.project_key();
-        let group = group.unwrap_or_else(|| default_group_for_project(store, &project));
         let visible = match exact_visible {
             Some(exact) => dedupe(exact),
             None if session.machine.is_local() => next_visible_sessions_for_local_focus(
@@ -158,8 +222,8 @@ impl FocusState {
             self.last_session_by_project.push(session.clone());
             (project.clone(), session.clone())
         });
+        self.active_group = Some(store.group_of_session(&session));
         self.active_project = Some(project);
-        self.active_group = Some(group);
         self.focused_session = Some(session);
         self.visible_sessions = visible;
 
@@ -170,8 +234,11 @@ impl FocusState {
         }
     }
 
-    /// Local intent: make a project active without choosing a session. The focused session and
-    /// the visible set are left alone.
+    /// Local intent: make a project active without choosing a session.
+    ///
+    /// A focused session of another project is cleared: the focused session owns the active
+    /// project, so leaving it would snap the active project straight back. The visible set is left
+    /// alone; the host reports the new one.
     pub fn focus_project(
         &mut self,
         store: &PresentationStore,
@@ -180,6 +247,13 @@ impl FocusState {
     ) -> FocusOutcome {
         let before = self.projection();
         self.stamp(now_ms);
+        if self
+            .focused_session
+            .as_ref()
+            .is_some_and(|focused| focused.project_key() != project)
+        {
+            self.focused_session = None;
+        }
         self.active_group = Some(default_group_for_project(store, &project));
         self.active_project = Some(project);
         FocusOutcome {
@@ -213,7 +287,9 @@ impl FocusState {
     }
 
     /// A focus update from outside. Applied only when it is not older than the newest local
-    /// intent; it never bumps the stamp, so it can never beat a local intent itself.
+    /// intent; it never bumps the stamp, so it can never beat a local intent itself. The caller
+    /// runs [`Self::reconcile`] afterwards, which drops anything the update named that the store
+    /// does not hold.
     pub fn apply_external(&mut self, update: ExternalFocusUpdate) -> FocusOutcome {
         if update.observed_stamp < self.local_stamp {
             return FocusOutcome {
@@ -222,47 +298,16 @@ impl FocusState {
             };
         }
         let before = self.projection();
-        self.active_project = update.active_project;
-        self.active_group = update.active_group;
-        self.focused_session = update.focused_session;
-        if let Some(visible) = update.visible_sessions {
-            self.visible_sessions = dedupe(visible);
+        update.active_project.apply_to(&mut self.active_project);
+        update.active_group.apply_to(&mut self.active_group);
+        update.focused_session.apply_to(&mut self.focused_session);
+        match update.visible_sessions {
+            FocusField::Keep => {}
+            FocusField::Clear => self.visible_sessions.clear(),
+            FocusField::Set(visible) => self.visible_sessions = dedupe(visible),
         }
         FocusOutcome {
             changed: before != self.projection(),
-            ..FocusOutcome::default()
-        }
-    }
-
-    /// Sessions disappeared (removed by the daemon, or hidden locally): clear focus that points at
-    /// them and drop them from the visible and displayed sets. Choosing a successor is a later
-    /// milestone's rule; until then focus is simply empty.
-    ///
-    /// `forget_remembered` also drops them as a project's remembered last session. Pass `false`
-    /// when the sessions are merely missing from a fresh load: the remembered session of a closed
-    /// project is not in the presentation, and the user still expects it back.
-    pub fn sessions_gone(&mut self, gone: &[SessionKey], forget_remembered: bool) -> FocusOutcome {
-        if gone.is_empty() {
-            return FocusOutcome::default();
-        }
-        let before = self.projection();
-        if self
-            .focused_session
-            .as_ref()
-            .is_some_and(|focused| gone.contains(focused))
-        {
-            self.focused_session = None;
-        }
-        self.visible_sessions.retain(|key| !gone.contains(key));
-        let displayed_before = self.displayed_sessions.len();
-        self.displayed_sessions.retain(|key| !gone.contains(key));
-        if forget_remembered {
-            self.last_session_by_project
-                .retain(|session| !gone.contains(session));
-        }
-        FocusOutcome {
-            changed: before != self.projection(),
-            displayed_changed: displayed_before != self.displayed_sessions.len(),
             ..FocusOutcome::default()
         }
     }
@@ -285,6 +330,96 @@ impl FocusState {
             changed: before != self.projection(),
             displayed_changed: displayed_before != self.displayed_sessions.len(),
             ..FocusOutcome::default()
+        }
+    }
+
+    /// Makes focus agree with the store. Runs after every event.
+    ///
+    /// CDXC:FocusRouting 2026-09-19 WHY:
+    /// The TypeScript runtime re-derived the active project and group from the focused session on every publish (`ensureActiveProject`), and the desktop workspace depends on that: the active group's tab list is its authority for which tabs exist, so a group that does not contain the focused session, or that names a project that is gone, reads as "no tabs" and clears the workspace. Doing it here, after every event, keeps the invariant in one place instead of at each call site. The rules, in order: (1) focus never points at a session the store does not hold, judged only for machines that are loaded; (2) a focused session owns the active project, and the group is the Chats collection for a chat project, else the user-made group that contains the session, else the project's own group; (3) otherwise the active project stays while it exists and is not hidden, with a group that belongs to it; (4) otherwise the first local code project becomes active, else the local Chats collection. The remembered last session of a project is never forgotten here: it must survive the project being closed and reopened, so memory and the host's persisted copy always agree.
+    pub fn reconcile(&mut self, store: &PresentationStore) -> FocusOutcome {
+        let before = self.projection();
+        let exists =
+            |key: &SessionKey| store.loaded(&key.machine).is_none() || store.session(key).is_some();
+        if self
+            .focused_session
+            .as_ref()
+            .is_some_and(|key| !exists(key))
+        {
+            self.focused_session = None;
+        }
+        self.visible_sessions.retain(exists);
+        let displayed_before = self.displayed_sessions.len();
+        self.displayed_sessions.retain(exists);
+        self.ensure_active(store);
+        FocusOutcome {
+            changed: before != self.projection(),
+            displayed_changed: displayed_before != self.displayed_sessions.len(),
+            ..FocusOutcome::default()
+        }
+    }
+
+    fn ensure_active(&mut self, store: &PresentationStore) {
+        if let Some(focused) = &self.focused_session {
+            if store.loaded(&focused.machine).is_none() {
+                // Not judged yet (startup restore, or a remote machine that is still connecting).
+                return;
+            }
+            let project = focused.project_key();
+            if store.project(&project).is_some() {
+                self.active_group = Some(store.group_of_session(focused));
+                self.active_project = Some(project);
+                return;
+            }
+        }
+        if let Some(project) = &self.active_project {
+            if store.loaded(&project.machine).is_none() {
+                return;
+            }
+            if store.project(project).is_some() {
+                let group_fits = match &self.active_group {
+                    Some(ActiveGroup::Project(owner)) => {
+                        owner == project && !store.is_chat_project(project)
+                    }
+                    Some(ActiveGroup::Chats(machine)) => {
+                        *machine == project.machine && store.is_chat_project(project)
+                    }
+                    Some(ActiveGroup::Subgroup {
+                        project: owner,
+                        group_id,
+                    }) => {
+                        owner == project
+                            && store
+                                .user_groups_of_project(project)
+                                .iter()
+                                .any(|group| group.group_id == *group_id)
+                    }
+                    None => false,
+                };
+                if !group_fits {
+                    self.active_group = Some(default_group_for_project(store, project));
+                }
+                return;
+            }
+        }
+        // Nothing valid is active: re-home, but only once the local machine can be judged.
+        let Some(local) = store.loaded(&MachineId::Local) else {
+            return;
+        };
+        let first_code_project = local
+            .projects()
+            .iter()
+            .map(|project| ProjectKey::local(project.project_id.as_str()))
+            .find(|key| store.project(key).is_some() && !store.is_chat_project(key));
+        match first_code_project {
+            Some(project) => {
+                self.active_group = Some(ActiveGroup::Project(project.clone()));
+                self.active_project = Some(project);
+            }
+            None => {
+                self.active_project = None;
+                self.active_group = Some(ActiveGroup::Chats(MachineId::Local));
+            }
         }
     }
 

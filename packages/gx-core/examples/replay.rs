@@ -1,6 +1,10 @@
 //! Replays recorded `/api/events` frames through the core.
 //!
-//! Usage: `cargo run --release --example replay -- <frames.jsonl>`
+//! Usage: `cargo run --release --example replay -- <frames.jsonl> [end-state.json]`
+//!
+//! `end-state.json` is optional: the body of a `readPresentationSnapshot` response captured near
+//! the end of the recording. The replay then compares the store, as it stood at that snapshot's
+//! revision, with the daemon's own rows.
 //!
 //! The input holds one raw frame per line, exactly as the socket delivered it. Recordings contain
 //! private data: keep them outside the repository. This is tooling, not a test suite: it reports
@@ -12,8 +16,10 @@ use std::time::{Duration, Instant};
 
 use ghostex_gx_core::protocol::{peek_event_type, ServerEvent};
 use ghostex_gx_core::{
-    ActiveGroup, Core, Event, Intent, Loadable, MachineId, ProjectKey, SessionKey,
+    ActiveGroup, Core, Event, ExternalFocusUpdate, Intent, Loadable, MachineId, ProjectKey,
+    SessionKey, TabDirection,
 };
+use serde_json::Value;
 
 #[derive(Default)]
 struct TypeStats {
@@ -43,7 +49,7 @@ struct ChatPosition {
 
 fn main() -> ExitCode {
     let Some(path) = std::env::args().nth(1) else {
-        eprintln!("usage: replay <frames.jsonl>");
+        eprintln!("usage: replay <frames.jsonl> [end-state.json]");
         return ExitCode::from(2);
     };
     let text = match std::fs::read_to_string(&path) {
@@ -53,6 +59,24 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+
+    let end_state = match std::env::args().nth(2) {
+        None => None,
+        Some(path) => match read_end_state(&path) {
+            Ok(end_state) => Some(end_state),
+            Err(error) => {
+                eprintln!("cannot use {path}: {error}");
+                return ExitCode::from(2);
+            }
+        },
+    };
+    let end_revision = end_state
+        .as_ref()
+        .and_then(|snapshot| snapshot.get("revision"))
+        .and_then(Value::as_i64);
+    let mut checkpoint: Option<Core> = None;
+    let mut focus_intents = 0u64;
+    let mut tab_steps = 0u64;
 
     let machine = MachineId::Local;
     let mut core = Core::new();
@@ -109,6 +133,15 @@ fn main() -> ExitCode {
             ));
         }
         note_frame(&frame, &mut delta_types, &mut chats);
+        // The store as it stood at the end-state snapshot's revision: taken just before the first
+        // frame that is newer than that snapshot.
+        if let (Some(target), None, Some(revision)) =
+            (end_revision, &checkpoint, frame_revision(&frame))
+        {
+            if revision > target && core.presentation().loaded(&machine).is_some() {
+                checkpoint = Some(core.clone());
+            }
+        }
 
         let apply_started = Instant::now();
         let output = core.handle(
@@ -150,6 +183,31 @@ fn main() -> ExitCode {
             changed_frames += 1;
             sessions_changed += output.changes.sessions_changed.len() as u64;
             order_changes += output.changes.session_order_changed.len() as u64;
+            // Drive focus the way a user would while the stream runs, so the focus invariants
+            // are exercised against real removals and reorders: focus whatever just changed, and
+            // step to the neighbouring tab now and then.
+            if let Some(session) = output.changes.sessions_changed.first() {
+                core.handle(
+                    Event::Intent(Intent::FocusSession {
+                        session: session.clone(),
+                        visible: None,
+                    }),
+                    line_number as u64,
+                );
+                focus_intents += 1;
+            }
+            if changed_frames.is_multiple_of(3) {
+                if let Some(next) = core.adjacent_tab_session(TabDirection::Next) {
+                    core.handle(
+                        Event::Intent(Intent::FocusSession {
+                            session: next.clone(),
+                            visible: Some(vec![next]),
+                        }),
+                        line_number as u64,
+                    );
+                    tab_steps += 1;
+                }
+            }
             check_invariants(&core, &machine, line_number, &mut violations);
         }
 
@@ -256,10 +314,20 @@ fn main() -> ExitCode {
     let chat_epochs: u64 = chats.values().map(|chat| chat.epochs).sum();
     println!("chat frames: {chat_frames}, epochs seen: {chat_epochs}, seq gaps inside an epoch: {chat_gaps}");
 
+    println!(
+        "focus driven during the replay: {focus_intents} focus intents, {tab_steps} tab steps, tabs generation {}",
+        core.tabs_generation()
+    );
+
+    if let Some(end_state) = &end_state {
+        let at_revision = checkpoint.as_ref().unwrap_or(&core);
+        end_state_report(at_revision, &machine, end_state, &mut violations);
+    }
+
     focus_cycle_report(&mut core, &machine, &mut violations);
 
     println!("\n== invariants ==");
-    println!("checked: every session's project exists; every group id has a row and every row is in its group; tab sessions resolve to sessions; the revision never decreases; peek agrees with the parser; focus never points at a missing session");
+    println!("checked: every session's project and group exist; every group id has a row and every row is in its group; tab sessions resolve to sessions; the revision never decreases; peek agrees with the parser; focus never points at a missing session; the active group exists and holds the focused session");
     if violations.is_empty() {
         println!("all hold");
     } else {
@@ -330,13 +398,18 @@ fn check_invariants(core: &Core, machine: &MachineId, line: usize, violations: &
         let group = loaded.groups().iter().find(|group| {
             group.project_id == session.project_id && group.group_id == session.group_id
         });
-        if let Some(group) = group {
-            if !group.session_ids.contains(&session.session_id) {
+        match group {
+            None => violations.push(format!(
+                "line {line}: session {}/{} names group {}, which does not exist",
+                session.project_id, session.session_id, session.group_id
+            )),
+            Some(group) if !group.session_ids.contains(&session.session_id) => {
                 violations.push(format!(
                     "line {line}: session {}/{} is missing from its group {}",
                     session.project_id, session.session_id, session.group_id
                 ));
             }
+            Some(_) => {}
         }
     }
     for group in loaded.groups() {
@@ -355,8 +428,8 @@ fn check_invariants(core: &Core, machine: &MachineId, line: usize, violations: &
     for project in loaded.projects() {
         let group = ActiveGroup::Project(ProjectKey::local(project.project_id.as_str()));
         match store.tab_sessions(&group) {
-            Loadable::NotLoaded => violations.push(format!(
-                "line {line}: tab sessions of loaded project {} read as not loaded",
+            Loadable::NotLoaded | Loadable::Missing => violations.push(format!(
+                "line {line}: tab sessions of loaded project {} read as not loaded or missing",
                 project.project_id
             )),
             Loadable::Loaded(tabs) => {
@@ -382,6 +455,26 @@ fn check_invariants(core: &Core, machine: &MachineId, line: usize, violations: &
                 "line {line}: focus points at missing session {}/{}",
                 key.project_id, key.session_id
             ));
+        }
+    }
+    if let Some(group) = &core.focus().active_group {
+        match store.tab_session_keys(group) {
+            Loadable::Loaded(keys) => {
+                if let Some(focused) = &core.focus().focused_session {
+                    let is_tab = store
+                        .session(focused)
+                        .is_some_and(|session| session.visible_in_sidebar_by_default);
+                    if is_tab && !keys.contains(focused) {
+                        violations.push(format!(
+                            "line {line}: the active group's tab list does not hold the focused session {}/{}",
+                            focused.project_id, focused.session_id
+                        ));
+                    }
+                }
+            }
+            Loadable::NotLoaded | Loadable::Missing => violations.push(format!(
+                "line {line}: the active group {group:?} does not resolve to a tab list"
+            )),
         }
     }
 }
@@ -419,7 +512,6 @@ fn focus_cycle_report(core: &mut Core, machine: &MachineId, violations: &mut Vec
         let output = core.handle(
             Event::Intent(Intent::FocusSession {
                 session: session.clone(),
-                group: None,
                 visible: Some(vec![session]),
             }),
             step as u64,
@@ -450,10 +542,35 @@ fn focus_cycle_report(core: &mut Core, machine: &MachineId, violations: &mut Vec
         micros(selector_elapsed / STEPS as u32),
         tab_rows / STEPS
     );
+    // The held-key path: ask for the neighbour, focus it. No tab list is built.
+    let stamp_before = core.focus().local_stamp;
+    let generation_before = core.tabs_generation();
+    let started = Instant::now();
+    let mut stepped = 0usize;
+    for step in 0..STEPS {
+        let Some(next) = core.adjacent_tab_session(TabDirection::Next) else {
+            break;
+        };
+        core.handle(
+            Event::Intent(Intent::FocusSession {
+                session: next.clone(),
+                visible: Some(vec![next]),
+            }),
+            step as u64,
+        );
+        stepped += 1;
+    }
+    println!(
+        "{stepped} next-tab steps (adjacent lookup + focus intent): {} per step",
+        micros(started.elapsed() / STEPS as u32)
+    );
+    if core.tabs_generation() != generation_before {
+        violations.push("the tabs generation moved while only focus changed".to_string());
+    }
     let stamp = core.focus().local_stamp;
-    if stamp != STEPS as u64 {
+    if stamp != stamp_before + stepped as u64 {
         violations.push(format!(
-            "focus stamp is {stamp} after {STEPS} local intents"
+            "focus stamp is {stamp} after {stepped} local intents from {stamp_before}"
         ));
     }
     if core.focus().active_project.as_ref() != Some(&project) {
@@ -464,13 +581,9 @@ fn focus_cycle_report(core: &mut Core, machine: &MachineId, violations: &mut Vec
     let focused_before = core.focus().focused_session.clone();
     let output = core.handle(
         Event::Intent(Intent::ExternalFocus(
-            ghostex_gx_core::ExternalFocusUpdate {
-                observed_stamp: stamp - 1,
-                active_project: None,
-                active_group: None,
-                focused_session: None,
-                visible_sessions: Some(Vec::new()),
-            },
+            ExternalFocusUpdate::new(stamp - 1)
+                .clear_focused_session()
+                .with_visible_sessions(Vec::new()),
         )),
         0,
     );
@@ -479,4 +592,207 @@ fn focus_cycle_report(core: &mut Core, machine: &MachineId, violations: &mut Vec
     if !held {
         violations.push("a stale external focus update overwrote a newer local intent".to_string());
     }
+}
+
+fn read_end_state(path: &str) -> Result<Value, String> {
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let value: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    // Accept the RPC envelope, its `result`, or the bare snapshot.
+    let snapshot = value
+        .pointer("/result/snapshot")
+        .or_else(|| value.get("snapshot"))
+        .unwrap_or(&value)
+        .clone();
+    if snapshot.get("sessions").is_some() && snapshot.get("revision").is_some() {
+        Ok(snapshot)
+    } else {
+        Err("no presentation snapshot found in the file".to_string())
+    }
+}
+
+fn frame_revision(frame: &ServerEvent) -> Option<i64> {
+    match frame {
+        ServerEvent::PresentationSnapshot(frame) => Some(frame.revision),
+        ServerEvent::PresentationSnapshotCurrent(frame) => Some(frame.revision),
+        ServerEvent::PresentationDelta(frame) => Some(frame.revision),
+        ServerEvent::WorkspaceGroupsChanged(frame) => frame.revision,
+        ServerEvent::SidebarProjectCollectionsChanged(frame) => frame.revision,
+        ServerEvent::SidebarSpacesChanged(frame) => frame.revision,
+        ServerEvent::CustomSessionTagsChanged(frame) => frame.revision,
+        ServerEvent::GlobalSidebarCommandsChanged(frame) => frame.revision,
+        _ => None,
+    }
+}
+
+/// Session keys the daemon changes without publishing a delta, so a snapshot taken later differs
+/// from the last delta at the same revision: values it re-projects against the clock on every
+/// snapshot, and `updatedAt`, which moves on row writes that leave the presentation alone
+/// (observed on a working session: the row was rewritten 40 s after its last delta with no new
+/// revision). They are counted and shown, never treated as violations.
+const UNPUBLISHED_SESSION_KEYS: &[&str] = &[
+    "delayedSendRemainingLabel",
+    "delayedSendRemainingMs",
+    "meaningfulActivityAt",
+    "updatedAt",
+];
+
+/// Compares the store with the daemon's own snapshot of the same revision.
+fn end_state_report(
+    core: &Core,
+    machine: &MachineId,
+    end_state: &Value,
+    violations: &mut Vec<String>,
+) {
+    println!("\n== end state against the daemon's snapshot ==");
+    let Some(loaded) = core.presentation().loaded(machine) else {
+        println!("skipped: presentation not loaded");
+        return;
+    };
+    let target = end_state
+        .get("revision")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    println!(
+        "store revision {} against snapshot revision {target}",
+        loaded.revision
+    );
+    if loaded.revision > target {
+        println!("the recording starts after that snapshot: comparison skipped");
+        return;
+    }
+
+    let mut differences: BTreeMap<String, u64> = BTreeMap::new();
+    let mut unpublished: BTreeMap<String, u64> = BTreeMap::new();
+    let mut note = |what: String| *differences.entry(what).or_default() += 1;
+    let rows = |key: &str| {
+        end_state
+            .get(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let id = |row: &Value, key: &str| {
+        row.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+
+    let daemon_sessions = rows("sessions");
+    for row in &daemon_sessions {
+        match loaded.server_session(&id(row, "projectId"), &id(row, "sessionId")) {
+            None => note("session missing from the store".to_string()),
+            Some(session) => {
+                let mine = serde_json::to_value(session).unwrap_or(Value::Null);
+                for key in differing_keys(row, &mine) {
+                    if UNPUBLISHED_SESSION_KEYS.contains(&key.as_str()) {
+                        *unpublished.entry(key).or_default() += 1;
+                    } else {
+                        note(format!("session field differs: {key}"));
+                    }
+                }
+            }
+        }
+    }
+    if loaded.session_count() > daemon_sessions.len() {
+        note(format!(
+            "sessions only in the store: {}",
+            loaded.session_count() - daemon_sessions.len()
+        ));
+    }
+    let daemon_projects = rows("projects");
+    for row in &daemon_projects {
+        match loaded.project(&id(row, "projectId")) {
+            None => note("project missing from the store".to_string()),
+            Some(project) => {
+                let mine = serde_json::to_value(project).unwrap_or(Value::Null);
+                for key in differing_keys(row, &mine) {
+                    note(format!("project field differs: {key}"));
+                }
+            }
+        }
+    }
+    let daemon_order: Vec<String> = daemon_projects
+        .iter()
+        .map(|row| id(row, "projectId"))
+        .collect();
+    let store_order: Vec<&str> = loaded
+        .projects()
+        .iter()
+        .map(|project| project.project_id.as_str())
+        .collect();
+    if daemon_order != store_order {
+        note("project order differs".to_string());
+    }
+    let daemon_groups = rows("groups");
+    for row in &daemon_groups {
+        let group_id = id(row, "groupId");
+        let daemon_ids: Vec<String> = row
+            .get("sessionIds")
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        match loaded
+            .groups()
+            .iter()
+            .find(|group| group.group_id == group_id)
+        {
+            None => note("group missing from the store".to_string()),
+            Some(group) if group.session_ids != daemon_ids => {
+                note("group session order differs".to_string())
+            }
+            Some(_) => {}
+        }
+    }
+
+    println!(
+        "compared {} sessions, {} projects, {} groups",
+        daemon_sessions.len(),
+        daemon_projects.len(),
+        daemon_groups.len(),
+    );
+    println!(
+        "keys the daemon changed without publishing a delta (not violations): {unpublished:?}"
+    );
+    if differences.is_empty() {
+        println!("identical");
+    }
+    for (what, count) in &differences {
+        println!("{count:>5}  {what}");
+    }
+    if loaded.revision == target {
+        for (what, count) in differences {
+            violations.push(format!("end state: {what} ({count})"));
+        }
+    } else if !differences.is_empty() {
+        println!(
+            "not counted as violations: the store stopped at an earlier revision than the snapshot"
+        );
+    }
+}
+
+/// Top-level keys whose values differ between a wire row and a store row (numbers by value).
+fn differing_keys(wire: &Value, mine: &Value) -> Vec<String> {
+    let (Some(wire), Some(mine)) = (wire.as_object(), mine.as_object()) else {
+        return vec!["<row>".to_string()];
+    };
+    let same = |left: &Value, right: &Value| match (left.as_f64(), right.as_f64()) {
+        (Some(left), Some(right)) => left == right,
+        _ => left == right,
+    };
+    wire.keys()
+        .chain(mine.keys().filter(|key| !wire.contains_key(*key)))
+        .filter(|key| match (wire.get(*key), mine.get(*key)) {
+            (Some(left), Some(right)) => !same(left, right),
+            // An explicit wire null that the store reads as absent is the same fact.
+            (Some(Value::Null), None) => false,
+            _ => true,
+        })
+        .cloned()
+        .collect()
 }

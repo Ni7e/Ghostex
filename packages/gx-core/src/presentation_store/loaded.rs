@@ -73,7 +73,7 @@ impl LoadedPresentation {
 
     pub(super) fn from_snapshot(server_id: String, snapshot: PresentationSnapshot) -> Self {
         let mut sessions = ProjectSessionMap::default();
-        for session in snapshot.sessions {
+        for session in snapshot.sessions.rows {
             let project_id = session.project_id.clone();
             let session_id = session.session_id.clone();
             sessions.insert(&project_id, &session_id, session);
@@ -85,8 +85,8 @@ impl LoadedPresentation {
             capabilities: snapshot.capabilities,
             auto_settle_after_days: snapshot.auto_settle_after_days,
             portless: snapshot.portless,
-            projects: snapshot.projects,
-            groups: snapshot.groups,
+            projects: snapshot.projects.rows,
+            groups: snapshot.groups.rows,
             sessions,
         };
         // The daemon already sends these ordered; sorting keeps the order rule in one place for

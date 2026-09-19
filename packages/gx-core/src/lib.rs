@@ -14,6 +14,7 @@
 //!   the revision.
 
 mod change;
+mod connection;
 mod core;
 mod focus;
 mod keys;
@@ -22,10 +23,11 @@ mod presentation_store;
 mod selectors;
 
 pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
+pub use crate::connection::{ConnectionPhase, ConnectionState, ConnectionUpdate};
 pub use crate::core::{Core, Effect, Event, Intent, Output, ResubscribeReason};
 pub use crate::focus::{
     default_group_for_project, next_visible_sessions_for_local_focus, ActiveGroup,
-    ExternalFocusUpdate, FocusOutcome, FocusState,
+    ExternalFocusUpdate, FocusField, FocusOutcome, FocusState,
 };
 pub use crate::keys::{
     decode_uri_component, encode_uri_component, encode_workspace_subgroup_id,
@@ -37,7 +39,7 @@ pub use crate::presentation_store::{
     SideStateUpdate, SnapshotOrigin,
 };
 pub use crate::selectors::{
-    is_chat_project_path, Loadable, TabSession, DEFAULT_TERMINAL_SESSION_TITLE,
+    is_chat_project_path, Loadable, TabDirection, TabSession, DEFAULT_TERMINAL_SESSION_TITLE,
     QUICK_AUTOMATIONS_PROJECT_ID, TAB_SESSION_TITLE_MAX_UTF16,
 };
 

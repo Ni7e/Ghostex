@@ -10,8 +10,10 @@ use ghostex_gx_protocol::{
 use serde_json::Value;
 
 use super::loaded::LoadedPresentation;
+use crate::connection::ConnectionState;
 use crate::keys::MachineId;
 use crate::overlay::{Overlays, SessionPatch};
+use crate::selectors::is_chat_project_path;
 
 /// The side-state documents of one machine. `None` means the daemon never published that
 /// document (an older daemon), which is different from an empty document.
@@ -34,7 +36,6 @@ pub enum SideStateUpdate {
 
 /// Whether a machine's presentation has arrived.
 ///
-/// CDXC:Workarea 2026-09-19 WHY:
 /// `NotLoaded` and "loaded with no rows" are different facts and must stay different types: a consumer that reads "no tab sessions" before the first snapshot clears every restored tab, split, and session mapping.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PresentationState {
@@ -51,6 +52,10 @@ pub struct MachinePresentation {
     /// Full domain project rows by project id, as far as the store has seen them (deltas carry
     /// one; the host can load the full list). Kept loose until a narrow typed view is needed.
     pub(crate) domain_projects: BTreeMap<String, Value>,
+    pub(crate) connection: ConnectionState,
+    /// A resubscribe was requested and no stream snapshot has answered it yet. Keeps the core from
+    /// asking again for every frame it has to ignore in the meantime.
+    pub(crate) resubscribe_requested: bool,
 }
 
 impl Default for MachinePresentation {
@@ -60,6 +65,8 @@ impl Default for MachinePresentation {
             side: SideState::default(),
             overlays: Overlays::default(),
             domain_projects: BTreeMap::new(),
+            connection: ConnectionState::default(),
+            resubscribe_requested: false,
         }
     }
 }
@@ -97,7 +104,41 @@ impl MachinePresentation {
     }
 
     pub fn session_patch(&self, project_id: &str, session_id: &str) -> Option<&SessionPatch> {
-        self.overlays.session_patches.get(project_id, session_id)
+        self.overlays
+            .session_patches
+            .get(project_id, session_id)
+            .map(|stored| &stored.patch)
+    }
+
+    /// Whether a project is a projectless Chats container: flagged as chat or quick on its domain
+    /// row, or stored under a Ghostex chats folder (domain row path or presentation path).
+    pub fn is_chat_project(&self, project_id: &str) -> bool {
+        let domain = self.domain_projects.get(project_id);
+        let domain_flag = |name: &str| {
+            domain.is_some_and(|project| {
+                project.get(name).and_then(Value::as_bool) == Some(true)
+                    || project
+                        .get("launchSettings")
+                        .and_then(|settings| settings.get(name))
+                        .and_then(Value::as_bool)
+                        == Some(true)
+            })
+        };
+        domain_flag("isChat")
+            || domain_flag("isQuick")
+            || domain
+                .and_then(|project| project.get("path"))
+                .and_then(Value::as_str)
+                .is_some_and(is_chat_project_path)
+            || self
+                .loaded()
+                .and_then(|loaded| loaded.project(project_id))
+                .and_then(|project| project.path.as_deref())
+                .is_some_and(is_chat_project_path)
+    }
+
+    pub fn connection(&self) -> &ConnectionState {
+        &self.connection
     }
 
     /// The session as the UI should see it: the daemon row with the local patch applied, or
@@ -112,9 +153,11 @@ impl MachinePresentation {
         }
         let server = self.loaded()?.server_session(project_id, session_id)?;
         Some(
+            // A stored patch is always pending: one the daemon caught up with, or moved past, is
+            // dropped the moment that row arrives.
             match self.overlays.session_patches.get(project_id, session_id) {
-                Some(patch) if !patch.is_caught_up(server) => Cow::Owned(patch.apply_to(server)),
-                _ => Cow::Borrowed(server),
+                Some(stored) => Cow::Owned(stored.patch.apply_to(server)),
+                None => Cow::Borrowed(server),
             },
         )
     }

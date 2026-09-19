@@ -201,7 +201,7 @@ impl SessionKey {
     /// session (no project part), the remote-scoped id for a remote one.
     ///
     /// The local form cannot be parsed back without the store, because it does not name the
-    /// project; resolve it with `Core::resolve_focus_state_session_id`.
+    /// project; resolve it with `PresentationStore::resolve_focus_state_session_id`.
     pub fn to_focus_state_session_id(&self) -> String {
         match &self.machine {
             MachineId::Local => self.session_id.clone(),

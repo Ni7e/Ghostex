@@ -14,20 +14,21 @@ use crate::focus::ActiveGroup;
 use crate::keys::{MachineId, ProjectKey, SessionKey};
 use crate::presentation_store::{LoadedPresentation, MachinePresentation, PresentationStore};
 
-/// A value that does not exist until a machine's first snapshot arrived.
+/// A value read from a machine's presentation.
 ///
-/// `NotLoaded` must never be read as "empty": an empty tab list tells the workspace that the
-/// project has no sessions, and it then clears every restored tab, split, and session mapping.
+/// CDXC:Workarea 2026-09-19 WHY:
+/// Three different facts must never collapse into an empty list, because the desktop workspace reads an empty tab list as "this project has no sessions" and clears every restored tab, split, and session mapping. `NotLoaded`: the machine's first snapshot has not arrived. `Missing`: the machine is loaded but the thing asked about does not exist (a removed or locally hidden project, an unknown user-made group). `Loaded(vec![])` is left to mean exactly one thing: it exists and is empty.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Loadable<T> {
     NotLoaded,
+    Missing,
     Loaded(T),
 }
 
 impl<T> Loadable<T> {
     pub fn loaded(self) -> Option<T> {
         match self {
-            Self::NotLoaded => None,
+            Self::NotLoaded | Self::Missing => None,
             Self::Loaded(value) => Some(value),
         }
     }
@@ -35,6 +36,22 @@ impl<T> Loadable<T> {
     pub fn is_loaded(&self) -> bool {
         matches!(self, Self::Loaded(_))
     }
+
+    pub fn map<U>(self, map: impl FnOnce(T) -> U) -> Loadable<U> {
+        match self {
+            Self::NotLoaded => Loadable::NotLoaded,
+            Self::Missing => Loadable::Missing,
+            Self::Loaded(value) => Loadable::Loaded(map(value)),
+        }
+    }
+}
+
+/// Which neighbour of a tab to step to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TabDirection {
+    Next,
+    Previous,
 }
 
 /// Synthetic project id of the Quick Automations overview row; never a workspace tab.
@@ -47,11 +64,14 @@ pub const TAB_SESSION_TITLE_MAX_UTF16: usize = 512;
 /// One workspace tab, in the shape the tab strip draws.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct TabSession {
     pub key: SessionKey,
     /// `displayTitle`, else `primaryTitle`, else `terminalTitle`, else `title`, else the default;
     /// trimmed and bounded.
     pub title: String,
+    /// `terminal` or `agent`, never anything else: rows of any other kind are not tabs. The old
+    /// bridge payload said `terminal` for both; see [`TabSession::bridge_kind`].
     pub kind: SessionKind,
     pub activity: SessionActivity,
     pub lifecycle_state: LifecycleState,
@@ -156,31 +176,29 @@ impl PresentationStore {
     /// Whether a project is a projectless Chats container: flagged as chat or quick on its domain
     /// row, or stored under a Ghostex chats folder.
     pub fn is_chat_project(&self, key: &ProjectKey) -> bool {
-        let Some(machine) = self.machine(&key.machine) else {
-            return false;
-        };
-        let domain = machine.domain_project(&key.project_id);
-        let domain_flag = |name: &str| {
-            domain.is_some_and(|project| {
-                project.get(name).and_then(Value::as_bool) == Some(true)
-                    || project
-                        .get("launchSettings")
-                        .and_then(|settings| settings.get(name))
-                        .and_then(Value::as_bool)
-                        == Some(true)
-            })
-        };
-        domain_flag("isChat")
-            || domain_flag("isQuick")
-            || domain
-                .and_then(|project| project.get("path"))
-                .and_then(Value::as_str)
-                .is_some_and(is_chat_project_path)
-            || machine
-                .loaded()
-                .and_then(|loaded| loaded.project(&key.project_id))
-                .and_then(|project| project.path.as_deref())
-                .is_some_and(is_chat_project_path)
+        self.machine(&key.machine)
+            .is_some_and(|machine| machine.is_chat_project(&key.project_id))
+    }
+
+    /// The sidebar group a session's tab lives in: the Chats collection for a chat project, else
+    /// the user-made group that contains the session, else the project's own group. Chat projects
+    /// come first because they have no user-made groups.
+    pub fn group_of_session(&self, key: &SessionKey) -> ActiveGroup {
+        let project = key.project_key();
+        if self.is_chat_project(&project) {
+            return ActiveGroup::Chats(key.machine.clone());
+        }
+        match self
+            .user_groups_of_project(&project)
+            .iter()
+            .find(|group| group.session_ids.contains(&key.session_id))
+        {
+            Some(group) => ActiveGroup::Subgroup {
+                project,
+                group_id: group.group_id.clone(),
+            },
+            None => ActiveGroup::Project(project),
+        }
     }
 
     /// The ordered workspace tabs of a sidebar group.
@@ -193,58 +211,120 @@ impl PresentationStore {
     /// collection concatenates the project lists of every chat project of the machine. The
     /// synthetic Quick Automations project is never a tab. Browser rows are host state, not
     /// sessions, and are not part of this list.
+    ///
+    /// `Missing` when the group's project does not exist or is hidden locally, or the user-made
+    /// group is unknown. The Chats collection always exists once its machine is loaded.
     pub fn tab_sessions(&self, group: &ActiveGroup) -> Loadable<Vec<TabSession>> {
-        let machine_id = match group {
-            ActiveGroup::Project(project) | ActiveGroup::Subgroup { project, .. } => {
-                &project.machine
-            }
-            ActiveGroup::Chats(machine) => machine,
+        let machine_id = group_machine(group);
+        self.tab_refs(group).map(|refs| {
+            let machine = self.machine(machine_id);
+            refs.into_iter()
+                .filter_map(|(project_id, session_id)| {
+                    let machine = machine?;
+                    tab_row(
+                        machine_id,
+                        machine,
+                        machine.loaded()?,
+                        project_id,
+                        session_id,
+                    )
+                })
+                .collect()
+        })
+    }
+
+    /// The keys of [`Self::tab_sessions`], without building the rows.
+    pub fn tab_session_keys(&self, group: &ActiveGroup) -> Loadable<Vec<SessionKey>> {
+        let machine_id = group_machine(group);
+        self.tab_refs(group).map(|refs| {
+            refs.into_iter()
+                .map(|(project_id, session_id)| SessionKey {
+                    machine: machine_id.clone(),
+                    project_id: project_id.to_string(),
+                    session_id: session_id.to_string(),
+                })
+                .collect()
+        })
+    }
+
+    /// The tab next to `from` in a group, wrapping at the ends. Made for a held "next tab" key:
+    /// it walks borrowed ids and allocates only the returned key.
+    ///
+    /// When `from` is not a tab of the group, `Next` gives the first tab and `Previous` the last.
+    /// `None` when the group has no tabs, is missing or not loaded, or `from` is its only tab.
+    pub fn adjacent_tab_session(
+        &self,
+        group: &ActiveGroup,
+        from: Option<&SessionKey>,
+        direction: TabDirection,
+    ) -> Option<SessionKey> {
+        let machine_id = group_machine(group);
+        let refs = self.tab_refs(group).loaded()?;
+        let position = from
+            .filter(|key| key.machine == *machine_id)
+            .and_then(|key| {
+                refs.iter().position(|(project_id, session_id)| {
+                    *project_id == key.project_id && *session_id == key.session_id
+                })
+            });
+        let target = match (position, direction) {
+            (_, _) if refs.is_empty() => return None,
+            (Some(_), _) if refs.len() == 1 => return None,
+            (Some(index), TabDirection::Next) => (index + 1) % refs.len(),
+            (Some(index), TabDirection::Previous) => (index + refs.len() - 1) % refs.len(),
+            (None, TabDirection::Next) => 0,
+            (None, TabDirection::Previous) => refs.len() - 1,
         };
+        let (project_id, session_id) = refs.get(target)?;
+        Some(SessionKey {
+            machine: machine_id.clone(),
+            project_id: project_id.to_string(),
+            session_id: session_id.to_string(),
+        })
+    }
+
+    /// The ordered `(project_id, session_id)` pairs of a group's tabs, borrowed from the store.
+    fn tab_refs<'a>(&'a self, group: &'a ActiveGroup) -> Loadable<Vec<(&'a str, &'a str)>> {
+        let machine_id = group_machine(group);
         let Some(machine) = self.machine(machine_id) else {
             return Loadable::NotLoaded;
         };
         let Some(loaded) = machine.loaded() else {
             return Loadable::NotLoaded;
         };
-        let mut tabs = Vec::new();
+        let project_exists = |project_id: &str| {
+            loaded.project(project_id).is_some() && !machine.is_project_hidden(project_id)
+        };
+        let mut refs: Vec<(&str, &str)> = Vec::new();
         match group {
             ActiveGroup::Project(project) => {
+                if !project_exists(&project.project_id) {
+                    return Loadable::Missing;
+                }
                 let subgroups = self.user_groups_of_project(project);
-                push_project_tabs(
-                    machine_id,
-                    machine,
-                    loaded,
-                    &project.project_id,
-                    subgroups,
-                    &mut tabs,
-                );
+                push_project_tab_refs(machine, loaded, &project.project_id, subgroups, &mut refs);
             }
             ActiveGroup::Subgroup { project, group_id } => {
-                let members = self
+                let subgroup = self
                     .user_groups_of_project(project)
                     .iter()
-                    .find(|group| group.group_id == *group_id)
-                    .map(|group| group.session_ids.as_slice())
-                    .unwrap_or_default();
-                for session_id in members {
-                    push_tab(
-                        machine_id,
-                        machine,
-                        loaded,
-                        &project.project_id,
-                        session_id,
-                        &mut tabs,
-                    );
+                    .find(|group| group.group_id == *group_id);
+                let Some(subgroup) = subgroup.filter(|_| project_exists(&project.project_id))
+                else {
+                    return Loadable::Missing;
+                };
+                for session_id in &subgroup.session_ids {
+                    push_tab_ref(machine, loaded, &project.project_id, session_id, &mut refs);
                 }
             }
             ActiveGroup::Chats(_) => {
-                for project_id in self.ordered_chat_project_ids(machine_id, machine, loaded) {
+                for project_id in self.ordered_chat_project_ids(machine, loaded) {
                     // Chat projects have no user-made groups.
-                    push_project_tabs(machine_id, machine, loaded, project_id, &[], &mut tabs);
+                    push_project_tab_refs(machine, loaded, project_id, &[], &mut refs);
                 }
             }
         }
-        Loadable::Loaded(tabs)
+        Loadable::Loaded(refs)
     }
 
     /// The user-made session groups of a project. They live in the LOCAL machine's workspace-groups
@@ -262,7 +342,6 @@ impl PresentationStore {
     /// `sort_key`, then newest `updated_at`, then id.
     fn ordered_chat_project_ids<'a>(
         &self,
-        machine_id: &MachineId,
         machine: &MachinePresentation,
         loaded: &'a LoadedPresentation,
     ) -> Vec<&'a str> {
@@ -282,12 +361,7 @@ impl PresentationStore {
             .projects()
             .iter()
             .filter(|project| !machine.is_project_hidden(&project.project_id))
-            .filter(|project| {
-                self.is_chat_project(&ProjectKey {
-                    machine: machine_id.clone(),
-                    project_id: project.project_id.clone(),
-                })
-            })
+            .filter(|project| machine.is_chat_project(&project.project_id))
             .map(|project| (project, order_index(project)))
             .collect();
         projects.sort_by(|(left, left_index), (right, right_index)| {
@@ -308,22 +382,32 @@ impl PresentationStore {
     }
 }
 
-fn push_project_tabs(
-    machine_id: &MachineId,
-    machine: &MachinePresentation,
-    loaded: &LoadedPresentation,
-    project_id: &str,
+fn group_machine(group: &ActiveGroup) -> &MachineId {
+    match group {
+        ActiveGroup::Project(project) | ActiveGroup::Subgroup { project, .. } => &project.machine,
+        ActiveGroup::Chats(machine) => machine,
+    }
+}
+
+fn push_project_tab_refs<'a>(
+    machine: &'a MachinePresentation,
+    loaded: &'a LoadedPresentation,
+    project_id: &'a str,
     subgroups: &[WorkspaceSessionGroup],
-    tabs: &mut Vec<TabSession>,
+    refs: &mut Vec<(&'a str, &'a str)>,
 ) {
     if project_id == QUICK_AUTOMATIONS_PROJECT_ID || machine.is_project_hidden(project_id) {
         return;
     }
+    // Ids are unique inside one group, so only a project with several groups (a legacy daemon)
+    // needs the duplicate check; skipping it keeps a held "next tab" step linear in the tab count.
+    let mut groups_seen = 0;
     for group in loaded
         .groups()
         .iter()
         .filter(|group| group.project_id == project_id)
     {
+        groups_seen += 1;
         for session_id in &group.session_ids {
             let in_subgroup = subgroups
                 .iter()
@@ -333,37 +417,50 @@ fn push_project_tabs(
                 .is_some_and(|session| {
                     session.visible_in_sidebar_by_default
                         && session.surface != SessionSurface::Commands
+                        && is_tab_kind(session)
                 });
-            if listed && !in_subgroup {
-                push_tab(machine_id, machine, loaded, project_id, session_id, tabs);
+            let duplicate = groups_seen > 1 && refs.contains(&(project_id, session_id.as_str()));
+            if listed
+                && !in_subgroup
+                && !duplicate
+                && !machine.is_session_hidden(project_id, session_id)
+            {
+                refs.push((project_id, session_id));
             }
         }
     }
 }
 
-fn push_tab(
+/// The tab strip shows terminals and agents; any other kind a newer daemon adds is not a tab.
+fn is_tab_kind(session: &PresentationSession) -> bool {
+    matches!(session.kind, SessionKind::Terminal | SessionKind::Agent)
+}
+
+/// A member of a user-made group: listed when it still has a row, with no sidebar filter.
+fn push_tab_ref<'a>(
+    machine: &MachinePresentation,
+    loaded: &'a LoadedPresentation,
+    project_id: &'a str,
+    session_id: &'a str,
+    refs: &mut Vec<(&'a str, &'a str)>,
+) {
+    let is_tab = !machine.is_session_hidden(project_id, session_id)
+        && loaded
+            .server_session(project_id, session_id)
+            .is_some_and(is_tab_kind);
+    if is_tab && !refs.contains(&(project_id, session_id)) {
+        refs.push((project_id, session_id));
+    }
+}
+
+fn tab_row(
     machine_id: &MachineId,
     machine: &MachinePresentation,
     loaded: &LoadedPresentation,
     project_id: &str,
     session_id: &str,
-    tabs: &mut Vec<TabSession>,
-) {
-    let Some(session) = machine.effective_session(project_id, session_id) else {
-        return;
-    };
-    // The tab strip shows terminals and agents; any other kind a newer daemon adds is not a tab.
-    if !matches!(session.kind, SessionKind::Terminal | SessionKind::Agent) {
-        return;
-    }
-    let key = SessionKey {
-        machine: machine_id.clone(),
-        project_id: project_id.to_string(),
-        session_id: session_id.to_string(),
-    };
-    if tabs.iter().any(|tab| tab.key == key) {
-        return;
-    }
+) -> Option<TabSession> {
+    let session = machine.effective_session(project_id, session_id)?;
     let working_directory = non_blank(session.cwd.as_deref())
         .or_else(|| {
             non_blank(
@@ -373,8 +470,12 @@ fn push_tab(
             )
         })
         .map(str::to_string);
-    tabs.push(TabSession {
-        key,
+    Some(TabSession {
+        key: SessionKey {
+            machine: machine_id.clone(),
+            project_id: project_id.to_string(),
+            session_id: session_id.to_string(),
+        },
         title: tab_title(&session),
         kind: session.kind.clone(),
         activity: session.activity.clone(),
@@ -394,7 +495,32 @@ fn push_tab(
             .as_ref()
             .and_then(Value::as_array)
             .is_some_and(|agents| !agents.is_empty()),
-    });
+    })
+}
+
+impl TabSession {
+    /// The `kind` string of the old focus-state bridge payload, which is `terminal` for agents and
+    /// terminals alike.
+    ///
+    /// The desktop contract parser (`AgentsWorkspaceSessionKind::from_sidebar_kind`) has one
+    /// variant, maps both `agent` and `terminal` to it, and rejects the WHOLE payload as malformed
+    /// for any other string. A host that still feeds that parser must send this value, never an
+    /// unknown kind; the selector guarantees `kind` is one of the two.
+    pub fn bridge_kind(&self) -> &'static str {
+        "terminal"
+    }
+
+    /// The `activity` string of the old bridge payload. That parser also rejects the whole payload
+    /// for an activity it does not know, and reads a missing one as idle; an activity value this
+    /// client does not know is therefore reported as idle here, while `activity` keeps the real
+    /// value.
+    pub fn bridge_activity(&self) -> &'static str {
+        match self.activity {
+            SessionActivity::Working => "working",
+            SessionActivity::Attention => "attention",
+            SessionActivity::Idle | SessionActivity::Other(_) => "idle",
+        }
+    }
 }
 
 fn non_blank(value: Option<&str>) -> Option<&str> {
