@@ -842,14 +842,14 @@ impl GhostexGpuiApp {
         CDXC:FocusRouting 2026-06-24-21:07:
         React may return only the gxserver presentation session ids it already owns from daemon create/focus/fork/restore flows. Store the parsed focus state in runtime memory, refresh only the sidebar bootstrap bridge on changes, and ignore malformed payloads without logging raw renderer JSON or deriving ids from terminal tabs, labels, paths, project names, or command text.
         */
-        let Ok((next_state, focus_stamp)) =
+        let Ok((next_state, echo)) =
             gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_json(payload)
         else {
             return;
         };
         // CDXC:FocusRouting 2026-09-19 WHY: the sidebar runtime must never override a newer local selection (user decision in gx_store/local_focus.rs). A payload produced against an older focus stamp keeps its tab list and loses its selection, active project and visible set before anything below reads it (gx_store/local_focus.rs).
         let (next_state, stale) =
-            self.gx_store_admit_old_runtime_focus_state(next_state, focus_stamp, cx);
+            self.gx_store_admit_old_runtime_focus_state(next_state, &echo, cx);
         if stale {
             // Tab membership only. The workspace project is not this payload's to choose: a swap here would undo whatever project the app is on now.
             self.apply_sidebar_gxserver_presentation_focus_state(next_state, cx);

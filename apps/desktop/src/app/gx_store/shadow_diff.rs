@@ -8,7 +8,9 @@ use ghostex_gx_core::{
     ProjectKey, SessionKey, TabSession, default_group_for_project,
 };
 
-use crate::app::helpers::{GpuiWorkspaceTerminalSessionKey, gpui_sidebar_agent_icon};
+use crate::app::helpers::{
+    GpuiGxserverPresentationFocusEcho, GpuiWorkspaceTerminalSessionKey, gpui_sidebar_agent_icon,
+};
 use crate::app::model::{
     AgentTerminalActivity, GpuiGxserverPresentationFocusState, GpuiSidebarWorkspaceTabSession,
     TerminalSessionPresentationState,
@@ -211,6 +213,9 @@ pub(crate) struct ShadowDiff {
 #[derive(Clone, Debug)]
 struct OldFocus {
     active_project_id: Option<String>,
+    /// The sidebar group the old runtime has selected. It is the only source for a user-made
+    /// session group that holds no session, which no focused session can point at.
+    active_group_id: Option<String>,
     focused_session_id: Option<String>,
     visible_session_ids: Vec<String>,
     /// The store stamp the old runtime had been told when it published.
@@ -241,9 +246,10 @@ impl ShadowDiff {
         &mut self,
         core: &mut Core,
         old_state: &GpuiGxserverPresentationFocusState,
-        observed_stamp: u64,
+        echo: &GpuiGxserverPresentationFocusEcho,
         now_ms: u64,
     ) -> ObservedFocus {
+        let observed_stamp = echo.focus_stamp.unwrap_or(0);
         self.counters.observed += 1;
         if names_remote_focus(old_state) {
             // Nothing is mirrored and nothing is compared: the core keeps the last local focus,
@@ -264,6 +270,7 @@ impl ShadowDiff {
             .map(|tabs| tabs.iter().map(OldTab::from_bridge).collect());
         self.old_focus = Some(OldFocus {
             active_project_id: old_state.active_project_id.clone(),
+            active_group_id: echo.active_group_id.clone(),
             focused_session_id: old_state.focused_session_id.clone(),
             visible_session_ids: old_state.visible_session_ids.clone(),
             observed_stamp,
@@ -443,6 +450,17 @@ fn names_remote_focus(old_state: &GpuiGxserverPresentationFocusState) -> bool {
     remote_project || remote_focus
 }
 
+/// Whether a sidebar group the old runtime named belongs to the project it also named. A group of
+/// another project, or of another machine, is not this payload's to apply.
+fn group_belongs_to(group: &ActiveGroup, project: &ProjectKey) -> bool {
+    match group {
+        ActiveGroup::Project(owner) | ActiveGroup::Subgroup { project: owner, .. } => {
+            owner == project
+        }
+        ActiveGroup::Chats(machine) => *machine == project.machine,
+    }
+}
+
 fn lists_remote_tab(old_state: &GpuiGxserverPresentationFocusState) -> bool {
     old_state
         .active_project_tab_sessions
@@ -500,7 +518,14 @@ fn external_focus_update(
         None => {
             update = update.clear_focused_session();
             if let Some(project) = &active_project {
-                update = update.with_active_group(default_group_for_project(store, project));
+                let selected = old_state
+                    .active_group_id
+                    .as_deref()
+                    .and_then(ActiveGroup::parse_sidebar_group_id)
+                    .filter(|group| group_belongs_to(group, project));
+                update = update.with_active_group(
+                    selected.unwrap_or_else(|| default_group_for_project(store, project)),
+                );
             }
         }
     }

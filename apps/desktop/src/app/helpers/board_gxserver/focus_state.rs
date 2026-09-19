@@ -21,14 +21,27 @@ pub(crate) fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_value
     value: &serde_json::Value,
 ) -> Result<GpuiGxserverPresentationFocusState, GpuiGxserverPresentationFocusStateContractError> {
     gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_value(value)
-        .map(|(state, _focus_stamp)| state)
+        .map(|(state, _echo)| state)
 }
 
-/// The focus state of a sidebar runtime payload together with the `focusStamp` it echoes.
+/// What a sidebar runtime payload carries beside the focus state itself.
+///
+/// CDXC:FocusRouting 2026-09-20 WHY:
+/// `activeGroupId` rides here rather than inside `GpuiGxserverPresentationFocusState`, whose equality decides whether a payload changed anything, and whose persisted file has no such field. The store needs it because a user-made session group that holds no session cannot be derived from the focused session: without it the store stays on the project's own group and reads the empty tab list of the selected group as a disagreement.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct GpuiGxserverPresentationFocusEcho {
+    pub(crate) focus_stamp: Option<u64>,
+    pub(crate) active_group_id: Option<String>,
+}
+
+/// The focus state of a sidebar runtime payload together with what rides beside it.
 pub(crate) fn gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_json(
     text: &str,
 ) -> Result<
-    (GpuiGxserverPresentationFocusState, Option<u64>),
+    (
+        GpuiGxserverPresentationFocusState,
+        GpuiGxserverPresentationFocusEcho,
+    ),
     GpuiGxserverPresentationFocusStateContractError,
 > {
     let value = serde_json::from_str::<serde_json::Value>(text)
@@ -41,7 +54,10 @@ pub(crate) fn gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_cont
 fn gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_value(
     value: &serde_json::Value,
 ) -> Result<
-    (GpuiGxserverPresentationFocusState, Option<u64>),
+    (
+        GpuiGxserverPresentationFocusState,
+        GpuiGxserverPresentationFocusEcho,
+    ),
     GpuiGxserverPresentationFocusStateContractError,
 > {
     let object = gpui_gxserver_focus_contract_object(value)?;
@@ -55,6 +71,7 @@ fn gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_value(
             "focusedSessionId",
             "visibleSessionIds",
             "focusStamp",
+            "activeGroupId",
         ],
     )?;
     let focus_stamp = match object.get("focusStamp") {
@@ -86,6 +103,17 @@ fn gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_value(
     let visible_session_ids = required_gxserver_visible_session_ids_field(object)?;
     let active_project_id = optional_gxserver_focus_project_id_field(object, "activeProjectId")?;
     let active_project_tab_sessions = optional_gxserver_workspace_tab_sessions_field(object)?;
+    let active_group_id = match object.get("activeGroupId") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => Some(
+            value
+                .as_str()
+                .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?
+                .trim()
+                .to_string(),
+        )
+        .filter(|group_id| !group_id.is_empty()),
+    };
     Ok((
         GpuiGxserverPresentationFocusState {
             active_project_id,
@@ -93,7 +121,10 @@ fn gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_value(
             focused_session_id,
             visible_session_ids,
         },
-        focus_stamp,
+        GpuiGxserverPresentationFocusEcho {
+            focus_stamp,
+            active_group_id,
+        },
     ))
 }
 

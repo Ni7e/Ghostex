@@ -12,6 +12,7 @@ use ghostex_gx_core::{
 
 use super::host::{GxStoreHost, now_ms};
 use crate::GhostexGpuiApp;
+use crate::app::helpers::GpuiGxserverPresentationFocusEcho;
 use crate::app::model::{
     GpuiGxserverPresentationFocusState, GpuiLocalWorkspaceSessionKey, GpuiPreferredAgentInterface,
     GpuiSidebarWorkspaceTerminalFocusMessage, GpuiWorkspaceTerminalFocusPlacement,
@@ -681,12 +682,12 @@ impl GhostexGpuiApp {
     pub(crate) fn gx_store_admit_old_runtime_focus_state(
         &mut self,
         mut next_state: GpuiGxserverPresentationFocusState,
-        focus_stamp: Option<u64>,
+        echo: &GpuiGxserverPresentationFocusEcho,
         cx: &mut gpui::Context<Self>,
     ) -> (GpuiGxserverPresentationFocusState, bool) {
-        let observed_stamp = focus_stamp.unwrap_or(0);
+        let observed_stamp = echo.focus_stamp.unwrap_or(0);
         let local_stamp = self.gx_store.core.focus().local_stamp;
-        self.gx_store_observe_old_runtime_focus_state(&next_state, observed_stamp, cx);
+        self.gx_store_observe_old_runtime_focus_state(&next_state, echo, cx);
         if self.gx_store.refresh_row_focus_cache() {
             // The highlight follows the store even when the payload changes nothing else.
             cx.notify();

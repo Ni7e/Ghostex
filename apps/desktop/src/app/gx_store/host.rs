@@ -12,6 +12,7 @@ use super::layout_persist::LayoutPersist;
 use super::local_focus::LocalFocus;
 use super::shadow_diff::{ObservedFocus, ShadowDiff};
 use crate::GhostexGpuiApp;
+use crate::app::helpers::GpuiGxserverPresentationFocusEcho;
 use crate::app::model::GpuiGxserverPresentationFocusState;
 
 /// The daemon does not route by this id; it only tells this socket apart from the old runtime's
@@ -209,12 +210,12 @@ impl GxStoreHost {
     fn observe_old_runtime_focus_state(
         &mut self,
         old_state: &GpuiGxserverPresentationFocusState,
-        observed_stamp: u64,
+        echo: &GpuiGxserverPresentationFocusEcho,
     ) -> bool {
         let waiting_since = self.shadow.pending_since();
         let observed = self
             .shadow
-            .observe(&mut self.core, old_state, observed_stamp, now_ms());
+            .observe(&mut self.core, old_state, echo, now_ms());
         self.note_observed_focus(observed);
         self.diagnostics.shadow_summary(&self.shadow, &self.core);
         // A new difference, or another one than was waiting, starts its own clock.
@@ -375,12 +376,12 @@ impl GhostexGpuiApp {
     pub(super) fn gx_store_observe_old_runtime_focus_state(
         &mut self,
         old_state: &GpuiGxserverPresentationFocusState,
-        observed_stamp: u64,
+        echo: &GpuiGxserverPresentationFocusEcho,
         cx: &mut gpui::Context<Self>,
     ) {
         if !self
             .gx_store
-            .observe_old_runtime_focus_state(old_state, observed_stamp)
+            .observe_old_runtime_focus_state(old_state, echo)
         {
             return;
         }
