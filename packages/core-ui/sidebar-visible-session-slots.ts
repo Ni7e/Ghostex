@@ -178,25 +178,28 @@ export function createRenderedSidebarSessionSlotIds(
 export function resolveAdjacentRenderedSidebarSessionSlotId({
   direction,
   focusedSessionId,
+  skipSleeping = true,
   slots,
 }: {
   direction: -1 | 1;
   focusedSessionId?: string;
+  skipSleeping?: boolean;
   slots: readonly RenderedSidebarSessionSlot[];
 }): string | undefined {
-  const awakeSlots = slots.filter((slot) => !slot.isSleeping);
-  if (awakeSlots.length === 0) {
+  const isCandidate = (slot: RenderedSidebarSessionSlot) => !skipSleeping || !slot.isSleeping;
+  const candidateSlots = slots.filter(isCandidate);
+  if (candidateSlots.length === 0) {
     return undefined;
   }
 
   const focusedIndex = focusedSessionId ? slots.findIndex((slot) => slot.sessionId === focusedSessionId) : -1;
   if (focusedIndex < 0) {
-    return direction > 0 ? awakeSlots[0]?.sessionId : awakeSlots.at(-1)?.sessionId;
+    return direction > 0 ? candidateSlots[0]?.sessionId : candidateSlots.at(-1)?.sessionId;
   }
 
   for (let step = 1; step <= slots.length; step += 1) {
     const candidate = slots[(focusedIndex + direction * step + slots.length) % slots.length];
-    if (candidate && !candidate.isSleeping) {
+    if (candidate && isCandidate(candidate)) {
       return candidate.sessionId;
     }
   }
@@ -276,10 +279,16 @@ export function readRenderedSidebarSessionSlotIds(
   );
 }
 
-export function readRenderedSidebarSessionSlots(root: ParentNode = document): RenderedSidebarSessionSlot[] {
+export function readRenderedSidebarSessionSlots(
+  root: ParentNode = document,
+  options?: RenderedSidebarSessionSlotOptions
+): RenderedSidebarSessionSlot[] {
   /**
-   * CDXC:Hotkeys 2026-06-07-14:05:
-   * Cmd+Shift+[ / Cmd+Shift+] and Cmd+Shift+Tab / Cmd+Tab traverse sidebar rows exactly as rendered across expanded groups, but skip rows whose session card is sleeping. Read row state from the DOM so collapsed groups and filtered rows do not participate in navigation.
+   * CDXC:Hotkeys 2026-09-19 WHY:
+   * Previous/Next Session traverse sidebar rows exactly as rendered across expanded groups. Read row state from the DOM so collapsed groups and filtered rows do not participate in navigation; the caller decides whether sleeping rows are skipped.
    */
-  return createRenderedSidebarSessionSlots(Array.from(root.querySelectorAll<HTMLElement>('[data-sidebar-session-id]')));
+  return createRenderedSidebarSessionSlots(
+    Array.from(root.querySelectorAll<HTMLElement>('[data-sidebar-session-id]')),
+    options
+  );
 }

@@ -71,25 +71,33 @@ pub(crate) fn gpui_command_palette_tab_cycle_hotkey_action(
     action_id: &str,
 ) -> Option<GpuiCommandPaletteTabCycleHotkeyAction> {
     /*
-    CDXC:CommandPalette 2026-06-26-07:32:
-    Shared command-palette tab-cycle rows post `focusPreviousSession` and `focusNextSession` through `runGhostexHotkeyAction`. GPUI maps only those exact ids to the `cycle_focused_tab(reverse)` direction so command, Agents, and Browser focus keep Ctrl-Shift-Tab/Ctrl-Tab parity; numbered session-slot rows are intentionally excluded because SidebarApp owns rendered slot order.
+    CDXC:CommandPalette 2026-09-19 WHY:
+    Previous/Next Tab in Pane (`focusPreviousPaneTab`/`focusNextPaneTab`) are the only ids that map to `cycle_focused_tab(reverse)`, so command, Agents, and Browser focus cycle their pane tabs from both the hotkey and the palette row. `focusPreviousSession`/`focusNextSession` walk sidebar rows and are delegated to SidebarApp instead.
     */
     match action_id {
-        "focusPreviousSession" => Some(GpuiCommandPaletteTabCycleHotkeyAction::Previous),
-        "focusNextSession" => Some(GpuiCommandPaletteTabCycleHotkeyAction::Next),
+        "focusPreviousPaneTab" => Some(GpuiCommandPaletteTabCycleHotkeyAction::Previous),
+        "focusNextPaneTab" => Some(GpuiCommandPaletteTabCycleHotkeyAction::Next),
         _ => None,
     }
 }
 
 pub(crate) fn gpui_command_palette_sidebar_slot_hotkey_action_id(action_id: &str) -> Option<&str> {
     /*
-    CDXC:CommandPalette 2026-06-26-23:20:
-    Numbered `focusSessionSlot1` through `focusSessionSlot9` rows are rendered-sidebar slot commands, not Rust tab-cycle commands. Delegate only those exact action ids to SidebarApp so its DOM slot ownership resolves focus, while `focusPreviousSession`/`focusNextSession` stay on GPUI tab-cycle routing and jump-to-project ids cannot loop back through native.
+    CDXC:CommandPalette 2026-09-19 WHY:
+    Numbered `focusSessionSlot1` through `focusSessionSlot9` and Previous/Next Session (`focusPreviousSession`/`focusNextSession`) are rendered-sidebar row commands, not Rust tab-cycle commands. Delegate only those exact action ids to SidebarApp so its rendered row order resolves focus, while jump-to-project ids cannot loop back through native.
     */
     match action_id {
-        "focusSessionSlot1" | "focusSessionSlot2" | "focusSessionSlot3" | "focusSessionSlot4"
-        | "focusSessionSlot5" | "focusSessionSlot6" | "focusSessionSlot7" | "focusSessionSlot8"
-        | "focusSessionSlot9" => Some(action_id),
+        "focusSessionSlot1"
+        | "focusSessionSlot2"
+        | "focusSessionSlot3"
+        | "focusSessionSlot4"
+        | "focusSessionSlot5"
+        | "focusSessionSlot6"
+        | "focusSessionSlot7"
+        | "focusSessionSlot8"
+        | "focusSessionSlot9"
+        | "focusPreviousSession"
+        | "focusNextSession" => Some(action_id),
         _ => None,
     }
 }

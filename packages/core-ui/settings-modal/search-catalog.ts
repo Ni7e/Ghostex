@@ -456,6 +456,11 @@ export function getSettingsSearchSectionDefinitions() {
           title: 'Double-click empty sidebar space to create a session',
         },
         {
+          key: 'sidebarSessionCycleSkipsSleeping',
+          subtitle: 'Next Session and Previous Session jump over sleeping sessions in the sidebar.',
+          title: 'Skip sleeping sessions',
+        },
+        {
           key: 'enableSessionParking',
           subtitle: 'Move deferred sessions into a collapsible Parked section at the bottom of the sidebar.',
           title: 'Enable session parking',

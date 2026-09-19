@@ -22,8 +22,6 @@ gpui::actions!(
         StopGpuiGxserverFromTitlebar,
         RestartGpuiGxserverFromTitlebar,
         OpenGpuiPortlessSetupModalFromTitlebar,
-        CycleFocusedTabForward,
-        CycleFocusedTabBackward,
         CloseFocusedSurface,
         CloseFocusedSurfaceMenuOnly,
         ToggleGpuiSidebarCollapsed,

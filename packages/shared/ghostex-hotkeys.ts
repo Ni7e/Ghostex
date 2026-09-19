@@ -47,6 +47,8 @@ export type ghostexHotkeyActionId =
   | 'deferNotificationAndJumpNext'
   | 'focusPreviousSession'
   | 'focusNextSession'
+  | 'focusPreviousPaneTab'
+  | 'focusNextPaneTab'
   | 'focusUp'
   | 'focusRight'
   | 'focusDown'
@@ -97,6 +99,7 @@ export type ghostexTerminalToolbarAction =
 export type ghostexHotkeyAction =
   | { id: 'scrollChatToBottom'; kind: 'chatAction' }
   | { id: ghostexHotkeyActionId; kind: 'createSession' }
+  | { id: ghostexHotkeyActionId; kind: 'cyclePaneTab'; direction: -1 | 1 }
   | { id: ghostexHotkeyActionId; kind: 'focusAdjacentGroup'; direction: -1 | 1 }
   | { id: ghostexHotkeyActionId; kind: 'focusDirection'; direction: SessionGridDirection }
   | { id: ghostexHotkeyActionId; kind: 'focusSessionSlot'; slotNumber: number }
@@ -626,47 +629,56 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     title: 'Pop Out Pane',
     windowsLinuxDefaultKey: 'cmd+alt+o',
   },
+  /**
+   * CDXC:Navigation 2026-09-19 DECISION:
+   * User: Back/Forward take Cmd+[ and Cmd+] so they match Chrome, and Previous/Next Group give
+   * the brackets up and ship with no default key at all (still bindable in Settings and runnable
+   * from the command palette). Cmd+Left/Cmd+Right stay out of it: the user needs them for
+   * start/end of line. Windows and Linux use Cmd+Alt+Shift+[ / ] (Ctrl+Alt+Shift), because Ctrl+[ is ESC in a terminal,
+   * Chrome's Alt+Left/Right is word movement in every shell, and the user gave Ctrl+Alt+[ / ] to
+   * Previous/Next Tab in Pane so it matches the Mac's Cmd+Alt+[ / ].
+   * This supersedes the 2026-08-19 rule that kept Back/Forward off the bracket chords.
+   */
   {
     action: { direction: -1, id: 'focusPreviousGroup', kind: 'focusAdjacentGroup' },
-    defaultKey: 'cmd+[',
+    defaultKey: '',
     description: 'Focus the previous group.',
     id: 'focusPreviousGroup',
-    retiredDefaultKeys: ['cmd+shift+['],
+    retiredDefaultKeys: ['cmd+shift+[', 'cmd+['],
     title: 'Previous Group',
   },
   {
     action: { direction: 1, id: 'focusNextGroup', kind: 'focusAdjacentGroup' },
-    defaultKey: 'cmd+]',
+    defaultKey: '',
     description: 'Focus the next group.',
     id: 'focusNextGroup',
-    retiredDefaultKeys: ['cmd+shift+]'],
+    retiredDefaultKeys: ['cmd+shift+]', 'cmd+]'],
     title: 'Next Group',
   },
   /**
    * CDXC:Navigation 2026-08-19:
    * Back/Forward walk the chronological trail of previously active sessions and
-   * projects — where you have BEEN, not where a session sits in an ordered list.
-   * That is why they are not bound to the bracket chords beside them: Cmd+[ / ]
-   * already move between groups in render order and Cmd+Shift+[ / ] between tabs
-   * in a pane. Cmd+Ctrl reuses the modifier this app already spends on
-   * cross-project movement (Jump to Project 1..9), with the same Cmd+Alt
-   * Windows/Linux substitution those entries use.
+   * projects: where you have BEEN, not where a session sits in an ordered list.
+   * Cmd+Shift+[ / ] stay on Previous/Next Session, so the plain brackets are the
+   * only bracket pair this trail claims.
    */
   {
     action: { direction: 'back', id: 'navigateHistoryBack', kind: 'navigateHistory' },
-    defaultKey: 'cmd+ctrl+[',
+    defaultKey: 'cmd+[',
     description: 'Go back to the previously active session or project.',
     id: 'navigateHistoryBack',
+    retiredDefaultKeys: ['cmd+alt+['],
     title: 'Back',
-    windowsLinuxDefaultKey: 'cmd+alt+[',
+    windowsLinuxDefaultKey: 'cmd+alt+shift+[',
   },
   {
     action: { direction: 'forward', id: 'navigateHistoryForward', kind: 'navigateHistory' },
-    defaultKey: 'cmd+ctrl+]',
+    defaultKey: 'cmd+]',
     description: 'Go forward again after going back.',
     id: 'navigateHistoryForward',
+    retiredDefaultKeys: ['cmd+alt+]'],
     title: 'Forward',
-    windowsLinuxDefaultKey: 'cmd+alt+]',
+    windowsLinuxDefaultKey: 'cmd+alt+shift+]',
   },
   /*
    * CDXC:Notifications 2026-09-11 DECISION:
@@ -699,26 +711,44 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     action: { id: 'focusPreviousSession', kind: 'focusSessionSlot', slotNumber: -1 },
     alternateDefaultKeys: ['cmd+shift+['],
     /**
-     * CDXC:Hotkeys 2026-06-13-19:36:
-     * Cmd+Shift+[ and Cmd+Shift+] remain supported alongside Cmd+Shift+Tab and Cmd+Tab, but both shortcut families are focused split-pane tab switchers.
-     *
-     * CDXC:Hotkeys 2026-06-13-20:08:
-     * Previous/next tab traversal must stay inside the active pane's tab group and include sleeping placeholder tabs, then native dispatch applies the same select/wake/attach logic as clicking that tab.
+     * CDXC:Hotkeys 2026-09-19 DECISION:
+     * User: Previous/Next Session walks only the sessions currently visible in the sidebar, using Chrome's tab keys: Ctrl+Tab / Ctrl+Shift+Tab on every OS plus Cmd+Shift+] / [ on Mac. Cmd+Tab was dropped because macOS owns it for the app switcher. Sleeping sessions are included unless "Skip sleeping sessions" is turned on. Cycling tabs inside a split pane moved to Previous/Next Tab in Pane.
+     * This supersedes the 2026-06-13 rule that made these ids split-pane tab switchers.
      */
-    defaultKey: 'cmd+shift+tab',
-    description: 'Select the previous tab in the focused split pane.',
+    defaultKey: 'ctrl+shift+tab',
+    description: 'Select the previous session shown in the sidebar.',
     id: 'focusPreviousSession',
-    retiredDefaultKeys: ['cmd+['],
-    title: 'Previous Tab',
+    retiredDefaultKeys: ['cmd+[', 'cmd+shift+tab'],
+    title: 'Previous Session',
+    windowsLinuxDefaultKey: 'cmd+shift+tab',
   },
   {
     action: { id: 'focusNextSession', kind: 'focusSessionSlot', slotNumber: 0 },
     alternateDefaultKeys: ['cmd+shift+]'],
-    defaultKey: 'cmd+tab',
-    description: 'Select the next tab in the focused split pane.',
+    defaultKey: 'ctrl+tab',
+    description: 'Select the next session shown in the sidebar.',
     id: 'focusNextSession',
-    retiredDefaultKeys: ['cmd+]'],
-    title: 'Next Tab',
+    retiredDefaultKeys: ['cmd+]', 'cmd+tab'],
+    title: 'Next Session',
+    windowsLinuxDefaultKey: 'cmd+tab',
+  },
+  /**
+   * CDXC:Hotkeys 2026-09-19 DECISION:
+   * User: pane-tab cycling takes Cmd+Alt+[ / ] on Mac and the same chord (Ctrl+Alt+[ / ]) on Windows and Linux, so both platforms match. Previous/Next Tab traversal stays inside the active pane's tab group and includes sleeping placeholder tabs, then native dispatch applies the same select/wake/attach logic as clicking that tab.
+   */
+  {
+    action: { direction: -1, id: 'focusPreviousPaneTab', kind: 'cyclePaneTab' },
+    defaultKey: 'cmd+alt+[',
+    description: 'Select the previous tab in the focused split pane.',
+    id: 'focusPreviousPaneTab',
+    title: 'Previous Tab in Pane',
+  },
+  {
+    action: { direction: 1, id: 'focusNextPaneTab', kind: 'cyclePaneTab' },
+    defaultKey: 'cmd+alt+]',
+    description: 'Select the next tab in the focused split pane.',
+    id: 'focusNextPaneTab',
+    title: 'Next Tab in Pane',
   },
   ...(['up', 'right', 'down', 'left'] as const).map((direction) => ({
     action: {

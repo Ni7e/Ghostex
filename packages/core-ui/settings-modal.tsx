@@ -1639,6 +1639,15 @@ export function SettingsModal({
                                 onChange={(checked) => updateDraft('createSessionOnSidebarDoubleClick', checked)}
                               />
                             ) : null}
+                            {mainSettingVisible(settingsSearch.sidebar, 'sidebarSessionCycleSkipsSleeping') ? (
+                              <ToggleField
+                                checked={draft.sidebarSessionCycleSkipsSleeping}
+                                description='Next Session and Previous Session jump over sleeping sessions in the sidebar.'
+                                label='Skip sleeping sessions'
+                                {...getSettingModificationProps('sidebarSessionCycleSkipsSleeping')}
+                                onChange={(checked) => updateDraft('sidebarSessionCycleSkipsSleeping', checked)}
+                              />
+                            ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'enableSessionParking') ? (
                               <ToggleField
                                 checked={draft.enableSessionParking}

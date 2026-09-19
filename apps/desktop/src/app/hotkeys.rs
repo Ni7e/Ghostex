@@ -73,6 +73,30 @@ pub(crate) fn gpui_migrated_hotkey_for_action<'a>(
     if action_id == "stashedPrompts" && key.trim().eq_ignore_ascii_case("alt+shift+s") {
         return default_key;
     }
+    // CDXC:Navigation 2026-09-19: Back/Forward now own the plain brackets, so a
+    // persisted copy of the old group-focus default has to fall back to the new
+    // (unassigned) default instead of firing on the same press. Mirrors
+    // retiredDefaultKeys in packages/shared/ghostex-hotkeys.ts.
+    if action_id == "focusPreviousGroup" && key.trim().eq_ignore_ascii_case("cmd+[") {
+        return default_key;
+    }
+    if action_id == "focusNextGroup" && key.trim().eq_ignore_ascii_case("cmd+]") {
+        return default_key;
+    }
+    // CDXC:Hotkeys 2026-09-19: macOS owns Cmd+Tab, so Previous/Next Session
+    // moved to Ctrl+Tab and Windows/Linux Back/Forward gave Ctrl+Alt+[ / ] to
+    // pane-tab cycling. Mirrors retiredDefaultKeys in
+    // packages/shared/ghostex-hotkeys.ts.
+    let retired_key = match action_id {
+        "focusNextSession" => Some("cmd+tab"),
+        "focusPreviousSession" => Some("cmd+shift+tab"),
+        "navigateHistoryBack" => Some("cmd+alt+["),
+        "navigateHistoryForward" => Some("cmd+alt+]"),
+        _ => None,
+    };
+    if retired_key.is_some_and(|retired| key.trim().eq_ignore_ascii_case(retired)) {
+        return default_key;
+    }
     key
 }
 
@@ -92,8 +116,10 @@ pub(crate) fn gpui_platform_hotkey_for_action<'a>(action_id: &str, key: &'a str)
             // CDXC:Navigation 2026-08-19: same Mac-Control substitution
             // as the Jump to Project entries below, mirroring the
             // windowsLinuxDefaultKey values in packages/shared/ghostex-hotkeys.ts.
-            "navigateHistoryBack" => Some(("cmd+ctrl+[", "cmd+alt+[")),
-            "navigateHistoryForward" => Some(("cmd+ctrl+]", "cmd+alt+]")),
+            "navigateHistoryBack" => Some(("cmd+[", "cmd+alt+shift+[")),
+            "navigateHistoryForward" => Some(("cmd+]", "cmd+alt+shift+]")),
+            "focusPreviousSession" => Some(("ctrl+shift+tab", "cmd+shift+tab")),
+            "focusNextSession" => Some(("ctrl+tab", "cmd+tab")),
             "jumpToProject1" => Some(("cmd+ctrl+1", "cmd+alt+1")),
             "jumpToProject2" => Some(("cmd+ctrl+2", "cmd+alt+2")),
             "jumpToProject3" => Some(("cmd+ctrl+3", "cmd+alt+3")),
@@ -290,17 +316,20 @@ pub(crate) const GPUI_DEFAULT_GHOSTEX_HOTKEYS: &[(&str, &str)] = &[
     ("wakeFocusedSession", ""),
     ("closeFocusedSession", ""),
     ("popOutPane", "ctrl+shift+o"),
-    ("focusPreviousGroup", "cmd+["),
-    ("focusNextGroup", "cmd+]"),
-    // CDXC:Navigation 2026-08-19: mirrors packages/shared/ghostex-hotkeys.ts.
-    ("navigateHistoryBack", "cmd+ctrl+["),
-    ("navigateHistoryForward", "cmd+ctrl+]"),
+    // CDXC:Navigation 2026-09-19: mirrors packages/shared/ghostex-hotkeys.ts,
+    // where the brackets moved from group focus to Back/Forward.
+    ("focusPreviousGroup", ""),
+    ("focusNextGroup", ""),
+    ("navigateHistoryBack", "cmd+["),
+    ("navigateHistoryForward", "cmd+]"),
     // CDXC:Notifications 2026-09-11: mirrors packages/shared/ghostex-hotkeys.ts.
     ("openNotifications", "cmd+i"),
     ("jumpToLatestUnreadNotification", "cmd+shift+u"),
     ("deferNotificationAndJumpNext", "cmd+ctrl+u"),
-    ("focusPreviousSession", "cmd+shift+tab"),
-    ("focusNextSession", "cmd+tab"),
+    ("focusPreviousSession", "ctrl+shift+tab"),
+    ("focusNextSession", "ctrl+tab"),
+    ("focusPreviousPaneTab", "cmd+alt+["),
+    ("focusNextPaneTab", "cmd+alt+]"),
     ("focusUp", "cmd+alt+up"),
     ("focusRight", "cmd+alt+right"),
     ("focusDown", "cmd+alt+down"),
@@ -500,8 +529,6 @@ pub(crate) fn gpui_configured_hotkey_action_id_for_native_text(
     match hotkey_text.as_str() {
         "cmd+shift+]" => Some("focusNextSession".to_string()),
         "cmd+shift+[" => Some("focusPreviousSession".to_string()),
-        "ctrl+tab" => Some("focusNextSession".to_string()),
-        "ctrl+shift+tab" => Some("focusPreviousSession".to_string()),
         _ => None,
     }
 }
@@ -618,8 +645,10 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
             "createSession"
                 | "deferNotificationAndJumpNext"
                 | "focusLeft"
+                | "focusNextPaneTab"
                 | "focusNextSession"
                 | "focusPreviousSession"
+                | "focusPreviousPaneTab"
                 | "focusRight"
                 | "jumpToLatestUnreadNotification"
                 | "navigateHistoryBack"
@@ -633,8 +662,10 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
         )) => matches!(
             action_id,
             "deferNotificationAndJumpNext"
+                | "focusNextPaneTab"
                 | "focusNextSession"
                 | "focusPreviousSession"
+                | "focusPreviousPaneTab"
                 | "jumpToLatestUnreadNotification"
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
@@ -676,8 +707,10 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
             action_id,
             "toggleChatView"
                 | "sessionNote"
+                | "focusNextPaneTab"
                 | "focusNextSession"
                 | "focusPreviousSession"
+                | "focusPreviousPaneTab"
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
                 | "toggleCompanionPane"
@@ -704,10 +737,10 @@ pub(crate) fn gpui_configured_hotkey_key_bindings_from_settings() -> Vec<KeyBind
         .and_then(serde_json::Value::as_object)
         .cloned()
         .unwrap_or_default();
-    // macOS registers cmd+shift+]/cmd+shift+[ as always-on aliases for session
-    // cycling (`defaultHotkeyAliases`) because the system app switcher usually
-    // owns the cmd+tab defaults. Bind the aliases first so user-configured
-    // chords from the settings map win conflicts.
+    // cmd+shift+]/cmd+shift+[ are always-on aliases for Previous/Next Session
+    // (`alternateDefaultKeys`), matching Chrome's second tab-switch pair on
+    // macOS. Bind the aliases first so user-configured chords from the
+    // settings map win conflicts.
     let next_session_alias =
         gpui_keystroke_from_shared_hotkey("cmd+shift+]").expect("valid next-session alias");
     let previous_session_alias =

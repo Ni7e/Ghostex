@@ -17,6 +17,7 @@ export function getHotkeySettingsSectionId(
     case 'splitFocusedPane':
     case 'terminalToolbarAction':
       return 'paneActions';
+    case 'cyclePaneTab':
     case 'focusAdjacentGroup':
     case 'focusDirection':
       return 'navigation';
@@ -224,6 +225,7 @@ export const MAIN_SETTINGS_SECTION_SETTING_KEYS: Record<MainSettingsSectionId, r
     'projectSessionListCollapsedCount',
     'agentManagerZoomPercent',
     'createSessionOnSidebarDoubleClick',
+    'sidebarSessionCycleSkipsSleeping',
     'enableSessionParking',
     'sleepSessionWhenParking',
     'showTagMenuWhenParking',

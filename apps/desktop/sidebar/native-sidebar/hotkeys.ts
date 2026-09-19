@@ -26,9 +26,10 @@ export function runNativeSidebarHotkey(ui: NativeSidebarUiState, actionId: strin
           ? resolveAdjacentRenderedSidebarSessionSlotId({
               direction: action.slotNumber === 0 ? 1 : -1,
               focusedSessionId,
+              skipSleeping: nativeSidebarSettings().sidebarSessionCycleSkipsSleeping,
               slots: visibleSessionIds.flatMap((sessionId) => {
                 const session = state.sessionsById[sessionId];
-                return session?.isVisible
+                return session
                   ? [{ sessionId, isSleeping: getSidebarSessionLifecycleState(session) === 'sleeping' }]
                   : [];
               }),
@@ -58,6 +59,7 @@ export function runNativeSidebarHotkey(ui: NativeSidebarUiState, actionId: strin
     case 'toggleSidebarCollapsed':
       post({ type: 'toggleSidebarCollapsed' });
       break;
+    case 'cyclePaneTab':
     case 'focusAdjacentGroup':
     case 'focusDirection':
     case 'focusedPaneAction':

@@ -358,6 +358,11 @@ export function normalizeghostexSettings(candidate: unknown): ghostexSettings {
       'createSessionOnSidebarDoubleClick',
       DEFAULT_ghostex_SETTINGS.createSessionOnSidebarDoubleClick
     ),
+    sidebarSessionCycleSkipsSleeping: readBoolean(
+      source,
+      'sidebarSessionCycleSkipsSleeping',
+      DEFAULT_ghostex_SETTINGS.sidebarSessionCycleSkipsSleeping
+    ),
     enableSessionParking: readBoolean(source, 'enableSessionParking', DEFAULT_ghostex_SETTINGS.enableSessionParking),
     sleepSessionWhenParking: readBoolean(
       source,

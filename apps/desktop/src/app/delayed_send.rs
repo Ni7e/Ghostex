@@ -2142,7 +2142,7 @@ impl GhostexGpuiApp {
                 `toggleSidebarCollapsed` is shell chrome, not a modal command. Route it before app-modal fallback so the command-palette row and Cmd+B hide or restore the GPUI sidebar and divider while preserving the expanded sidebar width.
 
                 CDXC:CommandPalette 2026-06-26-23:20:
-                Numbered session-slot rows are delegated to SidebarApp as nativeHotkey messages because rendered sidebar slot order is the only safe owner for `focusSessionSlot1..9`. Previous/next session remains GPUI tab-cycle routing, and jump-to-project ids must not enter this bounce path because SidebarApp forwards those back to native.
+                Numbered session-slot rows and Previous/Next Session are delegated to SidebarApp as nativeHotkey messages because rendered sidebar row order is the only safe owner for `focusSessionSlot1..9` and `focusPrevious/NextSession`. Previous/Next Tab in Pane stays on GPUI tab-cycle routing, and jump-to-project ids must not enter this bounce path because SidebarApp forwards those back to native.
 
                 CDXC:Hotkeys 2026-06-26-23:42:
                 Project jump rows also depend on SidebarApp's rendered project order, but they must use the dedicated `gpuiProjectSlotHotkey` host message instead of `nativeHotkey` so SidebarApp resolves the slot locally without forwarding the same `jumpToProject*` id back to GPUI.

@@ -373,6 +373,11 @@ export type ghostexSettings = {
   showNotificationOnTerminalBell: boolean;
   createSessionOnSidebarDoubleClick: boolean;
   /**
+   * CDXC:Hotkeys 2026-09-19 DECISION:
+   * User: Previous/Next Session gets a Settings toggle to jump over sleeping sessions, but sleeping sessions are not skipped by default.
+   */
+  sidebarSessionCycleSkipsSleeping: boolean;
+  /**
    * Enables the Park session action and the collapsible Parked section at the
    * bottom of each project's session list. Parking is durable session state;
    * disabling this preference only hides the organization feature and renders

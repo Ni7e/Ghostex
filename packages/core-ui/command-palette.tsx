@@ -1020,7 +1020,7 @@ function BuiltInCommandIcon({ command }: { command: BuiltInPaletteCommand }) {
   if (action.kind === 'focusedPaneAction') {
     return <FocusedPaneCommandIcon action={action.focusedPaneAction} />;
   }
-  if (action.kind === 'focusAdjacentGroup') {
+  if (action.kind === 'focusAdjacentGroup' || action.kind === 'cyclePaneTab') {
     return action.direction < 0 ? <IconChevronLeft aria-hidden='true' /> : <IconChevronRight aria-hidden='true' />;
   }
   if (action.kind === 'focusDirection') {

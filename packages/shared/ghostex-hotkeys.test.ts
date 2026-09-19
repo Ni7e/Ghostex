@@ -40,10 +40,14 @@ describe('normalizeghostexHotkeySettings', () => {
      * without a default shortcut.
      */
     expect(DEFAULT_ghostex_HOTKEYS.toggleSidebarCollapsed).toBe('cmd+b');
-    expect(DEFAULT_ghostex_HOTKEYS.focusPreviousSession).toBe('cmd+shift+tab');
-    expect(DEFAULT_ghostex_HOTKEYS.focusNextSession).toBe('cmd+tab');
-    expect(DEFAULT_ghostex_HOTKEYS.focusPreviousGroup).toBe('cmd+[');
-    expect(DEFAULT_ghostex_HOTKEYS.focusNextGroup).toBe('cmd+]');
+    expect(DEFAULT_ghostex_HOTKEYS.focusPreviousSession).toBe('ctrl+shift+tab');
+    expect(DEFAULT_ghostex_HOTKEYS.focusNextSession).toBe('ctrl+tab');
+    expect(DEFAULT_ghostex_HOTKEYS.focusPreviousPaneTab).toBe('cmd+alt+[');
+    expect(DEFAULT_ghostex_HOTKEYS.focusNextPaneTab).toBe('cmd+alt+]');
+    expect(DEFAULT_ghostex_HOTKEYS.focusPreviousGroup).toBe('');
+    expect(DEFAULT_ghostex_HOTKEYS.focusNextGroup).toBe('');
+    expect(DEFAULT_ghostex_HOTKEYS.navigateHistoryBack).toBe('cmd+[');
+    expect(DEFAULT_ghostex_HOTKEYS.navigateHistoryForward).toBe('cmd+]');
     expect(DEFAULT_ghostex_HOTKEYS.focusLeft).toBe('cmd+alt+left');
     expect(DEFAULT_ghostex_HOTKEYS.focusRight).toBe('cmd+alt+right');
     expect(DEFAULT_ghostex_HOTKEYS.focusUp).toBe('cmd+alt+up');
@@ -183,10 +187,10 @@ describe('normalizeghostexHotkeySettings', () => {
     ).toMatchObject({
       createSession: 'cmd+t',
       focusLeft: 'cmd+alt+left',
-      focusNextGroup: 'cmd+]',
-      focusNextSession: 'cmd+tab',
-      focusPreviousGroup: 'cmd+[',
-      focusPreviousSession: 'cmd+shift+tab',
+      focusNextGroup: '',
+      focusNextSession: 'ctrl+tab',
+      focusPreviousGroup: '',
+      focusPreviousSession: 'ctrl+shift+tab',
       focusRight: 'cmd+alt+right',
       openBrowserPane: 'cmd+n',
       openCommandPalette: 'cmd+shift+p',

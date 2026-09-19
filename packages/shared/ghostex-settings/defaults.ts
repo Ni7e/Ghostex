@@ -206,6 +206,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   showNotificationOnTerminalBell: false,
   createSessionOnSidebarDoubleClick: false,
+  sidebarSessionCycleSkipsSleeping: false,
   /**
    * CDXC:Sessions 2026-09-10 DECISION:
    * User: enable parking by default, but keep sleep on park disabled by default.
@@ -402,7 +403,8 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   /** CDXC:Theming 2026-09-14 DECISION: User: default App theme to System, with Chat and Terminal on Follow app. Existing saved theme selections remain unchanged. */
   sidebarTheme: 'system',
   sessionChatTheme: 'app',
-  sessionChatUseGpui: false,
+  /** CDXC:SessionChat 2026-09-19 DECISION: User: make GPUI chat the default on desktop. This supersedes the React default; turning the setting off still selects React chat, and saved choices are kept. */
+  sessionChatUseGpui: true,
   sessionChatFontFamily: '',
   sessionChatZoomPercent: DEFAULT_SESSION_CHAT_ZOOM_PERCENT,
   sessionChatCustomTranscriptWidthEnabled: false,
