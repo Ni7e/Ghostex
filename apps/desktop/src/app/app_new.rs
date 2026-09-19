@@ -267,7 +267,6 @@ impl GhostexGpuiApp {
                 session_chat_diagnostics: Default::default(),
                 agents_chat_eviction_running: false,
                 agents_chat_prewarm_scheduled: false,
-                session_chat_skeletons: Default::default(),
                 native_chat_visible_sessions: HashSet::new(),
                 session_chat_subscribe_requests: HashMap::new(),
                 session_chat_paused_generations: HashSet::new(),

@@ -54,7 +54,14 @@ impl GhostexGpuiApp {
                         });
                     });
                 }
-                self.render_native_chat_with_skeleton(session_id, &view, cx)
+                div()
+                    .id(format!("native-chat-{}", session_id.0))
+                    .size_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(view)
+                    .into_any_element()
             }
             None => self.render_session_chat_surface_content(session_id),
         };

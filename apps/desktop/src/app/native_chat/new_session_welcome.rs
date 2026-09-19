@@ -68,11 +68,13 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         /*
-        The loading hold. `loadingStage` is `blank` for the first 600ms of a
-        transcript read, so toggling back to an already-open chat never flashes
-        the skeleton on its way to the rows.
+        The loading hold. A chat whose host has not published its first snapshot yet is still
+        reading its transcript too, so it draws the skeleton instead of a blank region.
         */
-        if let Some(stage) = state["loadingStage"].as_str() {
+        let stage = state["loadingStage"]
+            .as_str()
+            .or_else(|| (state["status"].is_null() && self.error.is_none()).then_some("indicator"));
+        if let Some(stage) = stage {
             return self.render_transcript_skeleton(stage, p, cx);
         }
         let s = p.scale;

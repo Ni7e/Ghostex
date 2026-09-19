@@ -48,7 +48,10 @@ static SKELETON: LazyLock<TranscriptSkeleton> = LazyLock::new(|| {
 });
 
 impl NativeChatView {
-    /// The loading hold: blank at first, then the skeleton, then the skeleton under a Retry row.
+    /// The loading hold: the skeleton, then the skeleton under a Retry row.
+    ///
+    /// CDXC:SessionChat 2026-09-19 DECISION:
+    /// User: the pane must react to the click at once and show the newly clicked session, with a skeleton until its chat transcript is ready; the skeleton fills only the transcript area and the real composer stays at the bottom. This supersedes the same-day pane-wide overlay that covered the composer.
     pub(super) fn render_transcript_skeleton(
         &self,
         stage: &str,

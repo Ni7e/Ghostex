@@ -1,18 +1,13 @@
 use crate::app::helpers::ThrottledAnimationExt as _;
-use crate::app::native_chat::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::appearance::ChatAppearance;
 use crate::*;
 use gpui::{
     AnyElement, InteractiveElement as _, IntoElement, ParentElement as _, Styled as _, div, px,
     relative,
 };
 use serde::Deserialize;
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::LazyLock;
-use std::time::{Duration, Instant};
-
-/// The longest the pane-level skeleton stays over a booting chat before the view's own loading and retry states show through.
-const CHAT_SKELETON_OVERLAY_MAX: Duration = Duration::from_millis(2500);
+use std::time::Duration;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,8 +32,8 @@ struct SkeletonRow {
 
 /// CDXC:SessionChat 2026-09-19 SEE-ALSO:
 /// The geometry is the shared packages/shared/session-chat-presentation/transcript-skeleton.json that React's
-/// SessionChatLoadingState and the chat view's own transcript skeleton draw; the pane draws it here while there is
-/// no chat view yet or the view has nothing to show.
+/// SessionChatLoadingState and the chat view's own transcript skeleton draw; the pane draws it here only while there
+/// is no chat view yet, because a chat view draws its own skeleton above its real composer.
 static SKELETON: LazyLock<TranscriptSkeleton> = LazyLock::new(|| {
     serde_json::from_str(include_str!(
         "../../../../packages/shared/session-chat-presentation/transcript-skeleton.json"
@@ -59,79 +54,7 @@ pub(crate) fn skeleton_pulse() -> (Duration, f32) {
     )
 }
 
-#[derive(Default)]
-pub(crate) struct SessionChatSkeletons {
-    waiting_since: RefCell<HashMap<TerminalSessionId, Instant>>,
-    /// Views that have shown content once; the pane never covers them again, whatever their rows do later.
-    ready_once: RefCell<std::collections::HashSet<gpui::EntityId>>,
-}
-
 impl GhostexGpuiApp {
-    /// The same readiness the chat view's own paint marker uses: rows on screen, or a status that says there are none.
-    pub(crate) fn native_chat_content_ready(
-        &self,
-        view: &Entity<NativeChatView>,
-        cx: &gpui::App,
-    ) -> bool {
-        let view = view.read(cx);
-        view.error.is_none()
-            && (view.list.item_count() > 0
-                || matches!(
-                    view.snapshot["status"].as_str(),
-                    Some("ready" | "working" | "empty")
-                ))
-    }
-
-    /// CDXC:SessionChat 2026-09-19 DECISION:
-    /// User: the pane must react to the click at once and show the newly clicked session, with a skeleton until its chat transcript is ready, never keep showing the current session while the next one loads. This supersedes the same-day holdover that kept the previous conversation on screen for up to 1.2s.
-    /// The incoming chat view paints underneath a skeleton until it has rows or a status, so the pane swaps in the click's frame and a boot never shows a blank pane; the overlay lets go after a moment so the view's own loading and retry states stay reachable.
-    pub(crate) fn render_native_chat_with_skeleton(
-        &self,
-        session_id: TerminalSessionId,
-        view: &Entity<NativeChatView>,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        let chat = div()
-            .id(format!("native-chat-{}", session_id.0))
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .overflow_hidden()
-            .child(view.clone());
-        let mut waiting = self.session_chat_skeletons.waiting_since.borrow_mut();
-        let mut ready_once = self.session_chat_skeletons.ready_once.borrow_mut();
-        if ready_once.contains(&view.entity_id()) {
-            waiting.remove(&session_id);
-            return chat.into_any_element();
-        }
-        if self.native_chat_content_ready(view, cx) {
-            waiting.remove(&session_id);
-            ready_once.insert(view.entity_id());
-            return chat.into_any_element();
-        }
-        let since = *waiting.entry(session_id).or_insert_with(Instant::now);
-        if since.elapsed() >= CHAT_SKELETON_OVERLAY_MAX {
-            return chat.into_any_element();
-        }
-        let appearance = ChatAppearance::current(&view.read(cx).snapshot);
-        div()
-            .id(format!("native-chat-skeleton-{}", session_id.0))
-            .relative()
-            .size_full()
-            .min_w_0()
-            .min_h_0()
-            .overflow_hidden()
-            .child(div().absolute().inset_0().child(chat))
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .occlude()
-                    .child(session_chat_skeleton(&appearance)),
-            )
-            .into_any_element()
-    }
-
     /// The skeleton for a chat-mode tab that has no chat view yet (a staged session or a placeholder awaiting its created session).
     pub(crate) fn render_session_chat_skeleton(&self) -> AnyElement {
         session_chat_skeleton(&ChatAppearance::current(&serde_json::Value::Null))

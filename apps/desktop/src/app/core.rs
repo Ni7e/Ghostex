@@ -445,7 +445,6 @@ pub struct GhostexGpuiApp {
     pub(crate) session_chat_diagnostics: super::session_chat_diagnostics::SessionChatDiagnostics,
     pub(crate) agents_chat_eviction_running: bool,
     pub(crate) agents_chat_prewarm_scheduled: bool,
-    pub(crate) session_chat_skeletons: super::session_chat_skeleton::SessionChatSkeletons,
     /// Sessions whose chat is in a visible pane, as of the last chat surface reconcile.
     pub(crate) native_chat_visible_sessions: HashSet<TerminalSessionId>,
     /// Each runtime's own broker subscribe request, replayed when a paused view is shown again.
