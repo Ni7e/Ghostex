@@ -874,6 +874,7 @@ impl GhostexGpuiApp {
             );
             return;
         }
+        self.adopt_agent_launch_placeholder(&message);
         support_logs::append_temporary(
             support_logs::GpuiSupportLog::TerminalFocus,
             "TEMP.gpui.sessionSwitchLatency.bridgeReceived",

@@ -445,7 +445,10 @@ pub struct GhostexGpuiApp {
     pub(crate) session_chat_diagnostics: super::session_chat_diagnostics::SessionChatDiagnostics,
     pub(crate) agents_chat_eviction_running: bool,
     pub(crate) agents_chat_prewarm_scheduled: bool,
-    pub(crate) session_chat_holdovers: super::session_chat_switch_holdover::SessionChatHoldovers,
+    pub(crate) session_chat_skeletons: super::session_chat_skeleton::SessionChatSkeletons,
+    /// Tabs opened by project-header agent launches that are still waiting for their created session.
+    pub(crate) agent_launch_placeholders:
+        std::collections::VecDeque<super::sidebar_agent_launch_placeholder::AgentLaunchPlaceholder>,
     pub(crate) agents_chat_eviction_retry_scheduled: bool,
     pub(crate) agents_chat_reconcile_scheduled: bool,
     pub(crate) agents_chat_eviction_requested: bool,

@@ -1,13 +1,29 @@
+use crate::app::helpers::*;
+use crate::app::model::*;
+use crate::app::native_sidebar::model::NativeSidebarSession;
 use crate::*;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// How long a click's in-process focus is recognised when the runtime's own focus message for the same session arrives.
 const IN_PROCESS_FOCUS_ECHO_WINDOW: Duration = Duration::from_secs(3);
 
 impl GhostexGpuiApp {
+    /// A row click's whole in-process reaction: the tab switch when the session already has a live tab, otherwise the staged tab the runtime's wake and attach will fill.
+    pub(crate) fn react_to_native_sidebar_session_click(
+        &mut self,
+        sidebar_session_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.focus_native_sidebar_session_in_process(sidebar_session_id, cx) {
+            return;
+        }
+        self.stage_native_sidebar_session_tab(sidebar_session_id, cx);
+    }
+
     /// CDXC:Sidebar 2026-09-19 WHY:
     /// A row click reached the workspace only after the service thread ran the sidebar command, the runtime routed the focus, and the bridge message came back, so the pane switched one service-thread turn after the row highlight even when the session already had a tab; Waku switches in the click's own frame.
-    /// A local, awake session of the active project whose tab already has a live terminal is selected here, synchronously, through the same tab selection the bridge path ends in. The runtime still receives the command so presentation focus, attention acknowledgement and the sidebar snapshot follow, and its echoed focus message is dropped by `sidebar_focus_message_echoes_in_process_focus`. Other projects, sleeping, remote, browser and unattached sessions keep the bridge path, which owns project switches and gxserver attach plans.
+    /// A local, awake session of the active project whose tab already has a live terminal is selected here, synchronously, through the same tab selection the bridge path ends in. The runtime still receives the command so presentation focus, attention acknowledgement and the sidebar snapshot follow, and its echoed focus message is dropped by `sidebar_focus_message_echoes_in_process_focus`. Other projects, remote and browser sessions keep the bridge path, which owns project switches and gxserver attach plans.
     pub(crate) fn focus_native_sidebar_session_in_process(
         &mut self,
         sidebar_session_id: &str,
@@ -48,6 +64,121 @@ impl GhostexGpuiApp {
         );
         self.sidebar_in_process_focus = Some((key, Instant::now()));
         true
+    }
+
+    /// CDXC:Sidebar 2026-09-19 DECISION:
+    /// User: clicking a sleeping session, or one not opened recently, must react on the pane at once and show that session, with a skeleton until its chat transcript is ready, instead of waiting for the wake and attach while the current session stays on screen; people flip between sessions quickly.
+    /// The session's tab is selected now, or created now as a mounting placeholder mapped to the session, so the pane switches in the click's frame. The runtime's wake and attach then fill that same tab: the attach completion reuses a mapped tab in place. A session whose agent prefers Chat and that already has a transcript gets its chat surface immediately, so the chat runtime boots while the daemon is still waking the session.
+    fn stage_native_sidebar_session_tab(
+        &mut self,
+        sidebar_session_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let Some(key) = gpui_combined_presentation_session_key(sidebar_session_id) else {
+            return false;
+        };
+        if self.agents_workspace_project_id.as_deref() != Some(key.project_id.as_str()) {
+            return false;
+        }
+        let keep_editor =
+            self.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key);
+        let mapped = self
+            .local_workspace_session_mappings
+            .get(&key)
+            .copied()
+            .filter(|shell| self.agents_workspace.pane_id_for_session(*shell).is_some());
+        let shell_session_id = match mapped {
+            Some(shell) => shell,
+            None => {
+                let Some(row) = self.native_sidebar_session_row(sidebar_session_id) else {
+                    return false;
+                };
+                if row.is_browser() {
+                    return false;
+                }
+                let focused_pane = self.agents_workspace.focused_pane;
+                let Some(shell) = self
+                    .agents_workspace
+                    .add_mounting_session_to_pane(focused_pane)
+                else {
+                    return false;
+                };
+                let icon = gpui_sidebar_agent_icon(row.agent_icon.as_deref());
+                if let Some(session) = self
+                    .agents_workspace
+                    .terminal_sessions
+                    .iter_mut()
+                    .find(|session| session.id == shell)
+                {
+                    session.title = row.title().to_owned();
+                    session.agent_icon = icon;
+                    // Not a startup-pipeline candidate: the attach owns this tab.
+                    session.set_presentation_state_with_startup_eligibility(
+                        TerminalSessionPresentationState::Mounting,
+                        false,
+                    );
+                }
+                self.local_workspace_session_mappings
+                    .insert(key.clone(), shell);
+                self.local_app_shot_session_mappings
+                    .insert(key.session_id.clone(), shell);
+                let has_transcript = row.is_draft
+                    || row
+                        .details
+                        .get("agentSessionId")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|id| !id.trim().is_empty());
+                let settings = shared_settings::shared_sidebar_settings_snapshot();
+                if has_transcript
+                    && self.agents_session_chat_transcript_agent(shell).is_some()
+                    && gpui_effective_preferred_agent_interface_for_agent_icon(
+                        settings.object(),
+                        icon,
+                    ) == GpuiPreferredAgentInterface::Chat
+                {
+                    self.agents_chat_mode_sessions.insert(shell);
+                }
+                shell
+            }
+        };
+        let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
+            return false;
+        };
+        self.agents_workspace.select_tab(pane_id, shell_session_id);
+        if !keep_editor {
+            self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
+            self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
+        }
+        self.scroll_workspace_pane_active_tab(pane_id);
+        self.reconcile_agents_pane_surfaces(cx);
+        self.update_active_mode_cef_child_visibility(cx);
+        self.persist_shell_layout_state();
+        support_logs::append_temporary(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "TEMP.gpui.sessionSwitchLatency.inProcessTabStaged",
+            serde_json::json!({
+                "epochMs": support_logs::temporary_epoch_ms(),
+                "projectId": key.project_id,
+                "sessionId": key.session_id,
+                "mapped": mapped.is_some(),
+            }),
+        );
+        cx.notify();
+        true
+    }
+
+    fn native_sidebar_session_row(
+        &self,
+        sidebar_session_id: &str,
+    ) -> Option<Arc<NativeSidebarSession>> {
+        self.native_sidebar
+            .snapshot
+            .as_ref()?
+            .groups
+            .iter()
+            .flat_map(|group| group.sessions.iter())
+            .find(|session| session.session_id == sidebar_session_id)
+            .cloned()
     }
 
     /// Whether a plain focus message from the runtime only repeats a click that was already applied in process, so the tab is not selected a second time.

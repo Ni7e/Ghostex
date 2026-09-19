@@ -114,6 +114,7 @@ impl GhostexGpuiApp {
                 json!({"sessionId": command["sessionId"], "epochMs": crate::support_logs::temporary_epoch_ms()}),
             );
         }
+        self.stage_agent_launch_placeholder(&command, cx);
         let script = format!("window.ghostexGpui.onNativeSidebarCommand({command}); undefined;");
         service.update(cx, |surface, _| {
             surface.execute_app_owned_script(&script);

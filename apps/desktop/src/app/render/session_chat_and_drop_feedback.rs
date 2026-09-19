@@ -46,7 +46,7 @@ impl GhostexGpuiApp {
         {
             Some(view) => {
                 self.record_session_chat_render(session_id);
-                self.render_native_chat_with_holdover(pane_id, session_id, &view, cx)
+                self.render_native_chat_with_skeleton(session_id, &view, cx)
             }
             None => self.render_session_chat_surface_content(session_id),
         };
@@ -100,6 +100,10 @@ impl GhostexGpuiApp {
                     "Chat unavailable",
                     "Session Chat needs the local Ghostex server. Start it from the sidebar, then toggle Chat View again.",
                 )
+            } else if self.session_chat_use_gpui {
+                // A chat-mode tab whose native view does not exist yet: the session is still being
+                // created or mapped, so the pane shows the transcript skeleton, not a sentence.
+                return self.render_session_chat_skeleton();
             } else {
                 ("Loading Chat...", "")
             };
