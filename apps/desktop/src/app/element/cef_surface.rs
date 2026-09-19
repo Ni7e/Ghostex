@@ -119,6 +119,28 @@ impl CefSurface {
         cx: &mut gpui::Context<Self>,
     ) -> Self {
         browser.set_visible(visible);
+        #[cfg(target_os = "linux")]
+        {
+            // CDXC:FocusRouting 2026-09-19 WHY:
+            // Native Chromium clicks bypass GPUI's mouse listeners; mirror their focus into the existing handle so the address bar blurs.
+            // Subscribe to actual pointer presses rather than CEF focus notifications, which can recursively fire during programmatic handoffs.
+            let surface = cx.entity().downgrade();
+            let async_cx = cx.to_async();
+            let foreground = cx.foreground_executor().clone();
+            browser.on_native_pointer_focus(Rc::new(move || {
+                let surface = surface.clone();
+                let mut async_cx = async_cx.clone();
+                foreground
+                    .spawn(async move {
+                        let _ = surface.update_in(&mut async_cx, |surface, window, cx| {
+                            if surface.visible && surface.browser.owns_native_focus() {
+                                surface.focus_handle.focus(window, cx);
+                            }
+                        });
+                    })
+                    .detach();
+            }));
+        }
         Self {
             background,
             browser,

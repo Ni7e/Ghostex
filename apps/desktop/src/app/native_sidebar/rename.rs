@@ -47,8 +47,17 @@ impl GhostexGpuiApp {
         };
         let input = cx.new(|cx| InputState::new(window, cx).default_value(title.clone()));
         let subscription = cx.subscribe_in(&input, window, |app, _, event, _, cx| {
-            if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                app.finish_native_sidebar_rename(true, cx);
+            match event {
+                InputEvent::Focus => {
+                    // CDXC:FocusRouting 2026-09-19 WHY:
+                    // Selecting the group name only moves GPUI focus; Linux can still send keys to the previously focused Chromium input when the pointer is over it.
+                    app.drop_pending_browser_keyboard_handoff();
+                    app.reclaim_gpui_root_for_chrome_input_focus();
+                }
+                InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                    app.finish_native_sidebar_rename(true, cx);
+                }
+                _ => {}
             }
         });
         self.native_sidebar.name_editor = Some(SidebarNameEditor {

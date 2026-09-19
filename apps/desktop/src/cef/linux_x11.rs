@@ -51,6 +51,9 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::rust_connection::RustConnection;
 
+#[path = "linux_x11_pointer_focus.rs"]
+mod pointer_focus;
+
 /// Matches GhostexGpuiCEFMessagePumpPlaceholderDelayMs in the macOS shim.
 const PUMP_PLACEHOLDER_DELAY_MS: i64 = i32::MAX as i64;
 /// Matches GhostexGpuiCEFMessagePumpImmediateTimerDelayMs in the macOS shim.
@@ -125,6 +128,7 @@ pub(super) fn install_message_pump(cx: &gpui::App) {
     reinstall after invalidate just re-arms the flags.
     */
     if PUMP_SENDER.get().is_none() {
+        pointer_focus::install(cx);
         let (sender, receiver) = mpsc::unbounded();
         let _ = PUMP_SENDER.set(sender);
         let background_executor = cx.background_executor().clone();
@@ -407,6 +411,37 @@ CefBrowser drops.
 static PENDING_EMBED_HOST: Mutex<Option<X11Window>> = Mutex::new(None);
 static EMBED_HOST_BY_CEF_WINDOW: Mutex<Option<HashMap<X11Window, X11Window>>> = Mutex::new(None);
 
+/// CDXC:FocusRouting 2026-09-18 WHY:
+/// GPUI owns and reads this keyboard-only child because X11 key events stop propagating at the focus window; an adapter-owned child drops input instead of forwarding it to GPUI.
+/// SEE-ALSO: .dependencies/zed/crates/gpui_linux/src/linux/x11/window.rs publishes the child, and client.rs dispatches its events to the owning window.
+fn gpui_keyboard_focus_window(parent: X11Window) -> X11Window {
+    let (connection, _) = x11_connection();
+    static PROPERTY: OnceLock<u32> = OnceLock::new();
+    let property = *PROPERTY.get_or_init(|| {
+        connection
+            .intern_atom(false, b"_GPUI_KEYBOARD_FOCUS_WINDOW")
+            .expect("failed to request the GPUI keyboard-focus atom")
+            .reply()
+            .expect("failed to resolve the GPUI keyboard-focus atom")
+            .atom
+    });
+    connection
+        .get_property(
+            false,
+            parent,
+            property,
+            x11rb::protocol::xproto::AtomEnum::WINDOW,
+            0,
+            1,
+        )
+        .expect("failed to request the GPUI keyboard-focus window")
+        .reply()
+        .expect("failed to read the GPUI keyboard-focus window")
+        .value32()
+        .and_then(|mut values| values.next())
+        .expect("GPUI must publish its keyboard-focus window before embedding CEF")
+}
+
 fn embed_host_colormap(
     connection: &RustConnection,
     screen: &x11rb::protocol::xproto::Screen,
@@ -557,12 +592,14 @@ pub(super) fn prepare_native_view_for_focus(native_view: *mut c_void) {
         .expect("CEF embed-host registry mutex should not be poisoned")
         .get_or_insert_with(HashMap::new)
         .insert(cef_window, host);
+    pointer_focus::observe(cef_window);
 }
 
 pub(super) fn release_native_view(native_view: *mut c_void) {
     let Some(cef_window) = x11_window(native_view) else {
         return;
     };
+    pointer_focus::forget(cef_window);
     let host = EMBED_HOST_BY_CEF_WINDOW
         .lock()
         .expect("CEF embed-host registry mutex should not be poisoned")
@@ -717,6 +754,7 @@ pub(super) fn focus_gpui_root_view(native_view: *mut c_void) {
         return;
     };
     super::shell::clear_active_native_view();
+    let window = gpui_keyboard_focus_window(window);
     let (connection, _) = x11_connection();
     let _ = connection.set_input_focus(InputFocus::PARENT, window, x11rb::CURRENT_TIME);
     let _ = connection.flush();
@@ -747,7 +785,8 @@ pub(super) fn native_view_owns_first_responder(native_view: *mut c_void) -> bool
 }
 
 pub(super) fn native_view_has_direct_focus(native_view: *mut c_void) -> bool {
-    x11_window(native_view).is_some_and(|window| focused_x11_window() == Some(window))
+    x11_window(native_view)
+        .is_some_and(|window| focused_x11_window() == Some(gpui_keyboard_focus_window(window)))
 }
 
 fn focused_x11_window() -> Option<X11Window> {
