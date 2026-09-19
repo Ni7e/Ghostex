@@ -25,7 +25,7 @@ impl GhostexGpuiApp {
     back to Running because the composited element needs no native remount.
     */
     pub(crate) fn sync_agents_gpui_engine_terminals(&mut self, cx: &mut gpui::Context<Self>) {
-        self.release_unused_agents_gpui_terminal_viewers(false, cx);
+        self.release_unused_agents_gpui_terminal_viewers(false, &HashSet::new(), cx);
         // Prune records whose shell session or runtime identity is gone;
         // dropping a record kills the child through the model. Sleeping
         // sessions drop their record too (mirroring the command pane): a

@@ -875,9 +875,9 @@ impl GhostexGpuiApp {
             stale_surface
                 .surface
                 .update(cx, |surface, _| surface.set_visible(false));
-            self.park_custom_project_view(stale_surface);
+            self.park_project_workarea_runtime_cef_surface(stale_surface, true, cx);
         }
-        if let Some(owned) = self.take_custom_project_view(&runtime_url) {
+        if let Some(owned) = self.take_parked_project_workarea_runtime_cef_surface(&runtime_url) {
             let surface = owned.surface.clone();
             self.project_workarea_runtime_cef_surfaces
                 .insert(slot_key, owned);
@@ -1276,13 +1276,14 @@ impl GhostexGpuiApp {
             if surface_is_current {
                 continue;
             }
+            let was_visible = self.project_workarea_runtime_cef_surface_may_be_visible(slot_key);
             if let Some(owned_surface) =
                 self.project_workarea_runtime_cef_surfaces.remove(&slot_key)
             {
                 owned_surface
                     .surface
                     .update(cx, |surface, _| surface.set_visible(false));
-                self.park_custom_project_view(owned_surface);
+                self.park_project_workarea_runtime_cef_surface(owned_surface, was_visible, cx);
                 pruned = true;
             }
         }

@@ -92,8 +92,27 @@ impl GhostexGpuiApp {
                             .get(&candidate.session_id)
                             .is_some_and(|state| state.generation == candidate.generation)
                         && parked.surface_evictable(candidate.session_id, require_empty)
+                        && !parked.session_kept_alive(
+                            candidate.session_id,
+                            self.project_switch_keep_alive(),
+                        )
                 })
         }
+    }
+
+    /// How long a candidate must still wait before it can be pooled: the rest of the pool grace, or
+    /// the rest of its project's keep-alive window.
+    fn chat_eviction_candidate_wait(&self, candidate: &ChatEvictionCandidate) -> Option<Duration> {
+        let age = candidate.hidden_since.elapsed();
+        if age < GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE {
+            return Some(GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE - age);
+        }
+        if candidate.project_id == self.agents_workspace_project_id {
+            return None;
+        }
+        self.parked_agents_chat_runtimes_by_project
+            .get(candidate.project_id.as_ref()?)?
+            .keep_alive_remaining(candidate.session_id, self.project_switch_keep_alive())
     }
 
     fn request_chat_eviction_probe(
@@ -243,16 +262,14 @@ impl GhostexGpuiApp {
             return;
         }
         let candidates = self.chat_eviction_candidates();
-        if let Some(youngest) = candidates
+        if let Some(wait) = candidates
             .iter()
-            .map(|candidate| candidate.hidden_since.elapsed())
-            .filter(|age| *age < GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE)
+            .filter_map(|candidate| self.chat_eviction_candidate_wait(candidate))
             .min()
         {
             if !self.agents_chat_eviction_retry_scheduled {
                 self.agents_chat_eviction_retry_scheduled = true;
-                let delay =
-                    GPUI_AGENTS_CHAT_SURFACE_POOL_GRACE - youngest + Duration::from_millis(50);
+                let delay = wait + Duration::from_millis(50);
                 cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(delay).await;
                     let _ = this.update(cx, |this, cx| {

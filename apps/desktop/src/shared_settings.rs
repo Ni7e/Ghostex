@@ -153,7 +153,7 @@ CDXC:Settings 2026-06-24-10:50:
 GPUI must read and persist the shared sidebar settings JSON through the central XDG/GHOSTEX_HOME path resolver. Keep this module as the single GPUI path/read/write contract so Settings UI parity handles `updateSettings` without introducing a second settings store.
 
 CDXC:Settings 2026-06-24-10:50:
-Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, sidebarDefaultWidthPx, project-editor auto-sleep fields, legacy external-IDE command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
+Rust should parse only the GPUI runtime fields it consumes today: debuggingMode, showBetaFeatures, sidebarDefaultWidthPx, projectSwitchKeepAliveMinutes, project-editor auto-sleep fields, legacy external-IDE command fields, and the supported embedded Ghostty surface font-size field. The raw JSON object is preserved for whole-object writes, but this service intentionally does not duplicate the full TypeScript `ghostexSettings` schema.
 
 CDXC:Settings 2026-06-24-10:50:
 GPUI `updateSettings` handling needs a production write path: accept only JSON object payloads, create the shared state directory, write through an adjacent temp file then rename, skip byte-identical writes, and maintain a monotonic in-memory revision/hash/snapshot signal without logging paths, project names, URLs, commands, environment values, tokens, stdout/stderr, or user-owned content.
@@ -722,6 +722,17 @@ impl SharedSidebarSettingsSnapshot {
         self.object
             .get("sidebarDefaultWidthPx")
             .and_then(json_value_to_f32)
+    }
+
+    /// `None` when the keep-alive slider is at 0, which restores release-on-switch.
+    pub fn project_switch_keep_alive(&self) -> Option<std::time::Duration> {
+        let minutes = self
+            .object
+            .get("projectSwitchKeepAliveMinutes")
+            .and_then(json_value_to_f32)
+            .map(|minutes| minutes.clamp(0.0, 60.0))
+            .unwrap_or(10.0);
+        (minutes > 0.0).then(|| std::time::Duration::from_secs_f32(minutes * 60.0))
     }
 
     pub fn sidebar_visibility_memory(&self) -> SharedSidebarVisibilityMemory {

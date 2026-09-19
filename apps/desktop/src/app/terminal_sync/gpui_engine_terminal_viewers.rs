@@ -152,6 +152,7 @@ impl GhostexGpuiApp {
     /// CDXC:Terminal 2026-09-13 DECISION:
     /// User: create terminal viewers only when needed, and release unused viewers while zmx daemons and their agents remain running.
     /// Keep direct PTY owners and pending native operations attached; a detached zmx viewer retains only its native attach recipe, never its emulator or rendering subscription.
+    /// Carve-out 2026-09-19: viewers that were on screen when their project was left stay attached for the `projectSwitchKeepAliveMinutes` window (see `project_keep_alive.rs`); hidden tabs still release as above.
     pub(crate) fn agents_terminal_viewer_is_visible(&self, session_id: TerminalSessionId) -> bool {
         if self.agents_chat_mode_sessions.contains(&session_id) {
             return false;
@@ -394,6 +395,7 @@ impl GhostexGpuiApp {
     pub(crate) fn release_unused_agents_gpui_terminal_viewers(
         &mut self,
         parking: bool,
+        kept_alive: &HashSet<TerminalSessionId>,
         cx: &mut gpui::Context<Self>,
     ) {
         self.finish_retiring_gpui_terminal_viewers(cx);
@@ -422,6 +424,7 @@ impl GhostexGpuiApp {
             .iter()
             .filter_map(|(id, record)| {
                 (self.agents_terminal_has_detachable_viewer(*id)
+                    && !(parking && kept_alive.contains(id))
                     && (parking || !self.agents_terminal_viewer_is_visible(*id))
                     && (parking
                         || !self.agents_terminal_chat_is_visible(*id)
@@ -459,6 +462,7 @@ impl GhostexGpuiApp {
             }
         }
         let mut retired = Vec::new();
+        let keep = self.project_switch_keep_alive();
         for (project_id, parked) in &mut self.parked_agents_terminal_runtimes_by_project {
             let ids = parked
                 .gpui_engine_terminals
@@ -469,6 +473,7 @@ impl GhostexGpuiApp {
                     }) && !record.viewer_is_pinned()
                         && !record.view.read(cx).model().has_pending_input()
                         && !parked.protected_viewer_sessions.contains(id)
+                        && !parked.viewer_kept_alive(*id, keep)
                         && record.view.read(cx).exit_status().is_none()
                         && !self.retiring_gpui_terminal_viewers.contains_key(
                             &Self::terminal_viewer_owner(

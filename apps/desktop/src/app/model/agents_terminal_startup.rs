@@ -39,6 +39,20 @@ pub(crate) struct ParkedAgentsTerminalRuntime {
     pub(crate) runtime_osc_states:
         HashMap<AgentsTerminalRuntimeSessionId, GpuiTerminalRuntimeOscState>,
     pub(crate) gpui_engine_close_confirms: HashSet<AgentsTerminalBodyMountSlotId>,
+    /// Viewers that were on screen when the project was left; they skip release while the keep-alive window is open.
+    pub(crate) kept_alive_viewer_sessions: HashSet<TerminalSessionId>,
+    pub(crate) parked_at: Option<Instant>,
+}
+
+impl ParkedAgentsTerminalRuntime {
+    pub(crate) fn viewer_kept_alive(
+        &self,
+        session_id: TerminalSessionId,
+        keep: Option<Duration>,
+    ) -> bool {
+        self.kept_alive_viewer_sessions.contains(&session_id)
+            && crate::app::project_keep_alive::project_keep_alive_active(self.parked_at, keep)
+    }
 }
 
 impl Default for AgentsTerminalRuntimeSessionRegistry {

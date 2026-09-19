@@ -34,9 +34,34 @@ pub(crate) struct ParkedAgentsChatRuntime {
     pub(crate) composer_ready_sessions: HashSet<TerminalSessionId>,
     pub(crate) composer_empty_reports: HashMap<TerminalSessionId, bool>,
     pub(crate) pending_composer_insert: HashMap<TerminalSessionId, String>,
+    /// Pages that were on screen when the project was left; they skip pooling while the keep-alive window is open.
+    pub(crate) kept_alive_sessions: HashSet<TerminalSessionId>,
+    pub(crate) parked_at: Option<Instant>,
 }
 
 impl ParkedAgentsChatRuntime {
+    pub(crate) fn session_kept_alive(
+        &self,
+        session_id: TerminalSessionId,
+        keep: Option<Duration>,
+    ) -> bool {
+        self.kept_alive_sessions.contains(&session_id)
+            && crate::app::project_keep_alive::project_keep_alive_active(self.parked_at, keep)
+    }
+
+    pub(crate) fn keep_alive_remaining(
+        &self,
+        session_id: TerminalSessionId,
+        keep: Option<Duration>,
+    ) -> Option<Duration> {
+        if !self.kept_alive_sessions.contains(&session_id) {
+            return None;
+        }
+        keep?
+            .checked_sub(self.parked_at?.elapsed())
+            .filter(|remaining| !remaining.is_zero())
+    }
+
     pub(crate) fn surface_evictable(
         &self,
         session_id: TerminalSessionId,

@@ -916,8 +916,9 @@ impl GhostexGpuiApp {
             &self.agents_send_when_stopped_watchers,
             SystemTime::now(),
         );
+        let kept_alive_viewer_sessions = self.agents_terminal_keep_alive_viewer_sessions();
         self.park_agents_gpui_engine_terminal_zmx_clients(cx);
-        self.release_unused_agents_gpui_terminal_viewers(true, cx);
+        self.release_unused_agents_gpui_terminal_viewers(true, &kept_alive_viewer_sessions, cx);
         let zmx_session_names = self
             .agents_workspace
             .terminal_sessions
@@ -973,6 +974,8 @@ impl GhostexGpuiApp {
                         gpui_engine_close_confirms: std::mem::take(
                             &mut self.agents_gpui_engine_close_confirms,
                         ),
+                        kept_alive_viewer_sessions,
+                        parked_at: Some(Instant::now()),
                     },
                 );
                 if let Some(replaced) = self
@@ -1125,6 +1128,7 @@ impl GhostexGpuiApp {
         self.apply_project_view_state_for_active_project(cx);
         self.reconcile_agents_chat_surfaces(cx);
         self.evict_expired_hidden_agents_chat_surfaces(cx);
+        self.ensure_project_keep_alive_expiry_scheduled(cx);
         self.persist_shell_layout_state();
         self.sync_gpui_keep_awake_automation_from_current_settings(cx);
         cx.notify();
