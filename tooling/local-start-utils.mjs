@@ -115,6 +115,35 @@ export function withoutColorDisablingEnvironment(environment) {
   return sanitized;
 }
 
+/**
+ * CDXC:PlatformSupport 2026-09-18 WHY:
+ * PowerShell 7 prepends its own module directories to PSModulePath, and every child process inherits them.
+ * The Windows build and install scripts run under Windows PowerShell 5.1 (powershell.exe), which then autoloads PowerShell 7's Microsoft.PowerShell.Utility 7.0 instead of its own and loses cmdlets such as Get-FileHash, so `bun run start` from a pwsh terminal failed with "Get-FileHash is not recognized".
+ * Drop exactly PowerShell 7's three entries (its $PSHOME, shared and per-user module directories) so 5.1 resolves its own modules.
+ * The match is anchored because other products also install under a PowerShell\Modules folder (SQL Server ships ...\Tools\PowerShell\Modules), and those must survive.
+ */
+export function withoutPowerShell7ModulePaths(environment) {
+  const key = Object.keys(environment).find((name) => name.toLowerCase() === 'psmodulepath');
+  if (process.platform !== 'win32' || !key || !environment[key]) {
+    return environment;
+  }
+  const isPowerShell7Entry = (entry) => {
+    const normalized = entry.trim().replace(/[\\/]+$/u, '').toLowerCase();
+    return (
+      /[\\/]powershell[\\/]7[^\\/]*[\\/]modules$/u.test(normalized) ||
+      /[\\/]documents[\\/]powershell[\\/]modules$/u.test(normalized) ||
+      /^[a-z]:[\\/]program files[\\/]powershell[\\/]modules$/u.test(normalized)
+    );
+  };
+  return {
+    ...environment,
+    [key]: environment[key]
+      .split(';')
+      .filter((entry) => entry && !isPowerShell7Entry(entry))
+      .join(';'),
+  };
+}
+
 function isColorDisablingForceColor(value) {
   return typeof value === 'string' && ['0', 'false'].includes(value.trim().toLowerCase());
 }
