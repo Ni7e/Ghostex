@@ -18,6 +18,10 @@ use crate::app::native_sidebar::model::{NativeSidebarSession, NativeSidebarSnaps
 
 /// Most browser tabs the host publishes; the same bound the sidebar runtime applies.
 const MAX_BROWSER_TABS: usize = 256;
+/// `GPUI_SIDEBAR_BROWSER_FAVICON_URL_MAX_CHARS`, the bound the sidebar runtime measures a favicon
+/// URL against, before and after normalizing it. Kept here rather than borrowed from this app's
+/// own favicon bound, which is a different contract that happens to hold the same number.
+const FAVICON_URL_MAX_CHARS: usize = 2048;
 
 /// Builds everything the view model reads from the snapshot the old projection published, this
 /// app's browser tabs, and the persisted hidden items.
@@ -214,16 +218,53 @@ fn browser_tabs(json: &str) -> Vec<BrowserTabInput> {
                 project_id: non_empty("projectId")?,
                 tab_id: non_empty("tabId")?,
                 title: non_empty("title")?,
-                // The runtime re-serializes the URL; only its presence is compared, so the raw
-                // value with the same scheme check is enough here.
-                favicon_url: non_empty("faviconUrl")
-                    .filter(|url| url.starts_with("http://") || url.starts_with("https://")),
+                favicon_url: tab
+                    .get("faviconUrl")
+                    .and_then(Value::as_str)
+                    .and_then(normalized_favicon_url),
                 is_active: tab.get("isActive").and_then(Value::as_bool) == Some(true),
                 is_sleeping: tab.get("isSleeping").and_then(Value::as_bool) == Some(true),
                 is_visible: tab.get("isVisible").and_then(Value::as_bool) == Some(true),
             })
         })
         .collect()
+}
+
+/// A favicon URL as the sidebar runtime keeps it, or `None` where the runtime drops it.
+///
+/// `normalizeGpuiBrowserFaviconUrl` (apps/desktop/sidebar/gxserver-runtime/helpers/browser-tabs.ts)
+/// trims, measures the value against its bound, parses it, requires `http` or `https` after the
+/// parser has lowercased the scheme, rejects a username or a password, requires a host, strips
+/// the fragment, and measures what it serialized against the same bound. All of that is done
+/// here, because a value the runtime drops is a value this mirror must drop too: when the
+/// normalized list comes out unchanged the runtime publishes nothing, and a difference made here
+/// would then never resolve.
+///
+/// The two parts left out are the stored spelling and the parser's own escapes: the string is
+/// built only to be measured and is then dropped, because the comparison reads presence alone,
+/// and where this parser and the WHATWG one spell an odd escape differently they differ in the
+/// characters, never in whether there are any.
+fn normalized_favicon_url(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || utf16_len(trimmed) > FAVICON_URL_MAX_CHARS {
+        return None;
+    }
+    let mut parsed = gpui::http_client::Url::parse(trimmed).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.host_str().is_none_or(str::is_empty)
+    {
+        return None;
+    }
+    parsed.set_fragment(None);
+    let normalized = parsed.to_string();
+    (utf16_len(&normalized) <= FAVICON_URL_MAX_CHARS).then_some(normalized)
+}
+
+/// The length JavaScript measures, which is code units rather than characters or bytes.
+fn utf16_len(value: &str) -> usize {
+    value.chars().map(char::len_utf16).sum()
 }
 
 /// The git numbers the old runtime's background probe published for a project.
