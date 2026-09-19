@@ -120,6 +120,11 @@ impl TagCatalog {
             return Self::default();
         };
         let mut candidates: Vec<(String, &ghostex_gx_protocol::CustomSessionTag)> = Vec::new();
+        // A tag the `order` array does not name follows in id order here, where `Object.entries`
+        // gives the TypeScript the document's own order, so the two can list the tag filters in a
+        // different sequence. Accepted rather than fixed: the wire type is a `BTreeMap`, so the
+        // document order is gone before this runs, and every document the daemon writes has an
+        // `order` array naming every tag it stores.
         for (raw_id, tag) in &state.tags {
             let tag_id = js_trim(raw_id);
             if is_custom_tag_id(tag_id) && !candidates.iter().any(|(id, _)| id == tag_id) {

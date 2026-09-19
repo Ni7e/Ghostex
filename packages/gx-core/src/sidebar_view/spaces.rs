@@ -49,6 +49,11 @@ impl SpacesState {
     /// most one Space, and every kept Space has a name, an icon, and a `#rrggbb` colour.
     pub(crate) fn from_wire(state: &WireSpacesState) -> Self {
         let mut candidates: Vec<(String, &ghostex_gx_protocol::SidebarSpace)> = Vec::new();
+        // A Space the `order` array does not name follows in id order here, where `Object.keys`
+        // gives the TypeScript the document's own order, so the two can draw the Space rows in a
+        // different sequence. Accepted rather than fixed: the wire type is a `BTreeMap`, so the
+        // document order is gone before this runs, and every document the daemon writes has an
+        // `order` array naming every Space it stores.
         for (raw_id, space) in &state.spaces {
             let Some(space_id) = bounded_text(raw_id, MAX_ID_CHARS) else {
                 continue;

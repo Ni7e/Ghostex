@@ -94,15 +94,15 @@ pub(crate) fn utf16_suffix(value: &str, start_units: usize) -> &str {
 pub(crate) use crate::keys::encode_uri_component;
 
 /// `Date.parse` for the ISO-8601 forms gxserver and the app write: `YYYY-MM-DD`,
-/// `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`, optional fraction, and `Z` or `±HH:MM`. The date
-/// separator and the zone letter may be upper or lower case, and a day past the end of its month
-/// rolls over the way `MakeDay` does (`2026-02-31` is 3 March), which is what both QuickJS and V8
-/// accept.
+/// `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`, optional fraction, and `Z` or `±HH:MM`. A day past
+/// the end of its month rolls over the way `MakeDay` does (`2026-02-31` is 3 March) and a field
+/// outside its range is rejected, both measured in QuickJS and V8 and the same in each.
 ///
-/// Two deliberate differences from a JavaScript engine, neither reachable from a daemon stamp:
-/// this takes only the format above, where an engine also parses its legacy and locale forms; and
-/// a date-time without an offset is read as UTC, where an engine reads local time, which the core
-/// cannot know because it reads no clock and no time zone. Every writer of these fields emits `Z`.
+/// Three deliberate differences from a JavaScript engine, none reachable from a daemon stamp,
+/// which is always `YYYY-MM-DDTHH:MM:SS.sssZ`: a lowercase `t` or `z` is accepted here, matching
+/// V8, where QuickJS returns `NaN`; only the format above is taken, where an engine also parses
+/// its legacy and locale forms; and a date-time without an offset is read as UTC, where an engine
+/// reads local time, which the core cannot know because it reads no clock and no time zone.
 pub(crate) fn parse_iso_ms(value: &str) -> Option<i64> {
     let bytes = value.as_bytes();
     let digits = |from: usize, count: usize| -> Option<i64> {
