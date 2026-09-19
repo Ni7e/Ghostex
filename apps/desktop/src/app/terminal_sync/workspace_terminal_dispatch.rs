@@ -156,6 +156,9 @@ impl GhostexGpuiApp {
     /// interaction; the sidebar runtime owns the actual attention decision and
     /// gxserver acknowledgement for
     /// `ghostex.gpui.sidebar.workspaceSessionAttentionAcknowledge`.
+    ///
+    /// CDXC:FocusRouting 2026-09-19 WHY:
+    /// A held "next tab" key evaluated one script in the sidebar runtime per tab it passed. The report now rides with the coalesced selection tell (gx_store/burst.rs), and a tab that is no longer in front when the tell goes out is not acknowledged, because the user never stopped on it.
     pub(crate) fn dispatch_gpui_workspace_session_attention_acknowledge(
         &mut self,
         shell_session_id: TerminalSessionId,
@@ -168,19 +171,7 @@ impl GhostexGpuiApp {
         else {
             return;
         };
-        let Some(sidebar) = self.sidebar.clone() else {
-            return;
-        };
-        let message = serde_json::json!({
-            "projectId": key.project_id,
-            "sessionId": key.session_id,
-            "type": GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE,
-            "version": GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_VERSION,
-        });
-        let script = gpui_workspace_session_attention_acknowledge_script(&message);
-        sidebar.update(cx, |surface, _| {
-            surface.execute_app_owned_script(&script);
-        });
+        self.gx_store_queue_attention_acknowledge(key, cx);
     }
 
     #[cfg(target_os = "macos")]

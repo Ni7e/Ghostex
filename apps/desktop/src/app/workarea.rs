@@ -54,13 +54,17 @@ fn set_extension_view_runtime_state(id: ExtensionId, state: ExtensionViewRuntime
 }
 
 impl GhostexGpuiApp {
+    /// Marks the shell layout dirty; one task serializes it at most every 250 ms while it is (gx_store/layout_persist.rs).
     pub(crate) fn persist_shell_layout_state(&self) {
-        persist_gpui_workspace_shell_state(self);
+        self.gx_store.layout_persist.mark_dirty();
     }
 
-    /// Synchronous variant for the quit path; see `flush_gpui_workspace_shell_state`.
+    /// Synchronous variant for the quit path; see `flush_gpui_workspace_shell_state`. It serializes the current state itself, so it never depends on the dirty mark, and it writes the focus state file a local selection may not have reached yet.
     pub(crate) fn flush_shell_layout_state(&self) {
         flush_gpui_workspace_shell_state(self);
+        persist_gpui_gxserver_presentation_focus_state(
+            &self.sidebar_gxserver_presentation_focus_state,
+        );
     }
 
     pub(crate) fn project_scoped_workarea_availability(&self) -> ProjectScopedWorkareaAvailability {

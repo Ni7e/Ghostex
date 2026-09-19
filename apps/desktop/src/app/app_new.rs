@@ -252,7 +252,6 @@ impl GhostexGpuiApp {
                     GpuiSessionAttentionNotificationRateLimiter::default(),
                 sidebar_pet_overlay: GpuiSidebarPetOverlayState::default(),
                 local_workspace_latest_focus_key: None,
-                sidebar_in_process_focus: None,
                 local_workspace_session_mappings: shell_layout_state
                     .local_workspace_session_mappings,
                 local_workspace_attach_pending: HashSet::new(),

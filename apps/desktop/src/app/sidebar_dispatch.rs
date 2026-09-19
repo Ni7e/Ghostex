@@ -639,6 +639,8 @@ impl GhostexGpuiApp {
         CDXC:CommandPane 2026-06-24-23:49:
         Command-pane Action run-state feedback targets only the first-party GPUI sidebar CEF surface and the typed `window.ghostexGpui.onSidebarHostMessage` callback installed by the SidebarApp runtime. The generated script carries only existing sidebar message JSON and must not expose generic eval IPC, command text, paths, terminal output, status-file paths, tokens, or persisted shell-state fields.
         */
+        // Host messages carry the sidebar hotkeys (previous or next session, session and project slots), which change focus in the runtime: it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let Some(sidebar) = self.sidebar.clone() else {
             return false;
         };

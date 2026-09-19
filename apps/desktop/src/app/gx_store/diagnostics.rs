@@ -78,6 +78,36 @@ impl GxStoreDiagnostics {
         );
     }
 
+    /// The persisted focus seeded the core at startup. Ids only.
+    pub(super) fn focus_restored(&mut self, core: &Core) {
+        let focus = core.focus();
+        append(
+            "gxStore.focusRestored",
+            json!({
+                "activeProjectId": focus.active_project.as_ref().map(|project| &project.project_id),
+                "focusedSessionId": focus.focused_session.as_ref().map(|session| &session.session_id),
+            }),
+        );
+    }
+
+    /// The old runtime sent an empty tab list for a project the store does not see as empty (or
+    /// cannot judge yet), so the workspace kept its tabs. A warning: it means the two readers of
+    /// the daemon disagree, or the old runtime posted before it had rows.
+    pub(super) fn empty_tab_list_disputed(&mut self, core: &Core, total: u64) {
+        let store_tabs = match core.active_tab_sessions() {
+            Loadable::Loaded(tabs) => Some(tabs.len()),
+            Loadable::NotLoaded | Loadable::Missing => None,
+        };
+        self.warning(
+            "gxStore.emptyTabListDisputed.warning",
+            json!({
+                "storeRevision": store_revision(core),
+                "storeActiveTabs": store_tabs,
+                "total": total,
+            }),
+        );
+    }
+
     pub(super) fn connection(&mut self, update: &ConnectionUpdate) {
         let details = match update {
             ConnectionUpdate::Connecting { attempt } => {

@@ -3,10 +3,6 @@ use crate::app::model::*;
 use crate::app::native_sidebar::model::NativeSidebarSession;
 use crate::*;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-/// How long a click's in-process focus is recognised when the runtime's own focus message for the same session arrives.
-const IN_PROCESS_FOCUS_ECHO_WINDOW: Duration = Duration::from_secs(3);
 
 impl GhostexGpuiApp {
     /// A row click's whole in-process reaction: the tab switch when the session already has a live tab, otherwise the staged tab the runtime's wake and attach will fill.
@@ -15,15 +11,18 @@ impl GhostexGpuiApp {
         sidebar_session_id: &str,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self.focus_native_sidebar_session_in_process(sidebar_session_id, cx) {
-            return;
+        let applied = self.focus_native_sidebar_session_in_process(sidebar_session_id, cx)
+            || self.stage_native_sidebar_session_tab(sidebar_session_id, cx);
+        if applied && let Some(key) = gpui_combined_presentation_session_key(sidebar_session_id) {
+            // The runtime routes the same click and sends its own focus request for the session. It is applied while this click is still the newest selection (it attaches a staged tab) and dropped once the user has moved on (gx_store/local_focus.rs).
+            self.gx_store_expect_click_echo(&key);
         }
-        self.stage_native_sidebar_session_tab(sidebar_session_id, cx);
     }
 
     /// CDXC:Sidebar 2026-09-19 WHY:
     /// A row click reached the workspace only after the service thread ran the sidebar command, the runtime routed the focus, and the bridge message came back, so the pane switched one service-thread turn after the row highlight even when the session already had a tab; Waku switches in the click's own frame.
-    /// A local, awake session of the active project whose tab already has a live terminal is selected here, synchronously, through the same tab selection the bridge path ends in. The runtime still receives the command so presentation focus, attention acknowledgement and the sidebar snapshot follow, and its echoed focus message is dropped by `sidebar_focus_message_echoes_in_process_focus`. Other projects, remote and browser sessions keep the bridge path, which owns project switches and gxserver attach plans.
+    /// A local, awake session of the active project whose tab already has a live terminal is selected here, synchronously, through the same tab selection the bridge path ends in. The runtime still receives the command so presentation focus, attention acknowledgement and the sidebar snapshot follow. Other projects, remote and browser sessions keep the bridge path, which owns project switches and gxserver attach plans.
+    /// The selection is a store intent (gx_store/local_focus.rs). The runtime's focus message for the same click is recognised by the store's stamp order, not by time: it is applied while the click is still the newest selection and dropped once the user has moved on. This supersedes the `sidebar_in_process_focus` marker and its three second echo window of earlier the same day.
     pub(crate) fn focus_native_sidebar_session_in_process(
         &mut self,
         sidebar_session_id: &str,
@@ -63,7 +62,6 @@ impl GhostexGpuiApp {
                 "sessionId": key.session_id,
             }),
         );
-        self.sidebar_in_process_focus = Some((key, Instant::now()));
         true
     }
 
@@ -159,6 +157,25 @@ impl GhostexGpuiApp {
             return false;
         };
         self.agents_workspace.select_tab(pane_id, shell_session_id);
+        // The sidebar highlight reads the store, so the staged tab is a selection like any other.
+        self.gx_store_select_local_session(&key, false, false, cx);
+        if keep_editor
+            && self.project_editor_companion_terminal_session_is_active_project_eligible(
+                shell_session_id,
+            )
+        {
+            // The runtime's focus payload used to retarget the companion to the staged tab. The selection above already moved the focus that payload carries, so the payload no longer reads as a change; the companion follows here instead.
+            let mode = self.active_mode;
+            let focus_companion =
+                self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode);
+            self.retarget_project_editor_companion_to_workspace_terminal(
+                mode,
+                shell_session_id,
+                &GpuiWorkspaceTerminalSessionKey::Local(key.clone()),
+                focus_companion,
+                cx,
+            );
+        }
         if !keep_editor {
             self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
             self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
@@ -193,46 +210,5 @@ impl GhostexGpuiApp {
             .flat_map(|group| group.sessions.iter())
             .find(|session| session.session_id == sidebar_session_id)
             .cloned()
-    }
-
-    /// Whether a plain focus message from the runtime only repeats a click that was already applied in process, so the tab is not selected a second time.
-    pub(crate) fn sidebar_focus_message_echoes_in_process_focus(
-        &mut self,
-        message: &GpuiSidebarWorkspaceTerminalFocusMessage,
-    ) -> bool {
-        let plain = message.placement == GpuiWorkspaceTerminalFocusPlacement::Tab
-            && message.placement_target_session_id.is_none()
-            && !message.force_remount
-            && !message.startup_restore
-            && message.preferred_interface == GpuiPreferredAgentInterface::Terminal;
-        if !plain {
-            return false;
-        }
-        let Some((key, applied_at)) = self.sidebar_in_process_focus.as_ref() else {
-            return false;
-        };
-        if key.project_id != message.project_id
-            || key.session_id != message.session_id
-            || applied_at.elapsed() > IN_PROCESS_FOCUS_ECHO_WINDOW
-        {
-            return false;
-        }
-        let still_selected = self
-            .local_workspace_session_mappings
-            .get(key)
-            .copied()
-            .and_then(|shell_session_id| {
-                self.agents_workspace
-                    .pane_id_for_session(shell_session_id)
-                    .map(|pane_id| {
-                        self.agents_workspace.active_session_in_pane(pane_id)
-                            == Some(shell_session_id)
-                    })
-            })
-            .unwrap_or(false);
-        if still_selected {
-            self.sidebar_in_process_focus = None;
-        }
-        still_selected
     }
 }

@@ -1,11 +1,16 @@
 //! The Rust store (`ghostex-gx-core`) running inside the desktop app. Per-concern files:
 //! `host.rs` owns the core, the client and the pump; `effects.rs` performs what the core asks
-//! for; `shadow_diff.rs` compares the store with the old runtime's tab list; `diagnostics.rs`
-//! writes the log lines.
+//! for; `local_focus.rs` makes selections local and admits the old runtime's focus payloads;
+//! `burst.rs` tells the old runtime once and releases deferred work when the selection settles;
+//! `layout_persist.rs` writes the shell layout on a timer; `shadow_diff.rs` mirrors the old
+//! runtime's focus into the core and compares its tab list; `diagnostics.rs` writes the log lines.
 
+mod burst;
 mod diagnostics;
 mod effects;
 mod host;
+mod layout_persist;
+mod local_focus;
 mod shadow_diff;
 
 pub(crate) use host::GxStoreHost;

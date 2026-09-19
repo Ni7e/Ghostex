@@ -115,6 +115,8 @@ impl GhostexGpuiApp {
             );
         }
         self.stage_agent_launch_placeholder(&command, cx);
+        // A sidebar command can change focus in the runtime, so it must not be handled while the runtime still holds an older focus stamp than the store (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = format!("window.ghostexGpui.onNativeSidebarCommand({command}); undefined;");
         service.update(cx, |surface, _| {
             surface.execute_app_owned_script(&script);

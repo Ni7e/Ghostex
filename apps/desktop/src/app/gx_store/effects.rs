@@ -3,10 +3,9 @@ use ghostex_gx_core::Effect;
 use super::host::GxStoreHost;
 
 impl GxStoreHost {
-    /// Performs what the core asked for. While the store runs in shadow only the requests that
-    /// keep the store itself correct are performed; the rest belong to the milestone that makes
-    /// the store the owner of that behaviour, and performing them now would duplicate what the
-    /// old runtime still does.
+    /// Performs what the core asked for: the requests that keep the store itself correct, and
+    /// what focus ownership needs. The rest belong to the milestone that makes the store the
+    /// owner of that behaviour; performing them now would duplicate what the old runtime does.
     pub(super) fn run_effects(&mut self, effects: Vec<Effect>) {
         for effect in effects {
             match effect {
@@ -28,9 +27,12 @@ impl GxStoreHost {
                     self.diagnostics
                         .skipped_rows(projects, groups, sessions, &first_error);
                 }
-                // M3 (focus and tabs owned by Rust): persist the last session of a project,
-                // coalesced per project. The old runtime still persists it today.
-                Effect::RememberProjectSession { .. } => {}
+                // Kept newest per project and handed to the old runtime with the next tell: the
+                // record lives in its client storage (`projectLastSession`) until storage moves
+                // to Rust, and a second writer would leave its cache stale.
+                Effect::RememberProjectSession { session, .. } => {
+                    self.local_focus.remember(session);
+                }
                 // M4 (sidebar from the store): read `/api/readSidebarHud` in the background.
                 Effect::RefetchSidebarHud { .. } => {}
                 // M5 (session lifecycle, attention, notifications): read the notification feed.

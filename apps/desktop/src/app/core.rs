@@ -389,8 +389,6 @@ pub struct GhostexGpuiApp {
     Mapped workspace rename uses this same runtime-only gxserver project/session to shell-tab map, then requires a currently mounted Running Agents Ghostty surface before sending `/rename <title>` and a real Return key. Do not store rename titles, raw renderer JSON, command text, paths, output, or fallback target choices here.
     */
     pub(crate) local_workspace_latest_focus_key: Option<GpuiLocalWorkspaceSessionKey>,
-    /// The sidebar click last applied in process, so the runtime's echoed focus message is not applied twice.
-    pub(crate) sidebar_in_process_focus: Option<(GpuiLocalWorkspaceSessionKey, Instant)>,
     pub(crate) local_workspace_session_mappings:
         HashMap<GpuiLocalWorkspaceSessionKey, TerminalSessionId>,
     pub(crate) local_workspace_attach_pending: HashSet<GpuiLocalWorkspaceSessionKey>,

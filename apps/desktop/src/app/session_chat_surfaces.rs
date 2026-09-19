@@ -903,7 +903,13 @@ impl GhostexGpuiApp {
     /// One session switch used to run the chat reconcile four times back to back (bootstrap refresh, keyboard handoff, text-focus handoff, CEF visibility sync), each re-walking every surface.
     /// Requests through this entry coalesce into a single pass at the end of the current effect cycle, which still lands before the next frame paints.
     /// Callers that read the surface map right after reconciling must call `reconcile_agents_chat_surfaces` directly.
+    /// CDXC:SessionChat 2026-09-19 WHY:
+    /// While a held "next tab" key moves through tabs the pass waits until the selection settles (gx_store/burst.rs), so a chat view is not created for a tab the user only passes. A chat view that already exists is drawn by the pane body without this pass.
     pub(crate) fn reconcile_agents_pane_surfaces(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.gx_store_selection_is_settling() {
+            self.gx_store_defer_chat_reconcile();
+            return;
+        }
         if self.agents_chat_reconcile_scheduled {
             return;
         }

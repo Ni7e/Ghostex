@@ -63,10 +63,13 @@ impl GhostexGpuiApp {
         let drop_position = self.native_sidebar_drop_position("targetSessionId", &session_id);
         let scale = appearance.scale;
         let hovered = self.native_sidebar.hovered_session.as_deref() == Some(&session_id);
-        // CDXC:Sidebar 2026-09-19 WHY: while a click's optimistic focus draws another row focused, the row the snapshot still marks focused has just been replaced in its pane, so it must not fall back to the visible fill until the snapshot confirms where it is shown.
-        let focused = self
-            .native_sidebar
-            .session_draws_focused(&session_id, session.is_focused);
+        // CDXC:Sidebar 2026-09-19 WHY: sidebar clicks and tab selections must show in the same frame (user decision in gx_store/local_focus.rs). The focused and visible fills of a local session row read the Rust store, which a selection changes in the same frame; the snapshot's flags arrive a sidebar projection later. This supersedes the click-only `optimistic_focus` mark and its 1.5 second timeout of earlier the same day.
+        let (focused, visible) = self.gx_store_sidebar_row_focus(
+            &session_id,
+            session.is_browser(),
+            session.is_focused,
+            session.is_visible,
+        );
         let stale = group.is_stale && !session.is_browser();
         let sleeping = session.lifecycle_state.as_deref() == Some("sleeping");
         let icon = super::icons::session_icon(session, hud, appearance, hovered);
@@ -111,9 +114,9 @@ impl GhostexGpuiApp {
                 .when(stale, |row| row.opacity(0.55))
                 .when(self.native_sidebar.is_dragging("session", &session_id), |row| row.opacity(0.2))
                 .when_some(completion, |row, start| row.opacity(super::status::completion_opacity(start)))
-                .when(session.is_visible && !focused && !session.is_focused, |row| row.bg(appearance.visible))
+                .when(visible && !focused, |row| row.bg(appearance.visible))
                 .when(focused, |row| row.bg(appearance.session_selected))
-                .when(session.is_visible || focused, |row| row.text_color(chrome_color(0xd8d8d8, 0x292929)))
+                .when(visible || focused, |row| row.text_color(chrome_color(0xd8d8d8, 0x292929)))
                 .when(selected, |row| row.border_1().border_color(rgb(0x2f8cff)))
                 .when(drop_position == Some("before"), |row| row.border_t_1().border_color(rgb(0x60a5fa)))
                 .when(drop_position == Some("after"), |row| row.border_b_1().border_color(rgb(0x60a5fa)))
@@ -151,10 +154,6 @@ impl GhostexGpuiApp {
                     if stale { return; }
                     let modifiers = event.modifiers();
                     let mode = if modifiers.shift { "range" } else if modifiers.platform || modifiers.control { "additive" } else { "focus" };
-                    if mode == "focus" {
-                        app.native_sidebar.optimistic_focus = Some((session_id.clone(), std::time::Instant::now()));
-                        cx.notify();
-                    }
                     app.dispatch_native_sidebar_ui(json!({"type": "selectSession", "sessionId": session_id, "mode": mode}), cx);
                     if mode == "focus" {
                         app.react_to_native_sidebar_session_click(&session_id, cx);

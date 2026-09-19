@@ -1927,6 +1927,7 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        let step_started = Instant::now();
         let changed = if self.shell_focus == ShellFocusTarget::CommandPane {
             if let Some(attention_acknowledged) = Self::cycle_focused_command_pane_tab_for_app_route(
                 self.shell_focus,
@@ -1946,18 +1947,10 @@ impl GhostexGpuiApp {
                 ShellFocusTarget::AgentsPane(pane_id) => pane_id,
                 _ => self.agents_workspace.focused_pane,
             };
+            // CDXC:FocusRouting 2026-09-19 WHY: the pane used to be focused before the step, which announced the tab being left as the selected session and left the tab the step landed on to whatever focus event came next. The step comes first, so the one selection this records (store focus, sidebar highlight, attention, the coalesced tell) is the tab now in front.
+            let cycled = self.agents_workspace.cycle_tab_in_pane(pane_id, reverse);
             self.focus_agents_pane(pane_id, cx);
-            if self.agents_workspace.cycle_tab_in_pane(pane_id, reverse) {
-                self.dispatch_gpui_workspace_active_session_attention_acknowledge(pane_id, cx);
-                self.focus_shell_target(
-                    ShellFocusTarget::AgentsPane(self.agents_workspace.focused_pane),
-                    cx,
-                );
-                self.scroll_workspace_pane_active_tab(pane_id);
-                true
-            } else {
-                false
-            }
+            cycled
         } else if self.active_mode == TitlebarMode::Browser
             && matches!(
                 self.shell_focus,
@@ -1996,6 +1989,7 @@ impl GhostexGpuiApp {
             self.scroll_all_active_tab_strips();
             self.persist_shell_layout_state();
             cx.notify();
+            self.gx_store_log_tab_step(step_started, reverse);
         }
     }
 

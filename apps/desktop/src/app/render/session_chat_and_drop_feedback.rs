@@ -46,7 +46,10 @@ impl GhostexGpuiApp {
         {
             Some(view) => {
                 self.record_session_chat_render(session_id);
-                if !self.native_chat_visible_sessions.contains(&session_id) {
+                // A view passed during a held "next tab" is drawn as it is; its runtime resumes with the chat reconcile that runs when the selection settles.
+                if !self.native_chat_visible_sessions.contains(&session_id)
+                    && !self.gx_store_selection_is_settling()
+                {
                     let app = cx.entity().downgrade();
                     cx.defer(move |cx| {
                         let _ = app.update(cx, |app, cx| {

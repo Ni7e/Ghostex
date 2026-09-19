@@ -317,9 +317,7 @@ impl GhostexGpuiApp {
         let workspace_changed = self.reconcile_local_workspace_tabs_with_sidebar(&next_state, cx);
         self.sidebar_gxserver_presentation_focus_state = next_state;
         self.sync_gpui_engine_first_prompt_input_suppression(cx);
-        persist_gpui_gxserver_presentation_focus_state(
-            &self.sidebar_gxserver_presentation_focus_state,
-        );
+        self.gx_store_persist_focus_state_file();
         if self.active_mode.is_project_editor_mode() && self.project_editor_companion_is_visible() {
             let mode = self.active_mode;
             let focus_companion =
@@ -454,6 +452,13 @@ impl GhostexGpuiApp {
             return false;
         };
         if self.agents_workspace_project_id.as_deref() != focus_state.active_project_id.as_deref() {
+            return false;
+        }
+        // An empty list clears every tab of the project, so the Rust store has to agree that the project has none (gx_store/local_focus.rs, `confirms_empty_tab_list`).
+        if !self.gx_store_allows_tab_reconcile(
+            focus_state.active_project_id.as_deref(),
+            tab_sessions.len(),
+        ) {
             return false;
         }
         /*

@@ -20,6 +20,30 @@ pub(crate) fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_json(
 pub(crate) fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_value(
     value: &serde_json::Value,
 ) -> Result<GpuiGxserverPresentationFocusState, GpuiGxserverPresentationFocusStateContractError> {
+    gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_value(value)
+        .map(|(state, _focus_stamp)| state)
+}
+
+/// The focus state of a sidebar runtime payload together with the `focusStamp` it echoes.
+pub(crate) fn gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_json(
+    text: &str,
+) -> Result<
+    (GpuiGxserverPresentationFocusState, Option<u64>),
+    GpuiGxserverPresentationFocusStateContractError,
+> {
+    let value = serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|_| GpuiGxserverPresentationFocusStateContractError::MalformedJson)?;
+    gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_value(&value)
+}
+
+/// CDXC:FocusRouting 2026-09-19 WHY:
+/// `focusStamp` is the newest store focus stamp Rust told the sidebar runtime before it produced this payload; Rust uses it to tell a payload that answers the current selection from one that was already overtaken. It is optional (the runtime sends none until it has been told one, and the persisted focus file never has one) and it is kept out of `GpuiGxserverPresentationFocusState`, whose equality decides whether a payload changed anything.
+fn gpui_gxserver_presentation_focus_state_and_stamp_from_sidebar_contract_value(
+    value: &serde_json::Value,
+) -> Result<
+    (GpuiGxserverPresentationFocusState, Option<u64>),
+    GpuiGxserverPresentationFocusStateContractError,
+> {
     let object = gpui_gxserver_focus_contract_object(value)?;
     reject_unexpected_gxserver_focus_contract_keys(
         object,
@@ -30,8 +54,17 @@ pub(crate) fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_value
             "tabSessions",
             "focusedSessionId",
             "visibleSessionIds",
+            "focusStamp",
         ],
     )?;
+    let focus_stamp = match object.get("focusStamp") {
+        None => None,
+        Some(value) => Some(
+            value
+                .as_u64()
+                .ok_or(GpuiGxserverPresentationFocusStateContractError::MalformedField)?,
+        ),
+    };
 
     let version = object
         .get("version")
@@ -53,12 +86,15 @@ pub(crate) fn gpui_gxserver_presentation_focus_state_from_sidebar_contract_value
     let visible_session_ids = required_gxserver_visible_session_ids_field(object)?;
     let active_project_id = optional_gxserver_focus_project_id_field(object, "activeProjectId")?;
     let active_project_tab_sessions = optional_gxserver_workspace_tab_sessions_field(object)?;
-    Ok(GpuiGxserverPresentationFocusState {
-        active_project_id,
-        active_project_tab_sessions,
-        focused_session_id,
-        visible_session_ids,
-    })
+    Ok((
+        GpuiGxserverPresentationFocusState {
+            active_project_id,
+            active_project_tab_sessions,
+            focused_session_id,
+            visible_session_ids,
+        },
+        focus_stamp,
+    ))
 }
 
 pub(crate) fn gpui_gxserver_focus_contract_object(

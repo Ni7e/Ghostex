@@ -8,7 +8,9 @@ use ghostex_gx_client::{ClientOutput, GxClient, GxClientConfig};
 use ghostex_gx_core::{ConnectionPhase, ConnectionUpdate, Core, Event, MachineId};
 
 use super::diagnostics::GxStoreDiagnostics;
-use super::shadow_diff::ShadowDiff;
+use super::layout_persist::LayoutPersist;
+use super::local_focus::LocalFocus;
+use super::shadow_diff::{ObservedFocus, ShadowDiff};
 use crate::GhostexGpuiApp;
 use crate::app::model::GpuiGxserverPresentationFocusState;
 
@@ -46,9 +48,17 @@ pub(crate) struct GxStoreCounters {
     pub(crate) client_thread_exits: u64,
 }
 
+/// What one pump changed, for the app-level follow-up that needs more than the host.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct PumpOutcome {
+    /// The drain found the client's channel closed: its thread is gone and must be replaced.
+    pub(super) thread_ended: bool,
+    pub(super) tab_lists_changed: bool,
+}
+
 /// CDXC:StateSync 2026-09-19 DECISION:
 /// User: the desktop app stops running product logic in QuickJS; one Rust state store owns projects, sessions, tabs, panes, focus, and chat state, and gxserver is the only thing the app syncs with.
-/// This is that store inside the app, fed by its own socket to the local daemon. Until the focus and tab milestone it runs in shadow beside the old runtime: nothing on screen reads it, no pump repaints anything, and its only outputs are counters and the `native.sidebar.refresh` diagnostic log. It always runs, because the next milestone reads it; only the disk logging is gated.
+/// This is that store inside the app, fed by its own socket to the local daemon. It owns focus: local selections are its intents, the sidebar row highlight reads it, and the old runtime's focus payloads pass through it (local_focus.rs). Projects, sessions and tab membership on screen still come from the old runtime until the sidebar milestone, so the tab list comparison in shadow_diff.rs keeps running. It always runs; only the disk logging is gated.
 #[derive(Default)]
 pub(crate) struct GxStoreHost {
     pub(super) core: Core,
@@ -65,22 +75,27 @@ pub(crate) struct GxStoreHost {
     connecting_since: Option<Instant>,
     pub(super) shadow: ShadowDiff,
     pub(super) diagnostics: GxStoreDiagnostics,
+    pub(crate) local_focus: LocalFocus,
+    pub(crate) layout_persist: LayoutPersist,
 }
 
 impl GxStoreHost {
     /// Drains the client and applies the burst. Runs on the UI thread and does no I/O: frames are
     /// parsed on the client thread, and everything here is memory work bounded by the burst.
     ///
-    /// Returns `true` when the drain found the client's channel closed: its thread is gone, and
-    /// the caller must replace the client.
-    fn pump(&mut self) -> bool {
+    /// The outcome says whether the client's thread is gone (the caller must replace the client)
+    /// and what changed, so the caller repaints only when something on screen reads it.
+    fn pump(&mut self) -> PumpOutcome {
         let Some(client) = &self.client else {
-            return false;
+            return PumpOutcome::default();
         };
         let outputs = client.drain();
         let thread_ended = client.thread_ended();
         if outputs.is_empty() {
-            return thread_ended;
+            return PumpOutcome {
+                thread_ended,
+                ..PumpOutcome::default()
+            };
         }
         let mut events = Vec::with_capacity(outputs.len());
         for output in outputs {
@@ -119,10 +134,14 @@ impl GxStoreHost {
             // The next "connect to loaded" time starts at the next reconnect.
             self.connecting_since = None;
         }
+        let outcome = PumpOutcome {
+            thread_ended,
+            tab_lists_changed: output.changes.tab_lists_changed(),
+        };
         self.run_effects(output.effects);
         // New frames may be exactly what a pending tab list difference was waiting for.
         self.settle_shadow_diff();
-        thread_ended
+        outcome
     }
 
     /// Drops a client whose thread ended on its own and returns the delay before its successor
@@ -190,18 +209,36 @@ impl GxStoreHost {
     fn observe_old_runtime_focus_state(
         &mut self,
         old_state: &GpuiGxserverPresentationFocusState,
+        observed_stamp: u64,
     ) -> bool {
         let waiting_since = self.shadow.pending_since();
-        self.shadow.observe(&mut self.core, old_state, now_ms());
+        let observed = self
+            .shadow
+            .observe(&mut self.core, old_state, observed_stamp, now_ms());
+        self.note_observed_focus(observed);
         self.diagnostics.shadow_summary(&self.shadow, &self.core);
         // A new difference, or another one than was waiting, starts its own clock.
         let now_waiting_since = self.shadow.pending_since();
         now_waiting_since.is_some() && now_waiting_since != waiting_since
     }
 
+    /// Whether the old runtime's accepted focus is a row the store cannot hold.
+    fn note_observed_focus(&mut self, observed: ObservedFocus) {
+        match observed {
+            ObservedFocus::Stale => {}
+            ObservedFocus::Local => self.local_focus.foreign_focus = false,
+            ObservedFocus::Foreign => self.local_focus.foreign_focus = true,
+        }
+    }
+
     fn settle_shadow_diff(&mut self) {
         if let Some(mismatch) = self.shadow.settle(&mut self.core, SHADOW_SETTLE, now_ms()) {
             self.diagnostics.shadow_mismatch(&mismatch, &self.core);
+        }
+        // Judging mirrors the old focus again: a session that was missing a moment ago may now be
+        // placed.
+        if let Some(observed) = self.shadow.take_remirrored() {
+            self.note_observed_focus(observed);
         }
         self.diagnostics.shadow_summary(&self.shadow, &self.core);
     }
@@ -220,6 +257,11 @@ impl GhostexGpuiApp {
                 base_url: bootstrap.base_url.clone(),
                 auth_token: bootstrap.auth_token.clone(),
             });
+        // Both run once, before the first frame can be applied: the persisted focus seeds the core,
+        // and the task that writes the shell layout starts waiting.
+        self.gx_store
+            .restore_focus_once(&self.sidebar_gxserver_presentation_focus_state);
+        self.start_gx_store_layout_persist_task(cx);
         if self.gx_store.transport == next {
             return;
         }
@@ -268,7 +310,7 @@ impl GhostexGpuiApp {
         cx.spawn(async move |this, cx| {
             while wakes.next().await.is_some() {
                 let alive = this.update(cx, |this, cx| {
-                    if this.gx_store.pump() {
+                    if this.gx_store_pump(cx) {
                         this.gx_store_client_thread_ended(generation, cx);
                     }
                 });
@@ -294,8 +336,8 @@ impl GhostexGpuiApp {
         if host.client_generation != generation || host.client.is_none() {
             return;
         }
-        host.pump();
-        let delay = host.retire_dead_client();
+        self.gx_store_pump(cx);
+        let delay = self.gx_store.retire_dead_client();
         self.schedule_gx_store_client_restart(generation, delay, cx);
     }
 
@@ -317,14 +359,29 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    /// The old runtime published its focus state. Shadow only: the store follows the old
-    /// runtime's focus and its tab list is compared, nothing else reads the result.
-    pub(crate) fn gx_store_observe_old_runtime_focus_state(
+    /// Applies what the client delivered and follows up on it. Repaints only when the focused or
+    /// visible sessions moved, because focus is the only store state the screen reads so far.
+    /// Returns `true` when the client's thread is gone.
+    fn gx_store_pump(&mut self, cx: &mut gpui::Context<Self>) -> bool {
+        let outcome = self.gx_store.pump();
+        if self.gx_store_after_pump(outcome.tab_lists_changed, cx) {
+            cx.notify();
+        }
+        outcome.thread_ended
+    }
+
+    /// The old runtime published its focus state with the stamp it had been told. The store
+    /// follows it unless a newer local selection exists, and the tab lists are compared.
+    pub(super) fn gx_store_observe_old_runtime_focus_state(
         &mut self,
         old_state: &GpuiGxserverPresentationFocusState,
+        observed_stamp: u64,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.gx_store.observe_old_runtime_focus_state(old_state) {
+        if !self
+            .gx_store
+            .observe_old_runtime_focus_state(old_state, observed_stamp)
+        {
             return;
         }
         // A difference that no later frame or publish resolves still has to be judged.
@@ -332,13 +389,19 @@ impl GhostexGpuiApp {
             cx.background_executor()
                 .timer(SHADOW_SETTLE + Duration::from_millis(200))
                 .await;
-            let _ = this.update(cx, |this, _| this.gx_store.settle_shadow_diff());
+            let _ = this.update(cx, |this, cx| {
+                this.gx_store.settle_shadow_diff();
+                // Judging mirrors the old focus again, which can move the store's focus.
+                if this.gx_store.refresh_row_focus_cache() {
+                    cx.notify();
+                }
+            });
         })
         .detach();
     }
 }
 
-fn now_ms() -> u64 {
+pub(super) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_millis() as u64)

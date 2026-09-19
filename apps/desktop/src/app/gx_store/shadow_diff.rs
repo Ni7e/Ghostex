@@ -4,8 +4,8 @@ use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{
-    ActiveGroup, Core, Event, ExternalFocusUpdate, Intent, Loadable, MachineId, ProjectKey,
-    SessionKey, TabSession, default_group_for_project,
+    ActiveGroup, Core, Event, ExternalFocusUpdate, FocusField, Intent, Loadable, MachineId,
+    ProjectKey, SessionKey, TabSession, default_group_for_project,
 };
 
 use crate::app::helpers::{GpuiWorkspaceTerminalSessionKey, gpui_sidebar_agent_icon};
@@ -173,9 +173,21 @@ pub(crate) struct ShadowCounters {
     /// Publishes that named a remote machine. The store holds only the local machine until remote
     /// machines move into it, so these are neither mirrored nor compared.
     pub(crate) remote_skipped: u64,
-    /// Old-runtime focus updates the core dropped as older than a local intent. Always 0 in
-    /// shadow, where nothing issues local intents; a non-zero value is a bug.
+    /// Old-runtime focus updates the core dropped as older than a local selection. Expected
+    /// while the user moves through tabs faster than the old runtime is told.
     pub(crate) stale_external_focus: u64,
+}
+
+/// What a publish of the old runtime meant for the store's focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ObservedFocus {
+    /// Produced against an older stamp than the newest local selection: not applied.
+    Stale,
+    /// Applied; the focused session is a local session (or nothing is focused).
+    Local,
+    /// Applied; the focused row is not a local session the store holds (a remote session, a
+    /// remote project, the quick automations row).
+    Foreign,
 }
 
 struct PendingDifference {
@@ -191,6 +203,8 @@ pub(crate) struct ShadowDiff {
     old_tabs: Option<Vec<OldTab>>,
     pending: Option<PendingDifference>,
     confirmed_signatures: HashSet<u64>,
+    /// What mirroring the old focus again meant, while judging a waiting difference.
+    remirrored: Option<ObservedFocus>,
 }
 
 /// The focus part of the old runtime's last publish, in the old bridge's id forms.
@@ -199,6 +213,8 @@ struct OldFocus {
     active_project_id: Option<String>,
     focused_session_id: Option<String>,
     visible_session_ids: Vec<String>,
+    /// The store stamp the old runtime had been told when it published.
+    observed_stamp: u64,
 }
 
 impl ShadowDiff {
@@ -210,26 +226,37 @@ impl ShadowDiff {
         self.pending.is_some()
     }
 
+    /// The outcome of the newest repeat mirror, once.
+    pub(crate) fn take_remirrored(&mut self) -> Option<ObservedFocus> {
+        self.remirrored.take()
+    }
+
     pub(crate) fn pending_since(&self) -> Option<Instant> {
         self.pending.as_ref().map(|pending| pending.since)
     }
 
-    /// The old runtime published a focus state: make the core's focus follow it, then compare.
+    /// The old runtime published a focus state: make the core's focus follow it when it is not
+    /// older than the newest local selection, then compare the tab lists.
     pub(crate) fn observe(
         &mut self,
         core: &mut Core,
         old_state: &GpuiGxserverPresentationFocusState,
+        observed_stamp: u64,
         now_ms: u64,
-    ) {
+    ) -> ObservedFocus {
         self.counters.observed += 1;
-        if names_remote_machine(old_state) {
+        if names_remote_focus(old_state) {
             // Nothing is mirrored and nothing is compared: the core keeps the last local focus,
             // and a difference that was waiting is dropped with the publish it belonged to.
             self.counters.remote_skipped += 1;
             self.old_focus = None;
             self.old_tabs = None;
             self.pending = None;
-            return;
+            return if observed_stamp < core.focus().local_stamp {
+                ObservedFocus::Stale
+            } else {
+                ObservedFocus::Foreign
+            };
         }
         self.old_tabs = old_state
             .active_project_tab_sessions
@@ -239,8 +266,15 @@ impl ShadowDiff {
             active_project_id: old_state.active_project_id.clone(),
             focused_session_id: old_state.focused_session_id.clone(),
             visible_session_ids: old_state.visible_session_ids.clone(),
+            observed_stamp,
         });
-        self.mirror_focus(core, now_ms);
+        let observed = self.mirror_focus(core, now_ms);
+        if lists_remote_tab(old_state) {
+            // A list with remote rows has no counterpart in the store yet.
+            self.counters.remote_skipped += 1;
+            self.pending = None;
+            return observed;
+        }
         match self.compare(core) {
             Comparison::NotComparable => {
                 self.counters.not_comparable += 1;
@@ -265,6 +299,7 @@ impl ShadowDiff {
                 }
             }
         }
+        observed
     }
 
     /// Judges a waiting difference again. Returns it once it has lasted `settle`; a difference
@@ -280,7 +315,7 @@ impl ShadowDiff {
         now_ms: u64,
     ) -> Option<ShadowMismatch> {
         let since = self.pending.as_ref()?.since;
-        self.mirror_focus(core, now_ms);
+        self.remirrored = Some(self.mirror_focus(core, now_ms));
         match self.compare(core) {
             Comparison::Match | Comparison::NotComparable => {
                 self.counters.transient += 1;
@@ -301,14 +336,19 @@ impl ShadowDiff {
         }
     }
 
-    fn mirror_focus(&mut self, core: &mut Core, now_ms: u64) {
+    fn mirror_focus(&mut self, core: &mut Core, now_ms: u64) -> ObservedFocus {
         let Some(old_focus) = &self.old_focus else {
-            return;
+            return ObservedFocus::Stale;
         };
-        let update = external_focus_update(core, old_focus, self.old_tabs.as_deref());
+        let (update, foreign) = external_focus_update(core, old_focus, self.old_tabs.as_deref());
         let output = core.handle(Event::Intent(Intent::ExternalFocus(update)), now_ms);
         if output.changes.ignored.is_some() {
             self.counters.stale_external_focus += 1;
+            ObservedFocus::Stale
+        } else if foreign {
+            ObservedFocus::Foreign
+        } else {
+            ObservedFocus::Local
         }
     }
 
@@ -316,6 +356,16 @@ impl ShadowDiff {
         let Some(old_tabs) = &self.old_tabs else {
             return Comparison::NotComparable;
         };
+        // The two lists are the same list only while both sides have the same project active. The
+        // store is ahead of the old runtime from a local selection until the old runtime is told.
+        let old_project = self
+            .old_focus
+            .as_ref()
+            .and_then(|old_focus| old_focus.active_project_id.as_deref())
+            .and_then(ProjectKey::parse_workspace_project_id);
+        if old_project.as_ref() != core.focus().active_project.as_ref() {
+            return Comparison::NotComparable;
+        }
         let Loadable::Loaded(store_tabs) = core.active_tab_sessions() else {
             return Comparison::NotComparable;
         };
@@ -374,13 +424,13 @@ impl ShadowDiff {
     }
 }
 
-/// Whether a publish of the old runtime involves a remote machine: its active project, its focused
-/// session, or any of its tabs.
+/// Whether a publish of the old runtime puts focus on a remote machine: its active project or its
+/// focused session.
 ///
 /// Mirroring such a focus would set a remote focused session and project while the active group
 /// stays on the last local project (the core cannot derive a group on a machine it does not
 /// hold), and the local tab list would then be compared with a remote one.
-fn names_remote_machine(old_state: &GpuiGxserverPresentationFocusState) -> bool {
+fn names_remote_focus(old_state: &GpuiGxserverPresentationFocusState) -> bool {
     let remote_project = old_state
         .active_project_id
         .as_deref()
@@ -390,17 +440,20 @@ fn names_remote_machine(old_state: &GpuiGxserverPresentationFocusState) -> bool 
         .focused_session_id
         .as_deref()
         .is_some_and(|session_id| SessionKey::parse_remote_scoped_session_id(session_id).is_some());
-    let remote_tab = old_state
+    remote_project || remote_focus
+}
+
+fn lists_remote_tab(old_state: &GpuiGxserverPresentationFocusState) -> bool {
+    old_state
         .active_project_tab_sessions
         .iter()
         .flatten()
-        .any(|tab| matches!(tab.key, GpuiWorkspaceTerminalSessionKey::Remote(_)));
-    remote_project || remote_focus || remote_tab
+        .any(|tab| matches!(tab.key, GpuiWorkspaceTerminalSessionKey::Remote(_)))
 }
 
-/// The old runtime's focus as an external update. The old bridge payload cannot carry the stamp
-/// it was produced against, so the core's current stamp is quoted: in shadow nothing issues local
-/// intents, so there is no local intent this update could be older than.
+/// The old runtime's focus as an external update, quoting the stamp the old runtime echoed, so
+/// the core drops it when a newer local selection exists. The flag says whether the focused id
+/// names something that is not a local session the store or the published tab list can place.
 ///
 /// The payload names the focused and visible sessions by raw session id for a local session. The
 /// project comes from the published tab list when the session is one of its tabs, else from the
@@ -410,7 +463,7 @@ fn external_focus_update(
     core: &Core,
     old_state: &OldFocus,
     old_tabs: Option<&[OldTab]>,
-) -> ExternalFocusUpdate {
+) -> (ExternalFocusUpdate, bool) {
     let store = core.presentation();
     let resolve = |session_id: &str| -> Option<SessionKey> {
         // A remote session in a visible pane of a local project is left out: the store holds no
@@ -426,7 +479,7 @@ fn external_focus_update(
             .cloned()
             .or_else(|| store.resolve_focus_state_session_id(session_id))
     };
-    let mut update = ExternalFocusUpdate::new(core.focus().local_stamp).with_visible_sessions(
+    let mut update = ExternalFocusUpdate::new(old_state.observed_stamp).with_visible_sessions(
         old_state
             .visible_session_ids
             .iter()
@@ -451,8 +504,10 @@ fn external_focus_update(
             }
         }
     }
+    let foreign = old_state.focused_session_id.is_some()
+        && matches!(update.focused_session, FocusField::Clear);
     match active_project {
-        Some(project) => update.with_active_project(project),
-        None => update,
+        Some(project) => (update.with_active_project(project), foreign),
+        None => (update, foreign),
     }
 }
