@@ -172,6 +172,34 @@ void GhostexGpuiAttachComposerSuggestionsWindow(void *nativeView,
   GhostexGpuiAttachChildWindow(nativeView, mainNativeView, NO);
 }
 
+// CDXC:SessionChat 2026-09-19 WHY:
+// A pane-sized chat overlay (the image preview) has to follow its pane when a divider or the main
+// window is resized. GPUI can resize a window but not move it, and a pane resized from its left or
+// top edge moves as well, so the frame is set here. The rect is in the main window's content
+// coordinates, top-left origin, which is what GPUI reports for the pane.
+void GhostexGpuiSetChildWindowContentFrame(void *childNativeView,
+                                          void *mainNativeView, double x,
+                                          double y, double width,
+                                          double height) {
+  @autoreleasepool {
+    if (childNativeView == NULL || mainNativeView == NULL) {
+      return;
+    }
+    NSWindow *child = ((__bridge NSView *)childNativeView).window;
+    NSWindow *mainWindow = ((__bridge NSView *)mainNativeView).window;
+    if (child == nil || mainWindow == nil || child == mainWindow) {
+      return;
+    }
+    NSRect content = [mainWindow contentRectForFrameRect:mainWindow.frame];
+    NSRect frame = NSMakeRect(content.origin.x + x,
+                              content.origin.y + content.size.height - y - height,
+                              width, height);
+    if (!NSEqualRects(child.frame, frame)) {
+      [child setFrame:frame display:YES];
+    }
+  }
+}
+
 void GhostexGpuiPrepareTitlebarPopupWindow(void *nativeView) {
   @autoreleasepool {
     if (nativeView == NULL) {
