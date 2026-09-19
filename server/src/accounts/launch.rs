@@ -118,7 +118,7 @@ pub(crate) fn apply_new_session(
         _ => return Ok(None),
     };
     let registry = store::read(db)?;
-    // CDXC:AgentProviders 2026-09-11 DECISION: User: use the current CLI login until an account is added to Ghostex for that provider (2026-09-09); once accounts exist, a launch without an explicit account uses the provider's Account for new sessions rule from Settings (Most limit remaining by default, see default_account.rs), which supersedes the lowest-slot choice. When that rule yields no account the launch keeps the current CLI login, so a normal CLI launch needs no account switcher and starts with automatic continuation off.
+    // CDXC:AgentProviders 2026-09-11 DECISION: User: use the current CLI login until an account is added to Ghostex for that provider (2026-09-09); once accounts exist, a launch without an explicit account uses the provider's Account for new sessions rule from Settings (Most limit remaining by default, see default_account.rs), which supersedes the lowest-slot choice. When that rule yields no account the launch keeps the current CLI login, so a normal CLI launch needs no account switcher.
     let snapshot = super::runtime::current_snapshot();
     let id = runtime
         .get("accountId")
@@ -129,7 +129,6 @@ pub(crate) fn apply_new_session(
                 .map(|a| a.id.clone())
         });
     let Some(id) = id else {
-        runtime.insert("accountPolicyDefault".into(), json!(Policy::default()));
         return Ok(None);
     };
     let account = registry
@@ -141,13 +140,6 @@ pub(crate) fn apply_new_session(
                 "The selected account is no longer registered. Choose another account.",
             )
         })?;
-    runtime
-        .entry("accountPolicyDefault")
-        .or_insert(json!(registry
-            .defaults
-            .get(&provider)
-            .cloned()
-            .unwrap_or_default()));
     let home = home()?;
     let cmd = command(&home, account)?;
     let assigned = assign(runtime, account, cmd)?;
@@ -235,17 +227,13 @@ pub(crate) fn validate_identity(
     }
     Ok(())
 }
-/// CDXC:AgentProviders 2026-09-05 DECISION:
-/// Continuation defaults apply to new sessions. Existing sessions retain their saved policy; sessions created before account management stay off until explicitly configured.
-pub(crate) fn effective_policy(
-    _registry: &Registry,
-    _provider: Provider,
-    session: &Value,
-) -> Policy {
+/// CDXC:AgentProviders 2026-09-19 DECISION:
+/// User: "I literally didn't touch the default in the session or in settings" and the session still did not switch accounts at a limit. A session follows the provider's continuation defaults from Settings > Accounts as they are now, unless it has its own Customize settings. This supersedes the 2026-09-05 copy saved at launch (`accountPolicyDefault`), which forks, restored sessions, CLIs adopted from a terminal, and agent re-detection never received or lost, leaving them off while Settings said on.
+pub(crate) fn effective_policy(registry: &Registry, provider: Provider, session: &Value) -> Policy {
     session
         .pointer("/runtimeSettings/accountPolicyOverride")
         .filter(|v| !v.is_null())
-        .or_else(|| session.pointer("/runtimeSettings/accountPolicyDefault"))
         .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .or_else(|| registry.defaults.get(&provider).cloned())
         .unwrap_or_default()
 }

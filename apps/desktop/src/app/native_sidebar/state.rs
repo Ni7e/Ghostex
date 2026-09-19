@@ -35,6 +35,8 @@ pub(crate) struct NativeSidebarState {
     pub(crate) hovered_collection: Option<String>,
     pub(crate) hovered_section: Option<String>,
     pub(crate) hovered_group: Option<String>,
+    /// This frame's project header probes; `hovered_group` follows them.
+    pub(crate) header_hover: super::project_hover::ProjectHeaderHoverProbes,
     pub(crate) hovered_session: Option<String>,
     /// Armed Delayed Send / Close After Done labels by sidebar session id, for every session rather than only the rows the snapshot shows (session_chat_armed_actions.rs).
     pub(crate) armed_actions: std::collections::HashMap<String, serde_json::Value>,

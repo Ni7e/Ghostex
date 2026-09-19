@@ -33,6 +33,9 @@ impl GhostexGpuiApp {
         let bounds_view = view.clone();
         let wheel_view = view.clone();
         let presence_view = view.clone();
+        let header_view = view.clone();
+        self.native_sidebar.header_hover = Default::default();
+        let header_hover = self.native_sidebar.header_hover.clone();
         let (space_offset, space_opacity) = self.native_sidebar.space_gesture.presentation();
         let appearance = SidebarAppearance::from_hud(&snapshot.hud, window);
         v_flex()
@@ -181,6 +184,7 @@ impl GhostexGpuiApp {
                     |bounds, window, _| window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal),
                     move |bounds, hitbox, window, _| {
                         track_pointer_presence(presence_view, hitbox, window);
+                        header_hover.track(header_view, window);
                         let view = wheel_view.clone();
                         window.on_mouse_event(
                             move |event: &gpui::ScrollWheelEvent, phase, window, cx| {

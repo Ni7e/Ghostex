@@ -8,6 +8,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     StatefulInteractiveElement as _, Styled as _, StyledImage as _, Window, div, img, px, svg,
 };
+use gpui_component::tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement, Tooltip};
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,6 +24,12 @@ const FIT_HEIGHT: f32 = 0.75;
 const FIT_WIDTH: f32 = 0.9;
 /// The app-bridge image transfer moves already-base64 bytes in ordered 256 KiB messages.
 const SAVE_CHUNK_CHARS: usize = 256 * 1024;
+
+/**
+ * CDXC:SessionChat 2026-09-19 DECISION:
+ * User: right-clicking the previewed image closes the preview, and the close button's tooltip says so, shown below and to the left so it stays inside the overlay. Matches React's session-chat-image-viewer.tsx.
+ */
+const IMAGE_VIEWER_CLOSE_TOOLTIP: &str = "Close (or right-click the image)";
 
 static SAVE_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -329,6 +336,9 @@ impl Render for ImageViewerWindow {
                         .size(px(18.0))
                         .text_color(if p.light { p.foreground } else { p.primary }),
                 )
+                .managed_tooltip_with_placement(ManagedTooltipPlacement::BelowLeft, |window, cx| {
+                    Tooltip::new(IMAGE_VIEWER_CLOSE_TOOLTIP).build(window, cx)
+                })
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.chat.update(cx, |chat, cx| chat.close_image_viewer(cx));
                 })),
@@ -345,6 +355,13 @@ impl Render for ImageViewerWindow {
             .bg(gpui::Hsla::from(gpui::rgb(0x000000)).opacity(0.7))
             .on_mouse_down(
                 gpui::MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.chat.update(cx, |chat, cx| chat.close_image_viewer(cx));
+                }),
+            )
+            // Right-clicking anywhere in the preview, the picture included, closes it.
+            .on_mouse_down(
+                gpui::MouseButton::Right,
                 cx.listener(|this, _, _, cx| {
                     this.chat.update(cx, |chat, cx| chat.close_image_viewer(cx));
                 }),

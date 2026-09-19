@@ -178,9 +178,18 @@ pub(crate) fn apply_session_state_update(
     // Live identity adoption can replace the CLI without a Switch Agent flow, leaving the previous binary paired with the new family's resume grammar and conversation id.
     // Clear its launch and account metadata together so account validation and automatic recovery cannot reuse the previous provider's login.
     // SEE-ALSO: server/src/agents/resume_plan.rs, server/src/agents/switch_account.rs.
+    // CDXC:AgentProviders 2026-09-19 WHY:
+    // Compare CLI families, not agent ids. A custom agent built on Claude that the live-process scan re-detects as `claude` (restored sessions have no launch icon to align with) is the same CLI and login; treating it as a change removed the session's account and its Customize continuation settings.
     let family_changed = {
-        let previous = normalize_agent_id(current_identity.agent_id.as_deref());
-        let next = normalize_agent_id(identity.agent_id.as_deref());
+        let launch_settings = object_field(&session, "launchSettings");
+        let family = |agent_id: Option<&str>| {
+            let agent_id = normalize_agent_id(agent_id)?;
+            let config = resolve_project_agent_config(&project, &agent_id, Some(&launch_settings));
+            resume_agent_family_id(Some(agent_id), &config, &launch_settings)
+                .and_then(|family| normalize_agent_id(Some(&family)))
+        };
+        let previous = family(current_identity.agent_id.as_deref());
+        let next = family(identity.agent_id.as_deref());
         previous.is_some() && next.is_some() && previous != next
     };
     let mut stale_launch_metadata_cleared = 0;

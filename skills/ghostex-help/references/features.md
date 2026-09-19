@@ -549,8 +549,9 @@ Code/Docs preferences as transcript links. Double-click a composer pill to edit
 its reference text. Right-click a file reference or file-change path for Open in
 Code, Open in Docs (Markdown, HTML, and Excalidraw), Copy Path, or Open File/Folder
 Location. Open File/Folder Location appears directly below the path-copy actions
-in chat, image previews, Git changed files, and Docs menus, and opens
+in chat, Git changed files, and Docs menus, and opens
 the location in the machine’s file manager. It requires a local desktop path.
+Right-click an opened chat image preview to close it.
 Disabled Code and Docs views are omitted from the menu.
 Hosts without an editor copy the path on click.
 Click the card background, circle, or change counts to expand or collapse the full diff.
@@ -660,6 +661,13 @@ A manual switch waits for your next
 message without sending anything. An automatic switch sends a "." to continue
 the interrupted work once the new account is ready. Configured recovery after
 errors can also continue work on the same account.
+Whether a session keeps going at a limit comes from Continue automatically and
+When the account runs out under the provider's New session defaults in Settings >
+Accounts. Every Claude and Codex session follows those settings as they are now,
+including sessions that are already open, forks, and restored sessions, so a
+change there applies everywhere at once. To make one session behave differently,
+open More actions > Switch Account and click Customize under Keep going at a
+limit; Use session defaults returns it to the Settings values.
 Account sign-in terminals open in the active local project's folder and appear
 under that project. Before a first project is chosen, sign-in uses the home folder.
 When a newer usage reading cannot be fetched for a Claude account, for example

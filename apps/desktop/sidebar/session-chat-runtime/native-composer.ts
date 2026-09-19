@@ -125,7 +125,11 @@ export async function nativeComposerRequest(sessionKey: string, request: NativeC
     }
     case 'read': {
       const stored = readStoredSessionChatDraftEntry(sessionKey);
-      const version = stored?.version && !stored.submitted ? stored.version : nextSessionChatDraftVersion();
+      /**
+       * CDXC:Drafts 2026-09-19 WHY:
+       * A parked draft was handed to the terminal, so the native composer opens empty. Reusing the parked revision made its blur save claim "" under the revision gxserver holds for the handed-off text, and every save failed with "Two editors changed the same draft revision". It starts a fresh draft, as the live handoff already does with nextVersion.
+       */
+      const version = stored?.version && !stored.submitted && !stored.parked ? stored.version : nextSessionChatDraftVersion();
       return { sessionKey, chatSettings: nativeChatSettings(sessionKey), contextPreferences: { claude: readSessionChatContextDetailsPreferences('claude'), codex: readSessionChatContextDetailsPreferences('codex') }, modelCatalog: currentAgentModelCatalog(),
         optionStates: Object.fromEntries(storedSessionChatOptionKeys(sessionKey).map(key => [key, readStoredSessionChatOptions(key)])),
         modelOutboxes: Object.fromEntries(storedModelSelectionKeys(sessionKey).map(key => [key, modelSelectionPersistence.read(key)])),

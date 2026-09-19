@@ -175,9 +175,6 @@ fn collect(state: &AppState, restart: bool) -> Result<Vec<Plan>, DomainStateErro
             s.pointer("/runtimeSettings/accountPolicyOverride/enabled")
                 .and_then(Value::as_bool)
                 == Some(true)
-                || s.pointer("/runtimeSettings/accountPolicyDefault/enabled")
-                    .and_then(Value::as_bool)
-                    == Some(true)
         })
     {
         return Ok(vec![]);
@@ -822,6 +819,21 @@ async fn deliver(state: Arc<AppState>, plan: Plan) {
     }
     let _ = save(&state, &repo, &session, recovery);
 }
+/// Whether a session without its own Customize settings is covered by an enabled provider default, so Stop and the next send still record the recovery suppression flag.
+fn follows_enabled_defaults(
+    repo: &DomainRepository<'_>,
+    db: &rusqlite::Connection,
+    project: &str,
+    session: &Value,
+) -> Result<bool, DomainStateError> {
+    let Some(project) = repo.get_project(project)? else {
+        return Ok(false);
+    };
+    let Some(provider) = launch::provider(&project, session) else {
+        return Ok(false);
+    };
+    Ok(launch::effective_policy(&store::read(db)?, provider, session).enabled)
+}
 pub(crate) fn user_action(
     state: &AppState,
     project: &str,
@@ -839,8 +851,9 @@ pub(crate) fn user_action(
         .cloned()
         .unwrap_or_default();
     if !runtime.contains_key("accountRecovery")
-        && !runtime.contains_key("accountPolicyDefault")
+        && !runtime.contains_key("accountRecoverySuppressed")
         && !runtime.contains_key("accountPolicyOverride")
+        && !follows_enabled_defaults(&repo, &db, project, &row)?
     {
         return Ok(());
     }

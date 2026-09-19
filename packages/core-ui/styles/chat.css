@@ -3142,15 +3142,6 @@ lane inherits the same one — a size is chosen per lane, a rhythm is not.
   max-width: none;
 }
 
-/* Right-clicking the picture offers Copy image / Save image. Anchored to the
-   click in viewport coordinates: the overlay is `fixed inset-0`, so `fixed`
-   here lands on exactly the pixel that was clicked, and staying out of the
-   scrolling layer keeps the menu still while a zoomed picture pans. */
-.ghostex-chat-image-menu {
-  position: fixed;
-  z-index: 20;
-}
-
 .ghostex-chat-image-menu-error {
   background: rgb(0 0 0 / 0.8);
   border-radius: 8px;

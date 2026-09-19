@@ -1,15 +1,13 @@
-import { AppMenuPanel } from '@/packages/components/ui/app-menu-panel';
 // Session chat images. User-authored image references render as thumbnails at
 // their exact position, as do agent-authored pictures. Both click through to a
 // centered overlay at full size (max 75% of the window height, original aspect
 // ratio). Clicking
 // the overlay picture steps it through three zoom levels and back to the
 // fitted size, panning by scroll while zoomed; an image with no detail beyond
-// its fitted size never offers the toggle. Right-clicking it offers Copy image
-// (PNG, to the system clipboard), Copy path (the machine path or URL behind
-// the picture), and Save image (Downloads, using the session title as the file
-// name). The full-size viewer also keeps those three actions in
-// a top-right toolbar beside its close button; thumbnails remain image-only.
+// its fitted size never offers the toggle. Copy image (PNG, to the system
+// clipboard), Copy path (the machine path or URL behind the picture), and Save
+// image (Downloads, using the session title as the file name) sit in a
+// top-right toolbar beside the close button; thumbnails remain image-only.
 // CDXC:SessionChat 2026-09-08 DECISION:
 // User: no zoom cursor on chat image thumbnails or on the image preview.
 // Machine paths load through the transport's readSessionChatImage RPC — the
@@ -34,7 +32,10 @@ import { Button } from '@/packages/components/ui/button';
 import { ButtonGroup } from '@/packages/components/ui/button-group';
 import { SESSION_CHAT_FILE_PATH_ATTRIBUTE } from './session-chat-file-paths';
 import { SESSION_CHAT_WEB_URL_ATTRIBUTE } from './session-chat-links';
+import { AppTooltip } from '../app-tooltip';
 import { playCopySound } from '../copy-sound';
+
+const SESSION_CHAT_IMAGE_PREVIEW_CLOSE_TOOLTIP = 'Close (or right-click the image)';
 
 export interface SessionChatImageTarget {
   /** Absolute path on the session's machine (loaded over the transport). */
@@ -378,7 +379,6 @@ type ViewerState =
 export function SessionChatImageViewerProvider({
   children,
   loadImage,
-  locateFile,
   onClosed,
   saveImageAs,
   sessionTitle,
@@ -388,7 +388,6 @@ export function SessionChatImageViewerProvider({
   onClosed?: () => void;
   /** Resolves a machine path to a data URL; omit when the host cannot. */
   loadImage?: (path: string) => Promise<string>;
-  locateFile?: (path: string) => void;
   /**
    * Writes the picture to Downloads through the native host (gpui). Hosts
    * without a writer omit it and the overlay saves with a browser download.
@@ -423,8 +422,6 @@ export function SessionChatImageViewerProvider({
   const [zoomLevel, setZoomLevel] = useState(0);
   const [fitWidth, setFitWidth] = useState(0);
   const [naturalWidth, setNaturalWidth] = useState(0);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [completedAction, setCompletedAction] = useState<'copy-image' | 'copy-path' | 'save-image' | null>(null);
 
@@ -500,13 +497,12 @@ export function SessionChatImageViewerProvider({
   const zoomWidths = useMemo(() => zoomWidthsForImage(fitWidth, naturalWidth), [fitWidth, naturalWidth]);
   const zoomWidth = zoomLevel > 0 ? zoomWidths[zoomLevel - 1] : undefined;
 
-  // Every open (and every close) starts fitted, unzoomed and without a menu.
+  // Every open (and every close) starts fitted and unzoomed.
   useEffect(() => {
     zoomFocusRef.current = null;
     setZoomLevel(0);
     setFitWidth(0);
     setNaturalWidth(0);
-    setMenuAt(null);
     setMenuError(null);
     setCompletedAction(null);
   }, [source]);
@@ -548,10 +544,6 @@ export function SessionChatImageViewerProvider({
   const stepZoom = (event: ReactMouseEvent<HTMLImageElement>): void => {
     // Clicking the picture itself zooms it; only the surround dismisses.
     event.stopPropagation();
-    if (menuAt !== null) {
-      setMenuAt(null);
-      return;
-    }
     if (zoomWidths.length === 0) {
       return;
     }
@@ -586,22 +578,6 @@ export function SessionChatImageViewerProvider({
     scroll.scrollTop += imageRect.top - scrollRect.top + focus.y * imageRect.height - scroll.clientHeight / 2;
   }, [zoomLevel]);
 
-  // Nudge a menu opened near the right or bottom edge back inside the window.
-  // One correcting pass: after the shift there is no overflow left to react to.
-  useLayoutEffect(() => {
-    const menu = menuRef.current;
-    if (menuAt === null || menu === null) {
-      return;
-    }
-    const rect = menu.getBoundingClientRect();
-    const overflowX = Math.max(0, rect.right - window.innerWidth + 8);
-    const overflowY = Math.max(0, rect.bottom - window.innerHeight + 8);
-    if (overflowX === 0 && overflowY === 0) {
-      return;
-    }
-    setMenuAt({ x: menuAt.x - overflowX, y: menuAt.y - overflowY });
-  }, [menuAt]);
-
   useEffect(() => {
     if (menuError === null) {
       return;
@@ -627,7 +603,6 @@ export function SessionChatImageViewerProvider({
     if (image === null) {
       return;
     }
-    setMenuAt(null);
     void copySessionChatImage(image)
       .then(() => setCompletedAction('copy-image'))
       .catch((error: unknown) => {
@@ -641,7 +616,6 @@ export function SessionChatImageViewerProvider({
       return;
     }
     const path = state.copyPath;
-    setMenuAt(null);
     void navigator.clipboard
       .writeText(path)
       .then(() => setCompletedAction('copy-path'))
@@ -656,7 +630,6 @@ export function SessionChatImageViewerProvider({
       return;
     }
     const { name, src } = state;
-    setMenuAt(null);
     void saveSessionChatImage(name, src, saveImageAsRef.current)
       .then(() => {
         // The desktop host already raises its own "Saved to Downloads" toast
@@ -680,10 +653,6 @@ export function SessionChatImageViewerProvider({
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        if (menuAt !== null) {
-          setMenuAt(null);
-          return;
-        }
         close();
       }
     };
@@ -691,7 +660,7 @@ export function SessionChatImageViewerProvider({
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [close, menuAt, open]);
+  }, [close, open]);
 
   return (
     <SessionChatImageViewerContext.Provider value={api}>
@@ -701,13 +670,13 @@ export function SessionChatImageViewerProvider({
           aria-label={state.alt ?? 'Image preview'}
           aria-modal='true'
           className='fixed inset-0 z-50 bg-black/70 backdrop-blur-[2px]'
-          onClick={() => {
-            // An open menu is what a stray click is aiming to dismiss; only a
-            // click with no menu up means "close the picture".
-            if (menuAt !== null) {
-              setMenuAt(null);
-              return;
-            }
+          onClick={close}
+          /**
+           * CDXC:SessionChat 2026-09-19 DECISION:
+           * User: right-clicking the previewed image closes the preview, and the close button's tooltip says so, shown below and to the left so it stays inside the overlay. This replaces the earlier right-click menu, whose actions stay in the top-right toolbar.
+           */
+          onContextMenu={(event) => {
+            event.preventDefault();
             close();
           }}
           role='dialog'
@@ -766,25 +735,17 @@ export function SessionChatImageViewerProvider({
               </Button>
             </ButtonGroup>
           ) : null}
-          <button
-            aria-label='Close image preview'
-            className='ghostex-chat-image-preview-close absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:text-white'
-            onClick={close}
-            type='button'
-          >
-            <IconX aria-hidden='true' size={18} stroke={2} />
-          </button>
-          <div
-            className='absolute inset-0 overflow-auto'
-            onScroll={() => {
-              // A menu anchored to page coordinates would drift away from the
-              // pixel it was opened on once the picture is panned.
-              if (menuAt !== null) {
-                setMenuAt(null);
-              }
-            }}
-            ref={scrollRef}
-          >
+          <AppTooltip align='end' content={SESSION_CHAT_IMAGE_PREVIEW_CLOSE_TOOLTIP} side='bottom'>
+            <button
+              aria-label='Close image preview'
+              className='ghostex-chat-image-preview-close absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-black/50 text-white/80 transition-colors hover:text-white'
+              onClick={close}
+              type='button'
+            >
+              <IconX aria-hidden='true' size={18} stroke={2} />
+            </button>
+          </AppTooltip>
+          <div className='absolute inset-0 overflow-auto' ref={scrollRef}>
             <div className='ghostex-chat-image-preview-stage'>
               {state.status === 'loading' ? (
                 <IconLoader2 aria-label='Loading image' className='size-7 animate-spin text-white/80' stroke={2} />
@@ -803,12 +764,6 @@ export function SessionChatImageViewerProvider({
                   // Native image dragging would fight scroll-to-pan.
                   draggable={false}
                   onClick={stepZoom}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setMenuError(null);
-                    setMenuAt({ x: event.clientX, y: event.clientY });
-                  }}
                   onLoad={measureFit}
                   ref={imageRef}
                   src={state.src}
@@ -817,48 +772,6 @@ export function SessionChatImageViewerProvider({
               ) : null}
             </div>
           </div>
-          {menuAt !== null ? (
-            <AppMenuPanel
-              className='ghostex-chat-image-menu'
-              onClick={(event) => {
-                event.stopPropagation();
-              }}
-              onContextMenu={(event) => {
-                event.preventDefault();
-              }}
-              ref={menuRef}
-              role='menu'
-              style={{ left: menuAt.x, top: menuAt.y }}
-            >
-              <button className='ghostex-chat-image-menu-item' onClick={copyImage} role='menuitem' type='button'>
-                Copy image
-              </button>
-              {state.status === 'ready' && state.copyPath !== undefined ? (
-                <>
-                  <button className='ghostex-chat-image-menu-item' onClick={copyPath} role='menuitem' type='button'>
-                    {state.filePath !== undefined ? 'Copy Path' : 'Copy URL'}
-                  </button>
-                  {state.filePath !== undefined ? (
-                    <button
-                      className='ghostex-chat-image-menu-item'
-                      disabled={!locateFile}
-                      onClick={() => {
-                        if (state.filePath !== undefined) locateFile?.(state.filePath);
-                        setMenuAt(null);
-                      }}
-                      role='menuitem'
-                      type='button'
-                    >
-                      Open File/Folder Location
-                    </button>
-                  ) : null}
-                </>
-              ) : null}
-              <button className='ghostex-chat-image-menu-item' onClick={saveImage} role='menuitem' type='button'>
-                Save image
-              </button>
-            </AppMenuPanel>
-          ) : null}
           {menuError !== null ? (
             <div className='ghostex-chat-image-menu-error' role='status'>
               {menuError}

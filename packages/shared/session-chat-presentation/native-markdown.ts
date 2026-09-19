@@ -81,6 +81,14 @@ const IMAGE_EVIDENCE = /!\[|\]\([^)\r\n]*\.(?:avif|bmp|gif|heic|heif|ico|jpe?g|p
 const INLINE_IMAGE = /(!?)\[([^\]\r\n]*)\]\(([^)\r\n]+)\)/g;
 /** A picture written inside backticks is code, and stays code. */
 const CODE_SPAN = /`[^`\r\n]*`/g;
+/**
+ * A composer image reference, whose literal machine path may hold spaces
+ * (`Application Support`) that CommonMark will not accept in a link, so the
+ * parser leaves it as prose. React's remarkSessionChatImageReferences makes it
+ * a link before its bare-path pass runs; this is the same pattern, kept out of
+ * the bare-path scan here so a path fragment is not linked inside it.
+ */
+const COMPOSER_IMAGE_REFERENCE = /\[Image #\d+\]\([^)\r\n]+\)/g;
 
 function fenceHeader(info: string): string | null {
   const trimmed = info.trim();
@@ -253,6 +261,12 @@ function fileLink(path: string, label: string): string {
 function linkFileReferences(markdown: string, barePaths: boolean): string {
   const tree = fromMarkdown(markdown);
   const edits: { start: number; end: number; text: string }[] = [];
+  const imageReferences: [number, number][] = [];
+  if (barePaths) {
+    for (const reference of markdown.matchAll(COMPOSER_IMAGE_REFERENCE)) {
+      imageReferences.push([reference.index, reference.index + reference[0].length]);
+    }
+  }
   const walk = (nodes: RootContent[], bare: boolean) => {
     for (const node of nodes) {
       if (node.type === 'link' || node.type === 'linkReference' || node.type === 'definition') continue;
@@ -278,11 +292,11 @@ function linkFileReferences(markdown: string, barePaths: boolean): string {
       // the text would otherwise shift every offset after it.
       const source = markdown.slice(start, end);
       for (const found of sessionChatBareFilePaths(source)) {
-        edits.push({
-          start: start + found.start,
-          end: start + found.end,
-          text: fileLink(found.path, found.path),
-        });
+        const from = start + found.start;
+        const to = start + found.end;
+        if (imageReferences.some(([referenceStart, referenceEnd]) => from < referenceEnd && to > referenceStart))
+          continue;
+        edits.push({ start: from, end: to, text: fileLink(found.path, found.path) });
       }
     }
   };

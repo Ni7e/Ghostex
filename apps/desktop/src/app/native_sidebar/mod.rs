@@ -18,6 +18,7 @@ pub(crate) mod navigation;
 #[cfg(target_os = "macos")]
 mod pointer;
 mod project_header;
+pub(crate) mod project_hover;
 mod project_status;
 mod rename;
 pub(crate) mod render;

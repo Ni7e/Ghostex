@@ -124,6 +124,7 @@ impl GhostexGpuiApp {
             .cursor_default()
             .when(group.is_stale, |row| row.opacity(0.55))
             .hover(|row| row.bg(appearance.session_hover))
+            .child(self.native_sidebar.header_hover.probe(hover_id))
             // CDXC:Projects 2026-09-19 DECISION:
             // User: clicking the chevron left of the project header expands/collapses the project, same as clicking the header.
             .child(
@@ -273,14 +274,6 @@ impl GhostexGpuiApp {
                         })),
                 )
             })
-            .on_hover(cx.listener(move |app, hovered, _, cx| {
-                if *hovered {
-                    app.native_sidebar.hovered_group = Some(hover_id.clone());
-                } else if app.native_sidebar.hovered_group.as_ref() == Some(&hover_id) {
-                    app.native_sidebar.hovered_group = None;
-                }
-                cx.notify();
-            }))
             .on_mouse_down(MouseButton::Right, move |event, window, cx| {
                 cx.stop_propagation();
                 Self::show_native_sidebar_menu(&menu, event.position, scale, window, cx);

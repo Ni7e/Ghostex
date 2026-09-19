@@ -2,7 +2,7 @@
 //!
 //! CDXC:SessionChat 2026-09-18 SEE-ALSO:
 //! React's session-chat-image-viewer.tsx overlay: a picture opens centred at its original aspect
-//! ratio, clicking it steps through zoom levels and back to the fitted size, Escape or a click on
+//! ratio, clicking it steps through zoom levels and back to the fitted size, Escape, a right-click, or a click on
 //! the surround closes it, and Copy image / Copy path / Save image sit beside the close button.
 //! A native child window owns its own frame and input, which is how every other chat overlay here
 //! is built (save_markdown, model_picker).

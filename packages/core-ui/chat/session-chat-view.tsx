@@ -1670,7 +1670,6 @@ export function SessionChatView({
                 // left there, the next Enter would open the picture again.
                 window.requestAnimationFrame(() => composerRef.current?.focus());
               }}
-              {...(hostLinks?.locateFile ? { locateFile: hostLinks.locateFile } : {})}
               {...(loadImageDataUrl ? { loadImage: loadImageDataUrl } : {})}
               {...(saveImageAs ? { saveImageAs } : {})}
               {...(sessionTitle ? { sessionTitle } : {})}
