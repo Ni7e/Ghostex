@@ -18,6 +18,12 @@ const GX_STORE_CLIENT_ID: &str = "ghostex-gpui-store";
 /// How long a difference between the two tab lists must last before it counts. The old runtime
 /// and the store read the same daemon over two sockets, so either can be a few frames ahead.
 const SHADOW_SETTLE: Duration = Duration::from_millis(1000);
+/// Delay before a client whose thread ended on its own is replaced (the last entry repeats). The
+/// client reconnects by itself for as long as its thread lives, so this path only runs after a
+/// panic; the steps keep a panic that repeats on every start from spinning.
+const CLIENT_RESTART_BACKOFF_MS: [u64; 5] = [1000, 5000, 15000, 30000, 60000];
+/// A client that lived this long before its thread ended starts the backoff over.
+const CLIENT_HEALTHY_LIFETIME: Duration = Duration::from_secs(60);
 
 #[derive(Clone, PartialEq, Eq)]
 struct GxStoreTransport {
@@ -37,6 +43,7 @@ pub(crate) struct GxStoreCounters {
     pub(crate) resubscribes_requested: u64,
     pub(crate) skipped_row_reports: u64,
     pub(crate) client_diagnostics: u64,
+    pub(crate) client_thread_exits: u64,
 }
 
 /// CDXC:StateSync 2026-09-19 DECISION:
@@ -47,6 +54,11 @@ pub(crate) struct GxStoreHost {
     pub(super) core: Core,
     pub(super) client: Option<GxClient>,
     transport: Option<GxStoreTransport>,
+    /// Bumped by every client start, so a pump task or a restart timer of an earlier client can
+    /// tell that it is no longer the one in charge.
+    client_generation: u64,
+    client_started_at: Option<Instant>,
+    client_restart_attempt: u32,
     /// Shared with the client thread, which quotes it as `lastRevision` when it subscribes.
     held_revision: Arc<AtomicI64>,
     pub(super) counters: GxStoreCounters,
@@ -58,13 +70,17 @@ pub(crate) struct GxStoreHost {
 impl GxStoreHost {
     /// Drains the client and applies the burst. Runs on the UI thread and does no I/O: frames are
     /// parsed on the client thread, and everything here is memory work bounded by the burst.
-    fn pump(&mut self) {
+    ///
+    /// Returns `true` when the drain found the client's channel closed: its thread is gone, and
+    /// the caller must replace the client.
+    fn pump(&mut self) -> bool {
         let Some(client) = &self.client else {
-            return;
+            return false;
         };
         let outputs = client.drain();
+        let thread_ended = client.thread_ended();
         if outputs.is_empty() {
-            return;
+            return thread_ended;
         }
         let mut events = Vec::with_capacity(outputs.len());
         for output in outputs {
@@ -106,6 +122,55 @@ impl GxStoreHost {
         self.run_effects(output.effects);
         // New frames may be exactly what a pending tab list difference was waiting for.
         self.settle_shadow_diff();
+        thread_ended
+    }
+
+    /// Drops a client whose thread ended on its own and returns the delay before its successor
+    /// starts. The thread normally reports `Lost` itself as its last output; when it could not,
+    /// the core is told here, so the rows never stay marked live behind a dead socket.
+    fn retire_dead_client(&mut self) -> Duration {
+        self.client = None;
+        self.counters.client_thread_exits += 1;
+        let still_connected = self
+            .core
+            .presentation()
+            .machine(&MachineId::Local)
+            .is_some_and(|machine| {
+                matches!(
+                    machine.connection().phase,
+                    ConnectionPhase::Connecting | ConnectionPhase::Live
+                )
+            });
+        if still_connected {
+            let lost = ConnectionUpdate::Lost {
+                error: Some("the client thread ended".to_string()),
+            };
+            self.note_connection(&lost);
+            self.core.handle(
+                Event::Connection {
+                    machine: MachineId::Local,
+                    update: lost,
+                },
+                now_ms(),
+            );
+        }
+        let delay = self.next_restart_delay();
+        self.diagnostics
+            .client_thread_ended(self.client_restart_attempt, delay);
+        delay
+    }
+
+    fn next_restart_delay(&mut self) -> Duration {
+        if self
+            .client_started_at
+            .take()
+            .is_some_and(|at| at.elapsed() >= CLIENT_HEALTHY_LIFETIME)
+        {
+            self.client_restart_attempt = 0;
+        }
+        let step = (self.client_restart_attempt as usize).min(CLIENT_RESTART_BACKOFF_MS.len() - 1);
+        self.client_restart_attempt = self.client_restart_attempt.saturating_add(1);
+        Duration::from_millis(CLIENT_RESTART_BACKOFF_MS[step])
     }
 
     fn note_connection(&mut self, update: &ConnectionUpdate) {
@@ -155,14 +220,22 @@ impl GhostexGpuiApp {
                 base_url: bootstrap.base_url.clone(),
                 auth_token: bootstrap.auth_token.clone(),
             });
-        let host = &mut self.gx_store;
-        if host.transport == next {
+        if self.gx_store.transport == next {
             return;
         }
+        self.gx_store.transport = next;
+        self.gx_store.client_restart_attempt = 0;
+        self.start_gx_store_client(cx);
+    }
+
+    /// The one start path: a transport change and the replacement of a dead client both end here.
+    fn start_gx_store_client(&mut self, cx: &mut gpui::Context<Self>) {
+        let host = &mut self.gx_store;
         // Dropping the client stops its thread; its wake channel closes and ends the old pump.
         host.client = None;
-        host.transport = next.clone();
-        let Some(transport) = next else {
+        host.client_generation += 1;
+        let generation = host.client_generation;
+        let Some(transport) = host.transport.clone() else {
             return;
         };
         let (wake, mut wakes) = mpsc::unbounded::<()>();
@@ -182,20 +255,64 @@ impl GhostexGpuiApp {
         match client {
             Ok(client) => {
                 host.client = Some(client);
+                host.client_started_at = Some(Instant::now());
                 host.counters.client_starts += 1;
             }
             Err(error) => {
-                host.transport = None;
                 host.diagnostics.client_start_failed(&error);
+                let delay = host.next_restart_delay();
+                self.schedule_gx_store_client_restart(generation, delay, cx);
                 return;
             }
         }
         cx.spawn(async move |this, cx| {
             while wakes.next().await.is_some() {
-                if this.update(cx, |this, _| this.gx_store.pump()).is_err() {
-                    break;
+                let alive = this.update(cx, |this, cx| {
+                    if this.gx_store.pump() {
+                        this.gx_store_client_thread_ended(generation, cx);
+                    }
+                });
+                if alive.is_err() {
+                    return;
                 }
             }
+            // The wake closure lives on the client thread and is dropped with it, so the stream
+            // ending is the signal that the thread is gone. Unlike the channel check in the pump
+            // it cannot be missed: it arrives even when the thread died without a last output.
+            let _ = this.update(cx, |this, cx| {
+                this.gx_store_client_thread_ended(generation, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// The thread of client `generation` is gone. Nothing to do when that client was replaced or
+    /// dropped on purpose; otherwise its last outputs are applied, the store is marked lost, and
+    /// a new client starts after a bounded backoff.
+    fn gx_store_client_thread_ended(&mut self, generation: u64, cx: &mut gpui::Context<Self>) {
+        let host = &mut self.gx_store;
+        if host.client_generation != generation || host.client.is_none() {
+            return;
+        }
+        host.pump();
+        let delay = host.retire_dead_client();
+        self.schedule_gx_store_client_restart(generation, delay, cx);
+    }
+
+    fn schedule_gx_store_client_restart(
+        &mut self,
+        generation: u64,
+        delay: Duration,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = this.update(cx, |this, cx| {
+                // A transport change in the meantime already started a newer client.
+                if this.gx_store.client_generation == generation && this.gx_store.client.is_none() {
+                    this.start_gx_store_client(cx);
+                }
+            });
         })
         .detach();
     }

@@ -139,6 +139,9 @@ impl GxStoreDiagnostics {
             ClientDiagnostic::ProtocolMismatch { received } => {
                 json!({ "kind": "protocolMismatch", "received": received })
             }
+            ClientDiagnostic::ThreadStopped { reason } => {
+                json!({ "kind": "threadStopped", "error": reason })
+            }
         };
         self.warning("gxStore.client.warning", details);
     }
@@ -147,6 +150,17 @@ impl GxStoreDiagnostics {
         self.warning(
             "gxStore.clientStart.error",
             json!({ "error": error.to_string() }),
+        );
+    }
+
+    /// The client's thread is gone although nobody stopped it; a new client follows.
+    pub(super) fn client_thread_ended(&mut self, restart_attempt: u32, restart_in: Duration) {
+        self.warning(
+            "gxStore.clientThreadEnded.warning",
+            json!({
+                "restartAttempt": restart_attempt,
+                "restartInMs": restart_in.as_millis() as u64,
+            }),
         );
     }
 
@@ -218,6 +232,7 @@ impl GxStoreDiagnostics {
                 "distinctMismatches": counters.distinct_mismatches,
                 "transient": counters.transient,
                 "notComparable": counters.not_comparable,
+                "remoteSkipped": counters.remote_skipped,
                 "iconDifferences": counters.icon_differences,
                 "staleExternalFocus": counters.stale_external_focus,
                 "pending": shadow.is_pending(),

@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
@@ -170,6 +170,9 @@ pub(crate) struct ShadowCounters {
     pub(crate) distinct_mismatches: u64,
     /// Tabs whose resolved agent icon differs (expected for catalog-mapped icons).
     pub(crate) icon_differences: u64,
+    /// Publishes that named a remote machine. The store holds only the local machine until remote
+    /// machines move into it, so these are neither mirrored nor compared.
+    pub(crate) remote_skipped: u64,
     /// Old-runtime focus updates the core dropped as older than a local intent. Always 0 in
     /// shadow, where nothing issues local intents; a non-zero value is a bug.
     pub(crate) stale_external_focus: u64,
@@ -219,6 +222,15 @@ impl ShadowDiff {
         now_ms: u64,
     ) {
         self.counters.observed += 1;
+        if names_remote_machine(old_state) {
+            // Nothing is mirrored and nothing is compared: the core keeps the last local focus,
+            // and a difference that was waiting is dropped with the publish it belonged to.
+            self.counters.remote_skipped += 1;
+            self.old_focus = None;
+            self.old_tabs = None;
+            self.pending = None;
+            return;
+        }
         self.old_tabs = old_state
             .active_project_tab_sessions
             .as_ref()
@@ -319,9 +331,12 @@ impl ShadowDiff {
             store_tab_count: store_tabs.len(),
             ..ShadowMismatch::default()
         };
+        let store_by_key: HashMap<&SessionKey, &TabSession> =
+            store_tabs.iter().map(|store| (&store.key, store)).collect();
+        let old_keys: HashSet<&SessionKey> = old_tabs.iter().map(|old| &old.key).collect();
         let mut icon_differences = 0;
         for old in old_tabs {
-            match store_tabs.iter().find(|store| store.key == old.key) {
+            match store_by_key.get(&old.key) {
                 None => mismatch.only_old.push(label(&old.key)),
                 Some(store) => {
                     let fields = old.differing_fields(store);
@@ -333,7 +348,7 @@ impl ShadowDiff {
             }
         }
         for store in &store_tabs {
-            if !old_tabs.iter().any(|old| old.key == store.key) {
+            if !old_keys.contains(&store.key) {
                 mismatch.only_store.push(label(&store.key));
             }
         }
@@ -359,6 +374,30 @@ impl ShadowDiff {
     }
 }
 
+/// Whether a publish of the old runtime involves a remote machine: its active project, its focused
+/// session, or any of its tabs.
+///
+/// Mirroring such a focus would set a remote focused session and project while the active group
+/// stays on the last local project (the core cannot derive a group on a machine it does not
+/// hold), and the local tab list would then be compared with a remote one.
+fn names_remote_machine(old_state: &GpuiGxserverPresentationFocusState) -> bool {
+    let remote_project = old_state
+        .active_project_id
+        .as_deref()
+        .and_then(ProjectKey::parse_workspace_project_id)
+        .is_some_and(|project| !project.machine.is_local());
+    let remote_focus = old_state
+        .focused_session_id
+        .as_deref()
+        .is_some_and(|session_id| SessionKey::parse_remote_scoped_session_id(session_id).is_some());
+    let remote_tab = old_state
+        .active_project_tab_sessions
+        .iter()
+        .flatten()
+        .any(|tab| matches!(tab.key, GpuiWorkspaceTerminalSessionKey::Remote(_)));
+    remote_project || remote_focus || remote_tab
+}
+
 /// The old runtime's focus as an external update. The old bridge payload cannot carry the stamp
 /// it was produced against, so the core's current stamp is quoted: in shadow nothing issues local
 /// intents, so there is no local intent this update could be older than.
@@ -374,8 +413,10 @@ fn external_focus_update(
 ) -> ExternalFocusUpdate {
     let store = core.presentation();
     let resolve = |session_id: &str| -> Option<SessionKey> {
-        if let Some(remote) = SessionKey::parse_remote_scoped_session_id(session_id) {
-            return Some(remote);
+        // A remote session in a visible pane of a local project is left out: the store holds no
+        // remote machine yet, and an unjudgeable key would sit in the visible set for good.
+        if SessionKey::parse_remote_scoped_session_id(session_id).is_some() {
+            return None;
         }
         old_tabs
             .into_iter()
