@@ -63,6 +63,7 @@ impl GhostexGpuiApp {
         let drop_position = self.native_sidebar_drop_position("targetSessionId", &session_id);
         let scale = appearance.scale;
         let hovered = self.native_sidebar.hovered_session.as_deref() == Some(&session_id);
+        // CDXC:Sidebar 2026-09-19 WHY: while a click's optimistic focus draws another row focused, the row the snapshot still marks focused has just been replaced in its pane, so it must not fall back to the visible fill until the snapshot confirms where it is shown.
         let focused = self
             .native_sidebar
             .session_draws_focused(&session_id, session.is_focused);
@@ -110,7 +111,7 @@ impl GhostexGpuiApp {
                 .when(stale, |row| row.opacity(0.55))
                 .when(self.native_sidebar.is_dragging("session", &session_id), |row| row.opacity(0.2))
                 .when_some(completion, |row, start| row.opacity(super::status::completion_opacity(start)))
-                .when(session.is_visible && !focused, |row| row.bg(appearance.visible))
+                .when(session.is_visible && !focused && !session.is_focused, |row| row.bg(appearance.visible))
                 .when(focused, |row| row.bg(appearance.session_selected))
                 .when(session.is_visible || focused, |row| row.text_color(chrome_color(0xd8d8d8, 0x292929)))
                 .when(selected, |row| row.border_1().border_color(rgb(0x2f8cff)))

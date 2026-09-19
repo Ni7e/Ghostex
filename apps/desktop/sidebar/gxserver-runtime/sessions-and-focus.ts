@@ -142,7 +142,7 @@ export interface GpuiSidebarRuntimeSessionFocusMethods {
     targetGroupId?: string,
     exactVisibleSessionIds?: readonly string[]
   ): void;
-  nextVisibleSessionIdsForLocalFocus(sessionId: string): Set<string>;
+  nextVisibleSessionIdsForLocalFocus(previousFocusedSessionId: string | undefined, sessionId: string): Set<string>;
   isGpuiPresentationChatProjectId(projectId: string): boolean;
   setRemotePresentationSessionFocus(reference: { machineId: string; projectId: string; sessionId: string }): void;
   dropRemotePresentationSessionFocus(machineId: string): void;
@@ -1348,18 +1348,24 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
         ? GPUI_GXSERVER_CHATS_GROUP_ID
         : createGxserverPresentationProjectGroupId(normalizedProjectId));
     this.refreshSidebarHudFromClient();
+    const previousFocusedSessionId = this.focusedSessionId;
     this.focusedSessionId = normalizedSessionId;
     rememberGpuiProjectSession(this, normalizedProjectId, normalizedSessionId);
     this.visibleSessionIds = exactVisibleSessionIds
       ? new Set(exactVisibleSessionIds)
-      : this.nextVisibleSessionIdsForLocalFocus(normalizedSessionId);
+      : this.nextVisibleSessionIdsForLocalFocus(previousFocusedSessionId, normalizedSessionId);
     this.postGxserverPresentationFocusState();
   },
 
-  nextVisibleSessionIdsForLocalFocus(this: GpuiSidebarRuntime, sessionId: string): Set<string> {
+  nextVisibleSessionIdsForLocalFocus(
+    this: GpuiSidebarRuntime,
+    previousFocusedSessionId: string | undefined,
+    sessionId: string
+  ): Set<string> {
     /*
-    CDXC:FocusRouting 2026-06-26-04:42:
-    GPUI local session focus should follow the macOS sidebar rule that a click selects the target within the current visible workspace projection instead of replacing all visible ownership with a singleton. Preserve live local visible ids and remote ids, then add the clicked session so last-activity resorting cannot make a second session steal focus back.
+    CDXC:FocusRouting 2026-09-19 WHY:
+    A click selects the target within the current visible workspace projection instead of replacing all visible ownership with a singleton: other panes keep their sessions, and the clicked session is added so last-activity resorting cannot make a second session steal focus back. Rust's tab-selection report then delivers the exact rendered set.
+    The clicked session replaces the focused pane's session, so the previously focused session leaves the set here rather than after that report; keeping it drew the previous row with the visible fill for the whole round trip, which read as a hover highlight that took a moment to clear. This supersedes the 2026-06-26 rule that kept every prior visible id.
     */
     const liveLocalSessionIds = new Set<string>(
       (this.presentation?.sessions ?? []).map((session) => session.sessionId)
@@ -1367,7 +1373,8 @@ export const gpuiSidebarRuntimeSessionFocusMethods = {
     const nextVisibleSessionIds = new Set(
       [...this.visibleSessionIds].filter(
         (visibleSessionId) =>
-          parseGpuiRemotePresentationSessionId(visibleSessionId) || liveLocalSessionIds.has(visibleSessionId)
+          visibleSessionId !== previousFocusedSessionId &&
+          (parseGpuiRemotePresentationSessionId(visibleSessionId) || liveLocalSessionIds.has(visibleSessionId))
       )
     );
     nextVisibleSessionIds.add(sessionId);
