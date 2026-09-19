@@ -75,8 +75,11 @@ pub(crate) fn command(home: &Path, account: &SavedAccount) -> Result<String, Dom
             account.provider.helper()
         ))
     })?;
+    // CDXC:AgentProviders 2026-09-18 WHY:
+    // Windows sessions run in PowerShell, where a quoted executable path in command position is a string literal that prints instead of running. The call operator is required, as in agent_cli/endpoint.rs and zmx/scripts_windows.rs.
+    let invoke = if cfg!(windows) { "& " } else { "" };
     Ok(format!(
-        "{} run {} --share-history --",
+        "{invoke}{} run {} --share-history --",
         quote_shell_arg(&executable.to_string_lossy()),
         quote_shell_arg(&account.selector)
     ))
@@ -146,10 +149,14 @@ pub(crate) fn apply_new_session(
     super::default_account::record_last_used(db, &registry, provider, &account.id)?;
     Ok(Some(assigned))
 }
+/// CDXC:AgentProviders 2026-09-18 WHY:
+/// Windows has no HOME, so reading it alone failed every account launch and resume with "The server's home directory is unavailable."
 pub(crate) fn home() -> Result<PathBuf, DomainStateError> {
-    std::env::var_os("HOME")
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .filter_map(std::env::var_os)
         .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
+        .find(|p| p.is_absolute())
         .ok_or_else(|| DomainStateError::bad_request("The server's home directory is unavailable."))
 }
 pub(crate) fn validate_session(
@@ -182,10 +189,21 @@ pub(crate) fn validate_identity(
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| home.join(".local/share"));
+    // CDXC:AgentProviders 2026-09-18 WHY:
+    // xswap's registry is %LOCALAPPDATA%\codex-swap on Windows and $XDG_DATA_HOME/codex-swap elsewhere (its fsutil::default_data_dir).
+    // Reading the POSIX location on Windows made every saved Codex account fail identity validation as changed or unavailable.
+    let xswap_data_home = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| data_home.clone())
+    } else {
+        data_home.clone()
+    };
     let path = match account.provider {
         Provider::Codex => std::env::var_os("XSWAP_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|| data_home.join("codex-swap"))
+            .unwrap_or_else(|| xswap_data_home.join("codex-swap"))
             .join("accounts.json"),
         Provider::Claude => {
             if cfg!(target_os = "linux") {

@@ -19,6 +19,33 @@ impl Provider {
             Self::Codex => "xswap",
         }
     }
+    /// CDXC:AgentProviders 2026-09-18 DECISION:
+    /// User: Claude Swap and Codex Swap must install on Windows too, under both the PowerShell and the WSL terminal backend.
+    /// The backend setting picks which gxserver runs — the native Windows build or the Linux build inside the distribution — so the platform this code is compiled for is already the user's choice and no setting is read here.
+    /// Codex Swap has no Linux install script, so Linux and WSL keep Homebrew (with the tap-trust step its README requires) and fall back to a source build only where brew is absent, which is the common case inside WSL.
+    /// Claude Swap is a Python tool and installs the same way everywhere.
+    /// SEE-ALSO: packages/shared/ghostex-settings/types.ts (windowsTerminalBackend), apps/desktop/src/windows_terminal_backend/platform.rs.
+    pub(crate) fn install_command(self, home: &std::path::Path) -> String {
+        match self {
+            Self::Claude => "uv tool install claude-swap".to_string(),
+            Self::Codex if cfg!(windows) => {
+                "irm https://github.com/maddada/codex-swap/releases/latest/download/install.ps1 | iex"
+                    .to_string()
+            }
+            Self::Codex if super::helpers::executable(home, "brew").is_some() => {
+                "brew tap maddada/tap && brew trust --formula maddada/tap/codex-swap && brew install maddada/tap/codex-swap".to_string()
+            }
+            Self::Codex => {
+                "cargo install --git https://github.com/maddada/codex-swap --locked".to_string()
+            }
+        }
+    }
+    pub(crate) fn login_command(self) -> &'static str {
+        match self {
+            Self::Claude => "ghostex account-login claude",
+            Self::Codex => "xswap add --login --share-history",
+        }
+    }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
