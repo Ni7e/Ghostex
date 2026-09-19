@@ -15,6 +15,9 @@ use crate::paths::GxserverPaths;
 use crate::protocol::rpc_success;
 use crate::server::{domain_error_response, routed_json, AppState, RoutedResponse};
 use crate::session_chat_follower::session_chat_agent_for_session;
+use crate::session_chat_skill_variants::{
+    collapse_session_chat_skill_variants, read_claude_installed_plugin_roots,
+};
 use crate::storage::open_gxserver_database;
 use axum::http::StatusCode;
 
@@ -30,11 +33,15 @@ struct SkillRootSpec {
 }
 
 #[derive(Debug)]
-struct SessionChatSkill {
-    directory_path: PathBuf,
-    skill_file_path: PathBuf,
-    name: String,
-    source_kind: &'static str,
+pub(crate) struct SessionChatSkill {
+    pub(crate) directory_path: PathBuf,
+    pub(crate) skill_file_path: PathBuf,
+    pub(crate) name: String,
+    pub(crate) source_kind: &'static str,
+    /// The scanned skills root this copy was found under.
+    pub(crate) root_path: PathBuf,
+    /// Set only when the same name has several distinct SKILL.md contents.
+    pub(crate) variant_label: Option<String>,
 }
 
 /*
@@ -120,12 +127,12 @@ pub fn read_session_chat_skills(
     for (root, spec) in roots {
         discover_root_skills(&root, spec, &mut seen_skill_paths, &mut skills);
     }
-    skills.sort_by(|left, right| {
-        left.name
-            .to_ascii_lowercase()
-            .cmp(&right.name.to_ascii_lowercase())
-            .then_with(|| left.directory_path.cmp(&right.directory_path))
-    });
+    let installed_plugin_roots = if agent_id == "claude" {
+        read_claude_installed_plugin_roots(&paths.home_dir)
+    } else {
+        Vec::new()
+    };
+    let skills = collapse_session_chat_skill_variants(skills, &installed_plugin_roots);
 
     json!({
         "agentId": agent_id,
@@ -150,7 +157,7 @@ fn read_grok_session_chat_skills(paths: &GxserverPaths, project_path: Option<&Pa
     let inspected = run_grok_skill_inspect(&grok_command, working_directory);
 
     let mut seen_skill_paths = HashSet::new();
-    let mut skills = inspected
+    let skills = inspected
         .as_ref()
         .and_then(|value| value.get("skills"))
         .and_then(Value::as_array)
@@ -195,20 +202,18 @@ fn read_grok_session_chat_skills(paths: &GxserverPaths, project_path: Option<&Pa
                 Some("plugin") => "pluginCache",
                 _ => "global",
             };
+            let root_path = directory_path.parent()?.to_path_buf();
             Some(SessionChatSkill {
                 directory_path,
                 skill_file_path,
                 name,
                 source_kind,
+                root_path,
+                variant_label: None,
             })
         })
         .collect::<Vec<_>>();
-    skills.sort_by(|left, right| {
-        left.name
-            .to_ascii_lowercase()
-            .cmp(&right.name.to_ascii_lowercase())
-            .then_with(|| left.directory_path.cmp(&right.directory_path))
-    });
+    let skills = collapse_session_chat_skill_variants(skills, &[]);
 
     json!({
         "agentId": "grok",
@@ -370,6 +375,7 @@ fn discover_root_skills(
     let mut seen_directories = HashSet::new();
     walk_skill_directories(
         root,
+        root,
         SESSION_CHAT_SKILL_DISCOVERY_MAX_DEPTH,
         spec,
         &mut seen_directories,
@@ -379,6 +385,7 @@ fn discover_root_skills(
 }
 
 fn walk_skill_directories(
+    root: &Path,
     directory: &Path,
     remaining_depth: usize,
     spec: SkillRootSpec,
@@ -410,6 +417,8 @@ fn walk_skill_directories(
                 skill_file_path,
                 name,
                 source_kind: spec.source_kind,
+                root_path: root.to_path_buf(),
+                variant_label: None,
             });
         }
         return;
@@ -434,6 +443,7 @@ fn walk_skill_directories(
         };
         if file_type.is_dir() || file_type.is_symlink() {
             walk_skill_directories(
+                root,
                 &entry.path(),
                 remaining_depth - 1,
                 spec,
@@ -464,12 +474,16 @@ fn is_ignored_directory(name: &str) -> bool {
 }
 
 fn skill_to_value(skill: SessionChatSkill) -> Value {
-    json!({
+    let mut value = json!({
         "directoryPath": skill.directory_path.to_string_lossy(),
         "name": skill.name,
         "skillFilePath": skill.skill_file_path.to_string_lossy(),
         "sourceKind": skill.source_kind,
-    })
+    });
+    if let Some(variant_label) = skill.variant_label {
+        value["variantLabel"] = Value::String(variant_label);
+    }
+    value
 }
 
 #[cfg(test)]

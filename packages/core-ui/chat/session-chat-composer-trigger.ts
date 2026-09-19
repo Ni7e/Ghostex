@@ -61,6 +61,12 @@ export function sessionChatDisplaySkillDirectoryPath(path: string): string {
   return path.replace(/^\/Users\/[^/]+\//, '~/');
 }
 
+/** Secondary text of a `$` row; a same-name variation leads with its source so truncation keeps rows distinguishable. */
+export function sessionChatSkillDetail(skill: SessionChatSkill): string {
+  const path = sessionChatDisplaySkillDirectoryPath(skill.directoryPath);
+  return skill.variantLabel ? `${skill.variantLabel} · ${path}` : path;
+}
+
 /**
  * Markdown-linked skill mention: the label carries the "$name" the agent reads,
  * and the destination is the skill's SKILL.md — the thing a reader clicking the

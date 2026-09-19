@@ -106,6 +106,7 @@ pub mod session_chat_rewind_state;
 pub mod session_chat_screen_pane;
 pub mod session_chat_send;
 pub(crate) mod session_chat_send_diagnostics;
+pub(crate) mod session_chat_skill_variants;
 pub mod session_chat_skills;
 pub mod session_chat_stream;
 pub mod session_chat_subagent;

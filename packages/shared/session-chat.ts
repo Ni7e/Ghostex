@@ -943,6 +943,8 @@ export interface SessionChatSkill {
   /** Absolute SKILL.md path on the machine that owns this session. */
   skillFilePath: string;
   sourceKind: SessionChatSkillSourceKind;
+  /** Present only when gxserver keeps several distinct SKILL.md variations under this name ("project .claude", "plugin plugin-dev 1.2.0"). */
+  variantLabel?: string;
 }
 
 export interface GxserverReadSessionChatSkillsResult {
