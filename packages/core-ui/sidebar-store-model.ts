@@ -967,6 +967,29 @@ function applyLocalSessionSleepingOverride(session: SidebarSessionItem, sleeping
   };
 }
 
+/**
+ * CDXC:FocusRouting 2026-09-19 WHY:
+ * A click replaces the focused pane's session, so the row that was focused stops being visible at the click.
+ * Keeping its visible flag until the runtime confirmed the new focus drew the previous row with the visible fill for the whole round trip, and for a sleeping session that round trip includes the wake, which read as a hover highlight that took a moment to clear.
+ * Other rows keep their flag: sessions in other panes stay visible, and the runtime's exact set lands afterwards.
+ */
+function optimisticSessionVisibility(
+  groupKind: SidebarSessionGroup['kind'],
+  session: SidebarSessionItem,
+  isFocused: boolean
+): boolean {
+  if (groupKind === 'browser') {
+    return session.isVisible;
+  }
+  if (isFocused) {
+    return true;
+  }
+  if (session.isFocused) {
+    return false;
+  }
+  return session.isVisible;
+}
+
 function applyLocalFocusState(
   state: SidebarStoreState,
   groupId: string,
@@ -1003,8 +1026,7 @@ function applyLocalFocusState(
       }
 
       const isFocused = isActiveGroup && candidateSessionId === sessionId;
-      const isVisible =
-        group.kind !== 'browser' && isActiveGroup && candidateSessionId === sessionId ? true : session.isVisible;
+      const isVisible = optimisticSessionVisibility(group.kind, session, isFocused);
       if (session.isFocused === isFocused && session.isVisible === isVisible) {
         continue;
       }
@@ -1127,14 +1149,14 @@ function reconcilePendingFocusedSession(
       return {
         ...group,
         isActive: isActiveGroup,
-        sessions: (group.sessions ?? []).map((session) => ({
-          ...session,
-          isFocused: isActiveGroup && session.sessionId === pendingFocusedSessionId,
-          isVisible:
-            group.kind !== 'browser' && isActiveGroup && session.sessionId === pendingFocusedSessionId
-              ? true
-              : session.isVisible,
-        })),
+        sessions: (group.sessions ?? []).map((session) => {
+          const isFocused = isActiveGroup && session.sessionId === pendingFocusedSessionId;
+          return {
+            ...session,
+            isFocused,
+            isVisible: optimisticSessionVisibility(group.kind, session, isFocused),
+          };
+        }),
       };
     }),
     pendingFocusedSessionId,
