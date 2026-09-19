@@ -553,9 +553,16 @@ function ProjectSessionSectionToggle({
         {statusLabel ? (
           <AppTooltip content={statusLabel}>
             <span aria-hidden='true' className='session-kind-indicators'>
-              {summary.workingCount > 0 ? <span className='session-kind-dot' data-status='working' /> : null}
-              {summary.attentionCount > 0 ? <span className='session-kind-dot' data-status='attention' /> : null}
-              {summary.questionCount > 0 ? <span className='session-kind-dot' data-status='question' /> : null}
+              {/* CDXC:Sidebar 2026-09-19 DECISION: User: status dots next to a section title show only while it is collapsed. Same rule as render_native_section_header in apps/desktop/src/app/native_sidebar/sections.rs. */}
+              {isCollapsed && summary.workingCount > 0 ? (
+                <span className='session-kind-dot' data-status='working' />
+              ) : null}
+              {isCollapsed && summary.attentionCount > 0 ? (
+                <span className='session-kind-dot' data-status='attention' />
+              ) : null}
+              {isCollapsed && summary.questionCount > 0 ? (
+                <span className='session-kind-dot' data-status='question' />
+              ) : null}
               {showActiveSessionIndicator ? <span className='session-kind-dot' data-status='active' /> : null}
             </span>
           </AppTooltip>

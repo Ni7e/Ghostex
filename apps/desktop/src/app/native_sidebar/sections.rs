@@ -27,15 +27,18 @@ impl GhostexGpuiApp {
         let section_id = section.id.clone();
         let key = format!("{}-{}", group.group_id, section.id);
         let hovered = self.native_sidebar.hovered_section.as_ref() == Some(&key);
+        // CDXC:Sidebar 2026-09-19 DECISION:
+        // User: the working, attention and question dots next to a section title show only while that section is collapsed, not always; an expanded section already shows the state on its rows.
+        let summarize = section.collapsed;
         let indicator = h_flex()
             .gap(px(4.0 * scale))
-            .when(section.working_count > 0, |row| {
+            .when(summarize && section.working_count > 0, |row| {
                 row.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(0xffb454)))
             })
-            .when(section.attention_count > 0, |row| {
+            .when(summarize && section.attention_count > 0, |row| {
                 row.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(0x95d7f6)))
             })
-            .when(section.question_count > 0, |row| {
+            .when(summarize && section.question_count > 0, |row| {
                 row.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(0xf472b6)))
             })
             .when(
