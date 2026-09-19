@@ -82,7 +82,7 @@ in Settings > Extensions and focuses its name field.
   Send offers the new notes first and, once everything has been sent, sends
   all of them again, and the Review menu offers Resend all. With notes in
   several files, the Review menu sends the new notes across all files as one
-  message. Notes stay until you clear them with Clear. In a chat, the Reply by Annotating button beside an
+  message. Notes stay until you clear them with Clear. In a chat, the Reply by Annotating button below an
   agent reply (between Copy message and Save to md) opens that reply in Docs so
   it can be annotated the same way, with the feedback going back to that
   session. Folders appear as they load, and search fills in while
@@ -203,10 +203,10 @@ leaves the other pane in place.
   Specific time is available in Session Automations on desktop, web, and mobile.
   It uses the local time of the device where you set it, calculates the remaining
   wait when you save, and uses the same timed send.
-  For an active timed send, right-click the agent and choose **Postpone by**, then
-  **10 minutes**, **30 minutes**, **1 hour**, **2 hours**, or **5 hours** to add
-  that duration to its existing send time. The same submenu has **Edit delayed send**
-  to reopen its settings and **Disable delayed send** to cancel the pending send.
+  For an active timed send, right-click the agent and choose **Postpone By**, then
+  **10 Minutes**, **30 Minutes**, **1 Hour**, **2 Hours**, or **5 Hours** to add
+  that duration to its existing send time. The same submenu has **Edit Delayed Send**
+  to reopen its settings and **Disable Delayed Send** to cancel the pending send.
 - Session cards: agent icon, favicon, last-active time, git stats, colored
   icons, and rename-on-double-click are all toggles.
 - Session hover buttons (click to toggle, drag to reorder), under General >
@@ -224,7 +224,7 @@ leaves the other pane in place.
   to the reverse action on an active row (Unpin, Wake, Unsnooze, Unpark,
   Cancel Close After Done). The enabled buttons also lead the session's
   right-click menu, top to bottom in the card's right-to-left order (Sleep,
-  Park, Tag as by default), with the other actions after them. Close is the
+  Park, Tag As by default), with the other actions after them. Close is the
   exception: while it is on the card it is never in the menu, and turning it
   off puts Close back as the menu's last row. Hover buttons also in context
   menu (on by default) controls the rest; turn it off and every enabled
@@ -267,8 +267,8 @@ leaves the other pane in place.
   message returns an unpinned draft to Sessions; pinned drafts stay in
   Pinned. Empty sessions remain in Sessions. No setting is required.
 - Parking is enabled by default. Right-click a session and choose Park, or
-  select several sessions and choose Park selected, to move them into the
-  collapsible Parked section at the bottom. Use Unpark or Unpark selected to
+  select several sessions and choose Park Selected, to move them into the
+  collapsible Parked section at the bottom. Use Unpark or Unpark Selected to
   bring them back. On mobile, long-press a session and choose Park or Unpark;
   each project has its own Parked section, which starts collapsed. Parked
   sessions are always ordered from most recently active to oldest on desktop,
@@ -276,8 +276,8 @@ leaves the other pane in place.
   Mobile parking needs a connected computer with the `ghostex park-session
 <selector> true|false --json` command. Parking keeps sessions running unless Sleep session when
   parking is enabled (off by default). Park & Snooze with tags (on by
-  default) makes Park and Snooze open the Tag as menu: pick a tag to tag and
-  park in one step, or the No tag change row at the top to park as is.
+  default) makes Park and Snooze open the Tag As menu: pick a tag to tag and
+  park in one step, or the No Tag Change row at the top to park as is.
   Closing that menu without choosing does not park. Unpark after sending a
   message (on by default) moves a parked or snoozed session back out of its
   section as soon as you send it a message from chat or type a prompt into
@@ -324,11 +324,11 @@ the process alive) and are restored with the agent's resume command. From the
 sidebar or `ghostex`, a session can be focused, renamed, pinned, tagged,
 slept and woken (`ghostex sleep|wake <selector>`), forked, closed, or moved
 between panes and groups. A session carries one tag at a time, chosen from the
-Tag as menu (right-click the session): the built-in Priority, Progress, and
+Tag As menu (right-click the session): the built-in Priority, Progress, and
 Type tags, plus any custom tags you define. Custom tags are created in one
 place, Settings > General > Sidebar > Sidebar Tags: choose Add tag, then give
 it a name, an icon from the shared icon list, and a color from the preset list.
-New tag at the bottom of the Tag as menu opens that same place with the form
+New Tag at the bottom of the Tag As menu opens that same place with the form
 ready. Custom tags then appear in the same drag list as the built-in ones: drag
 to reorder, use the switch or eye to hide them from menus and filters, and the
 trash button to delete one (sessions that carried it become untagged). The
@@ -397,6 +397,10 @@ Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
 agent stops, transcript with thinking, tool, and edit cards, subagent
 transcripts, question and approval cards, rewind, and a note per session.
+Hover a message to show its actions and the time it was sent in a row below
+it: Copy message, Reply by Annotating, and Save to md under an agent's final
+reply; Rewind to here, Save prompt, and Copy message under your own messages.
+Hover the time to see the full date.
 Type `/` in the chat box to browse the agent's built-in commands. In Cursor
 chats, `/compact` summarizes the conversation to reduce context, just like
 `/summarize`.
