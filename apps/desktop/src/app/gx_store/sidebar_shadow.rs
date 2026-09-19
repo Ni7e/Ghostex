@@ -62,10 +62,16 @@ pub(crate) struct SidebarShadowCounters {
     pub(crate) skipped_stored_unknown: u64,
     /// That read failed; while it does, nothing is compared at all.
     pub(crate) stored_read_failures: u64,
-    /// Confirmed differences whose every row difference is one the old sidebar store freezes
-    /// (the question count, and the tooltip lines that are derived from fields its row equality
-    /// leaves out). Those are the old side standing still, not this list moving.
+    /// Rows, summed over every confirmed difference: how many of them differ in the question
+    /// count, which the old sidebar store leaves out of its row equality and so freezes on a row
+    /// nothing else touched.
     pub(crate) question_count_only: u64,
+    /// Rows whose only difference is the tooltip while their question count agrees. The frozen
+    /// row cannot explain those, and every mistake in the tooltip port produces exactly this
+    /// shape, so a number that climbs here is the first place to look.
+    pub(crate) tooltip_only: u64,
+    /// Confirmed differences, not rows: how many of them are made up entirely of frozen fields,
+    /// which is the old side standing still rather than this list moving.
     pub(crate) frozen_fields_only: u64,
     /// Differences that were replaced by another shape before they could settle. A number that
     /// keeps climbing while `matches` and `mismatches` stand still means something flapping.
@@ -225,6 +231,12 @@ impl GhostexGpuiApp {
         }
         // Only an accepted snapshot or patch replaces the published list; a rejected payload, a
         // clock row update, a flash and a menu answer leave it as it was and are not compared.
+        //
+        // The address of the `Arc` is the identity, which is sound here and only here: the one
+        // assignment site builds the new snapshot before it drops the old value, so the two are
+        // alive at once and cannot share an address, and the clock row update mutates in place
+        // through `Arc::make_mut` without ever reassigning. Nothing is kept behind this number
+        // between comparisons, so a freed snapshot cannot be mistaken for a live one.
         let identity = self
             .native_sidebar
             .snapshot
@@ -368,6 +380,7 @@ impl GhostexGpuiApp {
                     shadow.pending = None;
                     shadow.counters.mismatches += 1;
                     shadow.counters.question_count_only += difference.question_count_only as u64;
+                    shadow.counters.tooltip_only += difference.tooltip_only as u64;
                     if difference.only_frozen_fields {
                         shadow.counters.frozen_fields_only += 1;
                     }
@@ -429,6 +442,13 @@ impl GhostexGpuiApp {
         // judgement of its own. A stable difference is settled by the first of them; a shape that
         // keeps changing would book for ever, so the bookings are bounded and it then waits for
         // the next publish like everything else.
+        //
+        // The bound is per shape, not per list: a difference that takes a new shape on every
+        // self-booked judgement gets a fresh budget with it, so the settle-and-book cycle can run
+        // on at one comparison every 1.75 seconds for as long as the list keeps changing shape.
+        // Accepted: it costs one update and one comparison per cycle, it stops the moment the
+        // shapes repeat, and `neverSettled` counts every turn of it. A list that genuinely churns
+        // that way and a difference that flaps look the same from here, by design.
         let may_rebook = !self.gx_store.sidebar_shadow.settle_scheduled
             && match &mut self.gx_store.sidebar_shadow.pending {
                 Some(pending) if pending.rebooks < MAX_SETTLE_REBOOKS => {

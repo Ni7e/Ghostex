@@ -312,6 +312,7 @@ impl GxStoreDiagnostics {
                 "onlyOldSessions": mismatch.only_old_sessions,
                 "onlyStoreSessions": mismatch.only_store_sessions,
                 "questionCountOnly": mismatch.question_count_only,
+                "tooltipOnly": mismatch.tooltip_only,
                 "onlyFrozenFields": mismatch.only_frozen_fields,
             }),
         );
@@ -356,6 +357,7 @@ impl GxStoreDiagnostics {
                 "storedReadFailures": counters.stored_read_failures,
                 "storedReadError": stored_error,
                 "questionCountOnly": counters.question_count_only,
+                "tooltipOnly": counters.tooltip_only,
                 "frozenFieldsOnly": counters.frozen_fields_only,
                 "neverSettled": counters.never_settled,
                 "scratchChecks": counters.scratch_checks,

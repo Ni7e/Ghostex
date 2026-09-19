@@ -34,23 +34,32 @@ pub(super) struct SidebarMismatch {
     pub(super) sessions: Vec<(String, Vec<&'static str>)>,
     pub(super) only_old_sessions: Vec<String>,
     pub(super) only_store_sessions: Vec<String>,
-    /// Rows whose only difference is the question count, which the old sidebar store freezes on
-    /// a row nothing else touched.
+    /// Rows whose differing fields include the question count, which the old sidebar store
+    /// freezes on a row nothing else touched.
     pub(super) question_count_only: usize,
+    /// Rows whose only differing field is the tooltip while the question count agrees, so the
+    /// frozen row does not explain them and the tooltip port is the likelier cause.
+    pub(super) tooltip_only: usize,
     /// Every difference in this record is a field the old sidebar store freezes, so it is that
     /// side standing still rather than this list moving.
     pub(super) only_frozen_fields: bool,
 }
 
-/// The fields a difference can appear in when the old sidebar store kept a row it should have
-/// replaced.
+/// The two compared fields a frozen row can differ in on its own.
 ///
 /// `haveSameSidebarSessionItem` (packages/core-ui/sidebar-store-model.ts) decides whether a row
 /// changed, and it does not look at `pendingQuestionCount`, `isLive`, `providerSessionState`,
 /// `nativePaneState`, `sessionRoutingId`, `forkedFromSessionId`, `forkFamilySessionIds`,
 /// `workingStartedAt` or the account and agent-name fields. A row whose only change is one of
-/// those keeps its previous object, and with Debugging Mode on, which is the only state this
-/// comparison runs in, several of them are tooltip lines.
+/// those keeps its previous object.
+///
+/// Only two of them reach a compared field by themselves: the question count, and the tooltip,
+/// which with Debugging Mode on (the only state this comparison runs in) carries several of the
+/// others as lines. The rest are deliberately not listed here, because they surface in fields a
+/// real bug also lands in and bucketing them would label that bug as the old side standing
+/// still: `workingStartedAt` surfaces as row order, so it lands in a group's `sessionOrder` and
+/// `sections` rather than in a row, and the agent-name fields surface as `agentIcon`, which is
+/// also where a mistake in the agent catalog lands. A difference in those is reported.
 const FROZEN_FIELDS: [&str; 2] = ["pendingQuestionCount", "titleTooltip"];
 
 impl SidebarMismatch {
@@ -513,6 +522,8 @@ fn compare_session(
     }
     if fields.contains(&"pendingQuestionCount") {
         mismatch.question_count_only += 1;
+    } else if fields == ["titleTooltip"] {
+        mismatch.tooltip_only += 1;
     }
     mismatch.sessions.push((old.session_id.clone(), fields));
 }
