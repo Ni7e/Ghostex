@@ -4188,34 +4188,6 @@
       "agentWritable": false
     },
     {
-      "key": "sidebarProjectGroupStyle",
-      "title": "Project group style",
-      "subtitle": "Choose how project groups are marked in the sidebar.",
-      "tab": "settings",
-      "tabTitle": "General",
-      "group": "sidebar",
-      "groupTitle": "Sidebar",
-      "section": "sidebar",
-      "sectionTitle": "Sidebar",
-      "type": "enum",
-      "default": "branched",
-      "options": [
-        {
-          "label": "Quiet rail",
-          "value": "quiet"
-        },
-        {
-          "label": "Header rail",
-          "value": "header"
-        },
-        {
-          "label": "Branched rail",
-          "value": "branched"
-        }
-      ],
-      "agentWritable": true
-    },
-    {
       "key": "sidebarSpacesEnabled",
       "title": "Spaces",
       "subtitle": "Show a row of Space filter buttons in each server's sidebar section.",
@@ -4275,6 +4247,22 @@
       "sectionTitle": "Sidebar",
       "type": "boolean",
       "default": false,
+      "agentWritable": true
+    },
+    {
+      "key": "projectSwitchKeepAliveMinutes",
+      "title": "Keep the previous project live for",
+      "subtitle": "After you switch to another project or Space, keep the terminals, chats, and view that were open in the previous project running for this many minutes so switching back is instant. 0 releases them right away.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 60,
       "agentWritable": true
     },
     {
@@ -7677,6 +7665,18 @@
       "agentWritable": false
     },
     {
+      "key": "sessionChatModelPicksSessionOnly",
+      "title": "Session-only model picks",
+      "subtitle": "Apply a model or effort picked in a chat to that session only, without changing the default for new sessions. Off saves every pick as the default. Claude only: other agents always save the default.",
+      "tab": "agents",
+      "tabTitle": "Agents",
+      "section": "config",
+      "sectionTitle": "Config",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
       "key": "acceptAll",
       "title": "Agent approvals",
       "subtitle": "Choose whether supported agents ask before editing files or running commands. Per-agent settings can override this default.",
@@ -8029,8 +8029,8 @@
           "value": "ghostex-embedded-browser-use"
         },
         {
-          "label": "Ghostex Fable 5.6 Orchestration",
-          "value": "ghostex-fable-56-orchestration"
+          "label": "Ghostex Agents Orchestration",
+          "value": "ghostex-agents-orchestration"
         },
         {
           "label": "Ghostex Auto Rename Session",

@@ -64,6 +64,7 @@ import {
   MIN_TERMINAL_PANE_PADDING_PX,
   MIN_TERMINAL_VIEW_WIDTH_PERCENT,
   MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
+  MIN_PROJECT_SWITCH_KEEP_ALIVE_MINUTES,
   MIN_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
   MIN_SESSION_CHAT_ZOOM_PERCENT,
   PROMPT_EDITOR_BACKEND_OPTIONS,
@@ -77,6 +78,7 @@ import {
   COMMANDS_PANEL_AUTO_MINIMIZE_DELAY_OPTIONS,
   MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
   MAX_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS,
+  MAX_PROJECT_SWITCH_KEEP_ALIVE_MINUTES,
   MAX_SIDEBAR_DEFAULT_WIDTH_PX,
   MAX_SIDEBAR_TOOLTIP_DELAY_MS,
   MIN_COMMANDS_PANEL_DEFAULT_HEIGHT_PX,
@@ -133,7 +135,6 @@ import {
   SettingsSelect,
   SettingsSelectContent,
   SidebarPresetField,
-  SidebarProjectGroupStyleField,
   SidebarSpacesField,
   SidebarTagListSettingsField,
   SliderNumberField,
@@ -295,7 +296,7 @@ export type SettingsModalProps = {
   onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
-  onInstallFable56OrchestrationSkill?: () => void;
+  onInstallAgentsOrchestrationSkill?: () => void;
   onInstallManageBeadsSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
@@ -384,7 +385,7 @@ export function SettingsModal({
   onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
-  onInstallFable56OrchestrationSkill,
+  onInstallAgentsOrchestrationSkill,
   onInstallManageBeadsSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
@@ -1354,20 +1355,11 @@ export function SettingsModal({
                                 onResetToDefault={() => updateSidebarSettingsPreset('recommended')}
                               />
                             ) : null}
-                            {mainSettingVisible(settingsSearch.sidebar, 'sidebarProjectGroupStyle') ? (
-                              <SidebarProjectGroupStyleField
-                                description='Choose how project groups are marked without adding group or project card borders.'
-                                label='Project group style'
-                                {...getSettingModificationProps('sidebarProjectGroupStyle')}
-                                onChange={(value) => updateDraft('sidebarProjectGroupStyle', value)}
-                                value={draft.sidebarProjectGroupStyle}
-                              />
-                            ) : null}
                             {/*
                              * CDXC:Spaces 2026-08-28:
                              * Spaces is off until the user asks for it, so the switch sits
-                             * directly under Project group style where the other sidebar
-                             * structure controls are.
+                             * directly under Preset where the other sidebar structure
+                             * controls are.
                              */}
                             {mainSettingVisible(settingsSearch.sidebar, 'sidebarSpacesEnabled') ? (
                               <SidebarSpacesField
@@ -1407,6 +1399,19 @@ export function SettingsModal({
                                 label="Follow the active session's Space"
                                 {...getSettingModificationProps('sidebarSpaceFollowActiveSession')}
                                 onChange={(checked) => updateDraft('sidebarSpaceFollowActiveSession', checked)}
+                              />
+                            ) : null}
+                            {mainSettingVisible(settingsSearch.sidebar, 'projectSwitchKeepAliveMinutes') ? (
+                              <SliderNumberField
+                                description='After you switch to another project or Space, keep the terminals, chats, and view that were open in the previous project running for this many minutes so switching back is instant. 0 releases them right away.'
+                                label='Keep the previous project live for (minutes)'
+                                {...getSettingModificationProps('projectSwitchKeepAliveMinutes')}
+                                max={MAX_PROJECT_SWITCH_KEEP_ALIVE_MINUTES}
+                                min={MIN_PROJECT_SWITCH_KEEP_ALIVE_MINUTES}
+                                onCommit={(value) => updateDraft('projectSwitchKeepAliveMinutes', value)}
+                                onChange={(value) => updateDraftDebounced('projectSwitchKeepAliveMinutes', value)}
+                                step={1}
+                                value={draft.projectSwitchKeepAliveMinutes}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'sidebarVisibilityMemory') ? (
@@ -2924,7 +2929,7 @@ export function SettingsModal({
                       onInstallBrowserUseSkill={onInstallBrowserUseSkill}
                       onInstallComputerUseSkill={onInstallComputerUseSkill}
                       onInstallCuaDriver={onInstallCuaDriver}
-                      onInstallFable56OrchestrationSkill={onInstallFable56OrchestrationSkill}
+                      onInstallAgentsOrchestrationSkill={onInstallAgentsOrchestrationSkill}
                       onInstallManageBeadsSkill={onInstallManageBeadsSkill}
                       onInstallGenerateTitleSkill={onInstallGenerateTitleSkill}
                       onInstallGhostexCli={onInstallGhostexCli}
@@ -3027,6 +3032,10 @@ export function SettingsModal({
                       preferredAgentInterfaceOverrides={draft.preferredAgentInterfaceOverrides}
                       sessionTitleGenerationAgent={draft.sessionTitleGenerationAgent}
                       onAgentAcceptAllEnabledChange={(checked) => updateDraft('agentAcceptAllEnabled', checked)}
+                      onSessionChatModelPicksSessionOnlyChange={(checked) =>
+                        updateDraft('sessionChatModelPicksSessionOnly', checked)
+                      }
+                      sessionChatModelPicksSessionOnly={draft.sessionChatModelPicksSessionOnly}
                       onDefaultPromptAgentIdChange={(agentId) => updateDraft('defaultPromptAgentId', agentId)}
                       onCustomSessionTitleGenerationCommandChange={(command) =>
                         updateDraft('customSessionTitleGenerationCommand', command)

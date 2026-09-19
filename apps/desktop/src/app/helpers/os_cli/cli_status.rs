@@ -46,7 +46,7 @@ pub(crate) struct GpuiGhostexCliProbe {
     pub(crate) browser_skill_path: Option<String>,
     pub(crate) computer_use_skill_path: Option<String>,
     pub(crate) embedded_browser_skill_path: Option<String>,
-    pub(crate) fable56_orchestration_skill_path: Option<String>,
+    pub(crate) agents_orchestration_skill_path: Option<String>,
     pub(crate) manage_beads_skill_path: Option<String>,
     pub(crate) generate_title_skill_path: Option<String>,
     pub(crate) ghostex_path: Option<String>,
@@ -66,7 +66,7 @@ pub(crate) fn gpui_ghostex_cli_probe() -> Result<GpuiGhostexCliProbe, String> {
         browser_skill_path: status.browser_skill_path,
         computer_use_skill_path: status.computer_use_skill_path,
         embedded_browser_skill_path: status.embedded_browser_skill_path,
-        fable56_orchestration_skill_path: status.fable56_orchestration_skill_path,
+        agents_orchestration_skill_path: status.agents_orchestration_skill_path,
         manage_beads_skill_path: status.manage_beads_skill_path,
         generate_title_skill_path: status.generate_title_skill_path,
         ghostex_usable: status.ghostex_path.is_some(),
@@ -101,7 +101,7 @@ pub(crate) fn gpui_ghostex_cli_probe() -> Result<GpuiGhostexCliProbe, String> {
         browser_skill_path: skill_path("ghostex-browser-use"),
         computer_use_skill_path: skill_path("ghostex-computer-use"),
         embedded_browser_skill_path: skill_path("ghostex-embedded-browser-use"),
-        fable56_orchestration_skill_path: skill_path("ghostex-fable-56-orchestration"),
+        agents_orchestration_skill_path: skill_path("ghostex-agents-orchestration"),
         manage_beads_skill_path: skill_path("ghostex-manage-beads"),
         generate_title_skill_path: skill_path("ghostex-auto-rename-session"),
         ghostex_path: ghostex_path.as_ref().map(|path| gpui_path_string(path)),
@@ -130,7 +130,7 @@ pub(crate) fn gpui_ghostex_cli_status_message(detail_override: Option<&str>) -> 
     let embedded_browser_skill_installed = probe.embedded_browser_skill_path.is_some();
     let computer_use_skill_installed = probe.computer_use_skill_path.is_some();
     let cli_skill_installed = probe.cli_skill_path.is_some();
-    let fable56_orchestration_skill_installed = probe.fable56_orchestration_skill_path.is_some();
+    let agents_orchestration_skill_installed = probe.agents_orchestration_skill_path.is_some();
     let manage_beads_skill_installed = probe.manage_beads_skill_path.is_some();
     let generate_title_skill_installed = probe.generate_title_skill_path.is_some();
     let move_codex_session_skill_installed = probe.move_codex_session_skill_path.is_some();
@@ -196,10 +196,10 @@ pub(crate) fn gpui_ghostex_cli_status_message(detail_override: Option<&str>) -> 
             } else {
                 "Ghostex CLI skill is not installed.".to_string()
             });
-            parts.push(if fable56_orchestration_skill_installed {
-                "Ghostex Fable 5.6 Orchestration skill is installed.".to_string()
+            parts.push(if agents_orchestration_skill_installed {
+                "Ghostex Agents Orchestration skill is installed.".to_string()
             } else {
-                "Ghostex Fable 5.6 Orchestration skill is not installed.".to_string()
+                "Ghostex Agents Orchestration skill is not installed.".to_string()
             });
             parts.push(if manage_beads_skill_installed {
                 "Ghostex Manage Beads skill is installed.".to_string()
@@ -261,8 +261,8 @@ pub(crate) fn gpui_ghostex_cli_status_message(detail_override: Option<&str>) -> 
         "cuaDriverUpdateAvailable": cua_driver_update_status.update_available,
         "cuaDriverVersion": cua_driver_update_status.current_version,
         "detail": detail,
-        "fable56OrchestrationSkillInstalled": fable56_orchestration_skill_installed,
-        "fable56OrchestrationSkillPath": probe.fable56_orchestration_skill_path,
+        "agentsOrchestrationSkillInstalled": agents_orchestration_skill_installed,
+        "agentsOrchestrationSkillPath": probe.agents_orchestration_skill_path,
         "manageBeadsSkillInstalled": manage_beads_skill_installed,
         "manageBeadsSkillPath": probe.manage_beads_skill_path,
         "generatedAt": gpui_status_generated_at(),

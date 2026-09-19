@@ -11,7 +11,7 @@ pub(crate) enum GpuiGhostexCliSettingsAction {
     InstallBrowserUseSkill,
     InstallComputerUseSkill,
     InstallCliSkill,
-    InstallFable56OrchestrationSkill,
+    InstallAgentsOrchestrationSkill,
     InstallManageBeadsSkill,
     InstallGenerateTitleSkill,
     InstallMoveCodexSessionSkill,
@@ -32,7 +32,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserUseSkill => "installBrowserUseSkill",
             Self::InstallComputerUseSkill => "installComputerUseSkill",
             Self::InstallCliSkill => "installCliSkill",
-            Self::InstallFable56OrchestrationSkill => "installFable56OrchestrationSkill",
+            Self::InstallAgentsOrchestrationSkill => "installAgentsOrchestrationSkill",
             Self::InstallManageBeadsSkill => "installManageBeadsSkill",
             Self::InstallGenerateTitleSkill => "installGenerateTitleSkill",
             Self::InstallMoveCodexSessionSkill => "installMoveCodexSessionSkill",
@@ -50,7 +50,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserUseSkill => "Ghostex Browser Use installed",
             Self::InstallComputerUseSkill => "Ghostex Computer Use installed",
             Self::InstallCliSkill => "Ghostex CLI skill installed",
-            Self::InstallFable56OrchestrationSkill => "Ghostex Fable 5.6 Orchestration installed",
+            Self::InstallAgentsOrchestrationSkill => "Ghostex Agents Orchestration installed",
             Self::InstallManageBeadsSkill => "Ghostex Manage Beads installed",
             Self::InstallGenerateTitleSkill => "Ghostex Auto Rename Session installed",
             Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session installed",
@@ -71,8 +71,8 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserUseSkill => "Ghostex Browser Use install failed",
             Self::InstallComputerUseSkill => "Ghostex Computer Use install failed",
             Self::InstallCliSkill => "Ghostex CLI skill install failed",
-            Self::InstallFable56OrchestrationSkill => {
-                "Ghostex Fable 5.6 Orchestration install failed"
+            Self::InstallAgentsOrchestrationSkill => {
+                "Ghostex Agents Orchestration install failed"
             }
             Self::InstallManageBeadsSkill => "Ghostex Manage Beads install failed",
             Self::InstallGenerateTitleSkill => "Ghostex Auto Rename Session install failed",
@@ -157,11 +157,11 @@ pub(crate) fn gpui_run_ghostex_cli_settings_action(
                 "Ghostex CLI skill",
             )
         }
-        GpuiGhostexCliSettingsAction::InstallFable56OrchestrationSkill => {
+        GpuiGhostexCliSettingsAction::InstallAgentsOrchestrationSkill => {
             gpui_install_bundled_ghostex_skill_action(
                 action,
-                &["fable-5.6-orchestration", "install-skill"],
-                "Ghostex Fable 5.6 Orchestration",
+                &["agents-orchestration", "install-skill"],
+                "Ghostex Agents Orchestration",
             )
         }
         GpuiGhostexCliSettingsAction::InstallManageBeadsSkill => {

@@ -26,7 +26,8 @@ pub(crate) struct ProjectViewCommand {
     pub operation: String,
 }
 /// The HUD fields the app-modal Settings window needs to render the "Available in" pickers.
-pub(crate) const PROJECT_VIEW_SCOPE_OPTION_HUD_KEYS: [&str; 2] = ["projectViewSpaces", "projectViewProjects"];
+pub(crate) const PROJECT_VIEW_SCOPE_OPTION_HUD_KEYS: [&str; 2] =
+    ["projectViewSpaces", "projectViewProjects"];
 
 fn text<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")

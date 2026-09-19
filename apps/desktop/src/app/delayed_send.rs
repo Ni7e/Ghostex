@@ -2162,6 +2162,7 @@ impl GhostexGpuiApp {
                     session directly instead of requiring a focused terminal
                     view like the other toolbar actions.
                     */
+                    gpui_component::Root::hide_tooltip(window, cx);
                     self.toggle_agents_session_chat_mode_for_focused_session(cx);
                     return;
                 }
@@ -2493,9 +2494,9 @@ impl GhostexGpuiApp {
                     cx,
                 );
             }
-            "installFable56OrchestrationSkill" => {
+            "installAgentsOrchestrationSkill" => {
                 self.run_gpui_ghostex_cli_settings_action(
-                    GpuiGhostexCliSettingsAction::InstallFable56OrchestrationSkill,
+                    GpuiGhostexCliSettingsAction::InstallAgentsOrchestrationSkill,
                     cx,
                 );
             }

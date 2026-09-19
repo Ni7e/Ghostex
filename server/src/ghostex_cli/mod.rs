@@ -82,7 +82,7 @@ const HELP_GATE_EXCLUDED: &[&str] = &[
     "editor-daemon",
     "extensions",
     "f",
-    "fable-5.6-orchestration",
+    "agents-orchestration",
     "find",
     "generate-title",
     "guide",
@@ -302,8 +302,8 @@ fn is_known_command(name: &str) -> bool {
         "automations",
         "install-computer-use-skill",
         "install-cli-skill",
-        "fable-5.6-orchestration",
-        "install-fable-5.6-orchestration-skill",
+        "agents-orchestration",
+        "install-agents-orchestration-skill",
         "manage-beads",
         "install-manage-beads-skill",
         "generate-title",
@@ -775,9 +775,9 @@ fn run_command(name: &str, args: &[String]) -> CliResult<()> {
         "cli" => skills::cli_command(args),
         "install-cli-skill" => skills::install_cli_skill_command(args),
         "automations" => skills::automations_command(args),
-        "fable-5.6-orchestration" => skills::fable56_orchestration_command(args),
-        "install-fable-5.6-orchestration-skill" => {
-            skills::install_fable56_orchestration_skill_command(args)
+        "agents-orchestration" => skills::agents_orchestration_command(args),
+        "install-agents-orchestration-skill" => {
+            skills::install_agents_orchestration_skill_command(args)
         }
         "manage-beads" => skills::manage_beads_command(args),
         "install-manage-beads-skill" => skills::install_manage_beads_skill_command(args),

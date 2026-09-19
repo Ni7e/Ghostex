@@ -111,7 +111,7 @@ export type FirstLaunchSetupModalProps = {
   onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
-  onInstallFable56OrchestrationSkill?: () => void;
+  onInstallAgentsOrchestrationSkill?: () => void;
   onInstallManageBeadsSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
@@ -401,9 +401,9 @@ const FIRST_LAUNCH_SKILL_CAPABILITIES: Record<BundledGhostexAgentSkillId, { titl
     description: 'Check pages, take screenshots, and interact with the browser inside Ghostex.',
   },
   computerUse: { title: 'Use your computer', description: 'Let agents see the screen, click, and type in your apps.' },
-  fable56Orchestration: {
+  agentsOrchestration: {
     title: 'Coordinate multiple agents',
-    description: 'Let Claude delegate work to Codex agents and review their results.',
+    description: 'Let an agent launch other agents, hand them tasks, and review their results.',
   },
   manageBeads: {
     title: 'Manage your project board',
@@ -829,7 +829,7 @@ export function FirstLaunchSetupModal({
   onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
-  onInstallFable56OrchestrationSkill,
+  onInstallAgentsOrchestrationSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
   onInstallManageBeadsSkill,
@@ -1051,7 +1051,7 @@ export function FirstLaunchSetupModal({
     cli: onInstallCliSkill,
     computerUse: onInstallComputerUseSkill,
     embeddedBrowserUse: onInstallBrowserControl,
-    fable56Orchestration: onInstallFable56OrchestrationSkill,
+    agentsOrchestration: onInstallAgentsOrchestrationSkill,
     generateTitle: onInstallGenerateTitleSkill,
     manageBeads: onInstallManageBeadsSkill,
     moveCodexSession: onInstallMoveCodexSessionSkill,
@@ -2261,8 +2261,8 @@ function isFirstLaunchSkillInstalled(
       return status?.computerUseSkillInstalled === true;
     case 'cli':
       return status?.cliSkillInstalled === true;
-    case 'fable56Orchestration':
-      return status?.fable56OrchestrationSkillInstalled === true;
+    case 'agentsOrchestration':
+      return status?.agentsOrchestrationSkillInstalled === true;
     case 'manageBeads':
       return status?.manageBeadsSkillInstalled === true;
     case 'generateTitle':

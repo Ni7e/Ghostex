@@ -416,8 +416,8 @@ pub fn usage() -> String {
             "Communicate and coordinate with other agents",
         ),
         format_help_command(
-            "fable-5.6-orchestration --help",
-            "Show Ghostex Fable 5.6 Orchestration skill setup",
+            "agents-orchestration --help",
+            "Show Ghostex Agents Orchestration skill setup (launch and coordinate other agents)",
         ),
         format_help_command(
             "manage-beads --help",
@@ -581,7 +581,7 @@ Specialized workflows:
   chat queues, prompt history, server, diagnostics) is covered by ghostex --help
   and the focused help pages. Use $ghostex-embedded-browser-use,
   $ghostex-browser-use, $ghostex-computer-use, $ghostex-manage-beads,
-  $ghostex-fable-56-orchestration, $ghostex-auto-rename-session, or
+  $ghostex-agents-orchestration, $ghostex-auto-rename-session, or
   $ghostex-move-codex-session when their domain applies. Use $ghostex-help to
   explain how a Ghostex feature works or to change an app setting for the user
   (ghostex guide, ghostex settings).
@@ -1120,27 +1120,27 @@ Boundary:
     .to_string()
 }
 
-pub fn fable56_orchestration_usage() -> String {
-    "Ghostex Fable 5.6 Orchestration - install the agent skill for the Fable plan / Codex implement / Fable verify pipeline
+pub fn agents_orchestration_usage() -> String {
+    "Ghostex Agents Orchestration - install the agent skill for launching and coordinating other agents
 
 Usage:
-  gx fable-5.6-orchestration --help
-  gx fable-5.6-orchestration install-skill [--json]
+  gx agents-orchestration --help
+  gx agents-orchestration install-skill [--json]
 
 Agent skill:
-  Use $ghostex-fable-56-orchestration to run a multi-phase coding task as a
-  pipeline over Ghostex panes: plan inline with Fable, launch one Codex
-  gpt-5.6 worker pane per phase, then verify with a Fable pane and spawn
-  fixer panes until verification passes.
+  Use $ghostex-agents-orchestration when one agent needs other agents to do
+  part of the work: launch them with a specific model and effort, send them
+  tasks, read their replies, wait for them to finish, and verify the result.
 
 What the skill teaches:
-  Ask for Fable and Codex effort levels, write a self-contained phase plan
-  file, launch workers with create-session, monitor sentinels with read-text,
-  verify acceptance criteria with a Fable pane, and cap the fix loop.
+  Read ghostex agents --help and ghostex --help first, resolve your own
+  session and project, hand over self-contained tasks, keep the global
+  reference of every created session, confirm delivery, wait on a last-line
+  sentinel with wait-for-text, verify independently, and cap fix rounds.
 
 Boundary:
   Use Ghostex CLI commands instead of raw zmx/tmux control when coordinating
-  panes inside Ghostex.
+  sessions inside Ghostex.
 "
     .to_string()
 }

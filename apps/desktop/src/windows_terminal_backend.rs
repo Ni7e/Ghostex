@@ -44,7 +44,7 @@ pub(crate) struct WindowsWslGhostexCliStatus {
     pub(crate) browser_skill_path: Option<String>,
     pub(crate) computer_use_skill_path: Option<String>,
     pub(crate) embedded_browser_skill_path: Option<String>,
-    pub(crate) fable56_orchestration_skill_path: Option<String>,
+    pub(crate) agents_orchestration_skill_path: Option<String>,
     pub(crate) manage_beads_skill_path: Option<String>,
     pub(crate) generate_title_skill_path: Option<String>,
     pub(crate) ghostex_path: Option<String>,

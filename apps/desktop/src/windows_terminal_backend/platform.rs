@@ -142,7 +142,7 @@ printf '%s\n' \
   "$(test -f "$skills_root/ghostex-embedded-browser-use/SKILL.md" && printf 1 || printf 0)" \
   "$(test -f "$skills_root/ghostex-computer-use/SKILL.md" && printf 1 || printf 0)" \
   "$(test -f "$skills_root/ghostex-cli/SKILL.md" && printf 1 || printf 0)" \
-  "$(test -f "$skills_root/ghostex-fable-56-orchestration/SKILL.md" && printf 1 || printf 0)" \
+  "$(test -f "$skills_root/ghostex-agents-orchestration/SKILL.md" && printf 1 || printf 0)" \
   "$(test -f "$skills_root/ghostex-manage-beads/SKILL.md" && printf 1 || printf 0)" \
   "$(test -f "$skills_root/ghostex-auto-rename-session/SKILL.md" && printf 1 || printf 0)" \
   "$(test -f "$skills_root/ghostex-move-codex-session/SKILL.md" && printf 1 || printf 0)" \
@@ -167,7 +167,7 @@ printf '%s\n' \
         "ghostex-embedded-browser-use",
         "ghostex-computer-use",
         "ghostex-cli",
-        "ghostex-fable-56-orchestration",
+        "ghostex-agents-orchestration",
         "ghostex-manage-beads",
         "ghostex-auto-rename-session",
         "ghostex-move-codex-session",
@@ -187,7 +187,7 @@ printf '%s\n' \
         embedded_browser_skill_path: skill_paths.next().flatten(),
         computer_use_skill_path: skill_paths.next().flatten(),
         cli_skill_path: skill_paths.next().flatten(),
-        fable56_orchestration_skill_path: skill_paths.next().flatten(),
+        agents_orchestration_skill_path: skill_paths.next().flatten(),
         manage_beads_skill_path: skill_paths.next().flatten(),
         generate_title_skill_path: skill_paths.next().flatten(),
         move_codex_session_skill_path: skill_paths.next().flatten(),

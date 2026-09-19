@@ -56,7 +56,7 @@ const SKILL_LABELS: Record<BundledSkillId, string> = {
   embeddedBrowser: 'embedded browser',
   computerUse: 'computer use',
   cli: 'agent orchestration',
-  fable56Orchestration: 'fable 5.6 orchestration',
+  agentsOrchestration: 'agents orchestration',
   manageBeads: 'find prev session',
   generateTitle: 'generate title',
   manageBeads: 'project board beads',

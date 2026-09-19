@@ -63,7 +63,6 @@ import {
   DIAGNOSTIC_LOGGING_SCENARIOS,
   PREFERRED_AGENT_INTERFACE_OPTIONS,
   SESSION_CHAT_THEME_OPTIONS,
-  SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
   SIDEBAR_SETTINGS_PRESETS,
   SIDEBAR_SPACES_ENABLED_OPTIONS,
   TERMINAL_VIEW_WIDTH_MODE_OPTIONS,
@@ -73,7 +72,6 @@ import {
   type DiagnosticLoggingSettings,
   type PreferredAgentInterface,
   type SidebarSettingsPresetId,
-  type SidebarProjectGroupStyle,
   type TerminalViewWidthMode,
 } from '../../shared/ghostex-settings';
 import { type SessionChatThemeSetting } from '../../shared/session-chat';
@@ -1458,53 +1456,6 @@ export function SidebarPresetField({
   );
 }
 
-export function SidebarProjectGroupStyleField({
-  advanced,
-  description,
-  isModified,
-  label,
-  onChange,
-  onResetToDefault,
-  value,
-}: {
-  advanced?: boolean;
-  description?: string;
-  label: string;
-  onChange: (value: SidebarProjectGroupStyle) => void;
-  value: SidebarProjectGroupStyle;
-} & SettingModificationProps) {
-  const id = useId();
-  return (
-    <SettingRow
-      advanced={advanced}
-      description={description}
-      htmlFor={id}
-      isModified={isModified}
-      label={label}
-      onResetToDefault={onResetToDefault}
-    >
-      <SegmentedControl
-        aria-label={label}
-        onValueChange={(nextValue) => {
-          onChange(nextValue as SidebarProjectGroupStyle);
-        }}
-        value={value}
-      >
-        {SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS.map((option, index) => (
-          <SegmentedControlItem
-            aria-label={option.label}
-            id={index === 0 ? id : undefined}
-            key={option.value}
-            value={option.value}
-          >
-            {option.label}
-          </SegmentedControlItem>
-        ))}
-      </SegmentedControl>
-    </SettingRow>
-  );
-}
-
 export function TerminalViewWidthModeField({
   advanced,
   description,
@@ -1553,8 +1504,8 @@ export function TerminalViewWidthModeField({
 /*
  * CDXC:Spaces 2026-08-28:
  * Spaces is a feature switch rather than a density tweak, so it reads as the
- * same combined button the Project group style row above it uses instead of the
- * small toggle the per-row visibility settings use.
+ * same combined button the Preset row above it uses instead of the small toggle
+ * the per-row visibility settings use.
  */
 export function SidebarSpacesField({
   advanced,

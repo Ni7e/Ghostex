@@ -150,10 +150,10 @@ export function createGhostexCliStatusMessage(
     ...(skills.embeddedBrowser
       ? { embeddedBrowserSkillPath: '~/agents/skills/ghostex-embedded-browser-use/SKILL.md' }
       : {}),
-    fable56OrchestrationSkillInstalled: skills.fable56Orchestration,
-    ...(skills.fable56Orchestration
+    agentsOrchestrationSkillInstalled: skills.agentsOrchestration,
+    ...(skills.agentsOrchestration
       ? {
-          fable56OrchestrationSkillPath: '~/agents/skills/ghostex-fable-56-orchestration/SKILL.md',
+          agentsOrchestrationSkillPath: '~/agents/skills/ghostex-agents-orchestration/SKILL.md',
         }
       : {}),
     manageBeadsSkillInstalled: skills.manageBeads,

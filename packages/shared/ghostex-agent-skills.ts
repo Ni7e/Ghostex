@@ -4,7 +4,7 @@ export type BundledGhostexAgentSkillId =
   | 'browserUse'
   | 'embeddedBrowserUse'
   | 'computerUse'
-  | 'fable56Orchestration'
+  | 'agentsOrchestration'
   | 'manageBeads'
   | 'generateTitle'
   | 'moveCodexSession';
@@ -27,8 +27,7 @@ export type BundledGhostexAgentSkill = {
    * CDXC:AgentSkills 2026-08-24:
    * Some bundled skills stay installable through the CLI (and keep working when
    * already installed) but are deliberately absent from every app surface:
-   * onboarding, Settings > Integrations, and settings search. Fable 5.6
-   * Orchestration remains optional; the project-board skill is recommended.
+   * onboarding, Settings > Integrations, and settings search.
    */
   hiddenFromUi?: boolean;
   skillName: string;
@@ -111,14 +110,18 @@ export const BUNDLED_GHOSTEX_AGENT_SKILLS: readonly BundledGhostexAgentSkill[] =
     skillName: 'ghostex-embedded-browser-use',
     tier: 'recommended',
   },
+  /**
+   * CDXC:AgentSkills 2026-09-19 DECISION:
+   * User: add a bundled skill named "Ghostex Agents Orchestration" that just tells the agent to use the ghostex help commands to learn how to launch other agents with specific models and efforts and send and receive messages through the ghostex CLI, and remove the Fable 5.6 orchestration skill while keeping what was useful in it. It supersedes the pinned Fable plan / Codex implement / Fable verify pipeline skill, whose model-independent habits now live in the new skill text.
+   */
   {
-    command: 'ghostex fable-5.6-orchestration install-skill',
+    command: 'ghostex agents-orchestration install-skill',
     description:
-      'Use Claude Code Fable to orchestrate GPT 5.6 Sol sub-agents, then verify with Fable. A mix of the smartest model out there with the best implementer out there, for the best cost to performance.',
-    id: 'fable56Orchestration',
-    name: 'Ghostex Fable 5.6 Orchestration',
-    skillName: 'ghostex-fable-56-orchestration',
-    tier: 'optional',
+      'Let one agent run a team: teaches agents to launch other agents with the model and effort you ask for, send them tasks, read their replies, and check their work, all through the `ghostex` CLI help.',
+    id: 'agentsOrchestration',
+    name: 'Ghostex Agents Orchestration',
+    skillName: 'ghostex-agents-orchestration',
+    tier: 'recommended',
   },
   {
     command: 'ghostex generate-title install-skill',

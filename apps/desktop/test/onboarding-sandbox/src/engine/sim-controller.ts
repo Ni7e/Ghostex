@@ -104,7 +104,7 @@ const SKILL_INSTALL_COMMANDS: Record<string, BundledSkillId> = {
   installBrowserUseSkill: 'browser',
   installComputerUseSkill: 'computerUse',
   installCliSkill: 'cli',
-  installFable56OrchestrationSkill: 'fable56Orchestration',
+  installAgentsOrchestrationSkill: 'agentsOrchestration',
   installManageBeadsSkill: 'manageBeads',
   installGenerateTitleSkill: 'generateTitle',
   installManageBeadsSkill: 'manageBeads',
@@ -118,7 +118,7 @@ const BUNDLED_SKILL_ID_BY_CONTRACT_ID: Record<string, BundledSkillId> = {
   embeddedBrowserUse: 'embeddedBrowser',
   computerUse: 'computerUse',
   cli: 'cli',
-  fable56Orchestration: 'fable56Orchestration',
+  agentsOrchestration: 'agentsOrchestration',
   manageBeads: 'manageBeads',
   generateTitle: 'generateTitle',
   manageBeads: 'manageBeads',
@@ -874,7 +874,7 @@ export function createEngineActions(
       case 'installBrowserUseSkill':
       case 'installComputerUseSkill':
       case 'installCliSkill':
-      case 'installFable56OrchestrationSkill':
+      case 'installAgentsOrchestrationSkill':
       case 'installManageBeadsSkill':
       case 'installGenerateTitleSkill':
       case 'installManageBeadsSkill':

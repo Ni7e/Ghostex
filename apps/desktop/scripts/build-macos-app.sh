@@ -158,7 +158,7 @@ bundled_cli_skill_assets=(
 	ghostex-computer-use
 	ghostex-cli
 	ghostex-help
-	ghostex-fable-56-orchestration
+	ghostex-agents-orchestration
 	ghostex-manage-beads
 	ghostex-auto-rename-session
 	ghostex-move-codex-session

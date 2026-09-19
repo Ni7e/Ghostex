@@ -21,7 +21,7 @@ const GHOSTEX_EMBEDDED_BROWSER_SKILL_NAME: &str = "ghostex-embedded-browser-use"
 const GHOSTEX_COMPUTER_USE_SKILL_NAME: &str = "ghostex-computer-use";
 const GHOSTEX_CLI_SKILL_NAME: &str = "ghostex-cli";
 const GHOSTEX_MANAGE_BEADS_SKILL_NAME: &str = "ghostex-manage-beads";
-const GHOSTEX_FABLE_56_ORCHESTRATION_SKILL_NAME: &str = "ghostex-fable-56-orchestration";
+const GHOSTEX_AGENTS_ORCHESTRATION_SKILL_NAME: &str = "ghostex-agents-orchestration";
 const GHOSTEX_AUTO_RENAME_SESSION_SKILL_NAME: &str = "ghostex-auto-rename-session";
 const GHOSTEX_MOVE_CODEX_SESSION_SKILL_NAME: &str = "ghostex-move-codex-session";
 const GHOSTEX_HELP_SKILL_NAME: &str = "ghostex-help";
@@ -398,27 +398,26 @@ pub fn install_manage_beads_skill_command(args: &[String]) -> CliResult<()> {
     )
 }
 
-pub fn fable56_orchestration_command(args: &[String]) -> CliResult<()> {
+pub fn agents_orchestration_command(args: &[String]) -> CliResult<()> {
     skill_surface_command(
         args,
-        &usage::fable56_orchestration_usage(),
-        "fable-5.6-orchestration",
-        &install_fable56_orchestration_skill_command,
+        &usage::agents_orchestration_usage(),
+        "agents-orchestration",
+        &install_agents_orchestration_skill_command,
     )
 }
 
-pub fn install_fable56_orchestration_skill_command(args: &[String]) -> CliResult<()> {
+pub fn install_agents_orchestration_skill_command(args: &[String]) -> CliResult<()> {
     /*
-    Agents need a bundled pipeline skill on top of `$ghostex-cli`:
-    plan a multi-phase task inline with Fable, launch one Codex gpt-5.6 worker
-    pane per phase through supported Ghostex CLI commands, then verify with a
-    Fable pane and spawn targeted fixers until verification passes.
+    The skill carries no command reference of its own: it sends the agent to
+    `ghostex agents --help` and `ghostex --help` and adds model-independent
+    orchestration habits on top.
     */
     install_ghostex_agent_skill(
         args,
-        "ghostex --help",
-        &["GHOSTEX_FABLE_56_ORCHESTRATION_SKILL_SOURCE"],
-        GHOSTEX_FABLE_56_ORCHESTRATION_SKILL_NAME,
+        "ghostex agents --help",
+        &["GHOSTEX_AGENTS_ORCHESTRATION_SKILL_SOURCE"],
+        GHOSTEX_AGENTS_ORCHESTRATION_SKILL_NAME,
     )
 }
 

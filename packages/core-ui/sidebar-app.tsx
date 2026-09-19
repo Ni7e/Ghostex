@@ -4022,7 +4022,6 @@ export function SidebarApp({
         <div
           className='sidebar-reference-layout'
           data-project-reorder-drag={String(isProjectReorderDragActive)}
-          data-project-group-style={effectiveSettings.sidebarProjectGroupStyle}
           data-reference-sidebar='true'
           data-sidebar-machine-tabs={String(remoteMachines.length > 0)}
           ref={setReferenceLayoutElement}

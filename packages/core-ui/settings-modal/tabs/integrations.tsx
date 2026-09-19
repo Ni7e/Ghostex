@@ -99,7 +99,7 @@ export function IntegrationsSettingsTab({
   onInstallBrowserUseSkill,
   onInstallComputerUseSkill,
   onInstallCuaDriver,
-  onInstallFable56OrchestrationSkill,
+  onInstallAgentsOrchestrationSkill,
   onInstallManageBeadsSkill,
   onInstallGenerateTitleSkill,
   onInstallGhostexCli,
@@ -126,7 +126,7 @@ export function IntegrationsSettingsTab({
   onInstallBrowserUseSkill?: () => void;
   onInstallComputerUseSkill?: () => void;
   onInstallCuaDriver?: () => void;
-  onInstallFable56OrchestrationSkill?: () => void;
+  onInstallAgentsOrchestrationSkill?: () => void;
   onInstallManageBeadsSkill?: () => void;
   onInstallGenerateTitleSkill?: () => void;
   onInstallGhostexCli?: () => void;
@@ -247,7 +247,7 @@ export function IntegrationsSettingsTab({
               browserUse: onInstallBrowserUseSkill,
               computerUse: onInstallComputerUseSkill,
               embeddedBrowserUse: onInstallBrowserControl,
-              fable56Orchestration: onInstallFable56OrchestrationSkill,
+              agentsOrchestration: onInstallAgentsOrchestrationSkill,
               manageBeads: onInstallManageBeadsSkill,
               generateTitle: onInstallGenerateTitleSkill,
               moveCodexSession: onInstallMoveCodexSessionSkill,

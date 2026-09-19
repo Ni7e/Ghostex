@@ -840,7 +840,7 @@ type FirstLaunchSkillInstallAction =
   | 'installBrowserUseSkill'
   | 'installComputerUseSkill'
   | 'installCliSkill'
-  | 'installFable56OrchestrationSkill'
+  | 'installAgentsOrchestrationSkill'
   | 'installGenerateTitleSkill'
   | 'installManageBeadsSkill'
   | 'installMoveCodexSessionSkill'
@@ -851,7 +851,7 @@ const FIRST_LAUNCH_SKILL_INSTALL_ACTION_BY_ID: Record<BundledGhostexAgentSkillId
   cli: 'installCliSkill',
   computerUse: 'installComputerUseSkill',
   embeddedBrowserUse: 'installBrowserControl',
-  fable56Orchestration: 'installFable56OrchestrationSkill',
+  agentsOrchestration: 'installAgentsOrchestrationSkill',
   generateTitle: 'installGenerateTitleSkill',
   manageBeads: 'installManageBeadsSkill',
   moveCodexSession: 'installMoveCodexSessionSkill',
@@ -2511,9 +2511,9 @@ function AppModalHost() {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: 'installCliSkill' });
         }}
-        onInstallFable56OrchestrationSkill={() => {
+        onInstallAgentsOrchestrationSkill={() => {
           setGhostexCliStatusLoading(true);
-          vscode.postMessage({ type: 'installFable56OrchestrationSkill' });
+          vscode.postMessage({ type: 'installAgentsOrchestrationSkill' });
         }}
         onInstallManageBeadsSkill={() => {
           setGhostexCliStatusLoading(true);
@@ -2672,9 +2672,9 @@ function AppModalHost() {
           setGhostexCliStatusLoading(true);
           vscode.postMessage({ type: 'installCliSkill' });
         }}
-        onInstallFable56OrchestrationSkill={() => {
+        onInstallAgentsOrchestrationSkill={() => {
           setGhostexCliStatusLoading(true);
-          vscode.postMessage({ type: 'installFable56OrchestrationSkill' });
+          vscode.postMessage({ type: 'installAgentsOrchestrationSkill' });
         }}
         onInstallManageBeadsSkill={() => {
           setGhostexCliStatusLoading(true);

@@ -34,7 +34,6 @@ export type ChatFileOpenView = 'docs' | 'code';
 export type DefaultEditorCommand =
   'code' | 'code-insiders' | 'zed' | 'zeditor' | 'cursor' | 'windsurf' | 'codium' | 'subl' | 'other';
 export type CommandsPanelSide = 'bottom' | 'right';
-export type SidebarProjectGroupStyle = 'quiet' | 'header' | 'branched';
 export type SidebarSpaceSwitchBehavior = 'restore' | 'keep';
 export type SidebarVisibilityMemory = 'shared' | 'perView';
 export const MIN_SIDEBAR_COLLAPSE_ANIMATION_DURATION_MS = 0;
@@ -131,6 +130,9 @@ export const MAX_COMMANDS_PANEL_DEFAULT_HEIGHT_PX = 600;
 export const DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX = 275;
 export const MIN_SIDEBAR_DEFAULT_WIDTH_PX = 150;
 export const MAX_SIDEBAR_DEFAULT_WIDTH_PX = 520;
+export const DEFAULT_PROJECT_SWITCH_KEEP_ALIVE_MINUTES = 10;
+export const MIN_PROJECT_SWITCH_KEEP_ALIVE_MINUTES = 0;
+export const MAX_PROJECT_SWITCH_KEEP_ALIVE_MINUTES = 60;
 export const DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 13;
 export const MIN_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 1;
 export const MAX_PROJECT_SESSION_LIST_COLLAPSED_COUNT = 50;
@@ -150,6 +152,16 @@ export function clampSidebarDefaultWidthPx(value: number): number {
     return DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX;
   }
   return Math.min(MAX_SIDEBAR_DEFAULT_WIDTH_PX, Math.max(MIN_SIDEBAR_DEFAULT_WIDTH_PX, Math.round(value)));
+}
+
+export function clampProjectSwitchKeepAliveMinutes(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_PROJECT_SWITCH_KEEP_ALIVE_MINUTES;
+  }
+  return Math.min(
+    MAX_PROJECT_SWITCH_KEEP_ALIVE_MINUTES,
+    Math.max(MIN_PROJECT_SWITCH_KEEP_ALIVE_MINUTES, Math.round(value))
+  );
 }
 
 export function clampProjectSessionListCollapsedCount(value: number): number {
@@ -521,8 +533,6 @@ export type ghostexSettings = {
    * User: a Compact project list shows 13 rows by default, configurable up to 50, before its "Show all" row. The key keeps its 2026-06-13 name (then the Show less count, default ten) so saved settings carry over.
    */
   projectSessionListCollapsedCount: number;
-  /** Visual treatment for user-created project groups in the shared sidebar. */
-  sidebarProjectGroupStyle: SidebarProjectGroupStyle;
   /**
    * CDXC:Spaces 2026-08-28:
    * Spaces (saved per-gxserver sidebar filters) are opt-in. gxserver keeps
@@ -539,6 +549,12 @@ export type ghostexSettings = {
    * Only meaningful while `sidebarSpacesEnabled` is on.
    */
   sidebarSpaceSwitchBehavior: SidebarSpaceSwitchBehavior;
+  /**
+   * CDXC:Workarea 2026-09-19 DECISION:
+   * User: switching Spaces (which switches projects) must keep the previous project live in the background instead of closing and relaunching it every swap, with a slider for how long.
+   * What was visible when the project was left (its terminals, chat pages, and the open view page) stays running for this many minutes; 0 releases it right away as before.
+   */
+  projectSwitchKeepAliveMinutes: number;
   /**
    * CDXC:Spaces 2026-09-11 DECISION:
    * User: add a toggle, off by default for now, that switches the selected Space to the one owning a session activated from outside it (Back/Forward, Search by Prompt, notifications, Previous Sessions).
@@ -590,6 +606,8 @@ export type ghostexSettings = {
    * User: file edits default to a single collapsed row; Chat settings can opt into seven-line previews.
    */
   sessionChatFileEditPreviews: boolean;
+  /** See the CDXC:SessionChat 2026-09-19 decision in session-chat-presentation/model-picker.ts. */
+  sessionChatModelPicksSessionOnly: boolean;
   /**
    * CDXC:Theming 2026-06-15-11:24:
    * Custom chrome colors are scoped to the sidebar and native titlebar only.

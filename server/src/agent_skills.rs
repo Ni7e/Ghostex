@@ -18,7 +18,7 @@ pub const GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-computer-use",
     "ghostex-cli",
     "ghostex-manage-beads",
-    "ghostex-fable-56-orchestration",
+    "ghostex-agents-orchestration",
     "ghostex-auto-rename-session",
     "ghostex-move-codex-session",
     "ghostex-help",
@@ -990,11 +990,19 @@ builds installed on user machines. The startup migration removes a retired
 skill directory only when every file in it byte-matches a version Ghostex
 actually shipped; a directory with extra files or edited content is user work
 and is left alone.
+
+CDXC:AgentSkills 2026-09-19 WHY:
+The Fable 5.6 orchestration skill (shipped first as
+`ghostex-fable-5.6-orchestration`, then as `ghostex-fable-56-orchestration`)
+was replaced by the model-independent `$ghostex-agents-orchestration`, so its
+installed copies are retired the same way.
 */
 pub const RETIRED_GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-manage-automations",
     "ghostex-agent-orchestration",
     "ghostex-find-prev-session",
+    "ghostex-fable-5.6-orchestration",
+    "ghostex-fable-56-orchestration",
 ];
 
 /// sha256 of every SKILL.md / agents/openai.yaml revision the retired skills
@@ -1020,6 +1028,15 @@ const RETIRED_GHOSTEX_AGENT_SKILL_SHIPPED_SHA256: &[&str] = &[
     // ghostex-find-prev-session agents/openai.yaml
     "20901c1230ebec7200694cdcdb2c2cdad7a0b500adc10be7123f318b23f3b73a",
     "fe50e56c5216d964637c993c27e7c539ee0bfdfb7f22b4cf5bcff0ad783eea61",
+    // ghostex-fable-5.6-orchestration / ghostex-fable-56-orchestration SKILL.md
+    "6403a460e44371569c3d3a838cae1f0448e16180a047d5f16fba97531fdf59cb",
+    "8f7d1a32d0ae2093998abe5aa2c7712edf154a3c22ada20389d8d03a1df1a51e",
+    "bd337aa532c3817bebe784c54a558171209cfd9aa3fa5c310841a9452b9b8db8",
+    "d4e17d0a5e80ad363ae3aa4d7bb82ecbae370d6276f2fd35200d76f094a70607",
+    // ghostex-fable-5.6-orchestration / ghostex-fable-56-orchestration agents/openai.yaml
+    "7d1771b33c72b36692b4c97c82d5f78aca68acc55d3d30851380aa5c9e815ee7",
+    "d0c65b88ef3379d9dc93421d4e68f362fdeeac1fe8945eafd5c92ab70a8e0e11",
+    "1f220c6dd690323fcc8a82f7e612b2b2f25863954dbded973c108feb2f24cb8c",
 ];
 
 fn file_matches_shipped_retired_skill_content(path: &Path) -> bool {

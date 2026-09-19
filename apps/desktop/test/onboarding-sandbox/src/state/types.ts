@@ -56,7 +56,7 @@ export const BUNDLED_SKILL_IDS = [
   'embeddedBrowser',
   'computerUse',
   'cli',
-  'fable56Orchestration',
+  'agentsOrchestration',
   'manageBeads',
   'generateTitle',
   'manageBeads',

@@ -77,7 +77,7 @@ export const BUNDLED_AGENT_SKILL_ICONS: Record<BundledGhostexAgentSkillId, typeo
   cli: IconTerminal2,
   computerUse: IconDeviceDesktop,
   embeddedBrowserUse: IconBrowser,
-  fable56Orchestration: IconSitemap,
+  agentsOrchestration: IconSitemap,
   generateTitle: IconPencil,
   help: IconHelpCircle,
   manageBeads: IconLayoutKanban,
@@ -486,8 +486,8 @@ export function isBundledGhostexAgentSkillInstalled(
       return status?.computerUseSkillInstalled === true;
     case 'cli':
       return status?.cliSkillInstalled === true;
-    case 'fable56Orchestration':
-      return status?.fable56OrchestrationSkillInstalled === true;
+    case 'agentsOrchestration':
+      return status?.agentsOrchestrationSkillInstalled === true;
     case 'manageBeads':
       return status?.manageBeadsSkillInstalled === true;
     case 'generateTitle':

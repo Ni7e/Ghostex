@@ -9,9 +9,10 @@ Each section ends with "Related settings" so the helper can turn an
 explanation into a change with `ghostex settings set`.
 
 Context menus share the sidebar's rounded appearance and follow the current
-light or dark theme. Click a submenu to open it; it stays open as you move the
-pointer across other rows. Long menus scroll vertically to keep every action
-reachable, without a horizontal scrollbar.
+light or dark theme. Click a submenu to open it, and click the same row again to
+close it; it stays open as you move the pointer across other rows. Long menus
+scroll vertically to keep every action reachable, without a horizontal
+scrollbar.
 
 ## Views (titlebar tabs)
 
@@ -104,6 +105,8 @@ Related settings: `terminalViewWidthMode`, `webLinkOpenTarget`,
 The sidebar lists projects and their sessions. Project headers carry the git
 branch and diff stats, an agent launcher, Add Worktree, and project actions.
 Right-click a project for Open Folder in the file manager or Add to Group.
+Click a project header (or the chevron beside it) or a group header to expand
+or collapse it; rename a group from its right-click menu.
 Close Project parks the project in Recent Projects; when it held the active
 session, Ghostex stays in the current Space and switches to an awake session
 of the next project in the list.
@@ -137,12 +140,29 @@ the Space row only marks that Space with a dot.
 Switching projects by any route keeps the project's last view. Clicking a session
 inside the current project opens it in the visible companion pane, or switches
 to Agents if the companion is hidden.
+Leaving a project (by switching Spaces or projects) does not close what you had
+open there: the terminals, chats, and view page that were on screen stay running
+in the background for the "Keep the previous project live for" number of minutes
+(`projectSwitchKeepAliveMinutes`, default 10, 0 to 60), so switching back is
+instant. Set it to 0 to release them as soon as you leave.
 Starting a new agent from the sidebar launcher or New Thread picker keeps your
 current view open, including Code, Browser, Kanban, Automate, and Docs. Select
 Agents when you want to open the new agent there.
-With two vertically split companion panes, click inside the top or bottom pane
-to make it active. Selecting another session in the sidebar or creating a new
-session replaces that active pane's session and leaves the other pane in place.
+The companion pane holds a second session two ways, chosen with the two buttons
+in its title bar: split it vertically to stack the sessions, or split it to the
+right to put the second session in its own sidepane beside the first. A fresh
+side-by-side pair starts at 440px each where the window is wide enough for it,
+and narrower windows give both sidepanes less so the main pane keeps its own
+minimum. Drag the divider between the two sidepanes to rebalance them,
+double-click it to make them even again, and drag the outer divider to resize the
+pair together. Clicking the other arrangement's button rearranges the two
+sessions you already have instead of starting a third. The button for the
+arrangement you are in reads "Show one companion session": in a side-by-side pair
+it keeps the sidepane you click it in, and in a stacked split it keeps the active
+session, and the companion goes back to the width it had before it was split.
+Click inside either companion pane to make it active. Selecting another session
+in the sidebar or creating a new session replaces that active pane's session and
+leaves the other pane in place.
 
 - Width: the sidebar sits on the left; drag the divider to resize,
   double-click it to restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
@@ -162,7 +182,9 @@ session replaces that active pane's session and leaves the other pane in place.
   of that edge reveals the companion instead.
 - Pane width: agent panes and chat companion sidepanes have a minimum resize
   width of 388px. In the desktop app, the main pane in Code, Browser, Kanban,
-  Automate, and Docs has a minimum width of 455px.
+  Automate, and Docs has a minimum width of 455px. Two side-by-side companion
+  sidepanes share that 388px each where they fit; on a window too narrow for both
+  they divide the width they have.
 - Presets: Settings > General > Sidebar > Preset switches groups of card
   details at once; the individual rows below it are marked Advanced.
 - Timed Delayed Send: open **Delayed Send** from an agent's right-click menu
@@ -263,7 +285,7 @@ session replaces that active pane's session and leaves the other pane in place.
 - Remote machines appear as their own sidebar sections when connected.
 
 Related settings: everything under General > Sidebar, `agentManagerZoomPercent`
-(sidebar interface size), `sidebarProjectGroupStyle`, `sidebarSpacesEnabled`,
+(sidebar interface size), `sidebarSpacesEnabled`,
 `sidebarSpaceSwitchBehavior`, `sidebarSpaceFollowActiveSession`.
 
 ## Commands pane
@@ -480,7 +502,7 @@ them back. Background commands that are still running, compaction, and
 requests for approval keep their own status cards.
 Chat follows the app theme by default. In Settings > General > Theme, set Chat theme to Light, Dark, or System for a separate appearance, or choose Follow app to use the main App theme (`sessionChatTheme`, `sidebarTheme`).
 
-Set Default Chat Zoom (%) in Settings > Chat to scale the desktop chat interface, including messages, controls, and the prompt composer. Choose 70% to 200% in 5% steps; the initial default is 100%. The saved level applies to open chats and when chats open again (`sessionChatZoomPercent`).
+Set Default Chat Zoom (%) in Settings > Chat to scale the desktop chat interface, including messages, controls, and the prompt composer. Choose 70% to 200% in 5% steps; the initial default is 100%. The saved level applies to open chats and when chats open again (`sessionChatZoomPercent`). With a chat focused, Cmd+= and Cmd+- (Ctrl on Windows and Linux) resize that chat for as long as it is open, and Cmd+0 returns it to the saved level.
 
 Toggle chat and terminal for a session with one click on the pane header or
 the pane hotkey. Compatible agents can default to chat. On macOS and Linux,
@@ -542,24 +564,28 @@ Hover the model or effort to see the configured Model & Effort Picker shortcut
 (Option+P by default on macOS). Hover the context circle to read the agent's
 terminal status line.
 
-The Model & Effort Picker commits a choice in one of two ways. Use in this
-session (Enter) changes the model and effort for this session only and leaves
-the agent's saved default alone, so new sessions still start where they did
-before; waking this session later brings it back on the model you chose. Set as
-default (Shift+Enter) also saves the choice as the agent's default for new
-sessions, which is what the picker always did. Use in this session is available
-for Claude only: Codex's own model picker always writes the choice to its
-configuration file, so on a Codex session that action is greyed out and Enter
-sets the default.
+The Model & Effort Picker commits a choice in one of two ways. Set as default
+saves the choice as the agent's default for new sessions as well as changing
+this session. Use in this session changes the model and effort for this session
+only and leaves the agent's saved default alone, so new sessions still start
+where they did before; waking this session later brings it back on the model
+you chose. Enter sets the default and Shift+Enter applies to this session only.
+Turn on Session-only model picks under Settings, Agents, Config to swap them, so
+Enter applies to this session only and Shift+Enter sets the default. Use in this
+session is available for Claude only: Codex's own model picker always writes the
+choice to its configuration file, so on a Codex session that action is greyed
+out and Enter sets the default.
 
-The model and effort dropdowns in the chat input row follow the same rule
+The model and effort dropdowns in the chat input row follow the same setting
 without asking each time. Each carries an Also set as default switch at the
-bottom of its menu, off by default, so picking a model or effort there changes
-this session and leaves the agent's saved default alone. Turn it on and picks
-from those two menus save the default as well; the menu stays open so you can
-set the switch and choose in one go, and the setting is remembered for that
-session. On a Codex session the switch is on and greyed out, because its picker
-cannot change a model without saving it.
+bottom of its menu. It starts on, so picking a model or effort there saves the
+agent's default; with Session-only model picks turned on it starts off, so a
+pick changes this session and leaves the saved default alone. Flip the switch
+to do the other thing in one session: the menu stays open so you can set the
+switch and choose in one go, and the choice is remembered for that session. On
+a Codex session the switch is on and greyed out, because its picker cannot
+change a model without saving it. Settings key:
+`sessionChatModelPicksSessionOnly`.
 
 A choice that cannot be applied says so at the top of the model menu, under Not
 applied, with the reason. The usual reason is that the agent's own model list
@@ -777,9 +803,11 @@ Cross-agent orchestration also works through the `$ghostex-cli` skill. For
    worker is created; a reused linked worker keeps its existing model and effort.
    Model and effort overrides require a single agent launch command, without
    shell operators, command substitutions, comments, or line continuations.
-3. The optional Fable 5.6 Orchestration skill (`$ghostex-fable-56-orchestration`)
-   packages a plan-with-Claude, implement-with-Codex, verify-with-Claude
-   pipeline.
+3. The Agents Orchestration skill (`$ghostex-agents-orchestration`, installed
+   from Settings > Integrations or `ghostex agents-orchestration install-skill`)
+   teaches an agent to read `ghostex agents --help` and `ghostex --help`, then
+   launch other agents with the model and effort you ask for, send them tasks,
+   read their replies, and verify their work.
 
 Related settings: Settings > Agents (Default Prompt Agent, Agent approvals,
 Agent Hooks, Default view per agent), `agentAcceptAllEnabled`,

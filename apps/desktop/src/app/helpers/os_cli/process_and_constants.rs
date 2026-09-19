@@ -489,7 +489,7 @@ pub(crate) const GPUI_BUNDLED_GHOSTEX_AGENT_SKILL_NAMES: &[&str] = &[
     "ghostex-computer-use",
     "ghostex-cli",
     "ghostex-help",
-    "ghostex-fable-56-orchestration",
+    "ghostex-agents-orchestration",
     "ghostex-manage-beads",
     "ghostex-auto-rename-session",
     "ghostex-move-codex-session",

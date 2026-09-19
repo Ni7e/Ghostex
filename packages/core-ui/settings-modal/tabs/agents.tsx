@@ -80,6 +80,7 @@ import {
   SettingsTextarea,
   StaticNoteField,
   TextField,
+  ToggleField,
   setSettingsSortableRowElement,
 } from '../fields';
 import {
@@ -115,7 +116,7 @@ export function hasInstalledBundledAgentSkills(ghostexCliStatus: SidebarGhostexC
     ghostexCliStatus?.browserSkillInstalled === true ||
     ghostexCliStatus?.embeddedBrowserSkillInstalled === true ||
     ghostexCliStatus?.computerUseSkillInstalled === true ||
-    ghostexCliStatus?.fable56OrchestrationSkillInstalled === true ||
+    ghostexCliStatus?.agentsOrchestrationSkillInstalled === true ||
     ghostexCliStatus?.manageBeadsSkillInstalled === true ||
     ghostexCliStatus?.generateTitleSkillInstalled === true ||
     ghostexCliStatus?.moveCodexSessionSkillInstalled === true ||
@@ -135,6 +136,8 @@ export function AgentsSettingsTab({
   preferredAgentInterfaceOverrides,
   sessionTitleGenerationAgent,
   onAgentAcceptAllEnabledChange,
+  onSessionChatModelPicksSessionOnlyChange,
+  sessionChatModelPicksSessionOnly,
   onCustomSessionTitleGenerationCommandChange,
   onDefaultPromptAgentIdChange,
   onInstallAgentHooks,
@@ -158,6 +161,8 @@ export function AgentsSettingsTab({
   preferredAgentInterfaceOverrides: Readonly<Record<string, PreferredAgentInterface>>;
   sessionTitleGenerationAgent: SessionTitleGenerationAgent;
   onAgentAcceptAllEnabledChange: (checked: boolean) => void;
+  onSessionChatModelPicksSessionOnlyChange: (checked: boolean) => void;
+  sessionChatModelPicksSessionOnly: boolean;
   onCustomSessionTitleGenerationCommandChange: (command: string) => void;
   onDefaultPromptAgentIdChange: (agentId: string) => void;
   onInstallAgentHooks?: (agentIds?: readonly string[]) => void;
@@ -415,6 +420,20 @@ export function AgentsSettingsTab({
                 }
                 placeholder='title-generator'
                 value={customSessionTitleGenerationCommand}
+              />
+            ) : null}
+            {shouldShowSetting(search.sections.config, 'sessionChatModelPicksSessionOnly') ? (
+              <ToggleField
+                checked={sessionChatModelPicksSessionOnly}
+                description='Apply a model or effort picked in a chat to that session only, without changing the default for new sessions. Off saves every pick as the default. Claude only: other agents always save the default.'
+                isModified={
+                  sessionChatModelPicksSessionOnly !== DEFAULT_ghostex_SETTINGS.sessionChatModelPicksSessionOnly
+                }
+                label='Session-only model picks'
+                onChange={onSessionChatModelPicksSessionOnlyChange}
+                onResetToDefault={() =>
+                  onSessionChatModelPicksSessionOnlyChange(DEFAULT_ghostex_SETTINGS.sessionChatModelPicksSessionOnly)
+                }
               />
             ) : null}
             {shouldShowSetting(search.sections.config, 'acceptAll') ? (

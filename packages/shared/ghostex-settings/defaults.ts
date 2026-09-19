@@ -20,6 +20,7 @@ import {
 import {
   DEFAULT_ACCENT_COLOR,
   DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
+  DEFAULT_PROJECT_SWITCH_KEEP_ALIVE_MINUTES,
   DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT,
   DEFAULT_SESSION_CHAT_ZOOM_PERCENT,
   DEFAULT_TERMINAL_VIEW_WIDTH_MODE,
@@ -391,9 +392,9 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
    */
   sidebarDefaultWidthPx: DEFAULT_SIDEBAR_DEFAULT_WIDTH_PX,
   projectSessionListCollapsedCount: DEFAULT_PROJECT_SESSION_LIST_COLLAPSED_COUNT,
-  sidebarProjectGroupStyle: 'branched',
   sidebarSpacesEnabled: false,
   sidebarSpaceSwitchBehavior: 'restore',
+  projectSwitchKeepAliveMinutes: DEFAULT_PROJECT_SWITCH_KEEP_ALIVE_MINUTES,
   sidebarSpaceFollowActiveSession: false,
   sidebarVisibilityMemory: 'shared',
   expandCollapsedProjectsOnJump: true,
@@ -409,6 +410,7 @@ export const DEFAULT_ghostex_SETTINGS: ghostexSettings = {
   sessionChatVerboseMode: false,
   sessionChatSimpleMode: false,
   sessionChatFileEditPreviews: false,
+  sessionChatModelPicksSessionOnly: false,
   /**
    * CDXC:Theming 2026-06-15-11:24:
    * Custom sidebar/titlebar colors are scoped to the sidebar and titlebar.

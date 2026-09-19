@@ -34,7 +34,6 @@ import {
   PROMPT_EDITOR_BACKEND_OPTIONS,
   SIDEBAR_SETTINGS_PRESET_SETTINGS,
   SIDEBAR_SETTINGS_PRESETS,
-  SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS,
   SIDEBAR_THEME_SETTING_OPTIONS,
   WEB_LINK_OPEN_TARGET_OPTIONS,
 } from './ghostex-settings';
@@ -939,30 +938,6 @@ describe('normalizeghostexSettings', () => {
     expect(COMMANDS_PANEL_SIDE_OPTIONS).toEqual([
       { label: 'Bottom', value: 'bottom' },
       { label: 'Right', value: 'right' },
-    ]);
-  });
-
-  test('normalizes the selectable project group rail style', () => {
-    expect(DEFAULT_ghostex_SETTINGS.sidebarProjectGroupStyle).toBe('branched');
-    expect(normalizeghostexSettings({})).toMatchObject({
-      sidebarProjectGroupStyle: 'branched',
-    });
-    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: 'quiet' })).toMatchObject({
-      sidebarProjectGroupStyle: 'quiet',
-    });
-    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: 'header' })).toMatchObject({
-      sidebarProjectGroupStyle: 'header',
-    });
-    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: 'branched' })).toMatchObject({
-      sidebarProjectGroupStyle: 'branched',
-    });
-    expect(normalizeghostexSettings({ sidebarProjectGroupStyle: 'boxed' })).toMatchObject({
-      sidebarProjectGroupStyle: 'branched',
-    });
-    expect(SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS).toEqual([
-      { label: 'Quiet rail', value: 'quiet' },
-      { label: 'Header rail', value: 'header' },
-      { label: 'Branched rail', value: 'branched' },
     ]);
   });
 

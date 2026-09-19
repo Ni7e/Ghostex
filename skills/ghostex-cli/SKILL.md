@@ -58,8 +58,8 @@ above. Route to a specialized skill only when its domain applies:
 - Use `$ghostex-computer-use` for native desktop application control.
 - Use `$ghostex-manage-beads` for Project Board bead workflows through the
   machine-installed `bd` CLI.
-- Use `$ghostex-fable-56-orchestration` for the Fable-planned,
-  Codex-implemented, Fable-verified multi-pane pipeline.
+- Use `$ghostex-agents-orchestration` when launching, messaging, reading,
+  and verifying other agents (start from `ghostex agents --help`).
 - Use `$ghostex-auto-rename-session` when asked to generate a session title.
 - Use `$ghostex-move-codex-session` to fork a Codex session into another
   folder.

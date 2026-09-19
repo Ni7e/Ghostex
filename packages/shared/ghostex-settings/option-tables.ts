@@ -14,7 +14,6 @@ import {
   type KeepAwakeDurationMinutes,
   type PreferredAgentInterface,
   type PromptEditorBackend,
-  type SidebarProjectGroupStyle,
   type SidebarSpaceSwitchBehavior,
   type SidebarVisibilityMemory,
   type WebLinkOpenTarget,
@@ -102,15 +101,6 @@ export const COMMANDS_PANEL_SIDE_OPTIONS: ReadonlyArray<{
 }> = [
   { label: 'Bottom', value: 'bottom' },
   { label: 'Right', value: 'right' },
-];
-
-export const SIDEBAR_PROJECT_GROUP_STYLE_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: SidebarProjectGroupStyle;
-}> = [
-  { label: 'Quiet rail', value: 'quiet' },
-  { label: 'Header rail', value: 'header' },
-  { label: 'Branched rail', value: 'branched' },
 ];
 
 /**
