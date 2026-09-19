@@ -8,7 +8,11 @@ import { getGpuiWorkspaceSessionSubgroups, parseGpuiWorkspaceSessionSubgroupId }
 import { GPUI_AUTO_SLEEP_MONITOR_INTERVAL_MS, GPUI_QUICK_AUTOMATIONS_PROJECT_ID } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import type { PreferredAgentInterface } from '@/packages/shared/ghostex-settings';
-import { createGpuiAutoSleepAgentSessionIds, gxserverSleepWasDeclined } from './helpers/auto-sleep';
+import {
+  createGpuiAutoSleepAgentSessionIds,
+  focusMovedElsewhereDuringWake,
+  gxserverSleepWasDeclined,
+} from './helpers/auto-sleep';
 import { createGpuiSidebarSettings } from './helpers/bootstrap';
 import { gpuiBrowserSidebarSessionId } from './helpers/browser-tabs';
 import { isGpuiInactiveProjectPresentationSession } from './helpers/close-after-done';
@@ -311,6 +315,7 @@ export const gpuiSidebarRuntimeAutoSleepMethods = {
     const replacementFocusSessionId = sleeping
       ? this.resolveLocalProjectListTransitionFocusTarget(reference.projectId, reference.sessionId)
       : undefined;
+    const focusedSessionIdBeforeWake = this.focusedSessionId;
     const lifecycleResult = await this.client.rpc<GxserverSleepSessionResult | undefined>(
       sleeping ? '/api/sleepSession' : '/api/wakeSession',
       {
@@ -345,7 +350,10 @@ export const gpuiSidebarRuntimeAutoSleepMethods = {
     this.patchPresentationSession(reference.projectId, reference.sessionId, {
       lifecycleState: 'running',
     });
-    this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId, options);
+    // The user selected another session while the daemon was waking this one: it is running now and is attached when it is selected again, but it does not take focus (see `focusMovedElsewhereDuringWake`).
+    if (!focusMovedElsewhereDuringWake(this.focusedSessionId, focusedSessionIdBeforeWake, reference.sessionId)) {
+      this.focusLocalWorkspaceSession(reference.projectId, reference.sessionId, options);
+    }
     this.publishPresentation('patch');
   },
 

@@ -13,6 +13,7 @@ import {
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { createGpuiSidebarSettings } from './helpers/bootstrap';
+import { focusMovedElsewhereDuringWake } from './helpers/auto-sleep';
 import { normalizeGpuiWorkspaceTabSessionSelection } from './helpers/command-palette';
 import { normalizeNonEmptyString } from './helpers/records';
 import { rememberGpuiProjectSession } from './project-activation';
@@ -537,6 +538,7 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
       CDXC:Workarea 2026-06-26-23:24:
       Rust-origin mapped sleeping placeholder activation must mirror macOS wake ownership: SidebarApp/gxserver commits `/api/wakeSession`, the sidebar marks the row running, and only the result ack lets Rust move the native tab into Mounting. Do not post WorkspaceTerminalFocus from this branch or the wake request would re-enter Rust before its pending lifecycle mutation applies.
       */
+      const focusedSessionIdBeforeWake = this.focusedSessionId;
       await this.client.rpc('/api/wakeSession', {
         projectId: request.projectId,
         reason: 'gpui-sidebar',
@@ -550,7 +552,10 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
       `keepSidebarFocus` marks a startup-restore wake of a split pane that is not the focused pane.
       Moving the sidebar focus to it would republish and persist that session as the focused one, so after a restart with several sleeping panes the last wake to finish decided what the next restart focuses.
       */
-      if (!request.keepSidebarFocus) {
+      if (
+        !request.keepSidebarFocus &&
+        !focusMovedElsewhereDuringWake(this.focusedSessionId, focusedSessionIdBeforeWake, request.sessionId)
+      ) {
         this.setLocalPresentationSessionFocus(request.projectId, request.sessionId);
       }
       this.publishPresentation('patch');

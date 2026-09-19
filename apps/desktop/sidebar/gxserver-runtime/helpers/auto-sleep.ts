@@ -337,3 +337,15 @@ export function addGpuiAutoSleepProtectedSessionId(
 export function gpuiAutoSleepProjectSessionKey(projectId: string, sessionId: string): string {
   return `${projectId}\u0000${sessionId}`;
 }
+
+/**
+ * CDXC:FocusRouting 2026-09-19 WHY:
+ * A wake takes as long as the daemon needs, and focus belongs to the Rust store, which tells this runtime every selection the user makes meanwhile. A wake that finishes after the user selected another session must not take focus back: Rust cannot refuse it by stamp, because this runtime already echoes the newest one. Focus that is still where it was when the wake started, or already on the woken session (Rust selected its tab and told us), means the user is still waiting for it.
+ */
+export function focusMovedElsewhereDuringWake(
+  focusedSessionId: string | undefined,
+  focusedSessionIdBeforeWake: string | undefined,
+  wokenSessionId: string
+): boolean {
+  return focusedSessionId !== focusedSessionIdBeforeWake && focusedSessionId !== wokenSessionId;
+}
