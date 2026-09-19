@@ -85,6 +85,7 @@ impl CefSurface {
         visible: bool,
         bridge_surface: cef::ExtensionBridgeSurfaceSpec,
         bridge_event_handler: cef::ExtensionBridgeEventHandler,
+        page_load_end_handler: Option<cef::PageLoadEndHandler>,
         cx: &mut gpui::App,
     ) -> Result<gpui::Entity<Self>, String> {
         let browser = Rc::new(CefBrowser::new(
@@ -106,7 +107,7 @@ impl CefSurface {
             None,
             Some(bridge_surface),
             Some(bridge_event_handler),
-            None,
+            page_load_end_handler,
         )?);
         Ok(cx.new(|cx| Self::from_browser(id, background, visible, browser, cx)))
     }

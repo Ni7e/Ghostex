@@ -56,8 +56,13 @@ export function sessionChatNewSessionWelcomeTitle(agentName: string | null | und
   return agentName ? `What should we build with ${agentName}?` : 'What should we work on?';
 }
 
-/** How long a transcript read stays blank before any loading feedback appears. */
-export const SESSION_CHAT_LOADING_INDICATOR_DELAY_MS = 600;
+/**
+ * How long a transcript read stays blank before the skeleton appears.
+ *
+ * CDXC:SessionChat 2026-09-19 DECISION:
+ * User: the skeleton shows the moment a transcript starts loading, in both GPUI and React chat; the pane must react at once instead of holding blank. This supersedes the 600ms blank hold from the same day.
+ */
+export const SESSION_CHAT_LOADING_INDICATOR_DELAY_MS = 0;
 /** How long a transcript read runs before the empty region offers Retry. */
 export const SESSION_CHAT_LOADING_RETRY_DELAY_MS = 12_000;
 

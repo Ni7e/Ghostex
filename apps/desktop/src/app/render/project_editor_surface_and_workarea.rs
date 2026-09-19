@@ -62,6 +62,11 @@ impl GhostexGpuiApp {
         Real Source, Kanban, Automate, and Manage CEF panes render as normal-layout GPUI children only after the app-owned slot already has a CefSurface and the corresponding gate permits placeholder replacement. Focus uses the existing project-editor surface path; no overlay, hidden child view, hit-test routing, WKWebView/WebKit path, temporary page, or fallback URL is involved.
         */
         let mode = slot_key.titlebar_mode();
+        // The child view stays hidden until its first load (see `project_workarea_page_load_end_handler`); the skeleton is what shows meanwhile.
+        let page_ready = self
+            .project_workarea_runtime_cef_surfaces
+            .get(&slot_key)
+            .is_none_or(|owned| owned.page_ready());
         div()
             .id(format!(
                 "ghostex-gpui-project-workarea-runtime-cef-surface-{}",
@@ -86,6 +91,14 @@ impl GhostexGpuiApp {
                 }),
             )
             .child(surface)
+            .when(!page_ready, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .child(self.render_view_skeleton(mode)),
+                )
+            })
             .into_any_element()
     }
 
@@ -364,6 +377,14 @@ impl GhostexGpuiApp {
         let has_title = title.is_some();
         let project_view = matches!(mode, TitlebarMode::Extension(id) if gpui_custom_view(id).is_some_and(|v| v.definition.get("source").is_some()));
         let has_actions = !actions.is_empty();
+        // A loading state carries at most a progress title ("Starting Storybook…", "Loading source...") and no explanation; it is drawn as the view's skeleton. Errors, prompts, and explanations keep their words and buttons.
+        let loading = message.is_empty()
+            && title
+                .as_deref()
+                .is_none_or(|title| title.ends_with('…') || title.ends_with("..."));
+        if loading && !has_actions {
+            return self.render_view_skeleton(mode);
+        }
         let mut action_row = h_flex()
             .mt(px(16.0))
             .items_center()

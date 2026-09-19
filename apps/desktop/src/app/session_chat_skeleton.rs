@@ -46,6 +46,19 @@ static SKELETON: LazyLock<TranscriptSkeleton> = LazyLock::new(|| {
     .expect("shared transcript skeleton")
 });
 
+/// The shared skeleton tint, for skeletons drawn outside the chat.
+pub(crate) fn skeleton_tint() -> f32 {
+    SKELETON.tint
+}
+
+/// The shared skeleton pulse: its period and the opacity it dips to.
+pub(crate) fn skeleton_pulse() -> (Duration, f32) {
+    (
+        Duration::from_millis(SKELETON.pulse_ms),
+        SKELETON.pulse_min_opacity,
+    )
+}
+
 #[derive(Default)]
 pub(crate) struct SessionChatSkeletons {
     waiting_since: RefCell<HashMap<TerminalSessionId, Instant>>,

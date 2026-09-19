@@ -334,9 +334,9 @@ function asyncQuestionsCanSend(state: NativeChatState): boolean {
 
 /*
 CDXC:SessionChat 2026-09-18 WHY:
-React holds the empty region blank for the first 600ms of a transcript read and only then
-admits to loading, so opening a chat does not flash "Loading conversation…" at the user.
-GPUI chat renders whatever the snapshot says, so the hold has to be computed here to match.
+React advances the empty region through the shared loading stages (skeleton at once since the
+2026-09-19 decision in new-session-welcome.ts, Retry later) on timers of its own. GPUI chat renders
+whatever the snapshot says, so the same stages have to be computed here to match.
 */
 let loadingStage: SessionChatLoadingStage = 'blank';
 let loadingStageTimers: ReturnType<typeof setTimeout>[] = [];

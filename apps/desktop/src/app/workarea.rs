@@ -1036,6 +1036,8 @@ impl GhostexGpuiApp {
         } else {
             None
         };
+        let page_loaded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let page_load_end_handler = self.project_workarea_page_load_end_handler(&page_loaded, cx);
         let creation_result = match slot_key {
             ProjectWorkareaCefSurfaceSlotKey::Extension(id) => {
                 if gpui_custom_view(id).is_some() {
@@ -1059,7 +1061,7 @@ impl GhostexGpuiApp {
                         None,
                         None,
                         None,
-                        None,
+                        Some(page_load_end_handler.clone()),
                         cx,
                     )
                 } else {
@@ -1082,6 +1084,7 @@ impl GhostexGpuiApp {
                         true,
                         bridge_surface,
                         self.extension_view_bridge_event_handler(slot_key, cx),
+                        Some(page_load_end_handler.clone()),
                         cx,
                     )
                 }
@@ -1106,7 +1109,7 @@ impl GhostexGpuiApp {
                 manage_docs_resource_scope,
                 None,
                 None,
-                None,
+                Some(page_load_end_handler),
                 cx,
             ),
         };
@@ -1128,10 +1131,50 @@ impl GhostexGpuiApp {
             ProjectWorkareaRuntimeCefSurface {
                 runtime_url,
                 surface: surface.clone(),
+                page_loaded,
+                created_at: Instant::now(),
             },
         );
         self.update_project_workarea_runtime_cef_surface_visibility(cx);
+        // The skeleton hold ends on its own if the page never reports a load end.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(PROJECT_WORKAREA_PAGE_SKELETON_MAX)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.update_project_workarea_runtime_cef_surface_visibility(cx);
+                cx.notify();
+            });
+        })
+        .detach();
         Some(surface)
+    }
+
+    /// CDXC:Workarea 2026-09-19 WHY:
+    /// A freshly created page painted its prepaint colour, then whatever the page drew first, for as long as it took to load; the view's skeleton has to stay in front until the page is really there.
+    /// GPUI cannot paint over a native child view, so the child stays hidden until its first main-frame load end (or the skeleton hold runs out) and the visibility reconcile shows it then.
+    fn project_workarea_page_load_end_handler(
+        &self,
+        page_loaded: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        cx: &mut gpui::Context<Self>,
+    ) -> cef::PageLoadEndHandler {
+        let page_loaded = page_loaded.clone();
+        let app = cx.entity().downgrade();
+        let async_cx = cx.to_async();
+        let foreground = cx.foreground_executor().clone();
+        std::rc::Rc::new(move || {
+            page_loaded.store(true, std::sync::atomic::Ordering::Relaxed);
+            let app = app.clone();
+            let mut async_cx = async_cx.clone();
+            foreground
+                .spawn(async move {
+                    let _ = app.update(&mut async_cx, |this, cx| {
+                        this.update_project_workarea_runtime_cef_surface_visibility(cx);
+                        cx.notify();
+                    });
+                })
+                .detach();
+        })
     }
 
     pub(crate) fn ensure_project_workarea_runtime_cef_surfaces_for_current_context(
@@ -1312,6 +1355,7 @@ impl GhostexGpuiApp {
                 self.project_workarea_runtime_cef_surface_may_be_visible(slot_key);
             if let Some(owned_surface) = self.project_workarea_runtime_cef_surfaces.get(&slot_key) {
                 let surface_visible = surface_may_be_visible
+                    && owned_surface.page_ready()
                     && current_runtime_url
                         .as_ref()
                         .is_some_and(|runtime_url| owned_surface.matches_runtime_url(runtime_url));

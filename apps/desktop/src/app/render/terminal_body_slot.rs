@@ -387,13 +387,14 @@ impl GhostexGpuiApp {
                 mount_candidate.renders_placeholder_child(),
                 |this| match mount_candidate.presentation {
                     AgentsTerminalBodyPresentation::LifecyclePlaceholder => {
-                        if matches!(
-                            presentation_state,
-                            Some(
-                                TerminalSessionPresentationState::Sleeping
-                                    | TerminalSessionPresentationState::Mounting
-                            )
-                        ) {
+                        if presentation_state == Some(TerminalSessionPresentationState::Mounting) {
+                            // A tab whose terminal is still starting sketches a prompt and output lines until the runtime paints.
+                            this.child(crate::app::view_skeletons::render_view_skeleton(
+                                crate::app::view_skeletons::ViewSkeletonKind::Terminal,
+                                format!("terminal-skeleton-{}", session_id.0),
+                                gpui_session_chat_background_color(),
+                            ))
+                        } else if presentation_state == Some(TerminalSessionPresentationState::Sleeping) {
                             this
                         } else if let Some(presentation_state) = presentation_state {
                             this.child(self.render_terminal_state_placeholder(

@@ -92,6 +92,7 @@ pub(crate) mod titlebar;
 pub(crate) mod update_available_modal_lifecycle;
 mod view_pane_state;
 pub(crate) mod view_scopes;
+pub(crate) mod view_skeletons;
 pub(crate) mod workarea;
 pub(crate) mod workspace_events;
 pub(crate) mod workspace_reconcile;

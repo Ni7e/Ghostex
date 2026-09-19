@@ -114,6 +114,7 @@ impl GpuiAppModalHostWindow {
                 true,
                 extension_bridge_surface,
                 extension_bridge_event_handler,
+                None,
                 cx,
             )
         } else {

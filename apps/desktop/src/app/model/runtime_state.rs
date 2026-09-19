@@ -568,6 +568,20 @@ Project workarea CEF ownership keeps only the process-local direct runtime URL i
 pub(crate) struct ProjectWorkareaRuntimeCefSurface {
     pub(crate) runtime_url: ProjectWorkareaRealRuntimeUrl,
     pub(crate) surface: Entity<CefSurface>,
+    /// Set by the page's first main-frame load end; until then the view draws its skeleton and the child view stays hidden.
+    pub(crate) page_loaded: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) created_at: Instant,
+}
+
+/// How long a page may stay behind its skeleton when it never reports a load end.
+pub(crate) const PROJECT_WORKAREA_PAGE_SKELETON_MAX: Duration = Duration::from_secs(8);
+
+impl ProjectWorkareaRuntimeCefSurface {
+    /// Whether the page may be shown: its first load ended, or the skeleton hold ran out.
+    pub(crate) fn page_ready(&self) -> bool {
+        self.page_loaded.load(std::sync::atomic::Ordering::Relaxed)
+            || self.created_at.elapsed() >= PROJECT_WORKAREA_PAGE_SKELETON_MAX
+    }
 }
 
 impl ProjectWorkareaRuntimeCefSurface {
