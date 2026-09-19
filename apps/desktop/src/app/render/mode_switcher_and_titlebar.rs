@@ -61,6 +61,7 @@ fn titlebar_panel_toggle_button(
     id: &'static str,
     icon: &'static str,
     size_reduction: f32,
+    enabled: bool,
 ) -> gpui::Stateful<gpui::Div> {
     let button = div()
         .id(id)
@@ -71,7 +72,9 @@ fn titlebar_panel_toggle_button(
         .items_center()
         .justify_center()
         .cursor_default()
-        .hover(|this| this.bg(titlebar_button_hover_color()));
+        .when(enabled, |this| {
+            this.hover(|this| this.bg(titlebar_button_hover_color()))
+        });
     #[cfg(target_os = "macos")]
     let button = button.px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING)).child(
         div()
@@ -83,7 +86,11 @@ fn titlebar_panel_toggle_button(
             .child(titlebar_svg_icon(
                 icon,
                 TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
-                titlebar_active_text_color(),
+                if enabled {
+                    titlebar_active_text_color()
+                } else {
+                    titlebar_disabled_text_color()
+                },
             )),
     );
     #[cfg(not(target_os = "macos"))]
@@ -94,7 +101,11 @@ fn titlebar_panel_toggle_button(
         .child(titlebar_svg_icon(
             icon,
             TITLEBAR_SIDEBAR_COLLAPSE_ICON_SIZE - size_reduction,
-            titlebar_icon_color(),
+            if enabled {
+                titlebar_icon_color()
+            } else {
+                titlebar_disabled_text_color()
+            },
         ));
     button
 }
@@ -259,12 +270,7 @@ impl GhostexGpuiApp {
             .items_center()
             .window_control_area(WindowControlArea::Drag)
             .child(self.render_sidebar_collapse_button(cx))
-            .when(self.active_mode.is_project_editor_mode(), |this| {
-                this.child(self.render_titlebar_companion_toggle(cx))
-            })
-            .when(self.update_available || self.update_downloading, |this| {
-                this.child(self.render_titlebar_update_button(cx))
-            })
+            .child(self.render_titlebar_companion_toggle(cx))
             /*
             CDXC:Navigation 2026-08-19:
             Back/Forward sit LEFT of the project name, next to the sidebar
@@ -281,6 +287,11 @@ impl GhostexGpuiApp {
             })
             .when(show_compact_mode_dropdown, |this| {
                 this.child(self.render_compact_mode_dropdown(cx))
+            })
+            // CDXC:Titlebar 2026-09-19 DECISION:
+            // User: the Update button sits on the left just before the project name, after the bell and the compact view dropdown, so showing or hiding it only moves the project name and never shifts Back/Forward.
+            .when(self.update_available || self.update_downloading, |this| {
+                this.child(self.render_titlebar_update_button(cx))
             })
             .child(
                 h_flex()
@@ -312,14 +323,22 @@ impl GhostexGpuiApp {
             )
     }
 
-    /// CDXC:Workarea 2026-09-15 DECISION:
-    /// User: put the companion toggle next to Hide sidebar, make the chat control 2px smaller in both dimensions after two 1px reductions, and use the unfilled Side tail with text chat bubble in both the visible and hidden states.
-    /// This supersedes the 2026-09-11 placement after the Notifications bell and compact view dropdown; the toggle still replaces the minimized companion bar.
+    /// CDXC:Workarea 2026-09-19 DECISION:
+    /// User: keep the companion toggle next to Hide sidebar in every view and show it greyed out in Agents, so Back/Forward never shift when moving between views or projects with and without a companion. Make the chat control 2px smaller in both dimensions after two 1px reductions, and use the unfilled Side tail with text chat bubble in both the visible and hidden states.
+    /// This supersedes the 2026-09-15 rule that rendered the toggle only in companion views; the toggle still replaces the minimized companion bar.
     pub(crate) fn render_titlebar_companion_toggle(
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let visible = self.project_editor_shell.left_companion_visible;
+        let enabled = self.active_mode.is_project_editor_mode();
+        let visible = enabled && self.project_editor_shell.left_companion_visible;
+        let tooltip = if !enabled {
+            "Companion is not available in Agents".into()
+        } else if visible {
+            titlebar_tooltip_label("Hide companion", "toggleCompanionPane")
+        } else {
+            titlebar_tooltip_label("Show companion", "toggleCompanionPane")
+        };
         titlebar_panel_toggle_button(
             "ghostex-gpui-titlebar-companion-toggle",
             if visible {
@@ -328,29 +347,21 @@ impl GhostexGpuiApp {
                 TITLEBAR_ICON_COMPANION_SHOW
             },
             2.0,
+            enabled,
         )
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _, window, cx| {
-                window.prevent_default();
-                cx.stop_propagation();
-                this.toggle_project_editor_companion_from_hotkey(window, cx);
-            }),
-        )
-        .managed_tooltip_with_placement(
-            ManagedTooltipPlacement::Right,
-            move |window, cx| {
-                titlebar_tooltip(
-                    if visible {
-                        "Hide companion"
-                    } else {
-                        "Show companion"
-                    },
-                    window,
-                    cx,
-                )
-            },
-        )
+        .when(enabled, |this| {
+            this.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.toggle_project_editor_companion_from_hotkey(window, cx);
+                }),
+            )
+        })
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
+            titlebar_tooltip(tooltip.clone(), window, cx)
+        })
     }
 
     pub(crate) fn render_sidebar_collapse_button(
@@ -373,6 +384,7 @@ impl GhostexGpuiApp {
             "ghostex-gpui-sidebar-collapse",
             TITLEBAR_ICON_LAYOUT_SIDEBAR,
             0.0,
+            true,
         )
         .on_mouse_down(
             MouseButton::Left,
@@ -382,8 +394,9 @@ impl GhostexGpuiApp {
                 this.toggle_gpui_sidebar_collapsed(cx);
             }),
         )
-        .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, |window, cx| {
-            titlebar_tooltip("Hide sidebar", window, cx)
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, {
+            let tooltip = titlebar_tooltip_label("Hide sidebar", "toggleSidebarCollapsed");
+            move |window, cx| titlebar_tooltip(tooltip.clone(), window, cx)
         });
         #[cfg(target_os = "macos")]
         let button = button.ml(px(-9.0));

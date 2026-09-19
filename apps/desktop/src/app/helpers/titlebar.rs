@@ -43,6 +43,15 @@ pub(crate) fn titlebar_svg_icon(
     svg().size(px(icon_size)).path(path).text_color(color)
 }
 
+/// CDXC:Titlebar 2026-09-19 DECISION:
+/// User: a titlebar button tooltip names the button and then the hotkey assigned to it in Settings > Hotkeys, so rebinding the action there changes the tooltip too. Actions left unassigned show the label alone.
+pub(crate) fn titlebar_tooltip_label(label: &str, action_id: &str) -> gpui::SharedString {
+    match gpui_configured_hotkey_label(action_id) {
+        Some(shortcut) if !shortcut.is_empty() => format!("{label} ({shortcut})").into(),
+        _ => label.to_string().into(),
+    }
+}
+
 /// Tooltip sized to sit fully inside the titlebar strip rather than
 /// overflowing it, for the left/right placements that center on the trigger.
 pub(crate) fn titlebar_tooltip(

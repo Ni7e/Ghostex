@@ -36,7 +36,7 @@ use crate::{
     GhostexGpuiApp, GpuiTitlebarPopupKind, NOTIFICATIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
     TITLEBAR_BUTTON_HORIZONTAL_PADDING, TITLEBAR_LEADING_TALL_BUTTON_HEIGHT, shared_settings,
     titlebar_background, titlebar_button_hover_color, titlebar_icon_color,
-    titlebar_icon_hover_color, titlebar_svg_icon, titlebar_tooltip,
+    titlebar_icon_hover_color, titlebar_svg_icon, titlebar_tooltip, titlebar_tooltip_label,
 };
 
 /// Page-side event the sidebar runtime listens for. Must stay identical to
@@ -394,11 +394,7 @@ impl GhostexGpuiApp {
         };
         let button_bounds: Rc<Cell<Option<Bounds<Pixels>>>> =
             self.titlebar_notification_bell_bounds.clone();
-        let shortcut = crate::gpui_configured_hotkey_label("openNotifications");
-        let tooltip = match shortcut {
-            Some(shortcut) if !shortcut.is_empty() => format!("Notifications ({shortcut})"),
-            _ => "Notifications".to_string(),
-        };
+        let tooltip = titlebar_tooltip_label("Notifications", "openNotifications");
 
         div()
             .id("ghostex-gpui-titlebar-notifications-bell")
