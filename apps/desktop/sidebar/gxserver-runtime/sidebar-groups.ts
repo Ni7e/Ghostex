@@ -532,13 +532,10 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       : this.activeProjectId;
     const payload = JSON.stringify({
       activeProjectId,
-      /*
-      CDXC:FocusRouting 2026-09-20 WHY:
-      The selected sidebar group rides with the focus state because a user-made session group can
-      hold no session at all, and the Rust store derives the active group from the focused session.
-      Without it the store stays on the project's own group and refuses the empty tab list this
-      payload carries for the selected group.
-      */
+      /**
+       * CDXC:FocusRouting 2026-09-20 WHY:
+       * The selected sidebar group rides with the focus state because a user-made session group can hold no session at all, and the Rust store derives the active group from the focused session; without it the store stays on the project's own group and refuses the empty tab list this payload carries for the selected group.
+       */
       activeGroupId: this.activeGroupId,
       tabSessions: activeTabSessions,
       focusedSessionId: this.focusedSessionId,
