@@ -254,7 +254,12 @@ impl GhostexGpuiApp {
                 .items_start()
                 .overflow_hidden()
                 .bg(project_editor_shell_background_color())
-                .child(self.render_project_editor_companion_pane(mode, companion_ratio, window, cx))
+                .child(self.render_project_editor_companion_region(
+                    mode,
+                    companion_ratio,
+                    window,
+                    cx,
+                ))
                 .child(self.render_project_editor_companion_divider(mode, cx))
                 .child(
                     // CDXC:Workarea 2026-09-14 WHY:

@@ -84,7 +84,7 @@ impl Render for FloatingCompanionWindow {
                     }),
                 )
                 .child(div().flex().w(px(width)).h_full().ml(px(offset)).child(
-                    app.render_project_editor_companion_pane(app.active_mode, 1.0, window, cx),
+                    app.render_project_editor_companion_region(app.active_mode, 1.0, window, cx),
                 ))
                 .into_any_element()
         })

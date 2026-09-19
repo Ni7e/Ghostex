@@ -260,6 +260,40 @@ impl GhostexGpuiApp {
         }
     }
 
+    pub(crate) fn project_editor_companion_terminal_session_for_slot(
+        &self,
+        slot: ProjectEditorCompanionTerminalSlot,
+    ) -> Option<TerminalSessionId> {
+        match slot {
+            ProjectEditorCompanionTerminalSlot::Top => {
+                self.project_editor_companion_terminal_session_id
+            }
+            ProjectEditorCompanionTerminalSlot::Bottom => {
+                self.project_editor_companion_secondary_terminal_session_id
+            }
+        }
+    }
+
+    /// True while the two companion sessions are drawn as side-by-side sidepanes.
+    /// Both arrangements share the same two slots, so only the stored axis says
+    /// which one the companion is showing.
+    pub(crate) fn project_editor_companion_columns_split_active(&self) -> bool {
+        self.project_editor_shell.left_companion_split_enabled
+            && self.project_editor_shell.left_companion_split_axis == WorkspaceSplitAxis::Horizontal
+            && self
+                .project_editor_companion_secondary_terminal_session_id
+                .is_some()
+    }
+
+    pub(crate) fn project_editor_companion_slot_title(
+        &self,
+        slot: ProjectEditorCompanionTerminalSlot,
+    ) -> String {
+        self.project_editor_companion_terminal_session_for_slot(slot)
+            .map(|session_id| self.agents_workspace_tab_display_title(session_id))
+            .unwrap_or_else(|| "Companion".to_string())
+    }
+
     pub(crate) fn project_editor_companion_active_title(&self, _mode: TitlebarMode) -> String {
         self.project_editor_companion_focused_terminal_session_id()
             .map(|session_id| self.agents_workspace_tab_display_title(session_id))

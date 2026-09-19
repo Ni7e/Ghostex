@@ -123,8 +123,10 @@ restore.
 pub(crate) struct GpuiProjectViewState {
     pub(crate) active_mode: TitlebarMode,
     pub(crate) companion_split_enabled: bool,
+    pub(crate) companion_split_axis: WorkspaceSplitAxis,
     pub(crate) companion_width_ratio: f32,
     pub(crate) companion_split_ratio: f32,
+    pub(crate) companion_columns_ratio: f32,
     pub(crate) companion_top_session_id: Option<TerminalSessionId>,
     pub(crate) companion_bottom_session_id: Option<TerminalSessionId>,
     pub(crate) companion_focused_slot: ProjectEditorCompanionTerminalSlot,
@@ -134,7 +136,15 @@ pub(crate) struct ProjectEditorShellModel {
     pub(crate) left_companion_visible: bool,
     pub(crate) left_companion_width_ratio: f32,
     pub(crate) left_companion_split_enabled: bool,
+    /// `Vertical` stacks the two companion sessions, `Horizontal` puts the
+    /// second one in its own sidepane to the right of the first.
+    pub(crate) left_companion_split_axis: WorkspaceSplitAxis,
     pub(crate) left_companion_split_ratio: f32,
+    pub(crate) left_companion_columns_ratio: f32,
+    /// The width ratio a lone companion had before a side-by-side split widened
+    /// it, so collapsing the pair puts it back. Runtime-only and cleared by any
+    /// manual companion resize, because after that the width is the user's.
+    pub(crate) left_companion_width_ratio_before_columns: Option<f32>,
     pub(crate) source_lifecycle: ProjectEditorModeLifecycle,
     pub(crate) browser_lifecycle: ProjectEditorModeLifecycle,
     pub(crate) kanban_lifecycle: ProjectEditorModeLifecycle,
@@ -178,7 +188,10 @@ impl ProjectEditorShellModel {
             left_companion_visible: true,
             left_companion_width_ratio: PROJECT_EDITOR_COMPANION_WIDTH_RATIO,
             left_companion_split_enabled: true,
+            left_companion_split_axis: WorkspaceSplitAxis::Vertical,
             left_companion_split_ratio: PROJECT_EDITOR_COMPANION_SPLIT_RATIO,
+            left_companion_columns_ratio: PROJECT_EDITOR_COMPANION_SPLIT_RATIO,
+            left_companion_width_ratio_before_columns: None,
             source_lifecycle: ProjectEditorModeLifecycle::sleeping(),
             browser_lifecycle: ProjectEditorModeLifecycle {
                 state: ProjectEditorLifecycleState::Awake,
@@ -296,8 +309,14 @@ impl ProjectEditorShellModel {
         true
     }
 
-    pub(crate) fn set_left_companion_width_ratio(&mut self, ratio: f32, content_span: f32) -> bool {
-        let next_ratio = project_editor_companion_width_ratio_for_span(ratio, content_span);
+    pub(crate) fn set_left_companion_width_ratio(
+        &mut self,
+        ratio: f32,
+        content_span: f32,
+        columns_active: bool,
+    ) -> bool {
+        let next_ratio =
+            project_editor_companion_width_ratio_for_span(ratio, content_span, columns_active);
         if (self.left_companion_width_ratio - next_ratio).abs() < 0.001 {
             return false;
         }
@@ -306,12 +325,17 @@ impl ProjectEditorShellModel {
         true
     }
 
-    pub(crate) fn reset_left_companion_width_ratio(&mut self, content_span: Option<f32>) -> bool {
+    pub(crate) fn reset_left_companion_width_ratio(
+        &mut self,
+        content_span: Option<f32>,
+        columns_active: bool,
+    ) -> bool {
         let next_ratio = content_span
             .map(|content_span| {
                 project_editor_companion_width_ratio_for_span(
                     PROJECT_EDITOR_COMPANION_WIDTH_RATIO,
                     content_span,
+                    columns_active,
                 )
             })
             .unwrap_or(PROJECT_EDITOR_COMPANION_WIDTH_RATIO);
@@ -359,6 +383,99 @@ impl ProjectEditorShellModel {
 
         self.left_companion_split_ratio = next_ratio;
         true
+    }
+
+    /// Put back a remembered width ratio, clamped for the current span when one is
+    /// known. Without a span the plain clamp applies: the span-aware one would
+    /// read a zero span as an unsatisfiable minimum and return its own floor.
+    pub(crate) fn restore_left_companion_width_ratio(
+        &mut self,
+        ratio: f32,
+        content_span: Option<f32>,
+    ) -> bool {
+        let next_ratio = match content_span {
+            Some(content_span) if content_span > 1.0 => {
+                project_editor_companion_width_ratio_for_span(ratio, content_span, false)
+            }
+            _ => project_editor_companion_width_ratio(ratio),
+        };
+        if (self.left_companion_width_ratio - next_ratio).abs() < 0.001 {
+            return false;
+        }
+
+        self.left_companion_width_ratio = next_ratio;
+        true
+    }
+
+    /// The balance between a side-by-side pair. Both arrangements share the same
+    /// two companion slots, so each axis keeps its own ratio and switching back
+    /// and forth restores the balance the user last chose for that arrangement.
+    pub(crate) fn set_left_companion_columns_ratio(
+        &mut self,
+        ratio: f32,
+        content_span: f32,
+    ) -> bool {
+        let minimum_width = left_companion_columns_drag_minimum_width(content_span);
+        let Some((minimum, maximum)) =
+            split_drag_ratio_bounds_from_minimums(minimum_width, minimum_width, content_span)
+        else {
+            return false;
+        };
+        let next_ratio = ratio.clamp(minimum, maximum);
+        if (self.left_companion_columns_ratio - next_ratio).abs() < 0.001 {
+            return false;
+        }
+
+        self.left_companion_columns_ratio = next_ratio;
+        true
+    }
+
+    pub(crate) fn reset_left_companion_columns_ratio(&mut self, content_span: Option<f32>) -> bool {
+        let next_ratio = content_span
+            .and_then(|content_span| {
+                let minimum_width = left_companion_columns_drag_minimum_width(content_span);
+                split_drag_ratio_bounds_from_minimums(minimum_width, minimum_width, content_span)
+                    .map(|(minimum, maximum)| {
+                        PROJECT_EDITOR_COMPANION_SPLIT_RATIO.clamp(minimum, maximum)
+                    })
+            })
+            .unwrap_or(PROJECT_EDITOR_COMPANION_SPLIT_RATIO);
+        if (self.left_companion_columns_ratio - next_ratio).abs() < 0.001 {
+            return false;
+        }
+
+        self.left_companion_columns_ratio = next_ratio;
+        true
+    }
+
+    /// Give a freshly created pair of side-by-side sidepanes the default width
+    /// each: an even balance, and a companion region wide enough to hold both
+    /// plus their divider, as far as the main pane's own minimum allows. Returns
+    /// the width ratio the companion had before, so collapsing the pair can undo
+    /// this widening.
+    pub(crate) fn apply_left_companion_columns_default_widths(
+        &mut self,
+        content_span: Option<f32>,
+    ) -> Option<f32> {
+        // An even balance needs no span: the pair's own bounds clamp the first
+        // real drag, and the shell-row span this caller has is not that span.
+        self.left_companion_columns_ratio = PROJECT_EDITOR_COMPANION_SPLIT_RATIO;
+        let target_width =
+            2.0 * PROJECT_EDITOR_COMPANION_COLUMN_DEFAULT_WIDTH + WORKSPACE_SPLIT_HANDLE_THICKNESS;
+        let previous_ratio = self.left_companion_width_ratio;
+        match content_span {
+            Some(content_span)
+                if content_span > 1.0
+                    && self.set_left_companion_width_ratio(
+                        target_width / content_span,
+                        content_span,
+                        true,
+                    ) =>
+            {
+                Some(previous_ratio)
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn hide_left_companion(&mut self) -> bool {
@@ -413,10 +530,12 @@ pub(crate) fn project_view_state_to_shell_state_json(
     serde_json::json!({
         "activeMode": state.active_mode.element_slug(),
         "companionSplitEnabled": state.companion_split_enabled,
+        "companionSplitAxis": state.companion_split_axis.element_slug(),
         "companionWidthRatio": json_number_f32(project_editor_companion_width_ratio(
             state.companion_width_ratio,
         )),
         "companionSplitRatio": json_number_f32(state.companion_split_ratio.clamp(0.1, 0.9)),
+        "companionColumnsRatio": json_number_f32(state.companion_columns_ratio.clamp(0.1, 0.9)),
         "companionTopSessionId": state.companion_top_session_id.map(|session_id| session_id.0),
         "companionBottomSessionId": state
             .companion_bottom_session_id
@@ -439,10 +558,18 @@ pub(crate) fn project_view_state_from_shell_state(
     Some(GpuiProjectViewState {
         active_mode,
         companion_split_enabled: json_bool_field(object, "companionSplitEnabled").unwrap_or(false),
+        companion_split_axis: object
+            .get("companionSplitAxis")
+            .and_then(serde_json::Value::as_str)
+            .and_then(WorkspaceSplitAxis::from_slug)
+            .unwrap_or(WorkspaceSplitAxis::Vertical),
         companion_width_ratio: json_f32_field(object, "companionWidthRatio")
             .map(project_editor_companion_width_ratio)
             .unwrap_or(PROJECT_EDITOR_COMPANION_WIDTH_RATIO),
         companion_split_ratio: json_f32_field(object, "companionSplitRatio")
+            .map(|ratio| ratio.clamp(0.1, 0.9))
+            .unwrap_or(PROJECT_EDITOR_COMPANION_SPLIT_RATIO),
+        companion_columns_ratio: json_f32_field(object, "companionColumnsRatio")
             .map(|ratio| ratio.clamp(0.1, 0.9))
             .unwrap_or(PROJECT_EDITOR_COMPANION_SPLIT_RATIO),
         companion_top_session_id: json_u64_field(object, "companionTopSessionId")
@@ -468,8 +595,12 @@ pub(crate) fn project_editor_shell_to_shell_state_json(
             model.left_companion_width_ratio,
         )),
         "leftCompanionSplitEnabled": model.left_companion_split_enabled,
+        "leftCompanionSplitAxis": model.left_companion_split_axis.element_slug(),
         "leftCompanionSplitRatio": json_number_f32(
             model.left_companion_split_ratio.clamp(0.1, 0.9),
+        ),
+        "leftCompanionColumnsRatio": json_number_f32(
+            model.left_companion_columns_ratio.clamp(0.1, 0.9),
         ),
         "modeLifecycle": project_editor_lifecycle_to_shell_state_json(model),
         "nextLifecycleRecency": model.next_lifecycle_recency,
@@ -488,7 +619,15 @@ pub(crate) fn project_editor_shell_from_shell_state(
             .unwrap_or(PROJECT_EDITOR_COMPANION_WIDTH_RATIO),
         left_companion_split_enabled: json_bool_field(object, "leftCompanionSplitEnabled")
             .unwrap_or(true),
+        left_companion_split_axis: object
+            .get("leftCompanionSplitAxis")
+            .and_then(serde_json::Value::as_str)
+            .and_then(WorkspaceSplitAxis::from_slug)
+            .unwrap_or(WorkspaceSplitAxis::Vertical),
         left_companion_split_ratio: json_f32_field(object, "leftCompanionSplitRatio")
+            .map(|ratio| ratio.clamp(0.1, 0.9))
+            .unwrap_or(PROJECT_EDITOR_COMPANION_SPLIT_RATIO),
+        left_companion_columns_ratio: json_f32_field(object, "leftCompanionColumnsRatio")
             .map(|ratio| ratio.clamp(0.1, 0.9))
             .unwrap_or(PROJECT_EDITOR_COMPANION_SPLIT_RATIO),
         ..ProjectEditorShellModel::shell_default()
@@ -568,9 +707,41 @@ pub(crate) fn project_editor_companion_width_ratio(ratio: f32) -> f32 {
     ratio.clamp(0.10, 0.85)
 }
 
-pub(crate) fn project_editor_companion_width_ratio_for_span(ratio: f32, content_span: f32) -> f32 {
+/// What one sidepane of a side-by-side pair may not be dragged under. The shared
+/// pane minimum applies whenever the pair is wide enough for two of them. A
+/// narrower pair is already under that minimum, because the main pane keeps its
+/// own, so it falls back to an even share: without this the clamp would be
+/// unsatisfiable and the divider between the two sidepanes would look draggable
+/// while refusing to move.
+pub(crate) fn left_companion_columns_drag_minimum_width(content_span: f32) -> f32 {
     let content_span = content_span.max(1.0);
-    let companion_min_ratio = (PROJECT_EDITOR_COMPANION_MIN_WIDTH / content_span).clamp(0.10, 0.85);
+    if content_span >= 2.0 * PROJECT_EDITOR_COMPANION_COLUMN_MIN_WIDTH {
+        PROJECT_EDITOR_COMPANION_COLUMN_MIN_WIDTH
+    } else {
+        content_span * 0.25
+    }
+}
+
+/// The width a companion resize may not go under: one sidepane's minimum, or a
+/// side-by-side pair's two plus the divider between them, so neither divider can
+/// drag a sidepane below the shared pane minimum.
+pub(crate) fn project_editor_companion_region_min_width(columns_active: bool) -> f32 {
+    if columns_active {
+        2.0 * PROJECT_EDITOR_COMPANION_COLUMN_MIN_WIDTH + WORKSPACE_SPLIT_HANDLE_THICKNESS
+    } else {
+        PROJECT_EDITOR_COMPANION_MIN_WIDTH
+    }
+}
+
+pub(crate) fn project_editor_companion_width_ratio_for_span(
+    ratio: f32,
+    content_span: f32,
+    columns_active: bool,
+) -> f32 {
+    let content_span = content_span.max(1.0);
+    let companion_min_ratio = (project_editor_companion_region_min_width(columns_active)
+        / content_span)
+        .clamp(0.10, 0.85);
     let editor_max_ratio =
         ((content_span - PROJECT_EDITOR_MAIN_MIN_WIDTH) / content_span).clamp(0.10, 0.85);
     let ratio = project_editor_companion_width_ratio(ratio);

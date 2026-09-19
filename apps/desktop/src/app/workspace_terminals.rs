@@ -631,8 +631,10 @@ impl GhostexGpuiApp {
         GpuiProjectViewState {
             active_mode: self.available_titlebar_mode_or_agents(self.active_mode),
             companion_split_enabled: self.project_editor_shell.left_companion_split_enabled,
+            companion_split_axis: self.project_editor_shell.left_companion_split_axis,
             companion_width_ratio: self.project_editor_shell.left_companion_width_ratio,
             companion_split_ratio: self.project_editor_shell.left_companion_split_ratio,
+            companion_columns_ratio: self.project_editor_shell.left_companion_columns_ratio,
             companion_top_session_id: self.project_editor_companion_terminal_session_id,
             companion_bottom_session_id: self
                 .project_editor_companion_secondary_terminal_session_id,
@@ -689,8 +691,10 @@ impl GhostexGpuiApp {
             return;
         };
         self.project_editor_shell.left_companion_split_enabled = state.companion_split_enabled;
+        self.project_editor_shell.left_companion_split_axis = state.companion_split_axis;
         self.project_editor_shell.left_companion_width_ratio = state.companion_width_ratio;
         self.project_editor_shell.left_companion_split_ratio = state.companion_split_ratio;
+        self.project_editor_shell.left_companion_columns_ratio = state.companion_columns_ratio;
         self.project_editor_companion_terminal_session_id = state
             .companion_top_session_id
             .filter(|session_id| self.agents_workspace.has_session(*session_id));

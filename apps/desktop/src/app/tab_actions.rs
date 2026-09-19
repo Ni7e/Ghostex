@@ -1629,24 +1629,35 @@ impl GhostexGpuiApp {
                         }
                     }
                 }
-                Err(message) => this.dispatch_gpui_app_modal_toast(
-                    "warning",
-                    "Companion split unavailable",
-                    message.as_str(),
-                    cx,
-                ),
+                Err(message) => {
+                    // No second sidepane arrived, so the width reserved for the
+                    // pair goes back before the user sees why.
+                    this.restore_project_editor_companion_width_before_columns();
+                    this.dispatch_gpui_app_modal_toast(
+                        "warning",
+                        "Companion split unavailable",
+                        message.as_str(),
+                        cx,
+                    );
+                }
             });
         })
         .detach();
     }
 
+    /// `keep_slot` is the sidepane whose own control asked for this, so a
+    /// side-by-side pair collapses onto the session the user clicked rather than
+    /// onto whichever one happens to hold focus.
     pub(crate) fn collapse_project_editor_companion_split(
         &mut self,
         mode: TitlebarMode,
+        keep_slot: Option<ProjectEditorCompanionTerminalSlot>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        let focused_session_id = self.project_editor_companion_focused_terminal_session_id();
+        let focused_session_id = keep_slot
+            .and_then(|slot| self.project_editor_companion_terminal_session_for_slot(slot))
+            .or_else(|| self.project_editor_companion_focused_terminal_session_id());
         if focused_session_id.is_some() {
             self.project_editor_companion_terminal_session_id = focused_session_id;
         }
@@ -1654,6 +1665,9 @@ impl GhostexGpuiApp {
         self.project_editor_companion_focused_terminal_slot =
             ProjectEditorCompanionTerminalSlot::Top;
         self.project_editor_shell.left_companion_split_enabled = false;
+        // Splitting to the right widened the companion for two sidepanes, so one
+        // sidepane gets that width back rather than keeping the pair's.
+        self.restore_project_editor_companion_width_before_columns();
         self.project_editor_companion_split_drag = None;
         self.clear_project_editor_companion_split_divider_hover_state();
         // The dropped bottom slot may have been rendering a chat CEF child.
@@ -1668,22 +1682,69 @@ impl GhostexGpuiApp {
         cx.notify();
     }
 
+    /// Undo the widening that creating a side-by-side pair applied, while that
+    /// widening is still the last word on the companion's width. Any manual
+    /// resize clears the remembered ratio, so this cannot overrule the user.
+    pub(crate) fn restore_project_editor_companion_width_before_columns(&mut self) -> bool {
+        let Some(ratio) = self
+            .project_editor_shell
+            .left_companion_width_ratio_before_columns
+            .take()
+        else {
+            return false;
+        };
+        let content_span = self
+            .project_editor_companion_layout_metrics
+            .map(|metrics| metrics.content_span);
+        self.project_editor_shell
+            .restore_left_companion_width_ratio(ratio, content_span)
+    }
+
+    /// CDXC:Workarea 2026-09-19 DECISION:
+    /// User: the companion sidepane splits to the right as well as vertically, and a fresh pair of
+    /// side-by-side sidepanes starts at 440px each, still resizable.
+    /// One control per axis toggles that axis: clicking the other axis while split rearranges the
+    /// existing pair instead of creating a third session.
     pub(crate) fn toggle_project_editor_companion_split(
         &mut self,
         mode: TitlebarMode,
+        axis: WorkspaceSplitAxis,
+        keep_slot: Option<ProjectEditorCompanionTerminalSlot>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        let is_split = self.project_editor_shell.left_companion_split_enabled
-            && self
-                .project_editor_companion_secondary_terminal_session_id
-                .is_some();
-        if is_split {
-            self.collapse_project_editor_companion_split(mode, window, cx);
-        } else {
-            self.split_project_editor_companion(mode, window, cx);
-            self.persist_shell_layout_state();
+        let has_second_session = self
+            .project_editor_companion_secondary_terminal_session_id
+            .is_some();
+        let is_split = self.project_editor_shell.left_companion_split_enabled && has_second_session;
+        if is_split && self.project_editor_shell.left_companion_split_axis == axis {
+            self.collapse_project_editor_companion_split(mode, keep_slot, window, cx);
+            return;
         }
+
+        self.project_editor_shell.left_companion_split_axis = axis;
+        // Only the docked companion has a width ratio to set: the floating reveal
+        // sizes itself from its own window, so re-deriving the docked ratio from
+        // its stale span would leave that window's content misplaced.
+        if axis == WorkspaceSplitAxis::Horizontal
+            && self.project_editor_shell.left_companion_visible
+        {
+            let content_span = self
+                .project_editor_companion_layout_metrics
+                .map(|metrics| metrics.content_span);
+            if let Some(previous_ratio) = self
+                .project_editor_shell
+                .apply_left_companion_columns_default_widths(content_span)
+            {
+                self.project_editor_shell
+                    .left_companion_width_ratio_before_columns = Some(previous_ratio);
+            }
+        }
+        self.project_editor_companion_split_drag = None;
+        self.clear_project_editor_companion_split_divider_hover_state();
+        self.split_project_editor_companion(mode, window, cx);
+        self.persist_shell_layout_state();
+        cx.notify();
     }
 
     pub(crate) fn restore_project_editor_companion_shell_state(

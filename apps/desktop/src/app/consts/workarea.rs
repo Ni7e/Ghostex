@@ -40,6 +40,16 @@ pub(crate) const PROJECT_EDITOR_MAIN_MIN_WIDTH: f32 = 455.0;
 
 pub(crate) const PROJECT_EDITOR_COMPANION_SPLIT_RATIO: f32 = 0.5;
 
+/// CDXC:Workarea 2026-09-19 DECISION:
+/// User: a new pair of side-by-side companion sidepanes starts at 440px each, and both stay resizable.
+pub(crate) const PROJECT_EDITOR_COMPANION_COLUMN_DEFAULT_WIDTH: f32 = 440.0;
+
+/// A side-by-side sidepane is a companion sidepane too, so it keeps the shared
+/// pane minimum rather than half of it, and the pair reserves both minimums plus
+/// the divider between them.
+pub(crate) const PROJECT_EDITOR_COMPANION_COLUMN_MIN_WIDTH: f32 =
+    PROJECT_EDITOR_COMPANION_MIN_WIDTH;
+
 pub(crate) const PROJECT_EDITOR_AWAKE_MODE_CAP: usize = 3;
 
 pub(crate) const PROJECT_EDITOR_AUTO_SLEEP_POLICY_POLL_INTERVAL: Duration = Duration::from_secs(2);

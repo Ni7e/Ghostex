@@ -58,9 +58,14 @@ pub(crate) struct ProjectEditorCompanionResizeDragState {
     pub(crate) content_span: f32,
 }
 
+/// The companion split drag serves both arrangements: a stacked split tracks
+/// pointer Y against the stack height, a side-by-side split tracks pointer X
+/// against the pair's width. The axis is captured at mouse-down so a layout
+/// change mid-drag cannot re-read the stored start position on the other axis.
 #[derive(Clone, Copy)]
 pub(crate) struct ProjectEditorCompanionSplitResizeDragState {
-    pub(crate) start_y: f32,
+    pub(crate) axis: WorkspaceSplitAxis,
+    pub(crate) start_position: f32,
     pub(crate) start_ratio: f32,
     pub(crate) content_span: f32,
 }
