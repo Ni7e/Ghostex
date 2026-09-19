@@ -168,6 +168,12 @@ impl SidebarShadow {
         if self.needs_reset {
             return;
         }
+        if changes.side_state.project_collections {
+            // The sidebar writes its own copy of the collections back to client storage whenever
+            // it adopts a daemon document, so the copy read here is re-read at once rather than
+            // at the end of its five seconds.
+            self.stored_read_at = None;
+        }
         self.changes.merge(changes.clone());
     }
 
