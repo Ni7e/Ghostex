@@ -5,7 +5,8 @@ use std::{
 
 // RefCell backs cross-platform runtime state (window frame persistence), not
 // just the macOS-only shims that first introduced the import.
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::time::Duration;
 
 use gpui::{Bounds, Window, WindowBounds, px, size};
 
@@ -79,6 +80,27 @@ pub(crate) fn persist_gpui_window_frame_state() {
     write_gpui_window_frame_state_file(&gpui_window_frame_state_path(), &state);
 }
 
+const GPUI_WINDOW_FRAME_PERSIST_DEBOUNCE: Duration = Duration::from_millis(750);
+
+thread_local! {
+    static GPUI_WINDOW_FRAME_PERSIST_PENDING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// CDXC:Workarea 2026-09-19 WHY: quit and window-close are not the only ways the app ends (force quit, crash, a dev restart, an update relaunch), and those used to leave the previous run's monitor on disk. Every frame change is written after a short quiet period so the saved frame is the one the user last saw.
+pub(crate) fn schedule_gpui_window_frame_state_persist(cx: &gpui::App) {
+    if GPUI_WINDOW_FRAME_PERSIST_PENDING.replace(true) {
+        return;
+    }
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(GPUI_WINDOW_FRAME_PERSIST_DEBOUNCE)
+            .await;
+        GPUI_WINDOW_FRAME_PERSIST_PENDING.set(false);
+        persist_gpui_window_frame_state();
+    })
+    .detach();
+}
+
 pub(crate) fn write_gpui_window_frame_state_file(path: &Path, state: &GpuiWindowFrameState) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -136,7 +158,11 @@ pub(crate) fn load_gpui_window_frame_state_file(path: &Path) -> Option<GpuiWindo
 /// Restores the persisted frame with the macOS multi-monitor rules: prefer
 /// the stored display by uuid, fall back to the primary display, clamp the
 /// size to the display and a minimum, and keep the origin inside the display.
-pub(crate) fn restored_gpui_window_bounds(cx: &gpui::App) -> Option<WindowBounds> {
+///
+/// CDXC:Workarea 2026-09-19 DECISION: User: "always remember to launch in the same monitor and location that it was in when it last closed as much as possible". The chosen display id is returned with the bounds because the macOS window opener resolves bounds against `WindowOptions::display_id` and uses the primary display when it is absent, which put every restored window on the primary monitor.
+pub(crate) fn restored_gpui_window_bounds(
+    cx: &gpui::App,
+) -> Option<(WindowBounds, gpui::DisplayId)> {
     let state = load_gpui_window_frame_state()?;
     restored_gpui_window_bounds_from_state(
         state,
@@ -151,7 +177,7 @@ pub(crate) fn restored_gpui_window_bounds_from_state(
     min_width: f32,
     min_height: f32,
     cx: &gpui::App,
-) -> Option<WindowBounds> {
+) -> Option<(WindowBounds, gpui::DisplayId)> {
     let displays = cx.displays();
     let display = displays
         .iter()
@@ -180,11 +206,12 @@ pub(crate) fn restored_gpui_window_bounds_from_state(
         display_bounds.origin.y + px(state.relative_origin_y).clamp(px(0.0), max_y),
     );
     let bounds = Bounds::new(origin, size(width, height));
-    Some(match state.state.as_str() {
+    let window_bounds = match state.state.as_str() {
         "maximized" => WindowBounds::Maximized(bounds),
         "fullscreen" => WindowBounds::Fullscreen(bounds),
         _ => WindowBounds::Windowed(bounds),
-    })
+    };
+    Some((window_bounds, display.id()))
 }
 
 pub(crate) fn gpui_first_run_onboarding_state_path() -> PathBuf {
