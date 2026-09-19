@@ -41,11 +41,7 @@ impl SidebarAppearance {
                 rgb(0xffffff).opacity(0.12).into()
             },
             session_outline: chrome_ink().opacity(if light { 0.22 } else { 0.08 }).into(),
-            tooltip_delay: std::time::Duration::from_millis(
-                hud["settings"]["sidebarTooltipDelayMs"]
-                    .as_u64()
-                    .unwrap_or(500),
-            ),
+            tooltip_delay: tooltip_delay_from_hud(hud),
             foreground: chrome_color(0xb4b8c0, 0x262626).into(),
             muted: chrome_color(0x7c828c, 0x6b7280).into(),
             selected: rgb(0xffffff).opacity(if light { 1.0 } else { 0.12 }).into(),
@@ -60,6 +56,25 @@ impl SidebarAppearance {
                     .blend(rgb(0).opacity(0.40).into())
             },
             scale,
+        }
+    }
+}
+
+fn tooltip_delay_from_hud(hud: &Value) -> std::time::Duration {
+    std::time::Duration::from_millis(
+        hud["settings"]["sidebarTooltipDelayMs"]
+            .as_u64()
+            .unwrap_or(500),
+    )
+}
+
+impl crate::GhostexGpuiApp {
+    /// The user's Tooltip Delay setting, for native chrome outside the sidebar
+    /// that must wait as long as the sidebar's own tooltips do.
+    pub(crate) fn configured_tooltip_delay(&self) -> std::time::Duration {
+        match self.native_sidebar.snapshot.as_ref() {
+            Some(snapshot) => tooltip_delay_from_hud(&snapshot.hud),
+            None => tooltip_delay_from_hud(&Value::Null),
         }
     }
 }

@@ -38,6 +38,7 @@ use gpui::rgb;
 use gpui::svg;
 use gpui_component::h_flex;
 use gpui_component::tooltip::ManagedTooltipExt as _;
+use gpui_component::tooltip::ManagedTooltipPlacement;
 use gpui_component::tooltip::Tooltip;
 
 use crate::app::helpers::*;
@@ -488,6 +489,7 @@ impl GhostexGpuiApp {
                             session_id,
                             TerminalAgentBarAction::PromptEditor,
                             &suffix,
+                            self.configured_tooltip_delay(),
                             cx,
                         )),
                 )
@@ -852,6 +854,11 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        // The bar's own click handlers stop propagation before the managed
+        // tooltip's hide-on-click runs, and a control that leaves the tree
+        // (Chat View swaps the whole pane) never reports a hover-leave, so its
+        // tooltip would stay on screen over the next view.
+        gpui_component::Root::hide_tooltip(window, cx);
         if action == TerminalAgentBarAction::ToggleMenu {
             self.toggle_terminal_agent_action_bar_menu(session_id, cx);
             return;
@@ -1064,7 +1071,7 @@ impl GhostexGpuiApp {
         let enabled = state.disabled_reason.is_none();
         let right_click_action = (action == TerminalAgentBarAction::StashPrompt)
             .then_some(TerminalAgentBarAction::StashedPrompts);
-        terminal_agent_bar_button_base(action, &state, suffix)
+        terminal_agent_bar_button_base(action, &state, suffix, self.configured_tooltip_delay())
             .size(px(TERMINAL_AGENT_BAR_BUTTON_SIZE))
             .when(enabled, |this| {
                 this.hover(|this| this.bg(terminal_agent_bar_hover_background()))
@@ -1284,6 +1291,7 @@ fn terminal_agent_bar_accent_button(
     session_id: TerminalSessionId,
     action: TerminalAgentBarAction,
     suffix: &str,
+    tooltip_delay: std::time::Duration,
     cx: &mut gpui::Context<GhostexGpuiApp>,
 ) -> AnyElement {
     let (label, hotkey_action_id) = action.label_and_hotkey_action_id();
@@ -1294,7 +1302,7 @@ fn terminal_agent_bar_accent_button(
         label,
         tooltip_override: None,
     };
-    terminal_agent_bar_button_base(action, &state, suffix)
+    terminal_agent_bar_button_base(action, &state, suffix, tooltip_delay)
         .size(px(TERMINAL_AGENT_BAR_ACCENT_BUTTON_SIZE))
         .rounded(px(TERMINAL_AGENT_BAR_ACCENT_BUTTON_RADIUS))
         .bg(terminal_agent_bar_accent_background())
@@ -1321,6 +1329,7 @@ fn terminal_agent_bar_button_base(
     action: TerminalAgentBarAction,
     state: &TerminalAgentBarActionState,
     suffix: &str,
+    tooltip_delay: std::time::Duration,
 ) -> gpui::Stateful<gpui::Div> {
     // A disabled control names why it is inert instead of leaving the user to
     // guess, and drops the shortcut: naming a chord that would do nothing here
@@ -1350,7 +1359,11 @@ fn terminal_agent_bar_button_base(
         .justify_center()
         .rounded_full()
         .cursor_default()
-        .managed_tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .managed_discrete_tooltip_with_placement(
+            ManagedTooltipPlacement::Auto,
+            tooltip_delay,
+            move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx),
+        )
 }
 
 fn terminal_agent_bar_agent_name(session: &GpuiSidebarWorkspaceTabSession) -> Option<String> {
