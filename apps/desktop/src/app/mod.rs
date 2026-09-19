@@ -77,6 +77,7 @@ pub(crate) mod session_chat_prewarm;
 mod session_chat_renderers;
 mod session_chat_runtime;
 pub(crate) mod session_chat_skeleton;
+pub(crate) mod session_chat_warm_pool;
 mod session_chat_surfaces;
 pub(crate) mod session_note_modal_lifecycle;
 pub(crate) mod sidebar_agent_launch_placeholder;

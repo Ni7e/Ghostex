@@ -1,13 +1,16 @@
-use crate::app::helpers::ThrottledAnimationExt;
 use gpui::prelude::FluentBuilder;
 use gpui::{AnyElement, IntoElement, ParentElement, Styled, div, px, rgb};
-use std::time::Duration;
 
-/// CDXC:SessionStatus 2026-09-17 DECISION:
-/// User: bring back the session working spinner and attention dot in the native sidebar.
+/// CDXC:SessionStatus 2026-09-19 DECISION:
+/// User: "make the working indicator just the orange dot without animation. i dont mind. like the one we have in the SESSIONS header", so a working session shows the same static 8px orange dot the section headers draw.
+/// This supersedes the 2026-09-17 decision that brought the animated working spinner back.
 pub(crate) fn activity_indicator(activity: &str, scale: f32) -> Option<AnyElement> {
     let indicator = match activity {
-        "working" => working_spinner(12.0, scale),
+        "working" => div()
+            .size(px(8.0 * scale))
+            .rounded_full()
+            .bg(rgb(0xffb454))
+            .into_any_element(),
         "attention" => div()
             .size(px(7.0 * scale))
             .rounded_full()
@@ -28,65 +31,17 @@ pub(crate) fn activity_indicator(activity: &str, scale: f32) -> Option<AnyElemen
     )
 }
 
-fn working_spinner(size: f32, scale: f32) -> AnyElement {
-    div()
-        .size(px(size * scale))
-        .flex_shrink_0()
-        .with_throttled_animation(
-            "native-sidebar-working",
-            Duration::from_millis(820),
-            move |icon, delta| {
-                icon.child(
-                    gpui::canvas(
-                        |_, _, _| (),
-                        move |bounds, _, window, _| {
-                            let radius = (size - 1.5) * scale / 2.0;
-                            let center = bounds.center();
-                            let start = std::f32::consts::TAU * delta + std::f32::consts::FRAC_PI_4;
-                            let end = start + std::f32::consts::PI * 1.5;
-                            let at = |angle: f32| {
-                                center
-                                    + gpui::point(
-                                        px(radius * angle.cos()),
-                                        px(radius * angle.sin()),
-                                    )
-                            };
-                            let mut path = gpui::PathBuilder::stroke(px(1.5 * scale));
-                            path.move_to(at(start));
-                            path.arc_to(
-                                gpui::point(px(radius), px(radius)),
-                                px(0.0),
-                                true,
-                                true,
-                                at(end),
-                            );
-                            if let Ok(path) = path.build() {
-                                window.paint_path(path, rgb(0xd99a62));
-                            }
-                        },
-                    )
-                    .size_full(),
-                )
-            },
-        )
-        .into_any_element()
-}
-
 pub(crate) fn question_indicator(working: bool, scale: f32) -> AnyElement {
     div()
-        .relative()
-        .size(px(16.0 * scale))
+        .h(px(16.0 * scale))
+        .min_w(px(16.0 * scale))
         .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
+        .gap(px(4.0 * scale))
         .when(working, |indicator| {
-            indicator.child(
-                div()
-                    .absolute()
-                    .size(px(16.0 * scale))
-                    .child(working_spinner(16.0, scale)),
-            )
+            indicator.child(div().size(px(8.0 * scale)).rounded_full().bg(rgb(0xffb454)))
         })
         .child(div().size(px(6.0 * scale)).rounded_full().bg(rgb(0xf472b6)))
         .into_any_element()

@@ -11,9 +11,9 @@ use std::{
 /// CDXC:Sidebar 2026-09-18 WHY:
 /// gpui redraws the whole window for every animation frame, and the repeating indicators (sidebar working spinners, the chat working strip) ran at display rate.
 /// With agents working, that redraw alone took about half of the UI thread, because every visible markdown view lays itself out again per frame.
-/// Indicators advance on one shared timer at roughly fifteen frames per second instead; a spinner does not need sixty.
+/// Indicators advance on one shared timer at roughly seven frames per second instead; a spinner does not need sixty, and with agents always working the sidebar working state is a static dot since 2026-09-19.
 /// SEE-ALSO: apps/desktop/src/app/native_sidebar/status.rs, apps/desktop/src/app/native_chat/working_strip.rs, apps/desktop/src/app/native_chat/working_spark.rs.
-pub(crate) const INDICATOR_FRAME_INTERVAL: Duration = Duration::from_millis(66);
+pub(crate) const INDICATOR_FRAME_INTERVAL: Duration = Duration::from_millis(150);
 
 thread_local! {
     static FRAMES_PENDING: RefCell<HashSet<WindowId>> = RefCell::new(HashSet::new());

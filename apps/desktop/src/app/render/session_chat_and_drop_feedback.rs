@@ -46,6 +46,14 @@ impl GhostexGpuiApp {
         {
             Some(view) => {
                 self.record_session_chat_render(session_id);
+                if !self.native_chat_visible_sessions.contains(&session_id) {
+                    let app = cx.entity().downgrade();
+                    cx.defer(move |cx| {
+                        let _ = app.update(cx, |app, cx| {
+                            app.resume_native_chat_runtime_for_session(session_id, cx)
+                        });
+                    });
+                }
                 self.render_native_chat_with_skeleton(session_id, &view, cx)
             }
             None => self.render_session_chat_surface_content(session_id),

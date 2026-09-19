@@ -24,6 +24,10 @@ enum Command {
         method: &'static str,
         arguments: Vec<Value>,
     },
+    CallRaw {
+        method: &'static str,
+        raw: String,
+    },
     Query {
         method: &'static str,
         arguments: Vec<Value>,
@@ -103,6 +107,11 @@ impl ChatRuntimeWorker {
                                 post(ChatRuntimeOutput::Error(error.to_string()));
                             }
                         }
+                        Some(Command::CallRaw { method, raw }) => {
+                            if let Err(error) = runtime.call_raw(method, &raw) {
+                                post(ChatRuntimeOutput::Error(error.to_string()));
+                            }
+                        }
                         Some(Command::Query {
                             method,
                             arguments,
@@ -133,6 +142,11 @@ impl ChatRuntimeWorker {
         let _ = self.commands.send(Command::Call { method, arguments });
     }
 
+    /// Like `call` with one argument that is already JSON text; the runtime parses it itself.
+    pub(crate) fn call_raw(&self, method: &'static str, raw: String) {
+        let _ = self.commands.send(Command::CallRaw { method, raw });
+    }
+
     /// Run a pure controller helper and wait for its answer, or give up after `timeout`.
     /// CDXC:SessionChat 2026-09-18 WHY:
     /// The composer asks this on every paint. While the thread boots a transcript or backfills projections it cannot answer for hundreds of milliseconds, and waiting out the timeout on each frame made the UI stutter right after a session click.
@@ -146,6 +160,22 @@ impl ChatRuntimeWorker {
         if !self.idle.load(Ordering::Acquire) {
             return None;
         }
+        self.query_for_gesture(method, arguments, timeout)
+    }
+
+    /// Run a pure controller helper for one deliberate press (a right-click menu), waiting up to
+    /// `timeout` even when the thread is busy.
+    ///
+    /// CDXC:SessionChat 2026-09-19 WHY:
+    /// `query` gives up at once on a busy thread, which suits a per-paint helper, but a menu row
+    /// list asked for that way silently failed to open whenever a streaming reply or a transcript
+    /// boot had the thread. A press happens once, so it queues behind the running work instead.
+    pub(crate) fn query_for_gesture(
+        &self,
+        method: &'static str,
+        arguments: Vec<Value>,
+        timeout: Duration,
+    ) -> Option<Value> {
         let (reply, answer) = mpsc::channel();
         self.commands
             .send(Command::Query {

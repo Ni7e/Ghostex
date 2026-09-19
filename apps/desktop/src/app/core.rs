@@ -446,6 +446,13 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_chat_eviction_running: bool,
     pub(crate) agents_chat_prewarm_scheduled: bool,
     pub(crate) session_chat_skeletons: super::session_chat_skeleton::SessionChatSkeletons,
+    /// Sessions whose chat is in a visible pane, as of the last chat surface reconcile.
+    pub(crate) native_chat_visible_sessions: HashSet<TerminalSessionId>,
+    /// Each runtime's own broker subscribe request, replayed when a paused view is shown again.
+    pub(crate) session_chat_subscribe_requests: HashMap<u64, serde_json::Value>,
+    /// Runtime generations whose broker subscription is paused because their view is hidden.
+    pub(crate) session_chat_paused_generations: HashSet<u64>,
+    pub(crate) native_chat_pool_pass_scheduled: bool,
     /// Tabs opened by project-header agent launches that are still waiting for their created session.
     pub(crate) agent_launch_placeholders:
         std::collections::VecDeque<super::sidebar_agent_launch_placeholder::AgentLaunchPlaceholder>,

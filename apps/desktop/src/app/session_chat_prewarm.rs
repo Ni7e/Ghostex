@@ -3,13 +3,19 @@ use std::time::Duration;
 
 /// Native chat views kept warm for one project, counting the ones the user opened.
 const NATIVE_CHAT_WARM_VIEWS_PER_PROJECT: usize = 5;
+/// Native chat views alive across all projects; the warm pool trims hidden ones beyond this.
+pub(crate) const NATIVE_CHAT_WARM_VIEWS_TOTAL: usize = 6;
 
 impl GhostexGpuiApp {
     /// CDXC:SessionChat 2026-09-19 WHY:
     /// A session's first chat open cost about 300ms after the click (runtime boot, two service-thread round trips, transcript projection) while an already warm view painted in about 25ms; Waku feels instant because every transcript is in memory before the click.
     /// The active project's most recently used chat-eligible tab sessions get their native chat views created in the background, one every 150ms, so a click on a session the user actually switches between lands on a warm view. Recency comes from the sidebar's last interaction time; the first ten tabs in workspace order, which this supersedes, warmed sessions nobody was going to open. Views never show until focused, and each project keeps at most five warm views unless the user opened more.
     pub(crate) fn schedule_native_chat_prewarm(&mut self, cx: &mut gpui::Context<Self>) {
-        if !self.session_chat_use_gpui || self.agents_chat_prewarm_scheduled {
+        if !self.session_chat_use_gpui {
+            return;
+        }
+        self.ensure_native_chat_pool_pass(cx);
+        if self.agents_chat_prewarm_scheduled {
             return;
         }
         let pending = self.native_chat_prewarm_candidates();
@@ -27,7 +33,9 @@ impl GhostexGpuiApp {
                         if !this.session_chat_use_gpui {
                             return false;
                         }
-                        if this.native_chat_views.len() >= NATIVE_CHAT_WARM_VIEWS_PER_PROJECT {
+                        if this.native_chat_views.len() >= NATIVE_CHAT_WARM_VIEWS_PER_PROJECT
+                            || this.native_chat_views_total() >= NATIVE_CHAT_WARM_VIEWS_TOTAL
+                        {
                             return false;
                         }
                         if this.native_chat_views.contains_key(&session_id)
@@ -53,7 +61,9 @@ impl GhostexGpuiApp {
 
     /// The active project's chat-eligible tab sessions without a warm view, most recently used first.
     fn native_chat_prewarm_candidates(&self) -> Vec<TerminalSessionId> {
-        let room = NATIVE_CHAT_WARM_VIEWS_PER_PROJECT.saturating_sub(self.native_chat_views.len());
+        let room = NATIVE_CHAT_WARM_VIEWS_PER_PROJECT
+            .saturating_sub(self.native_chat_views.len())
+            .min(NATIVE_CHAT_WARM_VIEWS_TOTAL.saturating_sub(self.native_chat_views_total()));
         if room == 0 {
             return Vec::new();
         }

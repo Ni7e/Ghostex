@@ -143,6 +143,8 @@ pub(crate) struct NativeChatView {
     pub(crate) subscriptions: Vec<Subscription>,
     /// When this view last rendered; a parked chat keeps applying frames without redrawing the window.
     pub(crate) last_render: Option<std::time::Instant>,
+    last_notified: Option<std::time::Instant>,
+    notify_scheduled: bool,
 }
 
 impl EventEmitter<NativeChatEvent> for NativeChatView {}
@@ -271,6 +273,8 @@ impl NativeChatView {
             focus_requested: false,
             subscriptions: Vec::new(),
             last_render: None,
+            last_notified: None,
+            notify_scheduled: false,
         }
     }
 
@@ -464,12 +468,44 @@ impl NativeChatView {
     /// CDXC:SessionChat 2026-09-18 WHY:
     /// Retained chat views stay subscribed while parked, and every state frame (several a second across working sessions) notified, which redraws the whole window for a view nobody sees.
     /// The state is applied either way; only a view that rendered recently asks for a redraw, and a parked one paints the latest state when it comes back.
-    fn notify_if_shown(&self, cx: &mut Context<Self>) {
-        if self
+    /// CDXC:SessionChat 2026-09-19 WHY:
+    /// A streaming agent produced a runtime output several times a frame, and each one redrew the whole window, which re-lays out every visible transcript row; with a few agents streaming that was most of the UI thread.
+    /// Redraws from runtime output are coalesced to one per 50ms; the last output in a burst still paints, only never sooner than that.
+    fn notify_if_shown(&mut self, cx: &mut Context<Self>) {
+        const NOTIFY_MIN_INTERVAL: Duration = Duration::from_millis(50);
+        if !self
             .last_render
             .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
         {
-            cx.notify();
+            return;
+        }
+        let now = std::time::Instant::now();
+        if let Some(at) = self.last_notified
+            && now.duration_since(at) < NOTIFY_MIN_INTERVAL
+        {
+            if !self.notify_scheduled {
+                self.notify_scheduled = true;
+                let wait = NOTIFY_MIN_INTERVAL - now.duration_since(at);
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(wait).await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.notify_scheduled = false;
+                        this.last_notified = Some(std::time::Instant::now());
+                        cx.notify();
+                    });
+                })
+                .detach();
+            }
+            return;
+        }
+        self.last_notified = Some(now);
+        cx.notify();
+    }
+
+    /// A broker event as JSON text; the runtime thread parses it, so the UI thread never builds the value.
+    pub(crate) fn receive_broker_raw(&mut self, raw: String) {
+        if let Some(runtime) = &self.runtime {
+            runtime.call_raw("brokerMessage", raw);
         }
     }
 

@@ -149,6 +149,15 @@ impl GhostexGpuiApp {
             .filter(|id| id.len() <= 128)
             .unwrap_or_default();
         let payload = serde_json::json!({"clientId":client_id,"epoch":epoch,"generation":generation.to_string(),"requestId":request_id,"method":method,"params":params,"identity":{"machineId":machine_id,"projectId":project_id,"sessionId":session_id},"endpoint":{"baseUrl":base_url,"authToken":auth_token}});
+        // The warm pool replays this exact request to resume a paused view (session_chat_warm_pool.rs).
+        if method == "subscribe" {
+            self.session_chat_subscribe_requests
+                .insert(generation, payload.clone());
+            self.session_chat_paused_generations.remove(&generation);
+        } else if method == "unsubscribe" {
+            self.session_chat_subscribe_requests.remove(&generation);
+            self.session_chat_paused_generations.remove(&generation);
+        }
         if let Some(sidebar) = self.sidebar.as_ref() {
             sidebar.update(cx, |sidebar, _| {
                 sidebar.execute_app_owned_script(&format!(
@@ -276,6 +285,10 @@ impl GhostexGpuiApp {
             return;
         };
         if self.session_chat_runtime_key(generation).is_none() {
+            return;
+        }
+        if let Some(raw) = message["raw"].as_str() {
+            self.dispatch_session_chat_generation_event_raw(generation, raw.to_owned(), cx);
             return;
         }
         if message["cacheable"] == true {

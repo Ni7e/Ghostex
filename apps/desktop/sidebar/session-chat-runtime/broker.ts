@@ -97,6 +97,17 @@ export function installSessionChatRuntimeBroker(): void {
         data: serialized.slice(index * chunkSize, (index + 1) * chunkSize),
       });
   };
+  /**
+   * CDXC:SessionChat 2026-09-19 WHY:
+   * Each frame relayed to a chat runtime used to be serialized twice here, parsed and re-serialized on the UI thread, and parsed again in the runtime, once per subscribed view.
+   * A frame that fits one message travels as its JSON text: the UI thread hands the text to the runtime thread untouched and only that thread parses it. Oversized frames keep the chunked path.
+   */
+  const postEvent = (generation: string, event: unknown): void => {
+    const message = { type: 'sessionChatRuntimeBroker', epoch, kind: 'event', generation, event };
+    const raw = JSON.stringify(message);
+    if (raw.length <= 96 * 1024) send({ kind: 'event', generation, raw });
+    else post({ kind: 'event', generation, event });
+  };
   const setupMachine = (machineId: string, candidate: SessionChatRuntimeEndpoint, originClientId?: string) => {
     const endpoint = retainSessionChatRuntimeEndpoint(machineId, candidate);
     const prefix = machineId === 'local' ? '' : `remote-${machineId}:`;
@@ -185,7 +196,7 @@ export function installSessionChatRuntimeBroker(): void {
     if (request.method === 'subscribe') {
       const unsubscribe = transport.subscribe({
         currentLimit: () => request.params?.limit ?? 120,
-        onEvent: (event) => post({ kind: 'event', generation: request.generation, event }),
+        onEvent: (event) => postEvent(request.generation, event),
       });
       subscriptions.get(request.generation)?.();
       const unsubscribeCatalog = request.params?.catalog ? subscribeAgentModelCatalog(() =>

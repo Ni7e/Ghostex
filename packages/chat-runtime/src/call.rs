@@ -12,6 +12,16 @@ pub(crate) fn json(ctx: &Ctx<'_>, namespace: &str, method: &str, arguments: &[Va
     function.call_arg(args)
 }
 
+/// Call with one argument that is already JSON text.
+pub(crate) fn raw(ctx: &Ctx<'_>, namespace: &str, method: &str, raw: &str) -> rquickjs::Result<()> {
+    let object: Object = ctx.globals().get(namespace)?;
+    let function: Function = object.get(method)?;
+    let mut args = Args::new(ctx.clone(), 1);
+    args.this(object)?;
+    args.push_arg(ctx.json_parse(raw)?)?;
+    function.call_arg(args)
+}
+
 /// Call a synchronous helper and return its result as JSON.
 ///
 /// CDXC:SessionChat 2026-09-18 WHY:
