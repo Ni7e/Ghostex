@@ -34,7 +34,7 @@ pub(crate) const DOMAIN_PROJECTS_READ_TIMEOUT: Duration = Duration::from_secs(3)
 pub(crate) const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
 
 /// Where the daemon is and how the store is identified to it.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GxClientConfig {
     /// The machine the events are reported for. The local daemon is [`MachineId::Local`].
     pub machine: MachineId,
@@ -52,4 +52,19 @@ pub struct GxClientConfig {
     /// the chat milestone, so a host leaves this off and they are dropped unparsed like
     /// `apiRequestHandled`. Tools turn it on to check the chat wire types against live traffic.
     pub forward_chat_frames: bool,
+}
+
+/// Written by hand so the bearer token can never reach a log through `{:?}`.
+impl std::fmt::Debug for GxClientConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GxClientConfig")
+            .field("machine", &self.machine)
+            .field("base_url", &self.base_url)
+            .field("auth_token", &"[redacted]")
+            .field("client_id", &self.client_id)
+            .field("held_revision", &self.held_revision)
+            .field("forward_chat_frames", &self.forward_chat_frames)
+            .finish()
+    }
 }

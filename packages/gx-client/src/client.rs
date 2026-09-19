@@ -1,7 +1,8 @@
 //! The handle a host holds.
 
+use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread;
 
@@ -38,6 +39,8 @@ pub struct GxClient {
     shutdown: Arc<AtomicBool>,
     wake_pending: Arc<AtomicBool>,
     stats: Arc<ClientStats>,
+    /// The thread is gone: its end of the output channel closed.
+    thread_ended: Cell<bool>,
 }
 
 impl GxClient {
@@ -66,7 +69,7 @@ impl GxClient {
         };
         thread::Builder::new()
             .name("ghostex-gx-client".into())
-            .spawn(move || worker.run())
+            .spawn(move || worker.run_reporting_exit())
             .map_err(StartError::Thread)?;
         Ok(Self {
             commands,
@@ -74,6 +77,7 @@ impl GxClient {
             shutdown,
             wake_pending,
             stats,
+            thread_ended: Cell::new(false),
         })
     }
 
@@ -81,7 +85,25 @@ impl GxClient {
     /// an output queued while this runs causes another wake instead of being stranded.
     pub fn drain(&self) -> Vec<ClientOutput> {
         self.wake_pending.store(false, Ordering::Release);
-        self.outputs.try_iter().collect()
+        let mut outputs = Vec::new();
+        loop {
+            match self.outputs.try_recv() {
+                Ok(output) => outputs.push(output),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.thread_ended.set(true);
+                    break;
+                }
+            }
+        }
+        outputs
+    }
+
+    /// Whether a [`Self::drain`] found the thread gone. A client in that state never produces
+    /// another output and never reconnects; the host replaces it. The thread also drops the
+    /// `wake` closure when it ends, which a host can observe without polling.
+    pub fn thread_ended(&self) -> bool {
+        self.thread_ended.get()
     }
 
     /// Asks for a full snapshot: `subscribePresentation` without `lastRevision`, on the live

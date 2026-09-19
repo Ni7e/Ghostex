@@ -32,6 +32,10 @@ pub enum ClientDiagnostic {
     SubscribeNotAcknowledged,
     /// The daemon speaks another protocol version than this client.
     ProtocolMismatch { received: u64 },
+    /// The socket thread ended without being asked to (a panic, with its message stripped of
+    /// quoted values). It is the last output of this client: nothing reconnects any more, so the
+    /// host must start a new client.
+    ThreadStopped { reason: String },
 }
 
 /// Counters the socket thread keeps, readable from any thread.

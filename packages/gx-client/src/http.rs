@@ -54,10 +54,14 @@ pub(crate) fn list_projects(
             "the daemon answered with protocol version {}",
             success.protocol_version
         )),
-        Ok(RpcResponse::Success(mut success)) => match success.result["projects"].take() {
-            Value::Array(projects) => Ok(projects),
-            _ => Err("the response has no `projects` list".to_string()),
-        },
+        // `get_mut`, never `result["projects"]`: indexing a result that is not an object panics.
+        Ok(RpcResponse::Success(mut success)) => {
+            match success.result.get_mut("projects").map(Value::take) {
+                Some(Value::Array(projects)) => Ok(projects),
+                Some(_) => Err("`projects` in the response is not a list".to_string()),
+                None => Err("the response has no `projects` list".to_string()),
+            }
+        }
         // The code only: a daemon message can quote a path.
         Ok(RpcResponse::Failure(failure)) => Err(format!(
             "the daemon answered `{}` (HTTP {status})",

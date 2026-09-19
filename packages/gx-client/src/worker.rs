@@ -65,7 +65,41 @@ struct Resubscribes {
 }
 
 impl Worker {
-    pub(crate) fn run(self) {
+    /// Runs the thread body and reports any exit the host did not ask for.
+    ///
+    /// `catch_unwind` rather than a drop guard: the thread must still say something after a
+    /// panic, and saying it takes the worker's own sender and wake. A guard would need second
+    /// handles to both, and could not read the panic message. `AssertUnwindSafe` is sound here
+    /// because after a panic the worker is only used to queue these two outputs. Whatever
+    /// happens, the wake closure is dropped when this returns, which is the host's race-free
+    /// signal that the thread is gone.
+    pub(crate) fn run_reporting_exit(self) {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run()));
+        let reason = match outcome {
+            Ok(()) if self.stopped() => return,
+            Ok(()) => "the client thread returned without being asked to stop".to_string(),
+            Err(payload) => {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .map(|message| (*message).to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "no message".to_string());
+                // A panic message can quote data; keep its shape only, and keep it short.
+                let message: String = redact_quoted_values(&message).chars().take(200).collect();
+                format!("the client thread panicked: {message}")
+            }
+        };
+        self.send(ClientOutput::Event(self.connection(
+            ConnectionUpdate::Lost {
+                error: Some("the client thread stopped".to_string()),
+            },
+        )));
+        self.emit(ClientOutput::Diagnostic(ClientDiagnostic::ThreadStopped {
+            reason,
+        }));
+    }
+
+    fn run(&self) {
         let agent = http::agent(DOMAIN_PROJECTS_READ_TIMEOUT);
         let mut resubscribes = Resubscribes::default();
         let mut attempt: u32 = 0;
