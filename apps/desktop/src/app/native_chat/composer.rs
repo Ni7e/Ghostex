@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::StatefulInteractiveElement;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -22,7 +23,7 @@ impl NativeChatView {
             .id(id)
             .role(gpui::Role::Button)
             .aria_label(label)
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .size(px(24.0 * p.scale))
             .flex()
             .items_center()
@@ -99,7 +100,7 @@ impl NativeChatView {
             .id(id)
             .role(gpui::Role::Button)
             .aria_label(label.clone())
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .px(px(8.0 * p.scale))
             .py(px(4.0 * p.scale))
             .rounded(px(6.0 * p.scale))
@@ -136,6 +137,7 @@ impl NativeChatView {
             "summaryMode" => chrome["summaryPressed"] == true,
             "sessionNote" => chrome["notePressed"] == true,
             "maximizeComposer" => self.maximized_window.is_some(),
+            "moreActions" => self.chat_menu_is_open(super::actions::MORE_ACTIONS_TRIGGER),
             _ => false,
         };
         let badge = match action {
@@ -148,7 +150,7 @@ impl NativeChatView {
             .relative()
             .role(gpui::Role::Button)
             .aria_label(label)
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .size(px(28.0 * p.scale))
             .flex()
             .items_center()
@@ -215,6 +217,19 @@ impl NativeChatView {
         self.sync_composer_references(p, cx);
         let maximized = self.maximized_window.is_some();
         let collapsed = self.composer_collapsed();
+        // CDXC:SessionChat 2026-09-19 SEE-ALSO:
+        // The chat box's tween, React's `use-session-chat-composer-transition.ts`. Timing, easing and
+        // the collapsed and expanded metrics are shared through
+        // `packages/shared/session-chat-presentation/composer-animation.json`; `composer_animation.rs`
+        // holds the interpolation.
+        let metrics = &*super::composer_animation::METRICS;
+        let reduce_motion = cx.reduce_motion();
+        self.composer_animation
+            .set_collapsed(collapsed, reduce_motion);
+        let frame = self.composer_animation.advance(reduce_motion);
+        if frame.running && !maximized {
+            window.request_animation_frame();
+        }
         let input = self.input.as_ref().unwrap().clone();
         let attachment_previews = if collapsed {
             None
@@ -366,6 +381,143 @@ impl NativeChatView {
         )
         .absolute()
         .size_full();
+        let padding_block = if collapsed {
+            metrics.collapsed_padding_block_px
+        } else {
+            metrics.expanded_padding_block_px
+        } * s;
+        // The box paints at its natural height whenever nothing is moving, so the tween needs the
+        // height the content wants. The content column keeps that height even while the box is
+        // pinned shorter (it never shrinks, and the box clips it), which is what lets a growing
+        // editor or an arriving strip reveal itself over the tween instead of appearing whole.
+        let measured = cx.weak_entity();
+        let reported = self.composer_animation.reported();
+        let min_delta = metrics.min_delta_px;
+        let content_measure = gpui::canvas(
+            move |bounds, window, cx| {
+                let natural = bounds.size.height.as_f32() + padding_block * 2.0 + 2.0;
+                if (reported.get() - natural).abs() < min_delta {
+                    return;
+                }
+                reported.set(natural);
+                let measured = measured.clone();
+                window.defer(cx, move |_, cx| {
+                    let reduce_motion = cx.reduce_motion();
+                    let _ = measured.update(cx, |chat, cx| {
+                        if chat.composer_animation.measured(natural, reduce_motion) {
+                            cx.notify();
+                        }
+                    });
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
+        let content = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .min_w_0()
+            .gap(px(metrics.expanded_row_gap_px * s))
+            .when(maximized, |this| this.flex_1().min_h_0())
+            .when(!maximized, |this| this.flex_shrink_0())
+            .when(collapsed, |this| {
+                this.flex_row()
+                    .items_center()
+                    .gap(px(metrics.collapsed_row_gap_px * s))
+            })
+            .children(attachment_previews)
+            .children(self.render_queue(p, cx))
+            .child(
+                div()
+                    .id("composer-editor")
+                    .min_w_0()
+                    .w_full()
+                    // React's floating input thumb stops 2px short of the viewport's right edge
+                    // (app-scrollbars.ts places the 5px bar at `right - 7px`). gpui-component pins a
+                    // custom-thickness thumb to the track edge, so the field gives back those 2px.
+                    .pr(px(2.0 * s))
+                    .when(collapsed, |this| {
+                        this.flex_1()
+                            .h(px(metrics.collapsed_height_px * s))
+                            .overflow_hidden()
+                    })
+                    .when(maximized, |this| this.flex_1().h_full().min_h_0())
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                            this.invoke(json!({"type":"composerExpand","editor":true}), cx);
+                            this.click_composer_reference(event, cx);
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                        this.hover_composer_reference(Some(event.position), cx);
+                    }))
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        if !hovered {
+                            this.hover_composer_reference(None, cx);
+                        }
+                    }))
+                    .on_mouse_down(
+                        gpui::MouseButton::Right,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                            if this.show_composer_reference_menu(event, window, cx) {
+                                cx.stop_propagation();
+                            }
+                        }),
+                    )
+                    .child(
+                        Input::new(&input)
+                            .disabled(!self.composer_ready)
+                            .placeholder_color(p.muted.opacity(0.6))
+                            .appearance(false)
+                            .bordered(false)
+                            .focus_bordered(false)
+                            // The chat box's own scrollbar: React's 5px floating thumb that appears
+                            // while the draft scrolls and fades out afterwards
+                            // (packages/components/ui/app-scrollbars.ts, session-chat-lexical/input.css).
+                            .scrollbar_thickness(px(5.0 * s))
+                            .scrollbar_show(gpui_component::scroll::ScrollbarShow::Scrolling)
+                            .w_full()
+                            .p_0()
+                            .text_size(px(14.0 * s))
+                            .text_color(p.primary)
+                            .line_height(px(if collapsed {
+                                metrics.collapsed_line_height_px
+                            } else {
+                                metrics.expanded_line_height_px
+                            } * s))
+                            .when(collapsed, |this| {
+                                this.h(px(metrics.collapsed_height_px * s))
+                                    .max_h(px(metrics.collapsed_height_px * s))
+                            })
+                            .when(!collapsed && !maximized, |this| {
+                                this.max_h(px(metrics.expanded_max_height_px * s))
+                            })
+                            .when(maximized, |this| this.h_full().flex_1().min_h_0()),
+                    ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.0 * s))
+                    // React fades its option pills and toolbar back in over the second half of an
+                    // expansion rather than having them appear the moment the box starts growing.
+                    .when(frame.controls_opacity < 1.0, |this| {
+                        this.opacity(frame.controls_opacity)
+                            .top(px(frame.controls_offset * s))
+                    })
+                    .when(!collapsed, |this| {
+                        this.child(self.render_option_pills(&model, &effort, p, cx))
+                    })
+                    .child(self.render_toolbar(p, cx))
+                    .when(!collapsed, |this| this.child(measurement)),
+            )
+            .when(!maximized, |this| this.child(content_measure));
         // CDXC:SessionChat 2026-09-18 WHY: React's inline composer has a zero-height notification section before its field, contributing one grid gap even while idle. Reserve that same gap here, after any cards or note.
         footer = footer.child(
             div()
@@ -381,77 +533,14 @@ impl NativeChatView {
                 .border_color(p.composer_border)
                 .bg(p.composer_background)
                 .px(px(16.0 * s))
-                .py(px(10.0 * s))
-                .gap(px(6.0 * s))
+                .py(px(padding_block))
                 .when(maximized, |this| this.flex_1().min_h_0())
-                .when(collapsed, |this| {
-                    this.flex_row()
-                        .items_center()
-                        .gap(px(12.0 * s))
-                        .py(px(8.0 * s))
+                .when_some(frame.height.filter(|_| !maximized), |this, height| {
+                    this.h(px(height)).overflow_hidden()
                 })
-                .children(attachment_previews)
-                .children(self.render_queue(p, cx))
-                .child(
-                    div()
-                        .id("composer-editor")
-                        .min_w_0()
-                        .w_full()
-                        .when(collapsed, |this| {
-                            this.flex_1().h(px(32.0 * s)).overflow_hidden()
-                        })
-                        .when(maximized, |this| this.flex_1().h_full().min_h_0())
-                        .on_mouse_down(
-                            gpui::MouseButton::Left,
-                            cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
-                                this.invoke(json!({"type":"composerExpand","editor":true}), cx);
-                                this.click_composer_reference(event, cx);
-                            }),
-                        )
-                        .on_mouse_down(
-                            gpui::MouseButton::Right,
-                            cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
-                                if this.show_composer_reference_menu(event, window, cx) {
-                                    cx.stop_propagation();
-                                }
-                            }),
-                        )
-                        .child(
-                            Input::new(&input)
-                                .disabled(!self.composer_ready)
-                                .placeholder_color(p.muted.opacity(0.6))
-                                .appearance(false)
-                                .bordered(false)
-                                .focus_bordered(false)
-                                .w_full()
-                                .p_0()
-                                .text_size(px(14.0 * s))
-                                .text_color(p.primary)
-                                .line_height(px(if collapsed { 32.0 } else { 24.0 } * s))
-                                .when(collapsed, |this| this.h(px(32.0 * s)).max_h(px(32.0 * s)))
-                                .when(!collapsed && !maximized, |this| this.max_h(px(160.0 * s)))
-                                .when(maximized, |this| this.h_full().flex_1().min_h_0()),
-                        ),
-                )
-                .child(
-                    div()
-                        .relative()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap(px(8.0 * s))
-                        .when(!collapsed, |this| {
-                            this.child(self.render_option_pills(&model, &effort, p, cx))
-                        })
-                        .child(self.render_toolbar(p, cx))
-                        .when(!collapsed, |this| this.child(measurement)),
-                ),
+                .child(content),
         );
-        if self.snapshot["contextMeter"]["hasConfiguredItems"] == true
-            || self.snapshot["contextMeter"]["starred"]
-                .as_array()
-                .is_some_and(|items| !items.is_empty())
-        {
+        if self.status_line_reserved() {
             footer = footer.child(self.render_context_status(p, window, cx));
         }
         div()

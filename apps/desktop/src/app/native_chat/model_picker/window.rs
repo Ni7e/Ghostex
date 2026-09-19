@@ -10,7 +10,15 @@ use serde_json::json;
 pub(in crate::app::native_chat) struct ModelPickerWindowState {
     pub(super) handle: Option<gpui::WindowHandle<Root>>,
     opening: bool,
+    /// The last pane size reported to the runtime, so only a real layout change costs an action.
+    pane_size: Option<(f32, f32)>,
     subscription: Option<Subscription>,
+}
+
+impl ModelPickerWindowState {
+    pub(in crate::app::native_chat) fn is_open(&self) -> bool {
+        self.handle.is_some()
+    }
 }
 
 pub(super) struct ModelPickerWindow {
@@ -28,10 +36,31 @@ impl NativeChatView {
         self.invoke(json!({"type":"toggleModelPicker","size":{"width":size.width.as_f32(),"height":size.height.as_f32()}}), cx);
     }
 
+    /// The chat pane's painted frame, reported while the picker window is up; the runtime decides when that counts as a resize (model-picker-pane-resize.ts).
+    pub(in crate::app::native_chat) fn report_model_picker_pane_size(
+        &mut self,
+        size: gpui::Size<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.model_picker_window.handle.is_none() {
+            return;
+        }
+        let size = (size.width.as_f32(), size.height.as_f32());
+        if self.model_picker_window.pane_size == Some(size) {
+            return;
+        }
+        self.model_picker_window.pane_size = Some(size);
+        self.invoke(
+            json!({"type":"modelPickerPane","size":{"width":size.0,"height":size.1}}),
+            cx,
+        );
+    }
+
     /// CDXC:SessionChat 2026-09-17 WHY:
     /// A pane-sized native child window owns picker input while preserving the chat pane's existing frame and focus.
     pub(in crate::app::native_chat) fn sync_model_picker_window(&mut self, cx: &mut Context<Self>) {
         if self.snapshot["modelPicker"].is_null() {
+            self.model_picker_window.pane_size = None;
             if let Some(handle) = self.model_picker_window.handle.take() {
                 let main = self.main_window;
                 let chat = cx.weak_entity();
@@ -132,6 +161,7 @@ impl NativeChatView {
                 match result {
                     Ok(handle) => {
                         chat.model_picker_window.handle = Some(handle);
+                        chat.report_model_picker_pane_size(pane.size, cx);
                         let weak = cx.weak_entity();
                         chat.model_picker_window.subscription =
                             Some(cx.on_window_closed(move |cx, id| {

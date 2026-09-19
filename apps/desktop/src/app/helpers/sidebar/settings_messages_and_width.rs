@@ -290,6 +290,15 @@ pub(crate) fn gpui_session_chat_transcript_width_percent_from_settings(
     ((value / STEP_PERCENT).round() * STEP_PERCENT) as u8
 }
 
+pub(crate) fn gpui_session_chat_model_picks_session_only_from_settings(
+    settings: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    settings
+        .get("sessionChatModelPicksSessionOnly")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
 pub(crate) fn gpui_session_chat_file_edit_previews_from_settings(
     settings: &serde_json::Map<String, serde_json::Value>,
 ) -> bool {

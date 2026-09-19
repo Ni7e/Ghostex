@@ -10,12 +10,16 @@
 //! `apps/desktop/src/app/session_chat_fork_branches.rs`.
 
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, canvas, div, px, relative, svg,
 };
 use std::{cell::Cell, rc::Rc};
+
+/// The strip's toggle key in `menu_toggle.rs`.
+const FORK_BRANCHES_TRIGGER: &str = "chat-fork-branches";
 
 /// The lifecycle dot's tint, the tones of `sessionChatForkBranchTone` in React's colours
 /// (`bg-emerald-500`, `bg-muted-foreground/60`, `bg-muted-foreground/35`).
@@ -65,7 +69,7 @@ impl NativeChatView {
                                 .relative()
                                 .role(gpui::Role::Button)
                                 .aria_label(label)
-                                .cursor_pointer()
+                                .chat_cursor_pointer()
                                 .h(px(24.0 * s))
                                 .px(px(6.0 * s))
                                 .flex()
@@ -74,6 +78,9 @@ impl NativeChatView {
                                 .rounded(px(6.0 * s))
                                 .text_size(px(11.0 * s))
                                 .text_color(p.muted)
+                                .when(self.chat_menu_is_open(FORK_BRANCHES_TRIGGER), |this| {
+                                    this.bg(p.border)
+                                })
                                 .hover(|style| style.bg(p.border))
                                 .tooltip(move |window, cx| {
                                     gpui_component::tooltip::Tooltip::new(tooltip.clone())
@@ -92,6 +99,11 @@ impl NativeChatView {
                                         .as_array()
                                         .cloned()
                                         .unwrap_or_default();
+                                    if rows.is_empty()
+                                        || chat.chat_menu_toggled_shut(FORK_BRANCHES_TRIGGER, cx)
+                                    {
+                                        return;
+                                    }
                                     chat.show_chat_menu(rows, bounds.get(), 288.0, window, cx);
                                 }))
                                 .child(

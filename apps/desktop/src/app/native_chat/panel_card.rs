@@ -4,6 +4,7 @@
 //! header, the way React's `SessionChatStatusCard` renders them.
 
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -40,7 +41,7 @@ impl NativeChatView {
             .gap(px(8.0 * s))
             .w_full()
             .min_w_0()
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .child(
                 gpui::svg()
                     .path(header.icon)

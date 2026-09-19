@@ -20,7 +20,7 @@ Seven samples exist for the transcript components the older scenarios never prod
 
 - **tools**: a finished turn folded behind "Worked for", a live turn whose calls are still on screen, reasoning with and without tools under it, an error result, a subagent call, the "+N previous tool calls" fold, and the pending terminal tool row.
 - **files**: file change cards for an edit, a new file, a multi-hunk patch, a rejected edit that keeps its error, and a path long enough to truncate. The finished turn collects its cards behind "N files changed"; the live turn shows them inline.
-- **images**: attachments on a prompt, numbered `[Image #N]` references written into the prompt's text, a markdown image in a reply, and the named chip a picture this host cannot read falls back to.
+- **images**: attachments on a prompt, numbered `[Image #N]` references written into the prompt's text, a markdown image in a reply, the named chip a picture this host cannot read falls back to, a screenshot off a Retina screen on its own and again inside a sentence, and a tall picture beside a wide one.
 - **system**: fork boundary, compaction and model-change pills, completed and failed task notifications, an answered question exchange, a message from a subagent, a message from another agent's session, and the app's own `/goal`, `/status`, `/rename` and `/compact` rows.
 - **rich-markdown**: headings h1–h4, all five GitHub alerts, nested lists, a blockquote, colors, bare file paths in prose, fences in five languages, one fence that has to scroll sideways, and a table wider than the pane.
 - **agents**: the sub-agent strip and the task list, both populated over a live turn. Their clocks start when the sample is built.

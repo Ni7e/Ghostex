@@ -28,6 +28,37 @@ export function modelPickerSupportsSessionScope(provider: ModelPickerProvider): 
   return provider === 'claude';
 }
 
+/**
+ * CDXC:SessionChat 2026-09-19 DECISION:
+ * User: session-only model and effort picks must not be the default; they are the `sessionChatModelPicksSessionOnly` setting under Settings, Agents, Config, off by default.
+ * This supersedes the 2026-09-18 decision that a pick was session-only unless the session ticked Also set as default. Off, a pill pick and the picker's Enter save the agent's default as they always did; on, they apply to the session alone. The per-session switch and the picker's Shift+Enter still reach the other scope either way.
+ * Hosts adopt the saved setting here so React, GPUI, and the picker window read one value.
+ */
+let picksSessionOnly = false;
+const picksSessionOnlyListeners = new Set<() => void>();
+export const modelPicksSessionOnly = () => picksSessionOnly;
+export function adoptModelPicksSessionOnly(next: boolean): void {
+  if (next === picksSessionOnly) return;
+  picksSessionOnly = next;
+  for (const listener of picksSessionOnlyListeners) listener();
+}
+export function subscribeModelPicksSessionOnly(listener: () => void): () => void {
+  picksSessionOnlyListeners.add(listener);
+  return () => {
+    picksSessionOnlyListeners.delete(listener);
+  };
+}
+
+/** The scope the big picker's Enter commits with; Shift+Enter commits the other one where the agent has two. */
+export function modelPickerPrimaryScope(provider: ModelPickerProvider, sessionOnly: boolean): 'session' | 'default' {
+  return modelPickerSupportsSessionScope(provider) && sessionOnly ? 'session' : 'default';
+}
+
+/** A session that never touched its Also set as default switch follows the setting. */
+export function modelScopeAlsoSetDefault(stored: boolean | null, sessionOnly: boolean): boolean {
+  return stored ?? !sessionOnly;
+}
+
 /** Shown for every agent whose picker cannot apply a choice to one session: Codex, Cursor, Grok, Antigravity. */
 export const MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON =
   "This agent's model picker always saves the choice as its default.";

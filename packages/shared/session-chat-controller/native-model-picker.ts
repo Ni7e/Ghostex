@@ -6,7 +6,9 @@ import {
   modelPickerChooseModel,
   modelPickerLayout,
   modelPickerNextEffortIndex,
+  modelPickerPrimaryScope,
   modelPickerSupportsSessionScope,
+  modelPicksSessionOnly,
   MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
   type ModelPickerRequest,
   type ModelPickerSelection,
@@ -18,6 +20,7 @@ import {
   type ModelPickerWheelInput,
   type PickerControl,
 } from '../session-chat-presentation/model-picker-input';
+import { ModelPickerPaneResize } from '../session-chat-presentation/model-picker-pane-resize';
 
 export class NativeModelPicker {
   readonly request: ModelPickerRequest;
@@ -29,6 +32,7 @@ export class NativeModelPicker {
   private closeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly feedback: ModelPickerKeyFeedback;
   private readonly wheel = new ModelPickerWheelNavigation();
+  private readonly paneResize = new ModelPickerPaneResize();
   private size = { width: 1, height: 1 };
   private controlsHeight = 56;
 
@@ -47,7 +51,7 @@ export class NativeModelPicker {
   }
 
   private get defaultScope(): SessionChatModelSelectionScope {
-    return this.sessionScope ? 'session' : 'default';
+    return modelPickerPrimaryScope(this.request.provider, modelPicksSessionOnly());
   }
 
   projection() {
@@ -66,6 +70,7 @@ export class NativeModelPicker {
       closing: this.closing,
       saving: this.saving,
       sessionScope: this.sessionScope,
+      primaryScope: this.defaultScope,
       scopeReason: this.sessionScope ? undefined : MODEL_PICKER_DEFAULT_SCOPE_ONLY_REASON,
       pressed: [...this.feedback.pressed],
       compactControls: this.size.width < 560,
@@ -92,6 +97,12 @@ export class NativeModelPicker {
       })),
       effortLabel: request.efforts.find((entry) => entry.value === this.selection.effort)?.label ?? 'No effort setting',
     };
+  }
+
+  /** The host reports the owning chat pane's size, starting with the one it had when the picker opened (model-picker-pane-resize.ts). */
+  pane(size: { width: number; height: number }) {
+    if (this.closing) return;
+    if (this.paneResize.resized(size)) this.finish(false);
   }
 
   measure(size: { width: number; height: number; controlsHeight?: number }) {
@@ -133,7 +144,8 @@ export class NativeModelPicker {
       const next = modelPickerNextEffortIndex(this.request, this.selection, control === 'ArrowLeft' ? -1 : 1);
       if (next !== undefined) this.chooseEffort(next);
     }
-    if (control === 'EnterDefault') this.finish(true, 'default');
+    if (control === 'EnterAlternate' && this.sessionScope)
+      this.finish(true, this.defaultScope === 'session' ? 'default' : 'session');
     if (control === 'Enter' || control === 'Escape') this.finish(control === 'Enter');
   }
 

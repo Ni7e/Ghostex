@@ -17,8 +17,9 @@
  *   * a picture written into prose (`![alt](src)`, or a link to an image file)
  *     becomes a marked token carrying its image source, so the native renderer
  *     draws the thumbnail React draws instead of a chip or a blank band;
- *   * a path somebody typed into a prompt becomes a real Markdown link, so the
- *     native reference pill and the React file chip point at the same file.
+ *   * a file reference written as inline code, or a path somebody typed into a
+ *     prompt, becomes a real Markdown link, so the native reference pill and
+ *     the React file chip point at the same file.
  *
  * Rust only splits on the markers and lays the pieces out.
  *
@@ -33,6 +34,7 @@ import type { SessionChatImageRefBlock } from '../session-chat';
 import { sessionChatFilePositionSuffix } from './file-position';
 import {
   resolveSessionChatFenceTitleFilePath,
+  resolveSessionChatInlineCodeFilePath,
   sessionChatBareFilePaths,
   sessionChatFenceTitle,
   sessionChatFilePathIconName,
@@ -65,6 +67,12 @@ const QUOTED_ALERT = /^ {0,3}> ?\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i;
 /** GFM's delimiter row, the one line that tells a table from prose with pipes in it. */
 const TABLE_DELIMITER = /^ {0,3}\|?(?: *:?-+:? *\|)+ *(?::?-+:? *\|? *)?$/;
 const PATH_EVIDENCE = /[\\/@]|:\d/;
+/**
+ * A single-line backtick span holding something a path needs: a separator or a
+ * `:line`. Cheap enough to run on every message, and it keeps an answer whose
+ * only backticks belong to fences out of the parser.
+ */
+const INLINE_CODE_PATH_EVIDENCE = /`[^`\n\r]*(?:[\\/]|:\d)[^`\n\r]*`/;
 /** The extensions React's `isSessionChatImageHref` accepts, on a destination with its query and hash cut off. */
 const IMAGE_EXTENSION = /\.(avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i;
 /** Cheap enough to run on every message: no bang and no picture extension means nothing to mark. */
@@ -204,39 +212,83 @@ function markBlocks(markdown: string): string {
   return result.join('\n');
 }
 
+/** Characters that would be read as emphasis, code, or markup inside a link's visible text. */
+const LABEL_SPECIALS = /[\\`*_[\]<>~]/g;
+/** A destination that has to be wrapped in angle brackets to survive the parser. */
+const DESTINATION_NEEDS_BRACKETS = /[\s()]/;
+
 /**
- * Turns the paths somebody typed into a prompt into real Markdown links, which
- * is what the native renderer draws reference pills from. React reaches the
- * same paths through remarkSessionChatBareFilePaths and draws file chips.
+ * One reference, written as the Markdown link the native renderer draws a pill
+ * from. The path travels unchanged: escaping is undone by the parser, so the
+ * href and the label the pill is looked up by are the literal path again.
  */
-function linkBareFilePaths(markdown: string): string {
+function fileLink(path: string, label: string): string {
+  const destination = DESTINATION_NEEDS_BRACKETS.test(path)
+    ? `<${path.replaceAll('\\', '\\\\').replaceAll('<', '\\<').replaceAll('>', '\\>')}>`
+    : path;
+  return `[${label.replace(LABEL_SPECIALS, '\\$&')}](${destination})`;
+}
+
+/**
+ * Turns the file references written into a message into real Markdown links,
+ * which is what the native renderer draws reference pills from.
+ *
+ * Two kinds, both of which React promotes to the very same chip
+ * (session-chat-markdown.tsx renders `.ghostex-chat-markdown-file-chip` and
+ * `.ghostex-chat-reference-pill` identically inside the transcript):
+ *
+ *   * an inline-code span that is a path, in anybody's message, which is how an
+ *     agent writes `apps/desktop/src/app/native_sidebar/navigation.rs:41` in the
+ *     middle of a sentence (React's remarkSessionChatInlineCode plus the `code`
+ *     component); and
+ *   * a path somebody typed into a prompt without marking it up, which only a
+ *     user turn is scanned for (React's remarkSessionChatBareFilePaths).
+ *
+ * CDXC:SessionChat 2026-09-19 SEE-ALSO:
+ * resolveSessionChatInlineCodeFilePath in file-paths.ts is the single detection
+ * rule: a span that becomes a file chip in React becomes a pill here, and
+ * ordinary code such as `cargo check` or `chrome_ink().opacity(0.12)` becomes
+ * neither.
+ */
+function linkFileReferences(markdown: string, barePaths: boolean): string {
   const tree = fromMarkdown(markdown);
   const edits: { start: number; end: number; text: string }[] = [];
-  const walk = (nodes: RootContent[]) => {
+  const walk = (nodes: RootContent[], bare: boolean) => {
     for (const node of nodes) {
       if (node.type === 'link' || node.type === 'linkReference' || node.type === 'definition') continue;
-      if (node.type === 'code' || node.type === 'inlineCode' || node.type === 'html') continue;
-      if (node.type === 'blockquote' && QUOTED_ALERT.test(markdown.slice(node.position?.start.offset ?? 0, 60))) {
+      if (node.type === 'code' || node.type === 'html') continue;
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (node.type === 'inlineCode') {
+        if (start === undefined || end === undefined) continue;
+        const reference = resolveSessionChatInlineCodeFilePath(node.value);
+        if (reference === null) continue;
+        const target = `${reference.path}${sessionChatFilePositionSuffix(reference.position)}`;
+        // The whole span including its backticks becomes the link, so the pill
+        // reads as the path React's chip shows rather than as quoted code.
+        edits.push({ start, end, text: fileLink(target, target) });
         continue;
       }
       if ('children' in node) {
-        walk(node.children);
+        walk(node.children, bare && !(node.type === 'blockquote' && QUOTED_ALERT.test(markdown.slice(start ?? 0, 60))));
         continue;
       }
-      const start = node.position?.start.offset;
-      const end = node.position?.end.offset;
-      if (node.type !== 'text' || start === undefined || end === undefined) continue;
+      if (!bare || node.type !== 'text' || start === undefined || end === undefined) continue;
       // Scanned against the source rather than the node's value: an escape in
       // the text would otherwise shift every offset after it.
       const source = markdown.slice(start, end);
       for (const found of sessionChatBareFilePaths(source)) {
-        edits.push({ start: start + found.start, end: start + found.end, text: `[${found.path}](${found.path})` });
+        edits.push({
+          start: start + found.start,
+          end: start + found.end,
+          text: fileLink(found.path, found.path),
+        });
       }
     }
   };
-  walk(tree.children);
+  walk(tree.children, barePaths);
   let result = markdown;
-  for (const edit of edits.reverse()) {
+  for (const edit of edits.sort((left, right) => right.start - left.start)) {
     result = `${result.slice(0, edit.start)}${edit.text}${result.slice(edit.end)}`;
   }
   return result;
@@ -245,13 +297,16 @@ function linkBareFilePaths(markdown: string): string {
 /**
  * The Markdown the GPUI transcript renders for one message.
  *
- * `barePaths` follows React's `chatText` mode: a path is only spotted in prose
+ * Inline-code file references are promoted in every message, the way React
+ * promotes them wherever it renders Markdown. `barePaths` follows React's
+ * `chatText` mode on top of that: an unmarked path is only spotted in prose
  * somebody typed, never in an agent's answer, where a path that matters is
  * already inline code or a link.
  */
 export function sessionChatNativeMarkdown(markdown: string, barePaths = false): string {
   if (markdown === '') return markdown;
-  const pathsWanted = barePaths && PATH_EVIDENCE.test(markdown);
+  const bareWanted = barePaths && PATH_EVIDENCE.test(markdown);
+  const pathsWanted = bareWanted || INLINE_CODE_PATH_EVIDENCE.test(markdown);
   const blocksWanted =
     markdown.includes('```') ||
     markdown.includes('~~~') ||
@@ -259,6 +314,6 @@ export function sessionChatNativeMarkdown(markdown: string, barePaths = false): 
     markdown.includes('|') ||
     IMAGE_EVIDENCE.test(markdown);
   if (!pathsWanted && !blocksWanted) return markdown;
-  const linked = pathsWanted ? linkBareFilePaths(markdown) : markdown;
+  const linked = pathsWanted ? linkFileReferences(markdown, bareWanted) : markdown;
   return blocksWanted ? markBlocks(linked) : linked;
 }

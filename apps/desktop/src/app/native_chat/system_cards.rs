@@ -2,6 +2,7 @@ use super::{
     appearance::ChatAppearance, state::NativeChatView, status_rows::tone_color,
     thinking::estimated_lines, transcript::text,
 };
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -31,7 +32,9 @@ impl NativeChatView {
             "fork-boundary" => self.fork_boundary_row(card, p),
             "goal" => self.goal_card(id, card, p, cx),
             "command-output" => self.command_output_card(id, card, p, cx),
-            "agent-message" => self.agent_message_card(id, card, p, cx),
+            "agent-message" => {
+                self.agent_message_card(id, card, &message["markdownReferences"], p, cx)
+            }
             _ => self.system_marker_row(card, p),
         }
     }
@@ -277,6 +280,7 @@ impl NativeChatView {
         &self,
         id: &str,
         card: &Value,
+        references: &Value,
         p: &ChatAppearance,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -314,7 +318,16 @@ impl NativeChatView {
         let body = if body.is_empty() {
             Vec::new()
         } else if expanded {
-            vec![self.markdown(format!("agent-message:{id}"), body, &Value::Null, p, cx)]
+            // The marked, reference-linked form of the same text, so a path the
+            // subagent wrote is the pill React draws it as rather than backticks.
+            let marked = text(card, "markdown");
+            vec![self.markdown(
+                format!("agent-message:{id}"),
+                if marked.is_empty() { body } else { marked },
+                references,
+                p,
+                cx,
+            )]
         } else {
             vec![
                 // React's `line-clamp-2`: the first two lines and an ellipsis, with the chevron
@@ -360,7 +373,7 @@ impl NativeChatView {
             .flex_shrink_0()
             .size(px(20.0 * s))
             .rounded(px(4.0 * s))
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .hover(|style| style.bg(p.border.opacity(0.4)))
             .child(
                 gpui::svg()

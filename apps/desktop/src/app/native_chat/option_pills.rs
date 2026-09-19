@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -11,6 +12,7 @@ fn pill(
     kind: &'static str,
     label: &str,
     values: &Value,
+    open: bool,
     appearance: &ChatAppearance,
     cx: &mut Context<NativeChatView>,
 ) -> AnyElement {
@@ -58,7 +60,7 @@ fn pill(
         .relative()
         .role(gpui::Role::Button)
         .aria_label(title.clone())
-        .cursor_pointer()
+        .chat_cursor_pointer()
         .min_w_0()
         .max_w(px(160.0 * scale))
         .h(px(24.0 * scale))
@@ -68,6 +70,8 @@ fn pill(
         .justify_center()
         .gap(px(4.0 * scale))
         .rounded_full()
+        // React's ghost Button carries `aria-expanded:bg-muted`, so an open menu keeps its pill lit.
+        .when(open, |item| item.bg(appearance.border))
         .hover(|style| style.bg(appearance.border))
         .tooltip(move |window, cx| {
             gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
@@ -81,14 +85,46 @@ fn pill(
         } else {
             color
         };
-        item = item.child(
-            div().flex_shrink_0().mr(px(2.0 * scale)).child(
-                svg()
-                    .path(format!("agent-icons/{icon}.svg"))
-                    .size(px(14.0 * scale))
-                    .text_color(gpui::rgb(color)),
-            ),
-        );
+        let indicator = values["accountIndicator"]
+            .as_str()
+            .filter(|value| !value.is_empty());
+        let logo = svg()
+            .path(format!("agent-icons/{icon}.svg"))
+            .text_color(gpui::rgb(color));
+        /*
+        React's `.gx-account-mark` in packages/core-ui/accounts/accounts.css: once the session is
+        bound to an account, the pill's logo grows to 19.2px and dims to 0.3 so the account's mark
+        can sit centred on it in the account monospace, 9.9px semibold, muted except on Codex.
+        A session without a bound account keeps the plain 14px logo.
+        */
+        item = item.child(match indicator {
+            Some(indicator) => div()
+                .relative()
+                .flex_shrink_0()
+                .mr(px(2.0 * scale))
+                .size(px(19.2 * scale))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(logo.absolute().size_full().opacity(0.3))
+                .child(
+                    div()
+                        .font_family("Menlo")
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_size(px(9.9 * scale))
+                        .line_height(px(9.9 * scale))
+                        .text_color(if icon == "codex" {
+                            gpui::Hsla::from(gpui::rgb(0x7db8fb))
+                        } else {
+                            appearance.muted
+                        })
+                        .child(indicator.to_owned()),
+                ),
+            None => div()
+                .flex_shrink_0()
+                .mr(px(2.0 * scale))
+                .child(logo.size(px(14.0 * scale))),
+        });
     }
     if icon_only && let Some(mode) = values["modeValue"].as_str() {
         let (icon, color) = match mode {
@@ -198,7 +234,14 @@ impl NativeChatView {
                     .as_f32()
             };
             let agent = if kind == "model" && values["agentIcon"].is_string() {
-                20.0
+                if values["accountIndicator"]
+                    .as_str()
+                    .is_some_and(|v| !v.is_empty())
+                {
+                    26.0
+                } else {
+                    20.0
+                }
             } else {
                 0.0
             };
@@ -240,6 +283,8 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let values = &self.snapshot["optionLabels"];
+        let open =
+            |kind: &str| self.chat_menu_is_open(super::menu_toggle::option_pill_trigger_id(kind));
         div()
             .flex()
             .min_w_0()
@@ -249,12 +294,21 @@ impl NativeChatView {
             .text_size(px(13.0 * appearance.scale))
             .text_color(appearance.primary)
             .when(values["showModel"] == true, |item| {
-                item.child(pill("model", model, values, appearance, cx))
+                item.child(pill("model", model, values, open("model"), appearance, cx))
             })
             .when(
                 values["showOptions"] == true
                     && self.snapshot["composerOverflow"]["optionsOverflowed"] != true,
-                |item| item.child(pill("options", options, values, appearance, cx)),
+                |item| {
+                    item.child(pill(
+                        "options",
+                        options,
+                        values,
+                        open("options"),
+                        appearance,
+                        cx,
+                    ))
+                },
             )
             .when(
                 self.snapshot["optionMenus"]["mode"]
@@ -265,6 +319,7 @@ impl NativeChatView {
                         "mode",
                         values["mode"].as_str().unwrap_or_default(),
                         values,
+                        open("mode"),
                         appearance,
                         cx,
                     ))

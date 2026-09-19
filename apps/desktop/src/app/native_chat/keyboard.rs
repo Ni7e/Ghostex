@@ -82,6 +82,8 @@ impl NativeChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // React drops a pending pill open on any key press (`onKeyDownCapture` on its composer).
+        self.cancel_composer_reference_open();
         // The search field owns Enter, the arrows and Escape while it has focus.
         if self.search_key_down(event, window, cx) {
             cx.stop_propagation();

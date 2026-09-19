@@ -1,6 +1,7 @@
 use super::super::images::ChatImageSource;
 use super::super::{appearance::ChatAppearance, transcript::text};
 use super::window::ImageViewerWindow;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use base64::Engine as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -54,7 +55,7 @@ impl ImageViewerWindow {
             .flex_shrink_0()
             .items_center()
             .justify_center()
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .hover(|style| style.bg(p.input))
             .focus_visible(|style| style.bg(p.input))
             .tooltip(move |window, cx| {
@@ -204,7 +205,7 @@ impl Render for ImageViewerWindow {
         let content = match picture {
             Some(picture) => div()
                 .id("chat-image-viewer-picture")
-                .cursor_pointer()
+                .chat_cursor_pointer()
                 // Clicking the picture itself steps the zoom; only the surround dismisses.
                 .on_mouse_down(
                     gpui::MouseButton::Left,
@@ -319,7 +320,7 @@ impl Render for ImageViewerWindow {
                 .rounded_full()
                 .bg(surface)
                 .when(p.light, |this| this.border_1().border_color(p.border))
-                .cursor_pointer()
+                .chat_cursor_pointer()
                 .hover(|style| style.bg(p.input))
                 .focus_visible(|style| style.border_1().border_color(p.ring))
                 .child(

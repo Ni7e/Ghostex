@@ -33,6 +33,24 @@ impl ChatAppearance {
         rgb(if self.light { 0xc53030 } else { 0xef9999 }).into()
     }
 
+    /// The zoom this pane returns to: the Chat Lab's control in the Lab, `sessionChatZoomPercent`
+    /// otherwise. `zoom.rs` layers the keyboard's temporary override over it.
+    pub(crate) fn default_zoom_percent(state: &serde_json::Value) -> f32 {
+        let snapshot = crate::shared_settings::shared_sidebar_settings_snapshot();
+        Self::settings_zoom_percent(
+            state["previewSettings"]
+                .as_object()
+                .unwrap_or_else(|| snapshot.object()),
+        )
+    }
+
+    fn settings_zoom_percent(settings: &serde_json::Map<String, serde_json::Value>) -> f32 {
+        settings
+            .get("sessionChatZoomPercent")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(100.0) as f32
+    }
+
     pub(crate) fn current(state: &serde_json::Value) -> Self {
         let snapshot = crate::shared_settings::shared_sidebar_settings_snapshot();
         let settings = state["previewSettings"]
@@ -65,10 +83,8 @@ impl ChatAppearance {
             input: color(0x141414, 0xf4f4f5),
             composer_border: color(0x202020, 0xebebeb),
             composer_background: color(0x141414, 0xffffff),
-            scale: settings
-                .get("sessionChatZoomPercent")
-                .and_then(serde_json::Value::as_f64)
-                .unwrap_or(100.0) as f32
+            scale: super::zoom::keyboard_zoom_percent(state)
+                .unwrap_or_else(|| Self::settings_zoom_percent(settings))
                 / 100.0,
             font: settings
                 .get("sessionChatFontFamily")

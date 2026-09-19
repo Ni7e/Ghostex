@@ -123,21 +123,34 @@ impl NativeChatView {
             .map(|(id, _, _, _)| json!({"id":id,"width":28.0*scale}))
             .collect();
         let chat = cx.weak_entity();
-        gpui::canvas(move |bounds,window,cx| {
-            let measurements = json!({
-                "available":bounds.size.width.as_f32(), "options":options_width,
-                "actions":262.0*scale, "footerGap":8.0*scale, "actionGap":6.0*scale,
-                "clearance":16.0*scale, "hasOverflowOptions":has_overflow_options,
-                "controls":controls.clone(),
-            });
-            let chat = chat.clone();
-            window.defer(cx,move |_,cx| {
-                let _ = chat.update(cx,|chat,cx| {
-                    if !chat.composer_ready || chat.composer_measurements.as_ref() == Some(&measurements) { return; }
-                    chat.composer_measurements = Some(measurements.clone());
-                    chat.invoke(json!({"type":"measureComposer","measurements":measurements}),cx);
+        gpui::canvas(
+            move |bounds, window, cx| {
+                let measurements = json!({
+                    "available":bounds.size.width.as_f32(), "options":options_width,
+                    "actions":262.0*scale, "footerGap":8.0*scale, "actionGap":6.0*scale,
+                    "clearance":16.0*scale, "hasOverflowOptions":has_overflow_options,
+                    "controls":controls.clone(),
                 });
-            });
-        },|_,_,_,_|{}).absolute().size_full().into_any_element()
+                let chat = chat.clone();
+                window.defer(cx, move |_, cx| {
+                    let _ = chat.update(cx, |chat, cx| {
+                        if !chat.composer_ready
+                            || chat.composer_measurements.as_ref() == Some(&measurements)
+                        {
+                            return;
+                        }
+                        chat.composer_measurements = Some(measurements.clone());
+                        chat.invoke(
+                            json!({"type":"measureComposer","measurements":measurements}),
+                            cx,
+                        );
+                    });
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full()
+        .into_any_element()
     }
 }

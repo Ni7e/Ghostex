@@ -18,7 +18,13 @@ import { computeSessionChatOptions } from '@/packages/shared/session-chat-contro
 import { SessionChatComposerOptionsMenu } from './session-chat-composer-options-menu';
 import { modelPickerProvider } from './session-chat-model-picker-request';
 import { Switch } from '@/packages/components/ui/switch';
-import { modelScopeForPills, modelScopeMenuRow } from '@/packages/shared/session-chat-presentation/model-picker';
+import {
+  modelPicksSessionOnly,
+  modelScopeAlsoSetDefault,
+  modelScopeForPills,
+  modelScopeMenuRow,
+  subscribeModelPicksSessionOnly,
+} from '@/packages/shared/session-chat-presentation/model-picker';
 import { modelScopeDefaultPersistence } from '@/packages/shared/session-chat-controller/model-selection';
 import { QUICK_MODEL_PICKER_ENABLED } from './session-chat-model-picker-platform';
 import { resolveContextDetailStatus, type ContextDetailStatus } from './session-chat-context-details-agents';
@@ -41,7 +47,17 @@ import type { SessionChatPendingModelSelection } from '@/packages/shared/session
 
 import { SessionChatModelPickerLauncher, type ModelPickerActions } from './session-chat-model-picker-launcher';
 import { IconBoltFilled, IconChevronDown, IconMap } from '@tabler/icons-react';
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { postAppModalHostMessage } from '../app-modal-host-bridge';
 import { AppTooltip } from '../app-tooltip';
 import { formatSidebarHotkeyLabel } from '../hotkey-label';
@@ -512,9 +528,11 @@ export function SessionChatSessionOptionPills({
   );
 
   const pickerProvider = modelPickerProvider(catalog?.modelIcon);
-  const [alsoSetDefault, setAlsoSetDefaultState] = useState(() =>
+  const [storedAlsoSetDefault, setAlsoSetDefaultState] = useState(() =>
     modelScopeDefaultPersistence.read(controller.sessionKey ?? '')
   );
+  const sessionOnlyPicks = useSyncExternalStore(subscribeModelPicksSessionOnly, modelPicksSessionOnly);
+  const alsoSetDefault = modelScopeAlsoSetDefault(storedAlsoSetDefault, sessionOnlyPicks);
   useEffect(
     () => setAlsoSetDefaultState(modelScopeDefaultPersistence.read(controller.sessionKey ?? '')),
     [controller.sessionKey]

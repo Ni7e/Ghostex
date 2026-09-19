@@ -16,6 +16,8 @@ import {
   formatSessionChatContextPercentage,
   formatSessionChatContextTokens,
 } from '../session-chat-presentation/context-usage';
+import { adoptModelPicksSessionOnly } from '../session-chat-presentation/model-picker';
+import { sessionChatStatusLineReserved } from '../session-chat-presentation/status-line-layout';
 import type { ChatLifecycle } from './lifecycle';
 
 let preferences: Record<ContextDetailsAgent, SessionChatContextDetailsPreferences> = {
@@ -23,11 +25,15 @@ let preferences: Record<ContextDetailsAgent, SessionChatContextDetailsPreference
   codex: normalizeSessionChatContextDetailsPreferences(null, 'codex'),
 };
 export const currentNativeContextPreferences = () => preferences;
-let settings: { title: string | null; hideAccountEmails: boolean } = { title: null, hideAccountEmails: false };
+let settings: { title: string | null; hideAccountEmails: boolean; modelPicksSessionOnly?: boolean } = {
+  title: null,
+  hideAccountEmails: false,
+};
 export const nativeContextTitle = () => settings.title;
 export const nativeContextText = (text: string) => (settings.hideAccountEmails ? maskAccountText(text) : text);
 export function adoptNativeChatSettings(next: typeof settings) {
   settings = next;
+  adoptModelPicksSessionOnly(next.modelPicksSessionOnly === true);
   for (const listener of listeners) listener();
 }
 const listeners = new Set<() => void>();
@@ -72,6 +78,7 @@ export function computeNativeChatContext(
     ? resolveSessionChatContextDetailGroups(status, stored[agent], now, 'shown', session, agent)
     : null;
   const starred = hasDetails ? resolveSessionChatStarredContextDetails(status, stored[agent], now, session, agent) : [];
+  const hasConfiguredItems = hasDetails && Object.values(stored[agent].starred).some(Boolean);
   const label = percentage
     ? `Context window ${percentage} used`
     : usage.usedTokens === null
@@ -88,7 +95,9 @@ export function computeNativeChatContext(
       percentage,
       label,
       summary,
-      hasConfiguredItems: hasDetails && Object.values(stored[agent].starred).some(Boolean),
+      hasConfiguredItems,
+      // The native status line holds its row of space by the same rule React's `is-reserved` class applies.
+      statusLineReserved: sessionChatStatusLineReserved({ hasConfiguredItems, itemCount: starred.length }),
       details:
         details?.map((group) => ({
           ...group,

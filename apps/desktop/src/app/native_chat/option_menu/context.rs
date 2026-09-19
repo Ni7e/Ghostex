@@ -1,4 +1,5 @@
 use super::window::ChatOptionMenuPanel;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -137,7 +138,7 @@ impl ChatOptionMenuPanel {
                     .text_color(appearance.primary)
                     .when(disabled, |item| item.opacity(0.5))
                     .when(!disabled, |item| {
-                        item.cursor_pointer()
+                        item.chat_cursor_pointer()
                             .hover(|style| style.bg(appearance.border))
                     })
                     .tooltip(move |window, cx| {
@@ -184,7 +185,7 @@ impl ChatOptionMenuPanel {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .cursor_pointer()
+                                .chat_cursor_pointer()
                                 .child(
                                     svg()
                                         .path("titlebar/pencil.svg")

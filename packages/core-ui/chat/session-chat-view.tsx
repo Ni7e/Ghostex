@@ -2,6 +2,7 @@ import { computeSessionChatFiles } from '@/packages/shared/session-chat-controll
 import { queuedModelSelection } from '@/packages/shared/session-chat-controller/model-selection';
 import { sendSessionChatOptionAware } from '@/packages/shared/session-chat-controller/option-command';
 import { terminalNoticeChoiceAnswer } from '@/packages/shared/session-chat-presentation/terminal-prompts';
+import { sessionChatAccountIndicator } from '@/packages/shared/session-chat-presentation/option-pills';
 import { sessionChatSendBlockedReason, sessionChatComposerPlaceholder } from '@/packages/shared/session-chat-controller/composer-policy';
 import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { AccountSwitchCard } from '../accounts/account-switch-card';
@@ -2003,9 +2004,7 @@ export function SessionChatView({
                                     canSend={canSend}
                                     canSendKey={chat.sendKey !== undefined}
                                     controller={sessionOptions}
-                                    accountIndicator={
-                                      activeAccount ? activeAccount.indicator || activeAccount.selector : undefined
-                                    }
+                                    accountIndicator={sessionChatAccountIndicator(accountState.data)}
                                     detectedOptions={detectedOptions}
                                     {...(draftAgents ? { draftAgents } : {})}
                                     {...(chat.sessionAgentId !== null ? { draftAgentId: chat.sessionAgentId } : {})}

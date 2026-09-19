@@ -1,5 +1,6 @@
 use super::disclosure_body::{DisclosureRail, disclosure_body};
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::StatefulInteractiveElement;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -232,7 +233,7 @@ impl NativeChatView {
             .items_center()
             .justify_center()
             .flex_shrink_0()
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .child(
                 gpui::svg()
                     .path(if expanded {
@@ -275,7 +276,7 @@ impl NativeChatView {
             .gap(px(6.0 * s))
             .rounded(px(4.0 * s))
             .text_color(p.primary)
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .hover(|style| style.bg(p.border.opacity(0.4)))
             .child(
                 div()

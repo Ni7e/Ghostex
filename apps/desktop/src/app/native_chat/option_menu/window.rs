@@ -43,7 +43,11 @@ pub(super) struct ChatOptionMenuPanel {
 }
 
 impl ChatOptionMenu {
-    pub(super) fn close(&mut self, command: Option<Value>, cx: &mut Context<Self>) {
+    pub(in crate::app::native_chat) fn close(
+        &mut self,
+        command: Option<Value>,
+        cx: &mut Context<Self>,
+    ) {
         self.close_with_focus(command, true, cx);
     }
 
@@ -80,6 +84,7 @@ impl ChatOptionMenu {
                         .is_some_and(|menu| menu.entity_id() == identity)
                     {
                         chat.option_menu = None;
+                        chat.menu_toggle.note_closed();
                     }
                     if let Some(command) = command {
                         chat.handle_action(
@@ -103,6 +108,11 @@ impl ChatOptionMenu {
                 .update(cx, |_, window, _| window.is_window_active())
                 .unwrap_or(false)
         }) {
+            // The press that took the window away is the one a trigger is about to report as a
+            // click, so the trigger it belonged to is remembered before the menu goes (menu_toggle.rs).
+            let _ = self
+                .chat
+                .update(cx, |chat, _| chat.menu_toggle.note_dismissed());
             self.close_with_focus(None, false, cx);
         }
     }
@@ -410,6 +420,10 @@ impl NativeChatView {
         else {
             return;
         };
+        if self.chat_menu_toggled_shut(super::super::menu_toggle::option_pill_trigger_id(kind), cx)
+        {
+            return;
+        }
         self.show_chat_menu(
             rows,
             trigger,
@@ -495,5 +509,7 @@ impl NativeChatView {
             }
         });
         self.option_menu = Some(menu);
+        self.menu_toggle.note_opened();
+        cx.notify();
     }
 }

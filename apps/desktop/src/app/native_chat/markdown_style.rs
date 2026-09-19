@@ -78,6 +78,10 @@ const LIST_ITEM_GAP: f32 = 4.0;
 
 pub(super) fn text_style(p: &ChatAppearance) -> TextViewStyle {
     let mut style = TextViewStyle::default()
+        // The chat view never changes the mouse cursor (see native_chat/cursor.rs), so the
+        // rendered Markdown asks for no I-beam over its selectable text and no hand over its
+        // links, reference pills or linked images. Selecting and clicking are unaffected.
+        .default_cursor(true)
         .paragraph_gap(rems(VISUAL.paragraph_gap / 16.0 * p.scale))
         .heading_font_size(|level, base| {
             base * VISUAL.heading_font_sizes[(level.clamp(1, 6) - 1) as usize] / 14.0

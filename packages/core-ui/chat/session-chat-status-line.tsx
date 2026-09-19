@@ -10,6 +10,7 @@ import { postAppModalHostMessage } from '../app-modal-host-bridge';
 import { AppTooltip } from '../app-tooltip';
 import type { SessionChatContextDetailItem } from './session-chat-context-details';
 import { useSessionChatStatusLineLayout } from './use-session-chat-status-line-layout';
+import { sessionChatStatusLineReserved } from '@/packages/shared/session-chat-presentation/status-line-layout';
 import { playCopySound } from '../copy-sound';
 
 function copyStatusLineItem(copy: { text: string; label: string }): void {
@@ -37,7 +38,7 @@ export function SessionChatStatusLine({
 }) {
   const { ref, rowStarts } = useSessionChatStatusLineLayout(items);
   const visible = items.length > 0;
-  const shouldReserveSpace = hasConfiguredItems || items.length > 0;
+  const shouldReserveSpace = sessionChatStatusLineReserved({ hasConfiguredItems, itemCount: items.length });
   return (
     <div
       ref={ref}

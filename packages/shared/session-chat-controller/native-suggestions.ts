@@ -18,11 +18,27 @@ import {
   sessionChatSlashHeadingForAgent,
   sessionChatSlashQuery,
 } from '@/packages/core-ui/chat/session-chat-slash-commands';
+import { sessionChatWelcomeAgentName } from '../session-chat-presentation/new-session-welcome';
+import type { SessionChatAvailableAgent } from '@/packages/shared/session-chat';
 import type { computeSessionChatFiles } from './files';
 import type { computeSessionChatSkills } from './skills';
 
 type Sources = ReturnType<typeof computeSessionChatFiles> &
-  ReturnType<typeof computeSessionChatSkills> & { agent: string | null };
+  ReturnType<typeof computeSessionChatSkills> & {
+    agent: string | null;
+    sessionAgentId?: string | null;
+    availableAgents?: readonly SessionChatAvailableAgent[] | null;
+  };
+
+/**
+ * The `$` list is headed with the agent's own display name ("Claude skills"), the way React heads
+ * it in `session-chat-view.tsx`: a project custom agent's row name wins, because its own id has no
+ * entry in the shared agent catalog. The `/` list keeps the catalog's product heading instead.
+ */
+function skillsHeading(sources: Sources): string {
+  const row = sources.availableAgents?.find((agent) => agent.agentId === sources.sessionAgentId);
+  return `${row?.name ?? sessionChatWelcomeAgentName(sources.agent) ?? 'Agent'} skills`;
+}
 
 export class NativeComposerSuggestions {
   private text = '';
@@ -116,7 +132,7 @@ export class NativeComposerSuggestions {
         kind === 'slash'
           ? sessionChatSlashHeadingForAgent(sources.agent)
           : kind === 'skill'
-            ? `${sessionChatSlashHeadingForAgent(sources.agent)} skills`
+            ? skillsHeading(sources)
             : SESSION_CHAT_FILE_SUGGESTION_HEADING,
       status:
         kind === 'skill'
@@ -127,6 +143,9 @@ export class NativeComposerSuggestions {
             ? 'Listing project files…'
             : null,
       retry: kind === 'skill' && !!sources.skillsError,
+      // React turns a loader beside "Loading skills…" and "Listing project files…", and shows no
+      // spinner beside the error row or "No skills available.".
+      loading: kind === 'skill' ? sources.skillsLoading : kind === 'file' && !rows.length,
     };
   }
 

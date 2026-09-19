@@ -8,6 +8,7 @@
 //! in the composer" rule live in packages/shared/session-chat-controller/native-message-actions.ts.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
@@ -169,7 +170,7 @@ impl RewindWindow {
             .font_weight(gpui::FontWeight::MEDIUM)
             .when(disabled, |item| item.opacity(0.5).tab_stop(false))
             .when(!disabled, |item| {
-                item.cursor_pointer().hover(|style| style.bg(p.input))
+                item.chat_cursor_pointer().hover(|style| style.bg(p.input))
             })
             .focus_visible(|style| style.border_color(p.ring))
             .child(label)

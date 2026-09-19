@@ -1,5 +1,6 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
 use crate::app::helpers::ThrottledAnimationExt;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AppContext as _, Context, Focusable as _, InteractiveElement as _, IntoElement,
@@ -67,7 +68,7 @@ impl NativeChatView {
                 .py(px(12.0 * s))
                 .text_size(px(12.0 * s))
                 .line_height(relative(1.4))
-                .cursor_pointer()
+                .chat_cursor_pointer()
                 .child(indicator)
                 .child(
                     div()
@@ -266,7 +267,7 @@ impl NativeChatView {
                         .when(disabled, |button| button.opacity(0.5))
                         .when(!disabled, |button| {
                             button
-                                .cursor_pointer()
+                                .chat_cursor_pointer()
                                 .hover(|style| style.bg(p.input))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.invoke(

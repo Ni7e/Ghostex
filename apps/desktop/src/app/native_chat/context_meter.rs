@@ -1,11 +1,74 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, canvas, div, point, px,
 };
 use serde_json::{Value, json};
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
+
+/// One status-line row: the value of `SESSION_CHAT_STATUS_LINE_ROW_HEIGHT_PX` in
+/// `packages/shared/session-chat-presentation/status-line-layout.ts`, which React applies as the
+/// `min-height` of `.ghostex-chat-status-line.is-reserved`.
+pub(super) const STATUS_LINE_ROW_HEIGHT: f32 = 16.0;
+
+/// The context meter's toggle key in `menu_toggle.rs`.
+const CONTEXT_METER_TRIGGER: &str = "chat-context-meter";
+
+thread_local! {
+    /// CDXC:SessionChat 2026-09-19 WHY:
+    /// React knows from its first render whether a session shows a status line, because it reads the
+    /// starred context details straight out of client storage. The native chat learns it from the
+    /// shared controller, which replies over a CEF round trip on another thread, so the box used to
+    /// paint without the line's row and then jump when the answer landed. The last answer for this
+    /// session, or failing that the last answer any session gave (kept on disk, so a fresh process
+    /// has one too), stands until the controller speaks.
+    static REMEMBERED_STATUS_LINES: RefCell<HashMap<String, bool>> = RefCell::new(HashMap::new());
+    static LAST_STATUS_LINE_RESERVATION: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+fn status_line_state_path() -> std::path::PathBuf {
+    crate::app::helpers::ghostex_state_root().join("gpui-session-chat-status-line.json")
+}
+
+/// The last answer any session gave, read from disk once per process.
+fn last_status_line_reservation() -> bool {
+    LAST_STATUS_LINE_RESERVATION.with(|cached| {
+        if let Some(reserved) = cached.get() {
+            return reserved;
+        }
+        let reserved = std::fs::read_to_string(status_line_state_path())
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|state| state["reserved"].as_bool())
+            .unwrap_or(false);
+        cached.set(Some(reserved));
+        reserved
+    })
+}
+
+fn remember_last_status_line_reservation(reserved: bool) {
+    if last_status_line_reservation() == reserved {
+        return;
+    }
+    LAST_STATUS_LINE_RESERVATION.with(|cached| cached.set(Some(reserved)));
+    let path = status_line_state_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, json!({ "reserved": reserved }).to_string());
+}
+
+pub(super) fn remembered_status_line_reservation(session: &str) -> bool {
+    REMEMBERED_STATUS_LINES
+        .with_borrow(|sessions| sessions.get(session).copied())
+        .unwrap_or_else(last_status_line_reservation)
+}
 
 pub(super) fn ring(percentage: f32, appearance: &ChatAppearance) -> AnyElement {
     let scale = appearance.scale;
@@ -71,6 +134,29 @@ pub(super) fn ring(percentage: f32, appearance: &ChatAppearance) -> AnyElement {
 }
 
 impl NativeChatView {
+    /// Whether the status line holds its row of space, by the rule both renderers share
+    /// (`sessionChatStatusLineReserved` in the shared `status-line-layout.ts`). The shared
+    /// controller answers it; until it has, the last answer for this session stands.
+    pub(super) fn status_line_reserved(&self) -> bool {
+        self.status_line_reserved
+    }
+
+    pub(super) fn adopt_status_line_reservation(&mut self) {
+        let context = &self.snapshot["contextMeter"];
+        if !context.is_object() {
+            return;
+        }
+        let reserved = context["statusLineReserved"] == true
+            || context["hasConfiguredItems"] == true
+            || context["starred"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty());
+        self.status_line_reserved = reserved;
+        let session = self.config.session_id.clone();
+        REMEMBERED_STATUS_LINES.with_borrow_mut(|sessions| sessions.insert(session, reserved));
+        remember_last_status_line_reservation(reserved);
+    }
+
     pub(super) fn context_menu_rows(&self) -> Vec<Value> {
         vec![json!({"context":self.snapshot["contextMeter"]})]
     }
@@ -97,13 +183,19 @@ impl NativeChatView {
             .items_center()
             .justify_center()
             .rounded_full()
-            .cursor_pointer()
+            .chat_cursor_pointer()
+            .when(self.chat_menu_is_open(CONTEXT_METER_TRIGGER), |this| {
+                this.bg(appearance.border)
+            })
             .hover(|style| style.bg(appearance.border))
             .tooltip(move |window, cx| {
                 gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
             })
             .child(ring(percentage, appearance))
             .on_click(cx.listener(move |chat, _, window, cx| {
+                if chat.chat_menu_toggled_shut(CONTEXT_METER_TRIGGER, cx) {
+                    return;
+                }
                 let width = if chat.snapshot["contextMeter"]["details"].is_array() {
                     320.0
                 } else {
@@ -202,7 +294,7 @@ impl NativeChatView {
                         gpui_component::tooltip::Tooltip::new(label.clone()).build(window, cx)
                     })
                     .when_some(copy, |item, copy| {
-                        item.cursor_pointer()
+                        item.chat_cursor_pointer()
                             .on_click(cx.listener(move |_, _, _, cx| {
                                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(
                                     copy.clone(),
@@ -214,8 +306,8 @@ impl NativeChatView {
         }
         lines.push(line.into_any_element());
         let chat = cx.weak_entity();
-        div().relative().flex().flex_col().w_full().min_w_0().min_h(px(16.0*scale)).px(px(4.0*scale))
-            .text_size(px(11.0*scale)).line_height(px(16.0*scale)).text_color(appearance.muted.opacity(0.8)).children(lines)
+        div().relative().flex().flex_col().w_full().min_w_0().min_h(px(STATUS_LINE_ROW_HEIGHT*scale)).px(px(4.0*scale))
+            .text_size(px(11.0*scale)).line_height(px(STATUS_LINE_ROW_HEIGHT*scale)).text_color(appearance.muted.opacity(0.8)).children(lines)
             .child(canvas(move |bounds,window,cx| {
                 let measurement=json!({"available":(bounds.size.width.as_f32()-8.0*scale).max(0.0),"widths":widths,"separator":18.0*scale});
                 let chat=chat.clone();

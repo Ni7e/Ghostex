@@ -11,6 +11,7 @@
 //! selected one a stronger one. React highlights the exact characters.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Focusable as _, InteractiveElement as _,
@@ -242,7 +243,7 @@ impl NativeChatView {
                                 .id("chat-search-close")
                                 .role(gpui::Role::Button)
                                 .aria_label("Close search")
-                                .cursor_pointer()
+                                .chat_cursor_pointer()
                                 .size(px(24.0 * s))
                                 .flex()
                                 .items_center()

@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, AppContext as _, Context, Focusable as _, InteractiveElement as _, IntoElement,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, div, px,
@@ -78,7 +79,7 @@ impl NativeChatView {
                                 .child(
                                     div()
                                         .id("copy-note")
-                                        .cursor_pointer()
+                                        .chat_cursor_pointer()
                                         .size(px(24.0 * s))
                                         .flex()
                                         .items_center()

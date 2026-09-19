@@ -9,6 +9,7 @@ use super::disclosure_body::{DisclosureRail, disclosure_body};
 use super::{
     appearance::ChatAppearance, fonts::CHAT_MONO, state::NativeChatView, transcript::text,
 };
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -128,7 +129,7 @@ impl NativeChatView {
             .gap(px(6.0 * s))
             .rounded(px(4.0 * s))
             .text_color(p.muted)
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .hover(|style| style.bg(p.border.opacity(0.4)))
             .child(
                 div()
@@ -181,7 +182,7 @@ impl NativeChatView {
             .gap(px(6.0 * s))
             .rounded(px(4.0 * s))
             .when(has_detail, |this| {
-                this.cursor_pointer()
+                this.chat_cursor_pointer()
                     .hover(|style| style.bg(p.border.opacity(0.4)))
                     .on_click(
                         cx.listener(move |view, _, _, cx| view.toggle_disclosure(&toggle_key, cx)),

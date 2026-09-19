@@ -25,6 +25,7 @@ import type {
   SessionChatModelSelectionScope,
 } from '@/packages/shared/session-chat';
 import type { GxserverSelectSessionChatModelResult } from '@/packages/shared/gxserver-protocol';
+import { adoptModelPicksSessionOnly } from '@/packages/shared/session-chat-presentation/model-picker';
 import './model-picker-host.css';
 
 const clientStorage = storageScope(["terminalModel"]);
@@ -36,6 +37,8 @@ interface PickerOpen {
   projectId: string;
   sessionId: string;
   hotkeys: unknown;
+  /** The saved Session-only model picks setting, read when the window opens. */
+  modelPicksSessionOnly?: boolean;
   connection: { baseUrl: string; authToken: string; protocolVersion: number };
 }
 
@@ -103,6 +106,7 @@ function ModelPickerHost() {
       if (message?.type !== 'open' || message.modal !== 'modelPicker') return;
       if (!modelPickerProvider(message.provider)) return;
       interacted.current = false;
+      adoptModelPicksSessionOnly(message.modelPicksSessionOnly === true);
       setCancelRequested(false);
       setError(undefined);
       const selected = readSelection(message);

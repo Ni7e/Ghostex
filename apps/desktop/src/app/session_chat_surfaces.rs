@@ -714,6 +714,13 @@ impl GhostexGpuiApp {
                 .to_string(),
             ),
             (
+                "modelPicksSessionOnly",
+                gpui_session_chat_model_picks_session_only_from_settings(
+                    shared_settings::shared_sidebar_settings_snapshot().object(),
+                )
+                .to_string(),
+            ),
+            (
                 "fileEditPreviews",
                 gpui_session_chat_file_edit_previews_from_settings(
                     shared_settings::shared_sidebar_settings_snapshot().object(),

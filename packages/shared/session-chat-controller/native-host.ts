@@ -692,7 +692,14 @@ function startController(config: { clientId: string; initialSnapshot?: any; init
       lifecycle
     );
     const controls = computeNativeChatControls(chat, rpc, lifecycle);
-    const options = computeNativeChatOptions(chat, optionPersistence, rpc, onUnconfirmedOptions, lifecycle);
+    const options = computeNativeChatOptions(
+      chat,
+      optionPersistence,
+      rpc,
+      onUnconfirmedOptions,
+      controls.accounts,
+      lifecycle
+    );
     lifecycle.useEffect(() => {
       if (chat.returnedPrompt) void action({ type: 'restoreReturned', returned: chat.returnedPrompt });
     }, [chat.returnedPrompt?.id]);
@@ -960,6 +967,9 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       }
       case 'modelPickerMeasure':
         modelPicker?.measure(command.size);
+        break;
+      case 'modelPickerPane':
+        modelPicker?.pane(command.size);
         break;
       case 'modelPickerKey':
         modelPicker?.key(command.key);
@@ -1432,6 +1442,17 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
             kind: 'host',
             method: 'openLink',
             params: { url: target.url, external: command.external === true },
+          });
+        break;
+      }
+      case 'openComposerReference': {
+        // React's composer (`use-session-chat-reference-interactions.ts`) opens a pill only when its destination is a local file; a web link pill is inert.
+        const target = classifySessionChatLinkHref(command.href);
+        if (target.kind === 'file')
+          requests.push({
+            kind: 'host',
+            method: 'openFile',
+            params: { path: target.path, ...sessionChatFilePositionFromHref(command.href) },
           });
         break;
       }

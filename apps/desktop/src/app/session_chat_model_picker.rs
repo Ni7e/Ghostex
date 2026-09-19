@@ -89,6 +89,7 @@ impl GhostexGpuiApp {
             "type": "open", "modal": modal.modal_id(),
             "projectId": project_id, "sessionId": session_id, "provider": provider,
             "hotkeys": settings.object().get("hotkeys"),
+            "modelPicksSessionOnly": gpui_session_chat_model_picks_session_only_from_settings(settings.object()),
             "connection": { "baseUrl": bootstrap.base_url, "authToken": bootstrap.auth_token,
                 "protocolVersion": bootstrap.protocol_version },
         });

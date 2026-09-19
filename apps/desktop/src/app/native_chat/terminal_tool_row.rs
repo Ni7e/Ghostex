@@ -5,6 +5,7 @@
 //! the same painted tool block under it.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -35,7 +36,7 @@ impl NativeChatView {
             .min_w_0()
             .gap(px(8.0 * s))
             .when(expandable, |this| {
-                this.cursor_pointer().on_click(
+                this.chat_cursor_pointer().on_click(
                     cx.listener(|view, _, _, cx| view.toggle_disclosure(EXPANDED_KEY, cx)),
                 )
             })

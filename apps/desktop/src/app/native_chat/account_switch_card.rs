@@ -15,6 +15,7 @@ The 600px and 480px container queries there are the `Layout` variants here.
 use super::{
     appearance::ChatAppearance, new_session_welcome::brand_logo_color, state::NativeChatView,
 };
+use crate::app::native_chat::cursor::ChatCursor as _;
 use crate::app::window::native_modal_kit::css_mix;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -622,7 +623,7 @@ impl NativeChatView {
                                 .text_color(hsla(palette.title))
                                 .when(busy, |this| this.opacity(0.5))
                                 .when(!busy, |this| {
-                                    this.cursor_pointer()
+                                    this.chat_cursor_pointer()
                                         .hover(|style| style.bg(hsla(palette.route_surface)))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.invoke(command.clone(), cx)

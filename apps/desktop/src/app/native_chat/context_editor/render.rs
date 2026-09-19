@@ -1,5 +1,6 @@
 use super::super::{appearance::ChatAppearance, transcript::text};
 use super::window::ContextEditorWindow;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, Render,
@@ -52,7 +53,7 @@ impl ContextEditorWindow {
                 item.bg(p.foreground).text_color(p.background)
             })
             .when(disabled, |item| item.opacity(0.5))
-            .when(!disabled, |item| item.cursor_pointer())
+            .when(!disabled, |item| item.chat_cursor_pointer())
             .child(label)
             .on_key_down(cx.listener(move |this, event, window, cx| {
                 this.activate_key(event, json!({"type":command}), window, cx)

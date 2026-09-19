@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, images::ChatImageSource, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement,
@@ -23,6 +24,25 @@ impl NativeChatView {
             json!({"type":"removeAttachment","text":self.draft,"start":start,"end":end}),
             cx,
         );
+    }
+
+    /// The draft's image references in the shape the viewer reads, and where `path` sits in them.
+    ///
+    /// The viewer reads the same projected shape a transcript picture uses (`images.rs`), so a
+    /// pasted image reaches it through the session's transport instead of a local file read.
+    pub(super) fn composer_image_gallery(&self, path: &str) -> (Vec<Value>, usize) {
+        let paths: Vec<&str> = self
+            .composer_references
+            .iter()
+            .filter(|reference| reference.kind == "image")
+            .map(|reference| reference.path.as_str())
+            .collect();
+        let index = paths.iter().position(|other| *other == path).unwrap_or(0);
+        let images = paths
+            .into_iter()
+            .map(|path| json!({"transport":"read","path":path,"label":path,"alt":"Pasted image"}))
+            .collect();
+        (images, index)
     }
 
     /// The composer's pasted and dropped image thumbnails, with the uploading tile React shows.
@@ -60,8 +80,10 @@ impl NativeChatView {
             .items_center()
             .gap(px(8.0 * s))
             .pb(px(8.0 * s));
+        let active = self.composer_active_image(cx);
         for (index, (range, path)) in attachments.into_iter().enumerate() {
             let removed = range.clone();
+            let outlined = active.as_deref() == Some(path.as_str());
             let source = self.chat_image(&images[index], cx);
             let open = images.clone();
             row = row.child(
@@ -74,7 +96,7 @@ impl NativeChatView {
                             .id(("chat-attachment", index))
                             .role(gpui::Role::Button)
                             .aria_label("View pasted image")
-                            .cursor_pointer()
+                            .chat_cursor_pointer()
                             .size_full()
                             .rounded(px(8.0 * s))
                             .overflow_hidden()
@@ -98,6 +120,22 @@ impl NativeChatView {
                                 this.open_image_viewer(open.clone(), index, cx)
                             })),
                     )
+                    // React's `outline: 2px solid white; outline-offset: 1px` on the active
+                    // thumbnail. GPUI has no outline, so a ring is painted around the tile; it has
+                    // no id or listener, so it takes no input.
+                    .when(outlined, |tile| {
+                        tile.child(
+                            div()
+                                .absolute()
+                                .top(px(-3.0 * s))
+                                .left(px(-3.0 * s))
+                                .right(px(-3.0 * s))
+                                .bottom(px(-3.0 * s))
+                                .rounded(px(11.0 * s))
+                                .border_2()
+                                .border_color(gpui::white()),
+                        )
+                    })
                     .child(
                         div()
                             .id(("chat-attachment-remove", index))
@@ -106,7 +144,7 @@ impl NativeChatView {
                             .absolute()
                             .top(px(-5.0 * s))
                             .right(px(-5.0 * s))
-                            .cursor_pointer()
+                            .chat_cursor_pointer()
                             .size(px(16.0 * s))
                             .flex()
                             .items_center()

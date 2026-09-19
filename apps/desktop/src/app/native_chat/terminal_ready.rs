@@ -10,6 +10,7 @@
 //! in packages/core-ui/styles/chat.css.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, div, px,
@@ -44,7 +45,7 @@ impl NativeChatView {
             .id("terminalView")
             .role(gpui::Role::Button)
             .aria_label("Terminal View")
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .size(px(28.0 * p.scale))
             .flex()
             .items_center()

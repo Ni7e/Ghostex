@@ -8,6 +8,7 @@
 //! lays them out.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement, MouseButton,
@@ -54,7 +55,7 @@ impl NativeChatView {
             .justify_center()
             .size(px(26.0 * s))
             .rounded(px(6.0 * s))
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .hover(|style| style.bg(p.border.opacity(0.6)))
             .child(
                 gpui::svg()
@@ -326,7 +327,7 @@ impl NativeChatView {
             .aria_label(format!("View {label}'s transcript"))
             .min_w_0()
             .truncate()
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .text_color(p.control_primary)
             .hover(|style| style.text_decoration_1().text_decoration_color(p.muted))
             .tooltip(move |window, cx| {

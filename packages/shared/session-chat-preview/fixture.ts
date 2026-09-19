@@ -1,5 +1,6 @@
 import type { GxserverReadSessionChatResult, SessionChatMessage } from '../session-chat';
 import { DEFAULT_ACCOUNT_POLICY, type AgentAccount, type AgentAccountsState } from '../agent-accounts';
+import { LINKS_PREVIEW_MESSAGES } from './links';
 import { MARKDOWN_PREVIEW } from './markdown-fixture';
 import { previewMessage } from './message';
 import { chatPreviewScenarioOverride } from './scenarios';
@@ -101,13 +102,7 @@ export function chatPreviewSnapshot(config: ChatPreviewConfig): GxserverReadSess
       config.scenario === 'empty'
         ? []
         : config.scenario === 'links'
-          ? [
-              previewMessage(
-                '1',
-                'assistant',
-                '[Relative file](src/chat.ts:42:8)\n\n[File with spaces](/sample/My%20Project/chat.ts:9)\n\n[File URL](file:///sample/project/chat.ts:12)\n\n[Website](https://example.com/)'
-              ),
-            ]
+          ? LINKS_PREVIEW_MESSAGES
           : config.scenario === 'markdown'
             ? [
                 previewMessage('1', 'user', 'Compare inline code wrapping and selection.'),
@@ -223,6 +218,9 @@ export function chatPreviewAccounts(now = Date.now()): AgentAccountsState {
   const at = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
   const account = (
     id: string,
+    // The helper's slot number, which is also the mark the model pill draws over the provider logo
+    // for an account without its own indicator.
+    slot: string,
     name: string,
     email: string,
     fiveHour: number,
@@ -231,7 +229,7 @@ export function chatPreviewAccounts(now = Date.now()): AgentAccountsState {
   ): AgentAccount => ({
     id,
     provider: 'codex',
-    selector: id,
+    selector: slot,
     name,
     email,
     color: 'neutral',
@@ -248,10 +246,10 @@ export function chatPreviewAccounts(now = Date.now()): AgentAccountsState {
   });
   return {
     accounts: [
-      account('work', 'work@example.com', 'work@example.com', 96, 82),
-      account('personal', 'Personal', 'me@example.com', 12, 31),
-      account('spare', 'spare@example.com', 'spare@example.com', 40, 55),
-      account('old', 'old@example.com', 'old@example.com', 0, 0, 'loginRequired'),
+      account('work', '1', 'work@example.com', 'work@example.com', 96, 82),
+      account('personal', '2', 'Personal', 'me@example.com', 12, 31),
+      account('spare', '3', 'spare@example.com', 'spare@example.com', 40, 55),
+      account('old', '4', 'old@example.com', 'old@example.com', 0, 0, 'loginRequired'),
     ],
     helpers: [],
     defaults: { claude: DEFAULT_ACCOUNT_POLICY, codex: DEFAULT_ACCOUNT_POLICY },

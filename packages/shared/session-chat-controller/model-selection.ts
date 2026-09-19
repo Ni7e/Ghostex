@@ -7,6 +7,9 @@ import type {
 } from '../session-chat';
 import {
   modelPickerSupportsSessionScope,
+  modelPicksSessionOnly,
+  modelScopeAlsoSetDefault,
+  subscribeModelPicksSessionOnly,
   type ModelPickerRequest,
   type ModelPickerSelection,
 } from '../session-chat-presentation/model-picker';
@@ -28,9 +31,9 @@ export interface ModelSelectionPersistence {
 
 const storage = storageScope(['modelOutbox']);
 /**
- * CDXC:SessionChat 2026-09-18 DECISION:
- * User: the composer's model and effort pills get a checkbox rather than silently becoming session-only.
- * It is per session and off by default, so a pill pick leaves the agent's saved default alone until this session says otherwise.
+ * CDXC:SessionChat 2026-09-19 DECISION:
+ * User: the composer's model and effort pills get a checkbox rather than silently becoming session-only, and it is per session.
+ * Until a session touches it, it follows the Session-only model picks setting, which is off by default, so a pill pick saves the agent's default. This supersedes the 2026-09-18 default of unchecked.
  */
 const scopeStorage = storageScope(['modelScopeDefault']);
 const scopeStorageKey = (key: string) => `ghostex.model-selection-also-default.${key}`;
@@ -64,11 +67,13 @@ export const modelSelectionPersistence: ModelSelectionPersistence = {
 };
 
 export const modelScopeDefaultPersistence = {
-  read(key: string): boolean {
+  /** `null` means this session never touched the switch. */
+  read(key: string): boolean | null {
     try {
-      return scopeStorage.getItem(scopeStorageKey(key)) === 'true';
+      const stored = scopeStorage.getItem(scopeStorageKey(key));
+      return stored === 'true' ? true : stored === 'false' ? false : null;
     } catch {
-      return false;
+      return null;
     }
   },
   write(key: string, value: boolean): void {
@@ -147,7 +152,13 @@ export function computeModelSelectionOutbox(
   const persistence = params.persistence ?? modelSelectionPersistence;
   const key = params.sessionKey ?? '';
   const [outbox, setOutbox] = useState<ModelSelectionIntent | null>(() => persistence.read(key));
-  const [alsoSetDefault, setAlsoSetDefaultState] = useState(() => modelScopeDefaultPersistence.read(key));
+  const [storedAlsoSetDefault, setAlsoSetDefaultState] = useState(() => modelScopeDefaultPersistence.read(key));
+  const [sessionOnly, setSessionOnly] = useState(modelPicksSessionOnly);
+  useEffect(() => {
+    setSessionOnly(modelPicksSessionOnly());
+    return subscribeModelPicksSessionOnly(() => setSessionOnly(modelPicksSessionOnly()));
+  }, []);
+  const alsoSetDefault = modelScopeAlsoSetDefault(storedAlsoSetDefault, sessionOnly);
   const latest = useRef(outbox);
   const receipt = useRef<{
     id: string;

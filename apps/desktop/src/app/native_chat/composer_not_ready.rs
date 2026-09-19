@@ -8,6 +8,7 @@
 //! expand, and a switch to the session's terminal surface.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, div, px,
@@ -106,7 +107,7 @@ impl NativeChatView {
                 } else {
                     "Show terminal"
                 })
-                .cursor_pointer()
+                .chat_cursor_pointer()
                 .flex()
                 .items_center()
                 .gap(px(6.0 * s))

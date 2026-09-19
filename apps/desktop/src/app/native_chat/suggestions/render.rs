@@ -1,8 +1,9 @@
 use super::super::appearance::ChatAppearance;
 use super::window::SuggestionPanel;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    Context, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    AnimationExt as _, Context, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use serde_json::json;
@@ -48,18 +49,22 @@ impl Render for SuggestionPanel {
                 div()
                     .flex()
                     .items_center()
+                    .gap(px(10.0 * s))
                     .justify_between()
                     .px(px(12.0 * s))
                     .py(px(8.0 * s))
                     .text_color(p.muted)
-                    .child(status.to_owned())
+                    .when(data["loading"] == true, |row| {
+                        row.child(suggestion_spinner(px(16.0 * s), p.muted))
+                    })
+                    .child(div().flex_1().min_w_0().child(status.to_owned()))
                     .when(data["retry"] == true, |row| {
                         row.child(
                             div()
                                 .id("retry-skills")
                                 .role(gpui::Role::Button)
                                 .aria_label("Retry")
-                                .cursor_pointer()
+                                .chat_cursor_pointer()
                                 .border_1()
                                 .border_color(p.border)
                                 .rounded(px(6.0 * s))
@@ -94,7 +99,7 @@ impl Render for SuggestionPanel {
                     .px(px(12.0 * s))
                     .py(px(8.0 * s))
                     .rounded(px(8.0 * s))
-                    .cursor_pointer()
+                    .chat_cursor_pointer()
                     .when(index == selected, |row| {
                         row.bg(gpui::rgb(if p.light { 0xf4f4f5 } else { 0x333333 }))
                     })
@@ -155,4 +160,28 @@ impl Render for SuggestionPanel {
             .overflow_hidden()
             .child(body)
     }
+}
+
+/// React's `IconLoader2` beside "Loading skills…" and "Listing project files…", still when the
+/// system asks for reduced motion.
+fn suggestion_spinner(size: gpui::Pixels, color: gpui::Hsla) -> gpui::AnyElement {
+    let glyph = gpui::svg()
+        .path("titlebar/loader2.svg")
+        .size(size)
+        .flex_shrink_0()
+        .text_color(color);
+    if crate::app::helpers::gpui_macos_reduce_motion_enabled() {
+        return glyph.into_any_element();
+    }
+    glyph
+        .with_animation(
+            "suggestion-loading-spinner",
+            gpui::Animation::new(std::time::Duration::from_millis(900)).repeat(),
+            |svg, delta| {
+                svg.with_transformation(gpui::Transformation::rotate(gpui::radians(
+                    delta * std::f32::consts::TAU,
+                )))
+            },
+        )
+        .into_any_element()
 }

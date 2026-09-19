@@ -20,6 +20,7 @@ import {
   getghostexHotkeyActionIdForKey,
 } from '@/packages/shared/ghostex-hotkeys';
 import { useAgentModelCatalog } from '@/packages/shared/agent-model-catalog-store';
+import { ModelPickerPaneResize } from '@/packages/shared/session-chat-presentation/model-picker-pane-resize';
 import { createModelPickerRequest, modelPickerProvider } from './session-chat-model-picker-request';
 import type { SessionChatSessionOptionPillsProps } from './session-chat-option-pills';
 import type { SessionChatModelSelectionScope, SessionChatSelectionOptions } from '@/packages/shared/session-chat';
@@ -79,6 +80,17 @@ export function SessionChatModelPickerLauncher(
     requestRef.current = null;
     setRequest(null);
   }, [props.controller.sessionKey]);
+
+  // The rule and its tolerance are shared with the native picker in model-picker-pane-resize.ts.
+  useEffect(() => {
+    if (!request || !container) return;
+    const pane = new ModelPickerPaneResize();
+    const observer = new ResizeObserver(() => {
+      if (pane.resized({ width: container.clientWidth, height: container.clientHeight })) setCancelRequested(true);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [container, request]);
 
   useEffect(() => {
     const open = () => {

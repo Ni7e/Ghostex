@@ -72,8 +72,8 @@ function isContextCompactionRecord(message: SessionChatMessage, text: string): b
  * demoting the whole turn to a raw "Local command output" marker.
  */
 const MODEL_DEFAULT_OUTPUT =
-  /^set model to\s+(.+?)\s+and saved as your default for new sessions\s*(?:[.!…]+(?=\s|$))?\s*(.*)$/i;
-const EFFORT_DEFAULT_OUTPUT = /^set effort level to\s+(\S+)/i;
+  /^set model to\s+(.+?)\s+(?:and saved as your default for new sessions|for this session only)(?:\s+with\s+`?([^\s`]+)`?\s+effort)?\s*(?:[.!…]+(?=\s|$))?\s*(.*)$/i;
+const EFFORT_DEFAULT_OUTPUT = /^set effort level to\s+`?([^\s`]+)`?/i;
 const FAST_MODE_OUTPUT = /^fast mode\s+(on|off)\s*[.!…]*$/i;
 
 /*
@@ -189,6 +189,8 @@ interface ModelDefaultOutput {
   model: string;
   /** Trailing sentence the harness added, e.g. a settings.json pin warning. */
   note: string | null;
+  /** Display label of the effort a session-only pick set in the same sentence. */
+  effort: string | null;
 }
 
 function modelSetByCommandOutput(text: string): ModelDefaultOutput | null {
@@ -197,8 +199,14 @@ function modelSetByCommandOutput(text: string): ModelDefaultOutput | null {
   if (!model) {
     return null;
   }
-  const note = (match?.[2] ?? '').trim();
-  return { model, note: note.length > 0 ? note : null };
+  // A session-only pick that moved the effort rail reports it in the same sentence; it reads as the effort pill a separate `/effort` would have produced.
+  const effort = match?.[2]?.trim();
+  const note = (match?.[3] ?? '').trim();
+  return {
+    model,
+    note: note.length > 0 ? note : null,
+    effort: effort ? agentModelCatalogEffortLabel(currentAgentModelCatalog(), effort) : null,
+  };
 }
 
 function effortSetByCommandOutput(text: string): string | null {
@@ -467,9 +475,10 @@ export function sessionChatSuppressedTurnPresentation(
     text = command.name;
   } else if (model) {
     text = normalizedSuppressedTurnBody(rawText);
-    if (model.note) {
+    if (model.note || model.effort) {
       // The pin warning is a second fact about the same action, not chrome to
-      // drop: it gets its own neutral row under the model result.
+      // drop: it gets its own neutral row under the model result. An effort set
+      // by the same pick is a completed action like the model row above it.
       return {
         kind: 'status',
         label: suppressed.label,
@@ -479,7 +488,8 @@ export function sessionChatSuppressedTurnPresentation(
             label: suppressed.label,
             tone: suppressed.kind === 'status' ? (suppressed.tone ?? 'ok') : 'ok',
           },
-          { label: model.note, tone: 'neutral' },
+          ...(model.effort ? [{ label: `Set effort level to ${model.effort}`, tone: 'ok' as const }] : []),
+          ...(model.note ? [{ label: model.note, tone: 'neutral' as const }] : []),
         ],
       };
     }

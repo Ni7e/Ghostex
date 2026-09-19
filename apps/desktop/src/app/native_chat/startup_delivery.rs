@@ -5,6 +5,7 @@
 //! row the send became, so Retry and Remove are the queue's own operations.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -41,7 +42,7 @@ impl NativeChatView {
                 .id(id)
                 .role(gpui::Role::Button)
                 .aria_label(label)
-                .cursor_pointer()
+                .chat_cursor_pointer()
                 .px(px(6.0 * s))
                 .py(px(2.0 * s))
                 .rounded(px(5.0 * s))

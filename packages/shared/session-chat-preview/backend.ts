@@ -20,7 +20,9 @@ const PREVIEW_PROJECT_ROOT = '/sample/project';
 
 /**
  * The sample project the composer's `@` popup walks, and the skills its `$` popup lists. Without
- * them both chats open an empty picker, so neither popup can be compared.
+ * them both chats open an empty picker, so neither popup can be compared. The list deliberately
+ * holds more "session-chat" namesakes than either picker shows at once, a path with a space, and
+ * deeply nested namesakes, so ranking, scrolling and truncation can be compared side by side.
  */
 function chatPreviewFiles() {
   return {
@@ -32,14 +34,28 @@ function chatPreviewFiles() {
       'package.json',
       'apps/desktop/src/app/native_chat/transcript.rs',
       'apps/desktop/src/app/native_chat/composer.rs',
+      'apps/desktop/src/app/native_chat/suggestions/render.rs',
+      'apps/desktop/src/app/native_chat/suggestions/window.rs',
+      'apps/mobile/views/chat/session-chat-main.tsx',
+      'apps/web/src/chat/session-chat-transport.ts',
       'packages/core-ui/chat/session-chat-view.tsx',
       'packages/core-ui/chat/session-chat-composer.tsx',
+      'packages/core-ui/chat/session-chat-composer-trigger.ts',
+      'packages/core-ui/chat/session-chat-slash-commands.ts',
+      'packages/core-ui/chat/session-chat-lexical-input.tsx',
+      'packages/core-ui/chat/session-chat-plain-input.tsx',
+      'packages/core-ui/chat/session-chat-file-paths.ts',
       'packages/core-ui/styles/chat.css',
       'packages/shared/session-chat.ts',
+      'packages/shared/session-chat-presentation/composer-suggestions.ts',
       'packages/shared/session-chat-presentation/references.ts',
+      'packages/shared/session-chat-controller/native-suggestions.ts',
+      'packages/shared/session-chat-controller/controller.ts',
       'server/src/session_chat_files.rs',
+      'server/src/session_chat_skills.rs',
       'src/chat.ts',
       'src/notes/meeting notes.md',
+      'src/notes/archive/2026/session chat parity notes.md',
       'tooling/release-notes.md',
     ],
     truncated: false,
@@ -51,20 +67,21 @@ function chatPreviewSkills() {
     agentId: 'codex',
     generatedAt: new Date().toISOString(),
     skills: [
-      { name: 'ghostex-help', sourceKind: 'global' as const },
-      { name: 'code-review', sourceKind: 'global' as const },
-      { name: 'release-notes', sourceKind: 'repository' as const },
-      { name: 'ux-mockups', sourceKind: 'repository' as const },
-    ].map((skill) => ({
+      { name: 'ghostex-help', sourceKind: 'global' as const, root: '/sample/home/.ghostex/skills' },
+      { name: 'code-review', sourceKind: 'global' as const, root: '/sample/home/.ghostex/skills' },
+      { name: 'release-notes', sourceKind: 'repository' as const, root: `${PREVIEW_PROJECT_ROOT}/skills` },
+      { name: 'ux-mockups', sourceKind: 'repository' as const, root: `${PREVIEW_PROJECT_ROOT}/skills` },
+      // A plugin-cache skill whose folder is far too long for the second column, so both pickers
+      // can be compared on where they truncate it.
+      {
+        name: 'session-chat-parity-review',
+        sourceKind: 'pluginCache' as const,
+        root: '/sample/home/.claude/plugins/cache/ghostex-plugins-official/chat-parity/9f3c1d2b4a5e/skills',
+      },
+    ].map(({ root, ...skill }) => ({
       ...skill,
-      directoryPath:
-        skill.sourceKind === 'global'
-          ? `/sample/home/.ghostex/skills/${skill.name}`
-          : `${PREVIEW_PROJECT_ROOT}/skills/${skill.name}`,
-      skillFilePath:
-        skill.sourceKind === 'global'
-          ? `/sample/home/.ghostex/skills/${skill.name}/SKILL.md`
-          : `${PREVIEW_PROJECT_ROOT}/skills/${skill.name}/SKILL.md`,
+      directoryPath: `${root}/${skill.name}`,
+      skillFilePath: `${root}/${skill.name}/SKILL.md`,
     })),
   };
 }

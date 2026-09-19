@@ -8,6 +8,11 @@ pub(crate) struct NativeChatAction {
     pub(crate) command: Value,
 }
 
+/// Toggle keys in `menu_toggle.rs` for the menus this file opens.
+pub(super) const MORE_ACTIONS_TRIGGER: &str = "chat-more-actions";
+const SEND_ACTIONS_TRIGGER: &str = "chat-send-actions";
+const SWITCH_ACCOUNT_TRIGGER: &str = "chat-notice-switch-account";
+
 /// More actions row icons, matching `HOST_ACTION_ICONS` and the Sleep moon in
 /// `packages/core-ui/chat/session-chat-composer-actions.tsx`.
 fn host_action_icon(id: &str) -> Option<&'static str> {
@@ -39,6 +44,9 @@ impl NativeChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.chat_menu_toggled_shut(SEND_ACTIONS_TRIGGER, cx) {
+            return;
+        }
         let enabled = self.composer_ready && !self.pending_send && !self.draft.trim().is_empty();
         let can_queue = enabled && self.snapshot["queue"]["capabilities"]["canQueue"] == true;
         let rows = vec![json!({
@@ -55,6 +63,9 @@ impl NativeChatView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.chat_menu_toggled_shut(MORE_ACTIONS_TRIGGER, cx) {
+            return;
+        }
         let appearance = super::appearance::ChatAppearance::current(&self.snapshot);
         let mut rows = Vec::new();
         if self.snapshot["composerOverflow"]["optionsOverflowed"] == true {
@@ -191,6 +202,9 @@ impl NativeChatView {
         cx: &mut Context<Self>,
     ) {
         if self.snapshot["accountPanel"].is_object() {
+            if self.chat_menu_toggled_shut(SWITCH_ACCOUNT_TRIGGER, cx) {
+                return;
+            }
             self.show_chat_menu(
                 vec![json!({"accounts":self.snapshot["accountPanel"]})],
                 gpui::Bounds::new(position, gpui::size(gpui::px(0.0), gpui::px(0.0))),

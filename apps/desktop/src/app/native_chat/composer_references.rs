@@ -84,9 +84,10 @@ pub(super) fn replacements(
                         ),
                         gpui::px(ICON_INSET_REM * ROOT_FONT_PX * appearance.scale),
                     )
-                    // Only a pill whose click opens something takes the hand cursor, the way the
-                    // composer stylesheet leaves web links on the text cursor.
-                    .pointer(reference.kind != "url"),
+                    // No pill changes the cursor (see native_chat/cursor.rs): a reference inside
+                    // the composer keeps the input's own text cursor, and clicking it still
+                    // opens what it points at.
+                    .pointer(false),
             )
         })
         .collect()
@@ -129,16 +130,32 @@ impl NativeChatView {
                     std::time::Duration::from_millis(40),
                 )
             });
-            // A busy runtime answers nothing in time; keep the last pills and ask again on the next paint.
+            // CDXC:SessionChat 2026-09-19 WHY:
+            // Typing keeps the runtime thread busy with draft commands, so it often cannot answer
+            // within the paint. The input moves the pills it already shows with the edit, so the
+            // stale ranges held here must not be pushed over them; a short retry picks up a
+            // reference the edit completed even if nothing else repaints the composer.
             let Some(parsed) = parsed else {
+                if self.runtime.is_some() && self.composer_reference_retry.is_none() {
+                    self.composer_reference_retry = Some(cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(30))
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            this.composer_reference_retry = None;
+                            cx.notify();
+                        });
+                    }));
+                }
                 return;
             };
+            self.composer_reference_retry = None;
             self.composer_references = parse(&draft, &parsed);
             self.composer_reference_draft = Some(draft);
             // Editing the draft moves every reference, so a click that has not opened yet no
             // longer refers to what the user pressed.
-            self.composer_reference_click += 1;
-            self.composer_reference_task = None;
+            self.cancel_composer_reference_open();
+            self.composer_image_hover = None;
         }
         let replacements = replacements(&self.composer_references, appearance);
         if let Some(input) = self.input.clone() {
@@ -156,8 +173,7 @@ impl NativeChatView {
     ) -> bool {
         // React drops a pending open on any press inside the composer, so a press that is not on
         // the same pill can never be followed by the earlier one opening a view.
-        self.composer_reference_click += 1;
-        self.composer_reference_task = None;
+        self.cancel_composer_reference_open();
         let Some(input) = self.input.clone() else {
             return false;
         };
@@ -179,15 +195,15 @@ impl NativeChatView {
             }
             return true;
         }
-        if reference.kind == "url" {
-            return true;
-        }
-        // CDXC:SessionChat 2026-09-18 DECISION:
-        // User (2026-09-16, React composer): a file pill opens on one click through the
-        // transcript's Code/Docs flow. Opening waits out the double-click window so the view
-        // cannot swallow the second click that expands the reference source.
+        // CDXC:SessionChat 2026-09-19 DECISION:
+        // User: a click on a composer pill does exactly what it does in the React composer
+        // (`use-session-chat-reference-interactions.ts`). An image pill opens the picture preview
+        // (user, 2026-09-09); any other pill whose destination is a local path opens through the
+        // transcript's Code/Docs flow (user, 2026-09-16); a web link does nothing. Opening waits
+        // out the double-click window so the view cannot swallow the second click that expands
+        // the reference source.
+        let image = reference.kind == "image";
         let click = self.composer_reference_click;
-        let href = reference.path.clone();
         self.composer_reference_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(500))
@@ -197,12 +213,76 @@ impl NativeChatView {
                     return;
                 }
                 this.composer_reference_task = None;
-                this.invoke(
-                    json!({"type":"openMarkdownLink","href":href,"external":false}),
-                    cx,
-                );
+                // React's `pill.isConnected`: the reference has to still be in the draft.
+                if !this.composer_references.contains(&reference) {
+                    return;
+                }
+                if image {
+                    let (images, index) = this.composer_image_gallery(&reference.path);
+                    this.open_image_viewer(images, index, cx);
+                } else {
+                    this.invoke(
+                        json!({"type":"openComposerReference","href":reference.path}),
+                        cx,
+                    );
+                }
             });
         }));
         true
+    }
+
+    /// Drop a pill open that is still waiting out the double-click window.
+    pub(super) fn cancel_composer_reference_open(&mut self) {
+        self.composer_reference_click += 1;
+        self.composer_reference_task = None;
+    }
+
+    /// Track the image pill under the pointer, which outlines its thumbnail.
+    pub(super) fn hover_composer_reference(
+        &mut self,
+        position: Option<gpui::Point<gpui::Pixels>>,
+        cx: &mut Context<Self>,
+    ) {
+        let hovered = position
+            .zip(self.input.as_ref())
+            .and_then(|(position, input)| input.read(cx).inline_replacement_at(position))
+            .and_then(|range| {
+                self.composer_references
+                    .iter()
+                    .find(|reference| reference.range == range && reference.kind == "image")
+            })
+            .map(|reference| reference.path.clone());
+        if self.composer_image_hover != hovered {
+            self.composer_image_hover = hovered;
+            cx.notify();
+        }
+    }
+
+    /// The image reference the caret sits in or against, edges included.
+    pub(super) fn composer_caret_image(&self, cx: &gpui::App) -> Option<String> {
+        if self.composer_reference_draft.as_deref() != Some(self.draft.as_str()) {
+            return None;
+        }
+        let caret = self.input.as_ref()?.read(cx).cursor();
+        self.composer_references
+            .iter()
+            .find(|reference| {
+                reference.kind == "image"
+                    && caret >= reference.range.start
+                    && caret <= reference.range.end
+            })
+            .map(|reference| reference.path.clone())
+    }
+
+    /// The thumbnail to outline.
+    ///
+    /// CDXC:SessionChat 2026-09-19 DECISION:
+    /// User (2026-09-09, React composer): hovering or clicking an image reference, or placing the
+    /// caret in it, outlines its preview image in white. A click leaves the caret against the
+    /// pill, so the caret rule covers it here.
+    pub(super) fn composer_active_image(&self, cx: &gpui::App) -> Option<String> {
+        self.composer_image_hover
+            .clone()
+            .or_else(|| self.composer_caret_image(cx))
     }
 }

@@ -7,7 +7,13 @@ use gpui::{
 use serde_json::Value;
 
 impl ChatOptionMenuPanel {
-    fn activate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn activate(
+        &mut self,
+        index: usize,
+        toggle: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(row) = self.rows.get(index) else {
             return;
         };
@@ -16,6 +22,16 @@ impl ChatOptionMenuPanel {
         }
         if let Some(children) = row["children"].as_array() {
             if self.child == Some(index) && self.menu.read(cx).windows.len() > self.depth + 1 {
+                // Pressing the parent row of an open submenu shuts that submenu and leaves this
+                // panel up, the same toggle a chat-box trigger gives its own menu (menu_toggle.rs).
+                // Hovering it again, and the right arrow, still only keep the submenu open.
+                if toggle {
+                    self.child = None;
+                    let depth = self.depth;
+                    self.menu
+                        .update(cx, |menu, cx| menu.truncate(depth + 1, true, cx));
+                    cx.notify();
+                }
                 return;
             }
             self.child = Some(index);
@@ -100,7 +116,7 @@ impl ChatOptionMenuPanel {
                     .await;
                 let _ = this.update_in(cx, |this, window, cx| {
                     if this.selected == Some(index) {
-                        this.activate(index, window, cx);
+                        this.activate(index, false, window, cx);
                     }
                 });
             }));
@@ -182,14 +198,14 @@ impl ChatOptionMenuPanel {
                 .update(cx, |menu, cx| menu.truncate(self.depth, true, cx)),
             "enter" | "space" => {
                 if let Some(index) = self.selected {
-                    self.activate(index, window, cx);
+                    self.activate(index, true, window, cx);
                 }
             }
             "right" => {
                 if let Some(index) = self.selected
                     && self.rows[index]["children"].is_array()
                 {
-                    self.activate(index, window, cx);
+                    self.activate(index, false, window, cx);
                 }
             }
             "up" | "down" | "home" | "end" => {
@@ -334,7 +350,9 @@ impl Render for ChatOptionMenuPanel {
                         this.hover(index, window, cx);
                     }
                 }))
-                .on_click(cx.listener(move |this, _, window, cx| this.activate(index, window, cx)));
+                .on_click(
+                    cx.listener(move |this, _, window, cx| this.activate(index, true, window, cx)),
+                );
             let icon_path = row["iconPath"].as_str().map(str::to_owned).or_else(|| {
                 row["icon"]
                     .as_str()

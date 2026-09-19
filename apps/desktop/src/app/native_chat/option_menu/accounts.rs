@@ -12,6 +12,7 @@ same heights the renderer draws, the way the context panel is.
 
 use super::super::{appearance::ChatAppearance, new_session_welcome::brand_logo_color};
 use super::window::ChatOptionMenuPanel;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Bounds, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement,
@@ -658,7 +659,7 @@ impl ChatOptionMenuPanel {
                     .when(outline, |this| this.border_1().border_color(colors.border))
                     .when(disabled, |this| this.opacity(0.5))
                     .when(!disabled, |this| {
-                        this.cursor_pointer()
+                        this.chat_cursor_pointer()
                             .hover(|style| style.bg(colors.hover))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.account_action(&action, window, cx)
@@ -752,7 +753,7 @@ impl ChatOptionMenuPanel {
                         .rounded(px(6.0 * s))
                         .when(disabled, |this| this.opacity(0.5))
                         .when(!disabled, |this| {
-                            this.cursor_pointer()
+                            this.chat_cursor_pointer()
                                 .hover(|style| style.bg(colors.hover))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.account_action(&action, window, cx)
@@ -932,7 +933,7 @@ impl ChatOptionMenuPanel {
                     .rounded(px(6.0 * s))
                     .when(busy, |this| this.opacity(0.45))
                     .when(!busy, |this| {
-                        this.cursor_pointer()
+                        this.chat_cursor_pointer()
                             .hover(|style| style.bg(colors.hover))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.account_action(&action, window, cx)
@@ -1007,7 +1008,7 @@ impl ChatOptionMenuPanel {
                             .gap(px(6.0 * s))
                             .rounded(px(8.0 * s))
                             .text_color(colors.muted)
-                            .cursor_pointer()
+                            .chat_cursor_pointer()
                             .hover(|style| style.bg(colors.hover))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.accounts_customize = true;
@@ -1044,7 +1045,7 @@ impl ChatOptionMenuPanel {
                 .when(disabled, |this| this.opacity(0.45))
                 .when(!disabled, |this| {
                     let command = policy_command(next);
-                    this.cursor_pointer()
+                    this.chat_cursor_pointer()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             let command = command.clone();
                             this.menu.update(cx, |menu, cx| menu.dispatch(command, cx));
@@ -1086,7 +1087,7 @@ impl ChatOptionMenuPanel {
                         })
                         .when(pressed, |this| this.bg(colors.segment_pressed).shadow_sm())
                         .when(!pressed && !disabled, |this| {
-                            this.cursor_pointer()
+                            this.chat_cursor_pointer()
                                 .hover(|style| style.text_color(colors.segment_pressed_text))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     let command = command.clone();
@@ -1139,7 +1140,7 @@ impl ChatOptionMenuPanel {
                     .border_color(colors.border)
                     .when(disabled, |this| this.opacity(0.45))
                     .when(!disabled, |this| {
-                        this.cursor_pointer()
+                        this.chat_cursor_pointer()
                             .hover(|style| style.bg(colors.hover))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_priority_select(&policy, &priorities, cx)

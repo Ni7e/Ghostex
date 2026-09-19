@@ -3,6 +3,7 @@ use crate::app::hotkeys::{
     GPUI_DEFAULT_GHOSTEX_HOTKEYS, gpui_configured_hotkey_label, gpui_keystroke_from_shared_hotkey,
     gpui_migrated_hotkey_for_action, gpui_platform_hotkey_for_action,
 };
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, App, Context, EntityInputHandler as _, Focusable as _, FontWeight,
     InteractiveElement, IntoElement, KeyBinding, ParentElement, StatefulInteractiveElement, Styled,
@@ -147,7 +148,7 @@ impl NativeChatView {
                     .tab_index(0)
                     .role(gpui::Role::Button)
                     .aria_label(label.clone())
-                    .cursor_pointer()
+                    .chat_cursor_pointer()
                     .relative()
                     .overflow_hidden()
                     .flex()

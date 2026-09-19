@@ -16,9 +16,11 @@ mod attachments;
 mod binding;
 mod cards;
 mod choice_rows;
+mod composer_animation;
 mod composer_not_ready;
 mod composer_references;
 mod composer_scroll;
+pub(crate) mod cursor;
 mod deferred_work;
 mod disclosure_body;
 mod edit_shortcuts;
@@ -29,6 +31,7 @@ mod fork_branches;
 mod image_viewer;
 mod images;
 mod inter_agent_message;
+mod menu_toggle;
 mod minimap;
 mod new_session_welcome;
 mod note;
@@ -83,5 +86,7 @@ mod clipboard;
 
 mod working_spark;
 mod working_strip;
+
+mod zoom;
 
 mod save_markdown;

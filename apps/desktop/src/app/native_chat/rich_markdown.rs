@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, ClipboardItem, FontWeight, InteractiveElement as _, IntoElement,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, div, px, rgb, svg,
@@ -252,7 +253,7 @@ fn table_action(
         .justify_center()
         .size(px(22.0 * s))
         .rounded(px(6.0 * s))
-        .cursor_pointer()
+        .chat_cursor_pointer()
         .hover(|style| style.bg(p.border.opacity(0.7)))
         .child(
             svg()
@@ -474,25 +475,34 @@ impl NativeChatView {
                     ))
                     .into_any_element()
             }
-            // React's inline picture has 2px of air either side (`mx-0.5`); the row wraps because a
-            // sentence with two pictures in it still has to fit the transcript's width.
+            // The air around an inline picture is the picture's own margin, exactly as React's
+            // frame carries it, so the row itself adds nothing between a word and the picture
+            // beside it. It wraps because a sentence with two pictures in it still has to fit the
+            // transcript's width.
             Segment::Flow(parts) => div()
                 .flex()
                 .flex_wrap()
                 .items_center()
                 .w_full()
                 .min_w_0()
-                .gap(px(4.0 * s))
-                .children(parts.iter().enumerate().map(|(part, item)| match item {
-                    FlowPart::Text(content) => self.text_view(
-                        format!("{id}:{index}:{part}"),
-                        content.clone(),
-                        references,
-                        p,
-                        cx,
-                    ),
-                    FlowPart::Image(image) => {
-                        self.inline_image(&format!("{id}:{index}:{part}"), image, p, cx)
+                .children(parts.iter().enumerate().map(|(part, item)| {
+                    match item {
+                        // The words either side of the picture have to be allowed to shrink below
+                        // their own longest line, or a sentence with a picture in it runs past the
+                        // bubble's edge instead of wrapping inside it.
+                        FlowPart::Text(content) => div()
+                            .min_w_0()
+                            .child(self.text_view(
+                                format!("{id}:{index}:{part}"),
+                                content.clone(),
+                                references,
+                                p,
+                                cx,
+                            ))
+                            .into_any_element(),
+                        FlowPart::Image(image) => {
+                            self.inline_image(&format!("{id}:{index}:{part}"), image, p, cx)
+                        }
                     }
                 }))
                 .into_any_element(),

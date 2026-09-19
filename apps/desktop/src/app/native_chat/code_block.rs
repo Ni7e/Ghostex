@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, ClipboardItem, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -51,7 +52,7 @@ fn action(
         .justify_center()
         .size(px(22.0 * s))
         .rounded(px(6.0 * s))
-        .cursor_pointer()
+        .chat_cursor_pointer()
         .hover(|style| style.bg(p.border.opacity(0.7)))
         .child(
             svg()

@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -70,7 +71,7 @@ impl NativeChatView {
             .when(selected, |row| row.bg(p.control_primary.opacity(0.1)))
             .when(disabled, |row| row.opacity(0.6))
             .when(!disabled, |row| {
-                row.cursor_pointer().when(!selected, |row| {
+                row.chat_cursor_pointer().when(!selected, |row| {
                     row.hover(|style| {
                         style.bg(if p.light {
                             p.input

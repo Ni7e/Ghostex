@@ -1,5 +1,6 @@
 use super::super::{appearance::ChatAppearance, transcript::text};
 use super::window::ContextEditorWindow;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -54,7 +55,7 @@ impl ContextEditorWindow {
             .justify_center()
             .rounded(px(6.0 * p.scale))
             .when(!disabled, |item| {
-                item.cursor_pointer().hover(|style| style.bg(p.border))
+                item.chat_cursor_pointer().hover(|style| style.bg(p.border))
             })
             .tooltip(move |window, cx| {
                 gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)

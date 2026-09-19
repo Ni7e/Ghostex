@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -72,7 +73,7 @@ impl NativeChatView {
             })
             .when(disabled, |this| this.opacity(0.4))
             .when(!disabled, |this| {
-                this.cursor_pointer()
+                this.chat_cursor_pointer()
                     .hover(|style| style.text_color(p.foreground))
                     .on_click(cx.listener(move |this, _, _, cx| this.invoke(command.clone(), cx)))
             })

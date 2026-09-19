@@ -46,6 +46,7 @@ import {
   type SessionChatTheme,
 } from '@/packages/shared/session-chat';
 import type { GxserverSetSessionChatDraftResult, SessionChatDraftHandoff } from '@/packages/shared/session-chat-queue';
+import { adoptModelPicksSessionOnly } from '@/packages/shared/session-chat-presentation/model-picker';
 import { createRoot } from 'react-dom/client';
 import { createAccountSwitchTransport } from './account-switch';
 
@@ -71,6 +72,7 @@ declare global {
     ghostexSetSessionChatTheme?: (theme: unknown) => void;
     ghostexSetSessionChatTranscriptWidthPercent?: (widthPercent: unknown) => void;
     ghostexSetSessionChatFileEditPreviews?: (enabled: unknown) => void;
+    ghostexSetSessionChatModelPicksSessionOnly?: (enabled: unknown) => void;
     ghostexSetSessionChatFileViews?: (code: boolean, docs: boolean) => void;
     ghostexSetSessionChatHotkeys?: (hotkeys: unknown) => void;
     ghostexSetSessionChatVerboseMode?: (verboseMode: unknown) => void;
@@ -228,6 +230,7 @@ export function activateSessionChatPage(root: ReturnType<typeof createRoot>, act
     Number(searchParams.get('transcriptWidthPercent')) || DEFAULT_SESSION_CHAT_TRANSCRIPT_WIDTH_PERCENT
   );
   let chatFileEditPreviews = searchParams.get('fileEditPreviews') === 'true';
+  adoptModelPicksSessionOnly(searchParams.get('modelPicksSessionOnly') === 'true');
   let chatVerboseMode = searchParams.get('verboseMode') === 'true';
   let chatSimpleMode = searchParams.get('simpleMode') === 'true';
   let renderReadyChat: ((theme: SessionChatTheme) => void) | null = null;
@@ -290,6 +293,7 @@ made the chat's typeface impossible to change from CSS.
     chatTranscriptWidthPercent = clampSessionChatTranscriptWidthPercent(Number(value));
     applyDocumentChatTranscriptWidthPercent(chatTranscriptWidthPercent);
   };
+  window.ghostexSetSessionChatModelPicksSessionOnly = (value) => adoptModelPicksSessionOnly(value === true);
   window.ghostexSetSessionChatFileEditPreviews = (value) => {
     chatFileEditPreviews = value === true;
     renderReadyChat?.(chatTheme);

@@ -4,6 +4,7 @@
 //! `deferredWork` (see the `loadWork` action in native-host.ts).
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -49,7 +50,7 @@ impl NativeChatView {
                             .py(px(2.0 * s))
                             .rounded(px(6.0 * s))
                             .text_color(p.muted)
-                            .cursor_pointer()
+                            .chat_cursor_pointer()
                             .hover(|style| style.bg(p.border.opacity(0.4)))
                             .child("Retry")
                             .on_click(

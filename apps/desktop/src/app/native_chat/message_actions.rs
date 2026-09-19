@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
@@ -123,7 +124,7 @@ impl NativeChatView {
                 .rounded(px(8.0 * p.scale))
                 .border(px(p.scale))
                 .border_color(gpui::transparent_black())
-                .cursor_pointer()
+                .chat_cursor_pointer()
                 .opacity(if focused { 1.0 } else { 0.0 })
                 .group_hover("native-chat-message", |style| style.opacity(1.0))
                 .focus(|style| style.opacity(1.0))
@@ -251,7 +252,7 @@ impl NativeChatView {
                 .items_center()
                 .justify_center()
                 .rounded(px(6.0 * p.scale))
-                .cursor_pointer()
+                .chat_cursor_pointer()
                 .hover(|style| style.bg(p.border.opacity(0.4)))
                 .tooltip(move |window, cx| {
                     gpui_component::tooltip::Tooltip::new(label.clone()).build(window, cx)

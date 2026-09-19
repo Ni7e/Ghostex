@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -207,7 +208,7 @@ impl NativeChatView {
             .flex()
             .items_start()
             .gap(px(8.0 * s))
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .mx(px(-16.0 * s))
             .mt(px(-12.0 * s))
             .mb(px(if collapsed { -12.0 } else { -2.0 } * s))
@@ -302,7 +303,7 @@ impl NativeChatView {
             .when(wide, |button| button.min_w(px(96.0 * s)))
             .when(disabled, |button| button.opacity(0.5))
             .when(!disabled, |button| {
-                button.cursor_pointer().hover(|style| style.bg(p.input))
+                button.chat_cursor_pointer().hover(|style| style.bg(p.input))
             })
             .when(!ghost && p.light, |button| button.bg(p.background))
             .child(label.to_owned())

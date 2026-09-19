@@ -50,6 +50,7 @@ function projectMessage(message: SessionChatMessage, agentPath: string) {
   const nativeBody = sessionChatNativeMarkdown(displayedBody, message.role === 'user');
   const suppressed = sessionChatSuppressedTurnPresentation(message);
   const toolRows = nativeChatToolRows(toolPairs, agentPath);
+  const systemCard = classifySessionChatSystemCard(message, displayedBody);
   return {
     ...message,
     text: nativeBody,
@@ -63,7 +64,11 @@ function projectMessage(message: SessionChatMessage, agentPath: string) {
     questions: sessionChatMessageQuestionExchanges(message),
     images: images.map(sessionChatImageSource),
     suppressed,
-    systemCard: classifySessionChatSystemCard(message, displayedBody),
+    /* The expanded subagent-message card renders its body as Markdown (React's session-chat-agent-message-card.tsx), so it needs the same marks and reference links the turn's own body gets; the collapsed clamp keeps the raw text React clamps. */
+    systemCard:
+      systemCard?.kind === 'agent-message'
+        ? { ...systemCard, markdown: sessionChatNativeMarkdown(systemCard.body) }
+        : systemCard,
     files: nativeChatFileRows(changes.changes, workingDirectory),
     simpleFileLabel: sessionChatSimpleEditLabel(new Set(changes.changes.map((change) => change.path)).size),
     /* React counts only the work rows for this label: an answered question is conversation, so its card sits outside the group and is not one of the "N tool calls". */

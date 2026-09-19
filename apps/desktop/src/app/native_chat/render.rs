@@ -11,11 +11,13 @@ impl Render for NativeChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         super::scroll_bottom::register(cx);
         super::search::register(cx);
+        super::zoom::register(cx);
         self.last_render = Some(std::time::Instant::now());
         self.main_window = Some(window.window_handle());
         if self.maximized_window.is_none() {
             self.ensure_input(window, cx);
         }
+        self.sync_chat_zoom_default();
         let p = ChatAppearance::current(&self.snapshot);
         let s = p.scale;
         self.sync_search_scroll();
@@ -54,6 +56,10 @@ impl Render for NativeChatView {
             div().h(px(148.0 * s)).into_any_element()
         };
         let bounds = self.bounds.clone();
+        // The picker window is a sibling frame sized to this pane, so the pane's painted size is what tells it the pane was resized.
+        let model_picker_open = self.model_picker_window.is_open();
+        let picker_chat = cx.weak_entity();
+        let image_viewer_open = self.image_viewer.request.is_some();
         let rows = self.list.item_count();
         let content_ready = self.error.is_none()
             && (rows > 0
@@ -87,6 +93,9 @@ impl Render for NativeChatView {
             })
             .capture_action(cx.listener(Self::scroll_bottom_action))
             .capture_action(cx.listener(Self::open_search_action))
+            .capture_action(cx.listener(Self::chat_zoom_in_action))
+            .capture_action(cx.listener(Self::chat_zoom_out_action))
+            .capture_action(cx.listener(Self::chat_zoom_reset_action))
             .capture_key_down(cx.listener(Self::composer_key_down))
             .composer_input_actions(cx)
             .capture_key_up(cx.listener(|chat, _, _, _| chat.composer_held_key = None))
@@ -144,8 +153,22 @@ impl Render for NativeChatView {
             .child(composer)
             .child(
                 gpui::canvas(
-                    move |rect, _, _| {
-                        bounds.set(rect);
+                    move |rect, window, cx| {
+                        if bounds.replace(rect) != rect && image_viewer_open {
+                            let chat = picker_chat.clone();
+                            window.defer(cx, move |_, cx| {
+                                let _ = chat.update(cx, |chat, cx| {
+                                    chat.follow_image_viewer_pane(cx);
+                                });
+                            });
+                        }
+                        if model_picker_open {
+                            window.defer(cx, move |_, cx| {
+                                let _ = picker_chat.update(cx, |chat, cx| {
+                                    chat.report_model_picker_pane_size(rect.size, cx);
+                                });
+                            });
+                        }
                     },
                     move |rect, _, _, cx| {
                         if rect.size.width > px(0.0) && rect.size.height > px(0.0) {

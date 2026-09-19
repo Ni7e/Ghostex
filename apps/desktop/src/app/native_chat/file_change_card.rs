@@ -8,6 +8,7 @@
 //! React card reads too; this file only lays them out.
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement,
@@ -191,7 +192,7 @@ impl NativeChatView {
             .rounded_full()
             .border(px(1.0))
             .border_color(p.muted.opacity(0.65))
-            .when(can_expand, |this| this.cursor_pointer())
+            .when(can_expand, |this| this.chat_cursor_pointer())
             .child(
                 div()
                     .size(px(8.0 * s))
@@ -211,7 +212,7 @@ impl NativeChatView {
             .flex()
             .min_w_0()
             .flex_shrink(1.0)
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .text_color(p.prose)
             .hover(|style| style.text_color(p.foreground))
             // React shortens only the folder half (`direction: rtl` on the parent, `flex: 0 0 auto`
@@ -260,7 +261,7 @@ impl NativeChatView {
             .rounded(px(6.0 * s))
             .text_size(px(12.25 * s))
             .when(can_expand, |this| {
-                this.cursor_pointer()
+                this.chat_cursor_pointer()
                     .hover(|style| style.bg(p.muted.opacity(0.16)))
             })
             .child(div().text_color(palette.added).child(format!("+{added}")))
@@ -378,7 +379,7 @@ impl NativeChatView {
                 .min_w_0()
                 .mt(px(8.0 * s))
                 .gap(px(12.0 * s))
-                .when(can_expand, |this| this.cursor_pointer())
+                .when(can_expand, |this| this.chat_cursor_pointer())
                 .child(
                     // The rail is the grab target React gives the open code, not an invisible overlay.
                     div()
@@ -422,7 +423,7 @@ impl NativeChatView {
                             .rounded(px(6.0 * s))
                             .text_size(px(12.25 * s))
                             .text_color(p.muted)
-                            .cursor_pointer()
+                            .chat_cursor_pointer()
                             .hover(|style| style.bg(p.muted.opacity(0.16)))
                             .child(if expanded {
                                 "Collapse changes"

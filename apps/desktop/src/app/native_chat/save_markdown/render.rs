@@ -1,6 +1,7 @@
 use super::super::{appearance::ChatAppearance, transcript::text};
 use super::window::SaveMarkdownWindow;
 use crate::app::helpers::ThrottledAnimationExt as _;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -41,7 +42,7 @@ impl SaveMarkdownWindow {
             .font_weight(gpui::FontWeight::MEDIUM)
             .when(disabled, |item| item.opacity(0.5).tab_stop(false))
             .when(!disabled, |item| {
-                item.cursor_pointer().hover(|style| style.bg(p.input))
+                item.chat_cursor_pointer().hover(|style| style.bg(p.input))
             })
             .focus_visible(|style| style.border_color(p.ring))
             .when(saving, |item| {

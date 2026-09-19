@@ -24,7 +24,18 @@ export function classifySessionChatLinkHref(href: string): SessionChatLinkTarget
   if (/^file:\/\//i.test(trimmed)) {
     return { kind: 'file', path: filePathFromHref(trimmed.slice('file://'.length)) };
   }
-  if (!WINDOWS_DRIVE_PATH_PATTERN.test(trimmed) && URI_SCHEME_PATTERN.test(trimmed)) {
+  /*
+  CDXC:SessionChat 2026-09-19 WHY:
+  The scheme test runs on the destination with its editor coordinates removed, because `Makefile:12`
+  and `README:5` are a filename and a line, not a URI. Inline code judges those two by the file rule
+  (resolveSessionChatInlineCodeFilePath) and the composer already strips the suffix the same way in
+  sessionChatComposerReferences, so leaving it on here made the same reference clickable as inline
+  code and inert as a link.
+  */
+  if (
+    !WINDOWS_DRIVE_PATH_PATTERN.test(trimmed) &&
+    URI_SCHEME_PATTERN.test(splitSessionChatFilePosition(trimmed).path)
+  ) {
     // mailto:, vscode:, data:, … — nothing the chat's own surfaces can show.
     return { kind: 'inert' };
   }

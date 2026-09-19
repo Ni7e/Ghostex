@@ -80,6 +80,14 @@ impl NativeChatView {
         );
     }
 
+    /// CDXC:SessionChat 2026-09-19 WHY:
+    /// React draws the `@`, `$` and `/` list inside the composer, so nothing outside the composer
+    /// can hide it. This one is a child window and two conditions outside the composer used to be
+    /// able to: it opened only while the app shell called the whole pane focused, and it opened
+    /// without a display. GPUI reads a window's bounds relative to the display it is on but places
+    /// a new window relative to `display_id`, falling back to the display that owns the menu bar,
+    /// so on a two-display computer the popup landed on the other screen. Both read to the user as
+    /// the feature being missing. Every other chat child window passes its display the same way.
     pub(crate) fn sync_suggestion_window(&mut self, cx: &mut Context<Self>) {
         if self.suggestions.opening {
             return;
@@ -94,8 +102,13 @@ impl NativeChatView {
         let p = ChatAppearance::current(&self.snapshot);
         let anchor = self.composer_bounds.get();
         let projection = &self.snapshot["suggestions"];
+        // React shows the picker whenever the trigger sits under the caret, with no pane-level
+        // condition of its own. The composer's own keyboard focus is the native equivalent; the
+        // app shell's pane-focus flag alone missed every moment it lagged the field (a first
+        // responder the shell classifies as `Other`, a companion pane, a pane whose focus border
+        // is held elsewhere), which read as the feature being missing.
         let visible = self.maximized_window.is_none()
-            && self.pane_focused
+            && (self.pane_focused || self.composer_focused)
             && projection.is_object()
             && self.snapshot["questionCard"]["visible"] != true
             && anchor.size.width > px(0.0);
@@ -110,44 +123,57 @@ impl NativeChatView {
             * p.scale;
         let chat = cx.entity();
         let parent = self.config.parent_native_view;
+        // React draws the picker inside the composer's own stacking context, so it can never grow
+        // past the top of the chat pane. The window here is clamped to the same room.
+        let pane_top = self.bounds.get().top();
         self.suggestions.opening = true;
         cx.defer(move |cx| {
             let geometry = visible
                 .then(|| {
                     source
-                        .update(cx, |_, window, _| {
-                            let height = px(height)
-                                .min(anchor.top() - px(8.0 * p.scale))
-                                .max(px(0.0));
-                            Bounds::new(
-                                window.bounds().origin
-                                    + gpui::point(
-                                        anchor.left(),
-                                        anchor.top() - height - px(8.0 * p.scale),
-                                    ),
-                                size(anchor.size.width, height),
+                        .update(cx, |_, window, cx| {
+                            let room = anchor.top() - pane_top.min(anchor.top());
+                            // A picker floating over an app the user has switched away from is not
+                            // what React's in-page list does, so an inactive window keeps it shut.
+                            let height = if window.is_window_active() {
+                                px(height).min(room - px(8.0 * p.scale)).max(px(0.0))
+                            } else {
+                                px(0.0)
+                            };
+                            (
+                                Bounds::new(
+                                    window.bounds().origin
+                                        + gpui::point(
+                                            anchor.left(),
+                                            anchor.top() - height - px(8.0 * p.scale),
+                                        ),
+                                    size(anchor.size.width, height),
+                                ),
+                                window.display(cx).map(|display| display.id()),
                             )
                         })
                         .ok()
                 })
                 .flatten();
-            if chat.read(cx).suggestions.bounds == geometry {
+            let bounds = geometry.map(|(bounds, _)| bounds);
+            if chat.read(cx).suggestions.bounds == bounds {
                 chat.update(cx, |chat, _| chat.suggestions.opening = false);
                 return;
             }
             let old = chat.update(cx, |chat, _| {
-                chat.suggestions.bounds = geometry;
+                chat.suggestions.bounds = bounds;
                 chat.suggestions.handle.take()
             });
             if let Some(old) = old {
                 let _ = old.update(cx, |_, window, _| window.remove_window());
             }
             let result = geometry
-                .filter(|bounds| bounds.size.height > px(0.0))
-                .map(|bounds| {
+                .filter(|(bounds, _)| bounds.size.height > px(0.0))
+                .map(|(bounds, display_id)| {
                     cx.open_window(
                         WindowOptions {
                             window_bounds: Some(WindowBounds::Windowed(bounds)),
+                            display_id,
                             titlebar: None,
                             kind: gpui::WindowKind::PopUp,
                             focus: false,

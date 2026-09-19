@@ -13,6 +13,7 @@
 //! projected once per change in packages/shared/session-chat-controller/native-minimap.ts.
 
 use super::{appearance::ChatAppearance, state::NativeChatView};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, Bounds, Context, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
     Pixels, SharedString, StatefulInteractiveElement as _, Styled as _, div, px,
@@ -195,7 +196,7 @@ impl NativeChatView {
                     .w_full()
                     .flex()
                     .items_center()
-                    .cursor_pointer()
+                    .chat_cursor_pointer()
                     .on_hover(cx.listener(move |chat, hovered: &bool, _, cx| {
                         let next = hovered.then_some(index);
                         if chat.minimap.hovered != next

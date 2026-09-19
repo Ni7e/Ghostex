@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -132,7 +133,7 @@ impl NativeChatView {
                         .flex()
                         .items_center()
                         .gap(px(4.0 * p.scale))
-                        .cursor_pointer()
+                        .chat_cursor_pointer()
                         .h(px(32.0 * p.scale))
                         .px(px(12.0 * p.scale))
                         .border_1()
@@ -191,7 +192,7 @@ impl NativeChatView {
                     .id("notice-switch-account")
                     .role(gpui::Role::Button)
                     .aria_label("Switch account")
-                    .cursor_pointer()
+                    .chat_cursor_pointer()
                     .flex()
                     .items_center()
                     .gap(px(6.0 * p.scale))
@@ -238,7 +239,7 @@ impl NativeChatView {
             actions.push(
                 div()
                     .id("dismiss-notice")
-                    .cursor_pointer()
+                    .chat_cursor_pointer()
                     .child("Dismiss")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.invoke(json!({"type":"dismissNotice"}), cx);
@@ -299,7 +300,7 @@ impl NativeChatView {
                     } else {
                         "Show less"
                     })
-                    .cursor_pointer()
+                    .chat_cursor_pointer()
                     .child(
                         gpui::svg()
                             .path(if collapsed {

@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, px, svg,
@@ -48,7 +49,7 @@ impl NativeChatView {
                     .border_1()
                     .border_color(p.control_border.opacity(0.65))
                     .bg(p.background.opacity(0.4))
-                    .cursor_pointer()
+                    .chat_cursor_pointer()
                     .hover(|style| style.bg(p.background.opacity(0.7)).text_color(p.foreground))
                     .child(
                         svg()

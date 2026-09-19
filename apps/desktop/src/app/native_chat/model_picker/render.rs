@@ -3,6 +3,7 @@ use super::{
     style::{accent, mix, number, shadow, text, tile_background},
     window::ModelPickerWindow,
 };
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, div, px, rgb, svg,
@@ -90,7 +91,7 @@ fn tile(
         }));
     if available {
         card = card
-            .cursor_pointer()
+            .chat_cursor_pointer()
             .shadow(vec![shadow(
                 if selected {
                     color.opacity(0.2)

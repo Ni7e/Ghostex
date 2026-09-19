@@ -7,6 +7,19 @@ that renders in one surface and falls back to a named chip in the other is a bug
 */
 
 import type { SessionChatImageRefBlock } from '../session-chat';
+import imageVisual from './image-visual.json';
+
+/*
+CDXC:SessionChat 2026-09-19 SEE-ALSO:
+The measurements of a transcript picture, written down once because React keeps them in CSS and
+Tailwind classes where the native renderer cannot read them. The values mirror
+`.ghostex-chat-inline-image`, `.ghostex-chat-inline-image-pending` and
+`.ghostex-chat-markdown .ghostex-chat-inline-image-frame` in packages/core-ui/styles/chat.css and the
+`gap-1.5` / `gap-2` / `py-1` rows in packages/core-ui/chat/session-chat-message-list/rows.tsx.
+apps/desktop/src/app/native_chat/images.rs reads this file directly; change the CSS and this file
+together or the two transcripts stop matching.
+*/
+export const SESSION_CHAT_IMAGE_VISUAL = imageVisual;
 
 /** A composer paste writes `ghostex-paste-*.png`, which reads as "Pasted image" rather than a machine file name. */
 export const SESSION_CHAT_PASTED_IMAGE_NAME = /^ghostex-paste-.+\.png$/i;

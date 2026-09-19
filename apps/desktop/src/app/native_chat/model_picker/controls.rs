@@ -1,4 +1,5 @@
 use super::{style::accent, window::ModelPickerWindow};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, px, rgb,
@@ -16,7 +17,7 @@ pub(super) fn button(
         .id(id)
         .role(gpui::Role::Button)
         .aria_label(label)
-        .cursor_pointer()
+        .chat_cursor_pointer()
         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(cx.listener(move |view, _, _, cx| {
             if enabled {
@@ -32,6 +33,8 @@ pub(super) fn footer(state: &Value, scale: f32, cx: &mut Context<ModelPickerWind
     let closing = state["closing"] == true;
     // Codex's picker cannot commit without saving a default, so its session action stays disabled.
     let session_scope = state["sessionScope"] == true;
+    // Enter commits the scope the Session-only model picks setting names; Shift+Enter commits the other.
+    let session_primary = state["primaryScope"] == "session";
     let session_label = state["scopeReason"]
         .as_str()
         .map(|reason| format!("Use in this session — {reason}"))
@@ -163,9 +166,13 @@ pub(super) fn footer(state: &Value, scale: f32, cx: &mut Context<ModelPickerWind
         )
         .child(
             key(
-                "Enter",
+                if session_primary {
+                    "Enter"
+                } else {
+                    "EnterAlternate"
+                },
                 session_label.as_str(),
-                "↵",
+                if session_primary { "↵" } else { "⇧↵" },
                 !closing && session_scope,
                 cx,
             )
@@ -176,13 +183,13 @@ pub(super) fn footer(state: &Value, scale: f32, cx: &mut Context<ModelPickerWind
         )
         .child(
             key(
-                if session_scope {
-                    "EnterDefault"
+                if session_primary {
+                    "EnterAlternate"
                 } else {
                     "Enter"
                 },
                 "Set as default",
-                if session_scope { "⇧↵" } else { "↵" },
+                if session_primary { "⇧↵" } else { "↵" },
                 !closing,
                 cx,
             )

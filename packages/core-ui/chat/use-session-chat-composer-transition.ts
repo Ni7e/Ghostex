@@ -1,7 +1,11 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from 'react';
+import {
+  SESSION_CHAT_COMPOSER_ANIMATION,
+  SESSION_CHAT_COMPOSER_EASING,
+} from '@/packages/shared/session-chat-presentation/composer-animation';
 
-const DURATION_MS = 280;
-const EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
+const DURATION_MS = SESSION_CHAT_COMPOSER_ANIMATION.durationMs;
+const EASING = SESSION_CHAT_COMPOSER_EASING;
 const PROMPT = '.ghostex-chat-composer-row';
 const FOOTER = '.ghostex-chat-composer-footer';
 const CONTROLS =

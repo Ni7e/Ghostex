@@ -1,4 +1,5 @@
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
@@ -128,7 +129,7 @@ impl NativeChatView {
             actions.push(
                 div()
                     .id("terminal-dialog-submit")
-                    .cursor_pointer()
+                    .chat_cursor_pointer()
                     .px(px(8.0 * p.scale))
                     .py(px(4.0 * p.scale))
                     .rounded(px(6.0 * p.scale))
@@ -148,7 +149,7 @@ impl NativeChatView {
         if dialog["input"] == "key" {
             let id = dialog_id.clone();
             body.push(div().id("terminal-dialog-key").track_focus(&self.terminal_dialog_key_focus)
-                .border_1().border_color(p.border).rounded(px(6.0*p.scale)).p(px(8.0*p.scale)).cursor_pointer()
+                .border_1().border_color(p.border).rounded(px(6.0*p.scale)).p(px(8.0*p.scale)).chat_cursor_pointer()
                 .child("Focus here, then press the new shortcut")
                 .on_click(cx.listener(|this,_,window,cx| this.terminal_dialog_key_focus.focus(window,cx)))
                 .on_key_down(cx.listener(move |this,event:&gpui::KeyDownEvent,window,cx| {

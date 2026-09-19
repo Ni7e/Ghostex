@@ -1,4 +1,21 @@
 /**
+ * CDXC:SessionChat 2026-09-19 SEE-ALSO:
+ * One status-line row, the height both renderers hold free under the chat box from the first frame so the
+ * box never shifts when the values arrive. React applies it as `min-height` in the
+ * `.ghostex-chat-status-line.is-reserved` rule of packages/core-ui/styles/chat.css (which also sets the
+ * matching 16px line-height); apps/desktop/src/app/native_chat/context_meter.rs reserves the same height.
+ */
+export const SESSION_CHAT_STATUS_LINE_ROW_HEIGHT_PX = 16;
+
+/**
+ * Whether the status line keeps its row of space. Configured items reserve it while their values are still
+ * loading, so the first paint already has room for the line the session is going to show.
+ */
+export function sessionChatStatusLineReserved(input: { hasConfiguredItems: boolean; itemCount: number }): boolean {
+  return input.hasConfiguredItems || input.itemCount > 0;
+}
+
+/**
  * CDXC:SessionChat 2026-09-14 DECISION:
  * User: center every status-line row, avoid a row with only one item where possible, and show separators only between items on the same row.
  * This supersedes the 2026-09-04 container-only centering and left-aligned wrapped rows.

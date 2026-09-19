@@ -1,5 +1,9 @@
 import { nativeOptionMenus } from './native-option-menus';
-import { sessionChatOptionPillValues, sessionChatOptionsTitle } from '../session-chat-presentation/option-pills';
+import {
+  sessionChatAccountIndicator,
+  sessionChatOptionPillValues,
+  sessionChatOptionsTitle,
+} from '../session-chat-presentation/option-pills';
 import {
   sessionChatOptionsMayResolve,
   visibleSessionChatOptions,
@@ -19,6 +23,7 @@ import {
   type ModelSelectionPersistence,
 } from './model-selection';
 import type { SessionChatOptionPersistence } from './option-state';
+import type { AgentAccountsState } from '../agent-accounts';
 
 export interface NativeOptionSeed {
   sessionKey: string;
@@ -58,6 +63,7 @@ export function computeNativeChatOptions(
   persistence: ReturnType<typeof nativeOptionPersistence>,
   rpc: <T>(method: string, params: Record<string, unknown>) => Promise<T>,
   onUnconfirmed: () => void,
+  accounts: AgentAccountsState | undefined,
   lifecycle: ChatLifecycle
 ) {
   const { useMemo, useState, useLayoutEffect } = lifecycle;
@@ -125,6 +131,7 @@ export function computeNativeChatOptions(
     optionMenus: menus,
     optionLabels: {
       ...values,
+      accountIndicator: sessionChatAccountIndicator(accounts),
       optionsTitle: sessionChatOptionsTitle(sections, values.fast, values.plan),
       optionsTooltip: sessionChatOptionsTitle(sections, values.fast, values.plan, provider ? ' ({shortcut})' : ''),
       modelQuickPicker: !!provider,

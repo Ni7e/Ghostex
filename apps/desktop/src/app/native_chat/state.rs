@@ -50,6 +50,8 @@ pub(crate) struct NativeChatView {
     pub(super) suggestion_selection: Option<(String, usize)>,
     input_window: Option<gpui::WindowId>,
     pub(super) option_menu: Option<Entity<super::option_menu::ChatOptionMenu>>,
+    /// Which trigger owns the open menu, so pressing it again shuts it (`menu_toggle.rs`).
+    pub(super) menu_toggle: super::menu_toggle::ChatMenuToggle,
     pub(super) save_markdown_window: super::save_markdown::SaveMarkdownWindowState,
     pub(super) rewind_window: super::rewind::RewindWindowState,
     pub(super) image_viewer: super::image_viewer::ImageViewerState,
@@ -72,7 +74,15 @@ pub(crate) struct NativeChatView {
     pub(super) context_status_measurements: Option<Value>,
     pub(crate) composer_measurements: Option<Value>,
     pub(super) composer_held_key: Option<String>,
+    /// The chat box's height tween and the arrival fade of the controls an expansion brings back.
+    pub(super) composer_animation: super::composer_animation::ComposerAnimation,
+    /// Whether this session's status line holds its row of space, remembered across view
+    /// re-creations so a chat that is going to show one never paints a frame without it.
+    pub(super) status_line_reserved: bool,
     pub(crate) bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
+    /// The transcript scrollbar's measured track: from the top of the transcript region to the
+    /// bottom of the pane, so the composer's height never shortens it (scrollbar.rs).
+    pub(super) scrollbar_track: std::rc::Rc<std::cell::Cell<gpui::Pixels>>,
     input_needs_sync: bool,
     input_placeholder: String,
     input_undoable: bool,
@@ -82,6 +92,12 @@ pub(crate) struct NativeChatView {
     pub(super) composer_reference_draft: Option<String>,
     pub(super) composer_reference_click: u64,
     pub(super) composer_reference_task: Option<gpui::Task<()>>,
+    /// Re-asks the shared parser after a paint found the runtime thread busy.
+    pub(super) composer_reference_retry: Option<gpui::Task<()>>,
+    /// Path of the image pill under the pointer.
+    pub(super) composer_image_hover: Option<String>,
+    /// Image the caret last sat against, so a caret move repaints the thumbnails only when it matters.
+    pub(super) composer_caret_image: Option<String>,
     pub(super) async_answer_input: Option<(String, Entity<InputState>)>,
     pub(super) async_answer_subscription: Option<Subscription>,
     pub(crate) answer_input: Option<(String, Entity<InputState>)>,
@@ -94,6 +110,8 @@ pub(crate) struct NativeChatView {
     pub(super) search_input: Option<Entity<InputState>>,
     pub(super) search_subscription: Option<Subscription>,
     pub(super) search_scrolled_revision: i64,
+    /// Keyboard zoom (Cmd+= / Cmd+- / Cmd+0): this pane's temporary size (zoom.rs).
+    pub(super) zoom: super::zoom::ChatZoomState,
     pub(crate) draft: String,
     pub(crate) draft_revision: u64,
     pub(crate) draft_id: String,
@@ -118,6 +136,9 @@ pub(crate) struct NativeChatView {
     /// Whether the open viewer has already taken focus, so a redraw does not steal it back every frame.
     pub(super) subagent_focused: bool,
     pub(crate) pane_focused: bool,
+    /// Whether this chat's composer field itself holds the keyboard, which is what the `@`, `$` and
+    /// `/` picker window keys off (`suggestions/window.rs`).
+    pub(super) composer_focused: bool,
     pub(crate) focus_requested: bool,
     pub(crate) subscriptions: Vec<Subscription>,
     /// When this view last rendered; a parked chat keeps applying frames without redrawing the window.
@@ -169,6 +190,9 @@ impl NativeChatView {
                 config.client_id,
                 SessionChatPageState::next_identity()
             ),
+            status_line_reserved: super::context_meter::remembered_status_line_reservation(
+                &config.session_id,
+            ),
             config,
             runtime,
             error,
@@ -183,6 +207,7 @@ impl NativeChatView {
             suggestion_selection: None,
             input_window: None,
             option_menu: None,
+            menu_toggle: Default::default(),
             model_picker_window: Default::default(),
             context_editor_window: Default::default(),
             save_markdown_window: Default::default(),
@@ -200,8 +225,10 @@ impl NativeChatView {
             stop_cooldown_task: None,
             composer_measurements: None,
             composer_held_key: None,
+            composer_animation: Default::default(),
             context_status_measurements: None,
             bounds: Default::default(),
+            scrollbar_track: Default::default(),
             input_needs_sync: false,
             input_placeholder: String::new(),
             input_undoable: false,
@@ -210,6 +237,9 @@ impl NativeChatView {
             composer_reference_draft: None,
             composer_reference_click: 0,
             composer_reference_task: None,
+            composer_reference_retry: None,
+            composer_image_hover: None,
+            composer_caret_image: None,
             async_answer_input: None,
             async_answer_subscription: None,
             answer_input: None,
@@ -221,6 +251,7 @@ impl NativeChatView {
             search_input: None,
             search_subscription: None,
             search_scrolled_revision: -1,
+            zoom: Default::default(),
             draft: String::new(),
             draft_revision: 0,
             pending_send: false,
@@ -236,6 +267,7 @@ impl NativeChatView {
             subagent_focus: cx.focus_handle(),
             subagent_focused: false,
             pane_focused: false,
+            composer_focused: false,
             focus_requested: false,
             subscriptions: Vec::new(),
             last_render: None,
@@ -270,6 +302,11 @@ impl NativeChatView {
                 if input.read(cx).focus_handle(cx).is_focused(window) {
                     this.update_suggestion_selection(cx);
                 }
+                let caret_image = this.composer_caret_image(cx);
+                if this.composer_caret_image != caret_image {
+                    this.composer_caret_image = caret_image;
+                    cx.notify();
+                }
             }));
             self.input_subscription = Some(cx.subscribe_in(
                 &input,
@@ -289,10 +326,16 @@ impl NativeChatView {
                     }
                     InputEvent::Focus => {
                         super::focus::reclaim_keyboard_focus(window);
+                        this.composer_focused = true;
+                        this.sync_suggestion_window(cx);
                         this.invoke(json!({"type":"composerExpand","editor":true}), cx);
                         cx.emit(NativeChatEvent::ComposerFocused);
                     }
-                    InputEvent::Blur => this.save_draft(cx),
+                    InputEvent::Blur => {
+                        this.composer_focused = false;
+                        this.sync_suggestion_window(cx);
+                        this.save_draft(cx);
+                    }
                     _ => {}
                 },
             ));
@@ -467,11 +510,14 @@ impl NativeChatView {
             self.apply_subagent_splice(&mut splice);
             self.notify_if_shown(cx);
         }
-        if let Some(snapshot) = output
+        if let Some(mut snapshot) = output
             .as_object_mut()
             .and_then(|output| output.remove("snapshot"))
         {
+            // The pane's keyboard zoom is its own, and outlives the snapshots the host publishes.
+            self.apply_chat_zoom(&mut snapshot);
             self.snapshot = Arc::new(snapshot);
+            self.adopt_status_line_reservation();
             self.sync_model_picker_window(cx);
             self.sync_context_editor_window(cx);
             self.sync_save_markdown_window(cx);

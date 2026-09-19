@@ -8,6 +8,20 @@ import {
 } from '@/packages/core-ui/chat/session-chat-session-options';
 import { isShiftTabModeCycler, optionMenuSections } from './option-menu';
 import { MODES_SECTION_LABEL } from '@/packages/core-ui/chat/session-chat-session-options';
+import type { AgentAccountsState } from '../agent-accounts';
+
+/**
+ * The account mark the model pill draws over the provider logo: the account this session is bound
+ * to, by its own two-character indicator or, without one, its slot selector. `-` hides the mark,
+ * and a session with no bound account (or an agent that has no accounts) leaves the logo plain.
+ * SEE-ALSO: packages/core-ui/project-agent-launcher-icon.tsx, packages/core-ui/accounts/indicator.tsx,
+ * packages/core-ui/accounts/accounts.css (.gx-account-mark), apps/desktop/src/app/native_chat/option_pills.rs.
+ */
+export function sessionChatAccountIndicator(accounts: AgentAccountsState | undefined): string | undefined {
+  const active = accounts?.accounts.find((account) => account.id === accounts.session?.accountId);
+  const value = active ? active.indicator || active.selector : undefined;
+  return value && value !== '-' ? value : undefined;
+}
 
 export function sessionChatOptionsTitle(
   sections: ReturnType<typeof optionMenuSections>,

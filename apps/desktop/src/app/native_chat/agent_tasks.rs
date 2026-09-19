@@ -6,6 +6,7 @@
 
 use super::{appearance::ChatAppearance, state::NativeChatView, transcript::text};
 use crate::app::helpers::ThrottledAnimationExt;
+use crate::app::native_chat::cursor::ChatCursor as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -78,7 +79,7 @@ impl NativeChatView {
                         .id("chat-agent-tasks-fold")
                         .role(gpui::Role::Button)
                         .aria_label(fold.clone())
-                        .cursor_pointer()
+                        .chat_cursor_pointer()
                         .text_size(px(12.0 * s))
                         .text_color(p.card_muted)
                         .hover(|style| style.text_color(p.foreground))
