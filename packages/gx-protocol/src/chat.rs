@@ -111,15 +111,15 @@ pub struct AsyncQuestion {
 #[serde(rename_all = "camelCase")]
 pub struct DeferredWork {
     pub before_offset: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub start_id: String,
     #[serde(default)]
     pub end_id: Option<String>,
     #[serde(default)]
     pub completed_at: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::lenient_u64")]
     pub message_count: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub file_paths: Vec<String>,
 }
 
@@ -129,7 +129,7 @@ pub struct DeferredWork {
 pub struct ChatMessage {
     pub id: String,
     pub role: ChatRole,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub blocks: Vec<ChatBlock>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub async_questions: Option<Vec<AsyncQuestion>>,
@@ -141,10 +141,18 @@ pub struct ChatMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
     /// Line offset in the transcript file; the tie-breaker for equal timestamps.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::de::lenient_opt_u64",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub byte_offset: Option<u64>,
     /// A prompt sitting in the agent's own queue, not handed to the model yet. Omitted when false.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(
+        default,
+        deserialize_with = "crate::de::null_as_default",
+        skip_serializing_if = "is_false"
+    )]
     pub queued: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deferred_work: Option<DeferredWork>,
@@ -221,15 +229,15 @@ pub struct ChatSideState {
 pub struct ChatSnapshotFrame {
     #[serde(flatten)]
     pub base: ChatFrameBase,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub has_more: bool,
     /// `true` marks `has_more` as exact; older daemons omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_more_exact: Option<bool>,
     /// Byte offset into the transcript file: the cursor for the next older page.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::lenient_u64")]
     pub before_offset: u64,
     pub status: ChatStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -250,13 +258,17 @@ pub struct ChatSnapshotFrame {
 pub struct ChatAppendedFrame {
     #[serde(flatten)]
     pub base: ChatFrameBase,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub messages: Vec<ChatMessage>,
     /// Absent means unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<TurnLifecycle>,
     /// Omitted on the wire when empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "crate::de::null_as_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub superseded_message_ids: Vec<String>,
 }
 
@@ -285,7 +297,7 @@ pub struct ChatStateFrame {
 pub struct ChatForkInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forked_from_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub ancestor_ids: Vec<String>,
 }
 
@@ -296,13 +308,13 @@ pub struct ChatForkInfo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadSessionChatResult {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub has_more: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_more_exact: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::lenient_u64")]
     pub before_offset: u64,
     #[serde(default)]
     pub epoch: i64,

@@ -10,20 +10,15 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 ///
 /// Use it on a field with `#[serde(default, skip_serializing_if = "Tri::is_absent")]`: a missing
 /// key takes the default (`Absent`), a present key goes through `Deserialize` (`Null` or `Value`).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Tri<T> {
     /// The key is not on the wire.
+    #[default]
     Absent,
     /// The key is present with an explicit `null`.
     Null,
     /// The key is present with a value.
     Value(T),
-}
-
-impl<T> Default for Tri<T> {
-    fn default() -> Self {
-        Self::Absent
-    }
 }
 
 impl<T> Tri<T> {

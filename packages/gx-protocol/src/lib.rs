@@ -28,6 +28,7 @@ pub mod tri;
 
 pub use chat::*;
 pub use client_message::*;
+pub use de::{Rows, SkippedRow};
 pub use delta::*;
 pub use event::*;
 pub use peek::peek_event_type;

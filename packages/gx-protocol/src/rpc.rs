@@ -57,6 +57,13 @@ pub struct RpcSuccess<R> {
     pub result: R,
 }
 
+impl<R> RpcSuccess<R> {
+    /// The TypeScript client rejects a success envelope whose version differs; so should a caller.
+    pub fn protocol_version_matches(&self) -> bool {
+        self.protocol_version == GXSERVER_PROTOCOL_VERSION
+    }
+}
+
 /// Error envelope. `protocolVersion` and `requestId` are optional on errors.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -13,18 +13,22 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSessionGroup {
     pub group_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub session_ids: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub title: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceProjectGroups {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub groups: Vec<WorkspaceSessionGroup>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::de::lenient_opt_u64",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub next_group_number: Option<u64>,
 }
 
@@ -32,9 +36,9 @@ pub struct WorkspaceProjectGroups {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSessionGroupsState {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub project_order: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub projects: BTreeMap<String, WorkspaceProjectGroups>,
 }
 
@@ -42,11 +46,11 @@ pub struct WorkspaceSessionGroupsState {
 #[serde(rename_all = "camelCase")]
 pub struct SidebarProjectCollection {
     pub collection_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub color: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub project_ids: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub title: String,
 }
 
@@ -55,11 +59,11 @@ pub struct SidebarProjectCollection {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarProjectCollectionsState {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub collections: BTreeMap<String, SidebarProjectCollection>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::lenient_u64")]
     pub next_collection_number: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub order: Vec<String>,
 }
 
@@ -67,16 +71,16 @@ pub struct SidebarProjectCollectionsState {
 #[serde(rename_all = "camelCase")]
 pub struct SidebarSpace {
     pub space_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub name: String,
     /// Lowercase `#rrggbb`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub color: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub icon: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub member_collection_ids: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub member_project_ids: Vec<String>,
 }
 
@@ -84,9 +88,9 @@ pub struct SidebarSpace {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarSpacesState {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub order: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub spaces: BTreeMap<String, SidebarSpace>,
 }
 
@@ -94,12 +98,12 @@ pub struct SidebarSpacesState {
 #[serde(rename_all = "camelCase")]
 pub struct CustomSessionTag {
     pub tag_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub name: String,
     /// Lowercase `#rrggbb`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub color: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub icon: String,
 }
 
@@ -107,8 +111,8 @@ pub struct CustomSessionTag {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomSessionTagsState {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub order: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub tags: BTreeMap<String, CustomSessionTag>,
 }

@@ -17,10 +17,10 @@ use crate::side_state::{
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventHeader {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::lenient_u64")]
     pub protocol_version: u64,
     /// Daemon identity; a change means another daemon instance or machine.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub server_id: String,
 }
 
@@ -29,9 +29,9 @@ pub struct EventHeader {
 pub struct ApiRequestHandledFrame {
     #[serde(flatten)]
     pub header: EventHeader,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub path: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub request_id: String,
 }
 
@@ -126,11 +126,11 @@ pub struct GlobalSidebarCommandsChangedFrame {
 pub struct RendererCommand {
     pub action: String,
     pub command_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub created_at: String,
     #[serde(default)]
     pub payload: Value,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::de::lenient_u64")]
     pub timeout_ms: u64,
 }
 
@@ -237,6 +237,35 @@ impl ServerEvent {
             Self::SessionChatState(_) => "sessionChatState",
             Self::Unknown { event_type } => event_type.as_str(),
         }
+    }
+
+    /// The `protocolVersion` the frame carries; `None` for a frame type this client does not
+    /// know. A client applies a frame only when this equals
+    /// [`crate::GXSERVER_PROTOCOL_VERSION`].
+    pub fn protocol_version(&self) -> Option<u64> {
+        let header = match self {
+            Self::EventStreamReady(header)
+            | Self::ServerStarted(header)
+            | Self::ServerStopping(header)
+            | Self::NotificationFeedChanged(header) => header,
+            Self::ApiRequestHandled(frame) => &frame.header,
+            Self::PresentationSnapshot(frame) => &frame.header,
+            Self::PresentationSnapshotCurrent(frame) => &frame.header,
+            Self::PresentationDelta(frame) => &frame.header,
+            Self::WorkspaceGroupsChanged(frame) => &frame.header,
+            Self::SidebarProjectCollectionsChanged(frame) => &frame.header,
+            Self::SidebarSpacesChanged(frame) => &frame.header,
+            Self::CustomSessionTagsChanged(frame) => &frame.header,
+            Self::GlobalSidebarCommandsChanged(frame) => &frame.header,
+            Self::RendererCommand(frame) => &frame.header,
+            Self::SessionChatSnapshot(frame) | Self::SessionChatReplaced(frame) => {
+                return Some(frame.base.protocol_version)
+            }
+            Self::SessionChatAppended(frame) => return Some(frame.base.protocol_version),
+            Self::SessionChatState(frame) => return Some(frame.base.protocol_version),
+            Self::Unknown { .. } => return None,
+        };
+        Some(header.protocol_version)
     }
 
     /// Parses one raw frame. Peeks `type` first and then parses straight into that frame's
