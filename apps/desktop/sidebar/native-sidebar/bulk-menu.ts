@@ -1,7 +1,7 @@
 import { nativeTagPresentation } from './tag-presentation';
 import { getSidebarBulkSessionContextMenuAvailability } from '@/packages/core-ui/session-card-capabilities';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
-import { normalizeghostexSettings } from '@/packages/shared/ghostex-settings';
+import { nativeSidebarSettings } from './settings';
 import {
   getEffectiveSidebarSessionTag,
   getEnabledVisibleSidebarSessionTagSections,
@@ -13,7 +13,7 @@ import type { NativeSidebarUiState } from './ui-state';
 export function createNativeBulkMenu(ui: NativeSidebarUiState): NativeSidebarMenuItem[] | undefined {
   if (ui.selectedSessionIds.length < 2) return;
   const state = sidebarStore.getState();
-  const settings = normalizeghostexSettings(state.hud.settings);
+  const settings = nativeSidebarSettings();
   const available = getSidebarBulkSessionContextMenuAvailability({
     enableSessionParking: settings.enableSessionParking,
     sessionIds: ui.selectedSessionIds,

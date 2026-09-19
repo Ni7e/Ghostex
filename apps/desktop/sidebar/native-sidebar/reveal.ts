@@ -1,5 +1,5 @@
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
-import { normalizeghostexSettings } from '@/packages/shared/ghostex-settings';
+import { nativeSidebarSettings } from './settings';
 import { sessionMatchesSidebarTagFilters } from '@/packages/shared/session-tags';
 import {
   getProjectSessionSection,
@@ -35,7 +35,7 @@ export function applyNativeSidebarReveal(ui: NativeSidebarUiState) {
   )
     ui.showHidden = true;
   if (!sessionMatchesSidebarTagFilters(session, ui.selectedTagFilters)) ui.selectedTagFilters = [];
-  const settings = normalizeghostexSettings(state.hud.settings);
+  const settings = nativeSidebarSettings();
   const rawStorageId = group.projectContext?.editor.projectId ?? group.groupId;
   const storageId = group.remoteMachineContext
     ? `remote:${group.remoteMachineContext.machineId}:${rawStorageId}`

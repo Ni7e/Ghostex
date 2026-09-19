@@ -1,5 +1,5 @@
 import { getghostexHotkeyActionById } from '@/packages/shared/ghostex-hotkeys';
-import { normalizeghostexSettings } from '@/packages/shared/ghostex-settings';
+import { nativeSidebarSettings } from './settings';
 import { getSidebarSessionLifecycleState } from '@/packages/shared/session-grid-contract';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import {
@@ -84,7 +84,7 @@ export function runNativeProjectSlotHotkey(ui: NativeSidebarUiState, slotNumber:
   const snapshot = createNativeSidebarSnapshot(ui);
   const group = snapshot.groups.filter((group) => !group.remoteMachineContext)[slotNumber - 1];
   if (!group?.projectContext) return;
-  const settings = normalizeghostexSettings(sidebarStore.getState().hud.settings);
+  const settings = nativeSidebarSettings();
   const collapsed = ui.collapse.collapsedGroupsById[group.groupId];
   if (collapsed && settings.expandCollapsedProjectsOnJump) {
     delete ui.collapse.collapsedGroupsById[group.groupId];

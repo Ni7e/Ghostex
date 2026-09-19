@@ -22,7 +22,9 @@ import {
 } from '@/packages/core-ui/sidebar-app/space-filtering';
 import { describeNativeSidebarMachine } from './space-navigation';
 import { formatRelativeTime } from '@/packages/core-ui/relative-time';
-import { isRemoteMachineEnabledInSidebar, normalizeghostexSettings } from '@/packages/shared/ghostex-settings';
+import { isRemoteMachineEnabledInSidebar } from '@/packages/shared/ghostex-settings';
+import { nativeSidebarSettings } from './settings';
+import { nativeSidebarProjectionPhases } from './projection-phases';
 import type { ExtensionToSidebarMessage } from '@/packages/shared/session-grid-contract';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { createDisplaySessionLayout } from '@/packages/shared/active-sessions-sort';
@@ -81,17 +83,6 @@ function sameDeps(left: readonly unknown[], right: readonly unknown[]): boolean 
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-let settingsSource: unknown = undefined;
-let settingsValue: ghostexSettings | undefined;
-
-function normalizedSettings(source: unknown): ghostexSettings {
-  if (!settingsValue || source !== settingsSource) {
-    settingsSource = source;
-    settingsValue = normalizeghostexSettings(source);
-  }
-  return settingsValue;
-}
-
 function projectNativeSidebarSession(
   session: SidebarSessionItem,
   group: Omit<SidebarSessionGroup, 'sessions'>,
@@ -128,9 +119,17 @@ function projectNativeSidebarSession(
 }
 
 export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSidebarSnapshot {
+  const phases: Record<string, number> = { sessionMisses: 0, groupProjectMs: 0 };
+  nativeSidebarProjectionPhases.current = phases;
+  let phaseStart = Date.now();
+  const phase = (name: string) => {
+    const now = Date.now();
+    phases[name] = now - phaseStart;
+    phaseStart = now;
+  };
   applyNativeSidebarReveal(ui);
   const state = sidebarStore.getState();
-  const settings = normalizedSettings(state.hud.settings);
+  const settings = nativeSidebarSettings(state.hud.settings);
   const projectedSessionIds = new Set<string>();
   const enabledFilters = new Set(
     getEnabledVisibleSidebarSessionTagFilters(
@@ -185,6 +184,7 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
         attentionCount: summaries[space.id]?.attentionCount ?? 0,
       }))
     : [];
+  phase('spacesMs');
   const layout = createDisplaySessionLayout({
     enableSessionParking: settings.enableSessionParking,
     sessionIdsByGroup: state.sessionIdsByGroup,
@@ -192,6 +192,7 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
     sortMode: state.hud.activeSessionsSortMode,
     workspaceGroupIds: state.workspaceGroupIds,
   });
+  phase('layoutMs');
   ui.selectedSessionIds = ui.selectedSessionIds.filter((id) => state.sessionsById[id]);
   const groups = layout.groupIds.flatMap((groupId) => {
     const group = state.groupsById[groupId];
@@ -211,6 +212,7 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
     const customTags = group.remoteMachineContext
       ? state.remoteCustomSessionTagsByMachineId[group.remoteMachineContext.machineId]
       : state.customSessionTags;
+    const groupStart = Date.now();
     const projected = projectNativeSidebarGroup(
       {
         ...group,
@@ -230,6 +232,7 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
           projectedSessionIds.add(id);
           const cached = projectedSessions.get(id);
           if (cached && sameDeps(cached.deps, deps)) return cached.value;
+          phases.sessionMisses! += 1;
           const value = projectNativeSidebarSession(session, group, settings, customTags, state, selected);
           projectedSessions.set(id, { deps, value });
           return value;
@@ -238,10 +241,12 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
       ui,
       settings
     );
+    phases.groupProjectMs! += Date.now() - groupStart;
     return [projected];
   });
   for (const id of projectedSessions.keys()) if (!projectedSessionIds.has(id)) projectedSessions.delete(id);
-  return {
+  phase('groupsMs');
+  const snapshot: NativeSidebarSnapshot = {
     ...createNativeNavigation(ui),
     emptyState: createNativeEmptyState(ui),
     kind: 'snapshot',
@@ -268,4 +273,6 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
     groups,
     ...createNativeCollections(ui, groups),
   };
+  phase('tailMs');
+  return snapshot;
 }

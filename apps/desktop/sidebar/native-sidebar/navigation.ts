@@ -6,7 +6,8 @@ import {
 } from '@/packages/core-ui/sidebar-app/collapse-state';
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
-import { KEEP_AWAKE_DURATION_OPTIONS, normalizeghostexSettings } from '@/packages/shared/ghostex-settings';
+import { KEEP_AWAKE_DURATION_OPTIONS } from '@/packages/shared/ghostex-settings';
+import { nativeSidebarSettings } from './settings';
 import { normalizeghostexHotkeySettings } from '@/packages/shared/ghostex-hotkeys';
 import { GHOSTEX_DISCORD_URL } from '@/packages/shared/sidebar-commands';
 import {
@@ -22,7 +23,7 @@ import { describeNativeSidebarMachine } from './space-navigation';
 
 export function createNativeNavigation(ui: NativeSidebarUiState) {
   const state = sidebarStore.getState();
-  const settings = normalizeghostexSettings(state.hud.settings);
+  const settings = nativeSidebarSettings();
   const hotkeys = normalizeghostexHotkeySettings(settings.hotkeys);
   const intent = (
     label: string,
@@ -137,7 +138,7 @@ export function runNativeSidebarAction(
   if (action === 'sortManual' || action === 'sortLastActivity') {
     const sortMode = action === 'sortManual' ? 'manual' : 'lastActivity';
     const layout = createDisplaySessionLayout({
-      enableSessionParking: normalizeghostexSettings(state.hud.settings).enableSessionParking,
+      enableSessionParking: nativeSidebarSettings().enableSessionParking,
       sessionIdsByGroup: state.sessionIdsByGroup,
       sessionsById: state.sessionsById,
       sortMode: state.hud.activeSessionsSortMode,

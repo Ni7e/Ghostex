@@ -10,7 +10,7 @@ import {
   SIDEBAR_PROJECT_COLLECTION_COLOR_LABELS,
   type SidebarProjectCollection,
 } from '@/packages/core-ui/project-collections';
-import { normalizeghostexSettings } from '@/packages/shared/ghostex-settings';
+import { nativeSidebarSettings } from './settings';
 import { getSidebarSessionTagLabel } from '@/packages/shared/session-tags';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import type { SidebarSessionItem, SidebarToExtensionMessage } from '@/packages/shared/session-grid-contract';
@@ -40,7 +40,7 @@ export function createNativeCollectionMenu(
       ? [{ label, icon, command: { type: 'batch', messages: candidates.map((session) => message(session.sessionId)) } }]
       : [];
   const agents = sessions.filter((session) => !isSidebarBrowserSession(session));
-  const tags = normalizeghostexSettings(sidebarStore.getState().hud.settings).sidebarSessionTagListItems.filter(
+  const tags = nativeSidebarSettings().sidebarSessionTagListItems.filter(
     (item) => item.type === 'tag' && item.enabled && item.visible
   );
   const menu: NativeSidebarMenuItem[] = [

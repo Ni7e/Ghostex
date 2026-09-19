@@ -19,6 +19,7 @@ import type { NativeSidebarBridge } from '@/packages/shared/native-sidebar';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import type { createGpuiSidebarRuntime } from '../gxserver-runtime';
 import { applyNativeSidebarMessage, createNativeSidebarSnapshot } from './model';
+import { nativeSidebarProjectionPhases } from './projection-phases';
 import { NativeSidebarUiState } from './ui-state';
 import { createNativeSidebarPublisher } from './updates';
 import { resolveNativeSessionMenu } from './menu-request';
@@ -54,7 +55,12 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
           type: 'sidebarDebugLog',
           scenarioId: 'native.sidebar.refresh',
           event: 'nativeSidebar.publish',
-          details: { ...metrics, projectionMs: projected - started, publishMs: Date.now() - projected },
+          details: {
+            ...metrics,
+            projectionMs: projected - started,
+            publishMs: Date.now() - projected,
+            ...nativeSidebarProjectionPhases.current,
+          },
         });
       }
     });

@@ -1,5 +1,5 @@
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
-import { normalizeghostexSettings } from '@/packages/shared/ghostex-settings';
+import { nativeSidebarSettings } from './settings';
 import type {
   NativeSidebarCommand,
   NativeSidebarMenuItem,
@@ -34,7 +34,7 @@ export function resolveNativeSessionMenu(
     projected?.sessions.filter((item) => visible.has(item.sessionId)).map((item) => item.sessionId) ?? [];
   const index = visibleIds.indexOf(command.sessionId);
   const below = index < 0 ? [] : visibleIds.slice(index + 1).flatMap((id) => state.sessionsById[id] ?? []);
-  const settings = normalizeghostexSettings(state.hud.settings);
+  const settings = nativeSidebarSettings();
   const customTags = group.remoteMachineContext
     ? state.remoteCustomSessionTagsByMachineId[group.remoteMachineContext.machineId]
     : state.customSessionTags;

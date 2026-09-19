@@ -8,7 +8,7 @@ import {
   writeSidebarUiCollapseState,
 } from '@/packages/core-ui/sidebar-app/collapse-state';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
-import { normalizeghostexSettings } from '@/packages/shared/ghostex-settings';
+import { nativeSidebarSettings } from './settings';
 import { openAppModal } from '@/packages/core-ui/app-modal-host-bridge';
 import type { NativeSidebarUiState } from './ui-state';
 import type { SidebarPostMessage } from './metadata';
@@ -19,9 +19,7 @@ export function describeNativeSidebarMachine(ui: NativeSidebarUiState, machineId
     (id) => (state.groupsById[id]?.remoteMachineContext?.machineId ?? 'local') === machineId
   );
   const sectionKey = machineId === 'local' ? 'local' : `remote:${machineId}`;
-  const spacesState = normalizeghostexSettings(state.hud.settings).sidebarSpacesEnabled
-    ? ui.metadata.spaces[machineId]
-    : undefined;
+  const spacesState = nativeSidebarSettings().sidebarSpacesEnabled ? ui.metadata.spaces[machineId] : undefined;
   const visibility = {
     groupIds,
     groupsById: state.groupsById,
@@ -40,8 +38,7 @@ export function switchNativeSidebarSpace(ui: NativeSidebarUiState, spaceId: stri
   const previous = describeNativeSidebarMachine(ui).selection?.spaceId;
   ui.apply({ type: 'selectSpace', spaceId });
   const state = sidebarStore.getState();
-  if (previous === spaceId || normalizeghostexSettings(state.hud.settings).sidebarSpaceSwitchBehavior !== 'restore')
-    return;
+  if (previous === spaceId || nativeSidebarSettings().sidebarSpaceSwitchBehavior !== 'restore') return;
   const section = describeNativeSidebarMachine(ui);
   const visible = section.groupIds.filter(section.isVisible);
   const recent = ui.collapse.recentSessionIdsBySpace[section.sectionKey]?.[spaceId] ?? [];
@@ -76,7 +73,7 @@ export function rememberNativeSidebarFocus(ui: NativeSidebarUiState, sessionId: 
       spaceId,
       sessionId
     );
-    if (reveal || normalizeghostexSettings(state.hud.settings).sidebarSpaceFollowActiveSession)
+    if (reveal || nativeSidebarSettings().sidebarSpaceFollowActiveSession)
       ui.collapse.selectedSpaceIdBySectionKey[section.sectionKey] = spaceId;
   }
   writeSidebarUiCollapseState('main', ui.collapse);
