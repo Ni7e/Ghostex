@@ -17,7 +17,9 @@
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use ghostex_gx_core::protocol::ServerEvent;
+use ghostex_gx_core::protocol::{
+    CustomSessionTag, CustomSessionTagsState, ServerEvent, GXSERVER_PROTOCOL_VERSION,
+};
 use ghostex_gx_core::{
     Core, Event, Intent, MachineId, SectionId, SessionSortMode, SidebarInputs, SidebarView,
     SidebarViewModel,
@@ -96,12 +98,15 @@ fn run_pass(
 
     let mut cold_build: Option<Duration> = None;
     let mut store_changed: Vec<Duration> = Vec::new();
+    let mut catalog_changed: Vec<Duration> = Vec::new();
     let mut inputs_changed: Vec<Duration> = Vec::new();
     let mut idle: Vec<Duration> = Vec::new();
     let mut scratch: Vec<Duration> = Vec::new();
     let mut handled = 0u64;
     let mut focus_intents = 0u64;
     let mut churn_steps = 0u64;
+    let mut catalog_swaps = 0u64;
+    let mut captured_tags: Option<CustomSessionTagsState> = None;
     let mut mismatches = 0u64;
     let mut first_mismatch: Option<String> = None;
     let started = Instant::now();
@@ -138,6 +143,35 @@ fn run_pass(
                 focus_intents += 1;
             }
         }
+        // The tag catalog, the one store input that invalidates every row of the machine without
+        // any session changing. Swapped on a rotation between a catalog of the replay's own and
+        // the recording's, so rows lose their custom tag labels and get them back.
+        let mut catalog_swapped = false;
+        if churn && index % 29 == 28 {
+            if captured_tags.is_none() {
+                captured_tags = core
+                    .presentation()
+                    .machine(&machine)
+                    .and_then(|entry| entry.side_state().custom_session_tags.clone());
+            }
+            let catalog = if (index / 29) % 2 == 0 {
+                replay_tag_catalog()
+            } else {
+                captured_tags.clone().unwrap_or_default()
+            };
+            if let Some(frame) = tag_catalog_frame(&catalog) {
+                let swapped = core.handle(
+                    Event::Frame {
+                        machine: machine.clone(),
+                        frame: Box::new(frame),
+                    },
+                    now_ms,
+                );
+                changes.merge(swapped.changes);
+                catalog_swaps += 1;
+                catalog_swapped = true;
+            }
+        }
         let store_moved = !changes.is_empty();
         let before = inputs.clone();
         if churn {
@@ -156,6 +190,8 @@ fn run_pass(
         // Everything before it runs against an empty store and says nothing about the cost.
         if cold_build.is_none() && empty_before && !model.view().groups.is_empty() {
             cold_build = Some(elapsed);
+        } else if catalog_swapped {
+            catalog_changed.push(elapsed);
         } else if store_moved {
             store_changed.push(elapsed);
         } else if inputs_moved {
@@ -179,7 +215,7 @@ fn run_pass(
 
     println!("\n== {label} ==");
     println!(
-        "{handled} frames in {} ms, {focus_intents} focus intents, {churn_steps} input changes, clock walked {} minutes",
+        "{handled} frames in {} ms, {focus_intents} focus intents, {churn_steps} input changes, {catalog_swaps} tag catalog swaps, clock walked {} minutes",
         wall.as_millis(),
         handled * CLOCK_STEP_MS / 60_000
     );
@@ -210,6 +246,7 @@ fn run_pass(
     }
     report("incremental update (store changed)", &mut store_changed);
     report("incremental update (inputs churned)", &mut inputs_changed);
+    report("incremental update (tags swapped)", &mut catalog_changed);
     report("update with nothing changed", &mut idle);
     report("build from scratch", &mut scratch);
     println!(
@@ -240,7 +277,7 @@ fn churn_inputs(inputs: &mut SidebarInputs, view: &SidebarView, index: usize) {
         .flat_map(|group| group.core.sessions.iter())
         .nth(index % 17)
         .map(|session| session.row.sidebar_session_id.clone());
-    match index % 11 {
+    match index % 12 {
         0 => {
             if let Some(group_id) = group_id {
                 toggle(&mut inputs.ui.collapse.collapsed_groups, group_id);
@@ -300,6 +337,9 @@ fn churn_inputs(inputs: &mut SidebarInputs, view: &SidebarView, index: usize) {
         }
         8 => inputs.settings.sidebar_spaces_enabled = !inputs.settings.sidebar_spaces_enabled,
         9 => inputs.ui.show_hidden = !inputs.ui.show_hidden,
+        // One of the two inputs that invalidate every row of the machine at once, the other
+        // being the tag catalog, which the pass swaps through the store.
+        10 => inputs.settings.debugging_mode = !inputs.settings.debugging_mode,
         _ => {
             inputs.ui.selected_tag_filters = if inputs.ui.selected_tag_filters.is_empty() {
                 vec!["favorite".to_string(), "untagged".to_string()]
@@ -308,6 +348,44 @@ fn churn_inputs(inputs: &mut SidebarInputs, view: &SidebarView, index: usize) {
             };
         }
     }
+}
+
+/// A catalog of the replay's own, so a swap changes what every tagged row shows.
+fn replay_tag_catalog() -> CustomSessionTagsState {
+    let tag = |tag_id: &str, name: &str, color: &str| {
+        (
+            tag_id.to_string(),
+            CustomSessionTag {
+                tag_id: tag_id.to_string(),
+                name: name.to_string(),
+                color: color.to_string(),
+                icon: "tag".to_string(),
+            },
+        )
+    };
+    CustomSessionTagsState {
+        order: vec![
+            "custom-replayalpha".to_string(),
+            "custom-replaybeta".to_string(),
+        ],
+        tags: [
+            tag("custom-replayalpha", "Replay alpha", "#7c6df2"),
+            tag("custom-replaybeta", "Replay beta", "#3aa675"),
+        ]
+        .into_iter()
+        .collect(),
+    }
+}
+
+/// The catalog as a frame the core accepts: no revision, so it is applied whatever the stream's
+/// own revision is at this point of the recording.
+fn tag_catalog_frame(catalog: &CustomSessionTagsState) -> Option<ServerEvent> {
+    let frame = serde_json::json!({
+        "type": "customSessionTagsChanged",
+        "protocolVersion": GXSERVER_PROTOCOL_VERSION,
+        "customSessionTags": catalog,
+    });
+    ServerEvent::parse(&frame.to_string()).ok()
 }
 
 fn toggle(set: &mut std::collections::BTreeSet<String>, value: String) {

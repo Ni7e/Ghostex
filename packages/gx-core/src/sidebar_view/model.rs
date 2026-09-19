@@ -250,10 +250,11 @@ impl SidebarViewModel {
             dirty_rows.insert((project_id.as_str(), session_id.as_str()));
         }
 
-        let next_row_id = previous
-            .as_ref()
-            .filter(|_| !rows_all_dirty)
-            .map_or(1, |previous| previous.next_row_id);
+        // Never restarts, not even when every row is dropped: the cached groups live on, and a
+        // group is kept when its `rows` numbers match. Minting 1, 2, 3 again for re-derived rows
+        // would hand a rebuilt group the number sequence of the one it replaces, and every group
+        // whose membership did not move would keep serving its pre-catalog tag label and tooltip.
+        let next_row_id = previous.as_ref().map_or(1, |previous| previous.next_row_id);
         // 3. The rows themselves: kept from the previous round unless the store or a host timer
         // touched them.
         // The rows are moved out of the previous round rather than copied: a machine with two
@@ -478,18 +479,19 @@ impl SidebarViewModel {
             spaces: side_state
                 .and_then(|side| side.spaces.as_ref())
                 .map(SpacesState::from_wire),
-            collections: side_state
-                .and_then(|side| side.project_collections.as_ref())
-                .map(CollectionsState::from_wire)
-                .filter(|collections| !collections.collections.is_empty())
-                .or_else(|| {
-                    effective
-                        .host
-                        .stored_project_collections
-                        .as_ref()
-                        .map(CollectionsState::from_local_json)
-                })
-                .unwrap_or_default(),
+            collections: match side_state.and_then(|side| side.project_collections.as_ref()) {
+                // A document has arrived for this machine, so the daemon is authoritative from
+                // here on, an empty one included: after the user deletes their last collection
+                // the stored copy still holds it for as long as it takes the sidebar to write,
+                // and falling back to it there would draw the collection the user just removed.
+                Some(state) => CollectionsState::from_wire(state),
+                None => effective
+                    .host
+                    .stored_project_collections
+                    .as_ref()
+                    .map(CollectionsState::from_local_json)
+                    .unwrap_or_default(),
+            },
             machine_loaded,
             now_ms,
         });
