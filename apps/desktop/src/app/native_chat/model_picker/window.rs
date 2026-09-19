@@ -13,6 +13,8 @@ pub(in crate::app::native_chat) struct ModelPickerWindowState {
     /// The last pane size reported to the runtime, so only a real layout change costs an action.
     pane_size: Option<(f32, f32)>,
     subscription: Option<Subscription>,
+    /// Set when the pane was hidden under an open picker; blocks reopening until the runtime reports the picker gone.
+    dismissed: bool,
 }
 
 impl ModelPickerWindowState {
@@ -56,11 +58,34 @@ impl NativeChatView {
         );
     }
 
+    /// Cancels the picker and takes its window down at once, skipping the close animation and the
+    /// composer refocus, because the pane it covered is no longer on screen.
+    pub(in crate::app::native_chat) fn dismiss_model_picker_for_hidden_pane(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.snapshot["modelPicker"].is_null() {
+            return;
+        }
+        self.model_picker_window.dismissed = true;
+        self.model_picker_window.pane_size = None;
+        self.model_picker_window.subscription = None;
+        if let Some(handle) = self.model_picker_window.handle.take() {
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+            });
+        }
+        if self.snapshot["modelPicker"]["closing"] != true {
+            self.invoke(json!({"type":"modelPickerCancel"}), cx);
+        }
+    }
+
     /// CDXC:SessionChat 2026-09-17 WHY:
     /// A pane-sized native child window owns picker input while preserving the chat pane's existing frame and focus.
     pub(in crate::app::native_chat) fn sync_model_picker_window(&mut self, cx: &mut Context<Self>) {
         if self.snapshot["modelPicker"].is_null() {
             self.model_picker_window.pane_size = None;
+            self.model_picker_window.dismissed = false;
             if let Some(handle) = self.model_picker_window.handle.take() {
                 let main = self.main_window;
                 let chat = cx.weak_entity();
@@ -81,6 +106,7 @@ impl NativeChatView {
         }
         if self.model_picker_window.handle.is_some()
             || self.model_picker_window.opening
+            || self.model_picker_window.dismissed
             || self.snapshot["modelPicker"]["closing"] == true
         {
             return;
@@ -159,6 +185,11 @@ impl NativeChatView {
             chat.update(cx, |chat, cx| {
                 chat.model_picker_window.opening = false;
                 match result {
+                    Ok(handle) if chat.model_picker_window.dismissed => {
+                        cx.defer(move |cx| {
+                            let _ = handle.update(cx, |_, window, _| window.remove_window());
+                        });
+                    }
                     Ok(handle) => {
                         chat.model_picker_window.handle = Some(handle);
                         chat.report_model_picker_pane_size(pane.size, cx);

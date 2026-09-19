@@ -1179,6 +1179,7 @@ impl GhostexGpuiApp {
         for session_id in &visible_session_ids {
             let _ = self.ensure_agents_chat_surface(*session_id, cx);
         }
+        self.dismiss_native_chat_windows_leaving_view(&visible_session_ids, cx);
         self.native_chat_visible_sessions = visible_session_ids.clone();
         self.resume_visible_native_chat_runtimes(cx);
         self.schedule_native_chat_prewarm(cx);
@@ -1442,6 +1443,9 @@ impl GhostexGpuiApp {
         self.pending_session_chat_draft_handoffs.clear();
         self.session_chat_draft_capture_in_flight.clear();
         self.pending_session_chat_received_drafts.clear();
+        for view in self.native_chat_views.values() {
+            view.update(cx, |view, cx| view.dismiss_windows_for_hidden_pane(cx));
+        }
         for (session_id, surface) in &self.agents_chat_surfaces {
             self.record_session_chat_lifecycle(
                 *session_id,

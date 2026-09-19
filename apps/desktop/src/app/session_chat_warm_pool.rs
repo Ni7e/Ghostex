@@ -199,6 +199,22 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// Takes down the preview and picker windows of views whose pane just stopped being shown.
+    pub(crate) fn dismiss_native_chat_windows_leaving_view(
+        &mut self,
+        visible: &HashSet<TerminalSessionId>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let hidden = self
+            .native_chat_visible_sessions
+            .difference(visible)
+            .filter_map(|session_id| self.native_chat_views.get(session_id).cloned())
+            .collect::<Vec<_>>();
+        for view in hidden {
+            view.update(cx, |view, cx| view.dismiss_windows_for_hidden_pane(cx));
+        }
+    }
+
     /// A painted view is visible by definition; resume it even if no reconcile ran since it was selected.
     pub(crate) fn resume_native_chat_runtime_for_session(
         &mut self,

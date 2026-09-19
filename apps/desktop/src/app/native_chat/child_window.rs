@@ -4,6 +4,13 @@ use super::state::NativeChatView;
 use gpui::{Bounds, Context, Pixels};
 
 impl NativeChatView {
+    /// CDXC:SessionChat 2026-09-19 DECISION:
+    /// User: an open image preview or quick picker is dismissed when the user switches to another session. Both are native child windows that would otherwise stay on screen over the session shown next.
+    pub(crate) fn dismiss_windows_for_hidden_pane(&mut self, cx: &mut Context<Self>) {
+        self.close_image_viewer(cx);
+        self.dismiss_model_picker_for_hidden_pane(cx);
+    }
+
     pub(super) fn pane_windows_open(&self) -> bool {
         self.image_viewer.handle.is_some()
             || self.save_markdown_window.handle.is_some()
