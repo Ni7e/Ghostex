@@ -28,6 +28,10 @@ pub(crate) enum ViewSkeletonKind {
 
 struct SkeletonPaint {
     fill: Hsla,
+    /// A faint wash for chrome that sits on a panel (menu bar, sidebars, status bar).
+    panel: Hsla,
+    /// Dividers between chrome regions.
+    hairline: Hsla,
     background: Hsla,
 }
 
@@ -74,10 +78,13 @@ pub(crate) fn render_view_skeleton(
     id: impl Into<ElementId>,
     background: Hsla,
 ) -> AnyElement {
+    let fill: Hsla = chrome_color(0xe5e8ec, 0x111111)
+        .opacity(crate::app::session_chat_skeleton::skeleton_tint())
+        .into();
     let paint = SkeletonPaint {
-        fill: chrome_color(0xe5e8ec, 0x111111)
-            .opacity(crate::app::session_chat_skeleton::skeleton_tint())
-            .into(),
+        fill,
+        panel: fill.opacity(0.3),
+        hairline: fill.opacity(0.6),
         background,
     };
     let body = match kind {
@@ -177,152 +184,562 @@ fn tree(paint: &SkeletonPaint, rows: &[(u8, f32)]) -> Div {
         }))
 }
 
-const CODE_LINES: [(u8, f32); 18] = [
-    (0, 0.34),
-    (0, 0.52),
-    (0, 0.18),
-    (1, 0.61),
-    (1, 0.44),
-    (2, 0.72),
-    (2, 0.38),
-    (1, 0.26),
-    (0, 0.12),
-    (0, 0.48),
-    (1, 0.66),
-    (2, 0.55),
-    (2, 0.31),
-    (1, 0.42),
-    (0, 0.16),
-    (0, 0.58),
-    (1, 0.37),
-    (0, 0.22),
+/// Rough glyph advance of the editor font, so code bars read as lines of text.
+const CODE_CHAR: f32 = 7.5;
+/// One editor or tree row.
+const ROW_HEIGHT: f32 = 22.0;
+/// Code-server's Explorer width.
+const EXPLORER_WIDTH: f32 = 236.0;
+/// The Docs files list's default width (`MANAGE_SIDEBAR_DEFAULT_WIDTH`).
+const DOCS_LIST_WIDTH: f32 = 292.0;
+
+/// Code lines as (indent level, length in characters, starts a fold).
+const CODE_LINES: [(u8, u8, bool); 62] = [
+    (0, 1, true),
+    (1, 150, false),
+    (1, 18, false),
+    (1, 24, false),
+    (1, 17, true),
+    (2, 15, false),
+    (2, 20, false),
+    (2, 14, false),
+    (2, 20, false),
+    (2, 16, false),
+    (2, 22, false),
+    (2, 14, false),
+    (2, 18, false),
+    (2, 23, false),
+    (1, 2, false),
+    (1, 11, true),
+    (2, 11, true),
+    (3, 22, false),
+    (3, 24, false),
+    (3, 32, false),
+    (3, 34, false),
+    (3, 68, false),
+    (3, 22, false),
+    (3, 14, true),
+    (4, 18, false),
+    (4, 17, false),
+    (4, 16, false),
+    (4, 62, false),
+    (3, 2, false),
+    (3, 11, true),
+    (4, 1, true),
+    (5, 17, false),
+    (5, 20, false),
+    (5, 19, false),
+    (5, 70, false),
+    (5, 17, false),
+    (4, 2, false),
+    (4, 1, true),
+    (5, 19, false),
+    (5, 23, false),
+    (5, 32, false),
+    (5, 90, false),
+    (5, 15, false),
+    (5, 16, false),
+    (4, 2, false),
+    (4, 1, true),
+    (5, 17, false),
+    (5, 16, false),
+    (5, 19, false),
+    (5, 48, false),
+    (5, 16, false),
+    (4, 2, false),
+    (4, 1, true),
+    (5, 18, false),
+    (5, 17, false),
+    (5, 21, false),
+    (5, 36, false),
+    (5, 17, false),
+    (4, 2, false),
+    (4, 1, true),
+    (5, 17, false),
+    (5, 19, false),
 ];
 
-fn code_skeleton(paint: &SkeletonPaint) -> Div {
-    let activity = div()
-        .w(px(46.0))
-        .h_full()
-        .flex_shrink_0()
-        .flex()
-        .flex_col()
-        .items_center()
-        .pt(px(14.0))
-        .gap(px(18.0))
-        .children((0..5).map(|_| glyph(paint, 22.0)));
-    let sidebar = div()
-        .w(px(218.0))
-        .h_full()
-        .flex_shrink_0()
-        .flex()
-        .flex_col()
-        .pt(px(14.0))
-        .px(px(14.0))
-        .gap(px(18.0))
-        .child(line(paint, 0.5, 10.0))
-        .child(tree(
-            paint,
-            &[
-                (0, 0.55),
-                (1, 0.42),
-                (1, 0.62),
-                (2, 0.5),
-                (2, 0.36),
-                (1, 0.48),
-                (0, 0.6),
-                (1, 0.4),
-                (1, 0.53),
-                (0, 0.44),
-                (1, 0.58),
-                (1, 0.34),
-            ],
-        ));
-    let tabs = div()
-        .h(px(36.0))
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .gap(px(6.0))
-        .px(px(10.0))
-        .child(pill(paint, 118.0, 18.0))
-        .child(pill(paint, 92.0, 18.0))
-        .child(pill(paint, 138.0, 18.0));
-    let lines = div()
-        .flex_1()
-        .min_h_0()
-        .flex()
-        .flex_col()
-        .gap(px(13.0))
-        .pt(px(18.0))
-        .pl(px(56.0))
-        .pr(px(40.0))
-        .children(CODE_LINES.iter().map(|(indent, width)| {
-            div()
-                .flex()
-                .pl(px(f32::from(*indent) * 24.0))
-                .child(line(paint, *width, 10.0))
-        }));
-    div().flex().child(activity).child(sidebar).child(
-        div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .child(tabs)
-            .child(lines),
-    )
+/// Explorer entries as (is folder, label width, has changes, is the open file).
+const EXPLORER_ROWS: [(bool, f32, bool, bool); 38] = [
+    (true, 42.0, false, false),
+    (true, 36.0, false, false),
+    (true, 38.0, false, false),
+    (true, 40.0, false, false),
+    (true, 50.0, false, false),
+    (true, 82.0, true, false),
+    (true, 50.0, false, false),
+    (true, 56.0, false, false),
+    (true, 12.0, false, false),
+    (true, 28.0, true, false),
+    (true, 52.0, false, false),
+    (true, 30.0, false, false),
+    (true, 28.0, false, false),
+    (true, 36.0, false, false),
+    (true, 56.0, true, false),
+    (true, 40.0, false, false),
+    (true, 30.0, true, false),
+    (true, 104.0, false, false),
+    (true, 22.0, false, false),
+    (true, 40.0, false, false),
+    (false, 82.0, false, false),
+    (false, 64.0, false, false),
+    (false, 74.0, false, false),
+    (false, 58.0, false, false),
+    (false, 70.0, false, false),
+    (false, 148.0, false, true),
+    (false, 64.0, false, false),
+    (false, 70.0, false, false),
+    (false, 50.0, false, false),
+    (false, 88.0, false, false),
+    (false, 70.0, false, false),
+    (false, 96.0, false, false),
+    (false, 100.0, false, false),
+    (false, 60.0, false, false),
+    (false, 50.0, false, false),
+    (false, 72.0, false, false),
+    (false, 106.0, false, false),
+    (false, 64.0, false, false),
+];
+
+/// A short text bar, the height of small UI type.
+fn text(paint: &SkeletonPaint, width: f32) -> Div {
+    pill(paint, width, 7.0)
 }
 
-fn docs_skeleton(paint: &SkeletonPaint) -> Div {
-    let list = div()
-        .w(px(240.0))
+/// A dense file-tree row: a chevron for folders or an icon for files, then the name.
+fn tree_row(paint: &SkeletonPaint, depth: u8, folder: bool, width: f32) -> Div {
+    div()
+        .h(px(ROW_HEIGHT))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap(px(7.0))
+        .pl(px(14.0 + f32::from(depth) * 12.0))
+        .pr(px(14.0))
+        .child(glyph(paint, if folder { 8.0 } else { 11.0 }))
+        .child(text(paint, width))
+}
+
+/// A fixed-height chrome strip (menu bar, tab strip, header, status bar).
+fn strip(paint: &SkeletonPaint, height: f32) -> Div {
+    div()
+        .h(px(height))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .bg(paint.panel)
+}
+
+/// The window's menu bar: menus, history arrows, the centered command box, layout toggles.
+fn code_menu_bar(paint: &SkeletonPaint) -> Div {
+    let menus = div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap(px(17.0))
+        .pl(px(12.0))
+        .pr(px(18.0))
+        .overflow_hidden()
+        .children(
+            [20.0, 22.0, 50.0, 28.0, 16.0, 22.0, 50.0, 26.0]
+                .into_iter()
+                .map(|width| text(paint, width)),
+        )
+        .child(div().flex_1())
+        .child(glyph(paint, 11.0))
+        .child(glyph(paint, 11.0));
+    let command_center = div()
+        .w(relative(0.37))
+        .max_w(px(600.0))
+        .h(px(21.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .px(px(10.0))
+        .rounded(px(5.0))
+        .border_1()
+        .border_color(paint.fill)
+        .child(text(paint, 44.0))
+        .child(div().flex_1())
+        .child(glyph(paint, 12.0));
+    let toggles = div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .justify_end()
+        .gap(px(13.0))
+        .pr(px(12.0))
+        .overflow_hidden()
+        .children((0..6).map(|_| glyph(paint, 13.0)));
+    strip(paint, 31.0)
+        .border_b_1()
+        .border_color(paint.hairline)
+        .child(menus)
+        .child(command_center)
+        .child(toggles)
+}
+
+/// The status bar: branch and problems on the left, cursor, indentation, encoding and language on the right.
+fn code_status_bar(paint: &SkeletonPaint) -> Div {
+    strip(paint, 22.0)
+        .gap(px(14.0))
+        .px(px(12.0))
+        .border_t_1()
+        .border_color(paint.hairline)
+        .overflow_hidden()
+        .child(glyph(paint, 10.0))
+        .child(text(paint, 42.0))
+        .child(text(paint, 36.0))
+        .child(text(paint, 22.0))
+        .child(div().flex_1())
+        .children(
+            [186.0, 64.0, 58.0, 38.0, 14.0, 112.0, 72.0]
+                .into_iter()
+                .map(|width| text(paint, width)),
+        )
+        .child(glyph(paint, 10.0))
+}
+
+/// The editor group: one open tab, the breadcrumb row, then numbered code with fold chevrons and a scrollbar.
+fn code_editor(paint: &SkeletonPaint) -> Div {
+    let tabs = strip(paint, 35.0)
+        .child(
+            div()
+                .w(px(248.0))
+                .h_full()
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(12.0))
+                .bg(paint.background)
+                .child(glyph(paint, 10.0))
+                .child(text(paint, 120.0)),
+        )
+        .child(div().flex_1())
+        .child(
+            div()
+                .flex()
+                .gap(px(14.0))
+                .pr(px(14.0))
+                .child(glyph(paint, 13.0))
+                .child(glyph(paint, 13.0)),
+        );
+    let breadcrumbs = div()
+        .h(px(ROW_HEIGHT))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap(px(9.0))
+        .pl(px(18.0))
+        .overflow_hidden()
+        .children(
+            [
+                (true, 118.0),
+                (true, 38.0),
+                (true, 34.0),
+                (true, 38.0),
+                (false, 8.0),
+            ]
+            .into_iter()
+            .flat_map(|(chevron, width)| {
+                [
+                    Some(glyph(paint, 9.0)),
+                    Some(text(paint, width)),
+                    chevron.then(|| glyph(paint, 6.0)),
+                ]
+            })
+            .flatten(),
+        );
+    let lines = div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .pt(px(4.0))
+        .overflow_hidden()
+        .children(
+            CODE_LINES
+                .iter()
+                .enumerate()
+                .map(|(index, (indent, chars, fold))| {
+                    let number_width = if index + 1 < 10 { 6.0 } else { 12.0 };
+                    div()
+                        .h(px(17.0))
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .child(
+                            div()
+                                .w(px(46.0))
+                                .flex_shrink_0()
+                                .flex()
+                                .justify_end()
+                                .child(text(paint, number_width)),
+                        )
+                        .child(
+                            div()
+                                .w(px(20.0))
+                                .flex_shrink_0()
+                                .flex()
+                                .justify_center()
+                                .when(*fold, |slot| slot.child(glyph(paint, 7.0))),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .pl(px(f32::from(*indent) * CODE_CHAR * 2.0))
+                                .overflow_hidden()
+                                .child(text(paint, f32::from(*chars) * CODE_CHAR)),
+                        )
+                }),
+        );
+    let scrollbar = div()
+        .w(px(14.0))
         .h_full()
         .flex_shrink_0()
         .flex()
-        .flex_col()
-        .pt(px(16.0))
-        .px(px(16.0))
-        .gap(px(16.0))
-        .child(pill(paint, 150.0, 26.0))
-        .child(tree(
-            paint,
-            &[
-                (0, 0.7),
-                (0, 0.5),
-                (1, 0.6),
-                (1, 0.45),
-                (0, 0.66),
-                (1, 0.52),
-                (0, 0.4),
-                (0, 0.58),
-            ],
-        ));
-    let paragraphs: [&[f32]; 4] = [
-        &[0.96, 0.9, 0.62],
-        &[0.88, 0.97, 0.93, 0.4],
-        &[0.94, 0.86],
-        &[0.9, 0.98, 0.7, 0.55],
-    ];
-    let page = div()
+        .justify_center()
+        .pt(px(4.0))
+        .child(
+            div()
+                .w(px(10.0))
+                .h(px(104.0))
+                .rounded(px(2.0))
+                .bg(paint.fill),
+        );
+    div()
         .flex_1()
         .min_w_0()
         .h_full()
         .flex()
         .flex_col()
-        .pt(px(36.0))
-        .px(px(64.0))
-        .gap(px(28.0))
-        .child(line(paint, 0.42, 22.0))
-        .children(paragraphs.iter().map(|widths| {
+        .child(tabs)
+        .child(breadcrumbs)
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .child(lines)
+                .child(scrollbar),
+        )
+}
+
+/// The Explorer on the right: view switcher icons, the EXPLORER header, the workspace tree, then collapsed Outline and Timeline.
+fn code_explorer(paint: &SkeletonPaint) -> Div {
+    let switcher = div()
+        .h(px(35.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap(px(14.0))
+        .pl(px(12.0))
+        .children((0..6).map(|_| glyph(paint, 15.0)));
+    let header = div()
+        .h(px(30.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .pl(px(20.0))
+        .pr(px(16.0))
+        .child(text(paint, 58.0))
+        .child(div().flex_1())
+        .child(pill(paint, 12.0, 4.0));
+    let entries = div()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .child(tree_row(paint, 0, true, 56.0))
+        .children(EXPLORER_ROWS.iter().map(|(folder, width, changed, open)| {
+            tree_row(paint, 1, *folder, *width)
+                .when(*open, |row| row.bg(paint.fill))
+                .when(*changed, |row| {
+                    row.child(div().flex_1())
+                        .child(glyph(paint, 6.0).rounded_full())
+                })
+        }));
+    let section = |width: f32| {
+        div()
+            .h(px(ROW_HEIGHT))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .pl(px(12.0))
+            .border_t_1()
+            .border_color(paint.hairline)
+            .child(glyph(paint, 8.0))
+            .child(text(paint, width))
+    };
+    div()
+        .w(px(EXPLORER_WIDTH))
+        .h_full()
+        .flex_shrink_0()
+        .flex()
+        .flex_col()
+        .bg(paint.panel)
+        .border_l_1()
+        .border_color(paint.hairline)
+        .child(switcher)
+        .child(header)
+        .child(entries)
+        .child(section(56.0))
+        .child(section(62.0))
+}
+
+/// CDXC:Workarea 2026-09-19 DECISION:
+/// User: the Code and Docs loading skeletons should match the real Code view more closely (their code-server screenshot).
+/// Code sketches code-server's own frame: menu bar with the command box, a single tab and breadcrumbs over line-numbered code, the Explorer on the right, and the status bar. Docs uses the same vocabulary for its own frame (35px header strip, files list on the right) so both read as the page filling in.
+fn code_skeleton(paint: &SkeletonPaint) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .child(code_menu_bar(paint))
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .child(code_editor(paint))
+                .child(code_explorer(paint)),
+        )
+        .child(code_status_bar(paint))
+}
+
+/// Docs: the document under its title header, the files list docked on the right (search, open files, Project Docs tree).
+fn docs_skeleton(paint: &SkeletonPaint) -> Div {
+    let header = strip(paint, 35.0)
+        .gap(px(8.0))
+        .px(px(16.0))
+        .border_b_1()
+        .border_color(paint.hairline)
+        .child(glyph(paint, 11.0))
+        .child(text(paint, 160.0))
+        .child(div().flex_1())
+        .children((0..5).map(|_| glyph(paint, 14.0)));
+    let paragraphs: [&[f32]; 5] = [
+        &[0.96, 0.9, 0.62],
+        &[0.88, 0.97, 0.93, 0.4],
+        &[0.94, 0.86],
+        &[0.9, 0.98, 0.7, 0.55],
+        &[0.92, 0.84, 0.48],
+    ];
+    let body = div()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .pt(px(32.0))
+        .px(px(48.0))
+        .gap(px(26.0))
+        .overflow_hidden()
+        .child(line(paint, 0.38, 20.0))
+        .children(paragraphs.iter().enumerate().map(|(index, widths)| {
             div()
                 .w_full()
                 .max_w(px(760.0))
                 .flex()
                 .flex_col()
-                .gap(px(12.0))
-                .children(widths.iter().map(|width| line(paint, *width, 10.0)))
+                .gap(px(11.0))
+                .when(index == 2, |section| {
+                    section.child(div().pb(px(4.0)).child(line(paint, 0.26, 14.0)))
+                })
+                .children(widths.iter().map(|width| line(paint, *width, 9.0)))
         }));
-    div().flex().child(list).child(page)
+    let actions = div()
+        .h(px(35.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .px(px(12.0))
+        .children((0..6).map(|_| glyph(paint, 14.0)))
+        .child(div().flex_1())
+        .child(glyph(paint, 14.0));
+    let search = div()
+        .mx(px(10.0))
+        .mb(px(8.0))
+        .h(px(28.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(10.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(paint.fill)
+        .child(glyph(paint, 11.0))
+        .child(text(paint, 40.0));
+    let label = |width: f32| {
+        div()
+            .h(px(28.0))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .pl(px(14.0))
+            .child(text(paint, width))
+    };
+    let tree_rows: [(u8, bool, f32); 18] = [
+        (0, true, 70.0),
+        (1, false, 112.0),
+        (1, false, 86.0),
+        (1, false, 128.0),
+        (0, true, 54.0),
+        (1, true, 88.0),
+        (2, false, 104.0),
+        (2, false, 76.0),
+        (1, false, 118.0),
+        (0, true, 62.0),
+        (1, false, 96.0),
+        (1, false, 134.0),
+        (1, false, 80.0),
+        (0, false, 72.0),
+        (0, false, 90.0),
+        (0, false, 58.0),
+        (0, false, 100.0),
+        (0, false, 66.0),
+    ];
+    let list = div()
+        .w(px(DOCS_LIST_WIDTH))
+        .h_full()
+        .flex_shrink_0()
+        .flex()
+        .flex_col()
+        .bg(paint.panel)
+        .border_l_1()
+        .border_color(paint.hairline)
+        .overflow_hidden()
+        .child(actions)
+        .child(search)
+        .child(tree_row(paint, 0, false, 118.0).bg(paint.fill))
+        .child(tree_row(paint, 0, false, 92.0))
+        .child(label(76.0))
+        .children(
+            tree_rows
+                .iter()
+                .map(|(depth, folder, width)| tree_row(paint, *depth, *folder, *width)),
+        );
+    div()
+        .flex()
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .flex_col()
+                .child(header)
+                .child(body),
+        )
+        .child(list)
 }
 
 fn kanban_skeleton(paint: &SkeletonPaint) -> Div {
