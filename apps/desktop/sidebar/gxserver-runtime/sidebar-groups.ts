@@ -493,7 +493,8 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     CDXC:Automations 2026-07-04-23:18:
     The active-project helper owns Source/Kanban/Automate/Docs surface identity. Post its payload unchanged so Rust can strictly accept `automateBoardId` beside `kanbanBoardId` before issuing the bundled Automate runtime URL.
     */
-    postActiveProjectContext(JSON.stringify(payload));
+    // `focusStamp` sits beside the helper's payload, as in the focus state: Rust refuses a project switch produced before this runtime heard of a newer local selection (apps/desktop/src/app/gx_store/local_focus.rs).
+    postActiveProjectContext(JSON.stringify({ ...payload, focusStamp: this.gpuiFocusStamp }));
   },
 
   postGxserverPresentationFocusState(this: GpuiSidebarRuntime): void {
