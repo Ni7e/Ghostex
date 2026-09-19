@@ -12,6 +12,10 @@ use crate::app::helpers::*;
 use crate::*;
 
 impl GhostexGpuiApp {
+    /// CDXC:Sidebar 2026-09-19 DECISION:
+    /// User: the Search row and the Commands row are each one pixel taller.
+    /// Each row's height is its border-box, so the Search row's hairline had taken that pixel from its
+    /// content, and the Commands row grows upward through its top padding so its content stays put.
     pub(crate) fn render_native_sidebar_navigation(
         &self,
         appearance: &SidebarAppearance,
@@ -34,8 +38,8 @@ impl GhostexGpuiApp {
         let more_menu = snapshot.more_menu.clone();
         h_flex()
             .w_full()
-            .h(px((if footer { 35.0 } else { 34.0 }) * scale))
-            .pt(px((if footer { 3.0 } else { 5.0 }) * scale))
+            .h(px((if footer { 36.0 } else { 35.0 }) * scale))
+            .pt(px((if footer { 4.0 } else { 5.0 }) * scale))
             .pb(px((if footer { 3.0 } else { 2.0 }) * scale))
             .when(!footer, |row| row.px(px(5.0 * scale)).gap(px(4.0 * scale)))
             // The Search row's bottom hairline and the Commands row's top

@@ -28,6 +28,7 @@ pub(crate) mod rows;
 mod scroll;
 mod sections;
 pub(crate) mod selectors;
+mod session_hover;
 mod session_list;
 pub(crate) mod sessions;
 mod space_drag;
