@@ -276,7 +276,9 @@ pub fn handle_session_chat_queue_endpoint(
             (snapshot_value(&snapshot), false)
         }
         "/api/queueSessionChatPrompt" => {
-            let transaction = db.unchecked_transaction().map_err(sql_error)?;
+            let transaction =
+                rusqlite::Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate)
+                    .map_err(sql_error)?;
             let text = required_text(params, "text")?;
             let version = crate::session_chat_draft_versions::parse(params)?;
             if let Some(version) = version.as_ref() {
@@ -980,7 +982,9 @@ pub fn clear_session_chat_draft_after_delivery(
     session_id: &str,
     submitted: &SessionChatDraft,
 ) -> Result<(), DomainStateError> {
-    let transaction = db.unchecked_transaction().map_err(sql_error)?;
+    let transaction =
+        rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)
+            .map_err(sql_error)?;
     if let Some(version) = submitted.version.as_ref() {
         crate::session_chat_draft_versions::consume_in(
             &transaction,
