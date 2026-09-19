@@ -54,7 +54,6 @@ pub(super) fn write_hook_store(
     entry.insert("surfaceId".to_string(), json!(surface_id));
     entry.insert("cwd".to_string(), json!(cwd));
     entry.insert("transcriptPath".to_string(), json!(transcript_path));
-    entry.insert("pid".to_string(), json!(parent_process_id()));
     entry.insert("isRestorable".to_string(), json!(true));
 
     let store_path = hook_state_dir.join(format!("{agent_key}-hook-sessions.json"));
@@ -82,6 +81,8 @@ pub(super) fn write_hook_store(
     if entry_is_current(&data, session_id, &entry) {
         return;
     }
+    // The hook's parent is the short-lived wrapper shell, so its pid differs on every event: record it, but never compare it.
+    entry.insert("pid".to_string(), json!(parent_process_id()));
     entry.insert("updatedAt".to_string(), json!(now_seconds()));
     let object = data.as_object_mut().expect("object");
     let sessions = object
