@@ -49,6 +49,11 @@ impl CollectionsState {
                 ordered_ids.push(entry);
             }
         }
+        // A collection the `order` array does not name follows in id order here, where
+        // `Object.keys` gives the TypeScript the document's own order, which also moves the
+        // positional colour fallback. Accepted rather than fixed: the wire type is a `BTreeMap`,
+        // so the document order is gone before this runs, and every document the daemon writes
+        // has an `order` array naming every collection it stores.
         for collection_id in state.collections.keys() {
             if !ordered_ids.contains(&collection_id) {
                 ordered_ids.push(collection_id);
@@ -76,7 +81,7 @@ impl CollectionsState {
     /// daemon's map.
     ///
     /// CDXC:Projects 2026-09-20 WHY:
-    /// The sidebar seeds its collections from this key and keeps them when the daemon's document has none yet, pushing them up instead (`native-sidebar/metadata.ts`, first adoption). A list built from the daemon alone would show no collections, no colours and another top-level order for the whole window between a cold start and that first echo, so the same fallback is made here. Once the daemon answers, both sides read the daemon: the sidebar writes the adopted document straight back to this key.
+    /// The sidebar seeds its collections from this key and shows them until the daemon's first document arrives, pushing them up rather than dropping them (`sidebar-app.tsx`, first adoption). A list built from the daemon alone would show no collections, no colours and another top-level order for the whole window between a cold start and that first echo, so the same seed is read here. From the first document on, the daemon is authoritative, an empty one included: the sidebar writes every adopted document straight back to this key.
     pub(crate) fn from_local_json(value: &Value) -> Self {
         let collections = value
             .get("collections")
