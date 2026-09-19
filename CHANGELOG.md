@@ -47,6 +47,8 @@
 - **Dev servers keep their titles** instead of flipping to localhost.
 - **Search by Prompt opens a launch in the right session.**
 - **Rewind's confirmation quotes the prompt you are rewinding to.**
+- **Switching sessions closes an open image preview or model picker** instead of leaving it over the next session.
+- **The session you clicked away from loses its highlight right away,** even when the new session has to wake first.
 - **Toasts no longer block clicks underneath them,** and tooltips that got stuck now dismiss.
 
 ## 9.8.5 - 2026-09-16
