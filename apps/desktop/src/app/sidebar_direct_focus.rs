@@ -4,19 +4,37 @@ use crate::app::native_sidebar::model::NativeSidebarSession;
 use crate::*;
 use std::sync::Arc;
 
+/// What a row click did in process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativeSidebarClickReaction {
+    /// The session's tab has a live terminal and was selected.
+    InProcess,
+    /// The session got a staged tab; the runtime's wake and attach fill it.
+    Staged,
+    /// Not a local session of the active project (or a browser row): the runtime's route owns it.
+    NotApplied,
+}
+
 impl GhostexGpuiApp {
     /// A row click's whole in-process reaction: the tab switch when the session already has a live tab, otherwise the staged tab the runtime's wake and attach will fill.
     pub(crate) fn react_to_native_sidebar_session_click(
         &mut self,
         sidebar_session_id: &str,
         cx: &mut gpui::Context<Self>,
-    ) {
-        let applied = self.focus_native_sidebar_session_in_process(sidebar_session_id, cx)
-            || self.stage_native_sidebar_session_tab(sidebar_session_id, cx);
+    ) -> NativeSidebarClickReaction {
+        let reaction = if self.focus_native_sidebar_session_in_process(sidebar_session_id, cx) {
+            NativeSidebarClickReaction::InProcess
+        } else if self.stage_native_sidebar_session_tab(sidebar_session_id, cx) {
+            NativeSidebarClickReaction::Staged
+        } else {
+            NativeSidebarClickReaction::NotApplied
+        };
+        let applied = reaction != NativeSidebarClickReaction::NotApplied;
         if applied && let Some(key) = gpui_combined_presentation_session_key(sidebar_session_id) {
             // The runtime routes the same click and sends its own focus request for the session. It is applied while this click is still the newest selection (it attaches a staged tab) and dropped once the user has moved on (gx_store/local_focus.rs).
             self.gx_store_expect_click_echo(&key);
         }
+        reaction
     }
 
     /// CDXC:Sidebar 2026-09-19 WHY:
@@ -48,7 +66,10 @@ impl GhostexGpuiApp {
         self.begin_sidebar_focus_border_handoff(cx);
         self.local_workspace_latest_focus_key = Some(key.clone());
         self.advance_presentation_focus_to_in_process_click(&key);
-        self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
+        // The bootstrap carries the focused session to the sidebar runtime, one script per change. A held previous or next session key must not send one per row; the tell that ends the burst refreshes it (gx_store/burst.rs).
+        if !self.gx_store_key_is_held() && !self.gx_store_selection_is_settling() {
+            self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
+        }
         if !self.focus_existing_gpui_local_workspace_terminal(&key, cx) {
             return false;
         }

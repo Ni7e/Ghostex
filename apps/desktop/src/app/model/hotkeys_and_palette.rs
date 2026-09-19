@@ -72,7 +72,7 @@ pub(crate) fn gpui_command_palette_tab_cycle_hotkey_action(
 ) -> Option<GpuiCommandPaletteTabCycleHotkeyAction> {
     /*
     CDXC:CommandPalette 2026-09-19 WHY:
-    Previous/Next Tab in Pane (`focusPreviousPaneTab`/`focusNextPaneTab`) are the only ids that map to `cycle_focused_tab(reverse)`, so command, Agents, and Browser focus cycle their pane tabs from both the hotkey and the palette row. `focusPreviousSession`/`focusNextSession` walk sidebar rows and are delegated to SidebarApp instead.
+    Previous/Next Tab in Pane (`focusPreviousPaneTab`/`focusNextPaneTab`) are the only ids that map to `cycle_focused_tab(reverse)`, so command, Agents, and Browser focus cycle their pane tabs from both the hotkey and the palette row. `focusPreviousSession`/`focusNextSession` walk sidebar rows instead (`gpui_sidebar_session_walk_hotkey_reverse`).
     */
     match action_id {
         "focusPreviousPaneTab" => Some(GpuiCommandPaletteTabCycleHotkeyAction::Previous),
@@ -81,23 +81,28 @@ pub(crate) fn gpui_command_palette_tab_cycle_hotkey_action(
     }
 }
 
+/// Whether the action is Previous Session (`Some(true)`) or Next Session (`Some(false)`).
+///
+/// CDXC:Hotkeys 2026-09-19 DECISION:
+/// User: holding the previous or next session hotkey must fly through sessions.
+/// These two walk the rendered sidebar rows in Rust, from the native sidebar's own snapshot (gx_store/session_walk.rs), and repeat while held (helpers/os_cli/keyboard_router.rs). This supersedes their delegation to SidebarApp as `nativeHotkey` messages (2026-06-26-23:20), which cost one round trip through the sidebar runtime per step.
+pub(crate) fn gpui_sidebar_session_walk_hotkey_reverse(action_id: &str) -> Option<bool> {
+    match action_id {
+        "focusPreviousSession" => Some(true),
+        "focusNextSession" => Some(false),
+        _ => None,
+    }
+}
+
 pub(crate) fn gpui_command_palette_sidebar_slot_hotkey_action_id(action_id: &str) -> Option<&str> {
     /*
     CDXC:CommandPalette 2026-09-19 WHY:
-    Numbered `focusSessionSlot1` through `focusSessionSlot9` and Previous/Next Session (`focusPreviousSession`/`focusNextSession`) are rendered-sidebar row commands, not Rust tab-cycle commands. Delegate only those exact action ids to SidebarApp so its rendered row order resolves focus, while jump-to-project ids cannot loop back through native.
+    Numbered `focusSessionSlot1` through `focusSessionSlot9` are rendered-sidebar row commands, not Rust tab-cycle commands. They are single presses, so only those exact action ids are still delegated to SidebarApp, whose rendered row order resolves the slot, while jump-to-project ids cannot loop back through native. Previous/Next Session left this list for `gpui_sidebar_session_walk_hotkey_reverse`.
     */
     match action_id {
-        "focusSessionSlot1"
-        | "focusSessionSlot2"
-        | "focusSessionSlot3"
-        | "focusSessionSlot4"
-        | "focusSessionSlot5"
-        | "focusSessionSlot6"
-        | "focusSessionSlot7"
-        | "focusSessionSlot8"
-        | "focusSessionSlot9"
-        | "focusPreviousSession"
-        | "focusNextSession" => Some(action_id),
+        "focusSessionSlot1" | "focusSessionSlot2" | "focusSessionSlot3" | "focusSessionSlot4"
+        | "focusSessionSlot5" | "focusSessionSlot6" | "focusSessionSlot7" | "focusSessionSlot8"
+        | "focusSessionSlot9" => Some(action_id),
         _ => None,
     }
 }

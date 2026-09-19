@@ -156,7 +156,7 @@ impl GhostexGpuiApp {
                     let mode = if modifiers.shift { "range" } else if modifiers.platform || modifiers.control { "additive" } else { "focus" };
                     app.dispatch_native_sidebar_ui(json!({"type": "selectSession", "sessionId": session_id, "mode": mode}), cx);
                     if mode == "focus" {
-                        app.react_to_native_sidebar_session_click(&session_id, cx);
+                        let _ = app.react_to_native_sidebar_session_click(&session_id, cx);
                     }
                 }))
                 .on_mouse_down(MouseButton::Right, cx.listener(move |app, event: &gpui::MouseDownEvent, window, cx| {

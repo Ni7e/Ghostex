@@ -89,6 +89,17 @@ impl GhostexGpuiApp {
         } else {
             px(0.0)
         };
+        if self.gx_store_selection_is_settling() {
+            // A held previous or next session key reveals one row per key repeat. Following it is an instant scroll with no animation and no flash per row; the row the key is released on is revealed again once the selection settles (gx_store/session_walk.rs).
+            if delta.abs() >= px(1.0) {
+                let from = self.native_sidebar.scroll.offset();
+                self.native_sidebar
+                    .scroll
+                    .set_offset(Point::new(from.x, (from.y - delta).min(px(0.0))));
+                cx.notify();
+            }
+            return;
+        }
         if delta.abs() < px(1.0) {
             self.native_sidebar.reveal_flash = Some((session_id.to_owned(), Instant::now()));
         } else {

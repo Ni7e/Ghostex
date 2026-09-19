@@ -176,6 +176,27 @@ impl GhostexGpuiApp {
             self.reconcile_agents_chat_surfaces(cx);
         }
         self.gx_store_attach_surfaced_terminals(cx);
+        let (walk_reveal, walk_ask) = self.gx_store_take_walk_landing();
+        if let Some(row_id) = walk_reveal {
+            self.native_sidebar.pending_reveal = Some(
+                crate::app::native_sidebar::model::NativeSidebarRevealRequest {
+                    session_id: row_id,
+                    request_id: 0,
+                },
+            );
+        }
+        if let Some(row_id) = walk_ask {
+            // The row the held key landed on has a staged tab and no terminal. The runtime still
+            // owns wake and attach, and is asked for this one row, as a click would have.
+            if let Some(key) = crate::app::helpers::gpui_combined_presentation_session_key(&row_id)
+            {
+                self.gx_store_expect_request_after_tell(&key);
+            }
+            self.dispatch_native_sidebar_ui(
+                serde_json::json!({"type": "selectSession", "sessionId": row_id, "mode": "focus"}),
+                cx,
+            );
+        }
         let counters = self.gx_store.local_focus.counters;
         support_logs::append(
             support_logs::GpuiSupportLog::TerminalFocus,

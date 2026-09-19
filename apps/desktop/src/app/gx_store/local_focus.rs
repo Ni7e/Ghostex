@@ -122,6 +122,11 @@ pub(crate) struct LocalFocus {
     /// When the last tell is sent again unless a payload has echoed its stamp by then.
     pub(super) retell_due: Option<Instant>,
     pub(super) retell_attempts: u8,
+    /// The row a held previous or next session key landed on has no live terminal: the runtime is
+    /// asked to wake or attach it once the selection settles, and only if it is still focused.
+    pub(super) walk_runtime_ask: Option<String>,
+    /// The row to reveal (animated, or flashed when already in view) once the selection settles.
+    pub(super) walk_landing_reveal: Option<String>,
     /// The selection being booked comes from a key that is being held (a key repeat), so it is
     /// part of a burst whatever the time since the previous step.
     pub(super) key_held: bool,
@@ -402,6 +407,85 @@ impl GhostexGpuiApp {
     /// dispatch of a hotkey's key repeat.
     pub(crate) fn gx_store_set_key_held(&mut self, held: bool) {
         self.gx_store.local_focus.key_held = held;
+    }
+
+    pub(crate) fn gx_store_key_is_held(&self) -> bool {
+        self.gx_store.local_focus.key_held
+    }
+
+    /// The sidebar row that counts as current for the previous and next session walk: the row of
+    /// the store's focused session, the same source the highlight reads. While a browser tab or a
+    /// row the store does not hold owns focus, it is the row the snapshot marks focused, which is
+    /// then also the highlighted one.
+    pub(super) fn gx_store_focused_sidebar_row_id(
+        &self,
+        snapshot: &crate::app::native_sidebar::model::NativeSidebarSnapshot,
+    ) -> Option<String> {
+        let local_focus = &self.gx_store.local_focus;
+        let snapshot_focused_row = |browser: bool| {
+            snapshot
+                .groups
+                .iter()
+                .flat_map(|group| group.sessions.iter())
+                .find(|session| session.is_focused && session.is_browser() == browser)
+                .map(|session| session.session_id.clone())
+        };
+        let browser_holds_shell_focus = self.active_mode == TitlebarMode::Browser
+            && matches!(
+                self.shell_focus,
+                ShellFocusTarget::BrowserSurface | ShellFocusTarget::BrowserPane(_)
+            );
+        if local_focus.snapshot_browser_focus && browser_holds_shell_focus {
+            return snapshot_focused_row(true);
+        }
+        if local_focus.foreign_focus {
+            return snapshot_focused_row(false);
+        }
+        local_focus.focused_row_id.clone()
+    }
+
+    /// No focus request will follow for this session after all.
+    pub(super) fn gx_store_forget_expected_echo(&mut self, key: &GpuiLocalWorkspaceSessionKey) {
+        self.gx_store
+            .local_focus
+            .expected_echoes
+            .retain(|echo| echo.key != *key);
+    }
+
+    /// The runtime is about to be asked for this session right after the tell of its selection, so
+    /// its focus request follows the payload that echoes the selection's stamp.
+    pub(super) fn gx_store_expect_request_after_tell(
+        &mut self,
+        key: &GpuiLocalWorkspaceSessionKey,
+    ) {
+        let stamp = self.gx_store.core.focus().local_stamp;
+        self.gx_store
+            .local_focus
+            .expect_focus_echo(key.clone(), stamp, FocusEchoKind::TellReply);
+    }
+
+    pub(super) fn gx_store_ask_runtime_for_landing_row(&mut self, row_id: &str) {
+        self.gx_store.local_focus.walk_runtime_ask = Some(row_id.to_string());
+    }
+
+    /// A walk step revealed a row; when the selection is still moving, the landing row is
+    /// revealed again at the settle.
+    pub(super) fn gx_store_note_walk_reveal(&mut self, row_id: &str) {
+        self.gx_store.local_focus.walk_landing_reveal = self
+            .gx_store_selection_is_settling()
+            .then(|| row_id.to_string());
+    }
+
+    /// The selection settled: what the walk left for the row it landed on. Returns the row the
+    /// runtime must be asked for, when it is still the focused one.
+    pub(super) fn gx_store_take_walk_landing(&mut self) -> (Option<String>, Option<String>) {
+        let local_focus = &mut self.gx_store.local_focus;
+        let reveal = local_focus.walk_landing_reveal.take();
+        let ask = local_focus
+            .walk_runtime_ask
+            .take()
+            .filter(|row_id| local_focus.focused_row_id.as_deref() == Some(row_id.as_str()));
+        (reveal, ask)
     }
 
     /// A remote session was selected in the workspace. Remote machines are not in the store, so
