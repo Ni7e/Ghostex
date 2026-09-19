@@ -277,19 +277,36 @@ fn prompt_first_line(text: &str) -> String {
 }
 
 /// The prompt the confirmation dialog is quoting back, as its `│` lines show
-/// it. The trailing `│ (12m ago)` row is the relative time Claude appends, not
-/// part of the prompt.
-fn confirm_quoted_first_line(region: &[String]) -> Option<String> {
-    let quoted: Vec<String> = region
+/// it, one entry per screen line. The trailing `│ (12m ago)` row is the
+/// relative time Claude appends, not part of the prompt.
+fn confirm_quoted_lines(region: &[String]) -> Option<Vec<String>> {
+    let mut quoted: Vec<String> = region
         .iter()
         .filter_map(|line| {
             let rest = line.strip_prefix(CLAUDE_REWIND_QUOTE)?;
             Some(rest.trim().to_string())
         })
         .collect();
-    let first = quoted.first()?;
-    let is_only_a_timestamp = quoted.len() == 1 && first.starts_with('(') && first.ends_with(')');
-    (!is_only_a_timestamp).then(|| first.clone())
+    if quoted
+        .last()
+        .is_some_and(|last| last.starts_with('(') && last.ends_with(')'))
+    {
+        quoted.pop();
+    }
+    (!quoted.is_empty()).then_some(quoted)
+}
+
+/// CDXC:SessionChat 2026-09-19 WHY:
+/// The confirmation dialog word-wraps a prompt wider than the terminal across several `│` lines with no ellipsis, so its first screen line alone is an unmarked prefix that `row_matches_prompt` rightly refuses, and every long prompt failed to rewind.
+/// Rejoin the wrapped lines one at a time and compare without whitespace (a wrap can fall on a space or inside a long word); the quote still has to be the WHOLE first line, or an ellipsis-marked prefix of it.
+fn confirm_quote_matches_prompt(quoted: &[String], target_first_line: &str) -> bool {
+    let strip = |text: &str| text.split_whitespace().collect::<String>();
+    let target = strip(target_first_line);
+    let mut joined = String::new();
+    quoted.iter().any(|line| {
+        joined.push_str(&strip(line));
+        row_matches_prompt(&joined, &target)
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -954,13 +971,16 @@ impl RewindDriver<'_> {
             .wait_for("confirmation", |screen| {
                 let lines = screen_lines(screen);
                 let region = rewind_stage_region(&lines, CLAUDE_REWIND_CONFIRM_SUBTITLE)?;
-                confirm_quoted_first_line(region)
+                confirm_quoted_lines(region)
             })
             .await?;
-        if !row_matches_prompt(&quoted, &plan.target_first_line) {
+        if !confirm_quote_matches_prompt(&quoted, &plan.target_first_line) {
             return Err(dialog_mismatch(
                 "confirmation",
-                &format!("it is quoting \"{quoted}\", not the message that was asked for."),
+                &format!(
+                    "it is quoting \"{}\", not the message that was asked for.",
+                    quoted.join(" ")
+                ),
             ));
         }
         for _ in 0..REWIND_MENU_MAX_PRESSES {
