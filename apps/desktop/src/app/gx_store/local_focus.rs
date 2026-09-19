@@ -59,6 +59,10 @@ pub(super) enum FocusEchoKind {
     /// The runtime answers a flagged tell after it posted the focus state for that same tell, so
     /// the reply follows the first payload with the tell's stamp and precedes any newer one.
     TellReply,
+    /// A row the session walk handed to the runtime's route (a session of another project). The
+    /// request follows the payload that switches the project, like a tell reply, and it carries
+    /// `keepView`, which the other two kinds never do.
+    HandedOff,
 }
 
 /// An echo that has not arrived this long after it was registered is no longer waited for, so a
@@ -125,14 +129,23 @@ pub(crate) struct LocalFocus {
     /// The row a held previous or next session key landed on has no live terminal: the runtime is
     /// asked to wake or attach it once the selection settles, and only if it is still focused.
     pub(super) walk_runtime_ask: Option<String>,
+    /// The row the walk handed to the runtime (another project, a remote session, a browser tab)
+    /// and the store's focused row at that moment. While a key is held, repeats that resolve to
+    /// the same row from the same focused row are not handed over again.
+    walk_handoff: Option<(String, Option<String>)>,
     /// The row to reveal (animated, or flashed when already in view) once the selection settles.
     pub(super) walk_landing_reveal: Option<String>,
     /// The selection being booked comes from a key that is being held (a key repeat), so it is
     /// part of a burst whatever the time since the previous step.
     pub(super) key_held: bool,
     pub(super) burst_task_running: bool,
+    /// The instant the burst task sleeps towards, and the channel that wakes it earlier; see
+    /// `gx_store_burst_deadline_booked`.
+    pub(super) burst_sleeping_until: Option<Instant>,
+    pub(super) burst_wake: Option<futures::channel::mpsc::UnboundedSender<()>>,
     pub(super) burst_steps: u32,
     pub(super) chat_reconcile_wanted: bool,
+    pub(super) browser_surface_wanted: bool,
     /// What the focus state file holds, so it is written only when one of its fields moved.
     persisted_focus: Option<(Option<String>, Option<String>, Vec<String>)>,
     /// A focus payload that lost to a newer local selection asked for this other project. The
@@ -172,7 +185,7 @@ impl LocalFocus {
         self.expected_echoes.retain(|echo| {
             let may_still_arrive = match echo.kind {
                 FocusEchoKind::Click => stamp < echo.stamp,
-                FocusEchoKind::TellReply => stamp <= echo.stamp,
+                FocusEchoKind::TellReply | FocusEchoKind::HandedOff => stamp <= echo.stamp,
             };
             may_still_arrive && echo.registered_at.elapsed() < FOCUS_ECHO_EXPIRY
         });
@@ -464,6 +477,48 @@ impl GhostexGpuiApp {
             .expect_focus_echo(key.clone(), stamp, FocusEchoKind::TellReply);
     }
 
+    /// Whether a held walk step resolves to the row already handed to the runtime while the
+    /// store's focused row is still the one it was handed over from.
+    pub(super) fn gx_store_walk_waits_for_runtime(
+        &self,
+        target_row_id: &str,
+        current_row_id: Option<&str>,
+    ) -> bool {
+        self.gx_store.local_focus.walk_handoff.as_ref().is_some_and(
+            |(row_id, focused_at_handoff)| {
+                row_id == target_row_id && focused_at_handoff.as_deref() == current_row_id
+            },
+        )
+    }
+
+    pub(super) fn gx_store_clear_walk_handoff(&mut self) {
+        self.gx_store.local_focus.walk_handoff = None;
+    }
+
+    /// The walk hands a row to the runtime's route. For a local session the runtime answers with
+    /// a focus request after the focus payload that switches the project, so that request is an
+    /// expected echo: it is applied while the hand-off is still the newest thing the user did and
+    /// dropped once a newer local selection exists. Remote and browser rows come back on their
+    /// own channels and have no such request.
+    pub(super) fn gx_store_hand_walk_row_to_runtime(
+        &mut self,
+        target_row_id: &str,
+        current_row_id: Option<&str>,
+    ) {
+        self.gx_store.local_focus.walk_handoff = Some((
+            target_row_id.to_string(),
+            current_row_id.map(str::to_string),
+        ));
+        if let Some(key) =
+            crate::app::helpers::gpui_combined_presentation_session_key(target_row_id)
+        {
+            let stamp = self.gx_store.core.focus().local_stamp;
+            self.gx_store
+                .local_focus
+                .expect_focus_echo(key, stamp, FocusEchoKind::HandedOff);
+        }
+    }
+
     pub(super) fn gx_store_ask_runtime_for_landing_row(&mut self, row_id: &str) {
         self.gx_store.local_focus.walk_runtime_ask = Some(row_id.to_string());
     }
@@ -730,7 +785,6 @@ impl GhostexGpuiApp {
             && message.placement_target_session_id.is_none()
             && !message.force_remount
             && !message.startup_restore
-            && !message.keep_view
             && message.preferred_interface == GpuiPreferredAgentInterface::Terminal;
         local_focus
             .expected_echoes
@@ -739,7 +793,11 @@ impl GhostexGpuiApp {
             .expected_echoes
             .iter()
             .position(|echo| {
-                plain && echo.key.project_id == project_id && echo.key.session_id == session_id
+                // Only a hand-off to another project comes back with `keepView`.
+                plain
+                    && (echo.kind == FocusEchoKind::HandedOff || !message.keep_view)
+                    && echo.key.project_id == project_id
+                    && echo.key.session_id == session_id
             })
             .map(|index| local_focus.expected_echoes.remove(index));
         if let Some(echo) = echo {

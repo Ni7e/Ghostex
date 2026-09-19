@@ -138,12 +138,34 @@ impl GhostexGpuiApp {
                 && self.agents_workspace_project_id.as_deref() == Some(key.project_id.as_str())
         });
         let select = json!({"type": "selectSession", "sessionId": target_id, "mode": "focus"});
+        if held && self.gx_store_walk_waits_for_runtime(&target_id, current.as_deref()) {
+            // This row was already handed to the runtime during this hold and the store's focus
+            // has not moved since: the project switch, remote open or browser focus is still on
+            // its way. Asking again per key repeat made the runtime answer every duplicate, and
+            // the late answers pulled focus back to this row after the walk had moved on.
+            return;
+        }
+        if !held {
+            self.gx_store_clear_walk_handoff();
+        }
         let route = match &local_key {
             None => {
+                self.gx_store_hand_walk_row_to_runtime(&target_id, current.as_deref());
                 self.dispatch_native_sidebar_ui(select, cx);
                 "runtime"
             }
             Some(key) => match self.react_to_native_sidebar_session_click(&target_id, cx) {
+                // A row click closes an open app modal (Settings) through the runtime's
+                // `selectSession`. The hotkeys are not limited to owners that exclude a modal, so
+                // a press while a modal window exists takes the click's route; a modal cannot
+                // open during a hold, so repeats never need it.
+                NativeSidebarClickReaction::InProcess
+                    if !held && self.app_modal_window.is_some() =>
+                {
+                    self.gx_store_expect_request_after_tell(key);
+                    self.dispatch_native_sidebar_ui(select, cx);
+                    "inProcessClosesModal"
+                }
                 NativeSidebarClickReaction::InProcess => {
                     // No request follows, so none is expected back.
                     self.gx_store_forget_expected_echo(key);
@@ -176,6 +198,7 @@ impl GhostexGpuiApp {
                     "staged"
                 }
                 NativeSidebarClickReaction::NotApplied => {
+                    self.gx_store_hand_walk_row_to_runtime(&target_id, current.as_deref());
                     self.dispatch_native_sidebar_ui(select, cx);
                     "runtime"
                 }

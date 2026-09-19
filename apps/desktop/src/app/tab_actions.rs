@@ -1971,7 +1971,17 @@ impl GhostexGpuiApp {
                     ShellFocusTarget::BrowserPane(self.browser_tabs.focused_pane),
                     cx,
                 );
-                self.sync_active_browser_tab_to_surface(window, cx);
+                if self.gx_store_key_is_held() {
+                    // CDXC:Browser 2026-09-19 WHY: a held Previous/Next Tab in Pane now repeats (helpers/os_cli/keyboard_router.rs). Selecting a restored tab creates its CEF surface, which loads the page and starts a renderer process, so a hold over twenty restored tabs would start twenty. A held step moves only the selection (tab strip, address bar, and the surface of a tab that already has one); the surface of the tab the key is released on is created when the selection settles (gx_store/burst.rs).
+                    let pane_id = self.browser_tabs.focused_pane;
+                    let address_value = self.browser_tabs.address_value_for_pane(pane_id);
+                    self.browser_url = address_value.clone();
+                    self.set_browser_address_input_value(pane_id, address_value, window, cx);
+                    self.update_active_mode_cef_child_visibility(cx);
+                    self.gx_store_defer_browser_surface(cx);
+                } else {
+                    self.sync_active_browser_tab_to_surface(window, cx);
+                }
                 self.scroll_focused_browser_pane_active_tab();
                 true
             } else {

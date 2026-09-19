@@ -3,6 +3,9 @@
 
 use std::time::{Duration, Instant};
 
+use futures::channel::mpsc;
+use futures::{FutureExt as _, StreamExt as _};
+
 use super::local_focus::{FocusEchoKind, PendingTell, ToldSelection};
 use crate::GhostexGpuiApp;
 use crate::app::consts::{
@@ -68,7 +71,7 @@ impl GhostexGpuiApp {
             }
         }
         local_focus.tell_due = Some(now + TELL_DELAY);
-        self.ensure_gx_store_burst_task(cx);
+        self.gx_store_burst_deadline_booked(cx);
     }
 
     /// The attention of a session the user is looking at is acknowledged with the next tell.
@@ -84,7 +87,15 @@ impl GhostexGpuiApp {
         if local_focus.tell_due.is_none() {
             local_focus.tell_due = Some(Instant::now() + TELL_DELAY);
         }
-        self.ensure_gx_store_burst_task(cx);
+        self.gx_store_burst_deadline_booked(cx);
+    }
+
+    /// The Browser tab a held key landed on gets its CEF surface when the selection settles.
+    pub(crate) fn gx_store_defer_browser_surface(&mut self, cx: &mut gpui::Context<Self>) {
+        let local_focus = &mut self.gx_store.local_focus;
+        local_focus.browser_surface_wanted = true;
+        local_focus.settle_due = Some(Instant::now() + SETTLE_DELAY);
+        self.gx_store_burst_deadline_booked(cx);
     }
 
     /// Chat surfaces are reconciled when the selection settles.
@@ -92,25 +103,52 @@ impl GhostexGpuiApp {
         self.gx_store.local_focus.chat_reconcile_wanted = true;
     }
 
-    /// One task per burst serves the three deadlines (settle, tell, and the check that the tell
-    /// was heard).
+    /// A deadline (settle, tell, or the check that the tell was heard) was booked or moved: make
+    /// sure the one task that serves them runs, and that it is not asleep past the new deadline.
+    /// Every place that sets one of the three deadlines calls this afterwards.
     ///
-    /// Lifecycle: started by the first selection, acknowledge or tell while none runs. Each turn sleeps
-    /// until the nearer deadline, so a selection that pushes a deadline out only makes the task
-    /// sleep again; nothing cancels it. A turn that finds a deadline passed performs it and clears
-    /// it, and the task ends when both are clear. It cannot spin: a turn either sleeps a positive
-    /// time or clears a deadline, and deadlines are only set by user input. It ends early when the
-    /// app entity is gone.
-    fn ensure_gx_store_burst_task(&mut self, cx: &mut gpui::Context<Self>) {
-        if std::mem::replace(&mut self.gx_store.local_focus.burst_task_running, true) {
+    /// CDXC:FocusRouting 2026-09-19 WHY:
+    /// The task used to sleep until the nearest deadline it knew when it went to sleep. Once every tell booked a check 1.5 s ahead, a settle (80 ms) or tell (120 ms) booked while the task slept towards that check was served only when the check woke it: a landing tab stayed unmounted and its terminal parked for up to 1.2 s after a short hold.
+    /// Why every booking is now served on time. The task records the instant it sleeps towards (`burst_sleeping_until`, `None` while it is awake or not running) and sleeps on "timer or wake message, whichever comes first". (1) When it goes to sleep, that instant is the minimum of all three deadlines, so none is earlier. (2) A booking made while it sleeps runs this function: a deadline earlier than the recorded instant sends a wake message, the task wakes on its next executor turn, runs what is due and recomputes the minimum; a deadline at or after the recorded instant needs nothing, because the task wakes at the recorded instant, before it, and recomputes then. (3) A deadline that is only pushed later or cleared never needs a wake: waking early is harmless, the turn finds nothing due and sleeps again. (4) A booking made while the task is awake can only happen inside the task's own turn (one UI thread), before that turn computes the minimum, so it is included; a wake message it may have sent costs one empty turn. (5) With no task running, this function starts one, whose first turn computes the minimum immediately. So a deadline `D` booked at any moment is served at `D` plus executor latency and the 1 ms floor below.
+    /// It cannot spin: a turn either clears a due deadline or sleeps, a wake message is sent at most once per booking, and bookings come from user input, a tell, or a bounded retell. It ends when all three deadlines are clear or the app entity is gone.
+    fn gx_store_burst_deadline_booked(&mut self, cx: &mut gpui::Context<Self>) {
+        let local_focus = &mut self.gx_store.local_focus;
+        if local_focus.burst_task_running {
+            let earliest = [
+                local_focus.settle_due,
+                local_focus.tell_due,
+                local_focus.retell_due,
+            ]
+            .into_iter()
+            .flatten()
+            .min();
+            if let (Some(earliest), Some(sleeping_until), Some(wake)) = (
+                earliest,
+                local_focus.burst_sleeping_until,
+                local_focus.burst_wake.as_ref(),
+            ) && earliest < sleeping_until
+            {
+                // The turn this wakes records a new instant; until then further bookings need no
+                // second message.
+                local_focus.burst_sleeping_until = None;
+                let _ = wake.unbounded_send(());
+            }
             return;
         }
+        local_focus.burst_task_running = true;
+        let (wake, mut wakes) = mpsc::unbounded::<()>();
+        local_focus.burst_wake = Some(wake);
         cx.spawn(async move |this, cx| {
             loop {
                 let wait = this.update(cx, |this, cx| this.gx_store_run_due_burst_work(cx));
-                match wait {
-                    Ok(Some(wait)) => cx.background_executor().timer(wait).await,
-                    Ok(None) | Err(_) => return,
+                let Ok(Some(wait)) = wait else {
+                    return;
+                };
+                let mut timer = cx.background_executor().timer(wait).fuse();
+                let mut woken = wakes.next().fuse();
+                futures::select_biased! {
+                    _ = woken => {}
+                    _ = timer => {}
                 }
             }
         })
@@ -119,6 +157,8 @@ impl GhostexGpuiApp {
 
     /// Performs what is due and returns how long to sleep, or `None` when nothing is pending.
     fn gx_store_run_due_burst_work(&mut self, cx: &mut gpui::Context<Self>) -> Option<Duration> {
+        // Awake: bookings made during this turn are seen by the minimum computed at its end.
+        self.gx_store.local_focus.burst_sleeping_until = None;
         let now = Instant::now();
         if self
             .gx_store
@@ -155,14 +195,15 @@ impl GhostexGpuiApp {
         .min();
         let Some(next_due) = next_due else {
             local_focus.burst_task_running = false;
+            local_focus.burst_wake = None;
             return None;
         };
         // Never zero, so a deadline that is due "now" cannot turn the loop into a busy wait.
-        Some(
-            next_due
-                .saturating_duration_since(Instant::now())
-                .max(Duration::from_millis(1)),
-        )
+        let wait = next_due
+            .saturating_duration_since(Instant::now())
+            .max(Duration::from_millis(1));
+        local_focus.burst_sleeping_until = Some(Instant::now() + wait);
+        Some(wait)
     }
 
     /// The selection has been stable: do the work that was held back, for the tab in front now.
@@ -176,6 +217,14 @@ impl GhostexGpuiApp {
             self.reconcile_agents_chat_surfaces(cx);
         }
         self.gx_store_attach_surfaced_terminals(cx);
+        if std::mem::take(&mut self.gx_store.local_focus.browser_surface_wanted)
+            && self.active_mode == crate::app::model::TitlebarMode::Browser
+        {
+            // What a single press does at once (`sync_active_browser_tab_to_surface`), for the
+            // tab in front now.
+            self.ensure_browser_surface_for_pane(self.browser_tabs.focused_pane, cx);
+            self.update_active_mode_cef_child_visibility(cx);
+        }
         let (walk_reveal, walk_ask) = self.gx_store_take_walk_landing();
         if let Some(row_id) = walk_reveal {
             self.native_sidebar.pending_reveal = Some(
@@ -257,7 +306,12 @@ impl GhostexGpuiApp {
         let Some(told) = local_focus.last_tell.clone() else {
             return;
         };
-        if local_focus.confirmed_stamp >= told.stamp || local_focus.pending_tell.is_some() {
+        // While a remote session (or another row the store does not hold) has focus, telling the
+        // runtime the last local selection again would pull its focus back to it.
+        if local_focus.confirmed_stamp >= told.stamp
+            || local_focus.pending_tell.is_some()
+            || local_focus.foreign_focus
+        {
             return;
         }
         let attempt = local_focus.retell_attempts + 1;
@@ -401,7 +455,7 @@ impl GhostexGpuiApp {
         if told {
             // The task also watches for the echo of this tell; a flush from outside a burst (before
             // a sidebar command) has none running.
-            self.ensure_gx_store_burst_task(cx);
+            self.gx_store_burst_deadline_booked(cx);
             // The old runtime's echo of a selection used to reach two more readers of the focused
             // session. The echo now repeats what the app already holds and changes nothing, so
             // they hear about the selection here, once per burst.
