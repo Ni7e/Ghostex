@@ -403,11 +403,19 @@ pub fn ensure_gxserver_storage_layout(paths: &GxserverPaths) -> Result<()> {
     Ok(())
 }
 
+/// CDXC:ServerDaemon 2026-09-19 DECISION:
+/// User: "avoid any unnecessary writes", and accepted synchronous=NORMAL for state.db. In WAL mode this drops the fsync on every commit and syncs at checkpoints instead: an app or gxserver crash still loses nothing and the database cannot corrupt; only a power cut or OS crash can lose the last few commits.
+fn apply_wal_durability(db: &Connection) -> Result<()> {
+    db.pragma_update(None, "synchronous", "NORMAL")?;
+    Ok(())
+}
+
 pub fn open_gxserver_database(paths: &GxserverPaths) -> Result<Connection> {
     let db = Connection::open(&paths.state_db_file)
         .with_context(|| format!("open {}", paths.state_db_file.display()))?;
     db.pragma_update(None, "foreign_keys", "ON")?;
     db.pragma_update(None, "journal_mode", "WAL")?;
+    apply_wal_durability(&db)?;
     Ok(db)
 }
 
@@ -425,6 +433,7 @@ pub fn open_gxserver_database_with_busy_timeout(
     db.busy_timeout(busy_timeout)?;
     db.pragma_update(None, "foreign_keys", "ON")?;
     db.pragma_update(None, "journal_mode", "WAL")?;
+    apply_wal_durability(&db)?;
     Ok(db)
 }
 
