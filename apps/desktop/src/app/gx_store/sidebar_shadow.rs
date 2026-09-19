@@ -73,6 +73,11 @@ pub(crate) struct SidebarShadowCounters {
     /// Confirmed differences, not rows: how many of them are made up entirely of frozen fields,
     /// which is the old side standing still rather than this list moving.
     pub(crate) frozen_fields_only: u64,
+    /// Confirmed differences made up entirely of a timestamp that moves on its own. A working
+    /// session restamps `lastInteractionAt` faster than the settle window, so the two sides never
+    /// hold the same value long enough to agree on it; the row order it feeds is compared
+    /// separately and is not in this bucket.
+    pub(crate) timing_fields_only: u64,
     /// Differences that were replaced by another shape before they could settle. A number that
     /// keeps climbing while `matches` and `mismatches` stand still means something flapping.
     pub(crate) never_settled: u64,
@@ -383,6 +388,9 @@ impl GhostexGpuiApp {
                     shadow.counters.tooltip_only += difference.tooltip_only as u64;
                     if difference.only_frozen_fields {
                         shadow.counters.frozen_fields_only += 1;
+                    }
+                    if difference.only_timing_fields {
+                        shadow.counters.timing_fields_only += 1;
                     }
                     if shadow.confirmed_signatures.len() < MAX_CONFIRMED_SIGNATURES
                         && shadow.confirmed_signatures.insert(signature)

@@ -8,7 +8,7 @@ use serde_json::json;
 use super::host::GxStoreCounters;
 use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
 use super::sidebar_shadow::SidebarShadowCounters;
-use super::sidebar_shadow_compare::SidebarMismatch;
+use super::sidebar_shadow_compare::{FieldDiff, SidebarMismatch};
 use crate::{shared_settings, support_logs};
 
 /// Distinct mismatch records one app run may write; later ones are only counted.
@@ -291,10 +291,22 @@ impl GxStoreDiagnostics {
             return;
         }
         self.logged_sidebar_mismatches.insert(signature);
-        let named = |fields: &[(String, Vec<&'static str>)]| -> Vec<serde_json::Value> {
+        let entries = |fields: &[FieldDiff]| -> Vec<serde_json::Value> {
             fields
                 .iter()
-                .map(|(id, names)| json!({ "id": id, "names": names }))
+                .map(|field| {
+                    json!({
+                        "name": field.name,
+                        "oldHasValue": field.old_has_value,
+                        "storeHasValue": field.store_has_value,
+                    })
+                })
+                .collect()
+        };
+        let named = |fields: &[(String, Vec<FieldDiff>)]| -> Vec<serde_json::Value> {
+            fields
+                .iter()
+                .map(|(id, names)| json!({ "id": id, "fields": entries(names) }))
                 .collect()
         };
         append(
@@ -306,7 +318,7 @@ impl GxStoreDiagnostics {
                 "onlyOldGroups": mismatch.only_old_groups,
                 "onlyStoreGroups": mismatch.only_store_groups,
                 "groupOrderDiffers": mismatch.group_order_differs,
-                "topLevel": mismatch.top_level,
+                "topLevel": entries(&mismatch.top_level),
                 "groups": named(&mismatch.groups),
                 "sessions": named(&mismatch.sessions),
                 "onlyOldSessions": mismatch.only_old_sessions,
@@ -314,6 +326,7 @@ impl GxStoreDiagnostics {
                 "questionCountOnly": mismatch.question_count_only,
                 "tooltipOnly": mismatch.tooltip_only,
                 "onlyFrozenFields": mismatch.only_frozen_fields,
+                "onlyTimingFields": mismatch.only_timing_fields,
             }),
         );
     }
@@ -359,6 +372,7 @@ impl GxStoreDiagnostics {
                 "questionCountOnly": counters.question_count_only,
                 "tooltipOnly": counters.tooltip_only,
                 "frozenFieldsOnly": counters.frozen_fields_only,
+                "timingFieldsOnly": counters.timing_fields_only,
                 "neverSettled": counters.never_settled,
                 "scratchChecks": counters.scratch_checks,
                 "scratchMismatches": counters.scratch_mismatches,

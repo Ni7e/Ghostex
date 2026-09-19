@@ -15,6 +15,49 @@ use crate::app::native_sidebar::model::{
     NativeSidebarGroup, NativeSidebarSection, NativeSidebarSession, NativeSidebarSnapshot,
 };
 
+/// One compared field that differs, and which side carried a value for it.
+///
+/// The two booleans are what a reader of the record needs first: a field only one side holds is
+/// a different question from a field both hold with different contents. A field that always
+/// carries something (a flag, a count, a required string, a list whose contents differ) reports
+/// both sides as holding a value, which is what it is.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct FieldDiff {
+    pub(super) name: &'static str,
+    pub(super) old_has_value: bool,
+    pub(super) store_has_value: bool,
+}
+
+impl FieldDiff {
+    /// A field both sides always carry.
+    fn carried(name: &'static str) -> Self {
+        Self {
+            name,
+            old_has_value: true,
+            store_has_value: true,
+        }
+    }
+}
+
+/// Records one differing field. The three-argument form is for a field both sides always carry;
+/// the five-argument form takes whether each side holds a value.
+macro_rules! note {
+    ($fields:expr, $name:literal, $same:expr $(,)?) => {
+        if !$same {
+            $fields.push(FieldDiff::carried($name));
+        }
+    };
+    ($fields:expr, $name:literal, $same:expr, $old:expr, $store:expr $(,)?) => {
+        if !$same {
+            $fields.push(FieldDiff {
+                name: $name,
+                old_has_value: $old,
+                store_has_value: $store,
+            });
+        }
+    };
+}
+
 /// Most ids one record names per list; the support log caps arrays at 32 anyway.
 const MAX_IDS_PER_RECORD: usize = 24;
 
@@ -26,12 +69,12 @@ pub(super) struct SidebarMismatch {
     pub(super) only_old_groups: Vec<String>,
     pub(super) only_store_groups: Vec<String>,
     pub(super) group_order_differs: bool,
-    /// Field names of the list itself (`order`, `spaces`, `emptyState`, ...).
-    pub(super) top_level: Vec<&'static str>,
-    /// Per group: the names of the fields that differ.
-    pub(super) groups: Vec<(String, Vec<&'static str>)>,
-    /// Per row: the names of the fields that differ, as `<session id>`.
-    pub(super) sessions: Vec<(String, Vec<&'static str>)>,
+    /// The fields of the list itself (`order`, `spaces`, `emptyState`, ...).
+    pub(super) top_level: Vec<FieldDiff>,
+    /// Per group: the fields that differ.
+    pub(super) groups: Vec<(String, Vec<FieldDiff>)>,
+    /// Per row, by session id: the fields that differ.
+    pub(super) sessions: Vec<(String, Vec<FieldDiff>)>,
     pub(super) only_old_sessions: Vec<String>,
     pub(super) only_store_sessions: Vec<String>,
     /// Rows whose differing fields include the question count, which the old sidebar store
@@ -43,6 +86,9 @@ pub(super) struct SidebarMismatch {
     /// Every difference in this record is a field the old sidebar store freezes, so it is that
     /// side standing still rather than this list moving.
     pub(super) only_frozen_fields: bool,
+    /// Every difference in this record is a timestamp that moves on its own, so it is the two
+    /// sides reading the same session a publish apart rather than either of them being wrong.
+    pub(super) only_timing_fields: bool,
 }
 
 /// The two compared fields a frozen row can differ in on its own.
@@ -61,6 +107,18 @@ pub(super) struct SidebarMismatch {
 /// `sections` rather than in a row, and the agent-name fields surface as `agentIcon`, which is
 /// also where a mistake in the agent catalog lands. A difference in those is reported.
 const FROZEN_FIELDS: [&str; 2] = ["pendingQuestionCount", "titleTooltip"];
+
+/// The compared fields that move while nothing the user does changes.
+///
+/// `lastInteractionAt` is stamped by the daemon on every event of a working session, and the two
+/// sides read it over separate subscriptions: the old list carries the value of the moment it
+/// published, this one the value the store holds when the comparison runs. On an actively
+/// working session the two are never equal for long enough to settle, which is why a record made
+/// only of these is counted rather than confirmed as a difference in the list.
+///
+/// It is still compared, and its one real consequence still is: the row order it feeds shows up
+/// as a group's `sessionOrder` and `sections`, which are not in this list and are reported.
+const TIMING_FIELDS: [&str; 1] = ["lastInteractionAt"];
 
 impl SidebarMismatch {
     pub(super) fn signature(&self) -> u64 {
@@ -136,18 +194,26 @@ pub(super) fn compare(
             .map(|group| group.group_id.as_str())
             .ne(view.groups.iter().map(|group| group.core.group_id.as_str()));
 
-    mismatch.only_frozen_fields = mismatch.only_old_groups.is_empty()
+    let rows_only = mismatch.only_old_groups.is_empty()
         && mismatch.only_store_groups.is_empty()
         && !mismatch.group_order_differs
         && mismatch.top_level.is_empty()
         && mismatch.groups.is_empty()
         && mismatch.only_old_sessions.is_empty()
         && mismatch.only_store_sessions.is_empty()
-        && !mismatch.sessions.is_empty()
-        && mismatch
-            .sessions
-            .iter()
-            .all(|(_, fields)| fields.iter().all(|field| FROZEN_FIELDS.contains(field)));
+        && !mismatch.sessions.is_empty();
+    mismatch.only_frozen_fields = rows_only
+        && mismatch.sessions.iter().all(|(_, fields)| {
+            fields
+                .iter()
+                .all(|field| FROZEN_FIELDS.contains(&field.name))
+        });
+    mismatch.only_timing_fields = rows_only
+        && mismatch.sessions.iter().all(|(_, fields)| {
+            fields
+                .iter()
+                .all(|field| TIMING_FIELDS.contains(&field.name))
+        });
     mismatch.bound();
     mismatch.differs().then_some(mismatch)
 }
@@ -157,18 +223,19 @@ fn compare_top_level(
     view: &SidebarView,
     mismatch: &mut SidebarMismatch,
 ) {
-    let mut note = |name: &'static str, same: bool| {
-        if !same {
-            mismatch.top_level.push(name);
-        }
-    };
-    note("ready", snapshot.ready == view.ready);
-    note("scrollScope", snapshot.scroll_scope == view.scroll_scope);
-    note(
+    note!(mismatch.top_level, "ready", snapshot.ready == view.ready);
+    note!(
+        mismatch.top_level,
+        "scrollScope",
+        snapshot.scroll_scope == view.scroll_scope
+    );
+    note!(
+        mismatch.top_level,
         "spacesEnabled",
         snapshot.spaces_enabled == view.spaces_enabled,
     );
-    note(
+    note!(
+        mismatch.top_level,
         "order",
         snapshot.order.len() == view.order.len()
             && snapshot.order.iter().zip(&view.order).all(|(old, store)| {
@@ -180,7 +247,8 @@ fn compare_top_level(
                         }
             }),
     );
-    note(
+    note!(
+        mismatch.top_level,
         "spaces",
         snapshot.spaces.len() == view.spaces.len()
             && snapshot
@@ -198,7 +266,8 @@ fn compare_top_level(
                         && old.attention_count == store.attention_count
                 }),
     );
-    note(
+    note!(
+        mismatch.top_level,
         "collections",
         snapshot.collections.len() == view.collections.len()
             && snapshot
@@ -222,7 +291,8 @@ fn compare_top_level(
         .machines
         .iter()
         .find(|machine| machine.id == "local");
-    note(
+    note!(
+        mismatch.top_level,
         "machineCounts",
         local_machine.is_none_or(|machine| {
             machine.working_count == view.machine.working_count
@@ -231,19 +301,23 @@ fn compare_top_level(
     );
     let empty_flag =
         |key: &str| snapshot.empty_state.get(key).and_then(Value::as_bool) == Some(true);
-    note(
+    note!(
+        mismatch.top_level,
         "emptyState.loading",
         empty_flag("loading") == view.empty_state.loading,
     );
-    note(
+    note!(
+        mismatch.top_level,
         "emptyState.error",
         empty_flag("error") == view.empty_state.error,
     );
-    note(
+    note!(
+        mismatch.top_level,
         "emptyState.canAddProject",
         empty_flag("canAddProject") == view.empty_state.can_add_project,
     );
-    note(
+    note!(
+        mismatch.top_level,
         "emptyState.copy",
         snapshot.empty_state.get("copy").and_then(Value::as_str)
             == Some(view.empty_state.copy.as_str()),
@@ -252,46 +326,58 @@ fn compare_top_level(
 
 fn compare_group(old: &NativeSidebarGroup, store: &GroupView, mismatch: &mut SidebarMismatch) {
     let core = &store.core;
-    let mut fields: Vec<&'static str> = Vec::new();
-    let mut note = |name: &'static str, same: bool| {
-        if !same {
-            fields.push(name);
-        }
-    };
-    note("title", old.title == core.title);
-    note("titleTooltip", old.title_tooltip == core.title_tooltip);
-    note("storageId", old.storage_id == core.storage_id);
-    note("isActive", old.is_active == core.is_active);
-    note("collapsed", old.collapsed == core.collapsed);
-    note("expanded", old.expanded == core.expanded);
-    note(
+    let mut fields: Vec<FieldDiff> = Vec::new();
+    note!(fields, "title", old.title == core.title);
+    note!(
+        fields,
+        "titleTooltip",
+        old.title_tooltip == core.title_tooltip
+    );
+    note!(fields, "storageId", old.storage_id == core.storage_id);
+    note!(fields, "isActive", old.is_active == core.is_active);
+    note!(fields, "collapsed", old.collapsed == core.collapsed);
+    note!(fields, "expanded", old.expanded == core.expanded);
+    note!(
+        fields,
         "hiddenSessionCount",
         old.hidden_session_count == core.hidden_session_count,
     );
-    note(
+    note!(
+        fields,
         "showListToggle",
         old.show_list_toggle == core.show_list_toggle,
     );
-    note(
+    note!(
+        fields,
         "collectionColor",
         old.collection_color == store.collection_color,
+        old.collection_color.is_some(),
+        store.collection_color.is_some()
     );
     let summary = |key: &str| old.summary.get(key).and_then(Value::as_u64).unwrap_or(0) as usize;
-    note(
+    note!(
+        fields,
         "summary.workingCount",
         summary("workingCount") == core.summary.working_count,
     );
-    note(
+    note!(
+        fields,
         "summary.attentionCount",
         summary("attentionCount") == core.summary.attention_count,
     );
-    note(
+    note!(
+        fields,
         "summary.awakeCount",
         summary("awakeCount") == core.summary.awake_count,
     );
-    compare_project_context(old.project_context.as_ref(), store, &mut note);
-    note("sections", sections_equal(&old.sections, &core.sections));
-    note(
+    compare_project_context(old.project_context.as_ref(), store, &mut fields);
+    note!(
+        fields,
+        "sections",
+        sections_equal(&old.sections, &core.sections)
+    );
+    note!(
+        fields,
         "sessionOrder",
         old.sessions
             .iter()
@@ -329,31 +415,41 @@ fn compare_group(old: &NativeSidebarGroup, store: &GroupView, mismatch: &mut Sid
     }
 }
 
-fn compare_project_context(
-    old: Option<&Value>,
-    store: &GroupView,
-    note: &mut impl FnMut(&'static str, bool),
-) {
+fn compare_project_context(old: Option<&Value>, store: &GroupView, fields: &mut Vec<FieldDiff>) {
     let context = store.core.project_context.as_ref();
-    note("projectContext", old.is_some() == context.is_some());
+    note!(
+        fields,
+        "projectContext",
+        old.is_some() == context.is_some(),
+        old.is_some(),
+        context.is_some()
+    );
     let (Some(old), Some(context)) = (old, context) else {
         return;
     };
     let text =
         |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
-    note(
+    note!(
+        fields,
         "projectContext.path",
         text(old, "path").unwrap_or_default() == context.path,
     );
-    note(
+    note!(
+        fields,
         "projectContext.iconDataUrl",
         text(old, "iconDataUrl") == context.icon_data_url,
+        text(old, "iconDataUrl").is_some(),
+        context.icon_data_url.is_some()
     );
-    note(
+    note!(
+        fields,
         "projectContext.discoveredIconDataUrl",
         text(old, "discoveredIconDataUrl") == context.discovered_icon_data_url,
+        text(old, "discoveredIconDataUrl").is_some(),
+        context.discovered_icon_data_url.is_some()
     );
-    note(
+    note!(
+        fields,
         "projectContext.worktree",
         old.get("worktree")
             .and_then(|worktree| text(worktree, "parentProjectId"))
@@ -361,9 +457,12 @@ fn compare_project_context(
                 .worktree
                 .as_ref()
                 .map(|worktree| worktree.parent_project_id.clone()),
+        old.get("worktree").is_some(),
+        context.worktree.is_some()
     );
     let editor = old.get("editor");
-    note(
+    note!(
+        fields,
         "projectContext.projectId",
         editor
             .and_then(|editor| text(editor, "projectId"))
@@ -377,7 +476,8 @@ fn compare_project_context(
             .and_then(Value::as_i64)
             .unwrap_or_default()
     };
-    note(
+    note!(
+        fields,
         "projectContext.diffStats",
         number("additions") == context.diff_stats.additions
             && number("deletions") == context.diff_stats.deletions
@@ -405,95 +505,141 @@ fn compare_session(
     mismatch: &mut SidebarMismatch,
 ) {
     let row = &store.row;
-    let mut fields: Vec<&'static str> = Vec::new();
-    let mut note = |name: &'static str, same: bool| {
-        if !same {
-            fields.push(name);
-        }
-    };
-    note("displayTitle", old.title() == row.display_title);
-    note("alias", old.alias == row.alias);
-    note(
+    let mut fields: Vec<FieldDiff> = Vec::new();
+    note!(fields, "displayTitle", old.title() == row.display_title);
+    note!(
+        fields,
+        "alias",
+        old.alias == row.alias,
+        !old.alias.is_empty(),
+        !row.alias.is_empty()
+    );
+    note!(
+        fields,
         "titleTooltip",
         detail_str(old, "titleTooltip").unwrap_or(old.title()) == row.title_tooltip,
     );
-    note("activity", old.activity == row.activity);
-    note(
+    note!(fields, "activity", old.activity == row.activity);
+    note!(
+        fields,
         "pendingQuestionCount",
         detail_u64(old, "pendingQuestionCount") == row.pending_question_count,
     );
-    note(
+    note!(
+        fields,
         "agentIcon",
         old.agent_icon.as_deref() == row.agent_icon.as_deref(),
+        old.agent_icon.is_some(),
+        row.agent_icon.is_some()
     );
-    note("isBrowser", old.is_browser() == row.is_browser);
-    note(
+    note!(fields, "isBrowser", old.is_browser() == row.is_browser);
+    note!(
+        fields,
         "sessionKind",
         old.session_kind.as_deref() == row.session_kind.as_deref(),
+        old.session_kind.is_some(),
+        row.session_kind.is_some()
     );
-    note("isFocused", old.is_focused == store.is_focused);
-    note("isVisible", old.is_visible == store.is_visible);
-    note("isPinned", old.is_pinned == row.is_pinned);
-    note("isParked", old.is_parked == row.is_parked);
-    note("isDraft", old.is_draft == row.is_draft);
-    note(
+    note!(fields, "isFocused", old.is_focused == store.is_focused);
+    note!(fields, "isVisible", old.is_visible == store.is_visible);
+    note!(fields, "isPinned", old.is_pinned == row.is_pinned);
+    note!(fields, "isParked", old.is_parked == row.is_parked);
+    note!(fields, "isDraft", old.is_draft == row.is_draft);
+    note!(
+        fields,
         "lifecycleState",
         old.lifecycle_state.as_deref() == Some(row.lifecycle_state.as_str()),
     );
-    note("sessionNote", old.session_note == row.session_note);
-    note(
+    note!(
+        fields,
+        "sessionNote",
+        old.session_note == row.session_note,
+        old.session_note.is_some(),
+        row.session_note.is_some()
+    );
+    note!(
+        fields,
         "faviconDataUrl",
         old.favicon_data_url.is_some() == row.favicon_data_url.is_some(),
+        old.favicon_data_url.is_some(),
+        row.favicon_data_url.is_some()
     );
-    note(
+    note!(
+        fields,
         "hasComposerDraft",
         old.has_composer_draft == row.has_composer_draft,
     );
-    note(
+    note!(
+        fields,
         "queuedPromptCount",
         old.queued_prompt_count == row.queued_prompt_count.unwrap_or(0),
     );
-    note(
+    note!(
+        fields,
         "queuedPromptFailedCount",
         detail_u64(old, "queuedPromptFailedCount") == row.queued_prompt_failed_count.unwrap_or(0),
     );
-    note(
+    note!(
+        fields,
         "lastInteractionAt",
         old.last_interaction_at.as_deref() == row.last_interaction_at.as_deref(),
+        old.last_interaction_at.is_some(),
+        row.last_interaction_at.is_some()
     );
-    note(
+    note!(
+        fields,
         "effectiveTag",
         detail_str(old, "effectiveTag") == row.effective_tag.as_deref(),
+        detail_str(old, "effectiveTag").is_some(),
+        row.effective_tag.is_some()
     );
-    note(
+    note!(
+        fields,
         "tagPresentation",
         tag_presentation_equal(old.details.get("tagPresentation"), row),
+        old.details.get("tagPresentation").is_some(),
+        row.tag_presentation.is_some()
     );
-    note(
+    note!(
+        fields,
         "agentLogo",
         detail_str(old, "agentLogoDataUrl").is_some() == row.agent_icon.is_some(),
+        detail_str(old, "agentLogoDataUrl").is_some(),
+        row.agent_icon.is_some()
     );
-    note(
+    note!(
+        fields,
         "isMultiSelected",
         detail_bool(old, "isMultiSelected") == store.is_multi_selected,
     );
-    note(
+    note!(
+        fields,
         "delayedSendDeadlineAt",
         detail_str(old, "delayedSendDeadlineAt")
             == row
                 .delayed_send
                 .as_ref()
                 .and_then(|delayed| delayed.deadline_at.as_deref()),
+        detail_str(old, "delayedSendDeadlineAt").is_some(),
+        row.delayed_send
+            .as_ref()
+            .is_some_and(|delayed| delayed.deadline_at.is_some())
     );
-    note(
+    note!(
+        fields,
         "delayedSendRemainingLabel",
         detail_str(old, "delayedSendRemainingLabel")
             == row
                 .delayed_send
                 .as_ref()
                 .and_then(|delayed| delayed.remaining_label.as_deref()),
+        detail_str(old, "delayedSendRemainingLabel").is_some(),
+        row.delayed_send
+            .as_ref()
+            .is_some_and(|delayed| delayed.remaining_label.is_some())
     );
-    note(
+    note!(
+        fields,
         "closeAfterDone",
         detail_bool(old, "closeAfterDone")
             == row
@@ -501,28 +647,40 @@ fn compare_session(
                 .as_ref()
                 .is_some_and(|close| close.armed),
     );
-    note(
+    note!(
+        fields,
         "closeAfterDoneDeadlineAt",
         detail_str(old, "closeAfterDoneDeadlineAt")
             == row
                 .close_after_done
                 .as_ref()
                 .and_then(|close| close.deadline_at.as_deref()),
+        detail_str(old, "closeAfterDoneDeadlineAt").is_some(),
+        row.close_after_done
+            .as_ref()
+            .is_some_and(|close| close.deadline_at.is_some())
     );
-    note(
+    note!(
+        fields,
         "isFavorite",
         (old.details.get("isFavorite").and_then(Value::as_bool) == Some(true)) == row.is_favorite,
     );
-    note(
+    note!(
+        fields,
         "sessionTag",
         detail_str(old, "sessionTag") == row.session_tag.as_deref(),
+        detail_str(old, "sessionTag").is_some(),
+        row.session_tag.is_some()
     );
     if fields.is_empty() {
         return;
     }
-    if fields.contains(&"pendingQuestionCount") {
+    if fields
+        .iter()
+        .any(|field| field.name == "pendingQuestionCount")
+    {
         mismatch.question_count_only += 1;
-    } else if fields == ["titleTooltip"] {
+    } else if matches!(fields.as_slice(), [only] if only.name == "titleTooltip") {
         mismatch.tooltip_only += 1;
     }
     mismatch.sessions.push((old.session_id.clone(), fields));
