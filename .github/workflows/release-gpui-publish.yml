@@ -304,6 +304,12 @@ jobs:
           fi
           echo "Updating the Homebrew cask to ${VERSION}."
           echo 'publish=true' >>"$GITHUB_OUTPUT"
+      # CDXC:Release 2026-09-19 WHY:
+      # Homebrew added `no_autobump! because: :bumped_by_upstream` to the
+      # official cask (Homebrew/homebrew-cask#287795), and brew refuses to load
+      # that stanza from any non-official tap, so the throwaway audit tap drops
+      # it from its own copy. The pull request still carries the upstream cask
+      # with only version and sha256 changed.
       - name: Render the bumped cask and run brew style and brew audit on it
         if: ${{ steps.homebrew_gate.outputs.publish == 'true' }}
         env:
@@ -317,6 +323,7 @@ jobs:
             echo "Nothing rendered (the official cask already ships ${VERSION}); skipping the audit."
             exit 0
           fi
+          perl -0pi -e 's/\n[ \t]*no_autobump![^\n]*\n//' "$TAP_DIR/Casks/ghostex.rb"
           git -C "$TAP_DIR" init -q
           git -C "$TAP_DIR" add Casks/ghostex.rb
           git -C "$TAP_DIR" -c user.name=ghostex-release -c user.email=release@ghostex.invalid commit -qm "ghostex ${VERSION}"

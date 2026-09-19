@@ -25,10 +25,10 @@
  * homebrew-cask tap as a git clone (~620 MB), runs `brew audit`/`brew style` for a
  * cask on Linux, and decides fork and branch handling itself. The bump is two lines
  * of Ruby with a checksum the release already recorded, so the PR is opened with the
- * contents API instead and the maintainers' own CI performs the audit. The cask has
- * no `no_autobump!`, so BrewTestBot may also open a bump PR from the appcast
- * livecheck; whichever PR exists first wins and the other side skips, which is why
- * an existing open PR for the version is a success here, not a failure.
+ * contents API instead and the maintainers' own CI performs the audit. Since
+ * 2026-09-16 the official cask carries `no_autobump! because: :bumped_by_upstream`,
+ * so BrewTestBot no longer opens bump PRs and this one is the only update path; an
+ * existing open PR for the version (a manual rerun) is still a success here.
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
