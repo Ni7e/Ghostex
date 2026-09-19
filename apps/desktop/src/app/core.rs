@@ -180,6 +180,9 @@ pub struct GhostexGpuiApp {
     pub(crate) titlebar_actions_snapshot: Vec<GpuiTitlebarAction>,
     pub(crate) titlebar_actions_refresh_in_flight: bool,
     pub(crate) project_views: crate::app::project_views::ProjectViews,
+    pub(crate) parked_project_workarea_surfaces:
+        Vec<crate::app::project_keep_alive::ParkedProjectWorkareaSurface>,
+    pub(crate) project_keep_alive_expiry_scheduled: bool,
     pub(crate) extensions_snapshot: GpuiExtensionsSnapshot,
     pub(crate) extension_projects: HashMap<String, GpuiExtensionProjectMetadata>,
     pub(crate) extension_session_details: HashMap<String, serde_json::Value>,
@@ -439,6 +442,7 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_chat_page_states: HashMap<TerminalSessionId, SessionChatPageState>,
     pub(crate) session_chat_diagnostics: super::session_chat_diagnostics::SessionChatDiagnostics,
     pub(crate) agents_chat_eviction_running: bool,
+    pub(crate) agents_chat_prewarm_scheduled: bool,
     pub(crate) agents_chat_eviction_retry_scheduled: bool,
     pub(crate) agents_chat_reconcile_scheduled: bool,
     pub(crate) agents_chat_eviction_requested: bool,
@@ -969,6 +973,8 @@ pub struct GhostexGpuiApp {
     /// Last painted bounds of the titlebar Help button, so the `openGhostexHelp`
     /// hotkey can anchor the Help popup without a click.
     pub(crate) titlebar_help_button_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// Captured mode-tab spans plus the sliding active-fill state; see `titlebar_mode_highlight.rs`.
+    pub(crate) titlebar_mode_highlight: SharedTitlebarModeHighlightState,
     pub(crate) titlebar_extension_popup_generation: u64,
     pub(crate) titlebar_extension_popup: Option<GpuiTitlebarExtensionPopupState>,
     pub(crate) titlebar_tips_panel_open: bool,

@@ -36,9 +36,23 @@ pub(crate) struct NativeSidebarState {
     pub(crate) hovered_section: Option<String>,
     pub(crate) hovered_group: Option<String>,
     pub(crate) hovered_session: Option<String>,
+    /// CDXC:Sidebar 2026-09-19 WHY:
+    /// A row click round-trips through the service thread and its next sidebar projection before the snapshot marks the row focused, which read as a laggy click next to the instant highlight of the React sidebar.
+    /// The clicked row is drawn focused immediately and the snapshot takes over once it confirms the focus; a click the runtime rejects times out after a moment.
+    pub(crate) optimistic_focus: Option<(String, std::time::Instant)>,
 }
 
 impl NativeSidebarState {
+    /// Whether a row draws as focused: the click's optimistic mark for a moment, the snapshot's own flag otherwise.
+    pub(crate) fn session_draws_focused(&self, session_id: &str, snapshot_focused: bool) -> bool {
+        match &self.optimistic_focus {
+            Some((id, since)) if since.elapsed() < std::time::Duration::from_millis(1500) => {
+                id == session_id
+            }
+            _ => snapshot_focused,
+        }
+    }
+
     pub(crate) fn is_dragging(&self, kind: &str, id: &str) -> bool {
         self.dragging
             .as_ref()
@@ -107,6 +121,16 @@ impl GhostexGpuiApp {
                     self.native_sidebar.pending_reveal = Some(request.clone());
                     self.native_sidebar.handled_reveal = Some(request.request_id);
                 }
+                if let Some((id, _)) = &self.native_sidebar.optimistic_focus
+                    && snapshot.groups.iter().any(|group| {
+                        group
+                            .sessions
+                            .iter()
+                            .any(|session| session.is_focused && &session.session_id == id)
+                    })
+                {
+                    self.native_sidebar.optimistic_focus = None;
+                }
                 self.native_sidebar
                     .disclosures
                     .sync(&snapshot, self.gpui_pet_overlay_reduce_motion_enabled);
@@ -160,8 +184,7 @@ impl GhostexGpuiApp {
                 if close {
                     self.dismiss_native_sidebar_menu(cx);
                 } else if let Some(panel) = menu.panels.get_mut(*index) {
-                    panel.items = items;
-                    panel.selected = None;
+                    panel.replace_items(items);
                 }
             }
             NativeSidebarUpdate::Clock { version: 1, rows } => {

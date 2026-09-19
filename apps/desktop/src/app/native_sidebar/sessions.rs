@@ -63,6 +63,9 @@ impl GhostexGpuiApp {
         let drop_position = self.native_sidebar_drop_position("targetSessionId", &session_id);
         let scale = appearance.scale;
         let hovered = self.native_sidebar.hovered_session.as_deref() == Some(&session_id);
+        let focused = self
+            .native_sidebar
+            .session_draws_focused(&session_id, session.is_focused);
         let hover_id = session_id.clone();
         let stale = group.is_stale && !session.is_browser();
         let sleeping = session.lifecycle_state.as_deref() == Some("sleeping");
@@ -108,19 +111,19 @@ impl GhostexGpuiApp {
                 .when(stale, |row| row.opacity(0.55))
                 .when(self.native_sidebar.is_dragging("session", &session_id), |row| row.opacity(0.2))
                 .when_some(completion, |row, start| row.opacity(super::status::completion_opacity(start)))
-                .when(session.is_visible && !session.is_focused, |row| row.bg(appearance.visible))
-                .when(session.is_focused, |row| row.bg(appearance.session_selected))
-                .when(session.is_visible || session.is_focused, |row| row.text_color(chrome_color(0xd8d8d8, 0x292929)))
+                .when(session.is_visible && !focused, |row| row.bg(appearance.visible))
+                .when(focused, |row| row.bg(appearance.session_selected))
+                .when(session.is_visible || focused, |row| row.text_color(chrome_color(0xd8d8d8, 0x292929)))
                 .when(selected, |row| row.border_1().border_color(rgb(0x2f8cff)))
                 .when(drop_position == Some("before"), |row| row.border_t_1().border_color(rgb(0x60a5fa)))
                 .when(drop_position == Some("after"), |row| row.border_b_1().border_color(rgb(0x60a5fa)))
-                .when(!session.is_focused, |row| row.hover(|row| row.bg(appearance.session_hover)))
+                .when(!focused, |row| row.hover(|row| row.bg(appearance.session_hover)))
                 .on_hover(cx.listener(move |app, hovered, _, cx| {
                     if *hovered { app.native_sidebar.hovered_session = Some(hover_id.clone()); }
                     else if app.native_sidebar.hovered_session.as_deref() == Some(&hover_id) { app.native_sidebar.hovered_session = None; }
                     cx.notify();
                 }))
-                .when(session.is_focused, |row| row.child(super::decorations::session_outline(appearance)))
+                .when(focused, |row| row.child(super::decorations::session_outline(appearance)))
                 .child(self.render_native_session_identity(session, icon, appearance, cx))
                 .children(self.render_native_session_decorations(session, appearance, cx))
                 .when_some(self.native_sidebar.reveal_flash.as_ref().filter(|(id, _)| id == &session.session_id).map(|(_, start)| *start), |row, start| row.child(super::scroll::reveal_flash(start, scale)))
@@ -153,6 +156,10 @@ impl GhostexGpuiApp {
                     if stale { return; }
                     let modifiers = event.modifiers();
                     let mode = if modifiers.shift { "range" } else if modifiers.platform || modifiers.control { "additive" } else { "focus" };
+                    if mode == "focus" {
+                        app.native_sidebar.optimistic_focus = Some((session_id.clone(), std::time::Instant::now()));
+                        cx.notify();
+                    }
                     app.dispatch_native_sidebar_ui(json!({"type": "selectSession", "sessionId": session_id, "mode": mode}), cx);
                 }))
                 .on_mouse_down(MouseButton::Right, cx.listener(move |app, event: &gpui::MouseDownEvent, window, cx| {

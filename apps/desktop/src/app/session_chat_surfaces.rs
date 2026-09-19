@@ -1172,6 +1172,7 @@ impl GhostexGpuiApp {
         for session_id in &visible_session_ids {
             let _ = self.ensure_agents_chat_surface(*session_id, cx);
         }
+        self.schedule_native_chat_prewarm(cx);
         let mut visibility_changed = false;
         for (session_id, surface) in &self.agents_chat_surfaces {
             let visible = visible_session_ids.contains(session_id)
@@ -1416,6 +1417,16 @@ impl GhostexGpuiApp {
             )
             .copied()
             .collect();
+        // Captured before the loop below stamps every page as hidden.
+        let kept_alive_sessions = if self.project_switch_keep_alive().is_some() {
+            self.agents_chat_surfaces
+                .keys()
+                .copied()
+                .filter(|id| !self.agents_chat_surface_hidden_since.contains_key(id))
+                .collect()
+        } else {
+            HashSet::new()
+        };
         self.agents_chat_mode_sessions.clear();
         self.pending_agents_chat_launch_intents.clear();
         self.pending_session_terminal_composer_insert.clear();
@@ -1449,6 +1460,8 @@ impl GhostexGpuiApp {
             composer_ready_sessions: std::mem::take(&mut self.session_chat_composer_ready_sessions),
             composer_empty_reports: std::mem::take(&mut self.session_chat_composer_empty_reports),
             pending_composer_insert: std::mem::take(&mut self.pending_session_chat_composer_insert),
+            kept_alive_sessions,
+            parked_at: Some(Instant::now()),
         }
     }
 
