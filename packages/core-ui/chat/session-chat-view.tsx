@@ -2,6 +2,10 @@ import { computeSessionChatFiles } from '@/packages/shared/session-chat-controll
 import { queuedModelSelection } from '@/packages/shared/session-chat-controller/model-selection';
 import { sendSessionChatOptionAware } from '@/packages/shared/session-chat-controller/option-command';
 import { terminalNoticeChoiceAnswer } from '@/packages/shared/session-chat-presentation/terminal-prompts';
+import {
+  sessionChatTranscriptMenuItems,
+  sessionChatTranscriptQuote,
+} from '@/packages/shared/session-chat-presentation/transcript-menu';
 import { sessionChatAccountIndicator } from '@/packages/shared/session-chat-presentation/option-pills';
 import { sessionChatSendBlockedReason, sessionChatComposerPlaceholder } from '@/packages/shared/session-chat-controller/composer-policy';
 import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
@@ -374,14 +378,6 @@ function readTranscriptSelection(container: HTMLElement | null): string {
     return '';
   }
   return selection.toString().trim();
-}
-
-function asMarkdownQuote(text: string): string {
-  return text
-    .replace(/\r\n?/g, '\n')
-    .split('\n')
-    .map((line) => (line === '' ? '>' : `> ${line}`))
-    .join('\n');
 }
 
 /*
@@ -1606,7 +1602,7 @@ export function SessionChatView({
   */
   const addTranscriptTextToChat = useCallback((text: string): boolean => {
     const composer = composerRef.current;
-    return text !== '' && composer !== null && composer.appendText(`${asMarkdownQuote(text)}\n`);
+    return text !== '' && composer !== null && composer.appendText(sessionChatTranscriptQuote(text));
   }, []);
 
   const addTranscriptSelectionToChat = useCallback((): void => {
@@ -1791,22 +1787,26 @@ export function SessionChatView({
                                   {transcriptWebUrl !== null ? (
                                     <SessionChatReferenceMenuItems href={transcriptWebUrl} />
                                   ) : null}
-                                  {(transcriptFilePath === null && transcriptWebUrl === null) ||
-                                  transcriptSelection !== '' ? (
+                                  {sessionChatTranscriptMenuItems({
+                                    selection: transcriptSelection,
+                                    onReference: transcriptFilePath !== null || transcriptWebUrl !== null,
+                                    questionActive,
+                                  }).map((item) => (
                                     <ContextMenuItem
-                                      disabled={transcriptSelection === ''}
-                                      onClick={copyTranscriptSelection}
+                                      disabled={item.disabled}
+                                      key={item.id}
+                                      onClick={
+                                        item.id === 'copy' ? copyTranscriptSelection : addTranscriptSelectionToChat
+                                      }
                                     >
-                                      <IconCopy aria-hidden='true' />
-                                      Copy
+                                      {item.id === 'copy' ? (
+                                        <IconCopy aria-hidden='true' />
+                                      ) : (
+                                        <IconBlockquote aria-hidden='true' />
+                                      )}
+                                      {item.label}
                                     </ContextMenuItem>
-                                  ) : null}
-                                  {transcriptSelection !== '' ? (
-                                    <ContextMenuItem disabled={questionActive} onClick={addTranscriptSelectionToChat}>
-                                      <IconBlockquote aria-hidden='true' />
-                                      Add to Chat
-                                    </ContextMenuItem>
-                                  ) : null}
+                                  ))}
                                 </ContextMenuGroup>
                               </ContextMenuContent>
                             </ContextMenu>

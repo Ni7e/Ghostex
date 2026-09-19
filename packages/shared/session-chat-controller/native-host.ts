@@ -90,6 +90,10 @@ import {
 import { insertChatReference, nativePathReference, removeChatReference } from '../session-chat-presentation/references';
 import { nativeComposerKeyIntent } from '../session-chat-presentation/native-composer-keys';
 import { sessionChatReferenceMenuRows } from '../session-chat-presentation/reference-menu';
+import {
+  sessionChatAppendDraftText,
+  sessionChatTranscriptMenuRows,
+} from '../session-chat-presentation/transcript-menu';
 import { sessionChatSendBlockedToastRequest } from '../session-chat-presentation/send-blocked';
 import { NativeComposerChrome } from './native-composer-chrome';
 import {
@@ -504,10 +508,8 @@ function publish(state: NativeChatState): void {
       attach: !preview,
       terminal: !preview,
     },
-    emptyState: sessionChatEmptyStateCopy(
-      state.status === 'working' || state.status === 'ready' ? 'empty' : state.status,
-      state.agent
-    ),
+    // React picks this copy from the view, not the agent status (session-chat-view.tsx `emptyKind`).
+    emptyState: sessionChatEmptyStateCopy(state.view.kind === 'ready' ? 'empty' : state.view.kind, state.agent),
     /*
     The new-session welcome, projected for GPUI chat the same way React renders it: a
     `starting` or `empty` transcript greets the user with the agent mark and headline
@@ -1072,6 +1074,12 @@ async function action(command: { type: string; [key: string]: any }): Promise<vo
       case 'removeAttachment': {
         const result = removeChatReference(command.text as string, command.start as number, command.end as number);
         requests.push({ kind: 'composer', method: 'insert', params: { content: result.text, caret: result.caret } });
+        break;
+      }
+      case 'appendToDraft': {
+        // The transcript menu's Add to Chat, appended the way React's `appendText` does, caret at the end.
+        const content = sessionChatAppendDraftText(command.draft as string, command.text as string);
+        requests.push({ kind: 'composer', method: 'insert', params: { content, caret: content.length } });
         break;
       }
       case 'refreshComposerChrome':
@@ -1646,6 +1654,7 @@ Object.assign(globalThis, {
     composerReferences,
     composerKeyIntent: nativeComposerKeyIntent,
     referenceMenu: sessionChatReferenceMenuRows,
+    transcriptMenu: sessionChatTranscriptMenuRows,
     sendBlockedToast: sessionChatSendBlockedToastRequest,
     event: (event: GxserverSessionChatEvent) => eventListener?.(event),
     resolve(id: number, value: unknown, error?: { code?: GxserverRpcErrorCode; message: string; endpoint: string }) {

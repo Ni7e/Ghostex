@@ -3,15 +3,16 @@ import {
   composerSuggestions,
   completeComposerMention,
   composerNativeCommand,
+  sessionChatSuggestionRowCorners,
 } from '../session-chat-presentation/composer-suggestions';
 import { nextFileReferenceIndex } from '../session-chat-presentation/references';
 import {
   detectSessionChatComposerTrigger,
   linkedSessionChatSkillMention,
-  sessionChatDisplaySkillDirectoryPath,
   sessionChatFileBasename,
   sessionChatFileDirectory,
   sessionChatFileMention,
+  sessionChatSkillDetail,
 } from '@/packages/core-ui/chat/session-chat-composer-trigger';
 import {
   sessionChatSlashCommandsForAgent,
@@ -114,7 +115,7 @@ export class NativeComposerSuggestions {
         : kind === 'skill'
           ? matches.skillMatches.map((skill) => ({
               label: `$${skill.name}`,
-              detail: sessionChatDisplaySkillDirectoryPath(skill.directoryPath),
+              detail: sessionChatSkillDetail(skill),
             }))
           : matches.fileMatches.map((path) => ({
               label: sessionChatFileBasename(path),
@@ -122,7 +123,7 @@ export class NativeComposerSuggestions {
             }));
     return {
       kind,
-      rows,
+      rows: rows.map((row, index) => ({ ...row, ...sessionChatSuggestionRowCorners(index, rows.length) })),
       selected: Math.min(this.index, Math.max(0, rows.length - 1)),
       sendOnEnter:
         kind === 'slash' &&

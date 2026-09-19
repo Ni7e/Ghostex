@@ -81,7 +81,8 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
   container: ghostex-session-chat / inline-size;
 }
 
-.ghostex-session-chat-scope[data-chat-custom-transcript-width='true'] [data-slot='message-scroller-content'] {
+.ghostex-session-chat-scope[data-chat-custom-transcript-width='true'] [data-slot='message-scroller-content'],
+.ghostex-session-chat-scope[data-chat-custom-transcript-width='true'] .ghostex-chat-transcript-skeleton {
   width: calc(var(--ghostex-session-chat-transcript-width-percent, 75) * 1%);
   max-width: calc(100% - 60px);
 }
@@ -217,7 +218,8 @@ companion pane that is 47 columns instead of 42 for a diff or a command dump.
  * At the existing 1070px cutoff and below, remove the percentage inset and retain the shared px-4 padding.
  */
 @container ghostex-session-chat (max-width: 1070px) {
-  .ghostex-session-chat-scope[data-chat-custom-transcript-width='true'] [data-slot='message-scroller-content'] {
+  .ghostex-session-chat-scope[data-chat-custom-transcript-width='true'] [data-slot='message-scroller-content'],
+  .ghostex-session-chat-scope[data-chat-custom-transcript-width='true'] .ghostex-chat-transcript-skeleton {
     max-width: 100%;
     width: 100%;
   }
@@ -1995,6 +1997,32 @@ so the swap barely moves the composer row.
 
 @media (prefers-reduced-motion: reduce) {
   .ghostex-chat-pill-skeleton {
+    animation: none;
+  }
+}
+
+/* The transcript skeleton a loading chat shows (session-chat-loading-state.tsx). Its
+   geometry, tint and pulse come from transcript-skeleton.json, which GPUI chat reads too. */
+.ghostex-chat-transcript-skeleton-rows {
+  animation: ghostex-chat-transcript-skeleton-pulse var(--ghostex-chat-skeleton-pulse-ms) ease-in-out infinite;
+}
+
+.ghostex-chat-transcript-skeleton-block {
+  background: color-mix(in srgb, var(--foreground) var(--ghostex-chat-skeleton-tint), transparent);
+}
+
+@keyframes ghostex-chat-transcript-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: var(--ghostex-chat-skeleton-pulse-min);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghostex-chat-transcript-skeleton-rows {
     animation: none;
   }
 }
