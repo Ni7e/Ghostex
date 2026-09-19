@@ -2,7 +2,7 @@
 
 use ghostex_gx_protocol::LifecycleState;
 
-use super::loaded::{project_id_order, LoadedPresentation};
+use super::loaded::{project_id_order, tab_listing, LoadedPresentation};
 use super::store::{MachinePresentation, PresentationState};
 use crate::change::ChangeSummary;
 use crate::keys::{MachineId, ProjectKey, SessionKey};
@@ -33,12 +33,17 @@ pub(super) fn diff_loaded(
         summary.note_project_order_changed(machine.clone());
     }
     for (project_id, session_id, session) in next.sessions.iter() {
-        if previous.sessions.get(project_id, session_id) != Some(session) {
+        let before = previous.sessions.get(project_id, session_id);
+        if before != Some(session) {
             summary.note_session_changed(SessionKey {
                 machine: machine.clone(),
                 project_id: project_id.to_string(),
                 session_id: session_id.to_string(),
             });
+        }
+        // A row can enter or leave the tab lists without moving in its group.
+        if before.is_some_and(|before| tab_listing(before) != tab_listing(session)) {
+            summary.note_session_order_changed(project_key(project_id));
         }
     }
     for (project_id, session_id, _) in previous.sessions.iter() {
@@ -128,7 +133,12 @@ pub(super) fn settle_overlays_after_snapshot(
             .hidden_sessions
             .remove(&project_id, &session_id);
         if still_listed {
+            // The row is shown again, so it is news, and it can be back in a tab list.
             summary.note_session_changed(session_key(&project_id, &session_id));
+            summary.note_session_order_changed(ProjectKey {
+                machine: machine.clone(),
+                project_id,
+            });
         }
     }
 

@@ -112,7 +112,8 @@ impl PresentationStore {
     }
 
     /// Every effective session of a project on any surface, ordered by
-    /// `(group_id, sort_key, session_id)`.
+    /// `(group_id, sort_key, session_id)`. `Missing` when the project does not exist or is hidden
+    /// locally, so an empty list always means a project that has no sessions.
     pub fn sessions_of_project(
         &self,
         key: &ProjectKey,
@@ -123,6 +124,9 @@ impl PresentationStore {
         let Some(loaded) = machine.loaded() else {
             return Loadable::NotLoaded;
         };
+        if loaded.project(&key.project_id).is_none() || machine.is_project_hidden(&key.project_id) {
+            return Loadable::Missing;
+        }
         let mut sessions: Vec<Cow<'_, PresentationSession>> = loaded
             .project_sessions(&key.project_id)
             .into_iter()
@@ -247,8 +251,9 @@ impl PresentationStore {
         })
     }
 
-    /// The tab next to `from` in a group, wrapping at the ends. Made for a held "next tab" key:
-    /// it walks borrowed ids and allocates only the returned key.
+    /// The tab next to `from` in a group, wrapping at the ends. Made for a held "next tab" key: it
+    /// builds no `TabSession` rows and clones no session. It does allocate one short-lived `Vec`
+    /// of borrowed id pairs (16 bytes per tab) plus the returned key.
     ///
     /// When `from` is not a tab of the group, `Next` gives the first tab and `Previous` the last.
     /// `None` when the group has no tabs, is missing or not loaded, or `from` is its only tab.
@@ -338,47 +343,71 @@ impl PresentationStore {
             .unwrap_or_default()
     }
 
-    /// Chat projects in sidebar order: by manual project order when either side has one, else by
-    /// `sort_key`, then newest `updated_at`, then id.
+    /// Chat projects in sidebar order.
     fn ordered_chat_project_ids<'a>(
         &self,
         machine: &MachinePresentation,
         loaded: &'a LoadedPresentation,
     ) -> Vec<&'a str> {
-        let order = machine
-            .side_state()
-            .workspace_groups
-            .as_ref()
-            .map(|state| state.project_order.as_slice())
-            .unwrap_or_default();
-        // A machine's own document orders its projects by raw project id.
-        let order_index = |project: &PresentationProject| {
-            order
-                .iter()
-                .position(|candidate| *candidate == project.project_id)
-        };
-        let mut projects: Vec<(&PresentationProject, Option<usize>)> = loaded
+        let mut projects: Vec<&PresentationProject> = loaded
             .projects()
             .iter()
             .filter(|project| !machine.is_project_hidden(&project.project_id))
             .filter(|project| machine.is_chat_project(&project.project_id))
-            .map(|project| (project, order_index(project)))
             .collect();
-        projects.sort_by(|(left, left_index), (right, right_index)| {
-            if left_index.is_some() || right_index.is_some() {
-                return left_index
-                    .unwrap_or(usize::MAX)
-                    .cmp(&right_index.unwrap_or(usize::MAX));
-            }
-            left.sort_key
-                .cmp(&right.sort_key)
-                .then_with(|| right.updated_at.cmp(&left.updated_at))
-                .then_with(|| left.project_id.cmp(&right.project_id))
-        });
+        projects.sort_by(|left, right| sidebar_project_order(machine, left, right));
         projects
             .into_iter()
-            .map(|(project, _)| project.project_id.as_str())
+            .map(|project| project.project_id.as_str())
             .collect()
+    }
+
+    /// The first code (non-chat) project of a machine in sidebar order: where focus is re-homed
+    /// when the active project goes away. `None` when the machine is not loaded or has none.
+    pub fn first_code_project(&self, machine_id: &MachineId) -> Option<ProjectKey> {
+        let machine = self.machine(machine_id)?;
+        machine
+            .loaded()?
+            .projects()
+            .iter()
+            .filter(|project| !machine.is_project_hidden(&project.project_id))
+            .filter(|project| !machine.is_chat_project(&project.project_id))
+            .min_by(|left, right| sidebar_project_order(machine, left, right))
+            .map(|project| ProjectKey {
+                machine: machine_id.clone(),
+                project_id: project.project_id.clone(),
+            })
+    }
+}
+
+/// Sidebar order of two projects of one machine: by the manual project order (the machine's
+/// workspace-groups `projectOrder`, keyed by raw project id) when either project is in it, else by
+/// `sort_key`, then newest `updated_at`, then id.
+fn sidebar_project_order(
+    machine: &MachinePresentation,
+    left: &PresentationProject,
+    right: &PresentationProject,
+) -> std::cmp::Ordering {
+    let order = machine
+        .side_state()
+        .workspace_groups
+        .as_ref()
+        .map(|state| state.project_order.as_slice())
+        .unwrap_or_default();
+    let index = |project: &PresentationProject| {
+        order
+            .iter()
+            .position(|candidate| *candidate == project.project_id)
+    };
+    match (index(left), index(right)) {
+        (None, None) => left
+            .sort_key
+            .cmp(&right.sort_key)
+            .then_with(|| right.updated_at.cmp(&left.updated_at))
+            .then_with(|| left.project_id.cmp(&right.project_id)),
+        (left_index, right_index) => left_index
+            .unwrap_or(usize::MAX)
+            .cmp(&right_index.unwrap_or(usize::MAX)),
     }
 }
 

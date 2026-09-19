@@ -137,13 +137,17 @@ impl ChangeSummary {
 
     /// True when the ordered keys of some group's tab list may have changed (as opposed to the
     /// content of a row, which `sessions_changed` reports).
+    ///
+    /// It is conservative, never the other way round: every change of a tab list's keys sets it,
+    /// and a few inputs set it without moving a key (a machine reload with identical rows, a
+    /// legacy group delta, a reorder of projects that are not chat projects). A project title
+    /// change, a group rename, and a row content change do not set it.
     pub fn tab_lists_changed(&self) -> bool {
         !self.machines_reloaded.is_empty()
-            || !self.projects_changed.is_empty()
             || !self.projects_removed.is_empty()
+            || !self.project_order_changed.is_empty()
             || !self.session_order_changed.is_empty()
             || !self.chat_collection_changed.is_empty()
-            || self.side_state.workspace_groups
     }
 
     /// Folds `other` into `self`, so a host can coalesce a burst of events into one repaint. `other`

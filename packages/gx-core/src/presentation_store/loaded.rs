@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use ghostex_gx_protocol::{
     PresentationCapabilities, PresentationGroup, PresentationProject, PresentationSession,
-    PresentationSnapshot, Tri,
+    PresentationSnapshot, SessionKind, SessionSurface, Tri,
 };
 use serde_json::Value;
 
@@ -92,8 +92,51 @@ impl LoadedPresentation {
         // The daemon already sends these ordered; sorting keeps the order rule in one place for
         // daemons that do not.
         sort_projects(&mut loaded.projects);
+        loaded.repair_groups();
         sort_groups(&mut loaded.groups);
         loaded
+    }
+
+    /// Makes the groups agree with the rows after a snapshot, the way the delta path already does.
+    ///
+    /// CDXC:Workarea 2026-09-19 WHY:
+    /// A project's tab list is read from its group's `sessionIds`, and the desktop workspace clears every tab of a project whose list reads empty. A snapshot can arrive with a group missing (its row did not fit and was skipped) or with a session missing from its group's list (a bad element was left out). Every project therefore gets its default group, and a group that does not list one of its own sessions is rebuilt from the rows, in the daemon's order (byte order of `sortKey`).
+    fn repair_groups(&mut self) {
+        let missing: Vec<PresentationGroup> = self
+            .projects
+            .iter()
+            .filter(|project| {
+                !self
+                    .groups
+                    .iter()
+                    .any(|group| group.project_id == project.project_id)
+            })
+            .map(|project| PresentationGroup {
+                group_id: project.default_group_id(),
+                project_id: project.project_id.clone(),
+                session_ids: Vec::new(),
+                sort_key: format!("{}:active", project.sort_key),
+                title: "Active".to_string(),
+            })
+            .collect();
+        self.groups.extend(missing);
+
+        let incomplete: Vec<(String, String)> = self
+            .sessions
+            .iter()
+            .filter(|(project_id, session_id, session)| {
+                self.groups
+                    .iter()
+                    .find(|group| {
+                        group.project_id == *project_id && group.group_id == session.group_id
+                    })
+                    .is_some_and(|group| !group.session_ids.iter().any(|id| id == session_id))
+            })
+            .map(|(project_id, _, session)| (project_id.to_string(), session.group_id.clone()))
+            .collect();
+        for (project_id, group_id) in incomplete {
+            self.rebuild_group_session_ids(&project_id, &group_id);
+        }
     }
 
     /// Rebuilds one group's display order from the sessions that name it. Returns whether the
@@ -143,6 +186,15 @@ pub(super) fn sort_groups(groups: &mut [PresentationGroup]) {
         (left.sort_key.as_str(), left.group_id.as_str())
             .cmp(&(right.sort_key.as_str(), right.group_id.as_str()))
     });
+}
+
+/// The fields that decide whether a row is in a tab list at all.
+pub(super) fn tab_listing(session: &PresentationSession) -> (bool, &SessionSurface, &SessionKind) {
+    (
+        session.visible_in_sidebar_by_default,
+        &session.surface,
+        &session.kind,
+    )
 }
 
 pub(super) fn project_id_order(projects: &[PresentationProject]) -> Vec<String> {

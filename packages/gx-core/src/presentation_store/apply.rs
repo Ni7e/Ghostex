@@ -1,14 +1,16 @@
 //! Applying daemon input: snapshots, deltas, side-state frames, and domain project rows.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use ghostex_gx_protocol::{PresentationDelta, PresentationSnapshot, WorkspaceSessionGroupsState};
+use ghostex_gx_protocol::{
+    PresentationDelta, PresentationSnapshot, WorkspaceProjectGroups, WorkspaceSessionGroupsState,
+};
 use serde_json::Value;
 
 use super::loaded::{sort_groups, LoadedPresentation};
 use super::reducers::{remove_project, remove_session, upsert_project, upsert_session};
 use super::settle::{diff_loaded, settle_overlays_after_snapshot};
-use super::store::{PresentationState, PresentationStore, SideStateUpdate};
+use super::store::{MachinePresentation, PresentationState, PresentationStore, SideStateUpdate};
 use crate::change::{ChangeSummary, IgnoredReason};
 use crate::connection::{ConnectionPhase, ConnectionUpdate};
 use crate::keys::{MachineId, ProjectKey};
@@ -74,6 +76,7 @@ impl PresentationStore {
             side.custom_session_tags = Some(tags);
         }
 
+        let chat_before = chat_project_ids(entry);
         let mut next = LoadedPresentation::from_snapshot(server_id.to_string(), snapshot);
         match &entry.state {
             PresentationState::NotLoaded => summary.machines_reloaded.push(machine.clone()),
@@ -93,6 +96,17 @@ impl PresentationStore {
         }
         entry.state = PresentationState::Loaded(Box::new(next));
         settle_overlays_after_snapshot(machine, entry, &mut summary);
+        // A project whose chat status the snapshot flipped (its path changed) moved its tabs.
+        if summary.machines_reloaded.is_empty() {
+            let chat_after = chat_project_ids(entry);
+            for project_id in chat_before.symmetric_difference(&chat_after) {
+                summary.note_session_order_changed(ProjectKey {
+                    machine: machine.clone(),
+                    project_id: project_id.clone(),
+                });
+                summary.note_chat_collection_changed(machine.clone());
+            }
+        }
         summary
     }
 
@@ -140,6 +154,17 @@ impl PresentationStore {
         delta: PresentationDelta,
     ) -> ChangeSummary {
         let entry = self.machine_mut(machine);
+        // A project delta can flip the project between "chat" and "code" (its domain row or its
+        // path), which moves its sessions between its own tab list and the Chats collection.
+        let project_delta = match &delta {
+            PresentationDelta::ProjectAdded { project, .. }
+            | PresentationDelta::ProjectUpdated { project, .. } => Some(project.project_id.clone()),
+            _ => None,
+        }
+        .map(|project_id| {
+            let was_chat = entry.is_chat_project(&project_id);
+            (project_id, was_chat)
+        });
         let loaded = match &mut entry.state {
             PresentationState::NotLoaded => {
                 return ChangeSummary::ignored(IgnoredReason::NotLoaded)
@@ -242,6 +267,15 @@ impl PresentationStore {
             }
             // An unknown delta type advances the revision and changes nothing.
             PresentationDelta::Unknown { .. } => {}
+        }
+        if let Some((project_id, was_chat)) = project_delta {
+            if entry.is_chat_project(&project_id) != was_chat {
+                summary.note_session_order_changed(ProjectKey {
+                    machine: machine.clone(),
+                    project_id,
+                });
+                summary.note_chat_collection_changed(machine.clone());
+            }
         }
         summary
     }
@@ -411,6 +445,16 @@ impl PresentationStore {
     }
 }
 
+fn chat_project_ids(entry: &MachinePresentation) -> BTreeSet<String> {
+    entry
+        .loaded()
+        .into_iter()
+        .flat_map(|loaded| loaded.projects())
+        .filter(|project| entry.is_chat_project(&project.project_id))
+        .map(|project| project.project_id.clone())
+        .collect()
+}
+
 /// Why a revisioned frame must not be applied to `loaded`, if any.
 pub(super) fn frame_rejection(
     loaded: &LoadedPresentation,
@@ -452,15 +496,27 @@ fn note_workspace_groups_change(
     let empty = BTreeMap::new();
     let before = previous.map_or(&empty, |state| &state.projects);
     for workspace_project_id in before.keys().chain(next.projects.keys()) {
-        let groups_before = before.get(workspace_project_id).map(|entry| &entry.groups);
-        let groups_after = next
-            .projects
-            .get(workspace_project_id)
-            .map(|entry| &entry.groups);
-        if groups_before != groups_after {
+        // Membership and order only: renaming a user-made group moves no tab.
+        if group_members(before, workspace_project_id)
+            != group_members(&next.projects, workspace_project_id)
+        {
             if let Some(project) = ProjectKey::parse_workspace_project_id(workspace_project_id) {
                 summary.note_session_order_changed(project);
             }
         }
     }
+}
+
+/// The `(group id, member ids)` list of one project in a workspace-groups document.
+fn group_members<'a>(
+    projects: &'a BTreeMap<String, WorkspaceProjectGroups>,
+    workspace_project_id: &str,
+) -> Option<Vec<(&'a String, &'a Vec<String>)>> {
+    projects.get(workspace_project_id).map(|entry| {
+        entry
+            .groups
+            .iter()
+            .map(|group| (&group.group_id, &group.session_ids))
+            .collect()
+    })
 }

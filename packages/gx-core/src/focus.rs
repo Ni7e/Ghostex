@@ -322,6 +322,16 @@ impl FocusState {
         {
             self.focused_session = None;
         }
+        // An active project on a machine that is gone can never load again, so it must not stay
+        // active: clearing it lets the reconcile re-home focus.
+        if self
+            .active_project
+            .as_ref()
+            .is_some_and(|project| project.machine == *machine)
+        {
+            self.active_project = None;
+            self.active_group = None;
+        }
         self.visible_sessions.retain(|key| key.machine != *machine);
         let displayed_before = self.displayed_sessions.len();
         self.displayed_sessions
@@ -336,7 +346,7 @@ impl FocusState {
     /// Makes focus agree with the store. Runs after every event.
     ///
     /// CDXC:FocusRouting 2026-09-19 WHY:
-    /// The TypeScript runtime re-derived the active project and group from the focused session on every publish (`ensureActiveProject`), and the desktop workspace depends on that: the active group's tab list is its authority for which tabs exist, so a group that does not contain the focused session, or that names a project that is gone, reads as "no tabs" and clears the workspace. Doing it here, after every event, keeps the invariant in one place instead of at each call site. The rules, in order: (1) focus never points at a session the store does not hold, judged only for machines that are loaded; (2) a focused session owns the active project, and the group is the Chats collection for a chat project, else the user-made group that contains the session, else the project's own group; (3) otherwise the active project stays while it exists and is not hidden, with a group that belongs to it; (4) otherwise the first local code project becomes active, else the local Chats collection. The remembered last session of a project is never forgotten here: it must survive the project being closed and reopened, so memory and the host's persisted copy always agree.
+    /// The TypeScript runtime re-derived the active project and group from the focused session on every publish (`ensureActiveProject`), and the desktop workspace depends on that: the active group's tab list is its authority for which tabs exist, so a group that does not contain the focused session, or that names a project that is gone, reads as "no tabs" and clears the workspace. Doing it here, after every event, keeps the invariant in one place instead of at each call site. The rules, in order: (1) focus never points at a session the store does not hold, judged only for machines that are loaded; (2) a focused session owns the active project, and the group is the Chats collection for a chat project, else the user-made group that contains the session, else the project's own group; (3) otherwise the active project stays while it exists and is not hidden, with a group that belongs to it; (4) otherwise the first local code project in sidebar order (the manual project order when there is one, else `sortKey`; TypeScript took the first by `sortKey` only) becomes active, else the local Chats collection. The remembered last session of a project is never forgotten here: it must survive the project being closed and reopened, so memory and the host's persisted copy always agree.
     pub fn reconcile(&mut self, store: &PresentationStore) -> FocusOutcome {
         let before = self.projection();
         let exists =
@@ -403,14 +413,10 @@ impl FocusState {
             }
         }
         // Nothing valid is active: re-home, but only once the local machine can be judged.
-        let Some(local) = store.loaded(&MachineId::Local) else {
+        if store.loaded(&MachineId::Local).is_none() {
             return;
-        };
-        let first_code_project = local
-            .projects()
-            .iter()
-            .map(|project| ProjectKey::local(project.project_id.as_str()))
-            .find(|key| store.project(key).is_some() && !store.is_chat_project(key));
+        }
+        let first_code_project = store.first_code_project(&MachineId::Local);
         match first_code_project {
             Some(project) => {
                 self.active_group = Some(ActiveGroup::Project(project.clone()));

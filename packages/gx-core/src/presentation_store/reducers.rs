@@ -4,7 +4,9 @@ use ghostex_gx_protocol::{
     LifecycleState, PresentationGroup, PresentationProject, PresentationSession,
 };
 
-use super::loaded::{project_id_order, sort_groups, sort_projects, LoadedPresentation};
+use super::loaded::{
+    project_id_order, sort_groups, sort_projects, tab_listing, LoadedPresentation,
+};
 use crate::change::ChangeSummary;
 use crate::keys::{MachineId, ProjectKey, SessionKey};
 use crate::overlay::{Overlays, PatchVerdict};
@@ -55,15 +57,8 @@ pub(super) fn upsert_session(
 
     // A row can enter or leave the tab lists without moving in its group: a session that stops
     // keeps its place in `sessionIds` but is no longer listed in the sidebar.
-    let listing = |session: &PresentationSession| {
-        (
-            session.visible_in_sidebar_by_default,
-            session.surface.clone(),
-            session.kind.clone(),
-        )
-    };
     let listing_changed = match (&previous, loaded.sessions.get(&project_id, &session_id)) {
-        (Some(previous), Some(current)) => listing(previous) != listing(current),
+        (Some(previous), Some(current)) => tab_listing(previous) != tab_listing(current),
         _ => false,
     };
     let mut order_changed =

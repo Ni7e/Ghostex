@@ -193,6 +193,13 @@ impl Core {
     /// The workspace tabs of the active group. `NotLoaded` until the owning machine's first
     /// snapshot arrived and while no group is active; never `Missing` after an event was handled,
     /// because focus is re-homed when its project goes away.
+    ///
+    /// `Loaded(vec![])` is a real answer in two cases: a project that has no listed sessions, and
+    /// the Chats collection of a machine with no chat sessions, which is where focus is re-homed
+    /// when no code project exists (`active_project` is then `None`). A host must never reconcile
+    /// a PROJECT's tabs from the Chats list: check `focus().active_group` and `active_project`
+    /// first, and treat "Chats with no active project" as "no project workspace", not as "this
+    /// project has no sessions".
     pub fn active_tab_sessions(&self) -> Loadable<Vec<TabSession>> {
         match &self.focus.active_group {
             Some(group) => self.presentation.tab_sessions(group),
@@ -201,7 +208,8 @@ impl Core {
     }
 
     /// The tab next to the focused session in the active group, wrapping. For a held "next tab"
-    /// key: follow it with [`Intent::FocusSession`]. Allocates only the returned key.
+    /// key: follow it with [`Intent::FocusSession`]. It builds no rows and clones no session; see
+    /// [`PresentationStore::adjacent_tab_session`] for what it does allocate.
     pub fn adjacent_tab_session(&self, direction: TabDirection) -> Option<SessionKey> {
         self.presentation.adjacent_tab_session(
             self.focus.active_group.as_ref()?,
@@ -210,9 +218,11 @@ impl Core {
         )
     }
 
-    /// Changes whenever the ordered keys of some group's tab list may have changed, and only then.
-    /// A tab strip keeps the list it built and rebuilds it when this number moves; row content
-    /// (title, activity) is reported separately through `sessions_changed`.
+    /// Moves whenever the ordered keys of some group's tab list may have changed (see
+    /// [`ChangeSummary::tab_lists_changed`] for the exact rule). A tab strip keeps the list it
+    /// built and rebuilds it when this number moves. It never misses a key change; it can move
+    /// without one. Row content (title, activity) is reported through `sessions_changed` and does
+    /// not move it.
     pub fn tabs_generation(&self) -> u64 {
         self.tabs_generation
     }
