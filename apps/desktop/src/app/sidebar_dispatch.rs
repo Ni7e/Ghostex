@@ -240,6 +240,7 @@ impl GhostexGpuiApp {
         }
 
         self.sidebar_gxserver_bootstrap = next_bootstrap.clone();
+        self.sync_gx_store_transport(cx);
         self.refresh_session_chat_runtime_endpoints(false, cx);
         if let Some(handle) = self.app_modal_window {
             let _ = handle.update(cx, |host, _, cx| {

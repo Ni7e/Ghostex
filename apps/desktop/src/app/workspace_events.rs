@@ -847,6 +847,7 @@ impl GhostexGpuiApp {
         else {
             return;
         };
+        self.gx_store_observe_old_runtime_focus_state(&next_state, cx);
         self.set_sidebar_gxserver_presentation_focus_state(next_state, cx);
     }
 

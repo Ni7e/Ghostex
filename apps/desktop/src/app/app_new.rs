@@ -541,6 +541,7 @@ impl GhostexGpuiApp {
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
                 native_sidebar: Default::default(),
+                gx_store: Default::default(),
                 browser_surfaces: HashMap::new(),
                 browser_address_inputs: HashMap::new(),
                 browser_address_input_subscriptions: HashMap::new(),
@@ -642,6 +643,7 @@ impl GhostexGpuiApp {
             this.start_agents_chat_surface_eviction_polling(cx);
             this.start_prompt_editor_daemon_polling(cx);
             this.start_gpui_remote_gxserver_watchdog(cx);
+            this.sync_gx_store_transport(cx);
             this.refresh_titlebar_actions_in_background(cx);
             this.refresh_extensions_in_background(cx);
             this.start_titlebar_account_polling(cx);

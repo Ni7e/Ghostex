@@ -1,0 +1,236 @@
+use std::collections::HashSet;
+use std::time::{Duration, Instant};
+
+use ghostex_gx_client::{ClientDiagnostic, StartError, redact_quoted_values};
+use ghostex_gx_core::{ConnectionUpdate, Core, Loadable, MachineId, ProjectKey, ResubscribeReason};
+use serde_json::json;
+
+use super::host::GxStoreCounters;
+use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
+use crate::{shared_settings, support_logs};
+
+/// Distinct mismatch records one app run may write; later ones are only counted.
+const MAX_DISTINCT_MISMATCH_RECORDS: usize = 200;
+/// Unconditional warning lines one app run may write. A daemon that keeps producing a bad row
+/// must not be able to fill the disk through this path.
+const MAX_WARNING_LINES: u32 = 40;
+const SHADOW_SUMMARY_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Log lines of the store, all in the `native.sidebar.refresh` support log.
+///
+/// Routine lines (`gxStore.loaded`, `gxStore.connection`, `gxStore.shadow.*`) are written only
+/// while "Show debug UI controls" and that scenario are on, which the support log enforces.
+/// Warnings (a frame that does not parse, snapshot rows that were skipped) are written always,
+/// capped per run. Every line holds ids, counts, enum names, and field names: never a title, a
+/// path, or frame content.
+#[derive(Default)]
+pub(crate) struct GxStoreDiagnostics {
+    logged_mismatches: HashSet<u64>,
+    warning_lines: u32,
+    /// When the summary was last considered, so a run with logging off reads the settings at
+    /// most once per interval, and the totals it last wrote.
+    shadow_summary_considered_at: Option<Instant>,
+    shadow_summary_written: ShadowCounters,
+}
+
+fn routine_logging_enabled() -> bool {
+    shared_settings::shared_sidebar_settings_snapshot().debugging_mode()
+        && support_logs::scenario_enabled(support_logs::GpuiDiagnosticScenario::SidebarRefresh)
+}
+
+fn append(event: &str, details: serde_json::Value) {
+    support_logs::append(support_logs::GpuiSupportLog::SidebarRefresh, event, details);
+}
+
+impl GxStoreDiagnostics {
+    /// One line per (re)load of the local machine: the first one is the store coming up.
+    pub(super) fn store_loaded(
+        &mut self,
+        core: &Core,
+        counters: &GxStoreCounters,
+        since_connect: Option<Duration>,
+    ) {
+        let store = core.presentation();
+        let Some(loaded) = store.loaded(&MachineId::Local) else {
+            return;
+        };
+        let chat_projects = loaded
+            .projects()
+            .iter()
+            .filter(|project| {
+                store.is_chat_project(&ProjectKey::local(project.project_id.as_str()))
+            })
+            .count();
+        append(
+            "gxStore.loaded",
+            json!({
+                "first": counters.reloads == 1,
+                "revision": loaded.revision,
+                "projects": loaded.projects().len(),
+                "groups": loaded.groups().len(),
+                "sessions": loaded.session_count(),
+                "chatProjects": chat_projects,
+                "tabsGeneration": core.tabs_generation(),
+                "connectToLoadedMs": since_connect.map(|elapsed| elapsed.as_millis() as u64),
+                "clientStarts": counters.client_starts,
+                "reloads": counters.reloads,
+            }),
+        );
+    }
+
+    pub(super) fn connection(&mut self, update: &ConnectionUpdate) {
+        let details = match update {
+            ConnectionUpdate::Connecting { attempt } => {
+                json!({ "phase": "connecting", "attempt": attempt })
+            }
+            // `reason`, not `error`: a daemon restart is routine, and the support log writes any
+            // line with an error-named key unconditionally.
+            ConnectionUpdate::Lost { error } => json!({ "phase": "lost", "reason": error }),
+            _ => return,
+        };
+        append("gxStore.connection", details);
+    }
+
+    pub(super) fn resubscribe_requested(&mut self, reason: &ResubscribeReason) {
+        let reason = match reason {
+            ResubscribeReason::CurrentWithoutSnapshot => "currentWithoutSnapshot",
+            ResubscribeReason::ServerChanged => "serverChanged",
+            _ => "other",
+        };
+        append("gxStore.resubscribeRequested", json!({ "reason": reason }));
+    }
+
+    pub(super) fn skipped_rows(
+        &mut self,
+        projects: usize,
+        groups: usize,
+        sessions: usize,
+        first_error: &str,
+    ) {
+        self.warning(
+            "gxStore.snapshotRowsSkipped.warning",
+            json!({
+                "projects": projects,
+                "groups": groups,
+                "sessions": sessions,
+                "firstError": redact_quoted_values(first_error),
+            }),
+        );
+    }
+
+    pub(super) fn client_diagnostic(&mut self, diagnostic: &ClientDiagnostic) {
+        let details = match diagnostic {
+            ClientDiagnostic::FrameParseFailed {
+                event_type,
+                error,
+                resubscribe_scheduled,
+            } => json!({
+                "kind": "frameParseFailed",
+                "frameType": event_type,
+                "error": error,
+                "resubscribeScheduled": resubscribe_scheduled,
+            }),
+            ClientDiagnostic::DomainProjectsReadFailed { error } => {
+                json!({ "kind": "domainProjectsReadFailed", "error": error })
+            }
+            ClientDiagnostic::SubscribeNotAcknowledged => {
+                json!({ "kind": "subscribeNotAcknowledged" })
+            }
+            ClientDiagnostic::ProtocolMismatch { received } => {
+                json!({ "kind": "protocolMismatch", "received": received })
+            }
+        };
+        self.warning("gxStore.client.warning", details);
+    }
+
+    pub(super) fn client_start_failed(&mut self, error: &StartError) {
+        self.warning(
+            "gxStore.clientStart.error",
+            json!({ "error": error.to_string() }),
+        );
+    }
+
+    fn warning(&mut self, event: &str, details: serde_json::Value) {
+        if self.warning_lines >= MAX_WARNING_LINES {
+            return;
+        }
+        self.warning_lines += 1;
+        append(event, details);
+    }
+
+    /// One bounded record per distinct mismatch. A mismatch seen while logging is off is not
+    /// remembered, so turning the scenario on later still records it when it happens again.
+    pub(super) fn shadow_mismatch(&mut self, mismatch: &ShadowMismatch, core: &Core) {
+        let signature = mismatch.signature();
+        if self.logged_mismatches.contains(&signature)
+            || self.logged_mismatches.len() >= MAX_DISTINCT_MISMATCH_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.logged_mismatches.insert(signature);
+        let fields: Vec<serde_json::Value> = mismatch
+            .fields
+            .iter()
+            .map(|(tab, names)| json!({ "tab": tab, "names": names }))
+            .collect();
+        append(
+            "gxStore.shadow.mismatch",
+            json!({
+                "storeGroup": mismatch.store_group,
+                "storeRevision": store_revision(core),
+                "oldTabCount": mismatch.old_tab_count,
+                "storeTabCount": mismatch.store_tab_count,
+                "onlyOld": mismatch.only_old,
+                "onlyStore": mismatch.only_store,
+                "orderDiffers": mismatch.order_differs,
+                "fields": fields,
+            }),
+        );
+    }
+
+    /// The running totals, at most once a minute and only when they moved. Without it a run
+    /// with no mismatch would leave no trace that comparisons ran.
+    pub(super) fn shadow_summary(&mut self, shadow: &ShadowDiff, core: &Core) {
+        let counters = shadow.counters();
+        if counters == self.shadow_summary_written
+            || self
+                .shadow_summary_considered_at
+                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+        {
+            return;
+        }
+        self.shadow_summary_considered_at = Some(Instant::now());
+        if !routine_logging_enabled() {
+            return;
+        }
+        self.shadow_summary_written = counters;
+        let active_tabs = match core.active_tab_sessions() {
+            Loadable::Loaded(tabs) => Some(tabs.len()),
+            Loadable::NotLoaded | Loadable::Missing => None,
+        };
+        append(
+            "gxStore.shadow.summary",
+            json!({
+                "observed": counters.observed,
+                "matches": counters.matches,
+                "mismatches": counters.mismatches,
+                "distinctMismatches": counters.distinct_mismatches,
+                "transient": counters.transient,
+                "notComparable": counters.not_comparable,
+                "iconDifferences": counters.icon_differences,
+                "staleExternalFocus": counters.stale_external_focus,
+                "pending": shadow.is_pending(),
+                "storeRevision": store_revision(core),
+                "storeActiveTabs": active_tabs,
+                "tabsGeneration": core.tabs_generation(),
+            }),
+        );
+    }
+}
+
+fn store_revision(core: &Core) -> Option<i64> {
+    core.presentation()
+        .loaded(&MachineId::Local)
+        .map(|loaded| loaded.revision)
+}

@@ -1016,6 +1016,7 @@ pub struct GhostexGpuiApp {
     pub(crate) agent_hook_status_request_in_flight: bool,
     pub(crate) sidebar: Option<Entity<crate::app::native_service::NativeService>>,
     pub(crate) native_sidebar: crate::app::native_sidebar::state::NativeSidebarState,
+    pub(crate) gx_store: crate::app::gx_store::GxStoreHost,
     pub(crate) browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     pub(crate) browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,
     pub(crate) browser_address_input_subscriptions: HashMap<BrowserPaneId, gpui::Subscription>,

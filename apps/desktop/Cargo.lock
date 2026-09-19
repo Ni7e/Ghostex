@@ -2522,6 +2522,8 @@ dependencies = [
  "ghostex-chat-runtime",
  "ghostex-docs",
  "ghostex-editor-client",
+ "ghostex-gx-client",
+ "ghostex-gx-core",
  "ghostex-paths",
  "gpui",
  "gpui-component",
@@ -2547,6 +2549,34 @@ dependencies = [
  "velopack",
  "windows-sys 0.61.2",
  "x11rb",
+]
+
+[[package]]
+name = "ghostex-gx-client"
+version = "0.1.0"
+dependencies = [
+ "ghostex-gx-core",
+ "ghostex-gx-protocol",
+ "serde_json",
+ "tungstenite",
+ "ureq",
+]
+
+[[package]]
+name = "ghostex-gx-core"
+version = "0.1.0"
+dependencies = [
+ "ghostex-gx-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ghostex-gx-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
