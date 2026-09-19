@@ -26,7 +26,7 @@ pub(in crate::app::native_chat) struct ImageViewerRequest {
 
 #[derive(Default)]
 pub(in crate::app::native_chat) struct ImageViewerState {
-    pub(super) handle: Option<gpui::WindowHandle<Root>>,
+    pub(in crate::app::native_chat) handle: Option<gpui::WindowHandle<Root>>,
     opening: bool,
     subscription: Option<Subscription>,
     pub(in crate::app::native_chat) request: Option<ImageViewerRequest>,
@@ -103,16 +103,6 @@ impl NativeChatView {
             request.completed = Some(completed);
             cx.notify();
         }
-    }
-
-    /// Keep the open preview covering the pane after the pane was resized or moved.
-    pub(in crate::app::native_chat) fn follow_image_viewer_pane(&mut self, cx: &mut Context<Self>) {
-        let Some(handle) = self.image_viewer.handle else {
-            return;
-        };
-        let pane = self.bounds.get();
-        let parent = self.config.parent_native_view;
-        let _ = handle.update(cx, |_, window, _| set_pane_frame(window, parent, pane));
     }
 
     pub(in crate::app::native_chat) fn sync_image_viewer_window(&mut self, cx: &mut Context<Self>) {
@@ -236,48 +226,4 @@ impl NativeChatView {
             });
         });
     }
-}
-
-#[cfg(target_os = "macos")]
-fn set_pane_frame(
-    window: &mut gpui::Window,
-    parent: *mut std::ffi::c_void,
-    pane: gpui::Bounds<gpui::Pixels>,
-) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    unsafe extern "C" {
-        fn GhostexGpuiSetChildWindowContentFrame(
-            child_native_view: *mut std::ffi::c_void,
-            main_native_view: *mut std::ffi::c_void,
-            x: f64,
-            y: f64,
-            width: f64,
-            height: f64,
-        );
-    }
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return;
-    };
-    if let RawWindowHandle::AppKit(handle) = handle.as_raw() {
-        unsafe {
-            GhostexGpuiSetChildWindowContentFrame(
-                handle.ns_view.as_ptr(),
-                parent,
-                f64::from(pane.origin.x.as_f32()),
-                f64::from(pane.origin.y.as_f32()),
-                f64::from(pane.size.width.as_f32()),
-                f64::from(pane.size.height.as_f32()),
-            );
-        }
-    }
-}
-
-// GPUI has no cross-platform way to move a window, so elsewhere the preview keeps its origin.
-#[cfg(not(target_os = "macos"))]
-fn set_pane_frame(
-    window: &mut gpui::Window,
-    _parent: *mut std::ffi::c_void,
-    pane: gpui::Bounds<gpui::Pixels>,
-) {
-    window.resize(pane.size);
 }

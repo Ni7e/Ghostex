@@ -10,7 +10,7 @@ use serde_json::json;
 
 #[derive(Default)]
 pub(in crate::app::native_chat) struct ContextEditorWindowState {
-    handle: Option<gpui::WindowHandle<Root>>,
+    pub(in crate::app::native_chat) handle: Option<gpui::WindowHandle<Root>>,
     opening: bool,
     subscription: Option<Subscription>,
 }
@@ -60,10 +60,8 @@ impl NativeChatView {
         let appearance = super::super::appearance::ChatAppearance::current(&self.snapshot);
         cx.defer(move |cx| {
             let result = main.update(cx,|_,window,cx| {
-                let width = px(576.0*appearance.scale).min(pane.size.width-px(24.0));
-                let height = px(760.0*appearance.scale).min(pane.size.height-px(32.0));
-                let origin = window.bounds().origin + pane.origin + gpui::point((pane.size.width-width)/2.0,(pane.size.height-height)/2.0);
-                let bounds = gpui::Bounds::new(origin,gpui::size(width,height));
+                let frame = context_editor_frame(pane, appearance.scale);
+                let bounds = gpui::Bounds::new(window.bounds().origin + frame.origin, frame.size);
                 (bounds,window.display(cx).map(|display|display.id()))
             }).and_then(|(bounds,display_id)| cx.open_window(WindowOptions {
                 window_bounds:Some(WindowBounds::Windowed(bounds)),display_id,
@@ -111,4 +109,21 @@ impl NativeChatView {
             });
         });
     }
+}
+
+/// The editor card, centred in the pane and kept inside it.
+pub(in crate::app::native_chat) fn context_editor_frame(
+    pane: gpui::Bounds<gpui::Pixels>,
+    scale: f32,
+) -> gpui::Bounds<gpui::Pixels> {
+    let width = px(576.0 * scale).min(pane.size.width - px(24.0));
+    let height = px(760.0 * scale).min(pane.size.height - px(32.0));
+    gpui::Bounds::new(
+        pane.origin
+            + gpui::point(
+                (pane.size.width - width) / 2.0,
+                (pane.size.height - height) / 2.0,
+            ),
+        gpui::size(width, height),
+    )
 }

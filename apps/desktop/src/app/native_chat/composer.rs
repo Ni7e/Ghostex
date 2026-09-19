@@ -236,6 +236,7 @@ impl NativeChatView {
         } else {
             self.render_attachment_previews(p, cx)
         };
+        let stack_top = super::suggestions::StackTop::default();
         let mut footer = div()
             .w_full()
             .flex()
@@ -299,7 +300,8 @@ impl NativeChatView {
                         json!({"type":"dismissIncomingDraft"}),
                         p,
                         cx,
-                    )),
+                    ))
+                    .child(super::suggestions::stack_marker(&stack_top)),
             );
         }
         if !maximized {
@@ -309,20 +311,21 @@ impl NativeChatView {
         }
         // A `composerNotReady` refusal gets its own card instead of the plain error line.
         if let Some(card) = self.render_composer_not_ready(p, cx) {
-            footer = footer.child(card);
+            footer = footer.child(super::suggestions::stack_member(card, &stack_top));
         } else if let Some(error) = self.snapshot["operationError"].as_str() {
             footer = footer.child(
                 div()
                     .text_color(gpui::rgb(0xef9999))
-                    .child(error.to_string()),
+                    .child(error.to_string())
+                    .child(super::suggestions::stack_marker(&stack_top)),
             );
         }
         if !maximized {
             if let Some(tasks) = self.render_agent_tasks(p, cx) {
-                footer = footer.child(tasks);
+                footer = footer.child(super::suggestions::stack_member(tasks, &stack_top));
             }
             if let Some(fleet) = self.render_agent_fleet(p, cx) {
-                footer = footer.child(fleet);
+                footer = footer.child(super::suggestions::stack_member(fleet, &stack_top));
             }
         }
         if let Some(notice) = self.render_notice(p, window, cx) {
@@ -348,15 +351,11 @@ impl NativeChatView {
         }
         if maximized {
             if let Some(suggestions) = self.inline_suggestions(window, cx) {
-                let rows = self.snapshot["suggestions"]["rows"]
-                    .as_array()
-                    .map_or(0, Vec::len);
-                let status = self.snapshot["suggestions"]["status"].is_string();
                 let height =
-                    (40.0 + rows as f32 * 36.0 + if status { 36.0 } else { 0.0 }).min(290.0);
+                    super::suggestions::suggestion_panel_height(&self.snapshot["suggestions"], s);
                 footer = footer.child(
                     div()
-                        .h(px(height * s))
+                        .h(height)
                         .max_h(gpui::relative(0.4))
                         .flex_shrink_0()
                         .child(suggestions),
@@ -370,6 +369,15 @@ impl NativeChatView {
         let chat = cx.weak_entity();
         let suggestion_anchor = gpui::canvas(
             move |bounds, _, cx| {
+                // The card's left and right edges under the top of the panels stacked on it, which
+                // prepainted before this canvas.
+                let bounds = match stack_top.get() {
+                    Some(top) if top < bounds.top() => gpui::Bounds::from_corners(
+                        gpui::point(bounds.left(), top),
+                        bounds.bottom_right(),
+                    ),
+                    _ => bounds,
+                };
                 if composer_bounds.replace(bounds) != bounds {
                     let chat = chat.clone();
                     cx.defer(move |cx| {
@@ -379,8 +387,11 @@ impl NativeChatView {
             },
             |_, _, _, _| {},
         )
+        // Absolute children are placed inside the card's padding box, so auto insets with
+        // `size_full` measured a box shifted right by the padding. The popup anchors to the card's
+        // painted edges, which sit one border width outside that box.
         .absolute()
-        .size_full();
+        .inset(px(-1.0));
         let padding_block = if collapsed {
             metrics.collapsed_padding_block_px
         } else {

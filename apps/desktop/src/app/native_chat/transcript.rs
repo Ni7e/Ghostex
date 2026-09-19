@@ -18,6 +18,26 @@ impl NativeChatView {
         self.expanded.contains(id) || default && !self.collapsed.contains(id)
     }
 
+    /// Flip a row whose default comes from verbose mode, where closing it has to be recorded
+    /// against that default. The chevron in the marker column and the heading beside it both land
+    /// here, so whichever of them the reader pressed leaves the row in the same state.
+    pub(super) fn toggle_marker_disclosure(
+        &mut self,
+        id: String,
+        expanded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if expanded {
+            self.expanded.remove(&id);
+            self.collapsed.insert(id);
+        } else {
+            self.collapsed.remove(&id);
+            self.expanded.insert(id);
+        }
+        self.list.remeasure();
+        cx.notify();
+    }
+
     /// Flip a row that defaults to closed, and remeasure the list its height changed.
     pub(super) fn toggle_disclosure(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.expanded.contains(id) {
@@ -208,8 +228,9 @@ impl NativeChatView {
 
     /// The chevron a disclosure puts in the transcript's marker column, in place of the dot a plain
     /// row hangs its first line from. React draws the same glyph through `.ghostex-chat-marker-slot`
-    /// and toggles from the button around it, so a heading made of the agent's own Markdown keeps
-    /// its links and code controls clickable.
+    /// inside its own button, so a heading made of the agent's own Markdown keeps its links and code
+    /// controls clickable; the press stops here for the same reason the React button's does, because
+    /// the heading around it is a trigger too and would toggle the row straight back.
     pub(super) fn disclosure_marker(
         &self,
         id: String,
@@ -245,15 +266,8 @@ impl NativeChatView {
                     .text_color(p.primary),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                if expanded {
-                    this.expanded.remove(&id);
-                    this.collapsed.insert(id.clone());
-                } else {
-                    this.collapsed.remove(&id);
-                    this.expanded.insert(id.clone());
-                }
-                this.list.remeasure();
-                cx.notify();
+                this.toggle_marker_disclosure(id.clone(), expanded, cx);
+                cx.stop_propagation();
             }))
             .into_any_element()
     }
@@ -481,24 +495,44 @@ impl NativeChatView {
                 // (CDXC:SessionChat 2026-09-13 DECISION in rows.tsx).
                 let key = format!("tools:{id}");
                 let expanded = tools && self.is_expanded(&key, p.verbose);
-                row = row.child(
-                    div()
-                        .flex()
-                        .items_start()
-                        .gap(px(6.0 * s))
-                        .child(if tools {
-                            self.disclosure_marker(key, expanded, p, cx)
-                        } else {
-                            self.reply_marker(message, reply_focused, p, cx)
-                        })
-                        .child(div().min_w_0().flex_1().child(self.markdown(
-                            format!("body:{id}"),
-                            body.clone(),
-                            &message["markdownReferences"],
-                            p,
-                            cx,
-                        ))),
-                );
+                let heading = div()
+                    .flex()
+                    .items_start()
+                    .gap(px(6.0 * s))
+                    .child(if tools {
+                        self.disclosure_marker(key.clone(), expanded, p, cx)
+                    } else {
+                        self.reply_marker(message, reply_focused, p, cx)
+                    })
+                    .child(div().min_w_0().flex_1().child(self.markdown(
+                        format!("body:{id}"),
+                        body.clone(),
+                        &message["markdownReferences"],
+                        p,
+                        cx,
+                    )));
+                // The whole heading is the trigger, not just the chevron: React's
+                // `.ghostex-chat-agent-tools-heading` carries the toggle and the hover fill, and a
+                // one-line commentary with a chevron beside it is read as a line to click. The
+                // controls the Markdown carries (links, file pills, fence and table actions,
+                // pictures) stop the press themselves, and `acts_on_row` keeps a press that
+                // selected text from counting as a click on the row.
+                row = row.child(if tools {
+                    heading
+                        .id(gpui::SharedString::from(format!("tools-heading:{id}")))
+                        .rounded(px(4.0 * s))
+                        .pr(px(5.0 * s))
+                        .chat_cursor_pointer()
+                        .hover(|style| style.bg(p.foreground.opacity(0.05)))
+                        .on_click(cx.listener(move |this, event, window, cx| {
+                            if super::row_click::acts_on_row(event, window, cx) {
+                                this.toggle_marker_disclosure(key.clone(), expanded, cx);
+                            }
+                        }))
+                        .into_any_element()
+                } else {
+                    heading.into_any_element()
+                });
                 if tools {
                     if expanded {
                         let work = self.tool_rows(message, p, cx);

@@ -64,7 +64,9 @@ pub(super) fn composer_color(kind: &str, appearance: &ChatAppearance) -> Option<
 /// The transcript's right-click menu on a reference, wired into the markdown view's secondary-click
 /// hook because these pills are inline links inside gpui-component's text, not elements of our own.
 /// The rows and the ordering are the composer's (`reference_menu.rs`), the way React shares
-/// `session-chat-reference-menu-items.tsx` between both.
+/// `session-chat-reference-menu-items.tsx` between both. On the main transcript the pill leads the
+/// transcript menu instead (`transcript_menu.rs`), which adds Copy and Add to Chat when text is
+/// selected, as React's transcript menu does.
 pub(super) fn secondary_click(
     chat: gpui::WeakEntity<NativeChatView>,
 ) -> impl Fn(&str, gpui::Modifiers, &mut gpui::Window, &mut gpui::App) + Send + Sync + 'static {
@@ -72,7 +74,11 @@ pub(super) fn secondary_click(
         let href = href.to_owned();
         let _ = chat.update(cx, |chat, cx| {
             let at = window.mouse_position();
-            chat.show_reference_menu(href, at, window, cx);
+            if chat.in_main_transcript(at) {
+                chat.show_transcript_menu(Some(href), at, window, cx);
+            } else {
+                chat.show_reference_menu(href, at, window, cx);
+            }
         });
     }
 }

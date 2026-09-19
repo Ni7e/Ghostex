@@ -1,7 +1,8 @@
 use super::super::{appearance::ChatAppearance, state::NativeChatView};
+use super::layout::{SPEC, suggestion_panel_height};
 use gpui::{
     AppContext as _, Bounds, Context, Entity, Pixels, ScrollHandle, Styled as _, Subscription,
-    WindowBounds, WindowOptions, px, size,
+    WindowBounds, WindowOptions, point, px, size,
 };
 use gpui_component::Root;
 use serde_json::json;
@@ -9,9 +10,18 @@ use serde_json::json;
 #[derive(Default)]
 pub(in crate::app::native_chat) struct SuggestionWindowState {
     handle: Option<gpui::WindowHandle<Root>>,
-    bounds: Option<Bounds<Pixels>>,
+    /// The open card in the chat window's content coordinates, on device pixels.
+    pub(super) bounds: Option<Bounds<Pixels>>,
     opening: bool,
     inline: Option<gpui::WeakEntity<SuggestionPanel>>,
+}
+
+impl SuggestionWindowState {
+    /// The card inside its window, whose frame is `window_frame` of the card.
+    pub(super) fn card_in_window(&self) -> Option<Bounds<Pixels>> {
+        self.bounds
+            .map(|card| Bounds::new(card.origin - window_frame(card).origin, card.size))
+    }
 }
 
 pub(in crate::app::native_chat) struct SuggestionPanel {
@@ -19,6 +29,9 @@ pub(in crate::app::native_chat) struct SuggestionPanel {
     pub(super) source: gpui::AnyWindowHandle,
     pub(super) scroll: ScrollHandle,
     pub(super) selected: Option<usize>,
+    /// The child window's panel, whose card is inset by `card_in_window`; the maximized
+    /// composer's inline panel fills its slot.
+    pub(super) windowed: bool,
     _subscription: Subscription,
 }
 
@@ -49,6 +62,7 @@ impl NativeChatView {
                 source,
                 scroll: Default::default(),
                 selected: None,
+                windowed: false,
                 _subscription: subscription,
             }
         });
@@ -112,101 +126,120 @@ impl NativeChatView {
             && projection.is_object()
             && self.snapshot["questionCard"]["visible"] != true
             && anchor.size.width > px(0.0);
-        let height = (40.0
-            + 36.0 * projection["rows"].as_array().map_or(0, Vec::len) as f32
-            + if projection["status"].is_string() {
-                36.0
-            } else {
-                0.0
-            })
-        .min(290.0)
-            * p.scale;
+        // `anchor` has the composer card's painted left and right edges and, as its top, the top
+        // of the panels stacked on the card (composer.rs). React's `inset-x-0 bottom-full mb-2`
+        // gives the list those edges and a fixed gap above that top.
+        // React draws the picker inside the chat pane, so it can never grow past the pane's top;
+        // the window is clamped to the same room.
+        let gap = px(SPEC.gap_above_px * p.scale);
+        let room = (anchor.top() - gap - self.bounds.get().top()).max(px(0.0));
+        let height = suggestion_panel_height(projection, p.scale).min(room);
+        let card = Bounds::new(
+            point(anchor.left(), anchor.top() - gap - height),
+            size(anchor.size.width, height),
+        );
         let chat = cx.entity();
         let parent = self.config.parent_native_view;
-        // React draws the picker inside the composer's own stacking context, so it can never grow
-        // past the top of the chat pane. The window here is clamped to the same room.
-        let pane_top = self.bounds.get().top();
         self.suggestions.opening = true;
         cx.defer(move |cx| {
-            let geometry = visible
+            let placement = visible
                 .then(|| {
                     source
                         .update(cx, |_, window, cx| {
-                            let room = anchor.top() - pane_top.min(anchor.top());
-                            // A picker floating over an app the user has switched away from is not
-                            // what React's in-page list does, so an inactive window keeps it shut.
-                            let height = if window.is_window_active() {
-                                px(height).min(room - px(8.0 * p.scale)).max(px(0.0))
-                            } else {
-                                px(0.0)
-                            };
-                            (
-                                Bounds::new(
-                                    window.bounds().origin
-                                        + gpui::point(
-                                            anchor.left(),
-                                            anchor.top() - height - px(8.0 * p.scale),
-                                        ),
-                                    size(anchor.size.width, height),
-                                ),
-                                window.display(cx).map(|display| display.id()),
-                            )
+                            let origin = super::super::child_window::content_bounds(window).origin;
+                            // A picker floating over an app the user has switched away from is
+                            // not what React's in-page list does, so an inactive window keeps it
+                            // shut.
+                            window.is_window_active().then(|| {
+                                (
+                                    snap_to_device_pixels(card, window.scale_factor()),
+                                    origin,
+                                    window.display(cx).map(|display| display.id()),
+                                )
+                            })
                         })
                         .ok()
+                        .flatten()
                 })
-                .flatten();
-            let bounds = geometry.map(|(bounds, _)| bounds);
-            if chat.read(cx).suggestions.bounds == bounds {
+                .flatten()
+                .filter(|(card, ..)| card.size.height > px(0.0));
+            let wanted = placement.map(|(card, ..)| card);
+            if chat.read(cx).suggestions.bounds == wanted {
                 chat.update(cx, |chat, _| chat.suggestions.opening = false);
                 return;
             }
             let old = chat.update(cx, |chat, _| {
-                chat.suggestions.bounds = bounds;
+                chat.suggestions.bounds = wanted;
                 chat.suggestions.handle.take()
             });
+            // An open popup follows the card in place (pane resize, sidebar toggle, a growing
+            // draft) instead of being closed and reopened, which flickered on every step.
+            let old = match old {
+                Some(handle)
+                    if wanted.is_some_and(|card| {
+                        super::super::child_window::move_child_window(
+                            handle.into(),
+                            parent,
+                            window_frame(card),
+                            cx,
+                        )
+                    }) =>
+                {
+                    chat.update(cx, |chat, cx| {
+                        chat.suggestions.handle = Some(handle);
+                        chat.suggestions.opening = false;
+                        if chat.composer_bounds.get() != anchor {
+                            chat.sync_suggestion_window(cx);
+                        }
+                    });
+                    return;
+                }
+                old => old,
+            };
             if let Some(old) = old {
                 let _ = old.update(cx, |_, window, _| window.remove_window());
             }
-            let result = geometry
-                .filter(|(bounds, _)| bounds.size.height > px(0.0))
-                .map(|(bounds, display_id)| {
-                    cx.open_window(
-                        WindowOptions {
-                            window_bounds: Some(WindowBounds::Windowed(bounds)),
-                            display_id,
-                            titlebar: None,
-                            kind: gpui::WindowKind::PopUp,
-                            focus: false,
-                            show: true,
-                            is_movable: false,
-                            is_resizable: false,
-                            is_minimizable: false,
-                            app_id: crate::gpui_platform_window_app_id(),
-                            icon: crate::gpui_platform_window_icon(),
-                            window_background: gpui::WindowBackgroundAppearance::Transparent,
-                            ..Default::default()
-                        },
-                        {
-                            let chat = chat.clone();
-                            move |window, cx| {
-                                attach_suggestion_window(window, parent);
-                                let panel = cx.new(|cx| {
-                                    let subscription = cx.observe(&chat, |_, _, cx| cx.notify());
-                                    SuggestionPanel {
-                                        chat,
-                                        source,
-                                        scroll: Default::default(),
-                                        selected: None,
-                                        _subscription: subscription,
-                                    }
-                                });
-                                cx.new(|cx| {
-                                    Root::new(panel, window, cx).bg(gpui::transparent_black())
-                                })
-                            }
-                        },
-                    )
-                });
+            let result = placement.map(|(card, origin, display_id)| {
+                let frame = window_frame(card);
+                cx.open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                            origin + frame.origin,
+                            frame.size,
+                        ))),
+                        display_id,
+                        titlebar: None,
+                        kind: gpui::WindowKind::PopUp,
+                        focus: false,
+                        show: true,
+                        is_movable: false,
+                        is_resizable: false,
+                        is_minimizable: false,
+                        app_id: crate::gpui_platform_window_app_id(),
+                        icon: crate::gpui_platform_window_icon(),
+                        window_background: gpui::WindowBackgroundAppearance::Transparent,
+                        ..Default::default()
+                    },
+                    {
+                        let chat = chat.clone();
+                        move |window, cx| {
+                            attach_suggestion_window(window, parent);
+                            let panel = cx.new(|cx| {
+                                let subscription = cx.observe(&chat, |_, _, cx| cx.notify());
+                                SuggestionPanel {
+                                    chat,
+                                    source,
+                                    scroll: Default::default(),
+                                    selected: None,
+                                    windowed: true,
+                                    _subscription: subscription,
+                                }
+                            });
+                            cx.new(|cx| Root::new(panel, window, cx).bg(gpui::transparent_black()))
+                        }
+                    },
+                )
+            });
             chat.update(cx, |chat, cx| {
                 chat.suggestions.opening = false;
                 match result {
@@ -216,6 +249,11 @@ impl NativeChatView {
                         chat.suggestions.bounds = None;
                     }
                     None => {}
+                }
+                // The card may have moved while this deferred step ran; its measurement was
+                // dropped by the `opening` guard, so catch up now.
+                if chat.composer_bounds.get() != anchor {
+                    chat.sync_suggestion_window(cx);
                 }
                 cx.notify();
             });
@@ -259,3 +297,21 @@ fn attach_suggestion_window(window: &mut gpui::Window, parent: *mut std::ffi::c_
 
 #[cfg(not(target_os = "macos"))]
 fn attach_suggestion_window(_: &mut gpui::Window, _: *mut std::ffi::c_void) {}
+
+/// Each edge on its nearest device pixel, all four taken from the same rect.
+fn snap_to_device_pixels(bounds: Bounds<Pixels>, scale: f32) -> Bounds<Pixels> {
+    let snap = |value: Pixels| px((value.as_f32() * scale).round() / scale);
+    Bounds::from_corners(
+        point(snap(bounds.left()), snap(bounds.top())),
+        point(snap(bounds.right()), snap(bounds.bottom())),
+    )
+}
+
+/// CDXC:SessionChat 2026-09-19 WHY:
+/// AppKit places a window on whole points, so at a fractional zoom a card edge on a half point landed one device pixel off whichever edge the frame's rounding moved. The window takes the whole points around the card and the card is inset inside it by the remainder, so both edges sit on the composer card's own device pixels.
+fn window_frame(card: Bounds<Pixels>) -> Bounds<Pixels> {
+    Bounds::from_corners(
+        point(card.left().floor(), card.top().floor()),
+        point(card.right().ceil(), card.bottom().ceil()),
+    )
+}

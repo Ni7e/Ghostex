@@ -54,7 +54,10 @@ impl PreviewWindow {
     fn observe_host(chat: &Entity<NativeChatView>, cx: &mut Context<Self>) -> gpui::Subscription {
         cx.subscribe(chat, |this, _, event, cx| {
             if let NativeChatEvent::Host(message) = event {
-                if message["action"] != "openFile" && message["action"] != "openLink" {
+                if !matches!(
+                    message["action"].as_str(),
+                    Some("openFile" | "openLink" | "locateFile")
+                ) {
                     return;
                 }
                 let mut fields = message.clone();

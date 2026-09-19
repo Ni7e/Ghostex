@@ -15,6 +15,7 @@ mod attachment_previews;
 mod attachments;
 mod binding;
 mod cards;
+mod child_window;
 mod choice_rows;
 mod composer_animation;
 mod composer_not_ready;
@@ -43,6 +44,7 @@ mod question_exchange;
 mod queue;
 mod reference_menu;
 mod rewind;
+mod row_click;
 mod rpc;
 mod runtime_worker;
 mod scroll_bottom;
@@ -67,6 +69,8 @@ mod rich_markdown;
 mod send_control;
 mod toolbar;
 mod transcript_layout;
+mod transcript_menu;
+mod transcript_skeleton;
 
 mod terminal_dialog;
 

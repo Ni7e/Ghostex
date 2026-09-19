@@ -36,9 +36,10 @@ Last updated: 2026-09-19
 | Bare web URLs get link icon, colour, tooltip | DONE-CODE | |
 | References inside tables, alerts, lists, subagent message card | DONE-CODE | list item checked live |
 | Right-click menu on transcript reference pills | DONE-LIVE | |
+| Transcript right-click menu (Copy, Add to Chat, after a pill's rows) | PARTIAL | shared `transcript-menu.ts`, same rows live 2026-09-19; GPUI keeps the selection on a right press outside it (Chromium clears it, leaving a disabled Copy); GPUI panel is 240px wide, React's fits its labels; in the lab the GPUI menu opens about one titlebar above the pointer (window frame vs content origin); subagent viewer has none in either |
 | Inline `[Image #N]` thumbnails, markdown images | PARTIAL | words that do not fit beside the picture start on the next line instead of flowing around it |
 | Transcript image thumbnails (user and agent) | PARTIAL | AVIF/HEIC fall back to a name chip; sizes come from shared `image-visual.json` and a screenshot is averaged down to the tile's device pixels |
-| Image viewer (zoom, arrows, Escape, backdrop, copy, save) | PARTIAL | backdrop dims but does not blur; two glyphs differ |
+| Image viewer (zoom, arrows, Escape, backdrop, copy, save) | PARTIAL | backdrop dims but does not blur; two glyphs differ; follows the pane when the window is resized while open (checked live 2026-09-19) |
 | Thinking / reasoning rows and disclosure | DONE-LIVE | "show more" overflow uses a character estimate |
 | Tool runs (glyphs, error tone, mono args, plain result) | DONE-LIVE | |
 | "+N previous tool calls" fold | DONE-LIVE | shared `tool-rows.ts` |
@@ -84,11 +85,13 @@ Last updated: 2026-09-19
 | Keyboard zoom (Cmd+= / Cmd+- / Cmd+0) | DONE-CODE | temporary per pane in both; GPUI's Cmd+0 returns to the configured default, Chromium's to 100% |
 | Reference pills in draft, click and double click | DONE-LIVE | |
 | Right-click menu on composer pills | DONE-CODE | |
-| `/` slash command popup | DONE-LIVE | React rows have per-row outlines |
+| `/` slash command popup | DONE-LIVE | GPUI now draws React's per-row outline too (the legacy button border, white 11% or black 12% under the plain light app theme) |
 | `@` project file popup (ranking, Up/Down, Enter, Tab, click, Escape, quoted-space path) | DONE-LIVE | shared trigger and ranking rules; the popup is a child window, so it closes when the chat pane loses focus while React's stays |
 | `$` skill popup (list, heading, loading row, "No skills available.") | DONE-LIVE | heading is the agent's display name in both since 2026-09-19 |
 | `$` skill popup error row with Retry | DONE-CODE | the lab's preview backend never fails a skills read, so the row cannot be reached there |
 | Suggestion popup lands over the composer on a second display | DONE-CODE | the child window now opens on the chat window's own display; the single-display lab cannot show the regression |
+| Suggestion popup geometry and look (`@`, `$`, `/`) | DONE-LIVE | 2026-09-19 in Tart, dark and light, 100% and 115%, window resized while open, maximized composer: same left and right edges as the composer card (both edges on the card's device pixels at 115% too), 8px gap above the task list, subagents, not-ready card or error and saved-draft notice as in React, same height, row pitch, heading tracking and colors, and `shadow-xl` painted by the pane under the popup (`composer-suggestions.json`); the faint dotted curve on the light-mode corners is gone since GPUI's Metal renderer composites alpha "over" instead of adding it (background and border quads share the antialiased edge), checked in Tart for the `$` popup and the model quick picker in light and dark at 100% and 115%; remaining: when the list is taller than the room above that stack GPUI shortens it to the room while React's runs past the pane top and is clipped |
+| Suggestion rows round only the list's outer corners | DONE-LIVE | user decision 2026-09-19, shared `sessionChatSuggestionRowCorners`: first row top corners, last row bottom corners, 11px; checked hovering the first, a middle and the last `$` row in both |
 | Attachment tiles (remove, pending) | DONE-CODE | paste not exercised live |
 | Send / Stop / queue / Compact & Send menu | DONE-LIVE | |
 | Send-blocked toast | DONE-CODE | |

@@ -483,7 +483,9 @@ impl NativeChatView {
             menu.update(cx, |menu, cx| menu.close_with_focus(None, false, cx));
         }
         let appearance = ChatAppearance::current(&self.snapshot);
-        let source_bounds = window.bounds();
+        // `trigger` is in content coordinates; a window frame with a titlebar (Chat Lab) put every
+        // menu that titlebar's height above its trigger or the pointer.
+        let source_bounds = super::super::child_window::content_bounds(window);
         let chat = cx.weak_entity();
         let source = window.window_handle();
         let source_focus = window.focused(cx);

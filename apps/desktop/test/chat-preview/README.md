@@ -14,7 +14,7 @@ The shared controls above both panes let you:
 - Use **markdown** to compare inline-code chips, long identifiers, Unicode, explicit line breaks, and copying selections across styled text.
 - Use **update** for the compact and expanded Codex update-choice card. **update-error** simulates a stale dialog when you choose Update now; Skip for now still succeeds. Neither sample installs anything.
 - Use **Save to md** on a formatted final reply to compare the save dialog. Each sample keeps saved documents in memory until reset; the copied `/sample/project/docs/…` path is simulated.
-- Use **links** to inspect file-opening requests, including relative paths, spaces, and line/column coordinates. The lab displays the requested target instead of opening a real project file.
+- Use **links** to inspect file-opening requests, including relative paths, spaces, and line/column coordinates. The lab displays the requested target instead of opening a real project file. Right-click menu rows that leave the chat (Open in Code or Docs, Open File/Folder Location, the two browser rows) show their request the same way in both panes, above each transcript.
 
 Seven samples exist for the transcript components the older scenarios never produced, one component group each:
 

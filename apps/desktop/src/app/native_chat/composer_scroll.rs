@@ -1,5 +1,7 @@
 use super::state::NativeChatView;
-use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, px};
+use gpui::{
+    AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement, Styled, div, px,
+};
 use serde_json::json;
 
 impl NativeChatView {
@@ -28,6 +30,14 @@ impl NativeChatView {
             .flex_1()
             .min_h_0()
             .w_full()
+            // React's transcript menu trigger wraps the whole message list, minimap, scrollbar and
+            // scroll button included; pills and links stop the press first (transcript_menu.rs).
+            .on_mouse_down(
+                gpui::MouseButton::Right,
+                cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                    this.transcript_secondary_press(event, window, cx)
+                }),
+            )
             .child(self.minimap_row(transcript.into_any_element(), cx))
             .child(
                 // React masks the viewport's last rows into the composer band

@@ -21,10 +21,10 @@ impl NativeChatView {
             .runtime
             .as_ref()
             .and_then(|runtime| {
-                runtime.query(
+                runtime.query_for_gesture(
                     "referenceMenu",
                     vec![Value::String(href)],
-                    std::time::Duration::from_millis(60),
+                    std::time::Duration::from_millis(250),
                 )
             })
             .and_then(|rows| rows.as_array().cloned())

@@ -303,7 +303,9 @@ impl NativeChatView {
             .when(wide, |button| button.min_w(px(96.0 * s)))
             .when(disabled, |button| button.opacity(0.5))
             .when(!disabled, |button| {
-                button.chat_cursor_pointer().hover(|style| style.bg(p.input))
+                button
+                    .chat_cursor_pointer()
+                    .hover(|style| style.bg(p.input))
             })
             .when(!ghost && p.light, |button| button.bg(p.background))
             .child(label.to_owned())

@@ -1,6 +1,6 @@
 /*!
-The empty transcript region: the new-session welcome, the loading hold, and the
-plain empty-state copy.
+The empty transcript region: the new-session welcome, the loading hold (drawn by
+transcript_skeleton.rs), and the plain empty-state copy.
 
 CDXC:SessionChat 2026-09-18 WHY:
 GPUI chat used to print `emptyState.title` / `.detail` for every transcript with
@@ -67,6 +67,14 @@ impl NativeChatView {
         p: &ChatAppearance,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        /*
+        The loading hold. `loadingStage` is `blank` for the first 600ms of a
+        transcript read, so toggling back to an already-open chat never flashes
+        the skeleton on its way to the rows.
+        */
+        if let Some(stage) = state["loadingStage"].as_str() {
+            return self.render_transcript_skeleton(stage, p, cx);
+        }
         let s = p.scale;
         // `.ghostex-chat-new-session`: `padding: 1.5rem 1.5rem var(--ghostex-chat-composer-overlay)`.
         // The band below already reserves its own height, so the welcome has no bottom padding of
@@ -125,32 +133,11 @@ impl NativeChatView {
         let region = region.pb(px(24.0 * s));
 
         /*
-        The loading hold. `loadingStage` is `blank` for the first 600ms of a
-        transcript read, so toggling back to an already-open chat never flashes
-        "Loading conversation…" on its way to the rows.
+        A transcript that is ready but has no rows yet is React's message list with nothing in it,
+        so it draws nothing rather than the empty-state copy ("Start a chat with …").
         */
-        if let Some(stage) = state["loadingStage"].as_str() {
-            if stage == "blank" {
-                return region.into_any_element();
-            }
-            return region
-                .text_color(p.muted)
-                .child(
-                    state["emptyState"]["title"]
-                        .as_str()
-                        .unwrap_or("Loading conversation…")
-                        .to_owned(),
-                )
-                .when(stage == "retry", |this| {
-                    this.child(self.chat_button(
-                        "retry-chat".into(),
-                        "Retry".into(),
-                        json!({"type":"retry"}),
-                        p,
-                        cx,
-                    ))
-                })
-                .into_any_element();
+        if state["view"]["kind"] == "ready" {
+            return region.into_any_element();
         }
 
         region

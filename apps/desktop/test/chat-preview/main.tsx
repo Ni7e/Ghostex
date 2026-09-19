@@ -35,8 +35,14 @@ function Conversation({ config }: { config: ChatPreviewConfig }) {
       )}
       <SessionChatView
         transport={transport}
+        // Menu rows that would leave the chat show the request they send, like the GPUI pane's label.
         hostLinks={{
           openFile: (path, position) => setHostAction(JSON.stringify({ action: 'openFile', path, ...position })),
+          openFileInCode: (path, position) =>
+            setHostAction(JSON.stringify({ action: 'openFile', path, view: 'code', ...position })),
+          openFileInDocs: (path, position) =>
+            setHostAction(JSON.stringify({ action: 'openFile', path, view: 'docs', ...position })),
+          locateFile: (path) => setHostAction(JSON.stringify({ action: 'locateFile', path })),
           openUrl: (url, options) => setHostAction(JSON.stringify({ action: 'openLink', url, ...options })),
         }}
         sessionKey={`chat-preview:${config.revision}`}

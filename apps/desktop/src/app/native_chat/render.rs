@@ -59,7 +59,8 @@ impl Render for NativeChatView {
         // The picker window is a sibling frame sized to this pane, so the pane's painted size is what tells it the pane was resized.
         let model_picker_open = self.model_picker_window.is_open();
         let picker_chat = cx.weak_entity();
-        let image_viewer_open = self.image_viewer.request.is_some();
+        let pane_windows_open = self.pane_windows_open();
+        let suggestion_shadow = self.render_suggestion_shadow(&p);
         let rows = self.list.item_count();
         let content_ready = self.error.is_none()
             && (rows > 0
@@ -151,14 +152,15 @@ impl Render for NativeChatView {
                 this.child(transcript)
             })
             .child(composer)
+            .children(suggestion_shadow)
             .child(
                 gpui::canvas(
                     move |rect, window, cx| {
-                        if bounds.replace(rect) != rect && image_viewer_open {
+                        if bounds.replace(rect) != rect && pane_windows_open {
                             let chat = picker_chat.clone();
                             window.defer(cx, move |_, cx| {
                                 let _ = chat.update(cx, |chat, cx| {
-                                    chat.follow_image_viewer_pane(cx);
+                                    chat.follow_pane_windows(cx);
                                 });
                             });
                         }

@@ -11,7 +11,7 @@ use serde_json::json;
 
 #[derive(Default)]
 pub(in crate::app::native_chat) struct SaveMarkdownWindowState {
-    handle: Option<gpui::WindowHandle<Root>>,
+    pub(in crate::app::native_chat) handle: Option<gpui::WindowHandle<Root>>,
     opening: bool,
     subscription: Option<Subscription>,
 }

@@ -262,7 +262,12 @@ fn table_action(
                 .text_color(p.muted)
                 .flex_shrink_0(),
         )
-        .on_click(move |_, _, cx| click(cx))
+        // A table's own control consumes the press, so the heading row behind
+        // it does not read it as a click on its own text.
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            click(cx)
+        })
         .into_any_element()
 }
 

@@ -579,9 +579,12 @@ impl NativeChatView {
                 .mx(px(VISUAL.inline_margin_x * p.scale))
                 .my(px(VISUAL.inline_margin_y * p.scale))
                 .chat_cursor_pointer()
-                .on_click(
-                    cx.listener(move |chat, _, _, cx| chat.open_image_viewer(open.clone(), 0, cx)),
-                )
+                // Opening the viewer consumes the press: React's picture is a
+                // button, which its row's click handler skips over.
+                .on_click(cx.listener(move |chat, _, _, cx| {
+                    cx.stop_propagation();
+                    chat.open_image_viewer(open.clone(), 0, cx);
+                }))
                 .child(picture)
                 .into_any_element(),
             None => div()

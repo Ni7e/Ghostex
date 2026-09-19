@@ -161,6 +161,8 @@ void GhostexGpuiAttachAppModalWindowToMainWindow(void *modalNativeView,
 
 // CDXC:SessionChat 2026-09-17 WHY:
 // Autocomplete owns a child window but typing must remain in the composer's window.
+// It keeps the shadowless chrome set above: the macOS window shadow outlines the rounded card with
+// a dark hairline that React's picker does not have, which read as a black border in light mode.
 void GhostexGpuiAttachComposerSuggestionsWindow(void *nativeView,
                                                void *mainNativeView) {
   NSWindow *window = ((__bridge NSView *)nativeView).window;
@@ -168,7 +170,6 @@ void GhostexGpuiAttachComposerSuggestionsWindow(void *nativeView,
   if ([window isKindOfClass:[NSPanel class]]) {
     ((NSPanel *)window).becomesKeyOnlyIfNeeded = YES;
   }
-  window.hasShadow = YES;
   GhostexGpuiAttachChildWindow(nativeView, mainNativeView, NO);
 }
 

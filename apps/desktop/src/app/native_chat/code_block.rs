@@ -61,7 +61,13 @@ fn action(
                 .text_color(p.muted)
                 .flex_shrink_0(),
         )
-        .on_click(move |_, _, cx| click(cx))
+        // A fence's own control consumes the press: the row behind it (an
+        // assistant heading that opens its tool calls) is a trigger too, and
+        // React excludes a `button` from it the same way.
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            click(cx)
+        })
         .into_any_element()
 }
 

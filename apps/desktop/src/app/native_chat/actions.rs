@@ -239,11 +239,13 @@ impl NativeChatView {
                 json!({"type":"open","modal":"settings","initialTab":"accounts"}),
             ));
         } else if action.command["type"] == "copyText" {
-            // Copy Path and Copy URL rows, with the shared copy sound every other chat copy plays.
+            // Copy Path, Copy URL and the transcript's Copy, with the shared copy sound every other chat copy plays.
             if let Some(text) = action.command["text"].as_str() {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_owned()));
                 crate::app::helpers::gpui_play_copy_sound();
             }
+        } else if action.command["type"] == "appendToDraft" {
+            self.append_to_draft(action.command["text"].as_str().unwrap_or_default(), cx);
         } else if action.command["type"] == "host" {
             self.host(
                 action.command["action"].as_str().unwrap_or_default(),
