@@ -27,6 +27,9 @@ import type { ExtensionToSidebarMessage } from '@/packages/shared/session-grid-c
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { createDisplaySessionLayout } from '@/packages/shared/active-sessions-sort';
 import type { NativeSidebarSnapshot } from '@/packages/shared/native-sidebar';
+import type { SidebarSessionGroup, SidebarSessionItem } from '@/packages/shared/session-grid-contract';
+import type { ghostexSettings } from '@/packages/shared/ghostex-settings';
+import type { CustomSessionTagsState } from '@/packages/shared/session-tags';
 import type { NativeSidebarUiState } from './ui-state';
 import { projectNativeSidebarGroup } from './project-sections';
 
@@ -64,10 +67,71 @@ export function applyNativeSidebarMessage(message: ExtensionToSidebarMessage): v
   }
 }
 
+/**
+ * CDXC:Sidebar 2026-09-19 WHY:
+ * Every publish re-projected every session of the machine (tooltip, labels, tag lookup, hover actions), 30 to 40ms per publish on the service thread and several publishes a second while agents run, most of it for rows nothing had touched.
+ * The store keeps the object identity of unchanged sessions, groups and tag state, so a row is re-projected only when one of its inputs is a different object. The identical output object also lets the publisher's field diff skip the row outright. Time-based labels are refreshed by the clock rows, not by this projection.
+ */
+const projectedSessions = new Map<
+  string,
+  { deps: readonly unknown[]; value: ReturnType<typeof projectNativeSidebarSession> }
+>();
+
+function sameDeps(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+let settingsSource: unknown = undefined;
+let settingsValue: ghostexSettings | undefined;
+
+function normalizedSettings(source: unknown): ghostexSettings {
+  if (!settingsValue || source !== settingsSource) {
+    settingsSource = source;
+    settingsValue = normalizeghostexSettings(source);
+  }
+  return settingsValue;
+}
+
+function projectNativeSidebarSession(
+  session: SidebarSessionItem,
+  group: Omit<SidebarSessionGroup, 'sessions'>,
+  settings: ghostexSettings,
+  customTags: CustomSessionTagsState | undefined,
+  state: ReturnType<typeof sidebarStore.getState>,
+  selected: boolean
+) {
+  const presentation = getSessionCardTitleTooltip({
+    session,
+    alwaysShowTitleTooltip: true,
+    alwaysShowStateTooltip: !!group.remoteMachineContext,
+    showDebugSessionNumbers: state.hud.debuggingMode,
+  });
+  const tag = getEffectiveSidebarSessionTag(session);
+  return {
+    ...session,
+    titleTooltip: presentation.tooltip,
+    displayTitle: session.isGeneratingFirstPromptTitle ? 'Generating title...' : presentation.headingText,
+    timerLabel: getSessionCardTimerTrailingLabel(session, Date.now()),
+    isMultiSelected: selected,
+    effectiveTag: tag,
+    tagPresentation: nativeTagPresentation(tag ?? ''),
+    customTag: findCustomSessionTag(tag, [
+      state.customSessionTags,
+      ...Object.values(state.remoteCustomSessionTagsByMachineId),
+    ]),
+    agentLogoDataUrl: session.agentIcon ? COLORED_AGENT_LOGOS[session.agentIcon] : undefined,
+    lastInteractionLabel: session.lastInteractionAt
+      ? formatRelativeTime(session.lastInteractionAt, { allowJustNow: false }).value
+      : undefined,
+    ...createNativeSessionActions(session, settings, group, customTags, [], false),
+  };
+}
+
 export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSidebarSnapshot {
   applyNativeSidebarReveal(ui);
   const state = sidebarStore.getState();
-  const settings = normalizeghostexSettings(state.hud.settings);
+  const settings = normalizedSettings(state.hud.settings);
+  const projectedSessionIds = new Set<string>();
   const enabledFilters = new Set(
     getEnabledVisibleSidebarSessionTagFilters(
       normalizeSidebarSessionTagListItems(settings.sidebarSessionTagListItems, state.customSessionTags)
@@ -144,54 +208,39 @@ export function createNativeSidebarSnapshot(ui: NativeSidebarUiState): NativeSid
       (id) => state.sessionsById[id] && sessionMatchesSidebarTagFilters(state.sessionsById[id], ui.selectedTagFilters)
     );
     if (ui.selectedTagFilters.length && !sessions.length) return [];
+    const customTags = group.remoteMachineContext
+      ? state.remoteCustomSessionTagsByMachineId[group.remoteMachineContext.machineId]
+      : state.customSessionTags;
     const projected = projectNativeSidebarGroup(
       {
         ...group,
         sessions: sessions.map((id) => {
           const session = state.sessionsById[id]!;
-          const presentation = getSessionCardTitleTooltip({
+          const selected = ui.selectedSessionIds.includes(id);
+          const deps = [
             session,
-            alwaysShowTitleTooltip: true,
-            alwaysShowStateTooltip: !!group.remoteMachineContext,
-            showDebugSessionNumbers: state.hud.debuggingMode,
-          });
-          return {
-            ...session,
-            titleTooltip: presentation.tooltip,
-            displayTitle: session.isGeneratingFirstPromptTitle ? 'Generating title...' : presentation.headingText,
-            timerLabel: getSessionCardTimerTrailingLabel(session, Date.now()),
-            isMultiSelected: ui.selectedSessionIds.includes(id),
-            effectiveTag: getEffectiveSidebarSessionTag(session),
-            tagPresentation: nativeTagPresentation(getEffectiveSidebarSessionTag(session) ?? ''),
-            customTag: findCustomSessionTag(getEffectiveSidebarSessionTag(session), [
-              state.customSessionTags,
-              ...Object.values(state.remoteCustomSessionTagsByMachineId),
-            ]),
-            agentLogoDataUrl: session.agentIcon ? COLORED_AGENT_LOGOS[session.agentIcon] : undefined,
-            lastInteractionLabel: session.lastInteractionAt
-              ? formatRelativeTime(session.lastInteractionAt, { allowJustNow: false }).value
-              : undefined,
-          };
+            group,
+            settings,
+            customTags,
+            state.customSessionTags,
+            state.remoteCustomSessionTagsByMachineId,
+            state.hud.debuggingMode,
+            selected,
+          ];
+          projectedSessionIds.add(id);
+          const cached = projectedSessions.get(id);
+          if (cached && sameDeps(cached.deps, deps)) return cached.value;
+          const value = projectNativeSidebarSession(session, group, settings, customTags, state, selected);
+          projectedSessions.set(id, { deps, value });
+          return value;
         }),
       },
       ui,
       settings
     );
-    projected.sessions = projected.sessions.map((session) => ({
-      ...session,
-      ...createNativeSessionActions(
-        session,
-        settings,
-        group,
-        group.remoteMachineContext
-          ? state.remoteCustomSessionTagsByMachineId[group.remoteMachineContext.machineId]
-          : state.customSessionTags,
-        [],
-        false
-      ),
-    }));
     return [projected];
   });
+  for (const id of projectedSessions.keys()) if (!projectedSessionIds.has(id)) projectedSessions.delete(id);
   return {
     ...createNativeNavigation(ui),
     emptyState: createNativeEmptyState(ui),

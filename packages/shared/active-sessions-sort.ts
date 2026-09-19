@@ -159,33 +159,29 @@ function sortParkedSessionIdsByLastActivity(
   sessionIds: readonly string[],
   sessionsById: Record<string, SidebarSessionItem>
 ): string[] {
-  return [...sessionIds].sort(
-    (leftId, rightId) =>
-      getSessionLastActivityTime(sessionsById[rightId]) - getSessionLastActivityTime(sessionsById[leftId]) ||
-      leftId.localeCompare(rightId)
-  );
+  return sessionIds
+    .map((sessionId) => ({ sessionId, time: getSessionLastActivityTime(sessionsById[sessionId]) }))
+    .sort((left, right) => right.time - left.time || left.sessionId.localeCompare(right.sessionId))
+    .map((entry) => entry.sessionId);
 }
 
+/**
+ * CDXC:Sessions 2026-09-19 WHY:
+ * The comparators parsed every timestamp again on every comparison, so one sidebar projection ran a few thousand `Date.parse` calls; in the desktop's QuickJS service thread that was most of the projection's fixed cost.
+ * Each session's priority and time are computed once, then the keys are sorted; the order, including the index tie-break, is unchanged.
+ */
 function sortSessionIdsByLastActivity(
   sessionIds: readonly string[],
   sessionsById: Record<string, SidebarSessionItem>
 ): string[] {
-  return [...sessionIds].sort((leftSessionId, rightSessionId) => {
-    const leftPriority = getSessionActivitySortPriority(sessionsById[leftSessionId]);
-    const rightPriority = getSessionActivitySortPriority(sessionsById[rightSessionId]);
-    if (rightPriority !== leftPriority) {
-      return rightPriority - leftPriority;
-    }
-
-    const activityDelta =
-      getSessionActivitySortTime(sessionsById[rightSessionId], rightPriority) -
-      getSessionActivitySortTime(sessionsById[leftSessionId], leftPriority);
-    if (activityDelta !== 0) {
-      return activityDelta;
-    }
-
-    return sessionIds.indexOf(leftSessionId) - sessionIds.indexOf(rightSessionId);
-  });
+  return sessionIds
+    .map((sessionId, index) => {
+      const session = sessionsById[sessionId];
+      const priority = getSessionActivitySortPriority(session);
+      return { sessionId, index, priority, time: getSessionActivitySortTime(session, priority) };
+    })
+    .sort((left, right) => right.priority - left.priority || right.time - left.time || left.index - right.index)
+    .map((entry) => entry.sessionId);
 }
 
 function isBrowserSession(session: SidebarSessionItem | undefined): boolean {
@@ -245,11 +241,19 @@ function getSessionActivitySortTime(session: SidebarSessionItem | undefined, act
   return getSessionLastActivityTime(session);
 }
 
+/** Parsed once per session object and revalidated against the string, since every projection sorts every row. */
+const parsedLastActivity = new WeakMap<SidebarSessionItem, { source: string; timeMs: number }>();
+
 function getSessionLastActivityTime(session: SidebarSessionItem | undefined): number {
   if (!session?.lastInteractionAt) {
     return 0;
   }
-
+  const cached = parsedLastActivity.get(session);
+  if (cached && cached.source === session.lastInteractionAt) {
+    return cached.timeMs;
+  }
   const timestamp = Date.parse(session.lastInteractionAt);
-  return Number.isFinite(timestamp) ? timestamp : 0;
+  const timeMs = Number.isFinite(timestamp) ? timestamp : 0;
+  parsedLastActivity.set(session, { source: session.lastInteractionAt, timeMs });
+  return timeMs;
 }

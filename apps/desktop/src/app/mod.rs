@@ -65,6 +65,8 @@ pub(crate) mod render;
 pub(crate) mod session_chat;
 pub(crate) mod session_chat_context_menu;
 pub(crate) mod session_chat_prewarm;
+pub(crate) mod session_chat_switch_holdover;
+pub(crate) mod sidebar_direct_focus;
 pub(crate) mod session_chat_diagnostics;
 mod session_chat_draft_handoff;
 pub(crate) mod session_chat_eviction;

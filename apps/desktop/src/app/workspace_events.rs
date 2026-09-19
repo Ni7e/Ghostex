@@ -862,6 +862,18 @@ impl GhostexGpuiApp {
         let Ok(message) = gpui_sidebar_workspace_terminal_focus_from_json(payload) else {
             return;
         };
+        if self.sidebar_focus_message_echoes_in_process_focus(&message) {
+            support_logs::append_temporary(
+                support_logs::GpuiSupportLog::TerminalFocus,
+                "TEMP.gpui.sessionSwitchLatency.inProcessFocusEchoDropped",
+                serde_json::json!({
+                    "epochMs": support_logs::temporary_epoch_ms(),
+                    "projectId": message.project_id,
+                    "sessionId": message.session_id,
+                }),
+            );
+            return;
+        }
         support_logs::append_temporary(
             support_logs::GpuiSupportLog::TerminalFocus,
             "TEMP.gpui.sessionSwitchLatency.bridgeReceived",

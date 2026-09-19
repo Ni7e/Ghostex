@@ -161,6 +161,9 @@ impl GhostexGpuiApp {
                         cx.notify();
                     }
                     app.dispatch_native_sidebar_ui(json!({"type": "selectSession", "sessionId": session_id, "mode": mode}), cx);
+                    if mode == "focus" && !sleeping {
+                        app.focus_native_sidebar_session_in_process(&session_id, cx);
+                    }
                 }))
                 .on_mouse_down(MouseButton::Right, cx.listener(move |app, event: &gpui::MouseDownEvent, window, cx| {
                     cx.stop_propagation();

@@ -14,18 +14,23 @@ type DraftSession = {
  */
 export const NEW_SESSION_PRIORITY_MS = 10 * 60 * 1_000;
 
+/** Parsed once per session object; the sidebar classifies every row on every projection. */
+const parsedCreatedAt = new WeakMap<DraftSession, { source: string | undefined; timeMs: number }>();
+
 export function newSessionPriorityExpiresAt(session: DraftSession | undefined): number {
-  return Date.parse(session?.createdAt ?? '') + NEW_SESSION_PRIORITY_MS;
+  if (!session) return Number.NaN;
+  const cached = parsedCreatedAt.get(session);
+  if (cached && cached.source === session.createdAt) return cached.timeMs;
+  const timeMs = Date.parse(session.createdAt ?? '') + NEW_SESSION_PRIORITY_MS;
+  parsedCreatedAt.set(session, { source: session.createdAt, timeMs });
+  return timeMs;
 }
 
 export function isNewSidebarSession(session: DraftSession | undefined, nowMs: number = Date.now()): boolean {
   return newSessionPriorityExpiresAt(session) > nowMs;
 }
 
-export function isSidebarDraftSectionSession(
-  session: DraftSession | undefined,
-  nowMs: number = Date.now()
-): boolean {
+export function isSidebarDraftSectionSession(session: DraftSession | undefined, nowMs: number = Date.now()): boolean {
   return (
     session?.isDraft === true &&
     session.isPinned !== true &&

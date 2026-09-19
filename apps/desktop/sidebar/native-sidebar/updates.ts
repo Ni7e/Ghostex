@@ -59,7 +59,10 @@ export function createNativeSidebarPublisher(post: (payload: string) => void) {
         const fields = changedFields(group, old, ['sessions']);
         const oldSessions = new Map(old?.sessions.map((session) => [session.sessionId, session]));
         const sessions = group.sessions.flatMap((session) => {
-          const fields = changedFields(session, oldSessions.get(session.sessionId));
+          const old = oldSessions.get(session.sessionId);
+          // The projection reuses the object of an untouched row; nothing in it can differ.
+          if (old === session) return [];
+          const fields = changedFields(session, old);
           return Object.keys(fields).length ? [{ sessionId: session.sessionId, fields }] : [];
         });
         const order = group.sessions.map((session) => session.sessionId);

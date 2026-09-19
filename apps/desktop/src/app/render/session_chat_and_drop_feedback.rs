@@ -35,7 +35,21 @@ impl GhostexGpuiApp {
         terminal: a per-session GPUI child plus ordinary placeholder layout children.
         The native chat remains inside its workspace pane's layout frame.
         */
-        let content = self.render_session_chat_surface_content(session_id);
+        let content = match self
+            .native_chat_views
+            .get(&session_id)
+            .filter(|_| {
+                self.session_account_switch_placeholder_progress(session_id)
+                    .is_none()
+            })
+            .cloned()
+        {
+            Some(view) => {
+                self.record_session_chat_render(session_id);
+                self.render_native_chat_with_holdover(pane_id, session_id, &view, cx)
+            }
+            None => self.render_session_chat_surface_content(session_id),
+        };
         self.render_agents_session_chat_body_frame(pane_id, session_id, content, cx)
     }
 
