@@ -211,6 +211,10 @@ export type NativeSidebarMenuItem = {
   children?: NativeSidebarMenuItem[];
   /** Header actions that form one split button: the `start` half is the action, the `end` half opens its menu. */
   split?: 'start' | 'end';
+  /** Panel-level, read from the first item: render the panel with the React agent launcher menu's layout. */
+  menuStyle?: 'agentLauncher';
+  /** The last-used agent in the agent launcher, shown highlighted with a semibold label. */
+  primary?: boolean;
 };
 
 export type NativeSidebarClockRow = { sessionId: string; timerLabel?: string; lastInteractionLabel?: string };

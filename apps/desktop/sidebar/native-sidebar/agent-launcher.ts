@@ -7,6 +7,7 @@ import type { SidebarAgentButton } from '@/packages/shared/sidebar-agents';
 import type { NativeSidebarCommand, NativeSidebarMenuItem } from '@/packages/shared/native-sidebar';
 import type { WebviewApi } from '@/packages/core-ui/webview-api';
 import { COLORED_AGENT_LOGOS } from '@/packages/core-ui/agent-logos';
+import { readPrimaryAgentLauncherId } from '@/packages/core-ui/primary-agent-launcher';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 
 type LauncherCommand = Extract<NativeSidebarCommand, { type: 'agentAccounts' }>;
@@ -22,13 +23,17 @@ const commandFor = (groupId: string, action: LauncherCommand['action'], agentId?
 });
 
 export function nativeAgentLauncherItems(groupId: string, data?: AgentAccountsState): NativeSidebarMenuItem[] {
-  const items: NativeSidebarMenuItem[] = sidebarStore.getState().hud.agents.map((agent) => {
+  const agents = sidebarStore.getState().hud.agents;
+  const primaryId = (agents.find((agent) => agent.agentId === readPrimaryAgentLauncherId()) ?? agents[0])?.agentId;
+  const items: NativeSidebarMenuItem[] = agents.map((agent) => {
     const provider = providerFor(agent);
     return {
+      primary: agent.agentId === primaryId,
       supportsChat: resolveSessionChatTranscriptAgent(agent.agentId, agent.icon) !== null,
       label: agent.name,
       agentIcon: agent.icon,
       imageDataUrl: agent.icon ? COLORED_AGENT_LOGOS[agent.icon] : undefined,
+      icon: agent.icon ? undefined : 'code',
       keepOpen: true,
       command: commandFor(groupId, 'launch', agent.agentId),
       secondary: provider
@@ -44,7 +49,12 @@ export function nativeAgentLauncherItems(groupId: string, data?: AgentAccountsSt
   });
   if (items.length) items.push({ separator: true });
   items.push({ label: 'Configure', icon: 'settings', command: { type: 'projectAction', action: 'agent', groupId } });
-  items[0] = { ...items[0], menuOwner: `group:${groupId}`, onOpen: commandFor(groupId, 'load') };
+  items[0] = {
+    ...items[0],
+    menuStyle: 'agentLauncher',
+    menuOwner: `group:${groupId}`,
+    onOpen: commandFor(groupId, 'load'),
+  };
   return items;
 }
 
@@ -71,9 +81,19 @@ export function createNativeAgentLauncherController(
       update([], true);
       return;
     }
+    const back: NativeSidebarMenuItem | undefined = agent && {
+      label: agent.name,
+      icon: 'chevron-left',
+      menuStyle: 'agentLauncher',
+      keepOpen: true,
+      command: commandFor(command.groupId, 'root'),
+    };
     let error: string | undefined;
     try {
       if (request && (!data || command.action === 'retry')) {
+        // The React launcher opens the account page at once and shows this hint until the list arrives.
+        if (back && provider && command.action === 'accounts')
+          update([back, { label: 'Reading accounts…', disabled: true }]);
         const result = await request(command.groupId, {
           operation: 'list',
           ...(command.action === 'retry' ? { refresh: true } : {}),
@@ -90,15 +110,13 @@ export function createNativeAgentLauncherController(
       update([], true);
       return;
     }
-    if (!agent || !provider) {
+    if (!agent || !provider || !back) {
       update(nativeAgentLauncherItems(command.groupId, data));
       return;
     }
     const format = (value: string) =>
       sidebarStore.getState().hud.settings?.hideAccountEmails ? maskAccountText(value) : value;
-    const items: NativeSidebarMenuItem[] = [
-      { label: agent.name, icon: 'chevron-left', keepOpen: true, command: commandFor(command.groupId, 'root') },
-    ];
+    const items: NativeSidebarMenuItem[] = [back];
     const accounts = data?.accounts.filter((account) => account.registered && account.provider === provider) ?? [];
     for (const account of accounts) {
       const weekly = account.usage.filter((window) => !window.model).find(isWeeklyWindow);

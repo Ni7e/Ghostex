@@ -71,13 +71,7 @@ impl GhostexGpuiApp {
                     app.native_sidebar.menu = Some(SidebarMenuState {
                         window: source,
                         account_panel,
-                        panels: vec![SidebarMenuPanel {
-                            scroll: Default::default(),
-                            items,
-                            anchor: position,
-                            selected: None,
-                            pages: vec![],
-                        }],
+                        panels: vec![SidebarMenuPanel::new(items, position)],
                         focus,
                         previous_focus,
                         scale,
@@ -117,7 +111,7 @@ impl GhostexGpuiApp {
         }
     }
 
-    fn activate_native_sidebar_menu_secondary(
+    pub(super) fn activate_native_sidebar_menu_secondary(
         &mut self,
         panel_index: usize,
         item_index: usize,
@@ -136,17 +130,29 @@ impl GhostexGpuiApp {
         }
     }
 
-    fn activate_native_sidebar_menu_item(
+    /// CDXC:ContextMenus 2026-09-19 DECISION:
+    /// User: "please do the same for all context menus that have sub menus in the gpui app. when i
+    /// click on the menu item that opens the sub menu again then close the sub menu if it's open.
+    /// example in the sidebar's context menu there's a few like park and tag etc". Every sidebar
+    /// menu, submenu, and flyout goes through this one activation, so the toggle lives here rather
+    /// than in the per-menu builders. `toggle` is set by pointer clicks only: the keyboard's
+    /// Enter/Space/Right must keep opening a submenu, and Left keeps closing it, so those callers
+    /// pass `false` and a repeated Right leaves the open submenu alone. `child_item` records which
+    /// row owns the panel stacked above, because `selected` also moves with the arrow keys and
+    /// cannot say whether a submenu is open.
+    pub(super) fn activate_native_sidebar_menu_item(
         &mut self,
         panel_index: usize,
         item_index: usize,
         row_bounds: Bounds<Pixels>,
+        toggle: bool,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(menu) = self.native_sidebar.menu.as_mut() else {
             return;
         };
+        let child_open = menu.panels.len() > panel_index + 1;
         let Some(panel) = menu.panels.get_mut(panel_index) else {
             return;
         };
@@ -156,54 +162,70 @@ impl GhostexGpuiApp {
         if item["disabled"] == true || item["heading"] == true {
             return;
         }
+        // This row already owns the submenu on screen, so a click on it is a request to shut it.
+        let owns_open_child = child_open && panel.child_item == Some(item_index);
         if item["back"] == true {
             if let Some(items) = panel.pages.pop() {
-                panel.items = items;
-                panel.selected = None;
+                panel.replace_items(items);
             }
         } else if let Some(children) = item["children"].as_array() {
             if item["presentation"] == "page" {
                 panel.pages.push(panel.items.clone());
-                panel.items = std::iter::once(
-                    serde_json::json!({"label": "Back", "icon": "chevron-left", "back": true}),
-                )
-                .chain(std::iter::once(serde_json::json!({"separator": true})))
-                .chain(children.clone())
-                .collect();
-                panel.selected = None;
+                panel.replace_items(
+                    std::iter::once(
+                        serde_json::json!({"label": "Back", "icon": "chevron-left", "back": true}),
+                    )
+                    .chain(std::iter::once(serde_json::json!({"separator": true})))
+                    .chain(children.clone())
+                    .collect(),
+                );
                 menu.panels.truncate(panel_index + 1);
+            } else if owns_open_child {
+                if toggle {
+                    close_child_panel(menu, panel_index, item_index);
+                }
             } else {
                 panel.selected = Some(item_index);
+                panel.child_item = Some(item_index);
                 menu.panels.truncate(panel_index + 1);
-                menu.panels.push(SidebarMenuPanel {
-                    scroll: Default::default(),
-                    items: children.clone(),
-                    anchor: Point::new(
+                menu.panels.push(SidebarMenuPanel::new(
+                    children.clone(),
+                    Point::new(
                         row_bounds.left(),
                         row_bounds.bottom() + px(4.0 * menu.scale),
                     ),
-                    selected: None,
-                    pages: vec![],
-                });
+                ));
             }
         } else if let Some(command) = item.get("command") {
             if command["type"] == "sessionAccounts" && command["action"] == "load" {
+                if owns_open_child {
+                    // The accounts flyout is already up; this click only takes it back down.
+                    if toggle {
+                        close_child_panel(menu, panel_index, item_index);
+                        if menu
+                            .account_panel
+                            .as_ref()
+                            .is_some_and(|(_, index)| *index == panel_index + 1)
+                        {
+                            menu.account_panel = None;
+                        }
+                        cx.notify();
+                    }
+                    return;
+                }
+                panel.selected = Some(item_index);
+                panel.child_item = Some(item_index);
                 menu.panels.truncate(panel_index + 1);
                 menu.account_panel = command["sessionId"]
                     .as_str()
                     .map(|id| (id.to_owned(), panel_index + 1));
-                menu.panels.push(SidebarMenuPanel {
-                    scroll: Default::default(),
-                    items: vec![
-                        serde_json::json!({"label": "Loading accounts…", "disabled": true}),
-                    ],
-                    anchor: Point::new(
+                menu.panels.push(SidebarMenuPanel::new(
+                    vec![serde_json::json!({"label": "Loading accounts…", "disabled": true})],
+                    Point::new(
                         row_bounds.left(),
                         row_bounds.bottom() + px(4.0 * menu.scale),
                     ),
-                    selected: None,
-                    pages: vec![],
-                });
+                ));
             }
             let action = NativeSidebarAction {
                 command: command.clone(),
@@ -277,17 +299,18 @@ impl GhostexGpuiApp {
                 let Some(menu) = app.native_sidebar.menu.as_mut() else {
                     return;
                 };
+                // The agent account page returns to the agent list on Escape or Left, like the React launcher.
+                let back = menu
+                    .panels
+                    .last()
+                    .and_then(|panel| panel.items.first())
+                    .and_then(|item| item.get("command"))
+                    .filter(|command| {
+                        command["type"] == "agentAccounts" && command["action"] == "root"
+                    })
+                    .cloned();
                 match key {
                     "escape" => {
-                        let back = menu
-                            .panels
-                            .last()
-                            .and_then(|panel| panel.items.first())
-                            .and_then(|item| item.get("command"))
-                            .filter(|command| {
-                                command["type"] == "agentAccounts" && command["action"] == "root"
-                            })
-                            .cloned();
                         if let Some(command) = back {
                             app.dispatch_native_sidebar_ui(command, cx);
                         } else {
@@ -297,8 +320,15 @@ impl GhostexGpuiApp {
                     "left" => {
                         if menu.panels.len() > 1 {
                             menu.panels.pop();
+                            // The parent row keeps the keyboard cursor but no longer owns a panel,
+                            // so Right reopens the submenu instead of finding it already open.
+                            if let Some(panel) = menu.panels.last_mut() {
+                                panel.child_item = None;
+                            }
                         } else if let Some(items) = menu.panels[0].pages.pop() {
-                            menu.panels[0].items = items;
+                            menu.panels[0].replace_items(items);
+                        } else if let Some(command) = back {
+                            app.dispatch_native_sidebar_ui(command, cx);
                         }
                     }
                     "up" | "down" | "home" | "end" => {
@@ -342,6 +372,7 @@ impl GhostexGpuiApp {
                                 panel_index,
                                 index,
                                 row_bounds,
+                                false,
                                 window,
                                 cx,
                             );
@@ -353,10 +384,28 @@ impl GhostexGpuiApp {
                 cx.stop_propagation();
                 cx.notify();
             }));
+        let view = cx.entity();
         for (panel_index, panel) in panels.iter().enumerate() {
             let bounds = panel.bounds(sidebar, scale, panel_index > 0);
             let relative = bounds.origin - Point::new(left, top);
+            if panel.is_agent_launcher() {
+                layers = layers.child(self.render_agent_launcher_menu_panel(
+                    panel_index,
+                    panel,
+                    bounds,
+                    relative,
+                    scale,
+                    view.clone(),
+                    cx,
+                ));
+                continue;
+            }
             let mut content = v_flex()
+                .on_children_prepainted(measure_menu_panel(
+                    view.clone(),
+                    panel_index,
+                    px(12.0 * scale + 2.0),
+                ))
                 .id(format!("native-sidebar-menu-panel-{panel_index}"))
                 .absolute()
                 .left(relative.x)
@@ -553,6 +602,7 @@ impl GhostexGpuiApp {
                                 panel_index,
                                 item_index,
                                 row_bounds,
+                                true,
                                 window,
                                 cx,
                             );
@@ -563,5 +613,48 @@ impl GhostexGpuiApp {
             layers = layers.child(content);
         }
         Some(deferred(layers).with_priority(20).into_any_element())
+    }
+}
+
+/// Drops the panel that `item_index` opened on top of `panel_index`, and everything stacked above
+/// it, then clears the row's expanded highlight so the parent menu no longer looks open.
+fn close_child_panel(menu: &mut SidebarMenuState, panel_index: usize, item_index: usize) {
+    if let Some(panel) = menu.panels.get_mut(panel_index) {
+        panel.child_item = None;
+        if panel.selected == Some(item_index) {
+            panel.selected = None;
+        }
+    }
+    menu.panels.truncate(panel_index + 1);
+}
+
+/// Records the rendered rows' height (plus `chrome`: vertical padding and border) so the panel's next frame fits them exactly.
+pub(super) fn measure_menu_panel(
+    view: gpui::Entity<GhostexGpuiApp>,
+    panel_index: usize,
+    chrome: Pixels,
+) -> impl Fn(Vec<Bounds<Pixels>>, &mut Window, &mut gpui::App) + 'static {
+    move |rows, _, cx| {
+        let (Some(first), Some(last)) = (rows.first(), rows.last()) else {
+            return;
+        };
+        let height = last.bottom() - first.top() + chrome;
+        view.update(cx, |app, cx| {
+            let Some(panel) = app
+                .native_sidebar
+                .menu
+                .as_mut()
+                .and_then(|menu| menu.panels.get_mut(panel_index))
+            else {
+                return;
+            };
+            if panel
+                .measured_height
+                .is_none_or(|measured| (measured - height).abs() > px(0.5))
+            {
+                panel.measured_height = Some(height);
+                cx.notify();
+            }
+        });
     }
 }

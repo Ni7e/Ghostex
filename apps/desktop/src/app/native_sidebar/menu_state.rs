@@ -8,6 +8,10 @@ pub(crate) struct SidebarMenuPanel {
     pub(crate) anchor: Point<Pixels>,
     pub(crate) selected: Option<usize>,
     pub(crate) pages: Vec<Vec<Value>>,
+    /// Border-box height of the rendered rows, measured after layout.
+    pub(crate) measured_height: Option<Pixels>,
+    /// The row of this panel that opened the panel stacked on top of it, if one is open.
+    pub(crate) child_item: Option<usize>,
 }
 
 pub(crate) struct SidebarMenuState {
@@ -20,6 +24,35 @@ pub(crate) struct SidebarMenuState {
 }
 
 impl SidebarMenuPanel {
+    pub(crate) fn new(items: Vec<Value>, anchor: Point<Pixels>) -> Self {
+        Self {
+            items,
+            scroll: Default::default(),
+            anchor,
+            selected: None,
+            pages: vec![],
+            measured_height: None,
+            child_item: None,
+        }
+    }
+
+    /// Swaps the rows in place; the old selection and measured height describe rows that are gone.
+    pub(crate) fn replace_items(&mut self, items: Vec<Value>) {
+        self.items = items;
+        self.selected = None;
+        self.measured_height = None;
+        self.child_item = None;
+    }
+
+    pub(crate) fn is_agent_launcher(&self) -> bool {
+        self.items
+            .first()
+            .is_some_and(|item| item["menuStyle"] == "agentLauncher")
+    }
+
+    /// CDXC:AgentLauncher 2026-09-19 DECISION:
+    /// User: the GPUI Select Agent menu and its account page must fit every account without cutting off the last row, like the React sidebar.
+    /// The panel takes the measured height of its rows; the per-row estimate only places the first frame, because two-line account rows and wrapped hints outgrow any fixed row height.
     pub(crate) fn bounds(
         &self,
         sidebar: Bounds<Pixels>,
@@ -27,13 +60,10 @@ impl SidebarMenuPanel {
         nested: bool,
     ) -> Bounds<Pixels> {
         let margin = gpui::px(12.0 * scale);
-        let launcher = self
-            .items
-            .iter()
-            .any(|item| item.get("secondary").is_some() || item.get("detail").is_some());
+        let launcher = self.is_agent_launcher();
         let width = gpui::px(
             if launcher {
-                260.0
+                super::agent_launcher_menu::AGENT_LAUNCHER_MENU_WIDTH
             } else if nested {
                 204.0
             } else {
@@ -41,27 +71,42 @@ impl SidebarMenuPanel {
             } * scale,
         )
         .min((sidebar.size.width - margin * 2.0).max(gpui::px(0.0)));
-        let height = gpui::px(
-            (14.0
-                + self
-                    .items
-                    .iter()
-                    .map(|item| {
-                        if item["separator"] == true {
-                            13.0
-                        } else if item["heading"] == true {
-                            24.0
-                        } else {
-                            34.0
-                        }
-                    })
-                    .sum::<f32>())
-                * scale,
-        )
-        .min((sidebar.size.height - margin * 2.0).max(gpui::px(0.0)));
+        let estimate = if launcher {
+            super::agent_launcher_menu::estimated_height(&self.items, width, scale)
+        } else {
+            gpui::px(
+                (14.0
+                    + self
+                        .items
+                        .iter()
+                        .map(|item| {
+                            if item["separator"] == true {
+                                13.0
+                            } else if item["heading"] == true {
+                                24.0
+                            } else {
+                                34.0
+                            }
+                        })
+                        .sum::<f32>())
+                    * scale,
+            )
+        };
+        let height = self
+            .measured_height
+            .unwrap_or(estimate)
+            .min((sidebar.size.height - margin * 2.0).max(gpui::px(0.0)));
+        // The React launcher sits right-aligned under its chevron; other sidebar menus are centered in the sidebar.
+        let left = if launcher {
+            (self.anchor.x - width)
+                .min(sidebar.right() - width - margin)
+                .max(sidebar.left() + margin)
+        } else {
+            sidebar.left() + (sidebar.size.width - width) / 2.0
+        };
         Bounds {
             origin: Point::new(
-                sidebar.left() + (sidebar.size.width - width) / 2.0,
+                left,
                 self.anchor
                     .y
                     .min(sidebar.bottom() - height - margin)

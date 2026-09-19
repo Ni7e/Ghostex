@@ -119,7 +119,7 @@ pub(crate) fn modal_icon(path: &'static str, icon_size: f32, color: Rgba) -> gpu
 
 /// The `--app-foreground`, `--app-muted` and `--app-background` triple of each
 /// dark sidebar theme in packages/core-ui/styles/theme.css.
-fn dark_theme_text_colors(sidebar_theme: Option<&str>) -> (u32, u32, u32) {
+pub(crate) fn dark_theme_text_colors(sidebar_theme: Option<&str>) -> (u32, u32, u32) {
     match sidebar_theme {
         Some("dark-1") => (0xc8cdd5, 0x747b85, 0x191919),
         Some("dark-green") => (0xd8e3db, 0x8ea196, 0x0b120d),
