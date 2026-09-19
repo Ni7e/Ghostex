@@ -219,15 +219,21 @@ export function matchingSessionChatUserContentCounts(messages: readonly SessionC
   return counts;
 }
 
-/** User texts with a later non-user turn, or an acknowledged local command. */
+/**
+ * User texts with a later non-user turn, an acknowledged local command, or the agent's own queue row.
+ *
+ * CDXC:SessionChat 2026-09-19 WHY:
+ * A mid-turn send parked in the agent CLI's queue can be pulled back into the terminal input, edited, and resubmitted, so its original text never reaches the transcript as a user row. An echo that waited for that row stayed on screen labelled Queued forever and pinned the pane in the optimistic working state. The server's queued row is the authoritative stand-in from the moment it appears: it is retracted when the queue releases the entry and replaced by the delivered row, so the echo retires as soon as that row exists.
+ */
 export function advancedSessionChatUserContentCounts(messages: readonly SessionChatMessage[]): Map<string, number> {
   const counts = new Map<string, number>();
   let waiting: string[] = [];
   for (const message of messages) {
     if (message.role === 'user') {
       const key = userMessageContentKey(message);
-      if (userMessageCommand(message)) {
-        // Local commands finish without an assistant reply to advance the turn.
+      if (userMessageCommand(message) || message.queued === true) {
+        // Neither needs an assistant reply to advance the turn: local commands
+        // finish without one, and a queued row is owned by the server.
         counts.set(key, (counts.get(key) ?? 0) + 1);
       } else {
         waiting.push(key);
