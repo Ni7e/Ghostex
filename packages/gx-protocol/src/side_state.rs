@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSessionGroup {
     pub group_id: String,
-    #[serde(default, deserialize_with = "crate::de::null_as_default")]
+    #[serde(default, deserialize_with = "crate::de::lenient_strings")]
     pub session_ids: Vec<String>,
     #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub title: String,

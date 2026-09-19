@@ -87,7 +87,7 @@ pub struct PresentationGroup {
     pub group_id: String,
     pub project_id: String,
     /// Display order.
-    #[serde(default, deserialize_with = "crate::de::null_as_default")]
+    #[serde(default, deserialize_with = "crate::de::lenient_strings")]
     pub session_ids: Vec<String>,
     #[serde(default, deserialize_with = "crate::de::null_as_default")]
     pub sort_key: String,

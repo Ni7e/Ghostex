@@ -7,6 +7,7 @@
 //!
 //! - A defaulted field reads `null` as its default ([`null_as_default`]).
 //! - A count reads any JSON number ([`lenient_u64`], [`lenient_opt_u64`], [`lenient_opt_i64`]).
+//! - A list of ids keeps its string elements ([`lenient_strings`]).
 //! - A list of rows is read row by row; a row that still does not fit is skipped and counted, never
 //!   silently ([`Rows`]).
 //!
@@ -71,6 +72,25 @@ pub fn lenient_opt_i64<'de, D: Deserializer<'de>>(
     Ok(Option::<Number>::deserialize(deserializer)?
         .as_ref()
         .and_then(number_as_i64))
+}
+
+/// A list of ids read element by element: elements that are not strings are left out instead of
+/// failing the row that carries the list. `null` reads as an empty list.
+///
+/// Used for `sessionIds`, where dropping the whole group over one bad element would leave a
+/// project that has sessions with an empty tab list. The store re-derives a group's list from its
+/// session rows when a row is missing from it, so a left-out element is repaired, not lost.
+pub fn lenient_strings<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error> {
+    Ok(Option::<Vec<Value>>::deserialize(deserializer)?
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::String(id) => Some(id),
+            _ => None,
+        })
+        .collect())
 }
 
 /// A row that did not fit its type and was left out.
