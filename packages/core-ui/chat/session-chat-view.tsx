@@ -7,7 +7,10 @@ import {
   sessionChatTranscriptQuote,
 } from '@/packages/shared/session-chat-presentation/transcript-menu';
 import { sessionChatAccountIndicator } from '@/packages/shared/session-chat-presentation/option-pills';
-import { sessionChatSendBlockedReason, sessionChatComposerPlaceholder } from '@/packages/shared/session-chat-controller/composer-policy';
+import {
+  sessionChatSendBlockedReason,
+  sessionChatComposerPlaceholder,
+} from '@/packages/shared/session-chat-controller/composer-policy';
 import { useAppScrollbars } from '@/packages/components/ui/app-scrollbars';
 import { AccountSwitchCard } from '../accounts/account-switch-card';
 import { useAccountSwitchStatus } from '../accounts/use-account-switch-status';
@@ -104,6 +107,7 @@ import { sessionChatOptionCommandNames } from './session-chat-session-options';
 import { readStoredSessionChatVerbose, writeStoredSessionChatVerbose } from './session-chat-verbose-override';
 import { sessionChatSlashCommandsForAgent, sessionChatSlashHeadingForAgent } from './session-chat-slash-commands';
 import type { SessionChatTransport } from './session-chat-transport';
+import type { SessionChatArmedAction } from '@/packages/shared/session-chat-presentation/armed-actions';
 import {
   hasAppliedSessionChatReturnedPrompt,
   markSessionChatReturnedPromptApplied,
@@ -286,6 +290,8 @@ export interface SessionChatViewProps {
   hostSessionNoteBridge?: SessionChatHostSessionNoteBridge;
   /** Open delayed actions for this session in the host-owned modal. */
   onDelayedActions?: () => void;
+  /** This session's armed Delayed Send / Close After Done, shown on the working row. */
+  armedActions?: readonly SessionChatArmedAction[];
   /** Opens an assistant reply in the host's Docs review so it can be annotated (desktop only). */
   onAnnotateMessage?: (markdown: string) => void;
   /*
@@ -495,6 +501,7 @@ export function SessionChatView({
   nativeSelectionMenus = false,
   onSwitchToTerminalForAgentPicker,
   onDelayedActions,
+  armedActions,
   onChatBarBridgeRequest,
   onChatBarPanelStateChange,
   onSelectForkBranch,
@@ -777,7 +784,12 @@ export function SessionChatView({
   "not listed yet" and keeps the picker in its loading state.
   */
   const { files, filesLoading, requestFiles } = computeSessionChatFiles(transport, {
-    useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect,
+    useState,
+    useEffect,
+    useRef,
+    useCallback,
+    useMemo,
+    useLayoutEffect,
   });
   const sessionOptions = useSessionChatSessionOptions({
     agent: resolvedAgentLabel,
@@ -1202,9 +1214,7 @@ export function SessionChatView({
   const answerNoticeChoice = useCallback(
     async (choiceIndex: number): Promise<void> => {
       try {
-        await chatAnswerPrompt(
-          terminalNoticeChoiceAnswer(chat.terminalNotice, choiceIndex)
-        );
+        await chatAnswerPrompt(terminalNoticeChoiceAnswer(chat.terminalNotice, choiceIndex));
         if (chat.terminalNotice?.kind === 'permissionPrompt' && chat.prompt?.kind === 'approval') {
           setAnsweredApprovalKey(sessionChatCardDismissKey(chat.prompt));
         }
@@ -1949,6 +1959,7 @@ export function SessionChatView({
                               workingStatus={{
                                 working: !accountSwitch.busy && chat.sessionWorking,
                                 activity: accountSwitch.busy ? null : chat.terminalActivity,
+                                ...(armedActions ? { armedActions } : {}),
                               }}
                               paneFocused={paneFocused}
                               agentFleet={chat.agentFleet}
@@ -2034,8 +2045,11 @@ export function SessionChatView({
                                 </>
                               }
                               placeholder={sessionChatComposerPlaceholder({
-                                canSend, terminalChoicePending, controlsOnly: chat.terminalNotice?.dialog?.rows.length === 0,
-                                noticeCardVisible, sessionOptionSwitching,
+                                canSend,
+                                terminalChoicePending,
+                                controlsOnly: chat.terminalNotice?.dialog?.rows.length === 0,
+                                noticeCardVisible,
+                                sessionOptionSwitching,
                               })}
                               ref={composerRef}
                               slashCommands={slashCommands}

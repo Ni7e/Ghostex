@@ -118,6 +118,8 @@ pub(crate) struct NativeChatView {
     pub(crate) pending_send: bool,
     pub(crate) composer_ready: bool,
     pub(crate) expanded: HashSet<String>,
+    /// Armed Delayed Send / Close After Done labels drawn on the working row, set by the app (session_chat_armed_actions.rs).
+    pub(crate) armed_actions: Value,
     pub(crate) collapsed: HashSet<String>,
     /// How each fenced block the reader has touched wraps; the rest follow `code_wrap_default`.
     pub(super) code_wrap: HashMap<String, bool>,
@@ -259,6 +261,7 @@ impl NativeChatView {
             pending_send: false,
             composer_ready: false,
             expanded: HashSet::new(),
+            armed_actions: Value::Array(Vec::new()),
             collapsed: HashSet::new(),
             code_wrap: HashMap::new(),
             code_wrap_default: false,

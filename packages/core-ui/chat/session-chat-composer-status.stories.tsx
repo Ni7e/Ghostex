@@ -8,10 +8,12 @@ function ComposerStatusStory({
   scenario,
   theme,
   inputBackend,
+  armed,
 }: {
   scenario: 'panels' | 'incoming' | 'error' | 'notReady' | 'blocked' | 'compacting' | 'idle';
   theme: 'dark' | 'light';
   inputBackend: 'lexical' | 'plain';
+  armed: boolean;
 }) {
   const composer = useRef<SessionChatComposerHandle>(null);
   const transcript = useRef<HTMLDivElement>(null);
@@ -65,6 +67,12 @@ function ComposerStatusStory({
               scenario === 'compacting'
                 ? { kind: 'compacting', label: 'Compacting conversation', percent: 42, detectedAt }
                 : null,
+            armedActions: armed
+              ? [
+                  { id: 'delayedSend', label: 'Delayed Send when all agents finish' },
+                  { id: 'closeAfterDone', label: 'Close After Done armed' },
+                ]
+              : [],
           }}
           agentTasks={
             scenario === 'panels'
@@ -102,7 +110,7 @@ const meta = {
   title: 'Chat/Composer Status Placement',
   component: ComposerStatusStory,
   parameters: { layout: 'fullscreen' },
-  args: { scenario: 'panels', theme: 'dark', inputBackend: 'lexical' },
+  args: { scenario: 'panels', theme: 'dark', inputBackend: 'lexical', armed: false },
   argTypes: {
     scenario: {
       control: 'select',
@@ -110,6 +118,7 @@ const meta = {
     },
     theme: { control: 'inline-radio', options: ['dark', 'light'] },
     inputBackend: { control: 'inline-radio', options: ['lexical', 'plain'] },
+    armed: { control: 'boolean' },
   },
 } satisfies Meta<typeof ComposerStatusStory>;
 export default meta;
@@ -123,3 +132,5 @@ export const Compacting: Story = { args: { scenario: 'compacting' } };
 export const Idle: Story = { args: { scenario: 'idle' } };
 export const PlainInput: Story = { args: { inputBackend: 'plain' } };
 export const Light: Story = { args: { theme: 'light' } };
+export const ArmedWhileWorking: Story = { args: { scenario: 'blocked', armed: true } };
+export const ArmedWhileIdle: Story = { args: { scenario: 'idle', armed: true } };

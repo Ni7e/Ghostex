@@ -1290,6 +1290,11 @@ const CLAUDE_RULES: &[NoticeRule] = &[
             },
             NoticeSignature {
                 scope: NoticeScope::Banner,
+                parts: &[NoticePart::Text("API Error: Server error mid-response")],
+                corroborators: &[],
+            },
+            NoticeSignature {
+                scope: NoticeScope::Banner,
                 parts: &[NoticePart::Text("Unable to connect to API")],
                 corroborators: &[],
             },

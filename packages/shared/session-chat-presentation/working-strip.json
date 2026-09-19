@@ -7,5 +7,10 @@
   "sparkSize": 14,
   "fontSize": 12.5,
   "pulseMs": 1600,
-  "spinMs": 9000
+  "spinMs": 9000,
+  "armedIconGap": 6,
+  "armedColumnGap": 16,
+  "armedRowGap": 2,
+  "delayedSendColor": "#f6c945",
+  "closeAfterDoneColor": "#ff9aa2"
 }

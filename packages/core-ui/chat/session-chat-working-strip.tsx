@@ -14,26 +14,34 @@ in use-session-chat/hook.ts), not the transcript's settled or held working, so t
 strip and the sidebar always agree.
 */
 
+import { IconClock } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import type { SessionChatTerminalActivity } from '../../shared/session-chat';
 import { SessionChatActivityRow } from './session-chat-activity-row';
 import { computeSessionChatWorkingStrip } from '@/packages/shared/session-chat-controller/working-strip';
+import type { SessionChatArmedAction } from '@/packages/shared/session-chat-presentation/armed-actions';
 import visual from '@/packages/shared/session-chat-presentation/working-strip.json';
 import type { CSSProperties } from 'react';
 
 export interface SessionChatWorkingStripProps {
   working: boolean;
   activity: SessionChatTerminalActivity | null;
+  /** Armed Delayed Send / Close After Done, drawn at the right of the working row (armed-actions.ts). */
+  armedActions?: readonly SessionChatArmedAction[];
 }
 
-export function SessionChatWorkingStrip({ working, activity }: SessionChatWorkingStripProps) {
-  const status = computeSessionChatWorkingStrip(working, activity, { useEffect, useState });
-  if (status.activity) {
-    return <SessionChatActivityRow activity={status.activity} className='my-0' />;
-  }
-  if (!status.label) return null;
+const ARMED_ICON_COLORS: Record<SessionChatArmedAction['id'], string> = {
+  delayedSend: visual.delayedSendColor,
+  closeAfterDone: visual.closeAfterDoneColor,
+};
 
-  return (
+export function SessionChatWorkingStrip({ working, activity, armedActions = [] }: SessionChatWorkingStripProps) {
+  const status = computeSessionChatWorkingStrip(working, activity, { useEffect, useState });
+  const activityRow = status.activity ? <SessionChatActivityRow activity={status.activity} className='my-0' /> : null;
+  const label = status.activity ? null : status.label;
+  if (!label && !armedActions.length) return activityRow;
+
+  const row = (
     <div
       aria-live='polite'
       className='ghostex-chat-working-strip'
@@ -48,17 +56,43 @@ export function SessionChatWorkingStrip({ working, activity }: SessionChatWorkin
           '--working-font-size': `${visual.fontSize / 16}rem`,
           '--working-pulse': `${visual.pulseMs}ms`,
           '--working-spin': `${visual.spinMs}ms`,
+          '--working-armed-icon-gap': `${visual.armedIconGap / 16}rem`,
+          '--working-armed-column-gap': `${visual.armedColumnGap / 16}rem`,
+          '--working-armed-row-gap': `${visual.armedRowGap / 16}rem`,
         } as CSSProperties
       }
     >
       <div className='ghostex-chat-working-strip-row'>
-        <span aria-hidden='true' className='ghostex-chat-working-strip-spark'>
-          <svg viewBox='0 0 24 24'>
-            <path d={visual.sparkPath} />
-          </svg>
-        </span>
-        <span className='ghostex-chat-working-strip-text'>{status.label}</span>
+        {/* The lead's auto right margin pins the armed items right on the first line; wrapped items start at the left. */}
+        <div className='ghostex-chat-working-strip-lead'>
+          {label ? (
+            <>
+              <span aria-hidden='true' className='ghostex-chat-working-strip-spark'>
+                <svg viewBox='0 0 24 24'>
+                  <path d={visual.sparkPath} />
+                </svg>
+              </span>
+              <span className='ghostex-chat-working-strip-text'>{label}</span>
+            </>
+          ) : null}
+        </div>
+        {armedActions.map((action) => (
+          <span className='ghostex-chat-working-strip-armed' data-armed-action={action.id} key={action.id}>
+            <span aria-hidden='true' className='ghostex-chat-working-strip-armed-icon'>
+              <IconClock color={ARMED_ICON_COLORS[action.id]} />
+            </span>
+            <span className='ghostex-chat-working-strip-armed-text'>{action.label}</span>
+          </span>
+        ))}
       </div>
     </div>
+  );
+  return activityRow ? (
+    <>
+      {activityRow}
+      {row}
+    </>
+  ) : (
+    row
   );
 }

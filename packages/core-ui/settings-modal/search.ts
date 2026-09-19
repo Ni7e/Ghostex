@@ -101,10 +101,21 @@ export function getHotkeySettingsSectionSearches({
                 : []),
             ]
           : [];
+      const sessionCycleSettings: SettingSearchDefinition[] =
+        section.id === 'navigation'
+          ? [
+              {
+                key: 'sidebarSessionCycleSkipsSleeping',
+                subtitle: 'Next Session and Previous Session jump over sleeping sessions in the sidebar.',
+                title: 'Skip sleeping sessions',
+              },
+            ]
+          : [];
       return [
         section.id,
         getSettingsSectionSearch(searchQuery, section.title, [
           ...projectJumpSettings,
+          ...sessionCycleSettings,
           ...section.ids.flatMap((id) => {
             const definition = definitionsById.get(id);
             return definition

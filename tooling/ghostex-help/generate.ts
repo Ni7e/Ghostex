@@ -382,6 +382,13 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     subtitle: 'Switch the session list of a project expanded by a jump to Compact.',
     title: 'Compact list after project jumps',
   },
+  sidebarSessionCycleSkipsSleeping: {
+    ...HOTKEYS_TAB,
+    section: 'navigation',
+    sectionTitle: 'Navigation',
+    subtitle: 'Next Session and Previous Session jump over sleeping sessions in the sidebar.',
+    title: 'Skip sleeping sessions',
+  },
   windowsTerminalBackend: {
     ...GENERAL_TAB,
     group: 'terminal',

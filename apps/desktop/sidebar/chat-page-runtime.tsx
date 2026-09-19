@@ -1,4 +1,5 @@
 import { sessionChatDesktopHostActions } from '@/packages/shared/session-chat-presentation/actions';
+import type { SessionChatArmedAction } from '@/packages/shared/session-chat-presentation/armed-actions';
 import { releaseDraftWriter } from '@/packages/core-ui/chat/session-chat-draft-outbox';
 import { sessionChatDraftClientId } from '@/packages/core-ui/chat/session-chat-queue';
 import { createSessionChatDiagnosticRecorder } from '@/packages/core-ui/chat/session-chat-diagnostics';
@@ -103,6 +104,7 @@ export interface ChatBridgeNamespace {
   onSessionChatExtensionRequested?: (payload: GhostexChatBarPanelToggleMessage) => void;
   onSessionChatExtensionBridgeMessage?: (payload: unknown) => void;
   onSessionChatExtensionContextChanged?: (context: GhostexExtensionContext) => void;
+  onSessionChatArmedActionsChanged?: (actions: SessionChatArmedAction[]) => void;
 }
 
 export interface SessionChatPageActivation {

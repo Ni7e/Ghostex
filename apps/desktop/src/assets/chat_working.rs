@@ -13,6 +13,25 @@ pub(crate) struct WorkingStripVisual {
     pub font_size: f32,
     pub pulse_ms: f32,
     pub spin_ms: f32,
+    pub armed_icon_gap: f32,
+    pub armed_column_gap: f32,
+    pub armed_row_gap: f32,
+    pub delayed_send_color: String,
+    pub close_after_done_color: String,
+}
+
+impl WorkingStripVisual {
+    /// The clock tint for an armed action id (`delayedSend` / `closeAfterDone`).
+    pub(crate) fn armed_color(&self, id: &str) -> Option<gpui::Rgba> {
+        let hex = match id {
+            "delayedSend" => &self.delayed_send_color,
+            "closeAfterDone" => &self.close_after_done_color,
+            _ => return None,
+        };
+        u32::from_str_radix(hex.trim_start_matches('#'), 16)
+            .ok()
+            .map(gpui::rgb)
+    }
 }
 
 pub(crate) static VISUAL: LazyLock<WorkingStripVisual> = LazyLock::new(|| {

@@ -88,6 +88,8 @@ pub(crate) struct SessionChatPageState {
     pub(crate) pending_native_requests: usize,
     pub(crate) account_key: Option<GpuiWorkspaceTerminalSessionKey>,
     pub(crate) pending_probe: Option<(u64, Option<futures::channel::oneshot::Sender<bool>>)>,
+    /// The armed Delayed Send / Close After Done labels last pushed to this page.
+    pub(crate) armed_actions_sent: Option<serde_json::Value>,
 }
 
 impl SessionChatPageState {
@@ -106,6 +108,7 @@ impl SessionChatPageState {
             pending_native_requests: 0,
             account_key: None,
             pending_probe: None,
+            armed_actions_sent: None,
         }
     }
 }

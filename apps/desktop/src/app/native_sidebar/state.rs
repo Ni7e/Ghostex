@@ -40,6 +40,8 @@ pub(crate) struct NativeSidebarState {
     /// A row click round-trips through the service thread and its next sidebar projection before the snapshot marks the row focused, which read as a laggy click next to the instant highlight of the React sidebar.
     /// The clicked row is drawn focused immediately and the snapshot takes over once it confirms the focus; a click the runtime rejects times out after a moment.
     pub(crate) optimistic_focus: Option<(String, std::time::Instant)>,
+    /// Armed Delayed Send / Close After Done labels by sidebar session id, for every session rather than only the rows the snapshot shows (session_chat_armed_actions.rs).
+    pub(crate) armed_actions: std::collections::HashMap<String, serde_json::Value>,
 }
 
 impl NativeSidebarState {
@@ -188,6 +190,16 @@ impl GhostexGpuiApp {
                 }
             }
             NativeSidebarUpdate::Clock { version: 1, rows } => {
+                for row in &rows {
+                    match &row.armed_actions {
+                        Some(actions) => self
+                            .native_sidebar
+                            .armed_actions
+                            .insert(row.session_id.clone(), actions.clone()),
+                        None => self.native_sidebar.armed_actions.remove(&row.session_id),
+                    };
+                }
+                self.sync_session_chat_armed_actions(cx);
                 let Some(snapshot) = self.native_sidebar.snapshot.as_mut() else {
                     return;
                 };

@@ -4074,8 +4074,47 @@ reduced-motion turns both off and keeps the static glyph.
 
 .ghostex-chat-working-strip-row {
   align-items: center;
+  column-gap: var(--working-armed-column-gap);
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  row-gap: var(--working-armed-row-gap);
+}
+
+.ghostex-chat-working-strip-lead {
+  align-items: center;
   display: flex;
   gap: var(--working-gap);
+  margin-right: auto;
+  min-width: 0;
+}
+
+.ghostex-chat-working-strip-armed {
+  align-items: center;
+  display: flex;
+  gap: var(--working-armed-icon-gap);
+  min-width: 0;
+}
+
+.ghostex-chat-working-strip-armed-icon {
+  align-items: center;
+  display: flex;
+  flex: none;
+  height: var(--working-spark-box);
+  justify-content: center;
+  width: var(--working-spark-box);
+}
+
+.ghostex-chat-working-strip-armed-icon svg {
+  display: block;
+  height: var(--working-spark-size);
+  width: var(--working-spark-size);
+}
+
+.ghostex-chat-working-strip-armed-text {
+  color: var(--foreground);
+  font-size: var(--working-font-size);
+  letter-spacing: 0.01em;
   min-width: 0;
 }
 

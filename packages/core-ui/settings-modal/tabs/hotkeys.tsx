@@ -31,11 +31,14 @@ export function HotkeysSettingsTab({
   onChange,
   onExpandCollapsedProjectsOnJumpChange,
   onShowLessForExpandedProjectJumpsChange,
+  onSidebarSessionCycleSkipsSleepingChange,
   searchQuery,
   sectionRefs,
   sectionSearches,
   showLessForExpandedProjectJumps,
   showLessForExpandedProjectJumpsModification,
+  sidebarSessionCycleSkipsSleeping,
+  sidebarSessionCycleSkipsSleepingModification,
   visibleSections,
 }: {
   definitionsById: HotkeySettingsDefinitionById;
@@ -46,11 +49,14 @@ export function HotkeysSettingsTab({
   onChange: (hotkeys: ghostexHotkeySettings) => void;
   onExpandCollapsedProjectsOnJumpChange: (checked: boolean) => void;
   onShowLessForExpandedProjectJumpsChange: (checked: boolean) => void;
+  onSidebarSessionCycleSkipsSleepingChange: (checked: boolean) => void;
   searchQuery: string;
   sectionRefs: HotkeySettingsSectionRefs;
   sectionSearches: HotkeySettingsSectionSearches;
   showLessForExpandedProjectJumps: boolean;
   showLessForExpandedProjectJumpsModification: Required<SettingModificationProps>;
+  sidebarSessionCycleSkipsSleeping: boolean;
+  sidebarSessionCycleSkipsSleepingModification: Required<SettingModificationProps>;
   visibleSections: readonly HotkeySettingsSectionDefinition[];
 }) {
   const normalizedHotkeys = normalizeghostexHotkeySettings(hotkeys);
@@ -208,6 +214,24 @@ export function HotkeysSettingsTab({
                       />
                     </div>
                   </SettingRow>,
+                  /*
+                   * CDXC:Hotkeys 2026-09-19 DECISION:
+                   * User: the Skip sleeping sessions option lives on the Hotkeys page right below the Previous/Next Session hotkeys it changes.
+                   */
+                  ...(definition.id === 'focusNextSession' &&
+                  shouldShowSetting(sectionSearches.navigation, 'sidebarSessionCycleSkipsSleeping')
+                    ? [
+                        <ToggleField
+                          checked={sidebarSessionCycleSkipsSleeping}
+                          description='Next Session and Previous Session jump over sleeping sessions in the sidebar.'
+                          dependent
+                          key='sidebarSessionCycleSkipsSleeping'
+                          label='Skip sleeping sessions'
+                          {...sidebarSessionCycleSkipsSleepingModification}
+                          onChange={onSidebarSessionCycleSkipsSleepingChange}
+                        />,
+                      ]
+                    : []),
                 ];
               })}
             </SettingsSection>

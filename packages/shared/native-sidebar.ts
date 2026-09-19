@@ -1,4 +1,5 @@
 import type { SidebarHudState, SidebarSessionGroup, SidebarToExtensionMessage } from './session-grid-contract';
+import type { SessionChatArmedAction } from './session-chat-presentation/armed-actions';
 
 export type NativeSidebarSection = {
   id: 'browser' | 'pinned' | 'sessions' | 'drafts' | 'parked' | 'snoozed';
@@ -217,7 +218,13 @@ export type NativeSidebarMenuItem = {
   primary?: boolean;
 };
 
-export type NativeSidebarClockRow = { sessionId: string; timerLabel?: string; lastInteractionLabel?: string };
+export type NativeSidebarClockRow = {
+  sessionId: string;
+  timerLabel?: string;
+  lastInteractionLabel?: string;
+  /** Every session's armed Delayed Send / Close After Done, not only visible rows: the chat working row reads these. */
+  armedActions?: SessionChatArmedAction[];
+};
 export type NativeSidebarClockUpdate = { kind: 'clock'; version: 1; rows: NativeSidebarClockRow[] };
 
 export type NativeSidebarPatch = {

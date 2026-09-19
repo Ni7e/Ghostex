@@ -1639,15 +1639,6 @@ export function SettingsModal({
                                 onChange={(checked) => updateDraft('createSessionOnSidebarDoubleClick', checked)}
                               />
                             ) : null}
-                            {mainSettingVisible(settingsSearch.sidebar, 'sidebarSessionCycleSkipsSleeping') ? (
-                              <ToggleField
-                                checked={draft.sidebarSessionCycleSkipsSleeping}
-                                description='Next Session and Previous Session jump over sleeping sessions in the sidebar.'
-                                label='Skip sleeping sessions'
-                                {...getSettingModificationProps('sidebarSessionCycleSkipsSleeping')}
-                                onChange={(checked) => updateDraft('sidebarSessionCycleSkipsSleeping', checked)}
-                              />
-                            ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'enableSessionParking') ? (
                               <ToggleField
                                 checked={draft.enableSessionParking}
@@ -3108,6 +3099,10 @@ export function SettingsModal({
                       showLessForExpandedProjectJumpsModification={getSettingModificationProps(
                         'showLessForExpandedProjectJumps'
                       )}
+                      sidebarSessionCycleSkipsSleeping={draft.sidebarSessionCycleSkipsSleeping}
+                      sidebarSessionCycleSkipsSleepingModification={getSettingModificationProps(
+                        'sidebarSessionCycleSkipsSleeping'
+                      )}
                       visibleSections={visibleHotkeySections}
                       searchQuery={settingsSearchQuery}
                       onChange={(hotkeys) => updateDraft('hotkeys', hotkeys)}
@@ -3121,6 +3116,9 @@ export function SettingsModal({
                       }
                       onShowLessForExpandedProjectJumpsChange={(checked) =>
                         updateDraft('showLessForExpandedProjectJumps', checked)
+                      }
+                      onSidebarSessionCycleSkipsSleepingChange={(checked) =>
+                        updateDraft('sidebarSessionCycleSkipsSleeping', checked)
                       }
                     />
                   </TabsContent>

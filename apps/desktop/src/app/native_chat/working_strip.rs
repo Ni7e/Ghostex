@@ -16,34 +16,122 @@ impl NativeChatView {
     pub(crate) fn render_working_strip(&self, p: &ChatAppearance) -> Option<AnyElement> {
         let status = &self.snapshot["workingStrip"];
         let reduced_motion = crate::app::helpers::gpui_macos_reduce_motion_enabled();
+        let armed = self.armed_action_items(p);
         if status["presentation"].is_object() {
-            return Some(self.render_working_activity(p, reduced_motion));
+            let activity = self.render_working_activity(p, reduced_motion);
+            if armed.is_empty() {
+                return Some(activity);
+            }
+            return Some(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0 * p.scale))
+                    .child(activity)
+                    .child(self.working_row(None, armed, p, reduced_motion))
+                    .into_any_element(),
+            );
         }
-        let label = status["label"].as_str()?;
-        Some(
-            div()
-                .id("chat-working-strip")
-                .role(gpui::Role::Status)
-                .aria_label(label)
-                .w_full()
-                .min_w_0()
-                .min_h(px(VISUAL.min_height * p.scale))
-                .px(px(VISUAL.padding_x * p.scale))
-                .flex()
-                .items_center()
-                .gap(px(VISUAL.gap * p.scale))
-                .child(spark(p, reduced_motion))
-                .child(
+        let label = status["label"].as_str();
+        if label.is_none() && armed.is_empty() {
+            return None;
+        }
+        Some(self.working_row(label, armed, p, reduced_motion))
+    }
+
+    /// The working row: spark and word at the left (when working), armed actions pushed right by the
+    /// lead's auto margin; items that do not fit wrap onto a left-aligned second line (armed-actions.ts).
+    fn working_row(
+        &self,
+        label: Option<&str>,
+        armed: Vec<AnyElement>,
+        p: &ChatAppearance,
+        reduced_motion: bool,
+    ) -> AnyElement {
+        let s = p.scale;
+        let armed_labels = self.armed_actions.as_array().into_iter().flatten();
+        let aria = label
+            .into_iter()
+            .chain(armed_labels.filter_map(|action| action["label"].as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut lead = div()
+            .flex()
+            .items_center()
+            .gap(px(VISUAL.gap * s))
+            .min_w_0()
+            .mr_auto();
+        if let Some(label) = label {
+            lead = lead.child(spark(p, reduced_motion)).child(
+                div()
+                    .min_w_0()
+                    .text_size(px(VISUAL.font_size * s))
+                    .line_height(relative(1.5))
+                    .text_color(p.muted)
+                    .truncate()
+                    .child(label.to_owned()),
+            );
+        }
+        div()
+            .id("chat-working-strip")
+            .role(gpui::Role::Status)
+            .aria_label(aria)
+            .w_full()
+            .min_w_0()
+            .min_h(px(VISUAL.min_height * s))
+            .px(px(VISUAL.padding_x * s))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_x(px(VISUAL.armed_column_gap * s))
+            .gap_y(px(VISUAL.armed_row_gap * s))
+            .child(lead)
+            .children(armed)
+            .into_any_element()
+    }
+
+    fn armed_action_items(&self, p: &ChatAppearance) -> Vec<AnyElement> {
+        let s = p.scale;
+        self.armed_actions
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|action| {
+                let color = VISUAL.armed_color(action["id"].as_str()?)?;
+                let label = action["label"].as_str()?.to_owned();
+                Some(
                     div()
+                        .flex()
+                        .items_center()
+                        .gap(px(VISUAL.armed_icon_gap * s))
                         .min_w_0()
-                        .text_size(px(VISUAL.font_size * p.scale))
-                        .line_height(relative(1.5))
-                        .text_color(p.muted)
-                        .truncate()
-                        .child(label.to_owned()),
+                        .child(
+                            div()
+                                .size(px(VISUAL.spark_box * s))
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    svg()
+                                        .path("titlebar/clock.svg")
+                                        .size(px(VISUAL.spark_size * s))
+                                        .text_color(color),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .text_size(px(VISUAL.font_size * s))
+                                .line_height(relative(1.5))
+                                .text_color(p.foreground)
+                                .child(label),
+                        )
+                        .into_any_element(),
                 )
-                .into_any_element(),
-        )
+            })
+            .collect()
     }
 
     fn render_working_activity(&self, p: &ChatAppearance, reduced_motion: bool) -> AnyElement {

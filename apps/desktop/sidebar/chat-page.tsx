@@ -1,4 +1,5 @@
 import { AccountPrivacyContext } from '@/packages/core-ui/accounts/account-text';
+import type { SessionChatArmedAction } from '@/packages/shared/session-chat-presentation/armed-actions';
 import { createSessionChatDiagnosticRecorder } from '@/packages/core-ui/chat/session-chat-diagnostics';
 import { replayDraftSaves } from '@/packages/core-ui/chat/session-chat-draft-outbox';
 import { importDraftRecovery } from '@/packages/core-ui/chat/session-chat-draft-recovery';
@@ -265,8 +266,25 @@ export function createGpuiSessionChatPage({
       session: GxserverPresentationSession;
     } | null>(null);
     const persistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const [armedActions, setArmedActions] = useState<SessionChatArmedAction[]>([]);
     const nativeBridgeSequenceRef = useRef(0);
     const pendingNativeBridgeCallsRef = useRef(new Map<string, PendingNativeExtensionBridgeCall>());
+
+    useEffect(() => {
+      // The native sidebar's clock owns these labels and Rust pushes each change; ask once on mount for the current value.
+      const namespace = chatBridgeNamespace();
+      const previous = namespace.onSessionChatArmedActionsChanged;
+      const receive = (actions: SessionChatArmedAction[]): void => {
+        setArmedActions(Array.isArray(actions) ? actions : []);
+      };
+      namespace.onSessionChatArmedActionsChanged = receive;
+      postSessionChatHostAction('armedActionsRequest');
+      return () => {
+        if (namespace.onSessionChatArmedActionsChanged === receive) {
+          namespace.onSessionChatArmedActionsChanged = previous;
+        }
+      };
+    }, []);
 
     useEffect(() => {
       const namespace = chatBridgeNamespace();
@@ -647,6 +665,7 @@ export function createGpuiSessionChatPage({
         <div className='native-sidebar-shell gpui-session-chat'>
           <SessionChatView
             agentLabel={agentLabel}
+            armedActions={armedActions}
             chatBarExtensions={chatBarExtensions}
             chatBarPanelState={panelState}
             className='gpui-session-chat-view'

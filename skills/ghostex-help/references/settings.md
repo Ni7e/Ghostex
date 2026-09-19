@@ -58,7 +58,6 @@ How to use this file:
 - **Compact Session Rows** `projectSessionListCollapsedCount` (number 1 to 50 default 13) [advanced]: Rows a project shows in Compact mode before its "Show all" row. Rows in collapsed sections do not count.
 - **Sidebar Interface Size** `agentManagerZoomPercent` (number 50 to 200 default 100): Scale the sidebar interface.
 - **Double-click empty sidebar space to create a session** `createSessionOnSidebarDoubleClick` (boolean, default false) [advanced]: Create a session from empty sidebar space.
-- **Skip sleeping sessions** `sidebarSessionCycleSkipsSleeping` (boolean, default false): Next Session and Previous Session jump over sleeping sessions in the sidebar.
 - **Enable session parking** `enableSessionParking` (boolean, default true): Move deferred sessions into a collapsible Parked section at the bottom of the sidebar.
 - **Sleep session when parking** `sleepSessionWhenParking` (boolean, default false): Sleep a session automatically when it is moved into the Parked section.
 - **Park & Snooze with tags** `showTagMenuWhenParking` (boolean, default true): Open the Tag as menu when a session is parked or snoozed so it can be tagged right away.
@@ -426,3 +425,6 @@ How to use this file:
 
 - **Expand collapsed projects on jump** `expandCollapsedProjectsOnJump` (boolean, default true): Expand a collapsed project when a project-jump hotkey lands on it.
 - **Compact list after project jumps** `showLessForExpandedProjectJumps` (boolean, default false): Switch the session list of a project expanded by a jump to Compact.
+### Navigation
+
+- **Skip sleeping sessions** `sidebarSessionCycleSkipsSleeping` (boolean, default false): Next Session and Previous Session jump over sleeping sessions in the sidebar.

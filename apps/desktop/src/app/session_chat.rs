@@ -344,6 +344,10 @@ impl GhostexGpuiApp {
             }
             return;
         }
+        if action == "armedActionsRequest" {
+            self.push_session_chat_armed_actions(session_id, cx);
+            return;
+        }
         if action == "setSimpleMode" {
             if let Some(enabled) = message.get("enabled").and_then(serde_json::Value::as_bool) {
                 self.handle_gpui_app_modal_update_settings_patch_message(

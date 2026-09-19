@@ -50,7 +50,12 @@ impl GhostexGpuiApp {
             initial_snapshot: self.cached_session_chat_runtime_snapshot(Some(&key)),
             initial_presentation: self.initial_session_chat_presentation(Some(&key)),
         };
-        let view = cx.new(|cx| NativeChatView::new(config, cx));
+        let armed_actions = self.session_chat_armed_actions(session_id);
+        let view = cx.new(|cx| {
+            let mut view = NativeChatView::new(config, cx);
+            view.armed_actions = armed_actions;
+            view
+        });
         let subscription =
             cx.subscribe(
                 &view,

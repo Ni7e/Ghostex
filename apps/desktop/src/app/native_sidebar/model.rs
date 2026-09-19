@@ -181,6 +181,8 @@ pub(crate) struct NativeSidebarClockRow {
     pub(crate) session_id: String,
     pub(crate) timer_label: Option<String>,
     pub(crate) last_interaction_label: Option<String>,
+    #[serde(default)]
+    pub(crate) armed_actions: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
