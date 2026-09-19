@@ -357,8 +357,8 @@ export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: 
       onKeyDownCapture={markUserInteractedAfterMount}
       onPointerDownCapture={markUserInteractedAfterMount}
     >
-      {/* Query row: input on the left, counter, filter dropdowns, and action buttons on the right. */}
-      <div className='ghostex-find-toolbar flex shrink-0 items-center gap-3 border-b border-border/60 px-3.5 py-2'>
+      {/* Query row: input on the left, filter dropdowns and action buttons on the right. */}
+      <div className='ghostex-find-toolbar flex shrink-0 items-center gap-2.5 border-b border-border/60 px-3.5 py-2'>
         <span aria-hidden='true' className='text-[15px] text-primary'>
           ❯
         </span>
@@ -373,12 +373,6 @@ export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: 
           type='text'
           value={find.query}
         />
-        {/* CDXC:PromptSearch 2026-09-08 DECISION: Hide both result counters while loading so Search by Prompt does not display provisional 0/0 counts. */}
-        {!find.loading ? (
-          <span className='shrink-0 tabular-nums text-[13px] text-muted-foreground'>
-            {find.matched}/{find.total}
-          </span>
-        ) : null}
         {/*
          * CDXC:PromptSearch 2026-09-16 DECISION:
          * User: the top-right controls match the Quick Access Sessions tab in size, show their hotkey in the app's regular tooltip for the one control under the pointer, and read as toggles (Days, Fav, View, Fork) or dropdowns (agents, projects) so the active state is obvious.
@@ -442,46 +436,60 @@ export function FindPromptsView({ acceptAll, hostActions, onReady, transport }: 
         {hostActions}
       </div>
 
-      {/* Results */}
-      <div
-        className={cn(
-          'min-h-0 flex-1 overflow-y-auto scrollbar-thin px-2.5 py-1.5',
-          find.loading && viewRows.length === 0 && 'overflow-hidden',
-          find.fullscreenPreview && 'hidden'
-        )}
-        ref={listRef}
-        role='listbox'
-        tabIndex={-1}
-      >
-        {find.loading && viewRows.length === 0 ? <FindPromptsListSkeleton groupByDay={find.groupByDay} /> : null}
-        {viewRows.length === 0 && !find.loading ? (
-          <div className='px-2 py-6 text-center text-[15px] text-muted-foreground'>
-            {find.total === 0 ? 'No agent prompt history was found on this machine.' : 'No prompts match this search.'}
-          </div>
+      {/*
+       * Results, with the match counter pinned over their bottom-right corner.
+       *
+       * CDXC:PromptSearch 2026-09-19 DECISION:
+       * User: the matched/total counter sits in a pill at the bottom right of the results, in the style of the floating "Search by Prompt" button over the Previous Sessions list, instead of in the query row where it cut the placeholder short.
+       */}
+      <div className={cn('relative min-h-0 flex-1', find.fullscreenPreview && 'hidden')}>
+        <div
+          className={cn(
+            'h-full overflow-y-auto scrollbar-thin px-2.5 pb-10 pt-1.5',
+            find.loading && viewRows.length === 0 && 'overflow-hidden'
+          )}
+          ref={listRef}
+          role='listbox'
+          tabIndex={-1}
+        >
+          {find.loading && viewRows.length === 0 ? <FindPromptsListSkeleton groupByDay={find.groupByDay} /> : null}
+          {viewRows.length === 0 && !find.loading ? (
+            <div className='px-2 py-6 text-center text-[15px] text-muted-foreground'>
+              {find.total === 0
+                ? 'No agent prompt history was found on this machine.'
+                : 'No prompts match this search.'}
+            </div>
+          ) : null}
+          {viewRows.map((viewRow) =>
+            viewRow.type === 'day' ? (
+              <div
+                className='px-2 pb-1.5 pt-3.5 text-[12px] font-medium text-muted-foreground'
+                key={`day-${viewRow.position}-${viewRow.dayKey}`}
+              >
+                {formatDayHeader(viewRow.dayKey, now)}
+              </div>
+            ) : (
+              <div
+                key={`${viewRow.row.key}-${viewRow.position}`}
+                ref={viewRow.position === find.selection ? selectedRef : undefined}
+              >
+                <FindPromptResultRow
+                  onActivate={() => void find.resumeRow(viewRow.row)}
+                  onSelect={() => find.selectRow(viewRow.position)}
+                  row={viewRow.row}
+                  selected={viewRow.position === find.selection}
+                  timeLabel={formatLastActiveCompact(viewRow.row.ts, now)}
+                />
+              </div>
+            )
+          )}
+        </div>
+        {/* CDXC:PromptSearch 2026-09-08 DECISION: Hide both result counters while loading so Search by Prompt does not display provisional 0/0 counts. */}
+        {!find.loading ? (
+          <span aria-live='polite' className='ghostex-find-count-pill tabular-nums'>
+            {find.matched}/{find.total}
+          </span>
         ) : null}
-        {viewRows.map((viewRow) =>
-          viewRow.type === 'day' ? (
-            <div
-              className='px-2 pb-1.5 pt-3.5 text-[12px] font-medium text-muted-foreground'
-              key={`day-${viewRow.position}-${viewRow.dayKey}`}
-            >
-              {formatDayHeader(viewRow.dayKey, now)}
-            </div>
-          ) : (
-            <div
-              key={`${viewRow.row.key}-${viewRow.position}`}
-              ref={viewRow.position === find.selection ? selectedRef : undefined}
-            >
-              <FindPromptResultRow
-                onActivate={() => void find.resumeRow(viewRow.row)}
-                onSelect={() => find.selectRow(viewRow.position)}
-                row={viewRow.row}
-                selected={viewRow.position === find.selection}
-                timeLabel={formatLastActiveCompact(viewRow.row.ts, now)}
-              />
-            </div>
-          )
-        )}
       </div>
 
       {/* Bottom pane: overlays take it over, otherwise the selected prompt. */}

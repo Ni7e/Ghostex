@@ -75,3 +75,38 @@ body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .gho
     animation: none;
   }
 }
+
+/*
+ * CDXC:PromptSearch 2026-09-19 WHY:
+ * The match counter borrows the surface, hairline, and inset highlight of the floating "Search by Prompt" button so the two pills read as one family.
+ * It is passive text, so it stays out of hit testing and lets clicks reach the row underneath it.
+ * SEE-ALSO: .previous-sessions-find-prompts-button in packages/core-ui/styles/modals.css.
+ */
+.ghostex-find-count-pill {
+  --ghostex-find-pill-surface: #141414;
+  --ghostex-find-pill-outline: rgb(255 255 255 / 5%);
+  --ghostex-find-pill-highlight: rgb(255 255 255 / 3%);
+  align-items: center;
+  background: var(--ghostex-find-pill-surface);
+  border: 1px solid var(--ghostex-find-pill-outline);
+  border-radius: 999px;
+  bottom: 10px;
+  box-shadow: inset 0 1px var(--ghostex-find-pill-highlight);
+  color: var(--muted-foreground, var(--app-muted));
+  display: inline-flex;
+  font-size: 12px;
+  height: 26px;
+  line-height: 18px;
+  padding: 0 11px;
+  pointer-events: none;
+  position: absolute;
+  right: 14px;
+  user-select: none;
+  z-index: 2;
+}
+
+body:is([data-sidebar-theme='plain-light'], [data-sidebar-theme^='light-']) .ghostex-find-count-pill {
+  --ghostex-find-pill-surface: #ffffff;
+  --ghostex-find-pill-outline: rgb(0 0 0 / 8%);
+  --ghostex-find-pill-highlight: transparent;
+}
