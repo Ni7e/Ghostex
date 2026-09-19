@@ -1,0 +1,271 @@
+//! Spaces: the saved sidebar filters, which projects each one claims, and the built-in Other view.
+//!
+//! SEE-ALSO: packages/core-ui/spaces.ts, packages/core-ui/sidebar-app/space-filtering.ts,
+//! packages/shared/sidebar-spaces-other.ts.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use ghostex_gx_protocol::SidebarSpacesState as WireSpacesState;
+
+use super::text::js_trim;
+
+/// The reserved id of the built-in Other view.
+pub const OTHER_SPACE_ID: &str = "other";
+pub(crate) const OTHER_SPACE_LABEL: &str = "Other";
+pub(crate) const OTHER_SPACE_ICON: &str = "layoutDashboard";
+const DEFAULT_SPACE_ICON: &str = "stack";
+
+const MAX_SPACES: usize = 256;
+const MAX_MEMBER_IDS_PER_LIST: usize = 512;
+const MAX_ID_CHARS: usize = 256;
+const MAX_NAME_CHARS: usize = 256;
+const MAX_ICON_CHARS: usize = 256;
+
+/// The colours a Space falls back to, shared with the collection palette.
+const SPACE_COLOR_PRESETS: &[&str] = &[
+    "#4f5663", "#808080", "#7c6df2", "#3aa675", "#d6873f", "#d75b72", "#3f8fc7", "#b36ad4",
+    "#8c9b45", "#c95353", "#c4a23d", "#2f9b95", "#596fd1",
+];
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Space {
+    pub(crate) space_id: String,
+    pub(crate) name: String,
+    pub(crate) icon: String,
+    pub(crate) color: String,
+    pub(crate) member_collection_ids: Vec<String>,
+    pub(crate) member_project_ids: Vec<String>,
+}
+
+/// One machine's Spaces after client normalization.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SpacesState {
+    pub(crate) order: Vec<String>,
+    pub(crate) spaces: BTreeMap<String, Space>,
+}
+
+impl SpacesState {
+    /// `sanitizeSidebarSpacesState`: the order array is authoritative, a project belongs to at
+    /// most one Space, and every kept Space has a name, an icon, and a `#rrggbb` colour.
+    pub(crate) fn from_wire(state: &WireSpacesState) -> Self {
+        let mut candidates: Vec<(String, &ghostex_gx_protocol::SidebarSpace)> = Vec::new();
+        for (raw_id, space) in &state.spaces {
+            let Some(space_id) = bounded_text(raw_id, MAX_ID_CHARS) else {
+                continue;
+            };
+            if candidates.iter().any(|(id, _)| *id == space_id) {
+                continue;
+            }
+            candidates.push((space_id, space));
+        }
+        let mut ordered: Vec<String> = Vec::new();
+        for entry in &state.order {
+            let Some(space_id) = bounded_text(entry, MAX_ID_CHARS) else {
+                continue;
+            };
+            if candidates.iter().any(|(id, _)| *id == space_id) && !ordered.contains(&space_id) {
+                ordered.push(space_id);
+            }
+        }
+        for (space_id, _) in &candidates {
+            if !ordered.contains(space_id) {
+                ordered.push(space_id.clone());
+            }
+        }
+        let mut sanitized = Self::default();
+        let mut assigned_collections: BTreeSet<String> = BTreeSet::new();
+        let mut assigned_projects: BTreeSet<String> = BTreeSet::new();
+        for space_id in ordered {
+            if sanitized.order.len() >= MAX_SPACES {
+                break;
+            }
+            let Some((_, candidate)) = candidates.iter().find(|(id, _)| *id == space_id) else {
+                continue;
+            };
+            let space = Space {
+                color: sanitize_space_color(&candidate.color, sanitized.order.len()),
+                icon: bounded_text(&candidate.icon, MAX_ICON_CHARS)
+                    .unwrap_or_else(|| DEFAULT_SPACE_ICON.to_string()),
+                member_collection_ids: sanitize_member_ids(
+                    &candidate.member_collection_ids,
+                    &mut assigned_collections,
+                ),
+                member_project_ids: sanitize_member_ids(
+                    &candidate.member_project_ids,
+                    &mut assigned_projects,
+                ),
+                name: bounded_text(&candidate.name, MAX_NAME_CHARS)
+                    .unwrap_or_else(|| space_id.clone()),
+                space_id: space_id.clone(),
+            };
+            sanitized.spaces.insert(space_id.clone(), space);
+            sanitized.order.push(space_id);
+        }
+        sanitized
+    }
+
+    pub(crate) fn ordered(&self) -> Vec<&Space> {
+        self.order
+            .iter()
+            .filter_map(|space_id| self.spaces.get(space_id))
+            .collect()
+    }
+}
+
+fn bounded_text(value: &str, max_chars: usize) -> Option<String> {
+    let text = js_trim(value);
+    if text.is_empty() || text.chars().count() > max_chars {
+        return None;
+    }
+    Some(text.to_string())
+}
+
+fn sanitize_member_ids(values: &[String], seen: &mut BTreeSet<String>) -> Vec<String> {
+    let mut member_ids = Vec::new();
+    for entry in values {
+        if member_ids.len() >= MAX_MEMBER_IDS_PER_LIST {
+            break;
+        }
+        let Some(member_id) = bounded_text(entry, MAX_ID_CHARS) else {
+            continue;
+        };
+        if seen.contains(&member_id) {
+            continue;
+        }
+        seen.insert(member_id.clone());
+        member_ids.push(member_id);
+    }
+    member_ids
+}
+
+fn sanitize_space_color(value: &str, fallback_index: usize) -> String {
+    let color = js_trim(value);
+    if color.len() == 7
+        && color.starts_with('#')
+        && color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
+    {
+        return color.to_lowercase();
+    }
+    SPACE_COLOR_PRESETS[fallback_index % SPACE_COLOR_PRESETS.len()].to_string()
+}
+
+/// The view a section is filtered by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SpaceSelection {
+    Space(String),
+    Other,
+}
+
+impl SpaceSelection {
+    pub(crate) fn space_id(&self) -> &str {
+        match self {
+            SpaceSelection::Space(space_id) => space_id,
+            SpaceSelection::Other => OTHER_SPACE_ID,
+        }
+    }
+
+    pub(crate) fn is_other(&self) -> bool {
+        matches!(self, SpaceSelection::Other)
+    }
+}
+
+/// `resolveSelectedSidebarSpace`: the stored Space when it still exists, else the section's first
+/// Space, else Other.
+pub(crate) fn resolve_selected_space(
+    state: &SpacesState,
+    selected_space_id: Option<&str>,
+) -> SpaceSelection {
+    if selected_space_id == Some(OTHER_SPACE_ID) {
+        return SpaceSelection::Other;
+    }
+    if let Some(space_id) = selected_space_id.filter(|id| state.spaces.contains_key(*id)) {
+        return SpaceSelection::Space(space_id.to_string());
+    }
+    match state
+        .order
+        .iter()
+        .find(|space_id| state.spaces.contains_key(*space_id))
+    {
+        Some(space_id) => SpaceSelection::Space(space_id.clone()),
+        None => SpaceSelection::Other,
+    }
+}
+
+/// `isSidebarSpaceProject`: a grouped project follows its collection, an ungrouped one its own id,
+/// and a worktree its parent project.
+pub(crate) fn space_claims_project(
+    space: &Space,
+    project_id: &str,
+    collection_id: Option<&str>,
+    parent_project_id: Option<&str>,
+) -> bool {
+    match collection_id {
+        Some(collection_id) => space
+            .member_collection_ids
+            .iter()
+            .any(|member| member == collection_id),
+        None => {
+            let owner = parent_project_id.unwrap_or(project_id);
+            space
+                .member_project_ids
+                .iter()
+                .any(|member| member == owner)
+        }
+    }
+}
+
+/// Whether the selected view shows a group. A row whose project cannot be resolved (a user-made
+/// session group, the Chats collection) is invisible in a Space and visible in Other.
+pub(crate) fn selection_shows_project(
+    selection: &SpaceSelection,
+    state: &SpacesState,
+    project_id: Option<&str>,
+    collection_id: Option<&str>,
+    parent_project_id: Option<&str>,
+) -> bool {
+    let Some(project_id) = project_id else {
+        return selection.is_other();
+    };
+    match selection {
+        SpaceSelection::Space(space_id) => state.spaces.get(space_id).is_some_and(|space| {
+            space_claims_project(space, project_id, collection_id, parent_project_id)
+        }),
+        SpaceSelection::Other => !state
+            .ordered()
+            .into_iter()
+            .any(|space| space_claims_project(space, project_id, collection_id, parent_project_id)),
+    }
+}
+
+/// `resolveSidebarSpaceForRevealedGroup`: the Space that shows a group, preferring the current
+/// selection.
+pub(crate) fn space_for_group(
+    state: &SpacesState,
+    selection: &SpaceSelection,
+    project_id: Option<&str>,
+    collection_id: Option<&str>,
+    parent_project_id: Option<&str>,
+) -> String {
+    if selection_shows_project(
+        selection,
+        state,
+        project_id,
+        collection_id,
+        parent_project_id,
+    ) {
+        return selection.space_id().to_string();
+    }
+    let Some(project_id) = project_id else {
+        return OTHER_SPACE_ID.to_string();
+    };
+    state
+        .order
+        .iter()
+        .find(|space_id| {
+            state.spaces.get(*space_id).is_some_and(|space| {
+                space_claims_project(space, project_id, collection_id, parent_project_id)
+            })
+        })
+        .cloned()
+        .unwrap_or_else(|| OTHER_SPACE_ID.to_string())
+}

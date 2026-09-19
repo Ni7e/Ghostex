@@ -21,6 +21,7 @@ mod keys;
 mod overlay;
 mod presentation_store;
 mod selectors;
+mod sidebar_view;
 
 pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
 pub use crate::connection::{ConnectionPhase, ConnectionState, ConnectionUpdate};
@@ -41,6 +42,15 @@ pub use crate::presentation_store::{
 pub use crate::selectors::{
     is_chat_project_path, Loadable, TabDirection, TabSession, DEFAULT_TERMINAL_SESSION_TITLE,
     QUICK_AUTOMATIONS_PROJECT_ID, TAB_SESSION_TITLE_MAX_UTF16,
+};
+pub use crate::sidebar_view::{
+    BrowserTabInput, CloseAfterDoneInput, CollectionView, DelayedSendInput, DelayedSendView,
+    EmptyState, GroupCore, GroupSummary, GroupView, MachineSummary, OrderItem, OrderKind,
+    ProjectContextView, ProjectDiffStats, SectionCollapse, SectionId, SectionView, SessionRow,
+    SessionSortMode, SessionTiming, SessionView, SidebarCollapseState, SidebarHiddenItems,
+    SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState, SidebarView,
+    SidebarViewModel, SpaceView, TagListItem, TagListItemKind, TagPresentation, UnavailableState,
+    WorktreeView, LOCAL_MACHINE_ID, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
 };
 
 /// The wire types, re-exported so a host needs one dependency.
