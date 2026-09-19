@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 /// until the same runtime URL asks for it again or the keep-alive window ends.
 pub(crate) struct ParkedProjectWorkareaSurface {
     pub(crate) owned: ProjectWorkareaRuntimeCefSurface,
+    pub(crate) slot_key: ProjectWorkareaCefSurfaceSlotKey,
     pub(crate) parked_at: Instant,
 }
 
@@ -53,6 +54,7 @@ impl GhostexGpuiApp {
     pub(crate) fn park_project_workarea_runtime_cef_surface(
         &mut self,
         owned: ProjectWorkareaRuntimeCefSurface,
+        slot_key: ProjectWorkareaCefSurfaceSlotKey,
         was_visible: bool,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -68,6 +70,7 @@ impl GhostexGpuiApp {
         self.parked_project_workarea_surfaces
             .push(ParkedProjectWorkareaSurface {
                 owned,
+                slot_key,
                 parked_at: Instant::now(),
             });
         self.ensure_project_keep_alive_expiry_scheduled(cx);

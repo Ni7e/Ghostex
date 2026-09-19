@@ -70,6 +70,9 @@ impl GhostexGpuiApp {
                 ));
         shell_layout_state
             .project_editor_shell
+            .sleep_all_modes_for_launch(shell_layout_state.active_mode);
+        shell_layout_state
+            .project_editor_shell
             .left_companion_visible = restored_panes.companion_visible;
         shell_layout_state.command_pane.mode = restored_panes.command_mode;
         shell_layout_state.command_pane.last_expanded_mode =
@@ -277,7 +280,7 @@ impl GhostexGpuiApp {
                     .object()
                     .get("sessionChatUseGpui")
                     .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false),
+                    .unwrap_or(true),
                 native_chat_views: HashMap::new(),
                 agents_chat_surfaces: HashMap::new(),
                 session_chat_broker_endpoints: HashMap::new(),
@@ -354,6 +357,8 @@ impl GhostexGpuiApp {
                 zmx_persistence_last_focused_terminal_slot: None,
                 cef_sidebar_creation_retried: false,
                 cef_context_initialization_waiting: false,
+                cef_runtime_requested: false,
+                app_modal_open_deferred_for_cef: None,
                 agents_terminal_zmx_refresh_recorded_bounds: HashMap::new(),
                 command_terminal_zmx_refresh_recorded_bounds: HashMap::new(),
                 project_editor_companion_zmx_refresh_recorded_bounds: HashMap::new(),

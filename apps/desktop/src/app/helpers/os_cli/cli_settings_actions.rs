@@ -71,9 +71,7 @@ impl GpuiGhostexCliSettingsAction {
             Self::InstallBrowserUseSkill => "Ghostex Browser Use install failed",
             Self::InstallComputerUseSkill => "Ghostex Computer Use install failed",
             Self::InstallCliSkill => "Ghostex CLI skill install failed",
-            Self::InstallAgentsOrchestrationSkill => {
-                "Ghostex Agents Orchestration install failed"
-            }
+            Self::InstallAgentsOrchestrationSkill => "Ghostex Agents Orchestration install failed",
             Self::InstallManageBeadsSkill => "Ghostex Manage Beads install failed",
             Self::InstallGenerateTitleSkill => "Ghostex Auto Rename Session install failed",
             Self::InstallMoveCodexSessionSkill => "Ghostex Move Codex Session install failed",

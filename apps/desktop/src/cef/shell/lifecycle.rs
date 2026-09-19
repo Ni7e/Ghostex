@@ -86,6 +86,39 @@ pub fn context_initialized() -> bool {
     CEF_CONTEXT_INITIALIZED.load(Ordering::Acquire)
 }
 
+struct CefRuntimeDemand {
+    sender: futures::channel::mpsc::UnboundedSender<()>,
+    receiver: Mutex<Option<futures::channel::mpsc::UnboundedReceiver<()>>>,
+}
+
+static CEF_RUNTIME_DEMAND: OnceLock<CefRuntimeDemand> = OnceLock::new();
+
+fn runtime_demand() -> &'static CefRuntimeDemand {
+    CEF_RUNTIME_DEMAND.get_or_init(|| {
+        let (sender, receiver) = futures::channel::mpsc::unbounded();
+        CefRuntimeDemand {
+            sender,
+            receiver: Mutex::new(Some(receiver)),
+        }
+    })
+}
+
+/// CDXC:CefRuntime 2026-09-19 DECISION:
+/// User: defer CEF at launch so startup is as fast as possible, and start it when it is actually needed.
+/// Browser creation is the one place that knows a web view is wanted right now, and it runs inside app updates, so it only signals here; the app's listener starts the runtime on its next turn and the existing "not yet" retry paths create the view once the context is ready.
+pub fn request_runtime() {
+    let _ = runtime_demand().sender.unbounded_send(());
+}
+
+/// The app takes this once at launch and starts CEF on the first signal.
+pub fn take_runtime_demand_receiver() -> Option<futures::channel::mpsc::UnboundedReceiver<()>> {
+    runtime_demand()
+        .receiver
+        .lock()
+        .expect("CEF runtime demand mutex should not be poisoned")
+        .take()
+}
+
 wrap_app! {
     pub(crate) struct GhostexGpuiCefApp;
 

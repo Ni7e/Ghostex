@@ -309,8 +309,6 @@ fn main() {
                 gpui::NoAction {},
                 Some(terminal_element::TERMINAL_KEY_CONTEXT),
             ),
-            KeyBinding::new("ctrl-tab", CycleFocusedTabForward, None),
-            KeyBinding::new("ctrl-shift-tab", CycleFocusedTabBackward, None),
             gpui_key_binding_from_shared_hotkey("cmd+w", CloseFocusedSurface, None),
             gpui_key_binding_from_shared_hotkey("cmd+b", ToggleGpuiSidebarCollapsed, None),
             gpui_key_binding_from_shared_hotkey("cmd+alt+b", ToggleProjectEditorCompanion, None),
@@ -403,7 +401,7 @@ fn main() {
                             target_os = "windows",
                             target_os = "linux"
                         ))]
-                        app.begin_cef_startup(cx);
+                        app.begin_deferred_cef_startup(cx);
                         #[cfg(not(any(
                             target_os = "macos",
                             target_os = "windows",

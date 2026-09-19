@@ -245,10 +245,23 @@ wrap_client! {
     }
 }
 
+/// CDXC:CefRuntime 2026-09-19 WHY:
+/// A CEF client owns exactly one LoadHandler, so a surface that installs its bridge at load end
+/// cannot also carry a separate load-end handler: whichever one is chosen silently replaces the
+/// other. Reporting the edge from inside every handler is what keeps both on the same surface.
+/// A standalone load-end handler put in front of the others on 2026-09-19 left Docs, Kanban, and
+/// Automate with no `window.ghostexGpui.post*Request` at all, so every request they made timed out.
+fn report_main_frame_load_end(handler: &Option<PageLoadEndHandler>) {
+    if let Some(handler) = handler {
+        handler();
+    }
+}
+
 wrap_load_handler! {
     pub(crate) struct GhostexGpuiBrowserPageLoadHandler {
         page_metadata_handler: Option<BrowserPageMetadataHandler>,
         code_editor_origin: Option<String>,
+        page_load_end_handler: Option<PageLoadEndHandler>,
     }
 
     impl LoadHandler {
@@ -274,10 +287,17 @@ wrap_load_handler! {
             frame: Option<&mut Frame>,
             _http_status_code: c_int,
         ) {
-            let (Some(frame), Some(origin)) = (frame, self.code_editor_origin.as_deref()) else {
+            let Some(frame) = frame else {
                 return;
             };
-            if frame.is_main() == 0 || !cef_origins_match(&CefString::from(&frame.url()).to_string(), origin) {
+            if frame.is_main() == 0 {
+                return;
+            }
+            report_main_frame_load_end(&self.page_load_end_handler);
+            let Some(origin) = self.code_editor_origin.as_deref() else {
+                return;
+            };
+            if !cef_origins_match(&CefString::from(&frame.url()).to_string(), origin) {
                 return;
             }
             // CDXC:DesignSystem 2026-09-15 SEE-ALSO:
@@ -292,6 +312,7 @@ wrap_load_handler! {
 wrap_load_handler! {
     pub(crate) struct GhostexGpuiExtensionBridgeLoadHandler {
         surface: ExtensionBridgeSurfaceSpec,
+        page_load_end_handler: Option<PageLoadEndHandler>,
     }
 
     impl LoadHandler {
@@ -307,6 +328,7 @@ wrap_load_handler! {
             if frame.is_main() == 0 {
                 return;
             }
+            report_main_frame_load_end(&self.page_load_end_handler);
             let frame_url = CefString::from(&frame.url()).to_string();
             if !self.surface.matches_url(&frame_url) {
                 return;
@@ -355,6 +377,7 @@ wrap_load_handler! {
     pub(crate) struct GhostexGpuiSidebarProjectContextLoadHandler {
         runtime_settings: SidebarRuntimeSettingsSnapshot,
         gxserver_bootstrap: Option<SidebarGxserverBootstrap>,
+        page_load_end_handler: Option<PageLoadEndHandler>,
     }
 
     impl LoadHandler {
@@ -370,6 +393,7 @@ wrap_load_handler! {
             if frame.is_main() == 0 {
                 return;
             }
+            report_main_frame_load_end(&self.page_load_end_handler);
 
             /*
             CDXC:CefRuntime 2026-06-24-11:17:
@@ -393,6 +417,7 @@ wrap_load_handler! {
         activation: StdRc<RefCell<Option<SessionChatActivation>>>,
         zoom: StdRc<SessionChatZoom>,
         entry_identity: Option<String>,
+        page_load_end_handler: Option<PageLoadEndHandler>,
     }
 
     impl LoadHandler {
@@ -405,6 +430,9 @@ wrap_load_handler! {
             let Some(frame) = frame else {
                 return;
             };
+            if frame.is_main() != 0 {
+                report_main_frame_load_end(&self.page_load_end_handler);
+            }
             let Some(entry_identity) = self.entry_identity.as_deref() else { return; };
             if !trusted_gxserver_frame_matches(frame, entry_identity) {
                 return;
@@ -440,6 +468,7 @@ wrap_load_handler! {
 wrap_load_handler! {
     pub(crate) struct GhostexGpuiProjectWorkareaBridgeLoadHandler {
         manage_docs_resource_base_url: Option<String>,
+        page_load_end_handler: Option<PageLoadEndHandler>,
     }
 
     impl LoadHandler {
@@ -455,6 +484,7 @@ wrap_load_handler! {
             if frame.is_main() == 0 {
                 return;
             }
+            report_main_frame_load_end(&self.page_load_end_handler);
 
             /*
             CDXC:CefRuntime 2026-06-24-11:03:

@@ -96,6 +96,7 @@ impl CefBrowser {
         same fallible "not yet" that callers already retry on their next pass.
         */
         if !context_initialized() {
+            request_runtime();
             return Err("CEF runtime is not initialized yet".into());
         }
         let keyboard_zoom_enabled = page_metadata_handler.is_some()
@@ -248,19 +249,15 @@ impl CefBrowser {
             .clone()
             .filter(|_| extension_bridge_installed)
         {
-            Some(GhostexGpuiExtensionBridgeLoadHandler::new(surface))
-        } else if let Some(page_load_end_handler) = page_load_end_handler {
-            /*
-            CDXC:Onboarding 2026-08-18:
-            Only bridge-less third-party surfaces (the tutorial video modal)
-            pass this handler, so it can never displace the sidebar,
-            session-chat, workarea, or Browser load handlers below.
-            */
-            Some(GhostexGpuiPageLoadEndHandler::new(page_load_end_handler))
+            Some(GhostexGpuiExtensionBridgeLoadHandler::new(
+                surface,
+                page_load_end_handler,
+            ))
         } else if sidebar_bridge_installed_for_handler(sidebar_bridge_event_handler.is_some()) {
             Some(GhostexGpuiSidebarProjectContextLoadHandler::new(
                 sidebar_runtime_settings.unwrap_or_default(),
                 sidebar_gxserver_bootstrap,
+                page_load_end_handler,
             ))
         } else if sidebar_gxserver_bootstrap.is_some() {
             /*
@@ -276,18 +273,28 @@ impl CefBrowser {
                 session_chat_activation.clone(),
                 session_chat_zoom.clone(),
                 trusted_gxserver_entry_identity.clone(),
+                page_load_end_handler,
             ))
         } else if project_workarea_bridge_event_handler.is_some() {
             Some(GhostexGpuiProjectWorkareaBridgeLoadHandler::new(
                 manage_docs_resource_base_url,
+                page_load_end_handler,
+            ))
+        } else if page_metadata_handler.is_some() || trusted_clipboard_origin.is_some() {
+            Some(GhostexGpuiBrowserPageLoadHandler::new(
+                page_metadata_handler,
+                trusted_clipboard_origin.clone(),
+                page_load_end_handler,
             ))
         } else {
-            (page_metadata_handler.is_some() || trusted_clipboard_origin.is_some()).then(|| {
-                GhostexGpuiBrowserPageLoadHandler::new(
-                    page_metadata_handler,
-                    trusted_clipboard_origin.clone(),
-                )
-            })
+            /*
+            CDXC:Onboarding 2026-08-18:
+            The handler for a surface with no bridge of its own (the tutorial
+            video modal). Every bridged surface above reports the same edge
+            from inside its own handler, because the client has one LoadHandler
+            slot and a second handler would displace the bridge install.
+            */
+            page_load_end_handler.map(GhostexGpuiPageLoadEndHandler::new)
         };
         // Session Chat pages resolve local drops to real absolute paths
         // published by the shell at drag-enter (Chromium hides them from the

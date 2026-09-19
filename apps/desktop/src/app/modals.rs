@@ -1334,6 +1334,16 @@ impl GhostexGpuiApp {
         CDXC:Diagnostics 2026-06-28-17:06:
         GPUI app-modal open/retry behavior stays functional, but runtime log writers and diagnostic breadcrumbs are intentionally removed until a future requirement adds a narrower diagnostics surface.
         */
+        if !cef::context_initialized() {
+            self.defer_gpui_app_modal_open_for_cef(
+                modal,
+                open_message,
+                sidebar_state_message,
+                reset_ready_retry,
+                cx,
+            );
+            return;
+        }
         if reset_ready_retry {
             self.app_modal_ready_retry_used = false;
         }

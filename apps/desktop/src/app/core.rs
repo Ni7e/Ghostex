@@ -686,6 +686,9 @@ pub struct GhostexGpuiApp {
     // (CDXC:CefRuntime 2026-07-11).
     pub(crate) cef_sidebar_creation_retried: bool,
     pub(crate) cef_context_initialization_waiting: bool,
+    pub(crate) cef_runtime_requested: bool,
+    pub(crate) app_modal_open_deferred_for_cef:
+        Option<crate::app::cef_deferred_startup::GpuiAppModalOpenDeferredForCef>,
     pub(crate) agents_terminal_zmx_refresh_recorded_bounds:
         HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
     pub(crate) command_terminal_zmx_refresh_recorded_bounds:

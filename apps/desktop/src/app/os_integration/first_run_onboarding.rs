@@ -162,6 +162,12 @@ impl GhostexGpuiApp {
                 return;
             }
             let _ = this.update(cx, |this, cx| {
+                // The setup modal is a CEF page and its "seen" marker is only written once the window exists. With CEF deferred at launch, start the runtime and let the CEF-ready entry point run this pass again (CDXC:CefRuntime 2026-09-19).
+                if first_launch_setup_sidebar_state.is_some() && !cef::context_initialized() {
+                    this.first_run_onboarding_started = false;
+                    this.request_cef_runtime(cx);
+                    return;
+                }
                 if show_os_integration_toast {
                     this.upsert_gpui_app_toast(
                         GpuiAppToast {
