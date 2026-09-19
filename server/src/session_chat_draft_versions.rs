@@ -273,6 +273,11 @@ pub fn consume_in(
         "UPDATE session_chat_draft_versions SET consumed=MAX(consumed,?4),content=CASE WHEN revision<=?4 THEN '' ELSE content END WHERE projectId=?1 AND sessionId=?2 AND draftId=?3",
         params![project, session, version.draft_id, version.revision],
     ).map_err(sql_error)?;
+    // Consumed revisions can never be offered for recovery again, so retire their records here instead of leaving them to accumulate.
+    transaction.execute(
+        "DELETE FROM session_chat_draft_recovery WHERE projectId=?1 AND sessionId=?2 AND draftId=?3 AND revision<=?4",
+        params![project, session, version.draft_id, version.revision],
+    ).map_err(sql_error)?;
     transaction.execute(
         "UPDATE session_chat_drafts SET content='',originClientId='gxserver-chat-send',updatedAt=?4 WHERE projectId=?1 AND sessionId=?2 AND draftId=?3 AND revision<=?5",
         params![project, session, version.draft_id, Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true), version.revision],

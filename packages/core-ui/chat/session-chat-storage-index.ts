@@ -79,6 +79,11 @@ export class SessionChatStorageIndex<T> {
     this.update(key, this.storage.getItem(key));
   }
 
+  has(key: string): boolean {
+    this.ensureLoaded();
+    return this.rows!.has(key);
+  }
+
   remove(key: string): void {
     this.storage.removeItem(key);
     this.update(key, null);

@@ -426,6 +426,7 @@ pub async fn run_gxserver_foreground(
     }
 
     let storage = initialize_gxserver_storage(&paths)?;
+    crate::storage::hold_gxserver_database_open(&paths)?;
     let config = read_gxserver_config(&paths)?;
     let identity = ensure_gxserver_identity(&paths)?;
     let auth = ensure_gxserver_auth_token(&paths)?;

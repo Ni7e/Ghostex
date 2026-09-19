@@ -14,6 +14,10 @@ use crate::{
     },
 };
 
+mod maintenance;
+
+pub use maintenance::hold_gxserver_database_open;
+
 pub struct Migration {
     pub id: &'static str,
     pub sql: &'static str,
@@ -44,6 +48,7 @@ pub fn initialize_gxserver_storage(paths: &GxserverPaths) -> Result<StorageInitR
     let mut db = open_gxserver_database(paths)?;
     let applied_migrations = run_gxserver_migrations(&mut db)?;
     backfill_legacy_macos_recent_projects(&mut db, paths)?;
+    maintenance::reclaim_free_database_pages(&db)?;
     Ok(StorageInitResult {
         applied_migrations,
         state_db_file: paths.state_db_file.to_string_lossy().to_string(),
@@ -1666,6 +1671,10 @@ pub const GXSERVER_STORAGE_MIGRATIONS: &[Migration] = &[
         id: "0039_session_chat_selection_scope",
         sql: include_str!("storage/migrations/0039_session_chat_selection_scope.sql"),
     },
+    Migration {
+        id: "0040_prune_consumed_draft_recovery",
+        sql: include_str!("storage/migrations/0040_prune_consumed_draft_recovery.sql"),
+    },
 ];
 
 #[cfg(unix)]
@@ -1714,10 +1723,10 @@ mod tests {
         let journal_mode: String = db
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
             .expect("journal_mode");
-        assert_eq!(user_version, 39);
+        assert_eq!(user_version, 40);
         assert_eq!(foreign_keys, 1);
         assert_eq!(journal_mode, "wal");
-        assert_eq!(schema_migration_count(&db), 39);
+        assert_eq!(schema_migration_count(&db), 40);
         assert_eq!(
             explicit_index_names(&db),
             vec![

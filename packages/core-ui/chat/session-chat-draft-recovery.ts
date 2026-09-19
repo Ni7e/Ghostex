@@ -7,6 +7,7 @@ import {
   draftRecoveryDismissalMarker,
   isDraftRecoveryDismissed,
 } from './session-chat-draft-dismissals';
+import { extendRun, redundantCheckpoints, type CheckpointRun } from './session-chat-draft-recovery-thinning';
 
 const clientStorage = storageScope(["recovery"]);
 
@@ -30,12 +31,47 @@ const recoveryIndex = new SessionChatStorageIndex<LocalRecoveryDraft>(
 function identity(entry: LocalRecoveryDraft): string {
   return `${entry.sessionKey}:${entry.version ? `${entry.version.draftId}:${entry.version.revision}` : entry.updatedAt}`;
 }
+const runs = new Map<string, CheckpointRun>();
+let thinned = false;
+function runKey(entry: LocalRecoveryDraft): string {
+  return JSON.stringify([entry.sessionKey, entry.version?.draftId]);
+}
+/** Apply the run rule to checkpoints stored before it existed, once per page, and seed each draft's current run. */
+function thinStoredCheckpoints(): void {
+  if (thinned) return;
+  thinned = true;
+  const drafts = new Map<string, { name: string; text: string; revision: number }[]>();
+  for (const [name, entry] of recoveryIndex.entries()) {
+    if (!entry.version) continue;
+    const draft = runKey(entry);
+    if (!drafts.has(draft)) drafts.set(draft, []);
+    drafts.get(draft)!.push({ name, text: entry.text, revision: entry.version.revision });
+  }
+  for (const [draft, checkpoints] of drafts) {
+    checkpoints.sort((a, b) => a.revision - b.revision);
+    const redundant = new Set(redundantCheckpoints(checkpoints));
+    for (const name of redundant) recoveryIndex.remove(name);
+    let run: CheckpointRun | undefined;
+    for (const checkpoint of checkpoints) {
+      if (!redundant.has(checkpoint.name)) run = extendRun(run, checkpoint.name, checkpoint.text).run;
+    }
+    if (run) runs.set(draft, run);
+  }
+}
 export function preserveDraftRevision(entry: LocalRecoveryDraft): void {
   if (entry.text === '') return;
   try {
     const name = PREFIX + identity(entry);
     if (clientStorage.getItem(name) === null && !isDraftRecoveryDismissed(entry.sessionKey, entry.version)) {
+      thinStoredCheckpoints();
       recoveryIndex.set(name, entry);
+      if (entry.version) {
+        const draft = runKey(entry);
+        const next = extendRun(runs.get(draft), name, entry.text);
+        runs.set(draft, next.run);
+        // A checkpoint dismissed since then is a receipt the dismissal compaction owns.
+        if (next.superseded && recoveryIndex.has(next.superseded)) recoveryIndex.remove(next.superseded);
+      }
     }
   } catch {
     reportDraftStorageFailure(entry.sessionKey);
@@ -78,6 +114,11 @@ export function dismissDraftRecovery(id: string): void {
   );
 }
 export function prepareDraftRecoveryStorage(sessionKey?: string): void {
+  try {
+    thinStoredCheckpoints();
+  } catch {
+    if (sessionKey) reportDraftStorageFailure(sessionKey);
+  }
   void compactDraftRecoveryDismissals((name) => recoveryIndex.remove(name)).catch(() => {
     if (sessionKey) reportDraftStorageFailure(sessionKey);
   });
