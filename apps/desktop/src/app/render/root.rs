@@ -192,7 +192,7 @@ impl Render for GhostexGpuiApp {
         GPUI must prove the macOS sidebar React UI and normal browser surfaces can run as CEF children inside the shell. Keep the CEF child views as exact GPUI layout siblings, with the address-bar chrome owned by GPUI above only the main browser area, so future Linux and Windows backends can replace the macOS FFI without changing the app layout contract.
 
         CDXC:Sidebar 2026-06-21-18:34:
-        The GPUI sidebar must match native macOS sidebar resizing: start from the persisted native sidebarWidth, reserve a real five-pixel divider rail between the sidebar and browser siblings, clamp drag/reset width to 150px..520px while preserving the active view's workspace minimum, and use the Settings-owned sidebarDefaultWidthPx only for double-click reset.
+        The GPUI sidebar must match native macOS sidebar resizing: start from the persisted native sidebarWidth, reserve a real two-pixel divider rail between the sidebar and browser siblings, clamp drag/reset width to 150px..520px while preserving the active view's workspace minimum, and use the Settings-owned sidebarDefaultWidthPx only for double-click reset.
 
         CDXC:Sidebar 2026-06-21-22:17:
         The GPUI divider rail must behave like the native sidebar divider without AppKit dependencies: the rail stays a real GPUI sibling, keeps the sidebar background color, uses the ew-resize cursor over the rail, and reveals the white hover line after the same short delay/fade from pointer hover instead of requiring a click.
@@ -522,20 +522,6 @@ impl Render for GhostexGpuiApp {
                     }
                 },
             ))
-            .on_action(cx.listener(|this, _: &CycleFocusedTabForward, window, cx| {
-                if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
-                    return;
-                }
-                this.cycle_focused_tab(false, window, cx);
-            }))
-            .on_action(
-                cx.listener(|this, _: &CycleFocusedTabBackward, window, cx| {
-                    if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
-                        return;
-                    }
-                    this.cycle_focused_tab(true, window, cx);
-                }),
-            )
             .on_action(cx.listener(|this, _: &CloseFocusedSurface, window, cx| {
                 if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
                     return;

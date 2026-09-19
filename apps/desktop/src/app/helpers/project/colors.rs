@@ -742,12 +742,9 @@ pub(crate) fn project_editor_companion_border_color_for_state(
     }
 }
 
+/// Rails rest in the neutral pane border colour so the two pane borders and the rail between them read as one line (see the Workarea decision on `SIDEBAR_DIVIDER_WIDTH`).
 pub(crate) fn workspace_split_handle_color() -> Hsla {
-    chrome_color(0x0c0c0c, LIGHT_RESIZE_HANDLE_RGB).into()
-}
-
-pub(crate) fn workspace_split_separator_color() -> Hsla {
-    rgb(0x333333).opacity(0.0).into()
+    workspace_pane_border_color()
 }
 
 pub(crate) fn project_editor_shell_background_color() -> Hsla {
@@ -755,15 +752,7 @@ pub(crate) fn project_editor_shell_background_color() -> Hsla {
 }
 
 pub(crate) fn project_editor_companion_divider_background_color() -> Hsla {
-    if CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed) {
-        rgb(LIGHT_RESIZE_HANDLE_RGB).into()
-    } else {
-        rgb(0x000000).opacity(0.0).into()
-    }
-}
-
-pub(crate) fn project_editor_companion_divider_line_color() -> Hsla {
-    rgb(0x000000).opacity(0.0).into()
+    project_editor_companion_border_color_for_state(WorkspacePaneBorderState::Neutral)
 }
 
 pub(crate) fn command_pane_chrome_color() -> Hsla {
@@ -1003,18 +992,10 @@ pub(crate) fn command_pane_sticky_active_tab_border_color() -> Hsla {
 
 pub(crate) fn command_pane_split_handle_color() -> Hsla {
     /*
-    CDXC:CommandPane 2026-06-25-13:19:
-    In dark mode, native pane split rails are transparent five-pixel hit regions; pane borders provide visible separation until hover feedback appears.
+    CDXC:CommandPane 2026-09-19 WHY:
+    Inactive command pane borders are hidden, so the 2px split rail is the one visible line between command panes and rests in the panel separator colour. This replaces the transparent five-pixel rails that relied on pane borders for separation.
     */
-    project_editor_companion_divider_background_color()
-}
-
-pub(crate) fn command_pane_split_separator_color() -> Hsla {
-    /*
-    CDXC:CommandPane 2026-06-25-13:19:
-    Command split handles should not draw a persistent center separator because pane borders provide visible separation.
-    */
-    rgb(0x000000).opacity(0.0).into()
+    command_pane_panel_separator_color()
 }
 
 pub(crate) fn command_terminal_placeholder_color() -> Hsla {

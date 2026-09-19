@@ -2,8 +2,6 @@
 // lines, itself moved verbatim out of main.rs) into descriptively named
 // modules; pure move, no logic changes. Cluster: Agents workspace top-level render entry and its pane split/leaf recursion.
 
-use gpui::Animation;
-use gpui::AnimationExt as _;
 use gpui::AnyElement;
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
@@ -24,6 +22,7 @@ use gpui_component::v_flex;
 use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::render::resize_rail::*;
 use crate::*;
 
 impl GhostexGpuiApp {
@@ -39,6 +38,7 @@ impl GhostexGpuiApp {
         CDXC:Workarea 2026-06-22-14:40:
         The Agents workspace root must be a vertical flex container, not only a flex-sized child of the command-pane wrapper. The rendered split or leaf tree uses flex_1 sizing, so it needs this parent layout context to fill the available height above the command pane instead of leaving a black shell gap below the terminal pane.
         */
+        let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
         v_flex()
             .id("ghostex-gpui-agents-workspace")
             .flex_1()
@@ -50,34 +50,67 @@ impl GhostexGpuiApp {
                 if let Some(pane_id) = self.agents_workspace.focus_mode_pane
                     && let Some(leaf) = self.agents_workspace.find_leaf(pane_id)
                 {
-                    self.render_workspace_leaf(leaf, window, cx)
+                    self.render_workspace_leaf(leaf, outer_rail_edges, window, cx)
                 } else {
-                    self.render_workspace_node(&self.agents_workspace.root, window, cx)
+                    self.render_workspace_node(
+                        &self.agents_workspace.root,
+                        outer_rail_edges,
+                        window,
+                        cx,
+                    )
                 },
             )
             .into_any_element()
     }
 
+    /// The sides of the main workspace area, in any view, that touch a rail owned by something outside
+    /// it: the sidebar divider on the left, and the command pane boundary below or to the right when pinned.
+    pub(crate) fn main_workspace_outer_rail_edges(&self, window: &Window) -> RailFacingEdges {
+        let layout_plan = command_pane_workspace_layout_plan(
+            self.command_pane.mode,
+            self.command_pane.has_sessions(),
+            command_pane_content_height(window),
+            self.command_pane.height_ratio,
+            self.command_pane_side,
+            command_pane_workspace_width(window, self.sidebar_width, self.sidebar_collapsed),
+            self.command_pane.width_ratio,
+        );
+        RailFacingEdges {
+            left: gpui_sidebar_chrome_visible(self.sidebar_collapsed),
+            right: matches!(
+                layout_plan,
+                CommandPaneWorkspaceLayoutPlan::PinnedRight { .. }
+            ),
+            top: false,
+            bottom: matches!(layout_plan, CommandPaneWorkspaceLayoutPlan::Pinned { .. }),
+        }
+    }
+
     pub(crate) fn render_workspace_node(
         &self,
         node: &WorkspaceNode,
+        rail_edges: RailFacingEdges,
         window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         match node {
-            WorkspaceNode::Split(split) => self.render_workspace_split(split, window, cx),
-            WorkspaceNode::Leaf(leaf) => self.render_workspace_leaf(leaf, window, cx),
+            WorkspaceNode::Split(split) => {
+                self.render_workspace_split(split, rail_edges, window, cx)
+            }
+            WorkspaceNode::Leaf(leaf) => self.render_workspace_leaf(leaf, rail_edges, window, cx),
         }
     }
 
     pub(crate) fn render_workspace_split(
         &self,
         split: &WorkspaceSplit,
+        rail_edges: RailFacingEdges,
         window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let split_id = split.id;
         let axis = split.axis;
+        let (first_rail_edges, second_rail_edges) = rail_edges.for_split_children(axis);
         let ratio = workspace_split_ratio(split.ratio);
         let first = div()
             .id(format!("ghostex-gpui-workspace-split-{}-first", split_id.0))
@@ -89,7 +122,7 @@ impl GhostexGpuiApp {
             .flex_grow(ratio)
             .flex_shrink_1()
             .flex_basis(relative(0.0))
-            .child(self.render_workspace_node(&split.first, window, cx));
+            .child(self.render_workspace_node(&split.first, first_rail_edges, window, cx));
         let second = div()
             .id(format!(
                 "ghostex-gpui-workspace-split-{}-second",
@@ -103,7 +136,7 @@ impl GhostexGpuiApp {
             .flex_grow(1.0 - ratio)
             .flex_shrink_1()
             .flex_basis(relative(0.0))
-            .child(self.render_workspace_node(&split.second, window, cx));
+            .child(self.render_workspace_node(&split.second, second_rail_edges, window, cx));
 
         /*
         CDXC:Workarea 2026-06-22-05:11:
@@ -169,133 +202,81 @@ impl GhostexGpuiApp {
         let split_id = split.id;
         let axis = split.axis;
         let hover_visible = self.workspace_split_hover_line_visible(split_id);
-        let hover_line_offset =
-            (WORKSPACE_SPLIT_HANDLE_THICKNESS - SIDEBAR_DIVIDER_HOVER_LINE_WIDTH) / 2.0;
-        match split.axis {
-            WorkspaceSplitAxis::Horizontal => div()
-                .id(format!(
-                    "ghostex-gpui-workspace-split-handle-{}",
-                    split_id.0
+        // A pane showing React chat is a CEF page, which takes the mouse itself, so the grab strip moves
+        // wholly onto the other side when only one side of the rail has such a pane.
+        let grab_side = match (
+            self.workspace_node_shows_cef_chat(&split.first),
+            self.workspace_node_shows_cef_chat(&split.second),
+        ) {
+            (true, false) => ResizeRailGrabSide::Trailing,
+            (false, true) => ResizeRailGrabSide::Leading,
+            _ => ResizeRailGrabSide::Straddle,
+        };
+        let rail = div()
+            .id(format!(
+                "ghostex-gpui-workspace-split-handle-{}",
+                split_id.0
+            ))
+            .relative()
+            .flex_shrink_0()
+            .bg(workspace_split_handle_color());
+        let rail = match axis {
+            WorkspaceSplitAxis::Horizontal => rail.h_full().w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS)),
+            WorkspaceSplitAxis::Vertical => rail.w_full().h(px(WORKSPACE_SPLIT_HANDLE_THICKNESS)),
+        };
+        rail.child(resize_rail_deferred_strip(
+            resize_rail_grab_strip(
+                format!("ghostex-gpui-workspace-split-grab-strip-{}", split_id.0),
+                axis,
+                grab_side,
+                self.resize_rail_drag_active(),
+            )
+            .on_hover(cx.listener(move |this, hovered, _, cx| {
+                this.set_workspace_split_hovering(split_id, *hovered, cx);
+            }))
+            .on_mouse_move(
+                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                    this.set_workspace_split_hovering(split_id, true, cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.handle_workspace_split_handle_mouse_down(
+                        split_id, axis, event, window, cx,
+                    );
+                }),
+            )
+            .when(hover_visible, |this| {
+                this.child(resize_rail_hover_line(
+                    format!(
+                        "ghostex-gpui-workspace-split-resize-hover-line-{}",
+                        split_id.0
+                    ),
+                    axis,
+                    grab_side,
                 ))
-                .relative()
-                .flex()
-                .flex_shrink_0()
-                .h_full()
-                .w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
-                .items_center()
-                .justify_center()
-                .cursor_ew_resize()
-                .bg(workspace_split_handle_color())
-                .on_hover(cx.listener(move |this, hovered, _, cx| {
-                    this.set_workspace_split_hovering(split_id, *hovered, cx);
-                }))
-                .on_mouse_move(
-                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
-                        this.set_workspace_split_hovering(split_id, true, cx);
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        this.handle_workspace_split_handle_mouse_down(
-                            split_id, axis, event, window, cx,
-                        );
-                    }),
-                )
-                .child(
-                    div()
-                        .h_full()
-                        .w(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
-                        .cursor_ew_resize()
-                        .bg(workspace_split_separator_color()),
-                )
-                .when(hover_visible, |this| {
-                    this.child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .h_full()
-                            .left(px(hover_line_offset))
-                            .w(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
-                            .cursor_ew_resize()
-                            .bg(sidebar_divider_hover_line_color())
-                            .with_animation(
-                                format!(
-                                    "ghostex-gpui-workspace-split-resize-hover-line-{}",
-                                    split_id.0
-                                ),
-                                Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
-                                    .with_easing(gpui::ease_out_quint()),
-                                |line, delta| line.opacity(delta),
-                            ),
-                    )
-                })
-                .into_any_element(),
-            WorkspaceSplitAxis::Vertical => div()
-                .id(format!(
-                    "ghostex-gpui-workspace-split-handle-{}",
-                    split_id.0
-                ))
-                .relative()
-                .flex()
-                .flex_shrink_0()
-                .h(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
-                .w_full()
-                .items_center()
-                .justify_center()
-                .cursor_ns_resize()
-                .bg(workspace_split_handle_color())
-                .on_hover(cx.listener(move |this, hovered, _, cx| {
-                    this.set_workspace_split_hovering(split_id, *hovered, cx);
-                }))
-                .on_mouse_move(
-                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
-                        this.set_workspace_split_hovering(split_id, true, cx);
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        this.handle_workspace_split_handle_mouse_down(
-                            split_id, axis, event, window, cx,
-                        );
-                    }),
-                )
-                .child(
-                    div()
-                        .h(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
-                        .w_full()
-                        .cursor_ns_resize()
-                        .bg(workspace_split_separator_color()),
-                )
-                .when(hover_visible, |this| {
-                    this.child(
-                        div()
-                            .absolute()
-                            .left_0()
-                            .w_full()
-                            .top(px(hover_line_offset))
-                            .h(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
-                            .cursor_ns_resize()
-                            .bg(sidebar_divider_hover_line_color())
-                            .with_animation(
-                                format!(
-                                    "ghostex-gpui-workspace-split-resize-hover-line-{}",
-                                    split_id.0
-                                ),
-                                Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
-                                    .with_easing(gpui::ease_out_quint()),
-                                |line, delta| line.opacity(delta),
-                            ),
-                    )
-                })
-                .into_any_element(),
+            }),
+        ))
+        .into_any_element()
+    }
+
+    pub(crate) fn workspace_node_shows_cef_chat(&self, node: &WorkspaceNode) -> bool {
+        match node {
+            WorkspaceNode::Split(split) => {
+                self.workspace_node_shows_cef_chat(&split.first)
+                    || self.workspace_node_shows_cef_chat(&split.second)
+            }
+            WorkspaceNode::Leaf(leaf) => leaf.tab_group.active_session_id().is_some_and(|id| {
+                self.agents_chat_mode_sessions.contains(&id) && !self.session_chat_use_gpui
+            }),
         }
     }
 
     pub(crate) fn render_workspace_leaf(
         &self,
         leaf: &WorkspaceLeaf,
+        rail_edges: RailFacingEdges,
         window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
@@ -317,8 +298,17 @@ impl GhostexGpuiApp {
             // Attention changes only the border color. Keeping its width
             // constant prevents status transitions from resizing the pane's
             // content box and nudging the tab bar, terminal, or action bar.
-            .border_1()
-            .border_color(workspace_pane_border_color_for_state(border_state))
+            // Sides that touch a resize rail have no border at all: the rail is
+            // the one line there, and a focus or attention outline closes over
+            // it.
+            .map(|pane| {
+                rail_aware_pane_border(
+                    pane,
+                    rail_edges,
+                    workspace_pane_border_color_for_state(border_state),
+                    workspace_pane_border_color(),
+                )
+            })
             .bg(workspace_terminal_placeholder_color())
             .on_mouse_down(
                 MouseButton::Left,

@@ -13,8 +13,6 @@ use std::time::SystemTime;
 // RefCell backs cross-platform runtime state (window frame persistence), not
 // just the macOS-only shims that first introduced the import.
 
-use gpui::Animation;
-use gpui::AnimationExt as _;
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
 use gpui::MouseButton;
@@ -36,6 +34,7 @@ use crate::app::consts::*;
 use crate::app::ffi::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::render::resize_rail::*;
 use crate::app::window::*;
 use crate::*;
 impl GhostexGpuiApp {
@@ -170,17 +169,40 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         let light = sidebar_uses_light_theme(settings.object());
-        for (slot, owned) in &self.project_workarea_runtime_cef_surfaces {
-            if matches!(
+        let themed = |slot: &ProjectWorkareaCefSurfaceSlotKey| {
+            matches!(
                 slot,
                 ProjectWorkareaCefSurfaceSlotKey::Kanban
                     | ProjectWorkareaCefSurfaceSlotKey::Automate
                     | ProjectWorkareaCefSurfaceSlotKey::Manage
-            ) {
-                owned
-                    .surface
-                    .update(cx, |surface, _| surface.refresh_workarea_theme(light));
-            }
+            )
+        };
+        let live = self
+            .project_workarea_runtime_cef_surfaces
+            .iter()
+            .filter(|(slot, _)| themed(slot))
+            .map(|(_, owned)| &owned.surface);
+        // Pages kept alive for a left project return without being recreated,
+        // so they take the theme change now rather than showing the old one.
+        let parked = self
+            .parked_project_workarea_surfaces
+            .iter()
+            .filter(|parked| themed(&parked.slot_key))
+            .map(|parked| &parked.owned.surface);
+        for surface in live.chain(parked) {
+            surface.update(cx, |surface, _| surface.refresh_workarea_theme(light));
+        }
+        // Browser pages: the colour GPUI paints under the CEF child view must
+        // follow the theme, or hiding a page on a switch flashes the old one.
+        let browser_background = rgb(if light { 0xffffff } else { 0x0d0d0d }).into();
+        let parked_browser = self
+            .parked_browser_runtimes_by_project
+            .values()
+            .flat_map(|runtime| runtime.surfaces.values());
+        for surface in self.browser_surfaces.values().chain(parked_browser) {
+            surface.update(cx, |surface, cx| {
+                surface.set_background(browser_background, cx)
+            });
         }
     }
 
@@ -2018,48 +2040,36 @@ impl GhostexGpuiApp {
             // their top edge; carry the titlebar hairline across the divider.
             .border_t_1()
             .border_color(titlebar_button_border_color())
-            .cursor_ew_resize()
-            .bg(sidebar_divider_background_color())
-            .on_hover(cx.listener(|this, hovered, _, cx| {
-                this.set_sidebar_divider_hovering(*hovered, cx);
-            }))
-            .on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, _window, cx| {
-                this.set_sidebar_divider_hovering(true, cx);
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    this.handle_sidebar_divider_mouse_down(event, window, cx);
-                }),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .h_full()
-                    .w(px(SIDEBAR_DIVIDER_LINE_WIDTH))
-                    .cursor_ew_resize()
-                    .bg(sidebar_divider_line_color())
-                    .left_0(),
-            )
-            .when(self.sidebar_divider_hover_visible, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .h_full()
-                        .w(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
-                        .cursor_ew_resize()
-                        .bg(sidebar_divider_hover_line_color())
-                        .right_0()
-                        .with_animation(
-                            "ghostex-gpui-sidebar-resize-divider-hover-line",
-                            Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
-                                .with_easing(gpui::ease_out_quint()),
-                            |line, delta| line.opacity(delta),
-                        ),
+            .bg(sidebar_divider_line_color())
+            // The workspace beside the sidebar is often a CEF page (React chat, Browser, Docs), so the
+            // whole grab strip lies over the native sidebar.
+            .child(resize_rail_deferred_strip(
+                resize_rail_grab_strip(
+                    "ghostex-gpui-sidebar-resize-grab-strip",
+                    WorkspaceSplitAxis::Horizontal,
+                    ResizeRailGrabSide::Leading,
+                    self.resize_rail_drag_active(),
                 )
-            })
+                .on_hover(cx.listener(|this, hovered, _, cx| {
+                    this.set_sidebar_divider_hovering(*hovered, cx);
+                }))
+                .on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, _window, cx| {
+                    this.set_sidebar_divider_hovering(true, cx);
+                }))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                        this.handle_sidebar_divider_mouse_down(event, window, cx);
+                    }),
+                )
+                .when(self.sidebar_divider_hover_visible, |this| {
+                    this.child(resize_rail_hover_line(
+                        "ghostex-gpui-sidebar-resize-divider-hover-line",
+                        WorkspaceSplitAxis::Horizontal,
+                        ResizeRailGrabSide::Leading,
+                    ))
+                }),
+            ))
     }
 
     pub(crate) fn set_sidebar_divider_hovering(
@@ -2158,6 +2168,9 @@ impl GhostexGpuiApp {
             start_width: self.sidebar_width,
         });
         self.set_sidebar_divider_hovering(true, cx);
+        // The grab strip stops blocking the mouse once a drag is active, which needs a new frame even
+        // when the hover state above was already set.
+        cx.notify();
     }
 
     pub(crate) fn handle_sidebar_drag_move(

@@ -2,8 +2,6 @@
 // lines, itself moved verbatim out of main.rs) into descriptively named
 // modules; pure move, no logic changes. Cluster: project-editor companion pane rendering: companion terminal body/slot, split divider/button, collapse button, restore rail, and divider.
 
-use gpui::Animation;
-use gpui::AnimationExt as _;
 use gpui::AnyElement;
 use gpui::FontWeight;
 use gpui::Hsla;
@@ -32,6 +30,7 @@ use gpui_component::v_flex;
 use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::render::resize_rail::*;
 use crate::*;
 
 use super::terminal_content_layout::terminal_content_frame;
@@ -127,6 +126,18 @@ impl GhostexGpuiApp {
                 .project_editor_companion_secondary_terminal_session_id
                 .is_some();
         let companion_border_state = self.project_editor_companion_border_state(mode, window);
+        // A lone sidepane and the first of a pair start at the sidebar divider; every sidepane ends at
+        // a rail, either the pair's own divider or the one before the main surface.
+        let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
+        let rail_edges = RailFacingEdges {
+            left: match column {
+                None | Some(ProjectEditorCompanionTerminalSlot::Top) => outer_rail_edges.left,
+                Some(_) => true,
+            },
+            right: true,
+            top: false,
+            bottom: outer_rail_edges.bottom,
+        };
         let border_state = match column {
             // Side by side, each sidepane owns a real frame, so the focused one
             // carries the outline itself.
@@ -184,10 +195,16 @@ impl GhostexGpuiApp {
             .h_full()
             .min_h_0()
             .overflow_hidden()
-            .border_1()
-            .border_color(project_editor_companion_border_color_for_state(
-                border_state,
-            ))
+            .map(|pane| {
+                rail_aware_pane_border(
+                    pane,
+                    rail_edges,
+                    project_editor_companion_border_color_for_state(border_state),
+                    project_editor_companion_border_color_for_state(
+                        WorkspacePaneBorderState::Neutral,
+                    ),
+                )
+            })
             .bg(workspace_terminal_placeholder_color())
             .on_mouse_down(
                 MouseButton::Left,
@@ -664,13 +681,11 @@ impl GhostexGpuiApp {
         show_separator_line: bool,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let hover_line_offset =
-            (WORKSPACE_SPLIT_HANDLE_THICKNESS - SIDEBAR_DIVIDER_HOVER_LINE_WIDTH) / 2.0;
         let hover_visible = self.project_editor_companion_split_divider_hover_visible == Some(mode);
-        let separator_line_color: Hsla = if show_separator_line {
+        let rail_color: Hsla = if show_separator_line {
             rgb(0x6d6d6d).into()
         } else {
-            rgb(0x000000).opacity(0.0).into()
+            project_editor_companion_divider_background_color()
         };
         let side_by_side = axis == WorkspaceSplitAxis::Horizontal;
         div()
@@ -680,88 +695,60 @@ impl GhostexGpuiApp {
                 mode.element_slug()
             ))
             .relative()
-            .flex()
             .flex_shrink_0()
             .when(side_by_side, |this| {
-                this.w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
-                    .h_full()
-                    .cursor_ew_resize()
+                this.w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS)).h_full()
             })
             .when(!side_by_side, |this| {
-                this.h(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
-                    .w_full()
-                    .cursor_ns_resize()
+                this.h(px(WORKSPACE_SPLIT_HANDLE_THICKNESS)).w_full()
             })
             // Side by side, both sidepanes own a top edge one pixel tall, so carry
             // that hairline across the divider the way the outer one does instead
-            // of leaving a five-pixel notch in it.
+            // of leaving a notch in it.
             .when(side_by_side, |this| {
-                this.border_t_1().border_color(titlebar_button_border_color())
+                this.border_t_1()
+                    .border_color(titlebar_button_border_color())
             })
-            .items_center()
-            .justify_center()
-            .bg(project_editor_companion_divider_background_color())
-            .on_hover(cx.listener(move |this, hovered, _, cx| {
-                this.set_project_editor_companion_split_divider_hovering(mode, *hovered, cx);
-            }))
-            .on_mouse_move(
-                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
-                    this.set_project_editor_companion_split_divider_hovering(mode, true, cx);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.handle_project_editor_companion_split_divider_mouse_down(
-                        mode, axis, event, window, cx,
-                    );
-                }),
-            )
-            .child(
-                div()
-                    .when(side_by_side, |line| {
-                        line.w(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
-                            .h_full()
-                            .cursor_ew_resize()
-                    })
-                    .when(!side_by_side, |line| {
-                        line.h(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
-                            .w_full()
-                            .cursor_ns_resize()
-                    })
-                    .bg(separator_line_color),
-            )
-            .when(hover_visible, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .when(side_by_side, |line| {
-                            line.top_0()
-                                .left(px(hover_line_offset))
-                                .w(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
-                                .h_full()
-                                .cursor_ew_resize()
-                        })
-                        .when(!side_by_side, |line| {
-                            line.left_0()
-                                .top(px(hover_line_offset))
-                                .h(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
-                                .w_full()
-                                .cursor_ns_resize()
-                        })
-                        .bg(sidebar_divider_hover_line_color())
-                        .with_animation(
-                            format!(
-                                "ghostex-gpui-project-editor-companion-split-divider-hover-line-{}-{}",
-                                axis.element_slug(),
-                                mode.element_slug()
-                            ),
-                            Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
-                                .with_easing(gpui::ease_out_quint()),
-                            |line, delta| line.opacity(delta),
-                        ),
+            .bg(rail_color)
+            .child(resize_rail_deferred_strip(
+                resize_rail_grab_strip(
+                    format!(
+                        "ghostex-gpui-project-editor-companion-split-grab-strip-{}-{}",
+                        axis.element_slug(),
+                        mode.element_slug()
+                    ),
+                    axis,
+                    ResizeRailGrabSide::Straddle,
+                    self.resize_rail_drag_active(),
                 )
-            })
+                .on_hover(cx.listener(move |this, hovered, _, cx| {
+                    this.set_project_editor_companion_split_divider_hovering(mode, *hovered, cx);
+                }))
+                .on_mouse_move(
+                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                        this.set_project_editor_companion_split_divider_hovering(mode, true, cx);
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        this.handle_project_editor_companion_split_divider_mouse_down(
+                            mode, axis, event, window, cx,
+                        );
+                    }),
+                )
+                .when(hover_visible, |this| {
+                    this.child(resize_rail_hover_line(
+                        format!(
+                            "ghostex-gpui-project-editor-companion-split-divider-hover-line-{}-{}",
+                            axis.element_slug(),
+                            mode.element_slug()
+                        ),
+                        axis,
+                        ResizeRailGrabSide::Straddle,
+                    ))
+                }),
+            ))
             .into_any_element()
     }
 
@@ -872,72 +859,61 @@ impl GhostexGpuiApp {
         CDXC:CodeEditor 2026-06-22-05:49:
         The project-editor companion boundary is a real reserved layout region between sibling panes. The visible divider is the resize/reset hit target; it persists shell-only companion sizing and does not use invisible overlays or root-level hit-test routing.
         */
-        let hover_line_offset =
-            (WORKSPACE_SPLIT_HANDLE_THICKNESS - SIDEBAR_DIVIDER_HOVER_LINE_WIDTH) / 2.0;
         let hover_visible = self.project_editor_companion_divider_hover_visible == Some(mode);
+        // The companion is the leading pane and a composited terminal; the main surface behind the
+        // rail is a CEF page, so the whole grab strip lies over the companion.
+        let grab_side = ResizeRailGrabSide::Leading;
         div()
             .id(format!(
                 "ghostex-gpui-project-editor-companion-divider-{}",
                 mode.element_slug()
             ))
             .relative()
-            .flex()
             .flex_shrink_0()
             .h_full()
             .w(px(WORKSPACE_SPLIT_HANDLE_THICKNESS))
-            .items_center()
-            .justify_center()
             // The body row sits 1px under the titlebar so panes can own
-            // their top edge; carry the titlebar hairline across the divider
-            // so its full-height line child starts below it.
+            // their top edge; carry the titlebar hairline across the divider.
             .border_t_1()
             .border_color(titlebar_button_border_color())
-            .cursor_ew_resize()
             .bg(project_editor_companion_divider_background_color())
-            .on_hover(cx.listener(move |this, hovered, _, cx| {
-                this.set_project_editor_companion_divider_hovering(mode, *hovered, cx);
-            }))
-            .on_mouse_move(
-                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
-                    this.set_project_editor_companion_divider_hovering(mode, true, cx);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.handle_project_editor_companion_divider_mouse_down(
-                        mode, event, window, cx,
-                    );
-                }),
-            )
-            .child(
-                div()
-                    .h_full()
-                    .w(px(WORKSPACE_SPLIT_SEPARATOR_THICKNESS))
-                    .cursor_ew_resize()
-                    .bg(project_editor_companion_divider_line_color()),
-            )
-            .when(hover_visible, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left(px(hover_line_offset))
-                        .h_full()
-                        .w(px(SIDEBAR_DIVIDER_HOVER_LINE_WIDTH))
-                        .cursor_ew_resize()
-                        .bg(sidebar_divider_hover_line_color())
-                        .with_animation(
-                            format!(
-                                "ghostex-gpui-project-editor-companion-divider-hover-line-{}",
-                                mode.element_slug()
-                            ),
-                            Animation::new(SIDEBAR_DIVIDER_HOVER_FADE_DURATION)
-                                .with_easing(gpui::ease_out_quint()),
-                            |line, delta| line.opacity(delta),
-                        ),
+            .child(resize_rail_deferred_strip(
+                resize_rail_grab_strip(
+                    format!(
+                        "ghostex-gpui-project-editor-companion-grab-strip-{}",
+                        mode.element_slug()
+                    ),
+                    WorkspaceSplitAxis::Horizontal,
+                    grab_side,
+                    self.resize_rail_drag_active(),
                 )
-            })
+                .on_hover(cx.listener(move |this, hovered, _, cx| {
+                    this.set_project_editor_companion_divider_hovering(mode, *hovered, cx);
+                }))
+                .on_mouse_move(
+                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                        this.set_project_editor_companion_divider_hovering(mode, true, cx);
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        this.handle_project_editor_companion_divider_mouse_down(
+                            mode, event, window, cx,
+                        );
+                    }),
+                )
+                .when(hover_visible, |this| {
+                    this.child(resize_rail_hover_line(
+                        format!(
+                            "ghostex-gpui-project-editor-companion-divider-hover-line-{}",
+                            mode.element_slug()
+                        ),
+                        WorkspaceSplitAxis::Horizontal,
+                        grab_side,
+                    ))
+                }),
+            ))
             .into_any_element()
     }
 }

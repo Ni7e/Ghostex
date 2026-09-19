@@ -78,18 +78,18 @@ pub(crate) const SIDEBAR_MAX_WIDTH: f32 = 520.0;
 
 pub(crate) const SIDEBAR_RESET_WIDTH: f32 = 235.0;
 
-/// The native resize rail between the sidebar column and the Agents
-/// workspace. It is painted with the workspace background so it reads as a
-/// 5px black gap, mirrored on both sidebar sides:
-/// `window edge | sidebar page | 5px rail | workspace` on the left and the
-/// reverse on the right. The sidebar page's own CSS supplies the 5px
-/// sidebar-colored gutters on both of its edges, so the native column adds
-/// no padding of its own.
-pub(crate) const SIDEBAR_DIVIDER_WIDTH: f32 = 5.0;
+/// CDXC:Workarea 2026-09-19 DECISION:
+/// User: resize rails between areas (sidebar, main area, companion sidepanes, command pane, pane splits) should look like Waku's instead of 5px black gaps: one 1px line between sections, with as few double border lines as possible.
+/// Every rail is therefore a 1px reserved layout sibling in its neighbours' neutral border colour, panes leave their own border off the sides that touch a rail, and hovering or dragging shows a 2px accent line. The grab area is the wider invisible strip in `render/resize_rail.rs`. This supersedes the 5px gap rails with a centred 3px hover line.
+pub(crate) const SIDEBAR_DIVIDER_WIDTH: f32 = 1.0;
 
-pub(crate) const SIDEBAR_DIVIDER_LINE_WIDTH: f32 = 1.0;
+/// How far a rail's invisible grab strip reaches into each neighbouring pane.
+pub(crate) const RESIZE_RAIL_GRAB_REACH: f32 = 4.0;
 
-pub(crate) const SIDEBAR_DIVIDER_HOVER_LINE_WIDTH: f32 = 3.0;
+/// The reach of a grab strip that lies on one side of its rail only, because the other side is a CEF page.
+pub(crate) const RESIZE_RAIL_GRAB_ONE_SIDED_REACH: f32 = 7.0;
+
+pub(crate) const SIDEBAR_DIVIDER_HOVER_LINE_WIDTH: f32 = 2.0;
 
 /* A chat file link routed to Docs waits this long for the Manage surface. */
 pub(crate) const PENDING_DOCS_FILE_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(120);
@@ -1205,9 +1205,7 @@ pub(crate) const WORKSPACE_TAB_SELECTED_WHITE_OVERLAY_ALPHA: f32 = 0.13;
 
 pub(crate) const WORKSPACE_TAB_INACTIVE_WHITE_OVERLAY_ALPHA: f32 = 0.06;
 
-pub(crate) const WORKSPACE_SPLIT_HANDLE_THICKNESS: f32 = 5.0;
-
-pub(crate) const WORKSPACE_SPLIT_SEPARATOR_THICKNESS: f32 = 1.0;
+pub(crate) const WORKSPACE_SPLIT_HANDLE_THICKNESS: f32 = 1.0;
 
 pub(crate) const WORKSPACE_BOTTOM_ROW_TOP_RATIO: f32 = 0.72;
 
@@ -1410,7 +1408,7 @@ pub(crate) const COMMAND_PANE_CONTROL_COLLAPSED_TRAILING_PADDING: f32 = 0.0;
 
 pub(crate) const COMMAND_PANE_VISIBILITY_ICON_LEADING_PADDING: f32 = 4.0;
 
-pub(crate) const COMMAND_PANE_SPLIT_HANDLE_THICKNESS: f32 = 5.0;
+pub(crate) const COMMAND_PANE_SPLIT_HANDLE_THICKNESS: f32 = 1.0;
 
 pub(crate) const COMMAND_PANE_DEFAULT_SESSION_TITLE: &str = "Command Terminal";
 

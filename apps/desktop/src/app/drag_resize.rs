@@ -2450,7 +2450,7 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:Workarea 2026-06-22-06:45:
-        Agents workspace split handles are real five-pixel layout siblings with one-pixel visual separators. Dragging a horizontal handle updates the left/right split ratio and dragging a vertical handle updates the top/bottom ratio while persisting shell layout state.
+        Agents workspace split handles are real two-pixel layout siblings painted in the neutral pane border colour. Dragging a horizontal handle updates the left/right split ratio and dragging a vertical handle updates the top/bottom ratio while persisting shell layout state.
         */
         window.prevent_default();
         cx.stop_propagation();
@@ -2727,7 +2727,7 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:Browser 2026-06-22-09:05:
-        Browser split handles use the same normal-layout resize contract as Agents workspace and command-pane splits. The visible five-pixel divider is the only grab target; dragging updates the targeted Browser split ratio from that branch's rendered first/handle/second child metrics, double-click resets to 0.5, and finished mutations persist through sanitized GPUI shell state while Browser leaf bodies keep existing tab-owned CEF surfaces keyed by BrowserTabId.
+        Browser split handles use the same normal-layout resize contract as Agents workspace and command-pane splits. The visible two-pixel divider is the only grab target; dragging updates the targeted Browser split ratio from that branch's rendered first/handle/second child metrics, double-click resets to 0.5, and finished mutations persist through sanitized GPUI shell state while Browser leaf bodies keep existing tab-owned CEF surfaces keyed by BrowserTabId.
         */
         window.prevent_default();
         cx.stop_propagation();
@@ -2824,7 +2824,7 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:CodeEditor 2026-06-22-06:53:
-        Source, Browser, Kanban, and Manage companion panes use the visible five-pixel divider as the real resize control. Dragging adjusts the stored companion width ratio, double-click resets toward the 0.32 default within practical width clamps, and shell-state persistence happens after reset or finished drag without hidden overlays or root hit-test routing.
+        Source, Browser, Kanban, and Manage companion panes use the visible two-pixel divider as the real resize control. Dragging adjusts the stored companion width ratio, double-click resets toward the 0.32 default within practical width clamps, and shell-state persistence happens after reset or finished drag without hidden overlays or root hit-test routing.
         */
         window.prevent_default();
         cx.stop_propagation();

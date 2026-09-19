@@ -37,10 +37,7 @@ pub(crate) fn sidebar_divider_background_color() -> Hsla {
 }
 
 /// CDXC:Sidebar 2026-09-19 DECISION:
-/// User: the line between the sidebar and the resize rail matches the companion sidepane's left border in
-/// both themes. Superseding the 2026-09-14 light-mode-only decision, it keeps the same one pixel of #d4d4d4
-/// in light mode and now draws in dark mode too; this stays the single owner of that edge, so the sidebar
-/// itself must not add a border there as well.
+/// User: the line between the sidebar and the workspace matches the companion sidepane's left border in both themes (#d4d4d4 in light mode, drawn in dark mode too). Since the same-day Workarea decision to make rails look like Waku's, the 2px resize rail is that line: it fills with this colour instead of drawing one pixel beside a black gap, and stays the single owner of the edge, so the sidebar itself must not add a border there as well.
 pub(crate) fn sidebar_divider_line_color() -> Hsla {
     chrome_color(0x252525, 0xd4d4d4).into()
 }
