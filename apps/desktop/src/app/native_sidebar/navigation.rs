@@ -38,9 +38,11 @@ impl GhostexGpuiApp {
             .pt(px((if footer { 3.0 } else { 5.0 }) * scale))
             .pb(px((if footer { 3.0 } else { 2.0 }) * scale))
             .when(!footer, |row| row.px(px(5.0 * scale)).gap(px(4.0 * scale)))
-            .when(footer, |row| {
-                row.border_t_1().border_color(chrome_ink().opacity(0.12))
-            })
+            // The Search row's bottom hairline and the Commands row's top
+            // hairline share one color so the list is framed evenly.
+            .when(footer, |row| row.border_t_1())
+            .when(!footer, |row| row.border_b_1())
+            .border_color(chrome_ink().opacity(0.12))
             .flex_shrink_0()
             .text_color(titlebar_active_text_color().opacity(0.52))
             .child(

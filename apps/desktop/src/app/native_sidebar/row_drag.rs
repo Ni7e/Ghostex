@@ -68,24 +68,11 @@ impl RowDragPreview {
                 }),
             RowDragIdentity::Collection { color, background } => row
                 .h(px(30.0 * scale))
-                .pl(px(5.0 * scale))
-                .pr(px(8.0 * scale))
+                .px(px(8.0 * scale))
                 .gap(px(5.0 * scale))
                 .border_l_2()
                 .border_color(*color)
-                .bg(*background)
-                .child(
-                    div()
-                        .w(px(20.0 * scale))
-                        .flex_shrink_0()
-                        .flex()
-                        .justify_center()
-                        .child(titlebar_svg_icon(
-                            COMMAND_ICON_CHEVRON_RIGHT,
-                            12.0 * scale,
-                            appearance.muted,
-                        )),
-                ),
+                .bg(*background),
             RowDragIdentity::Session { session } => row
                 .h(px(34.0 * scale))
                 .pl(px(5.0 * scale))

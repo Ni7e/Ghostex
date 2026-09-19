@@ -36,14 +36,13 @@ pub(crate) fn sidebar_divider_background_color() -> Hsla {
     }
 }
 
-/// CDXC:Sidebar 2026-09-14 DECISION:
-/// User: restore a one-pixel #d4d4d4 line between the sidebar and resize rail in light mode.
+/// CDXC:Sidebar 2026-09-19 DECISION:
+/// User: the line between the sidebar and the resize rail matches the companion sidepane's left border in
+/// both themes. Superseding the 2026-09-14 light-mode-only decision, it keeps the same one pixel of #d4d4d4
+/// in light mode and now draws in dark mode too; this stays the single owner of that edge, so the sidebar
+/// itself must not add a border there as well.
 pub(crate) fn sidebar_divider_line_color() -> Hsla {
-    if CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed) {
-        rgb(0xd4d4d4).into()
-    } else {
-        rgb(0x000000).opacity(0.0).into()
-    }
+    chrome_color(0x252525, 0xd4d4d4).into()
 }
 
 /// CDXC:Theming 2026-09-14 DECISION:

@@ -1744,7 +1744,6 @@ section.project-collection.project-collection-drag-ghost {
   cursor: grabbing;
 }
 
-.project-collection-collapse,
 .project-collection-title {
   align-items: center;
   background: transparent;
@@ -1752,17 +1751,6 @@ section.project-collection.project-collection-drag-ghost {
   color: inherit;
   display: inline-flex;
   min-width: 0;
-}
-
-.project-collection-collapse {
-  height: 24px;
-  justify-content: center;
-  padding: 0;
-  width: 20px;
-}
-
-.project-collection[data-collapsed='false'] .project-collection-collapse svg {
-  transform: rotate(90deg);
 }
 
 /*

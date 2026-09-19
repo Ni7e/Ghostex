@@ -1,4 +1,4 @@
-import { IconCaretRightFilled, IconCloud } from '@tabler/icons-react';
+import { IconCloud } from '@tabler/icons-react';
 import type { CSSProperties } from 'react';
 import { DEFAULT_ghostex_SETTINGS } from '../../shared/ghostex-settings';
 import type { SidebarCommandIcon } from '../../shared/sidebar-command-icons';
@@ -138,10 +138,10 @@ export function ProjectCollectionDragGhost({ preview }: { preview: SidebarProjec
   /*
    * CDXC:Projects 2026-07-22:
    * The ghost mirrors a collapsed collection panel's DOM
-   * (section.project-collection > .project-collection-header > caret + title)
+   * (section.project-collection > .project-collection-header > title)
    * so it inherits the exact reference-panel skin and typography. It renders
-   * the caret and title only — trailing header actions are omitted, matching
-   * the project drag ghost.
+   * the title only; trailing header actions are omitted, matching the project
+   * drag ghost.
    */
   return (
     <section
@@ -151,9 +151,6 @@ export function ProjectCollectionDragGhost({ preview }: { preview: SidebarProjec
       style={style}
     >
       <div className='project-collection-header'>
-        <span className='project-collection-collapse'>
-          <IconCaretRightFilled aria-hidden='true' size={14} />
-        </span>
         <span className='project-collection-title'>{preview.title}</span>
       </div>
     </section>

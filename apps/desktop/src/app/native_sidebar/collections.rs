@@ -4,10 +4,7 @@ use super::{
     appearance::SidebarAppearance,
     model::{NativeSidebarCollection, NativeSidebarSnapshot},
 };
-use crate::{
-    GhostexGpuiApp,
-    app::{consts::*, helpers::*},
-};
+use crate::{GhostexGpuiApp, app::helpers::*};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
@@ -21,6 +18,8 @@ use gpui_component::{
 use serde_json::json;
 
 impl GhostexGpuiApp {
+    /// CDXC:Projects 2026-09-19 DECISION:
+    /// User: keep only the Branched rail look for project groups and default everyone to it (the Quiet and Header rail options are gone); the group header shows no chevron, and double-clicking it no longer renames it (Rename stays in its context menu).
     pub(crate) fn render_native_collection(
         &self,
         collection: &NativeSidebarCollection,
@@ -37,7 +36,6 @@ impl GhostexGpuiApp {
             .drop_command
             .as_ref()
             .is_some_and(|command| command["collectionId"] == id);
-        let rename_id = id.clone();
         let drop_id = id.clone();
         let bulk_id = id.clone();
         let menu = collection.menu.clone();
@@ -46,21 +44,12 @@ impl GhostexGpuiApp {
             .map(rgb)
             .map(gpui::Hsla::from)
             .unwrap_or(appearance.muted);
-        let style = snapshot.hud["settings"]["sidebarProjectGroupStyle"]
-            .as_str()
-            .unwrap_or("branched");
         let dragged = super::drag::SidebarDrag {
             kind: "collection",
             preview: super::drag::SidebarDragPreview::Row(super::row_drag::RowDragPreview {
                 identity: super::row_drag::RowDragIdentity::Collection {
                     color,
-                    background: if style == "branched" {
-                        color.opacity(0.18)
-                    } else if style == "header" {
-                        color.opacity(0.12)
-                    } else {
-                        gpui::transparent_black()
-                    },
+                    background: color.opacity(0.18),
                 },
                 appearance: appearance.clone(),
                 width: px(0.0),
@@ -70,22 +59,7 @@ impl GhostexGpuiApp {
             title: collection.title.clone(),
             scale: appearance.scale,
         };
-        let rail_width = if style == "quiet" {
-            1.0
-        } else if style == "branched" {
-            2.0
-        } else {
-            3.0
-        };
-        let rail_color = if style == "quiet" {
-            color
-                .blend(titlebar_active_text_color().opacity(0.45))
-                .opacity(0.42)
-        } else if style == "branched" {
-            color.opacity(0.18)
-        } else {
-            color
-        };
+        let rail_width = 2.0;
         let active = collection.collapsed && collection.contains_active_session;
         let name = match self
             .native_sidebar
@@ -103,31 +77,20 @@ impl GhostexGpuiApp {
                 .child(Input::new(&editor.input).h(px(24.0 * scale)))
                 .into_any_element(),
             None => div()
-                .id(format!("native-collection-title-{id}"))
                 .flex_1()
                 .min_w_0()
                 .text_ellipsis()
                 .text_size(px(15.55 * scale))
                 .font_weight(FontWeight::LIGHT)
                 .child(collection.title.clone())
-                .on_click(
-                    cx.listener(move |app, event: &gpui::ClickEvent, window, cx| {
-                        if event.click_count() == 2 {
-                            cx.stop_propagation();
-                            app.begin_native_collection_rename(&rename_id, window, cx);
-                        }
-                    }),
-                )
                 .into_any_element(),
         };
         v_flex().relative().when(self.native_sidebar.is_dragging("collection", &id), |row| row.opacity(0.28)).flex_shrink_0().ml(px(3.0 * scale)).mr(px(5.0 * scale)).mb(px(10.0 * scale)).pb(px(5.0 * scale)).pl(px((rail_width + 10.0) * scale))
-            .child(div().absolute().left_0().top(px(if style == "branched" { 0.0 } else { scale })).bottom(px(5.0 * scale)).w(px(rail_width * scale)).bg(rail_color))
-            .child(h_flex().id(format!("native-collection-{id}")).relative().ml(px(if style == "branched" { -10.0 } else { -9.0 } * scale)).h(px(30.0 * scale)).pl(px(5.0 * scale)).pr(px(8.0 * scale)).gap(px(5.0 * scale))
-                .when(style == "header", |row| row.bg(color.opacity(0.12)))
-                .when(style == "branched", |row| row.bg(color.opacity(0.18)))
+            .child(div().absolute().left_0().top_0().bottom(px(5.0 * scale)).w(px(rail_width * scale)).bg(color.opacity(0.18)))
+            .child(h_flex().id(format!("native-collection-{id}")).relative().ml(px(-10.0 * scale)).h(px(30.0 * scale)).pl(px(8.0 * scale)).pr(px(8.0 * scale)).gap(px(5.0 * scale))
+                .bg(color.opacity(0.18))
                 .hover(|row| row.bg(color.opacity(0.22)))
                 .when(active, |row| row.bg(appearance.selected).rounded(px(5.0 * scale)).child(super::decorations::selected_outline(appearance)))
-                .child(div().w(px(20.0 * scale)).flex().justify_center().child(titlebar_svg_icon(if collection.collapsed { COMMAND_ICON_CHEVRON_RIGHT } else { COMMAND_ICON_CHEVRON_DOWN }, 12.0 * scale, appearance.muted)))
                 .when_some(drop_position, |row, position| row.child(super::drag::drop_line(position, scale)))
                 .when(drop_inside, |row| row.bg(color.opacity(0.28)))
                 .child(name)

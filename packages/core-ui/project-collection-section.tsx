@@ -345,19 +345,10 @@ export function ProjectCollectionSection({
         }}
         ref={sortable.handleRef}
       >
-        <button
-          aria-expanded={!collapsed}
-          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${collection.title}`}
-          className='project-collection-collapse'
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            toggleCollapsed();
-          }}
-          type='button'
-        >
-          <IconCaretRightFilled aria-hidden='true' size={14} />
-        </button>
+        {/*
+         * CDXC:Projects 2026-09-19 DECISION:
+         * User: the group header shows no chevron; clicking anywhere on the header toggles the group.
+         */}
         {isEditing ? (
           <input
             className='project-collection-title-input'
@@ -380,6 +371,7 @@ export function ProjectCollectionSection({
           />
         ) : (
           <button
+            aria-expanded={!collapsed}
             className='project-collection-title'
             onClick={(event) => {
               event.preventDefault();
