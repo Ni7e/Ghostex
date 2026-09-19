@@ -4,6 +4,7 @@ pub(crate) mod codex_status_line;
 pub(crate) mod codex_trust;
 pub mod config;
 pub mod event_mapping;
+mod hook_store;
 pub mod install;
 pub mod notify_runtime;
 pub mod plugin_sources;

@@ -18,7 +18,7 @@ use super::event_mapping::{
     activity_for_hook_event, claude_notification_is_idle_input, env_string, first_path,
     first_string, is_prompt_event, nested_get, normalized_hook_agent_key, update_hook_status,
 };
-use super::install::{parent_process_id, read_json_object};
+use super::hook_store::write_hook_store;
 use super::probing::{
     decode_base64_text, expand_home_path, insert_json_string, io_error, normalize_prompt_text,
     now_iso, parse_global_session_ref, read_file_text, temp_path_for,
@@ -344,87 +344,6 @@ pub(crate) fn read_state_string(state: &Map<String, Value>, key: &str) -> Option
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-}
-
-fn write_hook_store(
-    hook_state_dir: &Path,
-    agent_key: &str,
-    session_id: &str,
-    transcript_path: Option<&str>,
-    payload: &Value,
-) {
-    let (global_project_id, global_session_id) = parse_global_session_ref(
-        env::var("GHOSTEX_GLOBAL_SESSION_REF")
-            .unwrap_or_default()
-            .as_str(),
-    );
-    let workspace_id = env_string("GHOSTEX_WORKSPACE_ID")
-        .or_else(|| env_string("VSMUX_WORKSPACE_ID"))
-        .or_else(|| env_string("ghostex_WORKSPACE_ID"))
-        .or(global_project_id);
-    let surface_id = env_string("GHOSTEX_SESSION_ID")
-        .or_else(|| env_string("VSMUX_SESSION_ID"))
-        .or_else(|| env_string("ghostex_SESSION_ID"))
-        .or(global_session_id);
-    let (Some(workspace_id), Some(surface_id)) = (workspace_id, surface_id) else {
-        return;
-    };
-    let store_path = hook_state_dir.join(format!("{agent_key}-hook-sessions.json"));
-    let mut data = read_json_object(&read_file_text(&store_path));
-    if !data.is_object() {
-        data = json!({});
-    }
-    let object = data.as_object_mut().expect("object");
-    let sessions = object
-        .entry("sessions".to_string())
-        .or_insert_with(|| json!({}));
-    if !sessions.is_object() {
-        *sessions = json!({});
-    }
-    let cwd = payload
-        .get("cwd")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| env_string("GHOSTEX_WORKSPACE_ROOT"))
-        .or_else(|| env_string("VSMUX_WORKSPACE_ROOT"))
-        .unwrap_or_else(|| {
-            env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .to_string_lossy()
-                .to_string()
-        });
-    sessions.as_object_mut().expect("sessions object").insert(
-        session_id.to_string(),
-        json!({
-            "sessionId": session_id,
-            "workspaceId": workspace_id,
-            "surfaceId": surface_id,
-            "cwd": cwd,
-            "transcriptPath": transcript_path,
-            "pid": parent_process_id(),
-            "isRestorable": true,
-            "updatedAt": UtcTimestamp::now_seconds(),
-        }),
-    );
-    object.insert("version".to_string(), json!(1));
-    if let Some(parent) = store_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let temp_path = temp_path_for(&store_path);
-    if let Ok(text) = serde_json::to_string_pretty(&data) {
-        let _ = fs::write(&temp_path, format!("{text}\n"));
-        let _ = fs::rename(&temp_path, &store_path);
-    }
-}
-
-struct UtcTimestamp;
-
-impl UtcTimestamp {
-    fn now_seconds() -> f64 {
-        chrono::Utc::now().timestamp_millis() as f64 / 1000.0
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
