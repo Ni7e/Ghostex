@@ -53,9 +53,12 @@ impl GhostexGpuiApp {
         let now = Instant::now();
         let local_focus = &mut self.gx_store.local_focus;
         if moved {
-            let in_burst = local_focus
-                .last_selection_at
-                .is_some_and(|previous| now.duration_since(previous) < BURST_GAP);
+            // A key repeat is inside a burst by definition: only the first press of a hold is an
+            // isolated selection, whatever the platform's delay before the first repeat.
+            let in_burst = local_focus.key_held
+                || local_focus
+                    .last_selection_at
+                    .is_some_and(|previous| now.duration_since(previous) < BURST_GAP);
             local_focus.last_selection_at = Some(now);
             if in_burst {
                 local_focus.burst_steps += 1;

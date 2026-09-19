@@ -165,6 +165,8 @@ pub(crate) enum GpuiNativeKeyboardDispatch {
     GhostexHotkey {
         action_id: String,
         owner: GpuiKeyboardOwner,
+        /// A key repeat of a hotkey that is still held (only tab cycling repeats).
+        held: bool,
     },
 }
 

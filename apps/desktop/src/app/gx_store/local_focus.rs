@@ -122,6 +122,9 @@ pub(crate) struct LocalFocus {
     /// When the last tell is sent again unless a payload has echoed its stamp by then.
     pub(super) retell_due: Option<Instant>,
     pub(super) retell_attempts: u8,
+    /// The selection being booked comes from a key that is being held (a key repeat), so it is
+    /// part of a burst whatever the time since the previous step.
+    pub(super) key_held: bool,
     pub(super) burst_task_running: bool,
     pub(super) burst_steps: u32,
     pub(super) chat_reconcile_wanted: bool,
@@ -393,6 +396,12 @@ impl GhostexGpuiApp {
         if local_runtime_missing && !self.gx_store_selection_is_settling() {
             self.gx_store_attach_surfaced_terminals(cx);
         }
+    }
+
+    /// Marks the selections made until it is cleared as steps of a held key. Set around the
+    /// dispatch of a hotkey's key repeat.
+    pub(crate) fn gx_store_set_key_held(&mut self, held: bool) {
+        self.gx_store.local_focus.key_held = held;
     }
 
     /// A remote session was selected in the workspace. Remote machines are not in the store, so

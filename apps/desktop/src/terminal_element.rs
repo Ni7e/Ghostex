@@ -628,6 +628,9 @@ pub struct TerminalView {
     /// (CDXC:Terminal 2026-09-03).
     pending_zmx_visible_announce: bool,
     zmx_visibility_claims_enabled: bool,
+    /// CDXC:Zmx 2026-09-19 WHY:
+    /// A parked terminal sits at the zmx resting grid, so the first prepaint of a displayed slot resizes it and claims the grid, and the daemon resizes the session. A held "next tab" key passed one such terminal per key repeat. While the app holds the claim (the selection is still moving, app/gx_store/burst.rs) the prepaint keeps the parked grid and claims nothing; the app releases the hold when the selection settles, and the next prepaint resizes and claims once.
+    zmx_grid_claim_held: bool,
     /// CDXC:Terminal 2026-09-18 WHY:
     /// Every PTY wakeup used to refresh the grid snapshot and notify, and gpui redraws the whole window on any notify, so a hidden agent terminal streaming output behind its chat view redrew the window on every chunk.
     /// A parked or chat-mode terminal only marks its snapshot stale; the next prepaint of a displayed slot takes the fresh frame. Titles and pwd still sync so the sidebar stays current.
@@ -755,6 +758,7 @@ impl TerminalView {
             search: None,
             pending_zmx_visible_announce: false,
             zmx_visibility_claims_enabled: false,
+            zmx_grid_claim_held: false,
             displayed: true,
             snapshot_stale: false,
             last_prepaint: None,
@@ -807,6 +811,11 @@ impl TerminalView {
     /// must not be reported to the daemon as a displayed size.
     pub fn zmx_visible_announce_pending(&self) -> bool {
         self.pending_zmx_visible_announce
+    }
+
+    /// Holds or releases the prepaint's grid resize and `ZMX_VISIBLE` claim (see `zmx_grid_claim_held`).
+    pub fn set_zmx_grid_claim_held(&mut self, held: bool) {
+        self.zmx_grid_claim_held = held;
     }
 
     /// Whether the app currently shows this terminal in a slot; hidden terminals stop redrawing the window on output.
@@ -2350,13 +2359,15 @@ impl TerminalView {
         let cell_width_px = ((metrics.cell_width.as_f32() * scale).round() as u32).max(1);
         let cell_height_px = ((metrics.line_height.as_f32() * scale).round() as u32).max(1);
 
-        let grid_changed = (cols, rows) != self.model.size();
+        let grid_changed = !self.zmx_grid_claim_held && (cols, rows) != self.model.size();
         if self.frame.is_none() || grid_changed {
             // Resize reflows the vt grid synchronously, so take the fresh
             // frame now instead of waiting for the SIGWINCH redraw wakeup.
             // Best-effort: the PTY side can only fail once the child is
             // gone, and the vt grid (which rendering reads) resizes first.
-            let _ = self.model.resize(cols, rows, cell_width_px, cell_height_px);
+            if !self.zmx_grid_claim_held {
+                let _ = self.model.resize(cols, rows, cell_width_px, cell_height_px);
+            }
             self.row_cache.clear();
             self.refresh_snapshot();
         }

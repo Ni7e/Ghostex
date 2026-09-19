@@ -89,6 +89,28 @@ impl GhostexGpuiApp {
         if self.agents_gpui_engine_terminal_visibility_drag_in_progress() {
             return;
         }
+        // CDXC:Zmx 2026-09-19 WHY: every claim makes that session's daemon resize, and a held "next tab" key that passes mounted terminals sent one Visible and one Hidden claim per step. While the selection is still moving nothing is claimed (gx_store/burst.rs): this pass is skipped, and a displayed viewer that has not announced Visible is told to keep its parked grid, because its own prepaint would otherwise resize and claim (terminal_element.rs, `zmx_grid_claim_held`). The pass compares what is displayed with what each viewer last announced, so the repaint at the settle claims the tab the user landed on and releases the tab the hold started from, each exactly once; tabs only passed were never claimed.
+        if self.gx_store_selection_is_settling() {
+            let displayed = self.displayed_agents_gpui_engine_terminal_sessions();
+            for session_id in displayed {
+                let announced_visible = self
+                    .agents_gpui_engine_terminal_zmx_visibility
+                    .get(&session_id)
+                    .is_some_and(|announced| {
+                        announced.visibility == GpuiEngineTerminalZmxVisibility::Visible
+                    });
+                if announced_visible || !self.agents_gpui_engine_terminal_is_zmx_client(session_id)
+                {
+                    continue;
+                }
+                if let Some(record) = self.agents_gpui_engine_terminals.get(&session_id) {
+                    record
+                        .view
+                        .update(cx, |view, _cx| view.set_zmx_grid_claim_held(true));
+                }
+            }
+            return;
+        }
 
         let displayed = self.displayed_agents_gpui_engine_terminal_sessions();
         self.sync_agents_gpui_engine_terminal_zmx_visibility_for_displayed(&displayed, cx);
@@ -147,7 +169,11 @@ impl GhostexGpuiApp {
                 GpuiEngineTerminalZmxVisibility::Visible
             };
             let is_displayed = visibility == GpuiEngineTerminalZmxVisibility::Visible;
-            view.update(cx, |view, _cx| view.set_displayed(is_displayed));
+            view.update(cx, |view, _cx| {
+                view.set_displayed(is_displayed);
+                // The selection has settled (or never moved): the prepaint may resize and claim.
+                view.set_zmx_grid_claim_held(false);
+            });
             if is_displayed {
                 let (cols, rows) = view.read(cx).model().size();
                 if previous != Some(GpuiEngineTerminalZmxVisibility::Visible) {
