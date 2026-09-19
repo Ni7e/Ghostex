@@ -17,6 +17,7 @@ use crate::*;
 pub(crate) fn store_latest_gpui_project_snapshot_from_sidebar_contract_json(
     latest_snapshot: &mut Option<GpuiProjectSnapshot>,
     text: &str,
+    admit: impl FnOnce(&GpuiProjectSnapshot, Option<u64>) -> bool,
 ) -> Result<GpuiProjectSnapshotStoreResult, GpuiProjectSnapshotContractError> {
     /*
     CDXC:CefRuntime 2026-06-22-19:32:
@@ -28,10 +29,25 @@ pub(crate) fn store_latest_gpui_project_snapshot_from_sidebar_contract_json(
     CDXC:CefRuntime 2026-06-23-06:53:
     The store helper returns an explicit change result so bridge callers can no-op duplicate valid payloads. Parse and validate exactly as before, preserve the previous snapshot on errors, and replace the in-memory snapshot only after the parsed snapshot differs; do not add project/path/name heuristics, fallbacks, persistence, or logging of raw contract data.
     */
-    let snapshot = gpui_project_snapshot_from_sidebar_contract_json(text)?;
+    let value = serde_json::from_str::<serde_json::Value>(text)
+        .map_err(|_| GpuiProjectSnapshotContractError::MalformedJson)?;
+    let snapshot = gpui_project_snapshot_from_sidebar_contract_value(&value)?;
+    /*
+    CDXC:FocusRouting 2026-09-19 WHY:
+    `focusStamp` is the newest store focus stamp the sidebar runtime had been told when it produced this payload, the same echo its focus state carries. A project context produced before the runtime heard of a newer local selection must not swap the workspace: the focus state that rides with it is judged stale and would swap it straight back (two workspace swaps and a lost click). The caller decides through `admit`; a payload it refuses is not stored, so the stored snapshot never names a project the workspace did not follow. The runtime posts the context again with its next publish.
+    */
+    let focus_stamp = match value.get("focusStamp") {
+        None => None,
+        Some(stamp) => Some(
+            stamp
+                .as_u64()
+                .ok_or(GpuiProjectSnapshotContractError::MalformedField)?,
+        ),
+    };
     if latest_snapshot
         .as_ref()
         .is_some_and(|latest_snapshot| latest_snapshot == &snapshot)
+        || !admit(&snapshot, focus_stamp)
     {
         return Ok(GpuiProjectSnapshotStoreResult::Unchanged);
     }
@@ -54,7 +70,7 @@ pub(crate) fn gpui_project_snapshot_from_sidebar_contract_value(
     value: &serde_json::Value,
 ) -> Result<GpuiProjectSnapshot, GpuiProjectSnapshotContractError> {
     let object = gpui_contract_object(value)?;
-    reject_unexpected_contract_keys(object, &["version", "type", "activeProject"])?;
+    reject_unexpected_contract_keys(object, &["version", "type", "activeProject", "focusStamp"])?;
 
     let version = object
         .get("version")

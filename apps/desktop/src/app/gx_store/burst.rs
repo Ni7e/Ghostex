@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::local_focus::ToldSelection;
+use super::local_focus::{FocusEchoKind, PendingTell, ToldSelection};
 use crate::GhostexGpuiApp;
 use crate::app::consts::{
     GPUI_SIDEBAR_WORKSPACE_SESSION_ATTENTION_ACKNOWLEDGE_MESSAGE_TYPE,
@@ -26,6 +26,10 @@ const SETTLE_DELAY: Duration = Duration::from_millis(80);
 /// once. Key repeat runs at 30 to 60 milliseconds, far inside it; a click or a single key press
 /// is outside it.
 const BURST_GAP: Duration = Duration::from_millis(250);
+/// How long the old runtime has to echo the stamp of a tell before the tell is sent again, and
+/// how often that is tried.
+const RETELL_DELAY: Duration = Duration::from_millis(1500);
+const MAX_RETELLS: u8 = 3;
 /// Most remembered sessions one tell carries.
 const MAX_REMEMBERED_PER_TELL: usize = 16;
 
@@ -85,9 +89,10 @@ impl GhostexGpuiApp {
         self.gx_store.local_focus.chat_reconcile_wanted = true;
     }
 
-    /// One task per burst serves both deadlines.
+    /// One task per burst serves the three deadlines (settle, tell, and the check that the tell
+    /// was heard).
     ///
-    /// Lifecycle: started by the first selection or acknowledge while none runs. Each turn sleeps
+    /// Lifecycle: started by the first selection, acknowledge or tell while none runs. Each turn sleeps
     /// until the nearer deadline, so a selection that pushes a deadline out only makes the task
     /// sleep again; nothing cancels it. A turn that finds a deadline passed performs it and clears
     /// it, and the task ends when both are clear. It cannot spin: a turn either sleeps a positive
@@ -128,11 +133,23 @@ impl GhostexGpuiApp {
         {
             self.gx_store_flush_old_runtime_tell(cx);
         }
+        if self
+            .gx_store
+            .local_focus
+            .retell_due
+            .is_some_and(|due| due <= now)
+        {
+            self.gx_store_retell_old_runtime(cx);
+        }
         let local_focus = &mut self.gx_store.local_focus;
-        let next_due = match (local_focus.settle_due, local_focus.tell_due) {
-            (Some(settle), Some(tell)) => Some(settle.min(tell)),
-            (settle, tell) => settle.or(tell),
-        };
+        let next_due = [
+            local_focus.settle_due,
+            local_focus.tell_due,
+            local_focus.retell_due,
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         let Some(next_due) = next_due else {
             local_focus.burst_task_running = false;
             return None;
@@ -170,6 +187,7 @@ impl GhostexGpuiApp {
                 "tells": counters.tells,
                 "attentionAcknowledges": counters.attention_acknowledges,
                 "stalePayloads": counters.stale_payloads,
+                "staleProjectContexts": counters.stale_project_contexts,
                 "staleFocusRequestsDropped": counters.stale_focus_requests_dropped,
                 "settles": counters.settles,
             }),
@@ -202,19 +220,70 @@ impl GhostexGpuiApp {
     /// runtime that it could answer with a focus change (a sidebar command, a remote selection),
     /// so it never handles such a message while holding an older stamp.
     pub(crate) fn gx_store_flush_old_runtime_tell(&mut self, cx: &mut gpui::Context<Self>) {
+        self.gx_store_send_old_runtime_tell(false, cx);
+    }
+
+    /// The old runtime has not echoed the stamp of the last tell.
+    ///
+    /// CDXC:FocusRouting 2026-09-19 WHY:
+    /// Every focus payload of the old runtime is judged by the stamp it echoes, so a tell that never took effect (rejected by the runtime's contract check, or lost) would leave all of them stale until the next selection, and with them every project switch and focus change the runtime originates. The tell is sent again, with the stamp current at that moment, at most `MAX_RETELLS` times `RETELL_DELAY` apart; after that the divergence is logged and the next selection's tell is the next attempt. A newer tell that is already pending takes over instead.
+    fn gx_store_retell_old_runtime(&mut self, cx: &mut gpui::Context<Self>) {
+        let local_focus = &mut self.gx_store.local_focus;
+        local_focus.retell_due = None;
+        let Some(told) = local_focus.last_tell.clone() else {
+            return;
+        };
+        if local_focus.confirmed_stamp >= told.stamp || local_focus.pending_tell.is_some() {
+            return;
+        }
+        let attempt = local_focus.retell_attempts + 1;
+        let confirmed_stamp = local_focus.confirmed_stamp;
+        if attempt > MAX_RETELLS {
+            support_logs::append(
+                support_logs::GpuiSupportLog::TerminalFocus,
+                "gpui.terminalFocus.oldRuntimeTellUnconfirmed",
+                serde_json::json!({
+                    "toldStamp": told.stamp,
+                    "confirmedStamp": confirmed_stamp,
+                    "attempts": MAX_RETELLS,
+                }),
+            );
+            return;
+        }
+        local_focus.retell_attempts = attempt;
+        local_focus.pending_tell = Some(PendingTell {
+            key: told.key,
+            local_was_sleeping: false,
+            local_runtime_missing: false,
+        });
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.terminalFocus.oldRuntimeRetold",
+            serde_json::json!({
+                "attempt": attempt,
+                "toldStamp": told.stamp,
+                "confirmedStamp": confirmed_stamp,
+            }),
+        );
+        self.gx_store_send_old_runtime_tell(true, cx);
+    }
+
+    fn gx_store_send_old_runtime_tell(&mut self, retell: bool, cx: &mut gpui::Context<Self>) {
         let local_focus = &mut self.gx_store.local_focus;
         local_focus.tell_due = None;
-        let pending_tell = local_focus.pending_tell.take();
-        let pending_attention = std::mem::take(&mut local_focus.pending_attention);
-        if pending_tell.is_none() && pending_attention.is_empty() {
+        if local_focus.pending_tell.is_none() && local_focus.pending_attention.is_empty() {
             // Called before every message to the old runtime; usually there is nothing to say.
             return;
         }
         self.gx_store_persist_focus_state_file();
+        // Without the service nothing is taken: the selection stays pending and goes out with the
+        // next flush, so the runtime is never left without the newest stamp.
         let Some(sidebar) = self.sidebar.clone() else {
-            self.gx_store.local_focus.pending_remembered.clear();
             return;
         };
+        let local_focus = &mut self.gx_store.local_focus;
+        let pending_tell = local_focus.pending_tell.take();
+        let pending_attention = std::mem::take(&mut local_focus.pending_attention);
         let visible_session_ids = self.gpui_sidebar_visible_local_session_ids();
         let mut scripts = Vec::new();
         for key in pending_attention {
@@ -278,12 +347,16 @@ impl GhostexGpuiApp {
             local_focus.counters.tells += 1;
             if tell.local_was_sleeping || tell.local_runtime_missing {
                 // The old runtime may answer these flags with one focus request for the session.
-                local_focus.expect_focus_echo(tell.key.clone(), stamp);
+                local_focus.expect_focus_echo(tell.key.clone(), stamp, FocusEchoKind::TellReply);
             }
             local_focus.last_tell = Some(ToldSelection {
                 key: tell.key,
                 stamp,
             });
+            if !retell {
+                local_focus.retell_attempts = 0;
+            }
+            local_focus.retell_due = Some(Instant::now() + RETELL_DELAY);
             support_logs::append(
                 support_logs::GpuiSupportLog::TerminalFocus,
                 "gpui.terminalFocus.oldRuntimeTold",
@@ -302,6 +375,9 @@ impl GhostexGpuiApp {
             });
         }
         if told {
+            // The task also watches for the echo of this tell; a flush from outside a burst (before
+            // a sidebar command) has none running.
+            self.ensure_gx_store_burst_task(cx);
             // The old runtime's echo of a selection used to reach two more readers of the focused
             // session. The echo now repeats what the app already holds and changes nothing, so
             // they hear about the selection here, once per burst.

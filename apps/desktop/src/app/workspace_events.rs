@@ -848,8 +848,14 @@ impl GhostexGpuiApp {
             return;
         };
         // CDXC:FocusRouting 2026-09-19 WHY: the sidebar runtime must never override a newer local selection (user decision in gx_store/local_focus.rs). A payload produced against an older focus stamp keeps its tab list and loses its selection, active project and visible set before anything below reads it (gx_store/local_focus.rs).
-        let next_state = self.gx_store_admit_old_runtime_focus_state(next_state, focus_stamp, cx);
-        self.set_sidebar_gxserver_presentation_focus_state(next_state, cx);
+        let (next_state, stale) =
+            self.gx_store_admit_old_runtime_focus_state(next_state, focus_stamp, cx);
+        if stale {
+            // Tab membership only. The workspace project is not this payload's to choose: a swap here would undo whatever project the app is on now.
+            self.apply_sidebar_gxserver_presentation_focus_state(next_state, cx);
+        } else {
+            self.set_sidebar_gxserver_presentation_focus_state(next_state, cx);
+        }
     }
 
     pub(crate) fn receive_sidebar_workspace_terminal_focus_payload(

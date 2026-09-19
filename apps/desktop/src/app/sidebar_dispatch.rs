@@ -1053,6 +1053,8 @@ impl GhostexGpuiApp {
         let Some(sidebar) = self.sidebar.clone() else {
             return false;
         };
+        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = gpui_os_integration_command_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }
@@ -1399,6 +1401,8 @@ impl GhostexGpuiApp {
         let Some(sidebar) = self.sidebar.clone() else {
             return false;
         };
+        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = gpui_workspace_terminal_lifecycle_request_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script))
     }

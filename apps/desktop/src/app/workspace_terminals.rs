@@ -301,6 +301,15 @@ impl GhostexGpuiApp {
             return;
         }
         self.swap_agents_workspace_to_project_id(next_state.active_project_id.clone(), cx);
+        self.apply_sidebar_gxserver_presentation_focus_state(next_state, cx);
+    }
+
+    /// Everything a focus state does once the workspace project is settled. Called on its own for a payload that lost to a newer local selection, which must neither enter the project switch coalescer nor swap the workspace (gx_store/local_focus.rs).
+    pub(crate) fn apply_sidebar_gxserver_presentation_focus_state(
+        &mut self,
+        next_state: GpuiGxserverPresentationFocusState,
+        cx: &mut gpui::Context<Self>,
+    ) {
         self.reconcile_local_app_shot_session_mappings(&next_state);
         if self.sidebar_gxserver_presentation_focus_state == next_state {
             self.attach_surfaced_local_workspace_terminals(&next_state, cx);

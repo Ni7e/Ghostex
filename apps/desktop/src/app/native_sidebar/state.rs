@@ -131,6 +131,15 @@ impl GhostexGpuiApp {
                         });
                     }
                 }
+                // The old runtime draws no session row focused while a browser tab of the active group owns focus; rows read that per frame, so it is derived here, once per snapshot (gx_store/local_focus.rs).
+                let browser_focus = snapshot.groups.iter().any(|group| {
+                    group.is_active
+                        && group
+                            .sessions
+                            .iter()
+                            .any(|session| session.is_focused && session.is_browser())
+                });
+                self.gx_store_note_sidebar_snapshot_browser_focus(browser_focus);
                 self.native_sidebar.snapshot = Some(Arc::new(snapshot));
             }
             NativeSidebarUpdate::Flash {

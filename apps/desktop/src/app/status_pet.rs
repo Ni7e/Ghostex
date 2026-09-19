@@ -558,6 +558,8 @@ impl GhostexGpuiApp {
             "type": GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_TYPE,
             "version": GPUI_SIDEBAR_STATUS_PET_ACTIVATION_MESSAGE_VERSION,
         });
+        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = gpui_status_pet_activation_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
         true
@@ -583,6 +585,8 @@ impl GhostexGpuiApp {
             "type": GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_TYPE,
             "version": GPUI_SIDEBAR_MENU_BAR_PROJECT_ACTIVATION_MESSAGE_VERSION,
         });
+        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = gpui_menu_bar_project_activation_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
         true
@@ -611,6 +615,8 @@ impl GhostexGpuiApp {
             "type": GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_TYPE,
             "version": GPUI_SIDEBAR_MENU_BAR_SESSION_ACTIVATION_MESSAGE_VERSION,
         });
+        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = gpui_menu_bar_session_activation_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
         true
@@ -660,6 +666,8 @@ impl GhostexGpuiApp {
             "type": GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_TYPE,
             "version": GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_REQUEST_MESSAGE_VERSION,
         });
+        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = gpui_project_board_conversation_request_script(&message);
         if script.chars().count() > GPUI_SIDEBAR_PROJECT_BOARD_CONVERSATION_PAYLOAD_MAX_CHARS {
             return false;
@@ -695,6 +703,8 @@ impl GhostexGpuiApp {
             "type": GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_TYPE,
             "version": GPUI_SIDEBAR_COMMAND_PALETTE_SESSION_FOCUS_MESSAGE_VERSION,
         });
+        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = gpui_command_palette_session_focus_script(&message);
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
         true

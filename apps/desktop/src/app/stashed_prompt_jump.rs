@@ -78,6 +78,8 @@ impl GhostexGpuiApp {
             "version".to_string(),
             serde_json::json!(GPUI_SIDEBAR_STASHED_PROMPT_SESSION_JUMP_MESSAGE_VERSION),
         );
+        // The runtime can answer this with a focus change, so it must hear the newest local selection first (gx_store/burst.rs).
+        self.gx_store_flush_old_runtime_tell(cx);
         let script = gpui_stashed_prompt_session_jump_script(&serde_json::Value::Object(message));
         sidebar.update(cx, |surface, _| surface.execute_app_owned_script(&script));
         true

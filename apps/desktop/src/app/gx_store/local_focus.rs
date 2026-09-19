@@ -3,7 +3,7 @@
 //! highlight, and the admission of the old runtime's focus payloads. `burst.rs` owns the timers
 //! that tell the old runtime and release deferred work.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{
     Event, IgnoredReason, Intent, Loadable, MachineId, ProjectKey, SessionKey,
@@ -14,7 +14,8 @@ use super::host::{GxStoreHost, now_ms};
 use crate::GhostexGpuiApp;
 use crate::app::model::{
     GpuiGxserverPresentationFocusState, GpuiLocalWorkspaceSessionKey, GpuiPreferredAgentInterface,
-    GpuiSidebarWorkspaceTerminalFocusMessage, GpuiWorkspaceTerminalFocusPlacement, TitlebarMode,
+    GpuiSidebarWorkspaceTerminalFocusMessage, GpuiWorkspaceTerminalFocusPlacement,
+    ShellFocusTarget, TitlebarMode,
 };
 use crate::support_logs;
 
@@ -44,7 +45,27 @@ pub(super) struct ExpectedFocusEcho {
     key: GpuiLocalWorkspaceSessionKey,
     /// The store stamp of the selection the echo belongs to.
     stamp: u64,
+    kind: FocusEchoKind,
+    registered_at: Instant,
 }
+
+/// Where in the old runtime's output an echo sits relative to the focus payload that carries its
+/// selection's stamp, which decides when it can no longer arrive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FocusEchoKind {
+    /// The runtime routes a sidebar click before it is told the click's selection, so its focus
+    /// request precedes every payload that echoes that stamp.
+    Click,
+    /// The runtime answers a flagged tell after it posted the focus state for that same tell, so
+    /// the reply follows the first payload with the tell's stamp and precedes any newer one.
+    TellReply,
+}
+
+/// An echo that has not arrived this long after it was registered is no longer waited for, so a
+/// later request for the same session (a notification, the command palette) is never mistaken for
+/// it. The decision to drop an echo is still made by stamp order; this only bounds how long the
+/// marker lives when the runtime never sends the echo and never posts a newer stamp.
+const FOCUS_ECHO_EXPIRY: Duration = Duration::from_secs(2);
 
 /// Echoes remembered at once. A click or a flagged tell adds one and the echo removes it, so more
 /// than a few only pile up when the old runtime is far behind.
@@ -58,6 +79,7 @@ pub(super) struct LocalFocusCounters {
     pub(super) tells: u64,
     pub(super) attention_acknowledges: u64,
     pub(super) stale_payloads: u64,
+    pub(super) stale_project_contexts: u64,
     pub(super) stale_focus_requests_dropped: u64,
     pub(super) settles: u64,
     pub(super) disputed_empty_tab_lists: u64,
@@ -83,6 +105,10 @@ pub(crate) struct LocalFocus {
     visible_row_ids: Vec<String>,
     /// `foreign_focus` as of the last cache refresh, so a flip alone also counts as a change.
     cached_foreign_focus: bool,
+    /// The newest sidebar snapshot marks a browser row of the active group focused. The old
+    /// runtime then draws no session row focused (`browserOwnsFocus` in sidebar-groups.ts), and
+    /// neither do local rows here.
+    snapshot_browser_focus: bool,
     pub(super) pending_tell: Option<PendingTell>,
     pub(super) pending_attention: Vec<GpuiLocalWorkspaceSessionKey>,
     /// Newest remembered session per project from local selections that no tell covered yet.
@@ -93,6 +119,9 @@ pub(crate) struct LocalFocus {
     /// Set while heavy per-selection work is held back; `burst.rs` clears it.
     pub(super) settle_due: Option<Instant>,
     pub(super) tell_due: Option<Instant>,
+    /// When the last tell is sent again unless a payload has echoed its stamp by then.
+    pub(super) retell_due: Option<Instant>,
+    pub(super) retell_attempts: u8,
     pub(super) burst_task_running: bool,
     pub(super) burst_steps: u32,
     pub(super) chat_reconcile_wanted: bool,
@@ -110,19 +139,35 @@ pub(crate) struct LocalFocus {
 impl LocalFocus {
     /// The old runtime will send a plain focus request for `key`, an echo of the selection with
     /// this stamp.
-    pub(super) fn expect_focus_echo(&mut self, key: GpuiLocalWorkspaceSessionKey, stamp: u64) {
+    pub(super) fn expect_focus_echo(
+        &mut self,
+        key: GpuiLocalWorkspaceSessionKey,
+        stamp: u64,
+        kind: FocusEchoKind,
+    ) {
         self.expected_echoes.retain(|echo| echo.key != key);
         if self.expected_echoes.len() >= MAX_EXPECTED_FOCUS_ECHOES {
             self.expected_echoes.remove(0);
         }
-        self.expected_echoes.push(ExpectedFocusEcho { key, stamp });
+        self.expected_echoes.push(ExpectedFocusEcho {
+            key,
+            stamp,
+            kind,
+            registered_at: Instant::now(),
+        });
     }
 
-    /// The old runtime echoed `stamp` in a focus payload. It handles messages in order and posts
-    /// in order, so it has finished every message sent before the tell that carried a newer stamp
-    /// than an echo's, and that echo has either arrived already or never will.
-    fn forget_echoes_older_than(&mut self, stamp: u64) {
-        self.expected_echoes.retain(|echo| echo.stamp >= stamp);
+    /// The old runtime echoed `stamp` in an admitted focus payload. It handles messages in order
+    /// and posts in order, so every echo that had to precede this payload has arrived or never
+    /// will (see `FocusEchoKind` for which payload that is). Expired echoes go with them.
+    fn forget_echoes_answered_by(&mut self, stamp: u64) {
+        self.expected_echoes.retain(|echo| {
+            let may_still_arrive = match echo.kind {
+                FocusEchoKind::Click => stamp < echo.stamp,
+                FocusEchoKind::TellReply => stamp <= echo.stamp,
+            };
+            may_still_arrive && echo.registered_at.elapsed() < FOCUS_ECHO_EXPIRY
+        });
     }
 
     /// Keeps the newest remembered session per project.
@@ -414,10 +459,17 @@ impl GhostexGpuiApp {
         self.gx_store.local_focus.persisted_focus = Some(current);
     }
 
+    /// A sidebar snapshot arrived: whether it marks a browser row of an active group focused.
+    /// Computed once per snapshot by the receiver, never per row.
+    pub(crate) fn gx_store_note_sidebar_snapshot_browser_focus(&mut self, browser_focus: bool) {
+        self.gx_store.local_focus.snapshot_browser_focus = browser_focus;
+    }
+
     /// Whether a native sidebar row draws focused and with the visible fill.
     ///
-    /// A local session row reads the store. A browser row keeps the snapshot's flags (browser
-    /// tabs are host state, not sessions). Any other row (a remote session, the quick automations
+    /// A local session row reads the store, unless a browser tab owns focus. A browser row keeps
+    /// the snapshot's flags while the shell's focus is on the browser (browser tabs are host
+    /// state, not sessions). Any other row (a remote session, the quick automations
     /// row) reads the snapshot only while the old runtime's accepted focus is such a row, so a
     /// local selection never shows two focused rows while the old runtime catches up.
     pub(crate) fn gx_store_sidebar_row_focus(
@@ -428,8 +480,31 @@ impl GhostexGpuiApp {
         snapshot_visible: bool,
     ) -> (bool, bool) {
         let local_focus = &self.gx_store.local_focus;
+        // Whether a browser tab has focus is a fact of this shell (it is what the old runtime's
+        // flag is derived from), so leaving the browser shows at once; the snapshot's flag lags.
+        let browser_holds_shell_focus = self.active_mode == TitlebarMode::Browser
+            && matches!(
+                self.shell_focus,
+                ShellFocusTarget::BrowserSurface | ShellFocusTarget::BrowserPane(_)
+            );
         if is_browser {
-            return (snapshot_focused, snapshot_visible);
+            return (
+                snapshot_focused && browser_holds_shell_focus,
+                snapshot_visible,
+            );
+        }
+        if local_focus.snapshot_browser_focus && browser_holds_shell_focus {
+            // One focused row: the browser tab's, which the snapshot already draws.
+            let visible =
+                if row_id.starts_with(LOCAL_SESSION_ROW_PREFIX) && !local_focus.foreign_focus {
+                    local_focus
+                        .visible_row_ids
+                        .iter()
+                        .any(|visible| visible == row_id)
+                } else {
+                    snapshot_visible
+                };
+            return (false, visible);
         }
         if !row_id.starts_with(LOCAL_SESSION_ROW_PREFIX) {
             return (
@@ -453,13 +528,14 @@ impl GhostexGpuiApp {
     /// mirrors it through `Intent::ExternalFocus`, which applies the same ordering rule. A payload
     /// older than the newest local selection still carries the tab list of the current project,
     /// but its selection, its active project and its visible set are replaced by what the app
-    /// already holds, so nothing downstream can follow it.
+    /// already holds, so nothing downstream can follow it. The flag says the state is such a
+    /// rewrite: the caller applies it without choosing a workspace project.
     pub(crate) fn gx_store_admit_old_runtime_focus_state(
         &mut self,
         mut next_state: GpuiGxserverPresentationFocusState,
         focus_stamp: Option<u64>,
         cx: &mut gpui::Context<Self>,
-    ) -> GpuiGxserverPresentationFocusState {
+    ) -> (GpuiGxserverPresentationFocusState, bool) {
         let observed_stamp = focus_stamp.unwrap_or(0);
         let local_stamp = self.gx_store.core.focus().local_stamp;
         self.gx_store_observe_old_runtime_focus_state(&next_state, observed_stamp, cx);
@@ -471,8 +547,16 @@ impl GhostexGpuiApp {
             let local_focus = &mut self.gx_store.local_focus;
             local_focus.confirmed_stamp = observed_stamp;
             local_focus.stale_project_switch = None;
-            local_focus.forget_echoes_older_than(observed_stamp);
-            return next_state;
+            local_focus.forget_echoes_answered_by(observed_stamp);
+            if local_focus
+                .last_tell
+                .as_ref()
+                .is_some_and(|told| observed_stamp >= told.stamp)
+            {
+                // The old runtime has the stamp it was last told: nothing to send again.
+                local_focus.retell_due = None;
+            }
+            return (next_state, false);
         }
         let local_focus = &mut self.gx_store.local_focus;
         local_focus.counters.stale_payloads += 1;
@@ -493,7 +577,26 @@ impl GhostexGpuiApp {
         next_state.active_project_id = current.active_project_id.clone();
         next_state.focused_session_id = current.focused_session_id.clone();
         next_state.visible_session_ids = current.visible_session_ids.clone();
-        next_state
+        (next_state, true)
+    }
+
+    /// The store's count of local focus intents, for the channels that carry its echo.
+    pub(crate) fn gx_store_local_focus_stamp(&self) -> u64 {
+        self.gx_store.core.focus().local_stamp
+    }
+
+    /// An active project context for another project was refused because the old runtime produced
+    /// it before it heard of the newest local selection.
+    pub(crate) fn gx_store_note_stale_project_context(&mut self, observed_stamp: u64) {
+        self.gx_store.local_focus.counters.stale_project_contexts += 1;
+        support_logs::append(
+            support_logs::GpuiSupportLog::TerminalFocus,
+            "gpui.terminalFocus.staleProjectContextRefused",
+            serde_json::json!({
+                "localStamp": self.gx_store.core.focus().local_stamp,
+                "observedStamp": observed_stamp,
+            }),
+        );
     }
 
     /// A sidebar row click was applied in process; the old runtime routes the same click and will
@@ -502,7 +605,7 @@ impl GhostexGpuiApp {
         let stamp = self.gx_store.core.focus().local_stamp;
         self.gx_store
             .local_focus
-            .expect_focus_echo(key.clone(), stamp);
+            .expect_focus_echo(key.clone(), stamp, FocusEchoKind::Click);
     }
 
     /// Whether a focus request from the old runtime lost to a newer local selection.
@@ -536,6 +639,9 @@ impl GhostexGpuiApp {
             && !message.startup_restore
             && !message.keep_view
             && message.preferred_interface == GpuiPreferredAgentInterface::Terminal;
+        local_focus
+            .expected_echoes
+            .retain(|echo| echo.registered_at.elapsed() < FOCUS_ECHO_EXPIRY);
         let echo = local_focus
             .expected_echoes
             .iter()
