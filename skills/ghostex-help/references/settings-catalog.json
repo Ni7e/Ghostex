@@ -4585,6 +4585,20 @@
       "agentWritable": true
     },
     {
+      "key": "sidebarSessionCycleSkipsSleeping",
+      "title": "Skip sleeping sessions",
+      "subtitle": "Next Session and Previous Session jump over sleeping sessions in the sidebar.",
+      "tab": "settings",
+      "tabTitle": "General",
+      "group": "sidebar",
+      "groupTitle": "Sidebar",
+      "section": "sidebar",
+      "sectionTitle": "Sidebar",
+      "type": "boolean",
+      "default": false,
+      "agentWritable": true
+    },
+    {
       "key": "enableSessionParking",
       "title": "Enable session parking",
       "subtitle": "Move deferred sessions into a collapsible Parked section at the bottom of the sidebar.",
@@ -4949,7 +4963,7 @@
       "section": "chat",
       "sectionTitle": "Chat",
       "type": "boolean",
-      "default": false,
+      "default": true,
       "agentWritable": true
     },
     {
@@ -6935,15 +6949,17 @@
         "wakeFocusedSession": "",
         "closeFocusedSession": "",
         "popOutPane": "ctrl+shift+o",
-        "focusPreviousGroup": "cmd+[",
-        "focusNextGroup": "cmd+]",
-        "navigateHistoryBack": "cmd+ctrl+[",
-        "navigateHistoryForward": "cmd+ctrl+]",
+        "focusPreviousGroup": "",
+        "focusNextGroup": "",
+        "navigateHistoryBack": "cmd+[",
+        "navigateHistoryForward": "cmd+]",
         "openNotifications": "cmd+i",
         "jumpToLatestUnreadNotification": "cmd+shift+u",
         "deferNotificationAndJumpNext": "cmd+ctrl+u",
-        "focusPreviousSession": "cmd+shift+tab",
-        "focusNextSession": "cmd+tab",
+        "focusPreviousSession": "ctrl+shift+tab",
+        "focusNextSession": "ctrl+tab",
+        "focusPreviousPaneTab": "cmd+alt+[",
+        "focusNextPaneTab": "cmd+alt+]",
         "focusUp": "cmd+alt+up",
         "focusRight": "cmd+alt+right",
         "focusDown": "cmd+alt+down",
@@ -9594,27 +9610,27 @@
       "id": "focusPreviousGroup",
       "title": "Previous Group",
       "description": "Focus the previous group.",
-      "defaultKey": "cmd+["
+      "defaultKey": ""
     },
     {
       "id": "focusNextGroup",
       "title": "Next Group",
       "description": "Focus the next group.",
-      "defaultKey": "cmd+]"
+      "defaultKey": ""
     },
     {
       "id": "navigateHistoryBack",
       "title": "Back",
       "description": "Go back to the previously active session or project.",
-      "defaultKey": "cmd+ctrl+[",
-      "windowsLinuxDefaultKey": "cmd+alt+["
+      "defaultKey": "cmd+[",
+      "windowsLinuxDefaultKey": "cmd+alt+shift+["
     },
     {
       "id": "navigateHistoryForward",
       "title": "Forward",
       "description": "Go forward again after going back.",
-      "defaultKey": "cmd+ctrl+]",
-      "windowsLinuxDefaultKey": "cmd+alt+]"
+      "defaultKey": "cmd+]",
+      "windowsLinuxDefaultKey": "cmd+alt+shift+]"
     },
     {
       "id": "openNotifications",
@@ -9636,15 +9652,29 @@
     },
     {
       "id": "focusPreviousSession",
-      "title": "Previous Tab",
-      "description": "Select the previous tab in the focused split pane.",
-      "defaultKey": "cmd+shift+tab"
+      "title": "Previous Session",
+      "description": "Select the previous session shown in the sidebar.",
+      "defaultKey": "ctrl+shift+tab",
+      "windowsLinuxDefaultKey": "cmd+shift+tab"
     },
     {
       "id": "focusNextSession",
-      "title": "Next Tab",
+      "title": "Next Session",
+      "description": "Select the next session shown in the sidebar.",
+      "defaultKey": "ctrl+tab",
+      "windowsLinuxDefaultKey": "cmd+tab"
+    },
+    {
+      "id": "focusPreviousPaneTab",
+      "title": "Previous Tab in Pane",
+      "description": "Select the previous tab in the focused split pane.",
+      "defaultKey": "cmd+alt+["
+    },
+    {
+      "id": "focusNextPaneTab",
+      "title": "Next Tab in Pane",
       "description": "Select the next tab in the focused split pane.",
-      "defaultKey": "cmd+tab"
+      "defaultKey": "cmd+alt+]"
     },
     {
       "id": "focusUp",

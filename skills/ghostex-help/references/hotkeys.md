@@ -58,15 +58,17 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Wake Focused Session | unassigned |  | Wake the focused sleeping terminal session. | `wakeFocusedSession` |
 | Close Focused Session | unassigned |  | Close the focused pane or session. | `closeFocusedSession` |
 | Pop Out Pane | `ctrl+shift+o` | `cmd+alt+o` | Pop out or restore the focused pane. | `popOutPane` |
-| Previous Group | `cmd+[` |  | Focus the previous group. | `focusPreviousGroup` |
-| Next Group | `cmd+]` |  | Focus the next group. | `focusNextGroup` |
-| Back | `cmd+ctrl+[` | `cmd+alt+[` | Go back to the previously active session or project. | `navigateHistoryBack` |
-| Forward | `cmd+ctrl+]` | `cmd+alt+]` | Go forward again after going back. | `navigateHistoryForward` |
+| Previous Group | unassigned |  | Focus the previous group. | `focusPreviousGroup` |
+| Next Group | unassigned |  | Focus the next group. | `focusNextGroup` |
+| Back | `cmd+[` | `cmd+alt+shift+[` | Go back to the previously active session or project. | `navigateHistoryBack` |
+| Forward | `cmd+]` | `cmd+alt+shift+]` | Go forward again after going back. | `navigateHistoryForward` |
 | Open Notifications | `cmd+i` |  | Open the Notifications panel under the titlebar bell. | `openNotifications` |
 | Jump to Latest Unread Notification | `cmd+shift+u` |  | Jump to the session of the latest unread notification and mark it read. | `jumpToLatestUnreadNotification` |
 | Mark as Oldest Unread and Jump to Next | `cmd+ctrl+u` |  | Push the current session to the back of the unread queue and jump to the next unread notification. | `deferNotificationAndJumpNext` |
-| Previous Tab | `cmd+shift+tab` |  | Select the previous tab in the focused split pane. | `focusPreviousSession` |
-| Next Tab | `cmd+tab` |  | Select the next tab in the focused split pane. | `focusNextSession` |
+| Previous Session | `ctrl+shift+tab` | `cmd+shift+tab` | Select the previous session shown in the sidebar. | `focusPreviousSession` |
+| Next Session | `ctrl+tab` | `cmd+tab` | Select the next session shown in the sidebar. | `focusNextSession` |
+| Previous Tab in Pane | `cmd+alt+[` |  | Select the previous tab in the focused split pane. | `focusPreviousPaneTab` |
+| Next Tab in Pane | `cmd+alt+]` |  | Select the next tab in the focused split pane. | `focusNextPaneTab` |
 | Focus Up | `cmd+alt+up` |  | Move focus up. | `focusUp` |
 | Focus Right | `cmd+alt+right` |  | Move focus right. | `focusRight` |
 | Focus Down | `cmd+alt+down` |  | Move focus down. | `focusDown` |

@@ -58,6 +58,7 @@ How to use this file:
 - **Compact Session Rows** `projectSessionListCollapsedCount` (number 1 to 50 default 13) [advanced]: Rows a project shows in Compact mode before its "Show all" row. Rows in collapsed sections do not count.
 - **Sidebar Interface Size** `agentManagerZoomPercent` (number 50 to 200 default 100): Scale the sidebar interface.
 - **Double-click empty sidebar space to create a session** `createSessionOnSidebarDoubleClick` (boolean, default false) [advanced]: Create a session from empty sidebar space.
+- **Skip sleeping sessions** `sidebarSessionCycleSkipsSleeping` (boolean, default false): Next Session and Previous Session jump over sleeping sessions in the sidebar.
 - **Enable session parking** `enableSessionParking` (boolean, default true): Move deferred sessions into a collapsible Parked section at the bottom of the sidebar.
 - **Sleep session when parking** `sleepSessionWhenParking` (boolean, default false): Sleep a session automatically when it is moved into the Parked section.
 - **Park & Snooze with tags** `showTagMenuWhenParking` (boolean, default true): Open the Tag as menu when a session is parked or snoozed so it can be tagged right away.
@@ -74,7 +75,7 @@ How to use this file:
 
 #### Chat
 
-- **Use GPUI chat** `sessionChatUseGpui` (boolean, default false): Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.
+- **Use GPUI chat** `sessionChatUseGpui` (boolean, default true): Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.
 - **Default view for compatible agents** `preferredAgentInterface` (one of terminal | chat; default chat): Automatically switch to chat as soon as Ghostex detects that an agent session supports it. Option labels: terminal = Terminal, chat = Chat.
 - **Chat font family** `sessionChatFontFamily` (text, default (empty)): Use any installed font in chat messages and the prompt composer.
 - **Default chat zoom (%)** `sessionChatZoomPercent` (number 70 to 200 step 5 default 100): Scale the desktop chat interface, including messages and the prompt composer, from 70% to 200% in 5% steps. Default: 100%.

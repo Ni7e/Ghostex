@@ -24,9 +24,11 @@ reordered in Settings > Extensions > Titlebar views.
 The full view tabs stay centered in the titlebar. When space is tight, they
 become a dropdown on the left after the Notifications bell that follows Next
 (Forward), before the project name. Hovering a view shows its positional shortcut.
-**Hide sidebar** toggles the sidebar. In views with a companion pane, the matching
-**Hide companion** / **Show companion** button sits immediately beside it and uses
-the same outlined chat bubble with text lines whether the companion is visible or hidden.
+**Hide sidebar** toggles the sidebar. The matching **Hide companion** / **Show companion**
+button sits immediately beside it in every view (greyed out in Agents, which has no
+companion pane), so Back and Forward stay in the same place, and it uses the same
+outlined chat bubble with text lines whether the companion is visible or hidden.
+When an update is available, a download button appears just before the project name.
 
 Right-click Code, Browser, Kanban, Automate, Docs, or another web-based view's
 titlebar button for **Reload** and **Sleep** (or **Wake** when sleeping), followed by **Extensions**. Reload
@@ -111,6 +113,14 @@ Close Project parks the project in Recent Projects; when it held the active
 session, Ghostex stays in the current Space and switches to an awake session
 of the next project in the list.
 Session rows show the agent icon, title, status, tags, and last-active time.
+Ctrl+Tab and Ctrl+Shift+Tab (also Cmd+Shift+] and Cmd+Shift+[ on Mac) move to
+the next or previous session shown in the sidebar, the same keys Chrome uses
+to switch tabs. Sessions inside collapsed projects or sections, or hidden by a
+project's Show less, are skipped. Sleeping sessions are included; turn on "Skip
+sleeping sessions" to jump over them. To switch tabs inside a split pane instead,
+use Cmd+Alt+] and Cmd+Alt+[ (Ctrl+Alt+] and Ctrl+Alt+[ on Windows and Linux).
+Shortcuts: `focusNextSession`, `focusPreviousSession`, `focusNextPaneTab`,
+`focusPreviousPaneTab`; setting: `sidebarSessionCycleSkipsSleeping`.
 Top chrome holds the Quick section (projectless Quick chats and terminals),
 tag filters, Spaces, and More Options: Settings, Search by
 Prompt, Previous Sessions, Mobile & Remote, Extensions, Tips.
@@ -381,7 +391,7 @@ Related settings: `autoSleep*`, `clickToWakeSleepingSessions`,
 
 ## Session Chat
 
-In Settings > Chat, **Use GPUI chat** selects the desktop chat renderer. It is off by default, so desktop uses React chat. Turn it on to try and compare the native GPUI version. Restart the desktop app after changing it. Mobile and web keep their existing chat renderer (`sessionChatUseGpui`).
+In Settings > Chat, **Use GPUI chat** selects the desktop chat renderer. It is on by default, so desktop uses the native GPUI chat. Turn it off to go back to React chat. Restart the desktop app after changing it. Mobile and web keep their existing chat renderer (`sessionChatUseGpui`).
 
 Session Chat renders the same agent session as a chat GUI: composer with
 image paste and Ctrl+G rich prompt editor, a prompt queue that sends when the
@@ -404,7 +414,8 @@ Hex colors in messages, inline code, and tables have a small rounded color swatc
 beside the value on desktop, mobile, and web. Copying keeps the original text.
 
 Use Cmd+P (Recent Sessions) to jump between chats across projects, or
-Cmd+Ctrl+[ and Cmd+Ctrl+] to go back and forward through visited sessions.
+Cmd+[ and Cmd+] to go back and forward through visited sessions, the same keys
+Chrome uses (Ctrl+Alt+Shift+[ and Ctrl+Alt+Shift+] on Windows and Linux).
 Recently visited chats show their loaded messages while catching up with the
 agent. On desktop, returning to a recently visited chat also restores its account
 badge, context usage, and status line while their values refresh. The status
