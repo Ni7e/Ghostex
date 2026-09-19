@@ -28,12 +28,10 @@ export const MANAGE_DRAFTS_STORAGE_KEY_PREFIX = 'ghostex.manage.drafts.';
 export const MANAGE_ACTIVE_FILE_STORAGE_KEY_PREFIX = 'ghostex.manage.activeFile.';
 export const MANAGE_GPUI_FILE_CHANGE_POLL_INTERVAL_MS = 400;
 export const MANAGE_GPUI_FILE_CHANGE_DEBOUNCE_MS = 500;
+/** CDXC:Docs 2026-09-19 DECISION: User: the Docs files list is not resizable and keeps this one width, which replaced the resizable 230-560px range. */
 export const MANAGE_SIDEBAR_DEFAULT_WIDTH = 292;
-export const MANAGE_SIDEBAR_MIN_WIDTH = 230;
-export const MANAGE_SIDEBAR_MAX_WIDTH = 560;
 /** CDXC:Docs 2026-09-06 DECISION: User: below 800px of Docs viewport width, overlay the files list instead of pushing the file content; supersedes the 690px breakpoint. */
 export const MANAGE_FLOATING_SIDEBAR_MAX_WIDTH = 800;
-export const MANAGE_SIDEBAR_WIDTH_STORAGE_KEY = 'ghostex.manage.sidebarWidth';
 export const MANAGE_SIDEBAR_PINNED_STORAGE_KEY = 'ghostex.manage.sidebarPinned';
 export const MANAGE_FORMATTING_BAR_COLLAPSED_STORAGE_KEY = 'ghostex.manage.formattingBarCollapsed';
 /** Distance between the floating Markdown formatting bar and the editor's edges. */

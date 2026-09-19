@@ -408,13 +408,6 @@ export const storageCatalog = Object.freeze({
     'ghostex.manage.sidebarSide',
     enumCodec(['left', 'right'])
   ),
-  docsWidth: define(
-    'docsWidth',
-    'Docs sidebar width',
-    desktop + 'views/manage/manage-app.tsx',
-    'ghostex.manage.sidebarWidth',
-    textCodec
-  ),
   docsPinned: define(
     'docsPinned',
     'Docs sidebar pin',

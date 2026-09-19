@@ -4,6 +4,7 @@ import {
   MANAGE_MEO_CODE_COLOR,
   MANAGE_MEO_HEADING_COLOR,
   MANAGE_REDLINE_ANNOTATION_COLOR,
+  MANAGE_SIDEBAR_DEFAULT_WIDTH,
 } from './constants';
 import { quickLabelColor } from './annotation-store';
 import nativeFloatingPanelShadow from '@/packages/core-ui/assets/native-floating-panel-shadow.png';
@@ -92,7 +93,7 @@ export const MANAGE_STYLES = `
   .manage-shell {
     background: var(--manage-bg);
     display: grid;
-    grid-template-columns: var(--manage-sidebar-width, 292px) 1px minmax(0, 1fr);
+    grid-template-columns: var(--manage-sidebar-width) minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     position: relative;
@@ -106,11 +107,16 @@ export const MANAGE_STYLES = `
     --manage-sidebar-reveal-duration: 220ms;
     --manage-sidebar-reveal-easing: cubic-bezier(0.33, 1, 0.68, 1);
     --manage-sidebar-reveal-offset: -100%;
+    /*
+     * CDXC:Docs 2026-09-19 DECISION:
+     * User: the Docs files list is not resizable and keeps one width, so the shell owns that width instead of a persisted per-user value.
+     */
+    --manage-sidebar-width: ${MANAGE_SIDEBAR_DEFAULT_WIDTH}px;
     width: 100%;
   }
 
   .manage-shell[data-sidebar-side="right"] {
-    grid-template-columns: minmax(0, 1fr) 1px var(--manage-sidebar-width, 292px);
+    grid-template-columns: minmax(0, 1fr) var(--manage-sidebar-width);
     --manage-sidebar-reveal-offset: 100%;
   }
 
@@ -191,7 +197,7 @@ export const MANAGE_STYLES = `
   /*
    * CDXC:Docs 2026-09-15 DECISION:
    * User: in light mode the Docs files list, its search row, and the document and formatting toolbars use #f4f4f5, and the search row's bottom border is #e5e5e5.
-   * The docked list's own #e5e5e5 edge border and 6px resizer gap were replaced on 2026-09-19 by the 1px resize rail (see .manage-sidebar-resizer), which is now the only line between the list and the content.
+   * The 6px resizer gap that used to sit beside that border was removed on 2026-09-19, leaving the border as the only line between the list and the content.
    * Dark mode keeps the 2026-09-07 decision (files sidebar, search row, and header rows use #0b0b0b) until the user shares dark colours.
    */
   .manage-sidebar {
@@ -235,7 +241,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-shell[data-sidebar-side="right"] .manage-sidebar {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 1;
   }
 
@@ -248,7 +254,7 @@ export const MANAGE_STYLES = `
     max-width: calc(100% - 34px);
     position: absolute;
     top: 0;
-    width: min(var(--manage-sidebar-width, 292px), calc(100% - 34px));
+    width: min(var(--manage-sidebar-width), calc(100% - 34px));
     z-index: 650;
   }
 
@@ -261,60 +267,21 @@ export const MANAGE_STYLES = `
 
   /*
    * CDXC:Workarea 2026-09-19 DECISION:
-   * User: the Docs files list uses the same divider style as the rest of the app, replacing the old 6px gap.
-   * The resizer is the 1px rail itself; an invisible strip (::before) reaches 4px into each neighbour so it can be caught without hovering exactly on the line, and the 2px hover line (::after) covers the rail plus one pixel.
-   * The line appears after a 50ms hover delay, fades in over 180ms on an ease-out quint curve, hides instantly on leave, stays while dragging, and double-click resets the width, as the GPUI rails do.
-   * SEE-ALSO: apps/desktop/src/app/render/resize_rail.rs, sidebar_divider_hover_line_color, RESIZE_RAIL_GRAB_REACH, SIDEBAR_DIVIDER_HOVER_LINE_WIDTH, SIDEBAR_DIVIDER_HOVER_DELAY, SIDEBAR_DIVIDER_HOVER_FADE_DURATION.
+   * User: the Docs files list shows the same divider as the rest of the app, a single 1px line with no gap, and it is not resizable, so the line is the docked list's own edge border instead of a draggable rail.
+   * This supersedes the 6px resizer column and the hover line that came with it.
+   * SEE-ALSO: apps/desktop/src/app/render/resize_rail.rs (the GPUI rails this matches).
    */
-  .manage-sidebar-resizer {
-    background: light-dark(#e5e5e5, #212121);
-    cursor: ew-resize;
-    grid-column: 2;
-    grid-row: 1;
-    outline: none;
-    position: relative;
-    touch-action: none;
-    z-index: 600;
+  .manage-shell[data-sidebar-floating="false"] .manage-sidebar {
+    border-right: 1px solid light-dark(#e5e5e5, #212121);
   }
 
-  .manage-sidebar-resizer::before {
-    bottom: 0;
-    content: "";
-    left: -4px;
-    position: absolute;
-    right: -4px;
-    top: 0;
-  }
-
-  .manage-sidebar-resizer::after {
-    background: light-dark(#93c5fd, #ffffff);
-    bottom: 0;
-    content: "";
-    left: 0;
-    opacity: 0;
-    pointer-events: none;
-    position: absolute;
-    top: 0;
-    width: 2px;
-  }
-
-  .manage-sidebar-resizer:hover::after,
-  .manage-sidebar-resizer:focus-visible::after,
-  .manage-sidebar-resizer[data-dragging="true"]::after {
-    opacity: 1;
-    transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1) 50ms;
-  }
-
-  .manage-sidebar-resizer[data-dragging="true"]::after {
-    transition: none;
-  }
-
-  .manage-shell[data-sidebar-floating="true"] .manage-sidebar-resizer {
-    display: none;
+  .manage-shell[data-sidebar-floating="false"][data-sidebar-side="right"] .manage-sidebar {
+    border-left: 1px solid light-dark(#e5e5e5, #212121);
+    border-right: 0;
   }
 
   .manage-preview {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 1;
   }
 
@@ -2584,11 +2551,11 @@ export const MANAGE_STYLES = `
 
   @media (max-width: 760px) {
     .manage-shell:not([data-sidebar-hidden="true"]):not([data-sidebar-floating="true"]) {
-      grid-template-columns: minmax(190px, 42%) 1px minmax(0, 1fr);
+      grid-template-columns: min(var(--manage-sidebar-width), 42%) minmax(0, 1fr);
     }
 
     .manage-shell:not([data-sidebar-hidden="true"]):not([data-sidebar-floating="true"])[data-sidebar-side="right"] {
-      grid-template-columns: minmax(0, 1fr) 1px minmax(190px, 42%);
+      grid-template-columns: minmax(0, 1fr) min(var(--manage-sidebar-width), 42%);
     }
 
     .manage-shell[data-sidebar-hidden="true"],

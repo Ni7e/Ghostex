@@ -2,11 +2,8 @@ import { storageScope } from '@/packages/client-storage';
 import { useManageFileIndex } from './file-index';
 import { ManageFileTree, type ManageFileTreeHandle } from './file-tree';
 import {
-  type CSSProperties,
   type DragEvent as ReactDragEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -42,15 +39,11 @@ import {
   MANAGE_FLOATING_SIDEBAR_MAX_WIDTH,
   MANAGE_GPUI_FILE_CHANGE_DEBOUNCE_MS,
   MANAGE_GPUI_FILE_CHANGE_POLL_INTERVAL_MS,
-  MANAGE_SIDEBAR_DEFAULT_WIDTH,
-  MANAGE_SIDEBAR_MAX_WIDTH,
   MANAGE_SIDEBAR_EDGE_REVEAL_WIDTH,
-  MANAGE_SIDEBAR_MIN_WIDTH,
   MANAGE_SIDEBAR_PEEK_CLOSE_GRACE_MS,
   MANAGE_SIDEBAR_PEEK_OPEN_DELAY_MS,
   MANAGE_SIDEBAR_PINNED_STORAGE_KEY,
   MANAGE_SIDEBAR_REVEAL_DURATION_MS,
-  MANAGE_SIDEBAR_WIDTH_STORAGE_KEY,
 } from './constants';
 import {
   ManageAnnotation,
@@ -121,7 +114,7 @@ import {
 } from './annotation-store';
 import { type ManageAnnotationFeedbackDocument, formatManageAnnotationFeedback } from './annotation-feedback';
 
-const clientStorage = storageScope(['docsWidth', 'docsPinned', 'docsActiveFile']);
+const clientStorage = storageScope(['docsPinned', 'docsActiveFile']);
 
 /*
  * CDXC:Docs 2026-06-20-06:14:
@@ -272,8 +265,9 @@ const clientStorage = storageScope(['docsWidth', 'docsPinned', 'docsActiveFile']
  * CDXC:Docs 2026-06-28-04:35:
  * Users need to right-click files in the Manage sidebar and rename or delete them from a context menu. Keep the menu file-scoped, require a second destructive click before delete, preserve annotations across rename, and send only project-relative paths through the native bridge.
  *
- * CDXC:Docs 2026-06-26-23:14:
- * The Manage file sidebar needs a visible resizer so users can widen the artifacts tree on either sidebar side without overlapping the preview/editor. Persist the width locally and clamp it to the current workarea so the preview keeps usable space.
+ * CDXC:Docs 2026-09-19 DECISION:
+ * User: the Docs files list is not resizable and keeps one width, which supersedes the 2026-06-26 resizer that let users widen the tree and persisted the width locally.
+ * MANAGE_SIDEBAR_DEFAULT_WIDTH is that width, applied by the shell grid, and below the floating breakpoint the list still opens as a drawer at the same width.
  *
  * CDXC:Docs 2026-06-28-05:18:
  * The Manage artifact sidebar should visually match Ghostex's left reference sidebar: use the same near-black surface, muted section hierarchy, borderless navigation-style controls, larger lightweight rows, and neutral selected-row chrome instead of boxed blue file-list styling.
@@ -501,8 +495,6 @@ export function ManageApp() {
   const [annotationSendTarget, setAnnotationSendTarget] = useState<ManageAnnotationSendTarget | null>(null);
   const [annotationSendState, setAnnotationSendState] = useState<ManageAnnotationSendState>({ kind: 'idle' });
   const annotationSendStateTimerRef = useRef<number | undefined>(undefined);
-  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredManageSidebarWidth());
-  const [sidebarResizing, setSidebarResizing] = useState(false);
   /**
    * CDXC:Docs 2026-09-12 DECISION:
    * User: the files sidebar has one persisted intent, pinned or hidden, and the shell width alone decides whether a pinned sidebar is docked or, below the floating breakpoint, a closed drawer.
@@ -940,10 +932,6 @@ export function ManageApp() {
   }, [refreshFiles]);
 
   useEffect(() => {
-    clientStorage.setItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(sidebarWidth)));
-  }, [sidebarWidth]);
-
-  useEffect(() => {
     clientStorage.setItem(MANAGE_SIDEBAR_PINNED_STORAGE_KEY, String(sidebarPinned));
   }, [sidebarPinned]);
 
@@ -961,7 +949,6 @@ export function ManageApp() {
      */
     const updateManageSidebarLayout = () => {
       const shellWidth = shell.getBoundingClientRect().width;
-      setSidebarWidth((currentWidth) => clampManageSidebarWidth(currentWidth, shellWidth));
       setSidebarFloating(shellWidth < MANAGE_FLOATING_SIDEBAR_MAX_WIDTH);
     };
     updateManageSidebarLayout();
@@ -1332,79 +1319,6 @@ export function ManageApp() {
     event.preventDefault();
     setFileContextMenu(undefined);
   }, []);
-
-  const updateSidebarWidthFromClientX = useCallback((clientX: number) => {
-    const shellRect = shellRef.current?.getBoundingClientRect();
-    if (!shellRect) {
-      return;
-    }
-    setSidebarWidth(clampManageSidebarWidth(shellRect.right - clientX, shellRect.width));
-  }, []);
-
-  const resizeSidebarBy = useCallback((delta: number) => {
-    const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-    setSidebarWidth((currentWidth) => clampManageSidebarWidth(currentWidth + delta, containerWidth));
-  }, []);
-
-  const handleSidebarResizePointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!sidebarDocked) {
-        return;
-      }
-      event.preventDefault();
-      if (event.detail >= 2) {
-        // Double-click resets the width, like the GPUI companion divider.
-        const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-        setSidebarWidth(clampManageSidebarWidth(MANAGE_SIDEBAR_DEFAULT_WIDTH, containerWidth));
-        return;
-      }
-      setSidebarResizing(true);
-      // The grab strip reaches a few pixels past the rail, so keep the pointer's offset from the rail instead of snapping the rail under it.
-      const shellRight = shellRef.current?.getBoundingClientRect().right ?? event.clientX + sidebarWidth;
-      const grabOffset = shellRight - event.clientX - sidebarWidth;
-      const handlePointerMove = (moveEvent: PointerEvent) => {
-        updateSidebarWidthFromClientX(moveEvent.clientX + grabOffset);
-      };
-      const handlePointerUp = () => {
-        setSidebarResizing(false);
-        window.removeEventListener('pointermove', handlePointerMove);
-        window.removeEventListener('pointerup', handlePointerUp);
-        window.removeEventListener('pointercancel', handlePointerUp);
-      };
-      window.addEventListener('pointermove', handlePointerMove);
-      window.addEventListener('pointerup', handlePointerUp);
-      window.addEventListener('pointercancel', handlePointerUp);
-    },
-    [sidebarDocked, sidebarWidth, updateSidebarWidthFromClientX]
-  );
-
-  const handleSidebarResizeKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      // The sidebar hangs off the right edge, so the left arrow widens it.
-      if (event.key === 'ArrowLeft') {
-        event.preventDefault();
-        resizeSidebarBy(12);
-        return;
-      }
-      if (event.key === 'ArrowRight') {
-        event.preventDefault();
-        resizeSidebarBy(-12);
-        return;
-      }
-      if (event.key === 'Home') {
-        event.preventDefault();
-        const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-        setSidebarWidth(clampManageSidebarWidth(MANAGE_SIDEBAR_MIN_WIDTH, containerWidth));
-        return;
-      }
-      if (event.key === 'End') {
-        event.preventDefault();
-        const containerWidth = shellRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-        setSidebarWidth(clampManageSidebarWidth(MANAGE_SIDEBAR_MAX_WIDTH, containerWidth));
-      }
-    },
-    [resizeSidebarBy]
-  );
 
   useEffect(
     () => () => {
@@ -2704,7 +2618,6 @@ export function ManageApp() {
        */
       data-sidebar-side='right'
       ref={shellRef}
-      style={{ '--manage-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
     >
       {sidebarRendered ? (
         <aside
@@ -2817,21 +2730,6 @@ export function ManageApp() {
           <IconLayoutSidebarRightExpand aria-hidden='true' size={16} stroke={1.8} />
         </button>
       )}
-      {sidebarVisible && !sidebarOverlay ? (
-        <div
-          aria-label='Resize file sidebar'
-          aria-orientation='vertical'
-          aria-valuemax={MANAGE_SIDEBAR_MAX_WIDTH}
-          aria-valuemin={MANAGE_SIDEBAR_MIN_WIDTH}
-          aria-valuenow={Math.round(sidebarWidth)}
-          className='manage-sidebar-resizer'
-          data-dragging={String(sidebarResizing)}
-          onKeyDown={handleSidebarResizeKeyDown}
-          onPointerDown={handleSidebarResizePointerDown}
-          role='separator'
-          tabIndex={0}
-        />
-      ) : null}
       <section className='manage-preview'>
         {openDocuments.storageError ? (
           <p role='alert' className='m-2 rounded border border-destructive p-2 text-sm text-destructive'>
@@ -2964,20 +2862,4 @@ export function requestManageFiles(
 
 export function readStoredManageSidebarPinned(): boolean {
   return clientStorage.getItem(MANAGE_SIDEBAR_PINNED_STORAGE_KEY) !== 'false';
-}
-
-export function readStoredManageSidebarWidth(): number {
-  const parsedWidth = Number(clientStorage.getItem(MANAGE_SIDEBAR_WIDTH_STORAGE_KEY));
-  return clampManageSidebarWidth(
-    Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : MANAGE_SIDEBAR_DEFAULT_WIDTH,
-    window.innerWidth
-  );
-}
-
-export function clampManageSidebarWidth(width: number, containerWidth: number): number {
-  const maxForContainer = Math.max(
-    MANAGE_SIDEBAR_MIN_WIDTH,
-    Math.min(MANAGE_SIDEBAR_MAX_WIDTH, Math.floor(containerWidth * 0.46))
-  );
-  return Math.min(Math.max(Math.round(width), MANAGE_SIDEBAR_MIN_WIDTH), maxForContainer);
 }
