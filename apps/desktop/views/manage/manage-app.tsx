@@ -1359,9 +1359,11 @@ export function ManageApp() {
         return;
       }
       setSidebarResizing(true);
-      updateSidebarWidthFromClientX(event.clientX);
+      // The grab strip reaches a few pixels past the rail, so keep the pointer's offset from the rail instead of snapping the rail under it.
+      const shellRight = shellRef.current?.getBoundingClientRect().right ?? event.clientX + sidebarWidth;
+      const grabOffset = shellRight - event.clientX - sidebarWidth;
       const handlePointerMove = (moveEvent: PointerEvent) => {
-        updateSidebarWidthFromClientX(moveEvent.clientX);
+        updateSidebarWidthFromClientX(moveEvent.clientX + grabOffset);
       };
       const handlePointerUp = () => {
         setSidebarResizing(false);
@@ -1373,7 +1375,7 @@ export function ManageApp() {
       window.addEventListener('pointerup', handlePointerUp);
       window.addEventListener('pointercancel', handlePointerUp);
     },
-    [sidebarDocked, updateSidebarWidthFromClientX]
+    [sidebarDocked, sidebarWidth, updateSidebarWidthFromClientX]
   );
 
   const handleSidebarResizeKeyDown = useCallback(

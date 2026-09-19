@@ -92,7 +92,7 @@ export const MANAGE_STYLES = `
   .manage-shell {
     background: var(--manage-bg);
     display: grid;
-    grid-template-columns: var(--manage-sidebar-width, 292px) 6px minmax(0, 1fr);
+    grid-template-columns: var(--manage-sidebar-width, 292px) 1px minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     position: relative;
@@ -110,7 +110,7 @@ export const MANAGE_STYLES = `
   }
 
   .manage-shell[data-sidebar-side="right"] {
-    grid-template-columns: minmax(0, 1fr) 6px var(--manage-sidebar-width, 292px);
+    grid-template-columns: minmax(0, 1fr) 1px var(--manage-sidebar-width, 292px);
     --manage-sidebar-reveal-offset: 100%;
   }
 
@@ -190,7 +190,8 @@ export const MANAGE_STYLES = `
    */
   /*
    * CDXC:Docs 2026-09-15 DECISION:
-   * User: in light mode the Docs files list, its search row, and the document and formatting toolbars use #f4f4f5, the search row's bottom border is #e5e5e5, and the docked files list gets a #e5e5e5 border on the edge that faces the content next to a 6px resizer gap.
+   * User: in light mode the Docs files list, its search row, and the document and formatting toolbars use #f4f4f5, and the search row's bottom border is #e5e5e5.
+   * The docked list's own #e5e5e5 edge border and 6px resizer gap were replaced on 2026-09-19 by the 1px resize rail (see .manage-sidebar-resizer), which is now the only line between the list and the content.
    * Dark mode keeps the 2026-09-07 decision (files sidebar, search row, and header rows use #0b0b0b) until the user shares dark colours.
    */
   .manage-sidebar {
@@ -205,10 +206,6 @@ export const MANAGE_STYLES = `
     min-width: 0;
     padding: 0 0 7px;
     position: relative;
-  }
-
-  .manage-shell[data-sidebar-floating="false"][data-sidebar-side="right"] .manage-sidebar {
-    border-left: 1px solid light-dark(#e5e5e5, #212121);
   }
 
   /*
@@ -262,52 +259,43 @@ export const MANAGE_STYLES = `
     right: 0;
   }
 
+  /*
+   * CDXC:Workarea 2026-09-19 DECISION:
+   * User: the Docs files list uses the same divider style as the rest of the app, replacing the old 6px gap.
+   * The resizer is the 1px rail itself; an invisible strip (::before) reaches 4px into each neighbour so it can be caught without hovering exactly on the line, and the 2px hover line (::after) covers the rail plus one pixel.
+   * The line appears after a 50ms hover delay, fades in over 180ms on an ease-out quint curve, hides instantly on leave, stays while dragging, and double-click resets the width, as the GPUI rails do.
+   * SEE-ALSO: apps/desktop/src/app/render/resize_rail.rs, sidebar_divider_hover_line_color, RESIZE_RAIL_GRAB_REACH, SIDEBAR_DIVIDER_HOVER_LINE_WIDTH, SIDEBAR_DIVIDER_HOVER_DELAY, SIDEBAR_DIVIDER_HOVER_FADE_DURATION.
+   */
   .manage-sidebar-resizer {
-    background: var(--manage-bg);
+    background: light-dark(#e5e5e5, #212121);
     cursor: ew-resize;
     grid-column: 2;
     grid-row: 1;
-    min-width: 6px;
     outline: none;
     position: relative;
     touch-action: none;
+    z-index: 600;
   }
 
   .manage-sidebar-resizer::before {
-    background: light-dark(#e5e5e7, #212121);
-    content: "";
     bottom: 0;
+    content: "";
+    left: -4px;
     position: absolute;
-    right: 0;
+    right: -4px;
     top: 0;
-    width: 1px;
   }
 
-  .manage-shell[data-sidebar-side="right"] .manage-sidebar-resizer::before {
-    left: 0;
-    right: auto;
-  }
-
-  /*
-   * CDXC:Docs 2026-09-15 DECISION:
-   * User: the Docs files-list drag handle works just like the divider between the companion side pane and the main view in the GPUI app.
-   * That divider shows a 3px line centred in the handle after a 50ms hover delay, fades it in over 180ms on an ease-out quint curve, hides it instantly on leave, keeps it while dragging, and resets the width on double-click.
-   * SEE-ALSO: apps/desktop/src/app/render/project_editor_companion.rs (render_project_editor_companion_divider), sidebar_divider_hover_line_color, SIDEBAR_DIVIDER_HOVER_DELAY, SIDEBAR_DIVIDER_HOVER_FADE_DURATION.
-   */
   .manage-sidebar-resizer::after {
     background: light-dark(#93c5fd, #ffffff);
     bottom: 0;
     content: "";
+    left: 0;
     opacity: 0;
+    pointer-events: none;
     position: absolute;
-    right: 2px;
     top: 0;
-    width: 3px;
-  }
-
-  .manage-shell[data-sidebar-side="right"] .manage-sidebar-resizer::after {
-    left: 2px;
-    right: auto;
+    width: 2px;
   }
 
   .manage-sidebar-resizer:hover::after,
@@ -2596,11 +2584,11 @@ export const MANAGE_STYLES = `
 
   @media (max-width: 760px) {
     .manage-shell:not([data-sidebar-hidden="true"]):not([data-sidebar-floating="true"]) {
-      grid-template-columns: minmax(190px, 42%) 5px minmax(0, 1fr);
+      grid-template-columns: minmax(190px, 42%) 1px minmax(0, 1fr);
     }
 
     .manage-shell:not([data-sidebar-hidden="true"]):not([data-sidebar-floating="true"])[data-sidebar-side="right"] {
-      grid-template-columns: minmax(0, 1fr) 5px minmax(190px, 42%);
+      grid-template-columns: minmax(0, 1fr) 1px minmax(190px, 42%);
     }
 
     .manage-shell[data-sidebar-hidden="true"],
