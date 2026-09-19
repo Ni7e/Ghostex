@@ -481,7 +481,13 @@ export function createGxserverPresentationSidebarSession({
     isPrimaryTitleTerminalTitle: presentation.isPrimaryTitleTerminalTitle,
     isRunning: isLive,
     isSleeping: lifecycleState === 'sleeping',
-    isVisible: isActiveProject && (visibleSessionIds?.has(presentation.sessionId) === true || index === 0),
+    /*
+    CDXC:Sidebar 2026-09-19 WHY:
+    A session is visible when it is focused or the host reports it as surfaced in a pane. An earlier rule also marked the project's first session in server order as visible; with the visible fill so close to the hover fill, that read as a hover highlight stuck on a row the pointer had left.
+    */
+    isVisible:
+      isActiveProject &&
+      (focusedSessionId === presentation.sessionId || visibleSessionIds?.has(presentation.sessionId) === true),
     lastInteractionAt: presentation.meaningfulActivityAt ?? presentation.lastActiveAt ?? presentation.updatedAt,
     lifecycleState,
     nativePaneState,

@@ -48,6 +48,7 @@ impl GhostexGpuiApp {
         // The same preamble `focus_local_workspace_terminal_from_message` runs before selecting an existing tab.
         self.begin_sidebar_focus_border_handoff(cx);
         self.local_workspace_latest_focus_key = Some(key.clone());
+        self.advance_presentation_focus_to_in_process_click(&key);
         self.refresh_sidebar_gxserver_bootstrap_if_changed(cx);
         if !self.focus_existing_gpui_local_workspace_terminal(&key, cx) {
             return false;
@@ -64,6 +65,19 @@ impl GhostexGpuiApp {
         );
         self.sidebar_in_process_focus = Some((key, Instant::now()));
         true
+    }
+
+    /// CDXC:FocusRouting 2026-09-19 WHY:
+    /// The companion pane of a non-Agents view resolves its session from the runtime's last posted focus state (`project_editor_companion_active_terminal_key`). The bridge path only ran after the runtime had posted the clicked session, but an in-process click runs first, so the companion sync put the previous session back and the tab-selection report listed it as visible next to the clicked one. Nothing corrected that list afterwards, so the previous session's sidebar row kept the visible fill, which reads as a stuck hover.
+    /// The click is the new focus: record it here, and the runtime's own focus state confirms it a moment later.
+    fn advance_presentation_focus_to_in_process_click(
+        &mut self,
+        key: &GpuiLocalWorkspaceSessionKey,
+    ) {
+        let focus_state = &mut self.sidebar_gxserver_presentation_focus_state;
+        if focus_state.active_project_id.as_deref() == Some(key.project_id.as_str()) {
+            focus_state.focused_session_id = Some(key.session_id.clone());
+        }
     }
 
     /// CDXC:Sidebar 2026-09-19 DECISION:
