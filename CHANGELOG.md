@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+## 9.9.0 - 2026-09-19
+
+**Ghostex 9.9.0 is out.** The desktop app's sidebar and chat are rebuilt from the ground up in Rust with GPUI instead of the web views they used before, which cuts memory use roughly in half in many setups (from about 1.5 GB to about 800 MB). This release also adds actions under every chat message, per-session model picks, new session hotkeys, and CLI commands that let agents launch and talk to each other.
+
+### 🦀 A native desktop app at half the memory
+- **The sidebar and chat are now native.** Both are drawn by the app itself in Rust and GPUI instead of embedded web pages, so session clicks, scrolling, and typing respond in the same frame.
+- **Memory use drops by about half in many cases.** Workspaces that used around 1.5 GB now sit around 800 MB, and the built-in browser engine only starts once a page actually needs it, so launch no longer waits on web panes you are not using.
+- **Switching back is instant.** Recently visited chats stay warm instead of reloading, and the previous project's terminals, chats, and view keep running after you switch away; set how long with Keep the previous project live for in Settings (10 minutes by default).
+- **Views show a skeleton while they load.** Chat, Code, and Docs draw a placeholder that matches their real layout instead of an empty pane, restored browser panes stay asleep until you click them, and dark mode no longer flashes white between them.
+- **The previous chat view is still one switch away.** Turn off Use GPUI chat in Settings and restart the app to go back to it.
+
+### 🔭 Coming next: all native, and a new look
+- **The rest of the main views are moving to Rust next.** Over the coming releases, the remaining views in the app will be rewritten natively like the sidebar and chat.
+- **A big design revamp is on the way.** Ghostex will get a cleaner look that feels familiar to anyone coming from the ChatGPT or Claude apps.
+
+### 💬 Chat
+- **Actions and the time under every message.** Hover a reply for Copy, Reply by Annotating, Save to md, and when it arrived; hover your own message for its time, Rewind, Save prompt, and Copy.
+- **Pick a model for one Claude session without changing your default.** The composer's model and effort menus apply to the current session, with an Also set as default switch; in the model picker, Enter applies to the session and Shift+Enter sets the default. Codex can only change its default, and its controls say so.
+- **Identical skills show once.** Copies of the same skill installed in several places collapse into one row in the composer list.
+- **Delayed Send starts on When all agents finish.** New Session Automations dialogs on desktop, web, and mobile default to that trigger; an already armed send keeps its own setting.
+
+### ⌨️ Sidebar, titlebar, and hotkeys
+- **Session hotkeys follow browser tabs.** Next and Previous Session are Ctrl+Tab and Ctrl+Shift+Tab, pane tabs move to Cmd+Option+[ and ], and Back and Forward are Cmd+[ and ]; turn on Skip sleeping sessions to jump over sleeping ones.
+- **Titlebar tooltips show each button's hotkey.** Back and Forward stay in place in every view, and the mode-tab highlight slides between tabs.
+- **Collapse a group from its header.** The project chevron toggles collapse, and a section's status dots show only while it is collapsed.
+- **The new agent menu opens as a nested menu.** The plus button lists your agents with a back panel, like before.
+
+### 🤖 Agents that run other agents
+- **Agents can launch, message, and close other agents.** `ghostex agents` adds `whoami`, `types`, `create`, `list`, `send` (with `--interrupt` or `--queue`), and `close`; see `ghostex agents --help`.
+- **Pick a worker's model and effort at launch.** `ghostex create-agent` and `ghostex board start-work` take `--model` and `--effort` for Claude and Codex, for that session only, and resume and fork keep them.
+- **Ghostex Agents Orchestration replaces the Fable orchestration skill.** It walks agents through launching, messaging, reading, and closing helper sessions with the commands above.
+
+### 🗂 Workspace
+- **Two terminals side by side in the project editor companion.** The companion splits into resizable columns and remembers their widths.
+- **The window reopens on the monitor you last used.** Its position is saved as you move it, so a crash or force quit keeps it too.
+- **Accounts keep their last Claude usage reading when a refresh is rate-limited.** The row shows how old the reading is, and automatic switching skips that account until a fresh one arrives.
+- **Search results show their match count in a floating pill.**
+
+### 🩹 Fixes
+- **Linux keeps keyboard focus in browser chrome and sidebar rename,** and the sidebar sizes to the display's scale.
+- **The remote browser proxy works again,** so remote browser views connect instead of failing to configure.
+- **ZCode sessions can be renamed.** The new name is saved in ZCode's own session list.
+- **Dev servers keep their titles** instead of flipping to localhost.
+- **Search by Prompt opens a launch in the right session.**
+- **Rewind's confirmation quotes the prompt you are rewinding to.**
+- **Toasts no longer block clicks underneath them,** and tooltips that got stuck now dismiss.
+
 ## 9.8.5 - 2026-09-16
 
 **Ghostex 9.8.5 is out.** Agent Sync in the Agents Hub keeps every agent on your computer pointed at one shared set of skills, instructions, and hooks, plus switching a draft between Claude and Codex, annotations that clear after you send them, and fixes to chat and the sidebar.
