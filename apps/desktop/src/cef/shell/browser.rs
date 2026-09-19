@@ -473,7 +473,7 @@ impl CefBrowser {
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub fn native_view(&self) -> Option<*mut c_void> {
         let browser = self.browser.borrow();
         browser
@@ -1083,6 +1083,8 @@ pub(crate) fn unregister_native_view_browser(native_view: *mut c_void) {
     if native_view.is_null() {
         return;
     }
+    #[cfg(target_os = "linux")]
+    remove_pointer_focus_handler(native_view);
 
     CEF_BROWSERS_BY_NATIVE_VIEW.with(|browsers| {
         browsers.borrow_mut().remove(&(native_view as usize));

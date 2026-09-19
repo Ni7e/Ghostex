@@ -83,7 +83,7 @@ tar = "0.4"
 # crate lineage; x11rb needs no libX11/libxcb at link time.
 [target.'cfg(target_os = "linux")'.dependencies]
 ureq = { version = "3.3.0", default-features = false, features = ["platform-verifier", "rustls"] }
-x11rb = "0.13"
+x11rb = { version = "0.13", features = ["xinput"] }
 
 # CDXC:CefRuntime 2026-07-04: the Windows CEF adapter (src/cef/windows.rs)
 # drives a message-only pump HWND and child-HWND frame/visibility/focus through

@@ -5,6 +5,49 @@
 // docs/2026-08-22/repo-restructure/SPLITS.md C4.
 use super::*;
 
+#[cfg(target_os = "linux")]
+thread_local! {
+    static POINTER_FOCUS_HANDLERS: RefCell<HashMap<usize, StdRc<dyn Fn()>>> = RefCell::new(HashMap::new());
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn receive_native_pointer_focus(native_view: *mut c_void) {
+    let browser = CEF_BROWSERS_BY_NATIVE_VIEW
+        .with(|browsers| browsers.borrow().get(&(native_view as usize)).cloned());
+    let Some(browser) = browser else {
+        return;
+    };
+    set_active_cef_native_view(native_view as usize);
+    if let Some(host) = browser.host() {
+        host.set_focus(1);
+    }
+    let handler = POINTER_FOCUS_HANDLERS
+        .with(|handlers| handlers.borrow().get(&(native_view as usize)).cloned());
+    if let Some(handler) = handler {
+        handler();
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn remove_pointer_focus_handler(native_view: *mut c_void) {
+    POINTER_FOCUS_HANDLERS.with(|handlers| handlers.borrow_mut().remove(&(native_view as usize)));
+}
+
+#[cfg(target_os = "linux")]
+impl CefBrowser {
+    pub(crate) fn on_native_pointer_focus(&self, handler: StdRc<dyn Fn()>) {
+        if let Some(native_view) = self.native_view() {
+            POINTER_FOCUS_HANDLERS
+                .with(|handlers| handlers.borrow_mut().insert(native_view as usize, handler));
+        }
+    }
+
+    pub(crate) fn owns_native_focus(&self) -> bool {
+        self.native_view()
+            .is_some_and(platform::native_view_owns_first_responder)
+    }
+}
+
 pub(crate) fn active_cef_native_view() -> Option<usize> {
     match ACTIVE_CEF_NATIVE_VIEW.load(Ordering::Acquire) {
         0 => None,
