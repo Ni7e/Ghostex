@@ -48,6 +48,7 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+/** Fresh dialog: Trigger starts on When all agents finish. */
 export const Default: Story = {};
 
 /**

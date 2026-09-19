@@ -137,7 +137,9 @@ export function DelayedSendModal({
   const [nowMs, setNowMs] = useState(Date.now);
   const specificTimeInputId = useId();
   const [sendEnterEnabled, setSendEnterEnabled] = useState(true);
-  const [trigger, setTrigger] = useState<DelayedSendTrigger>('afterDelay');
+  const [trigger, setTrigger] = useState<DelayedSendTrigger>(
+    supportsSendWhenAllProjectSessionsStop ? 'allAgentsStop' : 'afterDelay'
+  );
   const [closeAfterDoneEnabled, setCloseAfterDoneEnabled] = useState(closeAfterDoneActive);
   const hoursInputId = useId();
   const minutesInputId = useId();
@@ -205,13 +207,22 @@ export function DelayedSendModal({
       supportsSendWhenAllProjectSessionsStop && sendWhenAllProjectSessionsStopActive;
     const shouldSendWhenAgentStops =
       !shouldSendWhenAllProjectSessionsStop && supportsSendWhenAgentStops && sendWhenAgentStopsActive;
+    const hasArmedTimer = Boolean(delayedSendDeadlineAt || delayedSendRemainingLabel);
+    /**
+     * CDXC:DelayedSend 2026-09-19 DECISION:
+     * User: the default Delayed Send trigger is When all agents finish.
+     * An already armed send still reopens on its own trigger; After a delay remains the fallback when the all-agents option is unavailable.
+     * SEE-ALSO: apps/desktop/src/app/window/delayed_send_modal.rs, apps/mobile/app/src/components/sessions/DelayedSendDialog.tsx
+     */
     const initialTrigger: DelayedSendTrigger = activeSpecificAgentKey
       ? 'specificAgentStops'
       : shouldSendWhenAllProjectSessionsStop
         ? 'allAgentsStop'
         : shouldSendWhenAgentStops
           ? 'agentStops'
-          : 'afterDelay';
+          : supportsSendWhenAllProjectSessionsStop && !hasArmedTimer
+            ? 'allAgentsStop'
+            : 'afterDelay';
     setSendEnterEnabled(true);
     setTrigger(initialTrigger);
     setSpecificAgentKey(activeSpecificAgentKey);
@@ -235,6 +246,7 @@ export function DelayedSendModal({
     clearScheduledMinutesFocus,
     closeAfterDoneActive,
     delayedSendDeadlineAt,
+    delayedSendRemainingLabel,
     isOpen,
     scheduleMinutesFocus,
     sendWhenAllProjectSessionsStopActive,

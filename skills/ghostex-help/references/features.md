@@ -198,7 +198,8 @@ leaves the other pane in place.
 - Presets: Settings > General > Sidebar > Preset switches groups of card
   details at once; the individual rows below it are marked Advanced.
 - Timed Delayed Send: open **Delayed Send** from an agent's right-click menu
-  under **Advanced**. Choose **After a delay** for hours and minutes, or
+  under **Advanced**. Session Automations opens with **When all agents finish**
+  selected. Choose **After a delay** for hours and minutes, or
   **Specific time** for a future date and time, then **Save changes**.
   Specific time is available in Session Automations on desktop, web, and mobile.
   It uses the local time of the device where you set it, calculates the remaining
@@ -378,9 +379,9 @@ when you open it.
   top. Inside the picker the agent and project filters are dropdowns at the top
   right (Ctrl+G and Ctrl+J open them), Grouping (Ctrl+D) toggles day headers,
   and hovering any control shows its hotkey.
-- Delayed Actions opens Session Automations. Send Enter can run after a delay,
-  when this agent finishes, when all agents in the project finish, or **When a
-  specific agent finishes**. Choose the specific agent from the Agent sessions
+- Delayed Actions opens Session Automations. Send Enter defaults to **When all
+  agents finish**. It can also run after a delay, when this agent finishes, or
+  **When a specific agent finishes**. Choose the specific agent from the Agent sessions
   on the same computer; sleeping sessions are excluded. Ghostex waits until the
   selected agent has remained idle for 10 seconds and restarts that wait if it
   resumes work. Close After Done closes a pane once its command exits.

@@ -340,21 +340,7 @@ impl GpuiDelayedSendModalWindow {
         self.specific_time.update(cx, |input, cx| {
             input.set_value(initial.format("%H:%M").to_string(), window, cx);
         });
-        let should_send_when_all_project_sessions_stop = self
-            .supports_send_when_all_project_sessions_stop
-            && self.send_when_all_project_sessions_stop_active;
-        let should_send_when_agent_stops = !should_send_when_all_project_sessions_stop
-            && self.supports_send_when_agent_stops
-            && self.send_when_agent_stops_active;
-        let initial_trigger = if self.active_specific_agent.is_some() {
-            DelayedSendTrigger::SpecificAgentStops
-        } else if should_send_when_all_project_sessions_stop {
-            DelayedSendTrigger::AllAgentsStop
-        } else if should_send_when_agent_stops {
-            DelayedSendTrigger::AgentStops
-        } else {
-            DelayedSendTrigger::AfterDelay
-        };
+        let initial_trigger = self.initial_trigger();
         self.send_enter_enabled = true;
         self.trigger = initial_trigger;
         self.specific_agent = self.active_specific_agent.clone();
@@ -367,6 +353,32 @@ impl GpuiDelayedSendModalWindow {
             self.focus_handle.focus(window, cx);
         }
         cx.notify();
+    }
+
+    /// CDXC:DelayedSend 2026-09-19 DECISION:
+    /// User: the default Delayed Send trigger is When all agents finish.
+    /// An already armed send still reopens on its own trigger; After a delay remains the fallback when the all-agents option is unavailable.
+    /// SEE-ALSO: packages/core-ui/delayed-send-modal.tsx, apps/mobile/app/src/components/sessions/DelayedSendDialog.tsx
+    fn initial_trigger(&self) -> DelayedSendTrigger {
+        let should_send_when_all_project_sessions_stop = self
+            .supports_send_when_all_project_sessions_stop
+            && self.send_when_all_project_sessions_stop_active;
+        let should_send_when_agent_stops = !should_send_when_all_project_sessions_stop
+            && self.supports_send_when_agent_stops
+            && self.send_when_agent_stops_active;
+        let has_armed_timer =
+            self.deadline_remaining_ms.is_some() || self.remaining_label.is_some();
+        if self.active_specific_agent.is_some() {
+            DelayedSendTrigger::SpecificAgentStops
+        } else if should_send_when_all_project_sessions_stop {
+            DelayedSendTrigger::AllAgentsStop
+        } else if should_send_when_agent_stops {
+            DelayedSendTrigger::AgentStops
+        } else if self.supports_send_when_all_project_sessions_stop && !has_armed_timer {
+            DelayedSendTrigger::AllAgentsStop
+        } else {
+            DelayedSendTrigger::AfterDelay
+        }
     }
 
     fn focus_minutes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
