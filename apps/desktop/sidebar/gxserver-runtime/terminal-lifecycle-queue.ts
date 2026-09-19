@@ -15,6 +15,7 @@ import type { GpuiSidebarRuntime } from './core';
 import { createGpuiSidebarSettings } from './helpers/bootstrap';
 import { normalizeGpuiWorkspaceTabSessionSelection } from './helpers/command-palette';
 import { normalizeNonEmptyString } from './helpers/records';
+import { rememberGpuiProjectSession } from './project-activation';
 import {
   createGpuiRemotePresentationSessionId,
   parseGpuiRemotePresentationProjectId,
@@ -83,6 +84,13 @@ export const gpuiSidebarRuntimeTerminalLifecycleMethods = {
     const selection = normalizeGpuiWorkspaceTabSessionSelection(payload);
     if (!selection) {
       return;
+    }
+    if (selection.focusStamp !== undefined) {
+      // Recorded before anything is posted, so the focus state this selection publishes already echoes it.
+      this.gpuiFocusStamp = Math.max(this.gpuiFocusStamp ?? 0, selection.focusStamp);
+    }
+    for (const remembered of selection.rememberedSessions ?? []) {
+      rememberGpuiProjectSession(this, remembered.projectId, remembered.sessionId);
     }
     const remoteSession = parseGpuiRemotePresentationSessionId(selection.sessionId);
     const remoteProject = parseGpuiRemotePresentationProjectId(selection.projectId);

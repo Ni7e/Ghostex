@@ -533,6 +533,7 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
       activeProjectId,
       tabSessions: activeTabSessions,
       focusedSessionId: this.focusedSessionId,
+      focusStamp: this.gpuiFocusStamp,
       type: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_TYPE,
       version: GPUI_SIDEBAR_GXSERVER_FOCUS_STATE_MESSAGE_VERSION,
       visibleSessionIds: [...this.visibleSessionIds],

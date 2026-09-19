@@ -439,9 +439,13 @@ export type GpuiMenuBarSessionActivationPayload = {
 };
 
 export type GpuiWorkspaceTabSessionSelectionPayload = {
+  /** The Rust store's focus stamp of this selection; echoed in every focus state posted afterwards. */
+  focusStamp?: number;
   localRuntimeMissing?: true;
   localWasSleeping?: true;
   projectId: string;
+  /** Sessions selected in other projects since the last message; remembered, never focused. */
+  rememberedSessions?: readonly { projectId: string; sessionId: string }[];
   sessionId: string;
   visibleSessionIds?: readonly string[];
 };

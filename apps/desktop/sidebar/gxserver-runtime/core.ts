@@ -420,6 +420,13 @@ export class GpuiSidebarRuntime {
   workspaceTerminalTitleSettleTimeouts = new Map<string, number>();
   domainProjects: GxserverProjectDomainState[] = [];
   focusedSessionId: string | undefined;
+  /**
+   * CDXC:FocusRouting 2026-09-19 WHY:
+   * Focus and tabs are owned by the Rust store: this runtime is told about a selection, never asked, and must never override a newer local one (user decision in apps/desktop/src/app/gx_store/local_focus.rs).
+   * The newest focus stamp Rust sent with a tab selection. Every focus state posted afterwards echoes it, so Rust can tell a payload that answers the current selection from one produced before this runtime heard of it.
+   * SEE-ALSO: apps/desktop/src/app/gx_store/local_focus.rs, apps/desktop/src/app/helpers/board_gxserver/focus_state.rs.
+   */
+  gpuiFocusStamp: number | undefined;
   gxserverBootstrap: GpuiValidatedGxserverBootstrap | undefined;
   gitState: SidebarGitState = createDefaultSidebarGitState();
   hasHydrated = false;
