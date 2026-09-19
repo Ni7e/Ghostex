@@ -19,8 +19,9 @@ impl NativeChatView {
     }
 
     /// Flip a row whose default comes from verbose mode, where closing it has to be recorded
-    /// against that default. The chevron in the marker column and the heading beside it both land
-    /// here, so whichever of them the reader pressed leaves the row in the same state.
+    /// against that default. The chevron in the marker column, the heading beside it and the rail
+    /// down the open body all land here, so whichever of them the reader pressed leaves the row in
+    /// the same state.
     pub(super) fn toggle_marker_disclosure(
         &mut self,
         id: String,
@@ -129,7 +130,7 @@ impl NativeChatView {
             let mut row = div().flex().flex_col().w_full().gap(px(8.0 * s));
             let heading = if item["expandable"] == true {
                 let disclosure = self.disclosure(
-                    id,
+                    id.clone(),
                     text(&item, "label"),
                     expanded,
                     Some(json!({"type":"loadWork","id":item["id"],"work":item["deferred"]}))
@@ -172,7 +173,15 @@ impl NativeChatView {
                 }
                 self.in_work_fold = false;
                 if !log.is_empty() {
-                    row = row.child(disclosure_body(&p, DisclosureRail::Marker, 8.0, log));
+                    row = row.child(disclosure_body(
+                        &p,
+                        DisclosureRail::Marker,
+                        8.0,
+                        id,
+                        "Collapse completed work",
+                        log,
+                        cx,
+                    ));
                 }
             }
             if let Some(files) = self.completed_files_fold(item, &p, cx) {
@@ -397,7 +406,7 @@ impl NativeChatView {
             let startup_delivery = self.render_startup_delivery(message, p, cx);
             // The prompt's own pictures sit above the bubble, where their author put them.
             let thumbnails = self.user_image_thumbnails(message, p, cx);
-            let actions = self.user_actions(message, p, window, cx);
+            let actions = self.user_actions(message, p, cx);
             return row
                 // A send still waiting for the terminal says so instead of showing the agent's queue label.
                 .when_some(startup_delivery, |this, status| this.child(status))
@@ -418,11 +427,11 @@ impl NativeChatView {
                 .child(
                     div()
                         .flex()
-                        .justify_end()
-                        .items_start()
-                        .gap(px(6.0 * s))
-                        .child(actions)
-                        .child(bubble),
+                        .flex_col()
+                        .items_end()
+                        .gap(px(4.0 * s))
+                        .child(bubble)
+                        .children(actions),
                 )
                 .into_any_element();
         }
@@ -452,7 +461,7 @@ impl NativeChatView {
                 let key = format!("reasoning:{id}");
                 let expanded = self.is_expanded(&key, p.verbose);
                 row = row.child(self.disclosure(
-                    key,
+                    key.clone(),
                     text(&message["reasoning"], "headline"),
                     expanded,
                     None,
@@ -475,8 +484,15 @@ impl NativeChatView {
                     }
                     detail_rows.extend(self.tool_rows(message, p, cx));
                     if !detail_rows.is_empty() {
-                        row =
-                            row.child(disclosure_body(p, DisclosureRail::Marker, 8.0, detail_rows));
+                        row = row.child(disclosure_body(
+                            p,
+                            DisclosureRail::Marker,
+                            8.0,
+                            key,
+                            "Collapse thinking",
+                            detail_rows,
+                            cx,
+                        ));
                     }
                 }
                 tools_rendered = true;
@@ -502,7 +518,7 @@ impl NativeChatView {
                     .child(if tools {
                         self.disclosure_marker(key.clone(), expanded, p, cx)
                     } else {
-                        self.reply_marker(message, reply_focused, p, cx)
+                        self.reply_marker(p)
                     })
                     .child(div().min_w_0().flex_1().child(self.markdown(
                         format!("body:{id}"),
@@ -518,6 +534,7 @@ impl NativeChatView {
                 // pictures) stop the press themselves, and `acts_on_row` keeps a press that
                 // selected text from counting as a click on the row.
                 row = row.child(if tools {
+                    let toggle_key = key.clone();
                     heading
                         .id(gpui::SharedString::from(format!("tools-heading:{id}")))
                         .rounded(px(4.0 * s))
@@ -526,7 +543,7 @@ impl NativeChatView {
                         .hover(|style| style.bg(p.foreground.opacity(0.05)))
                         .on_click(cx.listener(move |this, event, window, cx| {
                             if super::row_click::acts_on_row(event, window, cx) {
-                                this.toggle_marker_disclosure(key.clone(), expanded, cx);
+                                this.toggle_marker_disclosure(toggle_key.clone(), expanded, cx);
                             }
                         }))
                         .into_any_element()
@@ -537,7 +554,15 @@ impl NativeChatView {
                     if expanded {
                         let work = self.tool_rows(message, p, cx);
                         if !work.is_empty() {
-                            row = row.child(disclosure_body(p, DisclosureRail::Marker, 8.0, work));
+                            row = row.child(disclosure_body(
+                                p,
+                                DisclosureRail::Marker,
+                                8.0,
+                                key,
+                                "Collapse tool calls",
+                                work,
+                                cx,
+                            ));
                         }
                     }
                     tools_rendered = true;
@@ -560,12 +585,8 @@ impl NativeChatView {
         {
             row = row.child(cards);
         }
-        if self.has_reply_actions(message)
-            && message["tools"]
-                .as_array()
-                .is_some_and(|tools| !tools.is_empty())
-        {
-            row = row.child(self.reply_actions(message, false, reply_focused, p, cx));
+        if self.has_reply_actions(message) {
+            row = row.child(self.reply_actions(message, reply_focused, p, cx));
         }
         row.into_any_element()
     }

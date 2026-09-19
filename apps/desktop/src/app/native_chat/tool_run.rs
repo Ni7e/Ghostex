@@ -62,11 +62,25 @@ impl NativeChatView {
             let key = format!("tools:{id}");
             // React's run disclosure opens on demand and is never opened by verbose mode.
             let expanded = self.expanded.contains(&key);
-            let mut rows =
-                vec![self.disclosure(key, text(message, "simpleToolLabel"), expanded, None, p, cx)];
+            let mut rows = vec![self.disclosure(
+                key.clone(),
+                text(message, "simpleToolLabel"),
+                expanded,
+                None,
+                p,
+                cx,
+            )];
             if expanded {
                 let body = self.tool_row_list(&id, &tools, &visible, p, cx);
-                rows.push(disclosure_body(p, DisclosureRail::Marker, ROW_GAP, body));
+                rows.push(disclosure_body(
+                    p,
+                    DisclosureRail::Marker,
+                    ROW_GAP,
+                    key,
+                    "Collapse tool calls",
+                    body,
+                    cx,
+                ));
             }
             return rows;
         }
@@ -87,8 +101,16 @@ impl NativeChatView {
         );
         if run_expanded {
             let mut body = self.tool_row_list(&id, &tools, &visible, p, cx);
-            body.push(self.tool_fold_toggle(run_key, label, true, p, cx));
-            return vec![disclosure_body(p, DisclosureRail::Marker, ROW_GAP, body)];
+            body.push(self.tool_fold_toggle(run_key.clone(), label, true, p, cx));
+            return vec![disclosure_body(
+                p,
+                DisclosureRail::Marker,
+                ROW_GAP,
+                run_key,
+                "Show fewer tool calls",
+                body,
+                cx,
+            )];
         }
         let kept: Vec<usize> = visible
             .into_iter()
@@ -300,7 +322,15 @@ impl NativeChatView {
                 ));
             }
             if !detail.is_empty() {
-                row = row.child(disclosure_body(p, DisclosureRail::ToolDetail, 8.0, detail));
+                row = row.child(disclosure_body(
+                    p,
+                    DisclosureRail::ToolDetail,
+                    8.0,
+                    key,
+                    format!("Collapse {}", tool["name"].as_str().unwrap_or_default()),
+                    detail,
+                    cx,
+                ));
             }
         }
         row.into_any_element()

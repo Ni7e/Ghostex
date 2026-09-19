@@ -59,8 +59,8 @@ import { isSessionChatTerminalToolMessage, sessionChatTerminalToolActivity } fro
 import { SessionChatTerminalToolRow } from '../session-chat-terminal-tool-row';
 import { pairSessionChatToolBlocks, splitSessionChatBlocks } from '../session-chat-tool-fold';
 import { SessionChatToolRun } from '../session-chat-tool-run';
-import { SessionChatUserMessageLayout } from '../session-chat-user-message-layout';
 import { sessionChatMessageActionContent } from '@/packages/shared/session-chat-presentation/message-actions';
+import { sessionChatMessageTime } from '@/packages/shared/session-chat-presentation/message-time';
 import '../session-chat-agent-tools-disclosure.css';
 import { SessionChatMessageActionIcon } from '../session-chat-message-action-icon';
 import { playCopySound } from '../../copy-sound';
@@ -141,83 +141,100 @@ export function UserImageThumbnails({ blocks }: { blocks: readonly { alt?: strin
 }
 
 export function CopyFooter({
-  anchoredToAssistantMarker = false,
   className,
   markdown,
   onAnnotate,
   onRewind,
   onSaveMarkdown,
   onSavePrompt,
+  time,
+  user = false,
 }: {
-  anchoredToAssistantMarker?: boolean;
   className?: string;
   markdown: string;
   /**
    * CDXC:Docs 2026-09-15 DECISION:
-   * User: an agent reply can be annotated like a document. The button is titled "Reply by Annotating" and sits between Copy message and Save to md in the final reply's rail. Set only by hosts with a Docs review (the desktop app); the reply opens there and the feedback comes back to this session.
+   * User: an agent reply can be annotated like a document. The button is titled "Reply by Annotating" and sits between Copy message and Save to md in the final reply's actions. Set only by hosts with a Docs review (the desktop app); the reply opens there and the feedback comes back to this session.
    */
   onAnnotate?: (markdown: string) => void;
   /** Opens the rewind confirmation for this prompt (user rows only). */
   onRewind?: () => void;
   onSaveMarkdown?: (markdown: string) => void;
   onSavePrompt?: (prompt: string) => Promise<void>;
+  time?: { label: string; title: string } | null;
+  /** A prompt's row mirrors a reply's: the time leads and Copy sits at the bubble's edge. */
+  user?: boolean;
 }) {
   const { canAnnotate, canSaveMarkdown } = sessionChatMessageActionContent(markdown);
-  return (
-    <MessageFooter
-      className={cn(
-        'px-0',
-        anchoredToAssistantMarker
-          ? 'ghostex-chat-final-actions'
-          : 'opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100',
-        className
-      )}
+  const copy = (
+    <Button
+      aria-label='Copy message'
+      key='copy'
+      onClick={() => {
+        playCopySound();
+        void navigator.clipboard.writeText(markdown);
+      }}
+      size='icon-xs'
+      title='Copy message'
+      variant='ghost'
     >
-      <Button
-        aria-label='Copy message'
-        className={anchoredToAssistantMarker ? 'ghostex-chat-final-action ghostex-chat-final-action-copy' : undefined}
-        onClick={() => {
-          playCopySound();
-          void navigator.clipboard.writeText(markdown);
-        }}
-        size='icon-xs'
-        title='Copy message'
-        variant='ghost'
-      >
-        <SessionChatMessageActionIcon name='copy' />
-      </Button>
-      {onSavePrompt ? <SessionChatSavePromptButton prompt={markdown} onSave={onSavePrompt} /> : null}
-      {onRewind ? (
-        <Button aria-label='Rewind to here' onClick={onRewind} size='icon-xs' title='Rewind to here' variant='ghost'>
-          <IconArrowBackUp aria-hidden='true' data-icon='inline-start' stroke={1.9} />
-        </Button>
-      ) : null}
-      {onAnnotate && canAnnotate ? (
-        <Button
-          aria-label='Reply by Annotating'
-          className={
-            anchoredToAssistantMarker ? 'ghostex-chat-final-action ghostex-chat-final-action-annotate' : undefined
-          }
-          onClick={() => onAnnotate(markdown)}
-          size='icon-xs'
-          title='Reply by Annotating'
-          variant='ghost'
-        >
-          <SessionChatMessageActionIcon name='annotate' />
-        </Button>
-      ) : null}
-      {onSaveMarkdown && canSaveMarkdown ? (
-        <Button
-          aria-label='Save message to Markdown'
-          className={anchoredToAssistantMarker ? 'ghostex-chat-final-action ghostex-chat-final-action-save' : undefined}
-          onClick={() => onSaveMarkdown(markdown)}
-          size='icon-xs'
-          title='Save to md'
-          variant='ghost'
-        >
-          <SessionChatMessageActionIcon name='save' />
-        </Button>
-      ) : null}
+      <SessionChatMessageActionIcon name='copy' />
+    </Button>
+  );
+  const buttons = user
+    ? [
+        onRewind ? (
+          <Button
+            aria-label='Rewind to here'
+            key='rewind'
+            onClick={onRewind}
+            size='icon-xs'
+            title='Rewind to here'
+            variant='ghost'
+          >
+            <IconArrowBackUp aria-hidden='true' data-icon='inline-start' stroke={1.9} />
+          </Button>
+        ) : null,
+        onSavePrompt ? <SessionChatSavePromptButton key='save-prompt' prompt={markdown} onSave={onSavePrompt} /> : null,
+        copy,
+      ]
+    : [
+        copy,
+        onAnnotate && canAnnotate ? (
+          <Button
+            aria-label='Reply by Annotating'
+            key='annotate'
+            onClick={() => onAnnotate(markdown)}
+            size='icon-xs'
+            title='Reply by Annotating'
+            variant='ghost'
+          >
+            <SessionChatMessageActionIcon name='annotate' />
+          </Button>
+        ) : null,
+        onSaveMarkdown && canSaveMarkdown ? (
+          <Button
+            aria-label='Save message to Markdown'
+            key='save'
+            onClick={() => onSaveMarkdown(markdown)}
+            size='icon-xs'
+            title='Save to md'
+            variant='ghost'
+          >
+            <SessionChatMessageActionIcon name='save' />
+          </Button>
+        ) : null,
+      ];
+  const timeLabel = time ? (
+    <span className='ghostex-chat-message-time' title={time.title}>
+      {time.label}
+    </span>
+  ) : null;
+  return (
+    <MessageFooter className={cn('ghostex-chat-message-actions px-0', className)}>
+      {user ? timeLabel : null}
+      <div className='ghostex-chat-message-action-buttons'>{buttons}</div>
+      {user ? null : timeLabel}
     </MessageFooter>
   );
 }
@@ -828,17 +845,7 @@ export function MessageRowBody({
           ) : message.queued === true ? (
             <QueuedLabel />
           ) : null}
-          <SessionChatUserMessageLayout>
-            {showCopy ? (
-              <CopyFooter
-                className='ghostex-chat-user-actions'
-                markdown={userCopyMarkdown}
-                onSavePrompt={onSavePrompt}
-                {...(showRewind && onRewind
-                  ? { onRewind: () => onRewind({ messageId: message.id, prompt: userCopyMarkdown }) }
-                  : {})}
-              />
-            ) : null}
+          <div className='ghostex-chat-user-message'>
             <div className='ghostex-chat-user-content'>
               <UserImageThumbnails blocks={images} />
               {userMarkdown.length > 0 ? (
@@ -849,7 +856,19 @@ export function MessageRowBody({
                 </Bubble>
               ) : null}
             </div>
-          </SessionChatUserMessageLayout>
+            {showCopy ? (
+              <CopyFooter
+                className='ghostex-chat-user-actions'
+                markdown={userCopyMarkdown}
+                onSavePrompt={onSavePrompt}
+                time={sessionChatMessageTime(message.timestamp)}
+                user
+                {...(showRewind && onRewind
+                  ? { onRewind: () => onRewind({ messageId: message.id, prompt: userCopyMarkdown }) }
+                  : {})}
+              />
+            ) : null}
+          </div>
         </MessageContent>
       </Message>
     );
@@ -882,10 +901,11 @@ export function MessageRowBody({
         {fileCards}
         {showCopy ? (
           <CopyFooter
-            anchoredToAssistantMarker={tools.length === 0}
+            className='ghostex-chat-reply-actions'
             markdown={markdown}
             onAnnotate={onAnnotate}
             onSaveMarkdown={onSaveMarkdown}
+            time={sessionChatMessageTime(message.timestamp)}
           />
         ) : null}
       </MessageContent>

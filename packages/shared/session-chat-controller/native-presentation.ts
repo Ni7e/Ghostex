@@ -28,6 +28,7 @@ import {
 import { partitionCompletedChatWork, workedDurationLabel } from '../session-chat-presentation/turns';
 import type { SessionChatMessage } from '../session-chat';
 import { sessionChatMessageActionContent } from '../session-chat-presentation/message-actions';
+import { sessionChatMessageTime } from '../session-chat-presentation/message-time';
 import { sessionChatMarkdownReferences } from '../session-chat-presentation/markdown-links';
 import { sessionChatNativeMarkdown } from '../session-chat-presentation/native-markdown';
 import { sameSessionChatMessage } from '@/packages/core-ui/chat/session-chat-message-equality';
@@ -57,6 +58,7 @@ function projectMessage(message: SessionChatMessage, agentPath: string) {
     copyText,
     canRewind: sessionChatMessageCanRewind(message, copyText, suppressed),
     actionContent: sessionChatMessageActionContent(body),
+    time: sessionChatMessageTime(message.timestamp),
     markdownReferences: sessionChatMarkdownReferences(nativeBody),
     reasoning: splitReasoningHeadline(body),
     agentMessage: agentMessage ? { ...agentMessage, name: agentDisplayName(agentMessage.sender) } : null,

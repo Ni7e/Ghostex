@@ -167,8 +167,8 @@ export const SettledTurnFolds: Story = {
   args: { isWorking: false, messages: [...ACTIVE_RESPONSE, TASK_NOTIFICATION] },
   play: async ({ canvasElement }) => {
     expect(within(canvasElement).getByText(WORKED_FOLD_LABEL)).toBeVisible();
-    // The settled final reply owns its anchored copy affordance again.
-    expect(canvasElement.querySelector('.ghostex-chat-final-action-copy')).not.toBeNull();
+    // The settled final reply owns its copy action again.
+    expect(canvasElement.querySelector('.ghostex-chat-reply-actions')).not.toBeNull();
   },
 };
 

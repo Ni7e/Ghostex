@@ -49,15 +49,7 @@ impl NativeChatView {
                 .is_some_and(|ids| ids.iter().any(|id| id == &message["id"]))
     }
 
-    pub(super) fn reply_marker(
-        &self,
-        message: &Value,
-        focused: bool,
-        p: &ChatAppearance,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        let actions = self.has_reply_actions(message)
-            && message["tools"].as_array().is_none_or(Vec::is_empty);
+    pub(super) fn reply_marker(&self, p: &ChatAppearance) -> AnyElement {
         div()
             .relative()
             .w(px(16.0 * p.scale))
@@ -71,31 +63,16 @@ impl NativeChatView {
                     .top(px(9.5 * p.scale))
                     .size(px(4.0 * p.scale))
                     .rounded_full()
-                    .bg(p.primary)
-                    .when(actions && focused, |dot| dot.opacity(0.0))
-                    .when(actions, |dot| {
-                        dot.group_hover("native-chat-message", |style| style.opacity(0.0))
-                    }),
+                    .bg(p.primary),
             )
-            .when(actions, |marker| {
-                marker.child(
-                    div()
-                        .absolute()
-                        .left(px(-4.0 * p.scale))
-                        .top(px(-0.5 * p.scale))
-                        .child(self.reply_actions(message, true, focused, p, cx)),
-                )
-            })
             .into_any_element()
     }
 
-    /// CDXC:SessionChat 2026-09-18 SEE-ALSO:
-    /// React's CopyFooter and .ghostex-chat-final-actions place plain-reply actions in the marker gutter without adding a footer to the transcript height.
-    /// The gutter rail is three fixed slots, one row apart, in the order Copy, Reply by Annotating, Save to Markdown: a reply that cannot be annotated leaves that slot empty rather than pulling Save up under Copy, so an action is always in the same place.
+    /// CDXC:SessionChat 2026-09-19 SEE-ALSO:
+    /// React's `CopyFooter` and `.ghostex-chat-message-actions` in packages/core-ui/styles/chat.css carry the user decision this mirrors: a final reply's actions sit in a row below it, Copy, Reply by Annotating, Save to md, then the time it arrived, starting at the prose column.
     pub(super) fn reply_actions(
         &self,
         message: &Value,
-        rail: bool,
         focused: bool,
         p: &ChatAppearance,
         cx: &Context<Self>,
@@ -125,9 +102,6 @@ impl NativeChatView {
                 .border(px(p.scale))
                 .border_color(gpui::transparent_black())
                 .chat_cursor_pointer()
-                .opacity(if focused { 1.0 } else { 0.0 })
-                .group_hover("native-chat-message", |style| style.opacity(1.0))
-                .focus(|style| style.opacity(1.0))
                 .focus_visible(|mut style| {
                     style = style.border_color(p.ring);
                     style.box_shadow = Some(vec![gpui::BoxShadow {
@@ -159,10 +133,10 @@ impl NativeChatView {
         let can_annotate =
             self.config.app.is_some() && message["actionContent"]["canAnnotate"] == true;
         let can_save = message["actionContent"]["canSaveMarkdown"] == true;
-        div()
+        let buttons = div()
             .flex()
-            .tab_group()
-            .when(rail, |actions| actions.flex_col().gap(px(2.0 * p.scale)))
+            .items_center()
+            .gap(px(2.0 * p.scale))
             .child(button(
                 ReplyAction::Copy,
                 "Copy message",
@@ -175,23 +149,26 @@ impl NativeChatView {
                     "chat-actions/annotate",
                 ))
             })
-            .when(rail && !can_annotate && can_save, |actions| {
-                actions.child(div().size(px(24.0 * p.scale)).flex_shrink_0())
-            })
             .when(can_save, |actions| {
                 actions.child(button(
                     ReplyAction::SaveMarkdown,
                     "Save message to Markdown",
                     "chat-actions/save",
                 ))
-            })
+            });
+        // The prose column: the marker's 2px inset, its 16px slot, and the 6px gap before the text.
+        message_actions_row(p, focused)
+            .pl(px(24.0 * p.scale))
+            .tab_group()
+            .child(buttons)
+            .when_some(message_time(&id, message, p), |row, time| row.child(time))
             .into_any_element()
     }
 
     /// CDXC:SavedPrompts 2026-09-06 DECISION:
     /// User: add Save prompt between Copy and Rewind on user messages, using the input box's stack-push icon.
     ///
-    /// The prompt's own rail (React: `CopyFooter` on a user row). Rewind is offered only when the
+    /// The prompt's own action row (React: `CopyFooter` on a user row). Rewind is offered only when the
     /// host can reach `/api/rewindSessionChat`, the session runs an agent whose rewind Ghostex
     /// drives, and the composer could send right now, because the daemon types the rewind into that
     /// same pane. Which prompt is a rewind target at all is decided in
@@ -200,14 +177,13 @@ impl NativeChatView {
         &self,
         message: &Value,
         p: &ChatAppearance,
-        window: &mut gpui::Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
         let id = text(message, "id");
         let prompt = text(message, "copyText");
-        // Nothing to copy, save, or rewind to: an empty prompt keeps its rail off entirely.
+        // Nothing to copy, save, or rewind to: an empty prompt has no action row at all.
         if prompt.is_empty() {
-            return div().into_any_element();
+            return None;
         }
         let saved = self.snapshot["savedPrompts"][id.as_str()]
             .as_str()
@@ -222,22 +198,12 @@ impl NativeChatView {
         // behind the composer's Stash control, so a host without one offers Copy alone.
         let savable = self.snapshot["composerActions"]["stash"] == true;
         /*
-        CDXC:SessionChat 2026-09-18 SEE-ALSO:
-        `.ghostex-chat-user-message` in packages/core-ui/styles/chat.css carries the user decision
-        this mirrors: the rail sits left of the bubble, horizontal for one- or two-line prompts and
-        vertical for longer ones. React measures the rendered bubble
-        (`SessionChatUserMessageLayout`); GPUI measures the row the rail stretches to, the taller of
-        bubble and rail, so the threshold also allows for the rail's own column height.
+        CDXC:SessionChat 2026-09-19 SEE-ALSO:
+        `.ghostex-chat-message-actions` in packages/core-ui/styles/chat.css carries the user decision
+        this mirrors: the prompt's actions sit right-aligned below the bubble, led by the time it
+        was sent, in the order Rewind, Save prompt, Copy, so Copy lands at the bubble's edge as in
+        t3code.
         */
-        let s = p.scale;
-        let buttons = 1.0 + f32::from(savable) + f32::from(rewindable);
-        let measured = window.use_keyed_state(
-            gpui::SharedString::from(format!("user-actions-height:{id}")),
-            cx,
-            |_, _| 0.0_f32,
-        );
-        let compact =
-            *measured.read(cx) <= ((12.0 + buttons * 24.0) * s).max((2.0 * 22.75 + 26.0) * s + 1.0);
         let button = |key: &str, label: String, icon: &'static str, action: Value| {
             let icon_color = p.muted;
             div()
@@ -277,41 +243,20 @@ impl NativeChatView {
                     }
                 }))
         };
-        div()
-            .self_stretch()
-            .relative()
+        let buttons = div()
             .flex()
-            .flex_shrink_0()
-            .when(compact, |rail| rail.items_center())
-            .when(!compact, |rail| {
-                rail.flex_col().child(div().h(px(12.0 * s)).flex_shrink_0())
+            .items_center()
+            .gap(px(2.0 * p.scale))
+            .when(rewindable, |buttons| {
+                buttons.child(button(
+                    "rewind",
+                    "Rewind to here".into(),
+                    "chat-actions/rewind",
+                    json!({"type":"rewindOpen","messageId":id.clone(),"prompt":prompt.clone()}),
+                ))
             })
-            .opacity(0.0)
-            .group_hover("native-chat-message", |style| style.opacity(1.0))
-            .child(
-                gpui::canvas(
-                    move |bounds, _, cx| {
-                        let height = bounds.size.height.as_f32();
-                        measured.update(cx, |value, cx| {
-                            if (*value - height).abs() > 0.5 {
-                                *value = height;
-                                cx.notify();
-                            }
-                        });
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .size_full(),
-            )
-            .child(button(
-                "copy",
-                "Copy message".into(),
-                "chat-actions/copy",
-                json!({"type":"copyPrompt","text":prompt.clone()}),
-            ))
-            .when(savable, |rail| {
-                rail.child(button(
+            .when(savable, |buttons| {
+                buttons.child(button(
                     "save-prompt",
                     match saved {
                         "saved" => "Prompt saved",
@@ -328,15 +273,19 @@ impl NativeChatView {
                     json!({"type":"savePrompt","messageId":id.clone(),"prompt":prompt.clone()}),
                 ))
             })
-            .when(rewindable, |rail| {
-                rail.child(button(
-                    "rewind",
-                    "Rewind to here".into(),
-                    "chat-actions/rewind",
-                    json!({"type":"rewindOpen","messageId":id.clone(),"prompt":prompt.clone()}),
-                ))
-            })
-            .into_any_element()
+            .child(button(
+                "copy",
+                "Copy message".into(),
+                "chat-actions/copy",
+                json!({"type":"copyPrompt","text":prompt.clone()}),
+            ));
+        Some(
+            message_actions_row(p, false)
+                .pr(px(4.0 * p.scale))
+                .when_some(message_time(&id, message, p), |row, time| row.child(time))
+                .child(buttons)
+                .into_any_element(),
+        )
     }
 
     fn perform_reply_action(
@@ -356,4 +305,41 @@ impl NativeChatView {
             ReplyAction::Annotate => self.host("annotateReply", json!({"markdown":markdown}), cx),
         }
     }
+}
+
+/// The row under a message that holds its actions and time; hidden until the message is hovered
+/// or, for a reply, holds keyboard focus (React: `.ghostex-chat-message-actions`).
+///
+/// CDXC:SessionChat 2026-09-19 WHY:
+/// The row takes no negative margin and no `flex_shrink_0`. The list measures a row at min-content height, where taffy sizes a non-shrinking item with a negative main-axis margin as `basis + basis * margin`, which made a reply's row about 94px too short and drew the next message over it.
+fn message_actions_row(p: &ChatAppearance, focused: bool) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(8.0 * p.scale))
+        .opacity(if focused { 1.0 } else { 0.0 })
+        .group_hover("native-chat-message", |style| style.opacity(1.0))
+}
+
+/// The label from packages/shared/session-chat-presentation/message-time.ts, with its long form
+/// as the tooltip.
+fn message_time(id: &str, message: &Value, p: &ChatAppearance) -> Option<AnyElement> {
+    let label = text(&message["time"], "label");
+    if label.is_empty() {
+        return None;
+    }
+    let title = gpui::SharedString::from(text(&message["time"], "title"));
+    Some(
+        div()
+            .id(gpui::SharedString::from(format!("message-time:{id}")))
+            .flex_shrink_0()
+            .whitespace_nowrap()
+            .text_size(px(12.0 * p.scale))
+            .text_color(p.muted)
+            .tooltip(move |window, cx| {
+                gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
+            })
+            .child(label)
+            .into_any_element(),
+    )
 }
