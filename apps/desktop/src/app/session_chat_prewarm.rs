@@ -3,8 +3,9 @@ use std::time::Duration;
 
 /// Native chat views kept warm for one project, counting the ones the user opened.
 const NATIVE_CHAT_WARM_VIEWS_PER_PROJECT: usize = 5;
-/// Native chat views alive across all projects; the warm pool trims hidden ones beyond this.
-pub(crate) const NATIVE_CHAT_WARM_VIEWS_TOTAL: usize = 6;
+/// CDXC:SessionChat 2026-09-19 DECISION:
+/// User: keep more chat views in memory; clicking through four sessions and back must not show a skeleton again. A pooled-out view boots from scratch, so the app-wide pool is large and hidden views pause their subscription instead of being dropped.
+pub(crate) const NATIVE_CHAT_WARM_VIEWS_TOTAL: usize = 24;
 
 impl GhostexGpuiApp {
     /// CDXC:SessionChat 2026-09-19 WHY:

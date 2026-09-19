@@ -62,6 +62,8 @@ pub(crate) fn skeleton_pulse() -> (Duration, f32) {
 #[derive(Default)]
 pub(crate) struct SessionChatSkeletons {
     waiting_since: RefCell<HashMap<TerminalSessionId, Instant>>,
+    /// Views that have shown content once; the pane never covers them again, whatever their rows do later.
+    ready_once: RefCell<std::collections::HashSet<gpui::EntityId>>,
 }
 
 impl GhostexGpuiApp {
@@ -97,8 +99,14 @@ impl GhostexGpuiApp {
             .overflow_hidden()
             .child(view.clone());
         let mut waiting = self.session_chat_skeletons.waiting_since.borrow_mut();
+        let mut ready_once = self.session_chat_skeletons.ready_once.borrow_mut();
+        if ready_once.contains(&view.entity_id()) {
+            waiting.remove(&session_id);
+            return chat.into_any_element();
+        }
         if self.native_chat_content_ready(view, cx) {
             waiting.remove(&session_id);
+            ready_once.insert(view.entity_id());
             return chat.into_any_element();
         }
         let since = *waiting.entry(session_id).or_insert_with(Instant::now);

@@ -1,10 +1,19 @@
 use crate::app::native_chat::state::NativeChatView;
 use crate::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::app::session_chat_prewarm::NATIVE_CHAT_WARM_VIEWS_TOTAL;
 /// How often hidden views are paused and the pool trimmed.
 const NATIVE_CHAT_POOL_PASS_INTERVAL: Duration = Duration::from_secs(3);
+/// A view pauses its subscription only after being off screen this long, so flipping between a few sessions keeps them all live.
+const NATIVE_CHAT_PAUSE_AFTER_HIDDEN: Duration = Duration::from_secs(20);
+
+thread_local! {
+    /// When each runtime generation was last seen hidden by the pool pass.
+    static HIDDEN_SINCE: RefCell<HashMap<u64, Instant>> = RefCell::new(HashMap::new());
+}
 
 impl GhostexGpuiApp {
     /// Runs the pool pass on a timer; a no-op when it is already running.
@@ -66,8 +75,23 @@ impl GhostexGpuiApp {
                 ));
             }
         }
-        for (_, _, _, generation, _) in &hidden {
-            self.pause_session_chat_runtime(*generation, cx);
+        let now = Instant::now();
+        let due = HIDDEN_SINCE.with_borrow_mut(|since| {
+            let hidden_generations = hidden
+                .iter()
+                .map(|(_, _, _, generation, _)| *generation)
+                .collect::<std::collections::HashSet<_>>();
+            since.retain(|generation, _| hidden_generations.contains(generation));
+            hidden_generations
+                .into_iter()
+                .filter(|generation| {
+                    now.duration_since(*since.entry(*generation).or_insert(now))
+                        >= NATIVE_CHAT_PAUSE_AFTER_HIDDEN
+                })
+                .collect::<Vec<_>>()
+        });
+        for generation in due {
+            self.pause_session_chat_runtime(generation, cx);
         }
         let total = self.native_chat_views.len()
             + self
