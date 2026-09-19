@@ -7,6 +7,8 @@ use serde_json::json;
 
 use super::host::GxStoreCounters;
 use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
+use super::sidebar_shadow::SidebarShadowCounters;
+use super::sidebar_shadow_compare::SidebarMismatch;
 use crate::{shared_settings, support_logs};
 
 /// Distinct mismatch records one app run may write; later ones are only counted.
@@ -31,9 +33,13 @@ pub(crate) struct GxStoreDiagnostics {
     /// most once per interval, and the totals it last wrote.
     shadow_summary_considered_at: Option<Instant>,
     shadow_summary_written: ShadowCounters,
+    logged_sidebar_mismatches: HashSet<u64>,
+    sidebar_summary_considered_at: Option<Instant>,
+    sidebar_summary_written: SidebarShadowCounters,
+    sidebar_storage_warnings: u32,
 }
 
-fn routine_logging_enabled() -> bool {
+pub(super) fn routine_logging_enabled() -> bool {
     shared_settings::shared_sidebar_settings_snapshot().debugging_mode()
         && support_logs::scenario_enabled(support_logs::GpuiDiagnosticScenario::SidebarRefresh)
 }
@@ -270,6 +276,104 @@ impl GxStoreDiagnostics {
                 "storeActiveTabs": active_tabs,
                 "tabsGeneration": core.tabs_generation(),
             }),
+        );
+    }
+}
+
+impl GxStoreDiagnostics {
+    /// One bounded record per distinct sidebar difference: ids, counts, and field names only.
+    pub(super) fn sidebar_mismatch(&mut self, mismatch: &SidebarMismatch, snapshot_revision: u64) {
+        let signature = mismatch.signature();
+        if self.logged_sidebar_mismatches.contains(&signature)
+            || self.logged_sidebar_mismatches.len() >= MAX_DISTINCT_MISMATCH_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.logged_sidebar_mismatches.insert(signature);
+        let named = |fields: &[(String, Vec<&'static str>)]| -> Vec<serde_json::Value> {
+            fields
+                .iter()
+                .map(|(id, names)| json!({ "id": id, "names": names }))
+                .collect()
+        };
+        append(
+            "gxStore.sidebarShadow.mismatch",
+            json!({
+                "snapshotRevision": snapshot_revision,
+                "oldGroupCount": mismatch.old_group_count,
+                "storeGroupCount": mismatch.store_group_count,
+                "onlyOldGroups": mismatch.only_old_groups,
+                "onlyStoreGroups": mismatch.only_store_groups,
+                "groupOrderDiffers": mismatch.group_order_differs,
+                "topLevel": mismatch.top_level,
+                "groups": named(&mismatch.groups),
+                "sessions": named(&mismatch.sessions),
+                "onlyOldSessions": mismatch.only_old_sessions,
+                "onlyStoreSessions": mismatch.only_store_sessions,
+                "questionCountOnly": mismatch.question_count_only,
+            }),
+        );
+    }
+
+    /// The running totals of the sidebar comparison, at most once a minute and only when they
+    /// moved.
+    pub(super) fn sidebar_summary(
+        &mut self,
+        counters: &SidebarShadowCounters,
+        pending: bool,
+        groups: usize,
+        rows: usize,
+    ) {
+        if *counters == self.sidebar_summary_written
+            || self
+                .sidebar_summary_considered_at
+                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+        {
+            return;
+        }
+        self.sidebar_summary_considered_at = Some(Instant::now());
+        if !routine_logging_enabled() {
+            return;
+        }
+        self.sidebar_summary_written = *counters;
+        append(
+            "gxStore.sidebarShadow.summary",
+            json!({
+                "observed": counters.observed,
+                "compared": counters.compared,
+                "matches": counters.matches,
+                "mismatches": counters.mismatches,
+                "distinctMismatches": counters.distinct_mismatches,
+                "transient": counters.transient,
+                "skippedRemote": counters.skipped_remote,
+                "skippedForeignFocus": counters.skipped_foreign_focus,
+                "skippedNotLoaded": counters.skipped_not_loaded,
+                "skippedNotLive": counters.skipped_not_live,
+                "skippedHiddenUnknown": counters.skipped_hidden_unknown,
+                "questionCountOnly": counters.question_count_only,
+                "scratchChecks": counters.scratch_checks,
+                "scratchMismatches": counters.scratch_mismatches,
+                "updateUs": counters.last_update_us,
+                "updateMaxUs": counters.update_max_us,
+                "compareUs": counters.last_compare_us,
+                "compareMaxUs": counters.compare_max_us,
+                "pending": pending,
+                "storeGroups": groups,
+                "storeRows": rows,
+            }),
+        );
+    }
+
+    /// The hidden projects could not be read from client storage, so the comparison waits.
+    pub(super) fn sidebar_hidden_items_failed(&mut self, error: &str) {
+        if self.sidebar_storage_warnings >= 3 {
+            return;
+        }
+        self.sidebar_storage_warnings += 1;
+        self.warning(
+            "gxStore.sidebarShadow.hiddenItems.warning",
+            json!({ "error": error }),
         );
     }
 }

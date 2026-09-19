@@ -11,6 +11,7 @@ use super::diagnostics::GxStoreDiagnostics;
 use super::layout_persist::LayoutPersist;
 use super::local_focus::LocalFocus;
 use super::shadow_diff::{ObservedFocus, ShadowDiff};
+use super::sidebar_shadow::SidebarShadow;
 use crate::GhostexGpuiApp;
 use crate::app::helpers::GpuiGxserverPresentationFocusEcho;
 use crate::app::model::GpuiGxserverPresentationFocusState;
@@ -75,6 +76,7 @@ pub(crate) struct GxStoreHost {
     pub(super) counters: GxStoreCounters,
     connecting_since: Option<Instant>,
     pub(super) shadow: ShadowDiff,
+    pub(super) sidebar_shadow: SidebarShadow,
     pub(super) diagnostics: GxStoreDiagnostics,
     pub(crate) local_focus: LocalFocus,
     pub(crate) layout_persist: LayoutPersist,
@@ -117,6 +119,8 @@ impl GxStoreHost {
         self.counters.events += events.len() as u64;
         self.counters.largest_burst = self.counters.largest_burst.max(events.len());
         let output = self.core.handle_batch(events, now_ms());
+        // The sidebar list derives from these; the comparison applies them when it next runs.
+        self.sidebar_shadow.note_changes(&output.changes);
         if let Some(loaded) = self.core.presentation().loaded(&MachineId::Local) {
             self.held_revision.store(loaded.revision, Ordering::Release);
         }

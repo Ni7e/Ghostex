@@ -494,6 +494,8 @@ impl GhostexGpuiApp {
             }
             cef::SidebarBridgeEvent::NativeSidebarSnapshot(payload) => {
                 self.receive_native_sidebar_snapshot(&payload, cx);
+                // The store builds the same list beside it and compares the two (gx_store/sidebar_shadow.rs).
+                self.gx_store_sidebar_snapshot_received(cx);
             }
             cef::SidebarBridgeEvent::ResourcesSnapshotRequest(payload) => {
                 self.receive_sidebar_resources_snapshot_request_payload(&payload, cx);
