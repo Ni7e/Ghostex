@@ -2974,7 +2974,7 @@ export function SessionGroupSection({
                   type='button'
                 >
                   <IconPlus aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  New project group
+                  New Project Group
                 </button>
                 {projectCollectionOptions.map((collection) => (
                   <button
@@ -3001,7 +3001,7 @@ export function SessionGroupSection({
                       type='button'
                     >
                       <IconX aria-hidden='true' className='session-context-menu-icon' size={14} />
-                      Remove from group
+                      Remove from Group
                     </button>
                   </>
                 ) : null}
@@ -3428,7 +3428,7 @@ export function SessionGroupSection({
                   type='button'
                 >
                   <IconX aria-hidden='true' className='session-context-menu-icon' size={14} />
-                  Close inactive
+                  Close Inactive
                 </button>
                 <button
                   className='session-context-menu-item session-context-menu-item-danger'

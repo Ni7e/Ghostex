@@ -145,13 +145,13 @@ export function createNativeAgentLauncherController(
     if (error)
       items.push(
         { label: format(error), disabled: true },
-        { label: 'Try again', keepOpen: true, command: commandFor(command.groupId, 'retry', agent.agentId) }
+        { label: 'Try Again', keepOpen: true, command: commandFor(command.groupId, 'retry', agent.agentId) }
       );
     if (!request) items.push({ label: 'Account connection unavailable.', disabled: true });
     if (data && !accounts.length)
       items.push(
         {
-          label: 'Current CLI login',
+          label: 'Current CLI Login',
           agentIcon: provider,
           imageDataUrl: COLORED_AGENT_LOGOS[provider],
           command: { type: 'projectAction', action: 'agent', groupId: command.groupId, agentId: agent.agentId },
@@ -159,7 +159,7 @@ export function createNativeAgentLauncherController(
         { label: 'Uses your existing CLI sign-in. No account switcher needed.', disabled: true },
         { separator: true },
         { label: 'Add your account to see usage and reset times in Ghostex.', disabled: true },
-        { label: 'Add account', command: { type: 'sidebarAction', action: 'accounts' } }
+        { label: 'Add Account', command: { type: 'sidebarAction', action: 'accounts' } }
       );
     update(items);
   };

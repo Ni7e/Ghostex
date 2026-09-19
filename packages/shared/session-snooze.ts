@@ -10,9 +10,9 @@ export const SESSION_SNOOZE_PRESETS = ['oneHour', 'threeHours', 'tomorrow', 'nex
 export type SessionSnoozePreset = (typeof SESSION_SNOOZE_PRESETS)[number];
 
 export const SESSION_SNOOZE_PRESET_LABELS: Record<SessionSnoozePreset, string> = {
-  nextWeek: 'Next week',
-  oneHour: '1 hour',
-  threeHours: '3 hours',
+  nextWeek: 'Next Week',
+  oneHour: '1 Hour',
+  threeHours: '3 Hours',
   tomorrow: 'Tomorrow',
 };
 

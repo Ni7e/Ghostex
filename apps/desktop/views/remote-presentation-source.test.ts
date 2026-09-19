@@ -72,7 +72,7 @@ describe('remote presentation sidebar source', () => {
     );
     for (const label of [
       'Rename',
-      'Tag as',
+      'Tag As',
       'Copy Details',
       'Delayed Send',
       'Close After Done',

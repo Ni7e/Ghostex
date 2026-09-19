@@ -295,7 +295,7 @@ export function NewThreadPalette({
                     value={RETRY_VALUE}
                     onSelect={() => void request({ operation: 'list', refresh: true })}
                   >
-                    <span className='group-agent-menu-label'>Try again</span>
+                    <span className='group-agent-menu-label'>Try Again</span>
                   </CommandItem>
                 </>
               )}
@@ -308,7 +308,7 @@ export function NewThreadPalette({
                     onSelect={() => run(accountsAgent)}
                   >
                     <ProjectAgentLauncherIcon agent={accountsAgent} colorMode='brand' />
-                    <span className='group-agent-menu-label'>Current CLI login</span>
+                    <span className='group-agent-menu-label'>Current CLI Login</span>
                   </CommandItem>
                   <p className='gx-account-launcher-hint'>
                     Uses your existing CLI sign-in. No account switcher needed.
@@ -323,7 +323,7 @@ export function NewThreadPalette({
                       openAppModal({ initialTab: 'accounts', modal: 'settings', type: 'open' });
                     }}
                   >
-                    <span className='group-agent-menu-label'>Add account</span>
+                    <span className='group-agent-menu-label'>Add Account</span>
                   </CommandItem>
                 </>
               )}

@@ -588,7 +588,7 @@ export function ProjectCollectionSection({
                 type='button'
               >
                 <IconCheck className='session-context-menu-icon' size={14} />
-                Select all sessions
+                Select All Sessions
               </button>
               {sleepableSessionIds.length > 0 ? (
                 <button
@@ -598,7 +598,7 @@ export function ProjectCollectionSection({
                   type='button'
                 >
                   <IconMoon className='session-context-menu-icon' size={14} />
-                  Sleep sessions
+                  Sleep Sessions
                 </button>
               ) : null}
               {wakeableSessionIds.length > 0 ? (
@@ -609,7 +609,7 @@ export function ProjectCollectionSection({
                   type='button'
                 >
                   <IconPlayerPlay className='session-context-menu-icon' size={14} />
-                  Wake sessions
+                  Wake Sessions
                 </button>
               ) : null}
               {taggableSessionIds.length > 0 && availableTags.length > 0 ? (
@@ -620,7 +620,7 @@ export function ProjectCollectionSection({
                   type='button'
                 >
                   <IconTag className='session-context-menu-icon' size={14} />
-                  Tag sessions
+                  Tag Sessions
                 </button>
               ) : null}
               {pinnableSessionIds.length > 0 ? (
@@ -635,7 +635,7 @@ export function ProjectCollectionSection({
                   type='button'
                 >
                   <IconPinned className='session-context-menu-icon' size={14} />
-                  Pin sessions
+                  Pin Sessions
                 </button>
               ) : null}
               {unpinnableSessionIds.length > 0 ? (
@@ -650,7 +650,7 @@ export function ProjectCollectionSection({
                   type='button'
                 >
                   <IconPinnedOff className='session-context-menu-icon' size={14} />
-                  Unpin sessions
+                  Unpin Sessions
                 </button>
               ) : null}
               {reloadableSessionIds.length > 0 ? (
@@ -665,7 +665,7 @@ export function ProjectCollectionSection({
                   type='button'
                 >
                   <IconRefresh className='session-context-menu-icon' size={14} />
-                  Full Reload sessions
+                  Full Reload Sessions
                 </button>
               ) : null}
               <div className='session-context-menu-divider' role='separator' />
@@ -680,7 +680,7 @@ export function ProjectCollectionSection({
                 type='button'
               >
                 <IconPencil className='session-context-menu-icon' size={14} />
-                Rename group
+                Rename Group
               </button>
               <button
                 className='session-context-menu-item'
@@ -689,7 +689,7 @@ export function ProjectCollectionSection({
                 type='button'
               >
                 <IconPalette className='session-context-menu-icon' size={14} />
-                Group color
+                Group Color
               </button>
               {spaceMenuEnabled ? (
                 <button
@@ -713,7 +713,7 @@ export function ProjectCollectionSection({
                 type='button'
               >
                 <IconEyeOff className='session-context-menu-icon' size={14} />
-                {isHidden ? 'Unhide group' : 'Hide group'}
+                {isHidden ? 'Unhide Group' : 'Hide Group'}
               </button>
               <button
                 className='session-context-menu-item session-context-menu-item-danger'
@@ -725,7 +725,7 @@ export function ProjectCollectionSection({
                 type='button'
               >
                 <IconTrash className='session-context-menu-icon' size={14} />
-                Delete group
+                Delete Group
               </button>
               <button
                 className='session-context-menu-item session-context-menu-item-danger'
@@ -735,7 +735,7 @@ export function ProjectCollectionSection({
                 type='button'
               >
                 <IconX className='session-context-menu-icon' size={14} />
-                Close all sessions
+                Close All Sessions
               </button>
             </>
           )}

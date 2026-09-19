@@ -39,7 +39,7 @@ export function createNativeNavigation(ui: NativeSidebarUiState) {
   const groups = section.groupIds.filter((id) => section.isVisible(id) && !state.groupsById[id]?.isChatCollection);
   const sort: NativeSidebarMenuItem[] = [];
   if (ui.selectedMachineId === 'local')
-    sort.push({ ...intent('Show hidden', 'eye', 'showHidden'), checked: ui.showHidden }, { separator: true });
+    sort.push({ ...intent('Show Hidden', 'eye', 'showHidden'), checked: ui.showHidden }, { separator: true });
   sort.push(
     {
       ...intent('Last Active Sorting', 'clock', 'sortLastActivity'),
@@ -109,10 +109,10 @@ export function createNativeNavigation(ui: NativeSidebarUiState) {
     const children: NativeSidebarMenuItem[] = awake;
     if (active)
       children.push(
-        runtime("Don't keep awake", 'square-minus', { type: 'runTitlebarKeepAwakeCommand', action: 'stop' })
+        runtime("Don't Keep Awake", 'square-minus', { type: 'runTitlebarKeepAwakeCommand', action: 'stop' })
       );
     children.push({ separator: true }, intent('Power Settings', 'settings', 'powerSettings'));
-    more.push({ label: 'Keep awake', icon: active ? 'coffee' : 'moon', children });
+    more.push({ label: 'Keep Awake', icon: active ? 'coffee' : 'moon', children });
   }
   more.push(
     runtime('Join Discord', 'users-group', { type: 'openExternalUrl', url: GHOSTEX_DISCORD_URL }),

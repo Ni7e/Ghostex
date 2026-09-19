@@ -185,14 +185,14 @@ const sessionCardSensors = [
 
 /**
  * CDXC:DelayedSend 2026-09-15 DECISION:
- * User: agents with a timed Delayed Send show "Postpone by" in their right-click menu, with 10 minutes, 30 minutes, 1 hour, 2 hours, and 5 hours, plus "Edit delayed send" and "Disable delayed send".
+ * User: agents with a timed Delayed Send show "Postpone By" in their right-click menu, with 10 Minutes, 30 Minutes, 1 Hour, 2 Hours, and 5 Hours, plus "Edit Delayed Send" and "Disable Delayed Send" (Title Case per the 2026-09-19 ContextMenus decision).
  */
 const DELAYED_SEND_POSTPONE_PRESETS = [
-  { label: '10 minutes', delayMs: 10 * 60_000 },
-  { label: '30 minutes', delayMs: 30 * 60_000 },
-  { label: '1 hour', delayMs: 60 * 60_000 },
-  { label: '2 hours', delayMs: 120 * 60_000 },
-  { label: '5 hours', delayMs: 300 * 60_000 },
+  { label: '10 Minutes', delayMs: 10 * 60_000 },
+  { label: '30 Minutes', delayMs: 30 * 60_000 },
+  { label: '1 Hour', delayMs: 60 * 60_000 },
+  { label: '2 Hours', delayMs: 120 * 60_000 },
+  { label: '5 Hours', delayMs: 300 * 60_000 },
 ] as const;
 
 type ContextMenuPosition = {
@@ -2034,9 +2034,9 @@ export function SortableSessionCard({
   const snoozeOpensTagMenu = parkOpensTagMenu && canTagSession;
   /**
    * CDXC:Sessions 2026-09-12 DECISION:
-   * User: the row at the top of Park's tag menu that parks without changing tags is labelled "No tag change", for single and bulk parks alike. Snooze's tag menu uses the same row.
+   * User: the row at the top of Park's tag menu that parks without changing tags is labelled "No Tag Change", for single and bulk parks alike. Snooze's tag menu uses the same row.
    */
-  const shelveKeepTagLabel = 'No tag change';
+  const shelveKeepTagLabel = 'No Tag Change';
 
   const requestUnsnooze = () => {
     setContextMenuPosition(undefined);
@@ -2209,7 +2209,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconMoon aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'sleep-selected',
-      label: 'Sleep selected',
+      label: 'Sleep Selected',
       onClick: () => requestSetSelectedSessionsSleeping(true),
     });
   }
@@ -2217,7 +2217,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconPlayerPlay aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'wake-selected',
-      label: 'Wake selected',
+      label: 'Wake Selected',
       onClick: () => requestSetSelectedSessionsSleeping(false),
     });
   }
@@ -2229,7 +2229,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconTag aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'tag-selected-as',
-      label: 'Tag selected as',
+      label: 'Tag Selected As',
       onClick: openSessionTagSubmenu,
       submenu: 'session-tags',
     });
@@ -2238,7 +2238,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconPinned aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'pin-selected',
-      label: 'Pin selected',
+      label: 'Pin Selected',
       onClick: () => requestSetSelectedSessionsPinned(true),
     });
   }
@@ -2246,7 +2246,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconPinnedOff aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'unpin-selected',
-      label: 'Unpin selected',
+      label: 'Unpin Selected',
       onClick: () => requestSetSelectedSessionsPinned(false),
     });
   }
@@ -2260,7 +2260,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconArchive aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'park-selected',
-      label: 'Park selected',
+      label: 'Park Selected',
       onClick: bulkParkOpensTagMenu
         ? (event) => openSessionTagSubmenu(event, { clearSelection: true, sessionIds: parkableSessionIds })
         : () => requestSetSelectedSessionsParked(true),
@@ -2271,7 +2271,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconArchive aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'unpark-selected',
-      label: 'Unpark selected',
+      label: 'Unpark Selected',
       onClick: () => requestSetSelectedSessionsParked(false),
     });
   }
@@ -2279,7 +2279,7 @@ export function SortableSessionCard({
     bulkPrimaryActions.push({
       icon: <IconRefresh aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'full-reload-selected',
-      label: 'Full Reload selected',
+      label: 'Full Reload Selected',
       onClick: requestFullReloadSelectedSessions,
     });
   }
@@ -2296,7 +2296,7 @@ export function SortableSessionCard({
        * stays behind the Session Cards setting.
        */
       key: 'close-selected',
-      label: 'Close selected',
+      label: 'Close Selected',
       onClick: requestCloseSelectedSessions,
     });
   }
@@ -2418,7 +2418,7 @@ export function SortableSessionCard({
         ? {
             icon: <IconTag aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
             key: 'tag-as',
-            label: 'Tag as',
+            label: 'Tag As',
             onClick: openSessionTagSubmenu,
             submenu: 'session-tags',
           }
@@ -2442,7 +2442,7 @@ export function SortableSessionCard({
     primaryActions.push({
       icon: <IconClock aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'postpone-delayed-send',
-      label: 'Postpone by',
+      label: 'Postpone By',
       onClick: openPostponeSubmenu,
       submenu: 'postpone',
     });
@@ -2498,7 +2498,7 @@ export function SortableSessionCard({
     advancedSessionActions.push({
       icon: <IconMessageCircle aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'view-first-message',
-      label: 'View 1st message',
+      label: 'View 1st Message',
       onClick: requestViewFirstUserMessage,
     });
   }
@@ -2562,7 +2562,7 @@ export function SortableSessionCard({
     advancedCopyActions.push({
       icon: <IconCopy aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'copy-resume',
-      label: 'Copy resume',
+      label: 'Copy Resume',
       onClick: requestCopyResumeCommand,
     });
   }
@@ -2570,7 +2570,7 @@ export function SortableSessionCard({
     advancedCopyActions.push({
       icon: <IconCopy aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />,
       key: 'copy-attach',
-      label: 'Copy attach command',
+      label: 'Copy Attach Command',
       onClick: requestCopyAttachCommand,
     });
   }
@@ -2890,14 +2890,14 @@ export function SortableSessionCard({
       {canCreateCustomTag ? (
         <div className='session-tag-menu-section'>
           <button
-            aria-label='New tag'
+            aria-label='New Tag'
             className='session-context-menu-item session-tag-menu-item'
             onClick={openCustomTagSettings}
             role='menuitem'
             type='button'
           >
             <IconPlus aria-hidden='true' className='session-context-menu-icon' size={16} stroke={1.8} />
-            <span className='session-tag-menu-item-label'>New tag…</span>
+            <span className='session-tag-menu-item-label'>New Tag…</span>
           </button>
         </div>
       ) : null}
@@ -3359,7 +3359,7 @@ export function SortableSessionCard({
       {contextMenuPosition && tagSubmenuPosition && !isProjectSessionListMoreRow
         ? createPortal(
             <AppMenuPanel
-              aria-label='Tag as'
+              aria-label='Tag As'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
               onClick={(event) => event.stopPropagation()}
@@ -3384,7 +3384,7 @@ export function SortableSessionCard({
       {contextMenuPosition && postponeSubmenuPosition && canPostponeDelayedSend && !isProjectSessionListMoreRow
         ? createPortal(
             <AppMenuPanel
-              aria-label='Postpone by'
+              aria-label='Postpone By'
               className='session-context-menu session-tag-submenu'
               data-empty-space-blocking='true'
               onClick={(event) => event.stopPropagation()}
@@ -3416,7 +3416,7 @@ export function SortableSessionCard({
               ))}
               <div className='session-context-menu-divider' role='separator' />
               <button className='session-context-menu-item' role='menuitem' type='button' onClick={requestDelayedSend}>
-                Edit delayed send
+                Edit Delayed Send
               </button>
               <button
                 className='session-context-menu-item'
@@ -3428,7 +3428,7 @@ export function SortableSessionCard({
                   vscode.postMessage({ type: 'cancelDelayedSend', sessionId: session.sessionId });
                 }}
               >
-                Disable delayed send
+                Disable Delayed Send
               </button>
             </AppMenuPanel>,
             document.body

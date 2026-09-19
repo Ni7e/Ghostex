@@ -89,7 +89,7 @@ export function createNativeProjectMenu(group: SidebarSessionGroup, ui: NativeSi
     menu.push(row('Full Reload', 'refresh', { type: 'fullReloadProjectZmxSessions', groupId }));
   menu.push(
     { separator: true },
-    row('Close inactive', 'x', { type: 'closeInactiveProjectSessions', groupId }, !hasInactive, true),
+    row('Close Inactive', 'x', { type: 'closeInactiveProjectSessions', groupId }, !hasInactive, true),
     row(
       'Close Project',
       'x',

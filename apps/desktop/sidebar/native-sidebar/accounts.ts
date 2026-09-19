@@ -50,12 +50,12 @@ export function createNativeAccountMenuController(
       if (generation !== current) return;
       items = [
         { label: format(error instanceof Error ? error.message : String(error)), disabled: true },
-        { label: 'Try again', keepOpen: true, command: intent('retry') },
+        { label: 'Try Again', keepOpen: true, command: intent('retry') },
       ];
     }
     items.push(
       { separator: true },
-      { label: 'Manage accounts', icon: 'settings', command: { type: 'sidebarAction', action: 'accounts' } }
+      { label: 'Manage Accounts', icon: 'settings', command: { type: 'sidebarAction', action: 'accounts' } }
     );
     publish({ kind: 'menu', version: 1, ownerId: command.sessionId, close: false, items });
   };

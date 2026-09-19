@@ -721,7 +721,7 @@ export const SessionCardActions: Story = {
 
       const sessionCard = await findSessionCard();
       await openContextMenu(sessionCard);
-      await userEvent.click(await body.findByRole('menuitem', { name: 'Copy resume' }));
+      await userEvent.click(await body.findByRole('menuitem', { name: 'Copy Resume' }));
 
       await expectMessage({ sessionId: 'session-3', type: 'copyResumeCommand' });
     });
@@ -744,7 +744,7 @@ export const SessionCardActions: Story = {
 
       const sessionCard = await findSessionCard();
       await openContextMenu(sessionCard);
-      await userEvent.click(await body.findByRole('menuitem', { name: 'Tag as' }));
+      await userEvent.click(await body.findByRole('menuitem', { name: 'Tag As' }));
       await userEvent.click(await body.findByRole('menuitemradio', { name: 'Tag as Favorite' }));
 
       await expectMessage({ sessionId: 'session-3', sessionTag: 'favorite', type: 'setSessionTag' });

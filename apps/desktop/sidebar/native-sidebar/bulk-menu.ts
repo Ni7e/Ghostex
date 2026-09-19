@@ -53,23 +53,23 @@ export function createNativeBulkMenu(ui: NativeSidebarUiState): NativeSidebarMen
     ),
   ]);
   const menu = [
-    ...rows('Sleep selected', 'moon', available.sleepableSessionIds, (sessionId) => ({
+    ...rows('Sleep Selected', 'moon', available.sleepableSessionIds, (sessionId) => ({
       type: 'setSessionSleeping',
       sessionId,
       sleeping: true,
     })),
-    ...rows('Wake selected', 'player-play', available.wakeableSessionIds, (sessionId) => ({
+    ...rows('Wake Selected', 'player-play', available.wakeableSessionIds, (sessionId) => ({
       type: 'setSessionSleeping',
       sessionId,
       sleeping: false,
     })),
-    ...(tags.length ? [{ label: 'Tag selected as', icon: 'tag', children: tags }] : []),
-    ...rows('Pin selected', 'pinned', available.pinnableSessionIds, (sessionId) => ({
+    ...(tags.length ? [{ label: 'Tag Selected As', icon: 'tag', children: tags }] : []),
+    ...rows('Pin Selected', 'pinned', available.pinnableSessionIds, (sessionId) => ({
       type: 'setSessionPinned',
       sessionId,
       pinned: true,
     })),
-    ...rows('Unpin selected', 'pinned-off', available.unpinnableSessionIds, (sessionId) => ({
+    ...rows('Unpin Selected', 'pinned-off', available.unpinnableSessionIds, (sessionId) => ({
       type: 'setSessionPinned',
       sessionId,
       pinned: false,
@@ -84,11 +84,11 @@ export function createNativeBulkMenu(ui: NativeSidebarUiState): NativeSidebarMen
     menu.push(
       settings.showTagMenuWhenParking && tagIds.length
         ? {
-            label: 'Park selected',
+            label: 'Park Selected',
             icon: 'archive',
             children: [
               {
-                label: 'No tag change',
+                label: 'No Tag Change',
                 icon: 'tag-off',
                 command: { type: 'batch', clearSelection: true, messages: park },
               },
@@ -113,21 +113,21 @@ export function createNativeBulkMenu(ui: NativeSidebarUiState): NativeSidebarMen
               ),
             ],
           }
-        : { label: 'Park selected', icon: 'archive', command: { type: 'batch', clearSelection: true, messages: park } }
+        : { label: 'Park Selected', icon: 'archive', command: { type: 'batch', clearSelection: true, messages: park } }
     );
   }
   menu.push(
-    ...rows('Unpark selected', 'archive', available.unparkableSessionIds, (sessionId) => ({
+    ...rows('Unpark Selected', 'archive', available.unparkableSessionIds, (sessionId) => ({
       type: 'setSessionParked',
       sessionId,
       parked: false,
     })),
-    ...rows('Full Reload selected', 'refresh', available.fullReloadableSessionIds, (sessionId) => ({
+    ...rows('Full Reload Selected', 'refresh', available.fullReloadableSessionIds, (sessionId) => ({
       type: 'fullReloadSession',
       sessionId,
     })),
     { separator: true },
-    ...rows('Close selected', 'x', available.closableSessionIds, (sessionId) => ({
+    ...rows('Close Selected', 'x', available.closableSessionIds, (sessionId) => ({
       type: 'closeSession',
       sessionId,
     })).map((row) => ({ ...row, danger: true }))

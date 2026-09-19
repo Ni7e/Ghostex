@@ -550,7 +550,7 @@ export function SidebarReferenceSettingsDropdown({
         <>
           <SidebarReferencePrimaryMenuItem
             icon={keepAwakeRuntime ? IconCoffee : IconMoon}
-            label='Keep awake'
+            label='Keep Awake'
             onSelect={onOpenKeepAwakeMenu}
             trailingIcon={IconChevronRight}
           />
@@ -638,7 +638,7 @@ export function SidebarReferenceKeepAwakeDropdown({
         />
       ))}
       {isRunning ? (
-        <SidebarReferencePrimaryMenuItem icon={IconSquareMinus} label="Don't keep awake" onSelect={onStopKeepAwake} />
+        <SidebarReferencePrimaryMenuItem icon={IconSquareMinus} label="Don't Keep Awake" onSelect={onStopKeepAwake} />
       ) : null}
       <SidebarReferencePrimaryMenuSeparator />
       <SidebarReferencePrimaryMenuItem icon={IconSettings} label='Power Settings' onSelect={onOpenPowerSettings} />
@@ -682,7 +682,7 @@ export function SidebarReferenceSortFilterDropdown({
           <SidebarReferencePrimaryMenuItem
             active={showHidden === true}
             icon={IconEye}
-            label='Show hidden'
+            label='Show Hidden'
             onSelect={onToggleShowHidden}
             role='menuitemcheckbox'
           />
@@ -1235,7 +1235,7 @@ export function SidebarReferenceSectionHeader({
                   size={14}
                   stroke={2}
                 />
-                Show hidden
+                Show Hidden
               </button>
               <div className='session-context-menu-divider' role='separator' />
             </>

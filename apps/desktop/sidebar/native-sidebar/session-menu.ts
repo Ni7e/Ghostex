@@ -86,7 +86,7 @@ export function createNativeSessionActions(
   if (includeMenu && !group.remoteMachineContext)
     tags.push(
       { separator: true },
-      { label: 'New tag…', icon: 'plus', command: { type: 'sidebarAction', action: 'newTag' } }
+      { label: 'New Tag…', icon: 'plus', command: { type: 'sidebarAction', action: 'newTag' } }
     );
   const parked = session.isParked === true;
   const park: NativeSidebarMenuItem = runtime(parked ? 'Unpark' : 'Park', 'archive', {
@@ -98,7 +98,7 @@ export function createNativeSessionActions(
     park.children = !includeMenu
       ? lazyMenu('park')
       : [
-          runtime('No tag change', 'tag-off', { type: 'setSessionParked', sessionId: id, parked: true }),
+          runtime('No Tag Change', 'tag-off', { type: 'setSessionParked', sessionId: id, parked: true }),
           { separator: true },
           ...tags.map((item) =>
             item.command?.type === 'command'
@@ -127,7 +127,7 @@ export function createNativeSessionActions(
           ? {
               label: SESSION_SNOOZE_PRESET_LABELS[preset],
               children: [
-                { label: 'No tag change', icon: 'alarm', command },
+                { label: 'No Tag Change', icon: 'alarm', command },
                 { separator: true },
                 ...tags.map((item) =>
                   item.command?.type === 'command' && item.command.message.type === 'setSessionTag'
@@ -162,7 +162,7 @@ export function createNativeSessionActions(
         }
       : {}),
     ...(!caps.isBrowserSession && settings.enableSessionParking ? { park } : {}),
-    ...(caps.canTagSession && tags.length ? { tag: { label: 'Tag as', icon: 'tag', children: tags } } : {}),
+    ...(caps.canTagSession && tags.length ? { tag: { label: 'Tag As', icon: 'tag', children: tags } } : {}),
     ...(!caps.isBrowserSession
       ? {
           snooze: isSidebarSessionSnoozed(session)
@@ -187,12 +187,22 @@ export function createNativeSessionActions(
       ? (['sleep'] as const)
       : [...enabled].reverse().filter((action) => action !== 'close' && action !== 'closeAfterDone')
     : [];
+  /**
+   * CDXC:ContextMenus 2026-09-19 DECISION:
+   * The user asked for a different pin icon in the sidebar context menu. Pin uses the upright pushpin that pairs with Unpin's crossed-out pushpin (the React menu's IconPinned); the card hover button keeps the diagonal pin. Every sidebar menu label is Title Case ("Close Inactive", "Pin Selected"), except disabled status sentences.
+   */
   const primary = [
     ...mirror,
     ...(['rename', 'sleep', 'pin', 'park', 'snooze', 'note', 'tag'] as const).filter(
       (action) => !enabled.includes(action)
     ),
-  ].flatMap((action) => (rows[action] ? [rows[action]!] : []));
+  ].flatMap((action) =>
+    action === 'pin' && rows.pin && !session.isPinned
+      ? [{ ...rows.pin, icon: 'pinned' }]
+      : rows[action]
+        ? [rows[action]!]
+        : []
+  );
   const advanced: NativeSidebarMenuItem[] = [{ label: 'Session', heading: true }];
   if (caps.canDelayedSend) advanced.push(intent('Delayed Send', 'clock', 'delayedSend'));
   if (
@@ -213,7 +223,7 @@ export function createNativeSessionActions(
     });
   if (caps.canExportTranscript)
     advanced.push(runtime('Handoff / Export', 'file-export', { type: 'exportSessionTranscript', sessionId: id }));
-  if (session.firstUserMessage?.trim()) advanced.push(intent('View 1st message', 'message-circle', 'firstMessage'));
+  if (session.firstUserMessage?.trim()) advanced.push(intent('View 1st Message', 'message-circle', 'firstMessage'));
   if (caps.canGenerateSessionTitle)
     advanced.push(
       runtime('Generate Title', 'sparkles', {
@@ -240,9 +250,9 @@ export function createNativeSessionActions(
       })
     );
   if (caps.canCopyResumeCommand)
-    copy.push(runtime('Copy resume', 'copy', { type: 'copyResumeCommand', sessionId: id }));
+    copy.push(runtime('Copy Resume', 'copy', { type: 'copyResumeCommand', sessionId: id }));
   if (caps.canCopyAttachCommand)
-    copy.push(runtime('Copy attach command', 'copy', { type: 'copyAttachCommand', sessionId: id }));
+    copy.push(runtime('Copy Attach Command', 'copy', { type: 'copyAttachCommand', sessionId: id }));
   if (copy.length) advanced.push({ separator: true }, { label: 'Copy', heading: true }, ...copy);
   if (below.length) {
     advanced.push({ separator: true }, { label: 'Below', heading: true });
@@ -264,21 +274,21 @@ export function createNativeSessionActions(
   const menu = [...primary];
   if (caps.canDelayedSend && session.delayedSendDeadlineAt) {
     menu.push({
-      label: 'Postpone by',
+      label: 'Postpone By',
       icon: 'clock',
       children: [
         ...[
-          { label: '10 minutes', delayMs: 600_000 },
-          { label: '30 minutes', delayMs: 1_800_000 },
-          { label: '1 hour', delayMs: 3_600_000 },
-          { label: '2 hours', delayMs: 7_200_000 },
-          { label: '5 hours', delayMs: 18_000_000 },
+          { label: '10 Minutes', delayMs: 600_000 },
+          { label: '30 Minutes', delayMs: 1_800_000 },
+          { label: '1 Hour', delayMs: 3_600_000 },
+          { label: '2 Hours', delayMs: 7_200_000 },
+          { label: '5 Hours', delayMs: 18_000_000 },
         ].map((preset) =>
           runtime(preset.label, 'clock', { type: 'postponeDelayedSend', sessionId: id, delayMs: preset.delayMs })
         ),
         { separator: true },
-        intent('Edit delayed send', 'pencil', 'delayedSend'),
-        runtime('Disable delayed send', 'x', { type: 'cancelDelayedSend', sessionId: id }),
+        intent('Edit Delayed Send', 'pencil', 'delayedSend'),
+        runtime('Disable Delayed Send', 'x', { type: 'cancelDelayedSend', sessionId: id }),
       ],
     });
   }
