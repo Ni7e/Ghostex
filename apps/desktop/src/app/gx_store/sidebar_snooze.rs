@@ -78,7 +78,13 @@ impl GhostexGpuiApp {
             return false;
         };
         self.gx_store.sidebar_snooze.actions += 1;
-        if action.messages.len() > 1 {
+        // Asked of the messages by name rather than by counting them: a command can carry a tag
+        // and no preset, which is one message and is still a tag.
+        if action
+            .messages
+            .iter()
+            .any(|message| message.get("type") == Some(&Value::from("setSessionTag")))
+        {
             self.gx_store.sidebar_snooze.actions_with_tag += 1;
         }
         if action.messages.is_empty() {
