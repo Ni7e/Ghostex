@@ -12,15 +12,21 @@ use super::tags::TagPresentation;
 /// The whole list for one machine tab.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarView {
-    /// A first snapshot of the machine has been applied, or the host has seen it unavailable.
+    /// A first snapshot of THIS COMPUTER's daemon has been applied, or the host has seen it
+    /// unavailable. It is the local machine's fact on every tab, exactly as the old projection's
+    /// `state.hasReceivedSnapshot` is.
     pub ready: bool,
-    /// The selected machine is one this view model can build (the local daemon, for now). A host
-    /// that selects a machine tab this says `false` for must keep drawing whatever it had.
+    /// The selected machine is one this view model can build: this computer, or a remote machine
+    /// the host feeds into the store. A host that selects a machine tab this says `false` for must
+    /// keep drawing whatever it had.
     pub supported: bool,
     pub selected_machine_id: String,
     /// `<machine>|<space or all>`: the scope a scroll position belongs to.
     pub scroll_scope: String,
+    /// The selected machine's counts.
     pub machine: MachineSummary,
+    /// Every machine tab, this computer first, with the counts its badge draws.
+    pub machines: Vec<MachineTabView>,
     pub spaces_enabled: bool,
     pub spaces: Vec<SpaceView>,
     /// Every group of the machine that is drawn, in order.
@@ -44,6 +50,27 @@ impl SidebarView {
 pub struct MachineSummary {
     pub working_count: usize,
     pub attention_count: usize,
+}
+
+/// One machine tab: what the host said about it, plus the counts its badge draws.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineTabView {
+    pub id: String,
+    pub label: String,
+    /// The host's connection state word; always `connected` for this computer.
+    pub state: String,
+    pub message: Option<String>,
+    pub working_count: usize,
+    pub attention_count: usize,
+}
+
+/// The machine a drawn group belongs to; absent for this computer's groups.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RemoteMachineView {
+    pub machine_id: String,
+    pub machine_name: String,
+    /// The raw project id in that machine's daemon; absent for its Chats group.
+    pub project_id: Option<String>,
 }
 
 /// A drawn group: a project, or a user-made session group inside one.
@@ -79,6 +106,11 @@ pub struct GroupCore {
     pub sections: Vec<SectionView>,
     /// Every row of the group that passes the tag filter, in display order.
     pub sessions: Vec<SessionView>,
+    /// The machine this group belongs to; absent for this computer's groups.
+    pub remote_machine: Option<RemoteMachineView>,
+    /// The machine's stream is down while its rows are still held, so the group draws faded and
+    /// its terminal rows are not interactive. Never set for this computer's groups.
+    pub is_stale: bool,
 }
 
 /// What a project row draws besides its sessions.

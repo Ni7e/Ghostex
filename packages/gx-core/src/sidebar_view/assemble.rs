@@ -15,9 +15,10 @@ use super::spaces::{
     OTHER_SPACE_ICON, OTHER_SPACE_ID, OTHER_SPACE_LABEL,
 };
 use super::view::{
-    CollectionView, EmptyState, GroupView, MachineSummary, OrderItem, OrderKind, SidebarView,
-    SpaceView,
+    CollectionView, EmptyState, GroupView, MachineSummary, MachineTabView, OrderItem, OrderKind,
+    SidebarView, SpaceView,
 };
+use crate::keys::MachineId;
 
 /// Everything the top level reads.
 pub(crate) struct AssembleInput<'a> {
@@ -29,8 +30,14 @@ pub(crate) struct AssembleInput<'a> {
     pub(crate) host: &'a SidebarHostInputs,
     pub(crate) spaces: Option<SpacesState>,
     pub(crate) collections: CollectionsState,
-    /// The machine's first snapshot has arrived.
-    pub(crate) machine_loaded: bool,
+    /// THIS COMPUTER's first snapshot has arrived, which is what `ready` and the loading and error
+    /// branches of the empty state are about on every tab.
+    pub(crate) local_machine_loaded: bool,
+    /// The badge counts of every machine tab.
+    pub(crate) machine_summaries: &'a BTreeMap<MachineId, MachineSummary>,
+    /// Whether ANY machine draws a project group. Asked only when the two cheaper inventory tests
+    /// both say no, so it is a closure rather than a value.
+    pub(crate) any_machine_draws_a_project: &'a dyn Fn() -> bool,
     pub(crate) now_ms: u64,
 }
 
@@ -295,13 +302,42 @@ pub(crate) fn assemble(input: AssembleInput<'_>) -> SidebarView {
             }
         }
     }
+    // The selected machine's tab draws the counts of the list just built; every other tab draws the
+    // ones counted off the store, which is the same number by another route.
+    let machines: Vec<MachineTabView> = input
+        .host
+        .machines
+        .iter()
+        .map(|machine| {
+            let counts = if machine.machine_id == input.ui.selected_machine_id {
+                machine_summary
+            } else {
+                input
+                    .machine_summaries
+                    .get(&machine_key(&machine.machine_id))
+                    .copied()
+                    .unwrap_or_default()
+            };
+            MachineTabView {
+                id: machine.machine_id.clone(),
+                label: machine.label.clone(),
+                state: machine.state.clone(),
+                message: machine.message.clone(),
+                working_count: counts.working_count,
+                attention_count: counts.attention_count,
+            }
+        })
+        .collect();
 
     SidebarView {
-        // The machine's rows are in hand, or the host has already seen it unavailable and the
-        // empty state below says which. A host that draws before either has nothing to draw.
-        ready: input.machine_loaded || input.host.unavailable.since_ms.is_some(),
-        supported: input.ui.selected_machine_id == LOCAL_MACHINE_ID,
+        // `state.hasReceivedSnapshot` is this computer's, whichever machine tab is selected, and
+        // the host's unavailable clock stands in for it once it has been seen down.
+        ready: input.local_machine_loaded || input.host.unavailable.since_ms.is_some(),
+        // This computer always, and a remote machine while the host feeds its presentation into
+        // the store. A tab this says `false` for keeps whatever the caller drew.
+        supported: input.host.feeds(&input.ui.selected_machine_id),
         selected_machine_id: input.ui.selected_machine_id.clone(),
+        machines,
         scroll_scope: format!(
             "{}|{}",
             input.ui.selected_machine_id,
@@ -321,7 +357,23 @@ pub(crate) fn assemble(input: AssembleInput<'_>) -> SidebarView {
 
 /// `createNativeEmptyState`.
 fn empty_state(input: &AssembleInput<'_>, selection: Option<&SpaceSelection>) -> EmptyState {
-    let unavailable = !input.machine_loaded;
+    let is_local = input.ui.selected_machine_id == LOCAL_MACHINE_ID;
+    // Adding a project needs somewhere to add it: this computer always, a remote machine while its
+    // connection is up. That is a fact of the remote transport, which is why it comes from the host
+    // rather than from the store.
+    let can_add_project = is_local
+        || input
+            .host
+            .machine(&input.ui.selected_machine_id)
+            .is_some_and(super::inputs::MachineTabInput::is_connected);
+    if !is_local && !can_add_project {
+        // `createNativeEmptyState` returns early here: a machine tab that is not connected says
+        // nothing at all rather than "No projects".
+        return EmptyState::default();
+    }
+    // `unavailable` is the local placeholder group, so the loading and error branches are this
+    // computer's on every tab.
+    let unavailable = !input.local_machine_loaded;
     let error = unavailable
         && (input.host.unavailable.observed_available
             || input
@@ -330,12 +382,12 @@ fn empty_state(input: &AssembleInput<'_>, selection: Option<&SpaceSelection>) ->
                 .since_ms
                 .is_some_and(|since| input.now_ms.saturating_sub(since) >= 20_000));
     let loading = !error && unavailable;
+    // `hasKnownSidebarProjectInventory` reads `workspaceGroupIds`, which spans every machine, so a
+    // user whose only projects are on a remote machine is not shown first-run copy.
     let known = input.meta.project_settings_count > 0
         || input.host.recent_project_count > 0
-        || input.plans.iter().any(|plan| plan.kind != GroupKind::Chats);
-    // A remote machine also allows it once its connection is up, which is a fact of the remote
-    // transport rather than of the store; remote machines join the list in M4d and bring it.
-    let can_add_project = input.ui.selected_machine_id == LOCAL_MACHINE_ID;
+        || input.plans.iter().any(|plan| plan.kind != GroupKind::Chats)
+        || (input.any_machine_draws_a_project)();
     let copy = if error {
         "Unable to load sessions."
     } else if !known {
@@ -350,5 +402,14 @@ fn empty_state(input: &AssembleInput<'_>, selection: Option<&SpaceSelection>) ->
         error,
         can_add_project,
         copy: copy.to_string(),
+    }
+}
+
+/// The store's key for a machine tab id.
+fn machine_key(machine_id: &str) -> MachineId {
+    if machine_id == LOCAL_MACHINE_ID {
+        MachineId::Local
+    } else {
+        MachineId::Remote(machine_id.to_string())
     }
 }

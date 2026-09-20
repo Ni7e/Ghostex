@@ -28,7 +28,7 @@
 //! apps/desktop/sidebar/native-sidebar/space-navigation.ts (`rememberNativeSidebarFocus`).
 
 use crate::core::Core;
-use crate::keys::MachineId;
+use crate::keys::{MachineId, ProjectKey, SessionKey};
 
 use super::inputs::{SectionId, SidebarInputs, LOCAL_MACHINE_ID};
 use super::model::SidebarViewModel;
@@ -40,6 +40,9 @@ use super::view::{GroupView, SidebarView};
 /// state holds, so a field that is `false` or `None` needs nothing done.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarRevealPlan {
+    /// The machine tab the row lives on, when it is not the selected one. Applied FIRST: every
+    /// other field of the plan is keyed by that machine's section.
+    pub select_machine: Option<String>,
     /// The group holding the row.
     pub group_id: String,
     /// The id the group's own UI state is keyed by.
@@ -61,8 +64,11 @@ pub struct SidebarRevealPlan {
 }
 
 /// Works out what has to change for `sidebar_session_id` to be drawn, reading `view` (the list as
-/// it stands) first. `None` when the row is not one of the selected machine's, which is where a
-/// remote reveal lands until remote machines are in the store.
+/// it stands) first.
+///
+/// A row on another machine moves the machine tab first, the way `rememberNativeSidebarFocus` does
+/// with `reveal`. `None` when that machine's rows are not in the store: switching to a tab the
+/// store cannot build would replace the list with an empty one, which is worse than not revealing.
 pub fn reveal_plan(
     core: &Core,
     inputs: &SidebarInputs,
@@ -70,11 +76,31 @@ pub fn reveal_plan(
     sidebar_session_id: &str,
     now_ms: u64,
 ) -> Option<SidebarRevealPlan> {
+    // The machine has to be settled before anything else: the section key, the storage ids and the
+    // Space memory below all belong to whichever machine's section the row is in.
+    let select_machine = row_machine_id(sidebar_session_id)
+        .filter(|machine_id| *machine_id != inputs.ui.selected_machine_id)
+        .filter(|machine_id| {
+            core.presentation()
+                .loaded(&machine_key(machine_id))
+                .is_some()
+        });
+    let switched = select_machine.as_ref().map(|machine_id| {
+        let mut moved = inputs.clone();
+        moved.ui.selected_machine_id = machine_id.clone();
+        moved
+    });
+    let inputs = switched.as_ref().unwrap_or(inputs);
     let parking = inputs.settings.enable_session_parking;
     // One clone, reused for both questions a rebuild can answer.
     let mut probe: Option<SidebarInputs> = None;
     let mut built: Option<SidebarView> = None;
-    let found = match locate(view, sidebar_session_id, parking, now_ms) {
+    // The drawn list is the OTHER machine's when the tab moves, so it is not asked at all.
+    let drawn = select_machine
+        .is_none()
+        .then(|| locate(view, sidebar_session_id, parking, now_ms))
+        .flatten();
+    let found = match drawn {
         Some(found) => found,
         None => {
             // Nothing filtering: no Space, no Show Hidden, no tags. The row is then wherever it is.
@@ -135,6 +161,7 @@ pub fn reveal_plan(
                 &inputs.ui.selected_tag_filters,
             ),
         select_space: space_for_reveal(core, inputs, group, collection_id.as_deref()),
+        select_machine,
         group_id: found.group_id.clone(),
         storage_id: found.storage_id.clone(),
         expand_list: false,
@@ -283,11 +310,7 @@ fn space_for_reveal(
     if !inputs.settings.sidebar_spaces_enabled {
         return None;
     }
-    let machine = if inputs.ui.selected_machine_id == LOCAL_MACHINE_ID {
-        MachineId::Local
-    } else {
-        MachineId::Remote(inputs.ui.selected_machine_id.clone())
-    };
+    let machine = machine_key(&inputs.ui.selected_machine_id);
     let spaces = SpacesState::from_wire(
         core.presentation()
             .machine(&machine)?
@@ -316,6 +339,38 @@ fn space_for_reveal(
             .map(|worktree| worktree.parent_project_id.as_str()),
     );
     (space_id != selection.space_id()).then_some(space_id)
+}
+
+/// The machine tab a sidebar row belongs to, from its id alone.
+///
+/// A session row names its machine (`remote:<machine>:session:…`, or nothing at all for a local
+/// one). A browser row is `gpui-browser:<workspace project id>:<tab>`, and the workspace project id
+/// names the machine the same way. Anything else reads as this computer's, which is what every
+/// unprefixed id is.
+fn row_machine_id(sidebar_session_id: &str) -> Option<String> {
+    if let Some(key) = SessionKey::parse_sidebar_session_id(sidebar_session_id) {
+        return Some(machine_tab_id(&key.machine));
+    }
+    let browser = sidebar_session_id.strip_prefix("gpui-browser:")?;
+    let (encoded_project, _) = browser.split_once(':')?;
+    let project_id = crate::keys::decode_uri_component(encoded_project)?;
+    let project = ProjectKey::parse_workspace_project_id(&project_id)?;
+    Some(machine_tab_id(&project.machine))
+}
+
+fn machine_tab_id(machine: &MachineId) -> String {
+    match machine.remote_id() {
+        None => LOCAL_MACHINE_ID.to_string(),
+        Some(machine_id) => machine_id.to_string(),
+    }
+}
+
+fn machine_key(machine_id: &str) -> MachineId {
+    if machine_id == LOCAL_MACHINE_ID {
+        MachineId::Local
+    } else {
+        MachineId::Remote(machine_id.to_string())
+    }
 }
 
 fn drawn_in_sections(group: &GroupView, sidebar_session_id: &str) -> bool {

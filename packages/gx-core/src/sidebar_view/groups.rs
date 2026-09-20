@@ -11,7 +11,8 @@ use super::ordering::{order_rows_for_display, row_deadline_ms};
 use super::sections::project_session_sections;
 use super::tags::matches_tag_filters;
 use super::view::{
-    GroupCore, GroupSummary, ProjectContextView, SessionRow, SessionView, WorktreeView,
+    GroupCore, GroupSummary, ProjectContextView, RemoteMachineView, SessionRow, SessionView,
+    WorktreeView,
 };
 
 /// Where a group's rows come from.
@@ -69,6 +70,10 @@ pub(crate) struct GroupPlan {
     /// The project's own rows in the daemon's order, then the group's members.
     pub(crate) rows: Vec<RowRef>,
     pub(crate) project: Option<Arc<ProjectContextInput>>,
+    /// The remote machine this group belongs to, with the raw project id in that machine's daemon.
+    pub(crate) remote_machine: Option<RemoteMachineView>,
+    /// The machine's stream is down while its rows are still held.
+    pub(crate) is_stale: bool,
 }
 
 /// A built group: what is drawn, plus what the top level needs from every group, drawn or not.
@@ -212,6 +217,8 @@ pub(crate) fn build_group(
             .contains(&plan.storage_id),
         sections: layout.sections,
         sessions,
+        remote_machine: plan.remote_machine.clone(),
+        is_stale: plan.is_stale,
     };
     GroupBuild {
         deadline_ms: rows

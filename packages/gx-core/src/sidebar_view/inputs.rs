@@ -12,6 +12,40 @@ use super::tags::{TagCatalog, TagListItem};
 /// The machine tab id of this computer's daemon.
 pub const LOCAL_MACHINE_ID: &str = "local";
 
+/// The connection state word of a machine the host can build a list for.
+pub const MACHINE_STATE_CONNECTED: &str = "connected";
+
+/// One machine tab, as the host knows it.
+///
+/// The machine tabs are the host's list, not the store's: which machines are saved, whether they
+/// are enabled in the sidebar, what the user named them, and how their SSH tunnel is doing are all
+/// facts of the remote transport. The store only holds their rows, and only for the ones the host
+/// says it feeds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineTabInput {
+    /// [`LOCAL_MACHINE_ID`], or the saved remote machine's settings id.
+    pub machine_id: String,
+    pub label: String,
+    /// The host's connection state word (`connected`, `connecting`, `disconnected`, `sshFailed`,
+    /// and the rest of the connect ladder). Always `connected` for this computer.
+    pub state: String,
+    /// The already-sanitized failure summary, when the host has one.
+    pub message: Option<String>,
+    /// The host subscribes to this machine's presentation and feeds it into the store, so a list
+    /// can be built for it. A machine the host does not feed keeps whatever the caller drew.
+    pub fed: bool,
+}
+
+impl MachineTabInput {
+    pub fn is_local(&self) -> bool {
+        self.machine_id == LOCAL_MACHINE_ID
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.state == MACHINE_STATE_CONNECTED
+    }
+}
+
 /// Which sessions a project's list shows first, and in which order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -373,10 +407,18 @@ pub struct SidebarHostInputs {
     /// The sidebar's own copy of the project collections, as client storage holds it. Read only
     /// while the daemon has published none: the sidebar shows this copy until its first adoption.
     pub stored_project_collections: Option<Value>,
+    /// The machine tabs, this computer first, in the order the sidebar draws them.
+    pub machines: Vec<MachineTabInput>,
     /// Projects the daemon parked as Recent Projects, by their own id. The daemon keeps them out
     /// of the presentation, so this list only matters while a project is being parked or
     /// restored, but it is the authoritative one and the list hides them either way.
+    ///
+    /// This computer's only; a remote machine's parked projects are in
+    /// [`Self::remote_recent_project_ids`], because a project id is unique per daemon and two
+    /// machines can hand out the same one.
     pub recent_project_ids: BTreeSet<String>,
+    /// The same list per REMOTE machine, keyed by machine id.
+    pub remote_recent_project_ids: BTreeMap<String, BTreeSet<String>>,
     /// By project id.
     pub project_diff_stats: BTreeMap<String, ProjectDiffStats>,
     /// By sidebar session id (`combined-session:<project>:<session>`).
@@ -387,6 +429,35 @@ pub struct SidebarHostInputs {
     /// The empty state reads it to tell a first run from a list the user emptied.
     pub recent_project_count: usize,
     pub unavailable: UnavailableState,
+}
+
+impl SidebarHostInputs {
+    /// The machine tab with this id.
+    pub fn machine(&self, machine_id: &str) -> Option<&MachineTabInput> {
+        self.machines
+            .iter()
+            .find(|machine| machine.machine_id == machine_id)
+    }
+
+    /// Whether the host feeds this machine's presentation into the store. This computer always is;
+    /// a remote machine is only while its client runs, and an empty machine list is the moment
+    /// before the host has published one.
+    pub fn feeds(&self, machine_id: &str) -> bool {
+        machine_id == LOCAL_MACHINE_ID
+            || self.machine(machine_id).is_some_and(|machine| machine.fed)
+    }
+
+    /// The projects a machine has parked as Recent Projects.
+    pub(crate) fn parked_project_ids(&self, machine: &crate::keys::MachineId) -> &BTreeSet<String> {
+        static EMPTY: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
+        match machine.remote_id() {
+            None => &self.recent_project_ids,
+            Some(machine_id) => self
+                .remote_recent_project_ids
+                .get(machine_id)
+                .unwrap_or_else(|| EMPTY.get_or_init(BTreeSet::new)),
+        }
+    }
 }
 
 /// Everything besides the store.

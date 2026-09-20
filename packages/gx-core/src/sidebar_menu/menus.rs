@@ -98,13 +98,15 @@ impl<'a> SidebarMenus<'a> {
             group_id: core.group_id.as_str(),
             storage_id: core.storage_id.as_str(),
             title: core.title.as_str(),
-            // Remote machines are not in this store yet (M4d), so every group it draws is local.
-            is_remote: false,
-            remote_machine_name: None,
-            is_stale: false,
+            is_remote: core.remote_machine.is_some(),
+            remote_machine_name: core
+                .remote_machine
+                .as_ref()
+                .map(|remote| remote.machine_name.as_str()),
+            is_stale: core.is_stale,
             // Every project group and every user-made group can take a session into a new group;
-            // the Chats collection cannot.
-            can_create_session_group: core.group_id != CHATS_GROUP_ID,
+            // the Chats collection cannot, on either machine.
+            can_create_session_group: !is_chats_group(core.group_id.as_str()),
             // The projection never sets it, so the Focus item never appears.
             can_focus_mode: false,
             workspace_focus_bridge: self.host.workspace_focus_bridge,
@@ -235,7 +237,7 @@ impl<'a> SidebarMenus<'a> {
             .view
             .groups
             .iter()
-            .filter(|group| group.core.group_id != CHATS_GROUP_ID)
+            .filter(|group| !is_chats_group(group.core.group_id.as_str()))
             .map(|group| group.core.group_id.clone())
             .collect();
         navigation::more_menu(&navigation::MoreMenuInput {
@@ -298,4 +300,12 @@ impl<'a> SidebarMenus<'a> {
             None => Vec::new(),
         }
     }
+}
+
+/// Whether a sidebar group id is a machine's Chats collection. A remote machine's is
+/// `remote:<machine>:group:combined-chats`, so the id is not comparable as one string.
+fn is_chats_group(group_id: &str) -> bool {
+    group_id == CHATS_GROUP_ID
+        || crate::keys::ProjectKey::parse_sidebar_group_id(group_id)
+            .is_some_and(|project| project.project_id == CHATS_GROUP_ID)
 }
