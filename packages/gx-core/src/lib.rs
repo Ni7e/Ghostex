@@ -32,7 +32,9 @@ mod workspace_groups;
 pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
 pub use crate::connection::{ConnectionPhase, ConnectionState, ConnectionUpdate};
 pub use crate::core::{Core, Effect, Event, Intent, Output, ResubscribeReason};
-pub use crate::doc_sync::{DocumentSync, EmptyEchoRule, SyncEffect, SyncPolicy, SyncedDocument};
+pub use crate::doc_sync::{
+    document_reconcile_wanted, DocumentSync, EmptyEchoRule, SyncEffect, SyncPolicy, SyncedDocument,
+};
 pub use crate::focus::{
     default_group_for_project, next_visible_sessions_for_local_focus, ActiveGroup,
     ExternalFocusUpdate, FocusField, FocusOutcome, FocusState,

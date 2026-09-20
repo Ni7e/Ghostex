@@ -1387,6 +1387,12 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
   );
   for (const difference of differences.slice(0, 20)) console.log(`  ${difference}`);
   if (differences.length > 20) console.log(`  … and ${differences.length - 20} more`);
+  const launch = compareWorkspaceGroupLaunch((dump.launchCases ?? []) as Json[], mutationName);
+  differences.push(...launch.differences);
+  console.log(
+    `workspace groups launch: ${launch.cases} cases launchAsked ${launch.asked} launchAdopted ${launch.adopted} launchEqual ${launch.equal} launchPushed ${launch.pushed} differences ${launch.differences.length}`
+  );
+  for (const difference of launch.differences.slice(0, 10)) console.log(`  ${difference}`);
   const trip = await runWorkspaceGroupsRoundTrips(dump.handOff as Json, mutationName);
   differences.push(...trip.differences);
   console.log(
@@ -1416,6 +1422,10 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
     ['roundTripCarried', trip.carried],
     ['roundTripAppEdits', trip.appEdits],
     ['roundTripCrossings', trip.crossingsLost],
+    ['launchAsked', launch.asked],
+    ['launchAdopted', launch.adopted],
+    ['launchEqual', launch.equal],
+    ['launchPushed', launch.pushed],
   ];
   const collapsed = measured.filter(([, count]) => count === 0);
   if (mutationName) {
@@ -1458,6 +1468,61 @@ function normalizeDocument(document: unknown): Json {
  * re-implemented: the equivalence of the two document parsers is what the 22,572-step guard gate
  * above proves, and what nothing proved before this one is the BRIDGE.
  */
+/**
+ * The launch sequence, which the interleaving enumeration never performs.
+ *
+ * The Rust probe drives the real guard through both orders of (the stored key landing, the daemon's
+ * first snapshot landing) for every pair of stored and server documents, with the real
+ * `document_reconcile_wanted` deciding whether the guard is asked at all. This half checks the
+ * answers against the rules stated in `doc_sync`, which is the only reference there is: the
+ * TypeScript this replaced had no launch of its own, because the page read the key and the daemon's
+ * copy in the same hydrate and never had a host seeding a store in between.
+ *
+ * `asked` is the counter that carries the defect. Reducing the rule to the change flag alone, which
+ * is what shipped, leaves every pair where the stored and server documents AGREE unasked, and that
+ * is every ordinary launch.
+ */
+function compareWorkspaceGroupLaunch(
+  cases: Json[],
+  mutationName: string | undefined
+): { cases: number; asked: number; adopted: number; equal: number; pushed: number; differences: string[] } {
+  const differences: string[] = [];
+  let asked = 0;
+  let adopted = 0;
+  let equal = 0;
+  let pushed = 0;
+  for (const entry of cases) {
+    const [storedName, serverName] = String(entry.name).split('/');
+    // `reconcile-only-on-the-change-flag` is the rule as it shipped: the host asks the guard only
+    // when the store reports the side state as moved, which it cannot do for a document the host
+    // seeded with the same value.
+    const seeded = String(entry.name).endsWith('storedFirst');
+    const mutated = mutationName === 'reconcile-only-on-the-change-flag' && seeded && storedName === serverName;
+    // The mutation REWRITES the answer rather than skipping the check. Skipping it is what the
+    // first cut did, which made the one mutation this probe exists for produce nothing at all:
+    // a guard that is never asked has no outcome and leaves the stored document in place, and
+    // those are the two things the assertions below have to see.
+    const caseAsked = mutated ? 0 : Number(entry.asked ?? 0);
+    const outcome = mutated ? null : entry.outcome;
+    asked += caseAsked;
+    if (outcome === 'adopted') adopted += 1;
+    if (outcome === 'ignoredEqual') equal += 1;
+    if (outcome === 'scheduledPush') pushed += 1;
+    // Every launch asks the guard at least once: that is the whole rule.
+    if (caseAsked < 1) differences.push(`launch ${String(entry.name)}: the guard was never asked`);
+    // And the answer is the guard's own, unchanged by the launch: a server copy that differs is
+    // adopted, an empty server with a non-empty local one is pushed rather than adopted, and an
+    // equal one does nothing.
+    const expected = serverName === storedName ? 'ignoredEqual' : serverName === 'empty' ? 'scheduledPush' : 'adopted';
+    if (outcome !== expected)
+      differences.push(`launch ${String(entry.name)}: outcome ${String(outcome)}, expected ${expected}`);
+    // A push scheduled means the server is empty and the client is not, which must never adopt.
+    if (expected === 'scheduledPush' && Number(entry.schedules ?? 0) < 1)
+      differences.push(`launch ${String(entry.name)}: the empty server copy booked no push`);
+  }
+  return { cases: cases.length, asked, adopted, equal, pushed, differences };
+}
+
 /** The member the app's side prunes and the page's does not, which is what makes a hand-back visible. */
 const PRUNED_SESSION_ID = 'S9';
 
@@ -1842,6 +1907,7 @@ function mutateGroups(name: string | undefined, entry: Json): Json {
 let ECHO_DOCUMENTS: Json[] = [];
 
 const GROUPS_MUTATIONS = [
+  'reconcile-only-on-the-change-flag',
   'hand-back-never-arrives',
   'app-edit-is-never-handed-back',
   'the-crossing-keeps-the-app-edit',

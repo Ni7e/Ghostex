@@ -25,9 +25,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghostex_gx_core::{
-    workspace_groups_hand_back_script, AdoptOutcome, ProjectWorkspaceGroups,
-    WorkspaceGroupsDocument, WorkspaceGroupsEffect, WorkspaceGroupsSync, WorkspaceSubgroup,
-    WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE, WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER,
+    document_reconcile_wanted, workspace_groups_hand_back_script, AdoptOutcome,
+    ProjectWorkspaceGroups, WorkspaceGroupsDocument, WorkspaceGroupsEffect, WorkspaceGroupsSync,
+    WorkspaceSubgroup, WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE, WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER,
 };
 use serde_json::{json, Value};
 
@@ -71,6 +71,7 @@ fn main() {
         .map(|case| case["steps"].as_array().map(Vec::len).unwrap_or(0))
         .sum();
     let prune_cases = prune_cases();
+    let launch_cases = launch_cases();
     let hand_off = hand_off_edges();
     let path = std::path::Path::new(&out_dir).join("rust-groups.json");
     std::fs::write(
@@ -79,17 +80,122 @@ fn main() {
             "documents": documents.iter().map(WorkspaceGroupsDocument::to_json).collect::<Vec<_>>(),
             "cases": cases,
             "pruneCases": prune_cases,
+            "launchCases": launch_cases,
             "handOff": hand_off,
         }))
         .expect("serialize"),
     )
     .expect("write");
     println!(
-        "workspace groups guard: {} cases, {steps} steps, {} prune cases, written to {}",
+        "workspace groups guard: {} cases, {steps} steps, {} prune cases, {} launch cases, written to {}",
         cases.len(),
         prune_cases.len(),
+        launch_cases.len(),
         path.display()
     );
+}
+
+/// THE SEQUENCE EVERY LAUNCH PERFORMS, which the interleaving enumeration above never does.
+///
+/// Those 5,643 scripts are made of edits, echoes and pushes, and every one of them starts from a
+/// document that is simply `restore`d. A real launch is different in a way that turned out to
+/// matter: the HOST reads the stored key, puts that document into the store's side state ITSELF,
+/// and only then does the daemon's first snapshot land. The reducer therefore compares the daemon's
+/// copy against what the host just wrote rather than against nothing, and on an ordinary launch,
+/// where the two agree, it reports no change and the host asks the guard nothing at all. A whole
+/// run went by with the guard never once consulted, and the enumeration could not see it because
+/// "the host seeded the store" is not one of its events.
+///
+/// So this probe drives the real decision: both orders of (the stored key landing, the snapshot
+/// landing), every pair of stored and server documents, and the rule
+/// `document_reconcile_wanted` deciding whether the guard is asked. What it counts is `asked`:
+/// with the rule reduced to the change flag alone, the equal pairs are never asked and that
+/// counter collapses, which is the shape of the defect rather than a difference in the answer.
+fn launch_cases() -> Vec<Value> {
+    let documents = documents();
+    let names = ["empty", "a", "b"];
+    let mut cases = Vec::new();
+    for (stored_index, stored_name) in names.iter().enumerate() {
+        for (server_index, server_name) in names.iter().enumerate() {
+            for stored_first in [true, false] {
+                let stored = documents[stored_index].clone();
+                let server = documents[server_index].clone();
+                let mut sync = WorkspaceGroupsSync::default();
+                // What the store's side state holds, which the host writes as well as the daemon.
+                let mut side: Option<WorkspaceGroupsDocument> = None;
+                let mut asked = 0usize;
+                let mut outcome = None;
+                let mut effects = Vec::new();
+                let mut judge = |sync: &mut WorkspaceGroupsSync,
+                                 side: &mut Option<WorkspaceGroupsDocument>,
+                                 asked: &mut usize,
+                                 outcome: &mut Option<AdoptOutcome>,
+                                 effects: &mut Vec<WorkspaceGroupsEffect>,
+                                 reloaded: bool| {
+                    // `note_workspace_groups_change`: the flag is "the daemon's copy differs from
+                    // what is held", and what is held is whatever the host last put there.
+                    let changed = side.as_ref() != Some(&server);
+                    *side = Some(server.clone());
+                    if !document_reconcile_wanted(changed, reloaded) {
+                        return;
+                    }
+                    *asked += 1;
+                    let value = server.to_json();
+                    let (answer, next) = sync.adopt(Some(&value));
+                    *outcome = Some(answer);
+                    *effects = next;
+                };
+                if stored_first {
+                    // The host's read lands first: it restores the guard AND seeds the side state.
+                    sync.restore(stored.clone());
+                    side = Some(stored.clone());
+                    judge(
+                        &mut sync,
+                        &mut side,
+                        &mut asked,
+                        &mut outcome,
+                        &mut effects,
+                        true,
+                    );
+                } else {
+                    // The snapshot lands first, so the guard has not been restored yet. The host
+                    // defers, the read lands, and the deferral is recovered.
+                    judge(
+                        &mut sync,
+                        &mut side,
+                        &mut asked,
+                        &mut outcome,
+                        &mut effects,
+                        true,
+                    );
+                    sync.restore(stored.clone());
+                    judge(
+                        &mut sync,
+                        &mut side,
+                        &mut asked,
+                        &mut outcome,
+                        &mut effects,
+                        true,
+                    );
+                }
+                cases.push(json!({
+                    "name": format!("{stored_name}/{server_name}/{}", match stored_first {
+                        true => "storedFirst",
+                        false => "snapshotFirst",
+                    }),
+                    "asked": asked,
+                    "outcome": outcome.map(outcome_name),
+                    "document": sync.document().to_json(),
+                    "pending": sync.is_pending(),
+                    "schedules": effects
+                        .iter()
+                        .filter(|effect| matches!(effect, WorkspaceGroupsEffect::SchedulePush { .. }))
+                        .count(),
+                }));
+            }
+        }
+    }
+    cases
 }
 
 /// The two edges of the hand-off bridge, so the TypeScript half can drive the REAL ones.
