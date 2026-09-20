@@ -355,7 +355,7 @@ fn check_reveal(
     else {
         return;
     };
-    let Some(plan) = reveal_plan(core, inputs, &session_id, now_ms) else {
+    let Some(plan) = reveal_plan(core, inputs, view, &session_id, now_ms) else {
         return;
     };
     ui.reveals += 1;
@@ -365,6 +365,13 @@ fn check_reveal(
     }
     if plan.clear_tag_filters {
         revealed.ui.selected_tag_filters.clear();
+    }
+    if let Some(space_id) = &plan.select_space {
+        revealed
+            .ui
+            .collapse
+            .selected_space_by_section
+            .insert(revealed.ui.section_key(), space_id.clone());
     }
     if let Some(storage_id) = &plan.collapsed_collection_storage_id {
         revealed

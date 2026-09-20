@@ -341,6 +341,9 @@ impl GhostexGpuiApp {
             cx.notify();
         }
         self.gx_store_book_sidebar_deadline(cx);
+        // Everything the session changed while this app was not the writer is still owed, so the
+        // switch moving to the store's list writes it rather than waiting for the next click.
+        self.gx_store_write_owed_sidebar_ui_state(cx);
         if changed && self.gx_store_sidebar_draws_store_list() {
             self.gx_store_install_sidebar_list(cx);
         }

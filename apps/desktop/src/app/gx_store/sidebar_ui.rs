@@ -131,6 +131,11 @@ impl SidebarUiHost {
         self.store.selected_machine_id()
     }
 
+    /// What a write still owes.
+    pub(super) fn store_pending(&self) -> ghostex_gx_core::SidebarPersistSet {
+        self.store.pending()
+    }
+
     /// Drops rows the list no longer draws from the multi-selection.
     pub(super) fn retain_selected_sessions(&mut self, keep: impl FnMut(&str) -> bool) -> bool {
         let moved = self.store.retain_selected_sessions(keep);
@@ -287,6 +292,15 @@ impl GhostexGpuiApp {
     /// the TypeScript sidebar is still a blind whole-object writer of the same keys until M4c.
     pub(crate) fn gx_store_sidebar_ui_writes(&self) -> bool {
         self.gx_store_sidebar_list_source() == super::SidebarListSource::Store
+    }
+
+    /// Books a write for anything still owed, which is what a session that ran with the switch off
+    /// and then turned it on has.
+    pub(super) fn gx_store_write_owed_sidebar_ui_state(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.gx_store.sidebar_ui.store_pending().is_empty() {
+            return;
+        }
+        self.gx_store_schedule_sidebar_ui_write(cx);
     }
 
     /// Books one write for everything the intents since the last one changed.
