@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use ghostex_gx_protocol::PresentationSession;
+use ghostex_gx_protocol::{LifecycleState, PresentationSession};
 
 use super::store::{MachinePresentation, PresentationStore};
 use crate::change::{ChangeSummary, IgnoredReason};
@@ -84,6 +84,58 @@ impl PresentationStore {
             summary.note_project_changed(key.clone());
             summary.note_project_order_changed(key.machine.clone());
         }
+        summary
+    }
+
+    /// `reorderPresentationProjectSessions`: the local-first half of a manual session reorder.
+    ///
+    /// CDXC:Sessions 2026-09-21 WHY:
+    /// gxserver owns the durable `sidebarOrder`, but `/api/updateSessionOrder` is awaited and the
+    /// row has to move under the user's finger, so the client writes the same value into its own
+    /// copy first. It is a direct edit of the daemon rows and NOT a [`SessionPatch`] overlay, for
+    /// the reason the TypeScript writes it the same way: an overlay would expire (60 s, declared
+    /// difference 24) and the order would silently snap back to the daemon's old one if the row
+    /// were never re-sent, which is the oscillation this whole family exists to prevent. A row the
+    /// daemon does send again replaces it whole, overlays included, which is the correction.
+    ///
+    /// The saved rows start at 1000 so a session created later, with sidebar order 0, leads the
+    /// manual list (`CDXC:Sessions 2026-06-05-12:30`).
+    pub fn reorder_project_sessions(
+        &mut self,
+        project: &ProjectKey,
+        ordered_session_ids: &[String],
+    ) -> ChangeSummary {
+        let Some(entry) = self.machines.get_mut(&project.machine) else {
+            return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+        };
+        let Some(loaded) = entry.loaded_mut() else {
+            return ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+        };
+        let mut touched_groups: Vec<String> = Vec::new();
+        let mut changed = false;
+        for (index, session_id) in ordered_session_ids.iter().enumerate() {
+            let sidebar_order = ((index + 1) * 1_000) as f64;
+            let Some(session) = loaded.session_mut(&project.project_id, session_id) else {
+                continue;
+            };
+            if session.sidebar_order == Some(sidebar_order) {
+                continue;
+            }
+            session.sidebar_order = Some(sidebar_order);
+            session.sort_key = sort_key_with_sidebar_order(session, sidebar_order);
+            changed = true;
+            if !touched_groups.iter().any(|id| *id == session.group_id) {
+                touched_groups.push(session.group_id.clone());
+            }
+        }
+        if !changed {
+            return ChangeSummary::default();
+        }
+        for group_id in touched_groups {
+            loaded.rebuild_group_session_ids(&project.project_id, &group_id);
+        }
+        let mut summary = ChangeSummary::default();
+        summary.note_session_order_changed(project.clone());
         summary
     }
 
@@ -173,4 +225,35 @@ impl PresentationStore {
         }
         summary
     }
+}
+
+/// `createPresentationSessionSortKeyWithSidebarOrder`. The manual order comes FIRST, before the
+/// active and pin ranks, which is what lets a saved Manual Sorting order be exact; the ranks after
+/// it are the same ones the daemon's own key carries, so a row the daemon re-sends lands in the
+/// same place.
+fn sort_key_with_sidebar_order(session: &PresentationSession, sidebar_order: f64) -> String {
+    let active_rank = match session.lifecycle_state {
+        LifecycleState::Running | LifecycleState::Sleeping => '0',
+        _ => '1',
+    };
+    let pin_rank = if session.is_pinned {
+        '0'
+    } else if session.is_parked {
+        '3'
+    } else if session.session_tag.as_deref() == Some("favorite") || session.is_favorite {
+        '1'
+    } else {
+        '2'
+    };
+    let timestamp = session
+        .last_active_at
+        .as_deref()
+        .unwrap_or(session.updated_at.as_str());
+    // `String(sidebarOrder).padStart(12, '0')`: JavaScript prints an integral Number without a
+    // decimal point, and every value written here is `(index + 1) * 1000`, so the text is the
+    // integer's.
+    format!(
+        "{:0>12}:{active_rank}:{pin_rank}:{timestamp}:{}",
+        sidebar_order as i64, session.session_id
+    )
 }

@@ -87,6 +87,13 @@ impl MachinePresentation {
         }
     }
 
+    pub(crate) fn loaded_mut(&mut self) -> Option<&mut LoadedPresentation> {
+        match &mut self.state {
+            PresentationState::Loaded(loaded) => Some(loaded),
+            PresentationState::NotLoaded => None,
+        }
+    }
+
     pub fn side_state(&self) -> &SideState {
         &self.side
     }

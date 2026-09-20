@@ -262,6 +262,28 @@ impl FocusState {
         }
     }
 
+    /// Local intent: make a USER-MADE session group active, which is what
+    /// `createWorkspaceGroupFromSession` does after it mints one.
+    ///
+    /// It is `focus_project` plus the group, in that order and with the same rule about the
+    /// focused session, rather than a second body: the only thing this adds is that the active
+    /// group is the subgroup the caller names instead of the project's default one. A group id the
+    /// document does not hold is re-homed by `reconcile` on the next store change, which is what
+    /// keeps a stale id from naming a group the list draws no row for.
+    pub fn focus_subgroup(
+        &mut self,
+        store: &PresentationStore,
+        project: ProjectKey,
+        group_id: String,
+        now_ms: u64,
+    ) -> FocusOutcome {
+        let before = self.projection();
+        let mut outcome = self.focus_project(store, project.clone(), now_ms);
+        self.active_group = Some(ActiveGroup::Subgroup { project, group_id });
+        outcome.changed = before != self.projection();
+        outcome
+    }
+
     /// Local intent: the host reports the exact set of sessions that own a pane.
     pub fn set_visible_sessions(&mut self, sessions: Vec<SessionKey>, now_ms: u64) -> FocusOutcome {
         self.stamp(now_ms);

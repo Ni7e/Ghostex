@@ -22,6 +22,7 @@ mod overlay;
 mod presentation_store;
 mod selectors;
 mod sidebar_actions;
+mod sidebar_drag;
 mod sidebar_menu;
 mod sidebar_ui;
 mod sidebar_view;
@@ -65,6 +66,10 @@ pub use crate::sidebar_actions::{
     NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION, READ_ONLY_MESSAGE_TYPES, RELOAD_MESSAGE_TYPES,
     SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES,
 };
+pub use crate::sidebar_drag::{
+    owns_order_write_message, owns_session_move_command, plan_order_write, plan_session_move,
+    OrderWrite, OrderWritePlan, SessionMovePlan, ORDER_WRITE_MESSAGE_TYPES,
+};
 pub use crate::sidebar_menu::{
     agent_launcher_items, agent_logo_icons, colored_agent_logo, hover_strip, menu_to_json,
     project_header_actions, HeaderCommand, HoverAction, HoverStrip, LauncherAgent, MenuCommand,
@@ -92,7 +97,7 @@ pub use crate::sidebar_view::{
 pub use crate::workspace_groups::{
     AdoptOutcome, ProjectWorkspaceGroups, WorkspaceGroupsDocument, WorkspaceGroupsEffect,
     WorkspaceGroupsSync, WorkspaceSubgroup, WORKSPACE_GROUPS_SYNC_DELAY_MS,
-    WORKSPACE_GROUPS_SYNC_RETRY_DELAY_MS,
+    WORKSPACE_GROUPS_SYNC_RETRY_DELAY_MS, WORKSPACE_SESSION_GROUP_MAX_COUNT,
 };
 
 /// The wire types, re-exported so a host needs one dependency.

@@ -14,7 +14,7 @@ pub(crate) mod collections;
 mod groups;
 mod inputs;
 mod machines;
-mod membership;
+pub(crate) mod membership;
 mod model;
 pub(crate) mod ordering;
 pub(crate) mod projects;

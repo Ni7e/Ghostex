@@ -32,6 +32,12 @@ pub enum Intent {
     FocusProject {
         project: ProjectKey,
     },
+    /// Make one of a project's USER-MADE session groups active without choosing a session, which
+    /// is what creating a group from a session does.
+    FocusSubgroup {
+        project: ProjectKey,
+        group_id: String,
+    },
     /// The host reports the exact set of sessions that own a pane.
     SetVisibleSessions {
         sessions: Vec<SessionKey>,
@@ -473,6 +479,17 @@ impl Core {
                 let focus = self
                     .focus
                     .focus_project(&self.presentation, project, now_ms);
+                self.note_focus(focus, output);
+            }
+            Intent::FocusSubgroup { project, group_id } => {
+                let loaded = self.presentation.loaded(&project.machine).is_some();
+                if loaded && self.presentation.project(&project).is_none() {
+                    output.changes = ChangeSummary::ignored(IgnoredReason::UnknownTarget);
+                    return;
+                }
+                let focus =
+                    self.focus
+                        .focus_subgroup(&self.presentation, project, group_id, now_ms);
                 self.note_focus(focus, output);
             }
             Intent::SetVisibleSessions { sessions } => {

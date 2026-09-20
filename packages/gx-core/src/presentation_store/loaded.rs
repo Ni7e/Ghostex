@@ -64,6 +64,16 @@ impl LoadedPresentation {
         self.sessions.len()
     }
 
+    /// The daemon row of a session, mutable. The one local edit that uses it is the manual session
+    /// reorder, which writes the same `sidebarOrder` and `sortKey` the daemon will send back.
+    pub(crate) fn session_mut(
+        &mut self,
+        project_id: &str,
+        session_id: &str,
+    ) -> Option<&mut PresentationSession> {
+        self.sessions.get_mut(project_id, session_id)
+    }
+
     pub(crate) fn project_sessions(
         &self,
         project_id: &str,

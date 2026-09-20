@@ -261,6 +261,10 @@ impl<T> ProjectSessionMap<T> {
         self.by_project.get(project_id)?.get(session_id)
     }
 
+    pub(crate) fn get_mut(&mut self, project_id: &str, session_id: &str) -> Option<&mut T> {
+        self.by_project.get_mut(project_id)?.get_mut(session_id)
+    }
+
     pub(crate) fn contains(&self, project_id: &str, session_id: &str) -> bool {
         self.get(project_id, session_id).is_some()
     }
