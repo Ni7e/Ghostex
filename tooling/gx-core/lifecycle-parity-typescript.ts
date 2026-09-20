@@ -524,6 +524,123 @@ function installModalRecorder(calls: Json[]): void {
 }
 
 /**
+ * The bulk half. Drives the shipped `setGroupSleeping`, `wakeProjectSleepingSessions`,
+ * `sleepInactiveProjectSessions`, `closeInactiveProjectSessions`, `setSessionsSleeping` and the
+ * `closeSessions` arm, and records which per-session call each one made, in order.
+ *
+ * The two seams are the per-session actions themselves, `setSessionSleeping` and
+ * `transitionSession`, which is the boundary the port draws too: everything below them is already
+ * compared by the lifecycle and close halves of this gate, and running them again here would
+ * compare them twice and for the wrong reasons. `focusProjectId` is recorded because a project
+ * wake moves the active project before it fans out.
+ *
+ * `browserTabs` is empty on purpose. A project with app tabs is refused WHOLE by the port (the
+ * host cannot reach the browser bridge from this path), so the set the two sides compare is the
+ * set for a project without them; the refusal itself is asserted separately.
+ */
+export async function runTypeScriptBulk(scenario: Json, rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const out: Json[] = [];
+  for (const entry of (rustActions.bulk ?? []) as Json[]) {
+    const payload = entry.payload as Json;
+    const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+    runtime.presentation = scenario.snapshot;
+    runtime.browserTabs = [];
+    runtime.remotePresentations = new Map();
+    // The shape `getGpuiWorkspaceSessionSubgroups` indexes: a user-made session group id reaches
+    // it before anything else in `setGroupSleeping`, and the port refuses exactly that shape.
+    runtime.workspaceGroups = { groups: {}, projectOrder: [], projects: {} };
+    runtime.publishPresentation = () => {};
+    const calls: Json[] = [];
+    let focusProject: string | null = null;
+    runtime.focusProjectId = (projectId: string) => {
+      focusProject = projectId;
+    };
+    runtime.setSessionSleeping = (sessionId: string, sleeping: boolean) => {
+      calls.push({ call: sleeping ? 'sleep' : 'wake', session: sessionId });
+      return Promise.resolve();
+    };
+    // The third seam, and it is a seam for a reason rather than for convenience: the shipped
+    // `setSessionsSleeping` is the paced fan-out, and every project payload delegates to it, so
+    // running it here would make this probe wait 350 ms per row of every project of every scenario
+    // (the first cut did exactly that and never finished). The set and its ORDER are what this
+    // half compares, and they are forwarded untouched; the INTERVAL is measured separately in
+    // `runTypeScriptBulkPacing`, which drives the real helper through its own wait seam.
+    runtime.setSessionsSleeping = async (sessionIds: readonly string[], sleeping: boolean) => {
+      for (const sessionId of sessionIds) await runtime.setSessionSleeping(sessionId, sleeping);
+    };
+    runtime.transitionSession = (sessionId: string, action: string) => {
+      calls.push({ call: action, session: sessionId });
+      return Promise.resolve();
+    };
+    await runTypeScriptBulkPayload(runtime, payload);
+    out.push({ calls, focusProject });
+  }
+  return out;
+}
+
+async function runTypeScriptBulkPayload(runtime: Json, payload: Json): Promise<void> {
+  switch (String(payload.type)) {
+    case 'setGroupSleeping':
+      await runtime.setGroupSleeping(String(payload.groupId), payload.sleeping === true);
+      return;
+    case 'wakeProjectSleepingSessions':
+      await runtime.wakeProjectSleepingSessions(String(payload.groupId));
+      return;
+    case 'sleepInactiveProjectSessions':
+      await runtime.sleepInactiveProjectSessions(String(payload.groupId));
+      return;
+    case 'closeInactiveProjectSessions':
+      await runtime.closeInactiveProjectSessions(String(payload.groupId));
+      return;
+    case 'setSessionsSleeping':
+      await runtime.setSessionsSleeping((payload.sessionIds ?? []) as string[], payload.sleeping === true);
+      return;
+    case 'closeSessions':
+      // `handleSidebarMessage`'s own arm, which is one line and has no method of its own.
+      await Promise.all(((payload.sessionIds ?? []) as string[]).map((id) => runtime.transitionSession(id, 'close')));
+      return;
+  }
+}
+
+/**
+ * The pacing, measured through the shipped helper rather than asserted.
+ *
+ * A bulk SLEEP goes out one request at a time with a wait between them and everything else goes
+ * out together, and which of the two a payload gets is invisible in the call list the half above
+ * compares. So `runGpuiSidebarBulkSleepPaced` itself is driven here through its own `wait` seam,
+ * which RECORDS each interval instead of sleeping: what comes back is how many waits it takes for
+ * n rows and how long each one is, and both are bounded exactly (n - 1 waits, each the shipped
+ * constant) rather than with a tolerance.
+ *
+ * The seam is the helper's own option and not a monkeypatch. The first cut let it use the real
+ * timer, which never resolved under this harness's window shim and hung the whole gate before it
+ * printed a line: a probe that cannot finish is worse than one that cannot fail.
+ */
+export async function runTypeScriptBulkPacing(): Promise<Json[]> {
+  const { runGpuiSidebarBulkSleepPaced, GPUI_SIDEBAR_BULK_SLEEP_INTERVAL_MS } = await import(
+    '@/apps/desktop/sidebar/bulk-sleep-pacing'
+  );
+  const rows = ['a', 'b', 'c'];
+  const waits: number[] = [];
+  const counts = await runGpuiSidebarBulkSleepPaced(rows, async () => {}, {
+    wait: async (intervalMs: number) => {
+      waits.push(intervalMs);
+    },
+  });
+  return [
+    {
+      rows: rows.length,
+      waits: waits.length,
+      intervalMs: GPUI_SIDEBAR_BULK_SLEEP_INTERVAL_MS,
+      distinctIntervals: [...new Set(waits)],
+      attempted: counts.attempted,
+      completed: counts.completed,
+    },
+  ];
+}
+
+/**
  * The wake-time half. Runs the shipped `resolveSessionSnoozeWakeTime` at each fixed instant the
  * clock file names and returns the ISO string it produces.
  *
