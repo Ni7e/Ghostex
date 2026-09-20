@@ -13,7 +13,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Map, Value};
 
-use super::persist::{collapse_into_storage, stored_state_object, COLLAPSE_STORAGE_VERSION};
+use super::persist::{
+    collapse_into_storage, stored_state_object, stored_version, COLLAPSE_STORAGE_VERSION,
+};
 use crate::sidebar_view::{SectionCollapse, SidebarCollapseState};
 
 /// The keys one burst added and removed, per collapse field.
@@ -108,6 +110,12 @@ impl SidebarCollapseDiff {
         let Some(mut object) = stored.and_then(stored_state_object) else {
             return collapse_into_storage(fallback, None);
         };
+        // A newer build's envelope keeps its own version: carrying its fields forward and then
+        // calling it version 3 would hand that build a payload labelled as a shape it is not.
+        let version = stored
+            .and_then(stored_version)
+            .unwrap_or(COLLAPSE_STORAGE_VERSION)
+            .max(COLLAPSE_STORAGE_VERSION);
         apply_set(&mut object, "collapsedGroupsById", &self.collapsed_groups);
         apply_set(
             &mut object,
@@ -169,7 +177,7 @@ impl SidebarCollapseDiff {
                 Value::Object(spaces),
             );
         }
-        json!({ "state": Value::Object(object), "version": COLLAPSE_STORAGE_VERSION }).to_string()
+        json!({ "state": Value::Object(object), "version": version }).to_string()
     }
 }
 

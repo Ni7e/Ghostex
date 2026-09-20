@@ -209,6 +209,8 @@ pub(crate) fn assemble(input: AssembleInput<'_>) -> SidebarView {
         groups.push(GroupView {
             core: build.core.clone(),
             collection_color: None,
+            collection_id: project_of_group(&plan.group_id)
+                .and_then(|project_id| collection_id_by_project.get(&project_id).cloned()),
         });
     }
 

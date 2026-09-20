@@ -170,6 +170,11 @@ pub fn hidden_items_into_storage(items: &SidebarHiddenItems) -> String {
     .to_string()
 }
 
+/// The version a stored envelope names, when it names a number.
+pub(super) fn stored_version(raw: &str) -> Option<u64> {
+    parse_object(raw)?.get("version")?.as_u64()
+}
+
 /// The `state` object of a stored envelope, whatever version it names.
 pub(super) fn stored_state_object(raw: &str) -> Option<Map<String, Value>> {
     match parse_object(raw)?.get("state") {

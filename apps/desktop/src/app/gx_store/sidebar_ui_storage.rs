@@ -41,9 +41,26 @@ use serde_json::Value;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(500);
 /// `maxEntryBytes` of the stores these keys belong to (`packages/client-storage/catalog.ts`). The
 /// service in QuickJS refuses a larger entry, and this door has to refuse it too, or a payload
-/// this side stored would be one the other side cannot write and the two would disagree about
-/// what the user has.
+/// this side stored would be one the other side cannot write: `admission` would throw, the
+/// TypeScript sidebar swallows that, and it would stop persisting while this side kept writing.
 const MAX_ENTRY_BYTES: usize = 64 * 1024;
+/// `maxBytes` of the collapse store; the other two keep the 128 KiB default.
+const MAX_STORE_BYTES_COLLAPSE: usize = 256 * 1024;
+const MAX_STORE_BYTES_DEFAULT: usize = 128 * 1024;
+/// `STORAGE_BUDGETS.local`, shared with every other preference key the app has.
+const MAX_BACKEND_BYTES: usize = 2 * 1024 * 1024;
+
+/// `storageBytes(key, raw)`: two per UTF-16 code unit of the key and the value together. Not the
+/// length of the value in bytes, which is what the bound is most easily mistaken for and admits
+/// about twice as much.
+fn storage_bytes(key: &str, raw: &str) -> usize {
+    2 * (utf16_len(key) + utf16_len(raw))
+}
+
+/// The length JavaScript measures, which is code units rather than characters or bytes.
+fn utf16_len(value: &str) -> usize {
+    value.chars().map(char::len_utf16).sum()
+}
 
 /// The sidebar state as storage holds it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -53,6 +70,21 @@ pub(super) struct StoredSidebarUi {
     pub(super) selected_machine_id: String,
     /// The stored collections, as JSON; the view model reads them only while the daemon has none.
     pub(super) project_collections: Option<Value>,
+}
+
+/// A key a write could not store, and the bound that refused it. Reported rather than retried:
+/// the payload does not get smaller by trying again, and the other door refuses it too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct SidebarWriteRefusal {
+    pub(super) key: &'static str,
+    pub(super) bound: &'static str,
+}
+
+/// What one write managed. An empty list of refusals is a write that stored everything it was
+/// given.
+#[derive(Clone, Debug, Default)]
+pub(super) struct SidebarWriteReport {
+    pub(super) refused: Vec<SidebarWriteRefusal>,
 }
 
 /// What one write has to store. A field left empty is not written at all.
@@ -136,9 +168,15 @@ fn read_all(connection: &Connection) -> Result<StoredSidebarUi, &'static str> {
 
 /// Stores what changed. The collapse envelope is re-read inside the transaction and the state's
 /// own difference applied to it, so a field another writer owns survives.
-pub(super) fn write_sidebar_ui_state(write: &SidebarUiWrite) -> Result<(), &'static str> {
+///
+/// `Err` is a transient failure the caller owes again; a value too large for one of the three
+/// bounds comes back as a refusal in the report instead, because owing it again would retry a
+/// write that cannot succeed. A refused key does not take the others down with it.
+pub(super) fn write_sidebar_ui_state(
+    write: &SidebarUiWrite,
+) -> Result<SidebarWriteReport, &'static str> {
     if write.is_empty() {
-        return Ok(());
+        return Ok(SidebarWriteReport::default());
     }
     let mut held = connections()
         .lock()
@@ -157,7 +195,7 @@ pub(super) fn write_sidebar_ui_state(write: &SidebarUiWrite) -> Result<(), &'sta
 fn write_in_transaction(
     connection: &Connection,
     write: &SidebarUiWrite,
-) -> Result<(), &'static str> {
+) -> Result<SidebarWriteReport, &'static str> {
     connection
         .execute_batch("BEGIN IMMEDIATE")
         .map_err(|_| "begin")?;
@@ -173,19 +211,144 @@ fn write_in_transaction(
 fn write_inside_transaction(
     connection: &Connection,
     write: &SidebarUiWrite,
-) -> Result<(), &'static str> {
+) -> Result<SidebarWriteReport, &'static str> {
+    // The totals the three bounds are measured against, read once for the whole transaction.
+    let mut totals = Totals::read(connection)?;
+    let mut report = SidebarWriteReport::default();
+    let store = |connection: &Connection,
+                     report: &mut SidebarWriteReport,
+                     totals: &mut Totals,
+                     name: &'static str,
+                     key: &str,
+                     raw: &str,
+                     max_store_bytes: usize,
+                     store_prefix: &str|
+     -> Result<(), &'static str> {
+        match totals.admits(key, raw, max_store_bytes, store_prefix) {
+            Some(bound) => {
+                report
+                    .refused
+                    .push(SidebarWriteRefusal { key: name, bound });
+                Ok(())
+            }
+            None => {
+                write_preference(connection, key, raw)?;
+                totals.accept(key, raw);
+                Ok(())
+            }
+        }
+    };
     if let Some((diff, fallback)) = &write.collapse {
         let key = collapse_key();
         let stored = read_preference(connection, &key)?;
-        write_preference(connection, &key, &diff.apply(stored.as_deref(), fallback))?;
+        let raw = diff.apply(stored.as_deref(), fallback);
+        store(
+            connection,
+            &mut report,
+            &mut totals,
+            "collapse",
+            &key,
+            &raw,
+            MAX_STORE_BYTES_COLLAPSE,
+            COLLAPSE_STORAGE_KEY,
+        )?;
     }
     if let Some(hidden) = &write.hidden_items {
-        write_preference(connection, HIDDEN_ITEMS_STORAGE_KEY, hidden)?;
+        store(
+            connection,
+            &mut report,
+            &mut totals,
+            "hiddenItems",
+            HIDDEN_ITEMS_STORAGE_KEY,
+            hidden,
+            MAX_STORE_BYTES_DEFAULT,
+            HIDDEN_ITEMS_STORAGE_KEY,
+        )?;
     }
     if let Some(machine_id) = &write.selected_machine_id {
-        write_preference(connection, &machine_tab_key(), machine_id)?;
+        let key = machine_tab_key();
+        store(
+            connection,
+            &mut report,
+            &mut totals,
+            "machineTab",
+            &key,
+            machine_id,
+            MAX_STORE_BYTES_DEFAULT,
+            MACHINE_TAB_STORAGE_KEY,
+        )?;
     }
-    Ok(())
+    Ok(report)
+}
+
+/// Every preference row's size, so the three bounds `admission` checks can be checked here too.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// The entry bound alone is not what the client-storage decision is about: a second door that
+/// respects only its own entry size can still push the shared 2 MiB local budget past the limit,
+/// which is exactly the "storage silently fills up" the first door exists to prevent. All three of
+/// `admission`'s bounds are checked here against the same numbers, in the same UTF-16 accounting,
+/// inside the same transaction that writes. Cache eviction is the one part not ported, because
+/// none of these keys is a cache store and `admission` only evicts for those.
+struct Totals {
+    rows: Vec<(String, usize)>,
+}
+
+impl Totals {
+    fn read(connection: &Connection) -> Result<Self, &'static str> {
+        let mut query = connection
+            .prepare("SELECT key, value FROM preferences")
+            .map_err(|_| "query")?;
+        let rows = query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|_| "query")?
+            .map(|row| row.map(|(key, value)| (key.clone(), storage_bytes(&key, &value))))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "query")?;
+        Ok(Self { rows })
+    }
+
+    /// The bound this value would break, or `None` when all three admit it.
+    fn admits(
+        &self,
+        key: &str,
+        raw: &str,
+        max_store_bytes: usize,
+        store_prefix: &str,
+    ) -> Option<&'static str> {
+        let next = storage_bytes(key, raw);
+        if next > MAX_ENTRY_BYTES {
+            return Some("entry");
+        }
+        let previous = self
+            .rows
+            .iter()
+            .find(|(held, _)| held == key)
+            .map_or(0, |(_, bytes)| *bytes);
+        let store: usize = self
+            .rows
+            .iter()
+            .filter(|(held, _)| held.starts_with(store_prefix) && held != key)
+            .map(|(_, bytes)| *bytes)
+            .sum();
+        if store + next > max_store_bytes {
+            return Some("store");
+        }
+        let backend: usize = self.rows.iter().map(|(_, bytes)| *bytes).sum();
+        (backend - previous + next > MAX_BACKEND_BYTES).then_some("backend")
+    }
+
+    /// Records a value this transaction stored, so the next key in it measures against the total
+    /// as it now stands.
+    fn accept(&mut self, key: &str, raw: &str) {
+        let next = storage_bytes(key, raw);
+        match self.rows.iter_mut().find(|(held, _)| held == key) {
+            Some((_, bytes)) => *bytes = next,
+            None => self.rows.push((key.to_string(), next)),
+        }
+    }
 }
 
 fn open(flags: OpenFlags) -> Result<Connection, &'static str> {
@@ -208,9 +371,6 @@ fn read_preference(connection: &Connection, key: &str) -> Result<Option<String>,
 }
 
 fn write_preference(connection: &Connection, key: &str, raw: &str) -> Result<(), &'static str> {
-    if raw.len() > MAX_ENTRY_BYTES {
-        return Err("tooLarge");
-    }
     connection
         .execute(
             "INSERT INTO preferences VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

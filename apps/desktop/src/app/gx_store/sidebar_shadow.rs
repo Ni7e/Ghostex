@@ -215,14 +215,24 @@ impl GhostexGpuiApp {
     /// change. Without it the two sides would filter by different Spaces, and the drawn rows would
     /// lose the menus they carry from a publish built for the other Space.
     fn gx_store_follow_active_session_space(&mut self, cx: &mut gpui::Context<Self>) {
-        let Some(focused) = self
+        let focused = self
             .gx_store
             .core
             .focus()
             .focused_session
             .as_ref()
-            .map(ghostex_gx_core::SessionKey::to_sidebar_session_id)
-        else {
+            .map(ghostex_gx_core::SessionKey::to_sidebar_session_id);
+        // Only when the focused row CHANGED: the rule belongs to a focus change, and applying it
+        // on every publish would pull the section back out of any Space the user picked by hand,
+        // over and over, with a write behind each one.
+        if !self
+            .gx_store
+            .sidebar_ui
+            .take_followed_session(focused.as_deref())
+        {
+            return;
+        }
+        let Some(focused) = focused else {
             return;
         };
         let space_id = {

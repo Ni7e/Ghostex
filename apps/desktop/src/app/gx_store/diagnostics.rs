@@ -40,6 +40,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_summary_written: SidebarShadowCounters,
     sidebar_ui_summary_considered_at: Option<Instant>,
     sidebar_ui_summary_written: SidebarUiCounters,
+    sidebar_refusal_warnings: u32,
     sidebar_storage_warnings: u32,
 }
 
@@ -422,6 +423,7 @@ impl GxStoreDiagnostics {
                 "writes": counters.writes,
                 "writeFailures": counters.write_failures,
                 "readFailures": counters.read_failures,
+                "writeRefusals": counters.write_refusals,
                 "writeMaxUs": counters.write_max_us,
             }),
         );
@@ -438,6 +440,20 @@ impl GxStoreDiagnostics {
     /// in memory and is written again with the next one.
     pub(super) fn sidebar_ui_write_failed(&mut self, error: &'static str) {
         self.sidebar_storage_warning("gxStore.sidebarUi.write.warning", error);
+    }
+
+    /// A storage bound refused one value. Counted apart from a failure, and with its own budget of
+    /// lines, because a refusal repeats for as long as the payload stays that size and would
+    /// otherwise use up the warnings a real failure needs.
+    pub(super) fn sidebar_ui_write_refused(&mut self, key: &'static str, bound: &'static str) {
+        if self.sidebar_refusal_warnings >= 3 {
+            return;
+        }
+        self.sidebar_refusal_warnings += 1;
+        self.warning(
+            "gxStore.sidebarUi.write.refused",
+            json!({ "key": key, "bound": bound }),
+        );
     }
 
     fn sidebar_storage_warning(&mut self, event: &'static str, error: &'static str) {

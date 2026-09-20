@@ -52,6 +52,10 @@ pub struct GroupView {
     pub core: Arc<GroupCore>,
     /// The colour of the collection the group is in, when it is drawn inside one.
     pub collection_color: Option<String>,
+    /// The collection the group belongs to, from the collections document rather than from the
+    /// drawn list: a collection the user hid still owns its projects, and the Space rules are
+    /// written against ownership, not against what is on screen.
+    pub collection_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

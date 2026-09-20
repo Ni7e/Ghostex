@@ -5,10 +5,22 @@
 //! Space shows the row, which group holds it, which collection holds that group, which heading it
 //! falls under, and whether the compact list would still leave it out. The answers are read from
 //! the list that is already built wherever they are in it, and the list is only built again for
-//! the questions that one cannot answer: a row a filter or Show Hidden keeps out is not in it at
-//! all, and a row under a closed heading is in no heading's drawn rows, so whether the compact
-//! list would also cut it can only be asked of a list with that heading open. Rebuilding is how
-//! this stays the same rules the list itself uses rather than a second copy of them that drifts.
+//! the questions that one cannot answer.
+//!
+//! The probe lifts the Space filter as well as Show Hidden and the tag filters, and that is the
+//! whole point of it rather than a detail: the drawn list holds only the groups the selected Space
+//! shows, so a row in another Space is not in it, and asking the drawn list where a row is would
+//! answer "nowhere" for exactly the rows a reveal exists to fetch. `reveal.ts` looks the group up
+//! in `state.groupOrder`, which is the unfiltered inventory, and this is the same question asked
+//! of a list built with nothing filtering it.
+//!
+//! The collection a group belongs to is read from `GroupView::collection_id`, which is the
+//! collections document, not from the drawn collections: a hidden collection is dropped from the
+//! drawn list while its projects are still drawn, and passing `None` there would answer the Space
+//! question on a different branch from the one the list itself took.
+//!
+//! The cost is one clone of the inputs, reused, and between zero and two builds: none when the row
+//! is already drawn, one when something filters it out or its heading is closed, two when both.
 //!
 //! SEE-ALSO: apps/desktop/sidebar/native-sidebar/reveal.ts,
 //! apps/desktop/sidebar/native-sidebar/space-navigation.ts (`rememberNativeSidebarFocus`).
@@ -56,28 +68,25 @@ pub fn reveal_plan(
     sidebar_session_id: &str,
     now_ms: u64,
 ) -> Option<SidebarRevealPlan> {
-    // The list as it stands answers everything when it already holds the row.
     let parking = inputs.settings.enable_session_parking;
-    let mut probed = None;
+    // One clone, reused for both questions a rebuild can answer.
+    let mut probe: Option<SidebarInputs> = None;
+    let mut built: Option<SidebarView> = None;
     let found = match locate(view, sidebar_session_id, parking, now_ms) {
         Some(found) => found,
         None => {
-            // A filter or Show Hidden keeps the row out, so the list is built once with neither.
-            let mut probe = inputs.clone();
-            probe.ui.show_hidden = true;
-            probe.ui.selected_tag_filters.clear();
-            let built = SidebarViewModel::build_from_scratch(core, &probe, now_ms);
-            let found = locate(&built, sidebar_session_id, parking, now_ms)?;
-            probed = Some(built);
-            found
+            // Nothing filtering: no Space, no Show Hidden, no tags. The row is then wherever it is.
+            let probe = probe.insert(unfiltered(inputs));
+            let list = built.insert(SidebarViewModel::build_from_scratch(core, probe, now_ms));
+            locate(list, sidebar_session_id, parking, now_ms)?
         }
     };
-    let located = probed.as_ref().unwrap_or(view);
+    let located = built.as_ref().unwrap_or(view);
     let group = located.group(&found.group_id)?;
-    let collection = located
-        .collections
-        .iter()
-        .find(|collection| collection.group_ids.iter().any(|id| *id == found.group_id));
+    let collection_id = group.collection_id.clone();
+    let collection_storage_id = collection_id
+        .as_ref()
+        .map(|collection_id| format!("{}:{collection_id}", inputs.ui.section_key()));
 
     let mut plan = SidebarRevealPlan {
         collapsed_group: inputs
@@ -85,15 +94,13 @@ pub fn reveal_plan(
             .collapse
             .collapsed_groups
             .contains(&found.group_id),
-        collapsed_collection_storage_id: collection
-            .filter(|collection| {
-                inputs
-                    .ui
-                    .collapse
-                    .collapsed_collections
-                    .contains(&collection.storage_id)
-            })
-            .map(|collection| collection.storage_id.clone()),
+        collapsed_collection_storage_id: collection_storage_id.clone().filter(|storage_id| {
+            inputs
+                .ui
+                .collapse
+                .collapsed_collections
+                .contains(storage_id)
+        }),
         collapsed_section: inputs
             .ui
             .collapse
@@ -110,13 +117,13 @@ pub fn reveal_plan(
                 .group_ids
                 .iter()
                 .any(|id| *id == found.group_id)
-                || collection.is_some_and(|collection| {
+                || collection_storage_id.is_some_and(|storage_id| {
                     inputs
                         .ui
                         .hidden_items
                         .collection_keys
                         .iter()
-                        .any(|key| *key == collection.storage_id)
+                        .any(|key| *key == storage_id)
                 })),
         // `applyNativeSidebarReveal` asks the row itself, not why it was missing: a ticked filter
         // the row does not match is lifted whether or not something else also kept it out.
@@ -125,12 +132,7 @@ pub fn reveal_plan(
                 found.effective_tag.as_deref(),
                 &inputs.ui.selected_tag_filters,
             ),
-        select_space: space_for_reveal(
-            core,
-            inputs,
-            group,
-            collection.map(|collection| collection.collection_id.as_str()),
-        ),
+        select_space: space_for_reveal(core, inputs, group, collection_id.as_deref()),
         group_id: found.group_id.clone(),
         storage_id: found.storage_id.clone(),
         expand_list: false,
@@ -140,9 +142,10 @@ pub fn reveal_plan(
     }
     // The row is in the group but in no heading's drawn rows, so either its heading is closed or
     // the compact list cut it. Only a list with that heading open tells the two apart.
-    let mut probe = inputs.clone();
-    probe.ui.show_hidden = true;
-    probe.ui.selected_tag_filters.clear();
+    let probe = match probe.as_mut() {
+        Some(probe) => probe,
+        None => probe.insert(unfiltered(inputs)),
+    };
     probe
         .ui
         .collapse
@@ -150,18 +153,30 @@ pub fn reveal_plan(
         .entry(found.storage_id.clone())
         .or_default()
         .set(found.section, false);
-    let opened = SidebarViewModel::build_from_scratch(core, &probe, now_ms);
+    let opened = SidebarViewModel::build_from_scratch(core, probe, now_ms);
     plan.expand_list = !opened
         .group(&plan.group_id)
         .is_some_and(|group| drawn_in_sections(group, sidebar_session_id));
     Some(plan)
 }
 
+/// The inputs with everything that hides a row lifted: the Space, Show Hidden and the tag filters.
+fn unfiltered(inputs: &SidebarInputs) -> SidebarInputs {
+    let mut probe = inputs.clone();
+    probe.ui.show_hidden = true;
+    probe.ui.selected_tag_filters.clear();
+    // Not by clearing the section's Space: an absent selection resolves to the section's FIRST
+    // Space, which filters just as hard. Only turning Spaces off draws every group.
+    probe.settings.sidebar_spaces_enabled = false;
+    probe
+}
+
 /// The Space the section should follow the focused row into, when the setting asks it to.
 ///
 /// `rememberNativeSidebarFocus` runs on every focus change, not only on a reveal, and moves the
 /// section's Space when `sidebarSpaceFollowActiveSession` is on. Only the list as it stands is
-/// read: a row it does not draw is one this rule has nothing to say about.
+/// read: a row it does not draw is in another Space, and following a row the user cannot see is
+/// not what that setting asks for.
 pub fn space_for_focused_row(
     core: &Core,
     inputs: &SidebarInputs,
@@ -178,18 +193,7 @@ pub fn space_for_focused_row(
             .iter()
             .any(|session| session.row.sidebar_session_id == sidebar_session_id)
     })?;
-    let collection = view.collections.iter().find(|collection| {
-        collection
-            .group_ids
-            .iter()
-            .any(|id| *id == group.core.group_id)
-    });
-    space_for_reveal(
-        core,
-        inputs,
-        group,
-        collection.map(|collection| collection.collection_id.as_str()),
-    )
+    space_for_reveal(core, inputs, group, group.collection_id.as_deref())
 }
 
 /// Where a row sits in a list.

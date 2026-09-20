@@ -370,10 +370,13 @@ impl GhostexGpuiApp {
         request_id: u64,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.gx_store_sidebar_draws_store_list() {
-            return;
-        }
-        if !self.gx_store.sidebar_ui.take_reveal_request(request_id) {
+        // The request id is taken first, whatever the switch says. `reveal.ts` never clears
+        // `ui.revealRequest`, so the newest one is on every publish for the rest of the run, and a
+        // gate that returned before this would replay the session's last reveal the moment the
+        // switch moved: a group expanding, Show Hidden lifting and the filters clearing out of
+        // nowhere, for something the user asked for minutes ago.
+        let fresh = self.gx_store.sidebar_ui.take_reveal_request(request_id);
+        if !fresh || !self.gx_store_sidebar_draws_store_list() {
             return;
         }
         let now_ms = super::host::now_ms();

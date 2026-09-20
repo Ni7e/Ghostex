@@ -244,12 +244,11 @@ fn main() -> ExitCode {
         .insert("project:beta".to_string());
     let carried = SidebarCollapseDiff::between(&future, &moved_future)
         .apply(Some(STORED_FUTURE), &moved_future);
+    let carried_value: serde_json::Value = serde_json::from_str(&carried).unwrap_or_default();
     check(
-        "an unknown version keeps the fields it carried",
-        serde_json::from_str::<serde_json::Value>(&carried)
-            .ok()
-            .and_then(|value| value.pointer("/state/somethingNewer/kept").cloned())
-            == Some(serde_json::json!(1)),
+        "an unknown version keeps the fields and the number it carried",
+        carried_value.pointer("/state/somethingNewer/kept") == Some(&serde_json::json!(1))
+            && carried_value.get("version") == Some(&serde_json::json!(9)),
         carried,
     );
 

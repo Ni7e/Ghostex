@@ -19,7 +19,8 @@ use ghostex_gx_core::{
 use serde_json::Value;
 
 use super::sidebar_ui_storage::{
-    SidebarUiWrite, StoredSidebarUi, read_sidebar_ui_state, write_sidebar_ui_state,
+    SidebarUiWrite, SidebarWriteReport, StoredSidebarUi, read_sidebar_ui_state,
+    write_sidebar_ui_state,
 };
 use crate::GhostexGpuiApp;
 
@@ -46,6 +47,9 @@ pub(crate) struct SidebarUiCounters {
     pub(crate) writes: u64,
     pub(crate) write_failures: u64,
     pub(crate) read_failures: u64,
+    /// Values a storage bound refused. The change stays in memory and the next one carries it
+    /// again, which is what the TypeScript writer does with the same refusal.
+    pub(crate) write_refusals: u64,
     /// Intents that were applied before the stored state landed and were applied again on top of
     /// it, so a click in the first moments is not thrown away.
     pub(crate) replayed_intents: u64,
@@ -74,6 +78,10 @@ pub(crate) struct SidebarUiHost {
     generation: u64,
     /// The reveal request this state has already answered.
     handled_reveal: Option<u64>,
+    /// The focused row the Space was last followed into. `rememberNativeSidebarFocus` runs on a
+    /// CHANGE of focused session (controller.ts:118-120); running it on every publish instead
+    /// would drag the selection back every time the user picked another Space.
+    followed_session: Option<String>,
     /// The sidebar's own copy of the project collections, read with the rest of the state.
     pub(super) stored_project_collections: Option<Value>,
     pub(super) counters: SidebarUiCounters,
@@ -94,6 +102,7 @@ impl Default for SidebarUiHost {
             write_retries: 0,
             generation: 0,
             handled_reveal: None,
+            followed_session: None,
             stored_project_collections: None,
             counters: SidebarUiCounters::default(),
             last_error: None,
@@ -124,6 +133,17 @@ impl SidebarUiHost {
             return false;
         }
         self.handled_reveal = Some(request_id);
+        true
+    }
+
+    /// Whether this focused row is a new one to follow. Answered once per row, like the
+    /// TypeScript's comparison against the previous focused session.
+    pub(super) fn take_followed_session(&mut self, sidebar_session_id: Option<&str>) -> bool {
+        let next = sidebar_session_id.map(str::to_string);
+        if self.followed_session == next {
+            return false;
+        }
+        self.followed_session = next;
         true
     }
 
@@ -294,6 +314,17 @@ impl GhostexGpuiApp {
         self.gx_store_sidebar_list_source() == super::SidebarListSource::Store
     }
 
+    /// Reports a value a bound refused. Not retried on its own: the payload does not shrink by
+    /// trying again, and the next intent carries it with whatever else changed.
+    fn gx_store_note_sidebar_write_refusals(&mut self, report: &SidebarWriteReport) {
+        for refusal in &report.refused {
+            self.gx_store.sidebar_ui.counters.write_refusals += 1;
+            self.gx_store
+                .diagnostics
+                .sidebar_ui_write_refused(refusal.key, refusal.bound);
+        }
+    }
+
     /// Books a write for anything still owed, which is what a session that ran with the switch off
     /// and then turned it on has.
     pub(super) fn gx_store_write_owed_sidebar_ui_state(&mut self, cx: &mut gpui::Context<Self>) {
@@ -341,14 +372,20 @@ impl GhostexGpuiApp {
                 let ui = &mut this.gx_store.sidebar_ui;
                 ui.counters.write_max_us = ui.counters.write_max_us.max(elapsed);
                 match result {
-                    Ok(()) => {
+                    Ok(report) => {
                         ui.counters.writes += 1;
                         ui.last_error = None;
                         ui.write_retries = 0;
-                        if stored {
+                        if stored
+                            && !report
+                                .refused
+                                .iter()
+                                .any(|refusal| refusal.key == "collapse")
+                        {
                             // Stored now; the next write carries what changes from here.
                             ui.base_collapse = base;
                         }
+                        this.gx_store_note_sidebar_write_refusals(&report);
                     }
                     Err(code) => {
                         ui.counters.write_failures += 1;
@@ -384,11 +421,17 @@ impl GhostexGpuiApp {
         }
         let ui = &mut self.gx_store.sidebar_ui;
         match write_sidebar_ui_state(&write) {
-            Ok(()) => {
+            Ok(report) => {
                 ui.counters.writes += 1;
-                if write.collapse.is_some() {
+                if write.collapse.is_some()
+                    && !report
+                        .refused
+                        .iter()
+                        .any(|refusal| refusal.key == "collapse")
+                {
                     ui.base_collapse = base;
                 }
+                self.gx_store_note_sidebar_write_refusals(&report);
             }
             Err(code) => {
                 ui.counters.write_failures += 1;
