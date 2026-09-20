@@ -286,3 +286,91 @@ function closeRowIsDrawn(runtime: Json, reference: { projectId: string; sessionI
   );
   return present && !hidden;
 }
+
+/**
+ * The fork half. Drives the shipped `forkSession` through the four things `/api/forkSession` can
+ * do and records what it called and what it moved.
+ *
+ * The seams are the same three as everywhere else, plus `postLocalWorkspaceTerminalFocus`, which
+ * IS the pane move and so is the thing being compared rather than a thing being replaced: it
+ * records its session and its placement target. `postSidebarActionToast` records the level and
+ * the title; its description is the daemon's or the transport's text, which the two clients word
+ * differently by construction, so only its presence is compared.
+ */
+export async function runTypeScriptFork(scenario: Json, rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const latestGroups = buildLatestGroups(scenario, undefined) as unknown[];
+  const out: Json[] = [];
+  for (const entry of (rustActions.fork ?? []) as Json[]) {
+    if (entry.owned !== true) {
+      out.push({ owned: false });
+      continue;
+    }
+    const reference = parseSidebarSessionId(String(entry.sessionId));
+    const answers: Json = {};
+    let rpc: Json | null = null;
+    let activate: string | null = null;
+    for (const answer of ['accepted', 'emptyFork', 'failed', 'neverAnswered'] as const) {
+      const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+      runtime.browserTabs = [];
+      runtime.latestGroups = latestGroups;
+      runtime.presentation = scenario.snapshot;
+      runtime.workspaceGroups = { groups: {}, projectOrder: [] };
+      // The starting pair the Rust side actually planned against, not a label. A loaded snapshot
+      // re-homes the focus to some project on its own, so "elsewhere" is a real project and for a
+      // session of that project it means the opposite of what it is called.
+      runtime.activeProjectId = (entry.activeBefore?.project ?? undefined) as string | undefined;
+      runtime.activeGroupId = (entry.activeBefore?.group ?? undefined) as string | undefined;
+      runtime.refreshSidebarHudFromClient = () => {};
+      runtime.publishPresentation = () => {};
+      runtime.setLocalPresentationSessionFocus = () => {};
+      runtime.refreshDomainPresentationSnapshotFromClient = () => Promise.resolve();
+      runtime.workspaceSubgroupSidebarIdForSession = () => undefined;
+      const follow: Json[] = [];
+      runtime.postLocalWorkspaceTerminalFocus = (
+        projectId: string,
+        sessionId: string,
+        placementTargetSessionId?: string
+      ) => {
+        follow.push({
+          follow: 'placePane',
+          session: `${SIDEBAR_SESSION_PREFIX}${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}`,
+          placementTarget: `${SIDEBAR_SESSION_PREFIX}${encodeURIComponent(projectId)}:${encodeURIComponent(String(placementTargetSessionId ?? ''))}`,
+        });
+      };
+      runtime.postSidebarActionToast = (level: string, title: string, options?: Json) => {
+        follow.push({
+          follow: 'toast',
+          level,
+          title,
+          hasDescription: typeof options?.description === 'string' && options.description.length > 0,
+        });
+      };
+      runtime.client = {
+        rpc(path: string, params: Json) {
+          rpc = { path, params };
+          if (answer === 'accepted')
+            return Promise.resolve({ fork: { session: { sessionId: `${reference?.sessionId}-fork` } } });
+          if (answer === 'emptyFork') return Promise.resolve({ fork: { session: {} } });
+          return Promise.reject(new Error(answer === 'failed' ? 'transport' : 'timeout'));
+        },
+      };
+      await runtime.forkSession(String(entry.sessionId));
+      answers[answer] = follow;
+      // Whether `forkSession` moved the active project before its call, which is the one thing it
+      // does that the daemon's answer cannot undo.
+      // Whether `forkSession` moved the active place before its call, which is the one thing it
+      // does that the daemon's answer cannot undo. It is the PAIR that moves: a project can
+      // already be active with another of its groups selected, and comparing only the project id
+      // reported that as no activation at all.
+      if (answer === 'accepted')
+        activate =
+          runtime.activeProjectId !== (entry.activeBefore?.project ?? undefined) ||
+          runtime.activeGroupId !== (entry.activeBefore?.group ?? undefined)
+            ? String(runtime.activeGroupId)
+            : null;
+    }
+    out.push({ owned: true, rpc, activate, answers });
+  }
+  return out;
+}

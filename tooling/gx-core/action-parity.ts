@@ -126,6 +126,32 @@ function mutateClose(name: string | undefined, entry: Json): Json {
   }
 }
 
+/** The fork half's mutations. */
+function mutateFork(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  switch (name) {
+    // A pane placed for a success envelope that carried no session id, which is the leg a port is
+    // most likely to answer with a pane that has nothing behind it.
+    case 'place-a-pane-with-no-session':
+      if (clone.answers?.emptyFork) clone.answers.emptyFork = clone.answers.accepted;
+      return clone;
+    // The new pane appended beside whichever pane is focused instead of beside the row the fork
+    // came from, which is the placement bug the TypeScript's own comment warns about.
+    case 'forget-the-placement-target':
+      for (const answer of Object.values(clone.answers ?? {}) as Json[][])
+        for (const follow of answer) if (follow.follow === 'placePane') delete follow.placementTarget;
+      return clone;
+    // A failed fork that moves the user's project anyway when it should not have to.
+    case 'always-activate':
+      if (clone.request) clone.request.activate = `combined-project:x`;
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+const FORK_MUTATIONS = ['place-a-pane-with-no-session', 'forget-the-placement-target', 'always-activate'];
+
 const CLOSE_MUTATIONS = [
   'never-restore-the-row',
   'close-is-not-optimistic',
@@ -193,13 +219,14 @@ async function compare([outDir, ...flags]: string[]) {
   const injectAt = flags.indexOf('--inject');
   const mutationName = injectAt >= 0 ? flags[injectAt + 1] : undefined;
   const mutate = mutationName ? (MUTATIONS[mutationName] ?? ((calls: Json[]) => calls)) : undefined;
-  const known = [...Object.keys(MUTATIONS), ...LIFECYCLE_MUTATIONS, ...CLOSE_MUTATIONS];
+  const known = [...Object.keys(MUTATIONS), ...LIFECYCLE_MUTATIONS, ...CLOSE_MUTATIONS, ...FORK_MUTATIONS];
   if (mutationName && !known.includes(mutationName)) {
     console.error(`unknown mutation ${mutationName}; one of ${known.join(', ')}`);
     process.exit(2);
   }
   const { runTypeScriptActions } = await import('./action-parity-typescript.ts');
-  const { runTypeScriptLifecycle, runTypeScriptClose } = await import('./lifecycle-parity-typescript.ts');
+  const { runTypeScriptLifecycle, runTypeScriptClose, runTypeScriptFork } =
+    await import('./lifecycle-parity-typescript.ts');
   const names = readdirSync(outDir)
     .filter((name) => name.startsWith('scenario-') && name.endsWith('.json'))
     .sort();
@@ -208,6 +235,7 @@ async function compare([outDir, ...flags]: string[]) {
   let tsCalls = 0;
   let transitions = 0;
   let closes = 0;
+  let forks = 0;
   let overlayKept = 0;
   let closesRestored = 0;
   let stoppedUnhidden = 0;
@@ -228,6 +256,30 @@ async function compare([outDir, ...flags]: string[]) {
     if (entries.length !== ours.length) {
       differences.push(`${name}: ${entries.length} payloads against ${ours.length} answers`);
       continue;
+    }
+    const theirFork = await runTypeScriptFork(scenario, rust);
+    for (const [index, entry] of ((rust.fork ?? []) as Json[]).entries()) {
+      if (entry.owned !== true) continue;
+      forks += 1;
+      const theirs = theirFork[index];
+      if (!theirs) {
+        differences.push(`${name} fork #${index}: the TypeScript side produced no answer`);
+        continue;
+      }
+      const where = `${name} fork #${index} active=${entry.active}`;
+      const mine = mutate ? mutateFork(mutationName, entry) : entry;
+      if (canonical(mine.request?.rpc ?? null) !== canonical(theirs.rpc))
+        differences.push(`${where} rpc: rust ${canonical(mine.request?.rpc ?? null)} ts ${canonical(theirs.rpc)}`);
+      if (canonical(mine.request?.activate ?? null) !== canonical(theirs.activate))
+        differences.push(
+          `${where} activate: rust ${canonical(mine.request?.activate ?? null)} ts ${canonical(theirs.activate)}`
+        );
+      for (const answer of ['accepted', 'emptyFork', 'failed', 'neverAnswered']) {
+        const left = mine.answers?.[answer] ?? null;
+        const right = theirs.answers?.[answer] ?? null;
+        if (canonical(left) !== canonical(right))
+          differences.push(`${where} ${answer}: rust ${canonical(left)} ts ${canonical(right)}`);
+      }
     }
     const theirClose = await runTypeScriptClose(scenario, rust);
     for (const [index, entry] of ((rust.close ?? []) as Json[]).entries()) {
@@ -322,7 +374,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );

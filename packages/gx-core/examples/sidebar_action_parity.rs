@@ -25,9 +25,10 @@ use std::time::Instant;
 
 use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
-    apply_close_answer, apply_lifecycle_answer, close_optimistic_follow_ups, encode_uri_component,
-    plan_close_request, plan_lifecycle_request, plan_read_only_action, CloseAnswer, CloseFollowUp,
-    Core, Event, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, SessionKey, SidebarInputs,
+    apply_close_answer, apply_fork_answer, apply_lifecycle_answer, close_optimistic_follow_ups,
+    encode_uri_component, plan_close_request, plan_fork_request, plan_lifecycle_request,
+    plan_read_only_action, ActiveGroup, CloseAnswer, CloseFollowUp, Core, Event, ForkFollowUp,
+    Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey, SessionKey, SidebarInputs,
     QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES,
 };
 use serde_json::{json, Map, Value};
@@ -87,6 +88,7 @@ fn main() -> ExitCode {
     let mut from_menus = 0usize;
     let mut total_lifecycle = 0usize;
     let mut total_close = 0usize;
+    let mut total_fork = 0usize;
     let mut resolve_micros: Vec<u128> = Vec::new();
     for path in &scenarios {
         let scenario: Value = match std::fs::read_to_string(path)
@@ -109,6 +111,7 @@ fn main() -> ExitCode {
         from_menus += dump.from_menus;
         total_lifecycle += dump.lifecycle;
         total_close += dump.close;
+        total_fork += dump.fork;
         let out = path.with_file_name(
             path.file_name()
                 .and_then(|name| name.to_str())
@@ -142,7 +145,7 @@ fn main() -> ExitCode {
         .copied()
         .unwrap_or(0);
     println!(
-        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} resolveUs median {median} max {}",
+        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} resolveUs median {median} max {}",
         scenarios.len(),
         resolve_micros.last().copied().unwrap_or(0)
     );
@@ -163,6 +166,7 @@ struct Dump {
     from_menus: usize,
     lifecycle: usize,
     close: usize,
+    fork: usize,
 }
 
 /// The menu dump `sidebar_menu_parity` writes for the same scenario, when it has been run.
@@ -307,17 +311,21 @@ fn build(
     let lifecycle_count = lifecycle.len();
     let closes = close_entries(&core, scenario, now_ms);
     let close_count = closes.len();
+    let forks = fork_entries(&core, scenario, now_ms);
+    let fork_count = forks.len();
     Some(Dump {
         payloads: entries.len(),
         calls,
         from_menus,
         lifecycle: lifecycle_count,
         close: close_count,
+        fork: fork_count,
         value: json!({
             "parkedProjectId": parked,
             "entries": Value::Array(entries),
             "lifecycle": Value::Array(lifecycle),
             "close": Value::Array(closes),
+            "fork": Value::Array(forks),
         }),
     })
 }
@@ -857,4 +865,107 @@ fn row_is_drawn(core: &Core, session: &SessionKey) -> bool {
         .machine(&session.machine)
         .and_then(|entry| entry.effective_session(&session.project_id, &session.session_id))
         .is_some()
+}
+
+/// The fork half of the gate.
+///
+/// Fork has no optimistic half to compare, which is itself the thing worth proving: the pane move
+/// happens only after the daemon has answered with a session id, so the four answers are a call
+/// that succeeds, one that succeeds with nothing usable in it, one that fails, and one that never
+/// comes home. Only the first places a pane; the other three must all land in the same toast and
+/// move nothing.
+fn fork_entries(core: &Core, scenario: &Value, now_ms: u64) -> Vec<Value> {
+    let rows: Vec<Value> = scenario
+        .pointer("/snapshot/sessions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut targets: Vec<(String, String)> = rows
+        .iter()
+        .filter_map(|row| {
+            Some((
+                row.get("projectId")?.as_str()?.to_string(),
+                row.get("sessionId")?.as_str()?.to_string(),
+            ))
+        })
+        .collect();
+    // A row the store does not hold: the fork has no source and neither side calls anything.
+    targets.push(("unknown-project".to_string(), "unknown-session".to_string()));
+    let mut entries = Vec::new();
+    for (project_id, session_id) in &targets {
+        let session = SessionKey::local(project_id, session_id);
+        for active in ["elsewhere", "already"] {
+            let mut base = core.clone();
+            if active == "already" {
+                base.handle(
+                    Event::Intent(Intent::FocusSession {
+                        session: session.clone(),
+                        visible: None,
+                    }),
+                    now_ms,
+                );
+            }
+            // Recorded rather than assumed. A loaded snapshot already re-homes the focus to SOME
+            // project, so "do nothing" does not mean "no project is active", and for a session of
+            // that project it silently means the opposite of what the case is called. The
+            // TypeScript half starts from this exact pair instead of from a label.
+            let focus = base.focus();
+            let active_before = json!({
+                "project": focus.active_project.as_ref().map(ProjectKey::to_workspace_project_id),
+                "group": focus.active_group.as_ref().map(ActiveGroup::to_sidebar_group_id),
+            });
+            let Some(request) = plan_fork_request(
+                &base,
+                &json!({
+                    "type": "forkSession",
+                    "sessionId": session.to_sidebar_session_id(),
+                }),
+            ) else {
+                entries.push(json!({
+                    "sessionId": session.to_sidebar_session_id(),
+                    "active": active,
+                    "activeBefore": active_before,
+                    "owned": false,
+                }));
+                continue;
+            };
+            let mut answers = Map::new();
+            for (name, result) in fork_answers(session_id) {
+                answers.insert(
+                    name.to_string(),
+                    Value::Array(
+                        apply_fork_answer(&request, result.as_ref().map_err(String::as_str))
+                            .iter()
+                            .map(ForkFollowUp::to_json)
+                            .collect(),
+                    ),
+                );
+            }
+            entries.push(json!({
+                "sessionId": session.to_sidebar_session_id(),
+                "active": active,
+                "activeBefore": active_before,
+                "owned": true,
+                "request": request.to_json(),
+                "answers": Value::Object(answers),
+            }));
+        }
+    }
+    entries
+}
+
+/// The four things `/api/forkSession` can do, in the shape the host hands them on.
+fn fork_answers(session_id: &str) -> Vec<(&'static str, Result<Value, String>)> {
+    vec![
+        (
+            "accepted",
+            Ok(json!({ "fork": { "session": { "sessionId": format!("{session_id}-fork") } } })),
+        ),
+        // A success envelope with nothing usable in it. The TypeScript throws its own error for
+        // this and lands in the same toast as a transport failure, which is the leg a port is
+        // most likely to answer with a pane that has no session behind it.
+        ("emptyFork", Ok(json!({ "fork": { "session": {} } }))),
+        ("failed", Err("transport".to_string())),
+        ("neverAnswered", Err("timeout".to_string())),
+    ]
 }
