@@ -8,9 +8,9 @@
 //! cache that keeps all of it up to date from a `ChangeSummary`, and `inputs` and `view` are the
 //! two ends a host talks to.
 
-mod agents;
+pub(crate) mod agents;
 mod assemble;
-mod collections;
+pub(crate) mod collections;
 mod groups;
 mod inputs;
 mod membership;
@@ -21,10 +21,10 @@ mod reveal;
 mod rows;
 mod sections;
 mod session_text;
-mod spaces;
-mod tags;
-mod text;
-mod view;
+pub(crate) mod spaces;
+pub(crate) mod tags;
+pub(crate) mod text;
+pub(crate) mod view;
 
 pub use inputs::{
     BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, ProjectDiffStats, SectionCollapse,
@@ -37,6 +37,6 @@ pub use spaces::OTHER_SPACE_ID;
 pub use tags::{TagListItem, TagListItemKind, TagPresentation, UNTAGGED_TAG_FILTER};
 pub use view::{
     CollectionView, DelayedSendView, EmptyState, GroupCore, GroupSummary, GroupView, LabelDeadline,
-    MachineSummary, OrderItem, OrderKind, ProjectContextView, SectionView, SessionRow,
-    SessionTiming, SessionView, SidebarView, SpaceView, WorktreeView,
+    MachineSummary, OrderItem, OrderKind, ProjectContextView, SectionView, SessionMenuFacts,
+    SessionRow, SessionTiming, SessionView, SidebarView, SpaceView, WorktreeView,
 };

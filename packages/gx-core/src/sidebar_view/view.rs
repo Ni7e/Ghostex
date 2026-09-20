@@ -90,6 +90,10 @@ pub struct ProjectContextView {
     pub discovered_icon_data_url: Option<String>,
     pub diff_stats: ProjectDiffStats,
     pub worktree: Option<WorktreeView>,
+    /// The project's git origin, when the daemon has probed one. Absent and an explicit `null`
+    /// read the same here, because the one reader (the project menu's Copy Remote URL) tests it
+    /// for truthiness.
+    pub git_remote_origin_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -175,6 +179,39 @@ pub struct SessionRow {
     pub is_generating_first_prompt_title: bool,
     /// Inputs of the time-based values, which the renderer formats against its own clock.
     pub timing: SessionTiming,
+    /// The session facts only the row's menus and its Copy Details text read.
+    pub menu_facts: SessionMenuFacts,
+}
+
+/// What a row's context menu, hover actions and Copy Details need beyond what it draws.
+///
+/// CDXC:ContextMenus 2026-09-20 WHY:
+/// These are on the row rather than looked up per menu because a menu is built for a row the list
+/// is already holding, and reaching back into the store for the session would make the menu
+/// answer from a different moment than the row it belongs to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionMenuFacts {
+    /// `agentName ?? agentId`, which is what the transcript-agent lookup reads.
+    pub agent_name: Option<String>,
+    pub agent_session_id: Option<String>,
+    pub session_persistence_provider: Option<String>,
+    pub session_persistence_name: Option<String>,
+    /// `<project>:<session>`, the id a pane is routed by.
+    pub session_routing_id: Option<String>,
+    /// The daemon's own `displayTitle`, before the heading rules. Copy Details quotes this rather
+    /// than the heading the row draws.
+    pub raw_display_title: Option<String>,
+    pub primary_title: Option<String>,
+    pub terminal_title: Option<String>,
+    /// The session's subtitle.
+    pub detail: Option<String>,
+    /// The saved first prompt, which Generate Title and View 1st Message need. The presentation
+    /// stream does not carry it, so on this client it is always absent and both items are hidden,
+    /// exactly as they are in the TypeScript projection.
+    pub first_user_message: Option<String>,
+    /// A remote row publishes whether its machine can do these; a local daemon row always can.
+    pub can_schedule_delayed_send: bool,
+    pub can_toggle_close_after_done: bool,
 }
 
 /// The daemon's or the host's Delayed Send, as the row shows it.

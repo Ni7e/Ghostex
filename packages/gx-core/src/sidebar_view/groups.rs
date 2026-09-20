@@ -37,6 +37,7 @@ pub(crate) struct ProjectContextInput {
     pub(crate) diff_stats: super::inputs::ProjectDiffStats,
     /// How many worktree projects name this project as their parent.
     pub(crate) worktree_count: usize,
+    pub(crate) git_remote_origin_url: Option<String>,
 }
 
 /// Who is focused right now, in the vocabulary the rows compare against.
@@ -198,6 +199,7 @@ pub(crate) fn build_group(
             discovered_icon_data_url: project.discovered_icon_data_url.clone(),
             diff_stats: project.diff_stats,
             worktree: project.worktree.clone(),
+            git_remote_origin_url: project.git_remote_origin_url.clone(),
         }),
         summary,
         collapsed: ui.collapse.collapsed_groups.contains(&plan.group_id),

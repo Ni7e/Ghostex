@@ -13,7 +13,7 @@ use super::inputs::{BrowserTabInput, CloseAfterDoneInput, DelayedSendInput};
 use super::session_text::{session_heading, session_tooltip, TitleInput};
 use super::tags::{effective_tag, tag_presentation, TagCatalog};
 use super::text::{encode_uri_component, js_trim, parse_iso_ms};
-use super::view::{DelayedSendView, SessionRow, SessionTiming};
+use super::view::{DelayedSendView, SessionMenuFacts, SessionRow, SessionTiming};
 
 const GENERATING_TITLE_LABEL: &str = "Generating title...";
 
@@ -224,6 +224,29 @@ pub(crate) fn session_row(
         delayed_send: delayed,
         close_after_done: close_after_done.cloned(),
         is_generating_first_prompt_title: session.is_generating_first_prompt_title,
+        menu_facts: SessionMenuFacts {
+            agent_name: session
+                .agent_name
+                .clone()
+                .or_else(|| session.agent_id.clone()),
+            agent_session_id: session.agent_session_id.clone(),
+            session_persistence_provider: session
+                .session_persistence_provider
+                .as_ref()
+                .map(|provider| provider.as_str().to_string()),
+            // `sessionPersistenceName` is the zmx or wmx session name, which the projection
+            // carries even when it is empty; Copy Attach Command tests it for truthiness.
+            session_persistence_name: Some(session.zmx_name.clone()),
+            session_routing_id: Some(routing_id),
+            raw_display_title: session.display_title.clone(),
+            primary_title,
+            terminal_title: session.terminal_title.clone(),
+            detail: session.subtitle.clone(),
+            first_user_message: None,
+            // The local daemon's rows never withhold these; a remote machine's do (M4d).
+            can_schedule_delayed_send: true,
+            can_toggle_close_after_done: true,
+        },
         key: Some(key),
     }
 }

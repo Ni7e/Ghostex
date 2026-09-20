@@ -427,6 +427,92 @@ fn normalize_tag_list_item(candidate: &Value) -> Option<TagListItem> {
     })
 }
 
+/// One heading of the Tag As menu and the tags under it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TagSection {
+    pub(crate) label: &'static str,
+    /// `(tag id, label)` in menu order.
+    pub(crate) options: Vec<(String, String)>,
+}
+
+const SECTION_LABELS: [&str; 3] = ["Priority", "Progress", "Type"];
+
+/// `getEnabledVisibleSidebarSessionTagSections`: the built-in sections filtered to the tags the
+/// user left enabled and visible, then a Custom section, with empty sections dropped.
+/// `include_tags` puts a tag the user has already set back on the menu even when they hid it, so
+/// it can be taken off again.
+pub(crate) fn enabled_visible_tag_sections(
+    settings_items: &Value,
+    catalog: &TagCatalog,
+    include_tags: &[&str],
+) -> Vec<TagSection> {
+    let mut visible: Vec<String> = Vec::new();
+    let mut visible_custom: Vec<String> = Vec::new();
+    for item in normalize_tag_list_items(settings_items, Some(catalog)) {
+        if item.kind == TagListItemKind::Tag && item.enabled && item.visible {
+            if !visible.iter().any(|seen| *seen == item.id) {
+                visible.push(item.id.clone());
+                if is_custom_tag_id(&item.id) {
+                    visible_custom.push(item.id);
+                }
+            }
+        }
+    }
+    for tag in include_tags {
+        if visible.iter().any(|seen| seen == *tag) {
+            continue;
+        }
+        visible.push((*tag).to_string());
+        if is_custom_tag_id(tag) {
+            visible_custom.push((*tag).to_string());
+        }
+    }
+    let mut sections: Vec<TagSection> = SECTION_LABELS
+        .iter()
+        .enumerate()
+        .map(|(index, label)| TagSection {
+            label,
+            options: TAG_OPTIONS
+                .iter()
+                .filter(|(section, value, _)| {
+                    usize::from(*section) == index && visible.iter().any(|tag| tag == value)
+                })
+                .map(|(_, value, label)| ((*value).to_string(), (*label).to_string()))
+                .collect(),
+        })
+        .collect();
+    sections.push(TagSection {
+        label: "Custom",
+        options: visible_custom
+            .into_iter()
+            .filter_map(|tag_id| {
+                catalog
+                    .tags
+                    .get(&tag_id)
+                    .map(|tag| (tag_id.clone(), tag.name.clone()))
+            })
+            .collect(),
+    });
+    sections.retain(|section| !section.options.is_empty());
+    sections
+}
+
+/// `getSidebarSessionTagListItemLabel`.
+pub(crate) fn tag_list_item_label(item: &TagListItem, catalog: &TagCatalog) -> String {
+    match item.kind {
+        TagListItemKind::Tag => {
+            tag_label(Some(&item.id), catalog).unwrap_or_else(|| item.id.clone())
+        }
+        TagListItemKind::Untagged => "No tag".to_string(),
+        TagListItemKind::Separator => "Separator".to_string(),
+    }
+}
+
+/// `getSidebarSessionTagListItemFilter`, for a menu builder outside this module.
+pub(crate) fn tag_list_item_filter(item: &TagListItem) -> Option<&str> {
+    item.filter()
+}
+
 /// `getEnabledVisibleSidebarSessionTagFilters(normalizeSidebarSessionTagListItems(items,
 /// catalog))`: the filters the Sort & Filter menu offers, which is what a selected filter is pruned
 /// to on every projection.

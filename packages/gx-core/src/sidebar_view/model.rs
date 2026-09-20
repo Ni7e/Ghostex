@@ -634,6 +634,13 @@ fn project_context(
             .copied()
             .unwrap_or_default(),
         worktree_count,
+        // `Tri` keeps "not probed" apart from "probed, no origin"; the menu tests the value for
+        // truthiness, so both collapse to nothing here.
+        git_remote_origin_url: project
+            .git_remote_origin_url
+            .value()
+            .filter(|url| !url.is_empty())
+            .cloned(),
     })
 }
 

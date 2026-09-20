@@ -21,6 +21,7 @@ mod keys;
 mod overlay;
 mod presentation_store;
 mod selectors;
+mod sidebar_menu;
 mod sidebar_ui;
 mod sidebar_view;
 
@@ -44,6 +45,11 @@ pub use crate::selectors::{
     is_chat_project_path, Loadable, TabDirection, TabSession, DEFAULT_TERMINAL_SESSION_TITLE,
     QUICK_AUTOMATIONS_PROJECT_ID, TAB_SESSION_TITLE_MAX_UTF16,
 };
+pub use crate::sidebar_menu::{
+    agent_launcher_items, agent_logo_icons, colored_agent_logo, hover_strip, menu_to_json,
+    project_header_actions, HeaderCommand, HoverAction, HoverStrip, LauncherAgent, MenuCommand,
+    MenuGroup, MenuHost, MenuItem, MenuSecondary, MenuSplit, SessionActions, SidebarMenus,
+};
 pub use crate::sidebar_ui::{
     collapse_into_storage, collapse_state_from_storage, hidden_items_from_storage,
     hidden_items_into_storage, machine_tab_from_storage, sidebar_window_storage_key,
@@ -56,11 +62,11 @@ pub use crate::sidebar_view::{
     reveal_plan, space_for_focused_row, BrowserTabInput, CloseAfterDoneInput, CollectionView,
     DelayedSendInput, DelayedSendView, EmptyState, GroupCore, GroupSummary, GroupView,
     LabelDeadline, MachineSummary, OrderItem, OrderKind, ProjectContextView, ProjectDiffStats,
-    SectionCollapse, SectionId, SectionView, SessionRow, SessionSortMode, SessionTiming,
-    SessionView, SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs, SidebarInputs,
-    SidebarRevealPlan, SidebarSettings, SidebarUiState, SidebarView, SidebarViewModel, SpaceView,
-    TagListItem, TagListItemKind, TagPresentation, UnavailableState, WorktreeView,
-    LOCAL_MACHINE_ID, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
+    SectionCollapse, SectionId, SectionView, SessionMenuFacts, SessionRow, SessionSortMode,
+    SessionTiming, SessionView, SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs,
+    SidebarInputs, SidebarRevealPlan, SidebarSettings, SidebarUiState, SidebarView,
+    SidebarViewModel, SpaceView, TagListItem, TagListItemKind, TagPresentation, UnavailableState,
+    WorktreeView, LOCAL_MACHINE_ID, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
 };
 
 /// The wire types, re-exported so a host needs one dependency.
