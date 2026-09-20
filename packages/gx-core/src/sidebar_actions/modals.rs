@@ -59,7 +59,11 @@ pub fn plan_modal_action(view: &SidebarView, message: &Value) -> Option<ModalAct
     }
     let sidebar_session_id = text_field(message, "sessionId")?;
     let row = drawn_row(view, sidebar_session_id)?;
-    let title = rename_seed_title(row);
+    let title = rename_seed_title(
+        row.menu_facts.primary_title.as_deref(),
+        row.menu_facts.terminal_title.as_deref(),
+        &row.alias,
+    );
     match text_field(message, "action")? {
         "rename" => {
             let mut open = serde_json::Map::new();
@@ -107,17 +111,22 @@ pub fn plan_modal_action(view: &SidebarView, message: &Value) -> Option<ModalAct
 ///
 /// The two titles are trimmed before the test and the alias is not, which is what the `||` chain
 /// does: a title of only spaces falls through, and an alias of only spaces does not.
-fn rename_seed_title(row: &SessionRow) -> String {
-    for candidate in [
-        row.menu_facts.primary_title.as_deref(),
-        row.menu_facts.terminal_title.as_deref(),
-    ] {
+///
+/// Public and taking its three values directly, because a recording is not guaranteed to contain
+/// a padded or blank title: driving this rule only through drawn rows made the gate's own
+/// untrimmed-title mutation inert, which is a gate that cannot fail.
+pub fn rename_seed_title(
+    primary_title: Option<&str>,
+    terminal_title: Option<&str>,
+    alias: &str,
+) -> String {
+    for candidate in [primary_title, terminal_title] {
         let trimmed = crate::sidebar_view::text::js_trim(candidate.unwrap_or_default());
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
     }
-    row.alias.clone()
+    alias.to_string()
 }
 
 /// The row as the list draws it. `if (!session) return;` in the TypeScript is the same guard on

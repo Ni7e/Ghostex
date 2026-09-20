@@ -36,7 +36,7 @@ pub use lifecycle::{
     apply_lifecycle_answer, owns_lifecycle_message, plan_lifecycle_request, LifecycleAnswer,
     LifecycleCall, LifecycleFollowUp, LifecycleRequest, LIFECYCLE_PATCH_TTL_MS,
 };
-pub use modals::{owns_modal_message, plan_modal_action, ModalAction};
+pub use modals::{owns_modal_message, plan_modal_action, rename_seed_title, ModalAction};
 pub use plan::{ActionEffect, SidebarActionPlan, ToastLevel};
 pub use read_only::{plan_read_only_action, READ_ONLY_MESSAGE_TYPES};
 pub use resolve::{
