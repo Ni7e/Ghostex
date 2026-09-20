@@ -25,6 +25,7 @@ mod sidebar_actions;
 mod sidebar_menu;
 mod sidebar_ui;
 mod sidebar_view;
+mod workspace_groups;
 
 pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
 pub use crate::connection::{ConnectionPhase, ConnectionState, ConnectionUpdate};
@@ -87,6 +88,11 @@ pub use crate::sidebar_view::{
     SidebarRevealPlan, SidebarSettings, SidebarUiState, SidebarUpdateWork, SidebarView,
     SidebarViewModel, SpaceView, TagListItem, TagListItemKind, TagPresentation, UnavailableState,
     WorktreeView, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
+};
+pub use crate::workspace_groups::{
+    AdoptOutcome, ProjectWorkspaceGroups, WorkspaceGroupsDocument, WorkspaceGroupsEffect,
+    WorkspaceGroupsSync, WorkspaceSubgroup, WORKSPACE_GROUPS_SYNC_DELAY_MS,
+    WORKSPACE_GROUPS_SYNC_RETRY_DELAY_MS,
 };
 
 /// The wire types, re-exported so a host needs one dependency.
