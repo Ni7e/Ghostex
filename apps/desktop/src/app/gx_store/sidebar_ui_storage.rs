@@ -6,12 +6,20 @@
 //! TypeScript sidebar wrote them under, because an installation that upgrades keeps its collapsed
 //! groups, its Space, its hidden items and its filters, and a build from before the port must
 //! still read them. This is a second door into that database: the client-storage service in
-//! QuickJS owns the first one. The door is deliberate, because the whole point of the port is that
-//! the sidebar stops needing QuickJS to be alive, but it means the service's admission checks do
-//! not run here, so the entry bound of the catalog is enforced below instead. The database is
-//! opened on a background thread with its own connections, kept between calls, and every write is
-//! applied inside one immediate transaction, so a collapse envelope is never read by one writer
-//! while the other replaces it.
+//! QuickJS owns the first one, and there is a `CDXC:Settings` decision saying all storage goes
+//! through one system so it cannot silently fill up. The second door is what the port is for, and
+//! it carries that decision's obligations itself rather than dropping them: the catalog's entry
+//! bound is enforced below, a refused or failed write is counted and reported
+//! (`gxStore.sidebarUi.write.warning`), and the three keys have no functional subscriber, only the
+//! Settings storage inspector, which reads the database rather than the event stream. What it does
+//! not do is meter these writes into `recordStorageEvent`, so the inspector's writes-per-minute
+//! figure does not count them. The collapse map is deliberately not pruned, here or on the other
+//! side: an entry belongs to a project the user may have merely parked, and dropping it would
+//! reopen that project expanded.
+//!
+//! The database is opened on a background thread with its own connections, kept between calls, and
+//! every write is applied inside one immediate transaction, so a collapse envelope is never read
+//! by one writer while the other replaces it.
 //!
 //! SEE-ALSO: packages/client-storage/catalog.ts (the entry and store bounds this mirrors),
 //! packages/chat-runtime/src/storage.rs (the service's own door to the same file).

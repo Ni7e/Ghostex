@@ -115,11 +115,10 @@ impl GhostexGpuiApp {
             );
         }
         self.stage_agent_launch_placeholder(&command, cx);
-        // CDXC:Sidebar 2026-09-20 DECISION:
-        // User: every interaction is a local state change plus one redraw. A command that moves the
-        // sidebar's own state (collapse, Space, filters, hidden items, selection) moves the Rust
-        // state here and the list is rebuilt in the same frame; the command is still sent on, and
-        // the old projection keeps its own copy for the menus it owns until M4c.
+        // A command that moves the sidebar's own state (collapse, Space, filters, hidden items,
+        // selection) moves the Rust state here, before it is sent on: the list is rebuilt from it
+        // in the same frame, and the old projection keeps its own copy for the menus it owns until
+        // M4c (gx_store/sidebar_ui_commands.rs).
         self.gx_store_note_sidebar_command(&command, cx);
         // A sidebar command can change focus in the runtime, so it must not be handled while the runtime still holds an older focus stamp than the store (gx_store/burst.rs).
         self.gx_store_flush_old_runtime_tell(cx);

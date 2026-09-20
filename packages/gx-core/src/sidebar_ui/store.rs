@@ -1,11 +1,11 @@
 //! The sidebar's own state, the intents that move it, and which values a write still owes storage.
 //!
-//! CDXC:Sidebar 2026-09-20 DECISION:
-//! User: the desktop app stops running product logic in QuickJS; one Rust state store owns it, and
-//! every interaction is a local state change plus one redraw. This is the half of the sidebar's
-//! input the user owns, moved out of `native-sidebar/ui-state.ts`. A click changes it here and the
-//! list is rebuilt in the same frame; the write to client storage is a consequence the host
-//! performs afterwards and never something the list waits for.
+//! CDXC:Sidebar 2026-09-20 WHY:
+//! Two things live here that a reader would expect to find with the list: the selection, which is
+//! not persisted and so is not part of what storage holds, and the memory of which projects were
+//! expanded before a Collapse All, which is per machine and per collection and would otherwise be
+//! reconstructed from a list that has already moved. Everything here is applied synchronously and
+//! owes its write afterwards; nothing waits on the host.
 
 use std::collections::BTreeMap;
 

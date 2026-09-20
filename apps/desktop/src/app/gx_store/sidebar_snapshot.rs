@@ -9,6 +9,12 @@
 //! by group, collection and row id, and so are the fields no milestone has moved yet (the HUD, the
 //! machine tabs, the more menu). Nothing here derives product state: a value is either the view
 //! model's or the old projection's, and this file says which.
+//!
+//! A row, group or collection the store holds and the old projection has not published yet has
+//! nothing to carry, so it draws with no context menu, no hover buttons and its fallback icon
+//! until the next publish, which is the following frame in practice. That is the shape of the
+//! seam until M4c moves the menus; it is not a fallback for a missing value, because there is no
+//! second source for a menu this app does not build yet.
 
 use std::collections::HashMap;
 use std::sync::Arc;

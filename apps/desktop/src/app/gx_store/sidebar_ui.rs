@@ -1,13 +1,6 @@
 //! The sidebar's own state inside the app: seeded from client storage once, moved by intents, and
 //! written back on a debounce.
 //!
-//! CDXC:Sidebar 2026-09-20 DECISION:
-//! User: the desktop app stops running product logic in QuickJS, and every interaction is a local
-//! state change plus one redraw. A click on a chevron, a tag filter or a Space now moves this
-//! state and the list is rebuilt from it in the same frame. The write to client storage happens
-//! afterwards, off the UI thread, and the list never waits for it. The same command is still sent
-//! to the old projection, which keeps its own copy for the menus it still owns (M4c).
-//!
 //! CDXC:Sidebar 2026-09-20 WHY:
 //! The state moves whatever the list source is, because the comparison between the two lists is
 //! only worth anything while both are fed by the same clicks. The WRITE is another matter and runs
