@@ -438,7 +438,7 @@ fn churn_inputs(inputs: &mut SidebarInputs, ui: &mut UiState, view: &SidebarView
             .find_map(|group| group.core.project_context.as_ref())
             .map(|context| context.project_id.clone())
         {
-            inputs.host.browser_tabs = vec![
+            inputs.host.browser_tabs = ghostex_gx_core::BrowserTabsInput::supplied(vec![
                 BrowserTabInput {
                     project_id: project_id.clone(),
                     tab_id: "1".to_string(),
@@ -457,7 +457,7 @@ fn churn_inputs(inputs: &mut SidebarInputs, ui: &mut UiState, view: &SidebarView
                     is_sleeping: true,
                     is_visible: false,
                 },
-            ];
+            ]);
         }
     }
     match index % 13 {

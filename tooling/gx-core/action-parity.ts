@@ -371,8 +371,17 @@ function mutateBulk(name: string | undefined, entry: Json): Json {
         clone.request = { action: 'wake', focusProject: 'probe', intervalMs: 0, messages: [] };
       }
       return clone;
+    // The same mistake through the other door, and the one the app is one commit away from: the
+    // host stops supplying the app-tab list and the port reads the silence as "this project has no
+    // tabs". The sessions go to sleep and every app tab stays awake.
+    case 'unsupplied-tabs-read-as-none':
+      if (clone.tabsSupplied !== true && ((clone.browserTabs ?? []) as Json[]).length && clone.owned !== true) {
+        clone.owned = true;
+        clone.request = { action: 'sleep', focusProject: null, intervalMs: 0, messages: [] };
+      }
+      return clone;
     case 'drop-the-browser-handoff':
-      if (((clone.browserTabs ?? []) as Json[]).length && clone.owned !== true) {
+      if (clone.tabsSupplied === true && ((clone.browserTabs ?? []) as Json[]).length && clone.owned !== true) {
         clone.owned = true;
         clone.request = { action: 'sleep', focusProject: null, intervalMs: 0, messages: [] };
       }
@@ -408,6 +417,7 @@ const BULK_MUTATIONS = [
   'group-sleep-ignores-lifecycle',
   'drop-the-project-focus',
   'drop-the-browser-handoff',
+  'unsupplied-tabs-read-as-none',
   'answer-an-unloaded-project',
   'batch-keeps-the-selection',
   'reorder-the-batch',
@@ -707,6 +717,7 @@ async function compare([outDir, ...flags]: string[]) {
   let bulkRefusals = 0;
   let bulkBrowserHandOffs = 0;
   let bulkNotLoaded = 0;
+  let bulkTabsUnknown = 0;
   let bulkMessages = 0;
   let batchPlans = 0;
   const differences: string[] = [];
@@ -764,19 +775,30 @@ async function compare([outDir, ...flags]: string[]) {
       // The hand-off probe: a project the Rust side was shown app tabs for. A refusal only means
       // something if the TypeScript it hands the payload to really does the work, so that is what
       // is asserted, rather than the refusal being counted and skipped the way every other one was.
+      //
+      // It is run twice over the same two tabs, once with the host supplying the list and once with
+      // the host not supplying it at all, and the demand is identical. The second is the state the
+      // app is really in since the tabs moved to the view panel's tab strip: they exist, the old
+      // runtime still lists them, and nothing tells this side. Reading that silence as "this
+      // project has no tabs" would put the project's sessions to sleep and leave every app tab
+      // awake, so both cases have to hand over.
       const tabs = (entry.browserTabs ?? []) as Json[];
       if (tabs.length) {
+        const supplied = entry.tabsSupplied === true;
         const theirCalls = (theirs?.calls ?? []) as Json[];
         const forTabs = theirCalls.filter((call) => String(call.session).startsWith('gpui-browser:'));
         if (mine.owned === true)
           differences.push(
-            `${where}: performed a set for a project with ${tabs.length} app tabs instead of handing it over`
+            `${where}: performed a set for a project with ${tabs.length} app tabs (${
+              supplied ? 'listed' : 'not supplied to this side'
+            }) instead of handing it over`
           );
         else if (!forTabs.length)
           differences.push(
             `${where}: the hand-off probe measured no app-tab call on the TypeScript side, so the refusal proves nothing`
           );
-        else bulkBrowserHandOffs += 1;
+        else if (supplied) bulkBrowserHandOffs += 1;
+        else bulkTabsUnknown += 1;
       }
       // The not-loaded probe. `!this.presentation` is an early return, and for a project wake it
       // happens BEFORE `focusProjectId`, so answering with an empty set is not the same as not
@@ -1077,7 +1099,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkBrowserHandOffs ${bulkBrowserHandOffs} bulkNotLoaded ${bulkNotLoaded} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkBrowserHandOffs ${bulkBrowserHandOffs} bulkNotLoaded ${bulkNotLoaded} bulkTabsUnknown ${bulkTabsUnknown} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
@@ -1101,6 +1123,7 @@ async function compare([outDir, ...flags]: string[]) {
     ['bulkRefusals', bulkRefusals],
     ['bulkBrowserHandOffs', bulkBrowserHandOffs],
     ['bulkNotLoaded', bulkNotLoaded],
+    ['bulkTabsUnknown', bulkTabsUnknown],
     ['batchPlans', batchPlans],
   ];
   const collapsed = measured.filter(([, count]) => count === 0);

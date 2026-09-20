@@ -25,17 +25,17 @@ use std::time::Instant;
 
 use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
-    ActiveGroup, BrowserTabInput, CloseAnswer, CloseFollowUp, Core, Event, FlagsFollowUp,
-    ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey,
-    QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS, SectionCollapse,
-    SessionKey, SidebarInputs, SidebarView, SidebarViewModel, SnoozeClock, SnoozeFollowUp,
     apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
     apply_snooze_answer, close_optimistic_follow_ups, encode_uri_component, iso_string_from_ms,
     plan_batch, plan_bulk_request, plan_close_request, plan_flags_request, plan_fork_request,
     plan_lifecycle_request, plan_modal_action, plan_read_only_action, plan_snooze_action,
-    plan_snooze_request, rename_seed_title, session_is_snoozed, snooze_wake_ms,
+    plan_snooze_request, rename_seed_title, session_is_snoozed, snooze_wake_ms, ActiveGroup,
+    BrowserTabInput, BrowserTabsInput, CloseAnswer, CloseFollowUp, Core, Event, FlagsFollowUp,
+    ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey,
+    SectionCollapse, SessionKey, SidebarInputs, SidebarView, SidebarViewModel, SnoozeClock,
+    SnoozeFollowUp, QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 /// The clock facts file the harness writes beside the scenarios.
 const SNOOZE_CLOCK_FILE: &str = "snooze-clock.json";
@@ -1267,7 +1267,7 @@ fn bulk_entries(core: &Core, inputs: &SidebarInputs, scenario: &Value) -> Vec<Va
         .unwrap_or_default();
     // Each probe carries the app-tab list it is planned against, which is empty for all but the
     // browser probe below and is what the TypeScript half is handed for the same entry.
-    let mut payloads: Vec<(Value, Vec<Value>)> = Vec::new();
+    let mut payloads: Vec<(Value, Vec<Value>, bool)> = Vec::new();
     let project_payloads = |group_id: &str| {
         vec![
             json!({ "type": "setGroupSleeping", "groupId": group_id, "sleeping": true }),
@@ -1280,7 +1280,7 @@ fn bulk_entries(core: &Core, inputs: &SidebarInputs, scenario: &Value) -> Vec<Va
     for project_id in project_ids.iter().take(BULK_PROJECTS_PER_SCENARIO) {
         let group_id = format!("combined-project:{}", encode_uri_component(project_id));
         for payload in project_payloads(&group_id) {
-            payloads.push((payload, Vec::new()));
+            payloads.push((payload, Vec::new(), true));
         }
     }
     // The same four project payloads for a project that has an app tab, which is the refusal this
@@ -1309,7 +1309,15 @@ fn bulk_entries(core: &Core, inputs: &SidebarInputs, scenario: &Value) -> Vec<Va
             }),
         ];
         for payload in project_payloads(&group_id) {
-            payloads.push((payload, tabs.clone()));
+            payloads.push((payload, tabs.clone(), true));
+        }
+        // The same two tabs, and a host that does not supply the list at all. This is the state the
+        // app is really in since the tabs moved to the view panel's tab strip: they exist, the old
+        // runtime still lists them, and nothing tells this side about them. "I was not told" must
+        // refuse exactly as "there is one" does, because the alternative reads silence as "there
+        // are none" and performs a Sleep All that leaves every app tab awake.
+        for payload in project_payloads(&group_id) {
+            payloads.push((payload, tabs.clone(), false));
         }
     }
     // The group shapes that resolve to no local project, each a refusal with its own reason.
@@ -1317,10 +1325,12 @@ fn bulk_entries(core: &Core, inputs: &SidebarInputs, scenario: &Value) -> Vec<Va
         payloads.push((
             json!({ "type": "setGroupSleeping", "groupId": group_id, "sleeping": true }),
             Vec::new(),
+            true,
         ));
         payloads.push((
             json!({ "type": "wakeProjectSleepingSessions", "groupId": group_id }),
             Vec::new(),
+            true,
         ));
     }
     // The same four payloads against a store with NO presentation for the machine, which is
@@ -1349,40 +1359,50 @@ fn bulk_entries(core: &Core, inputs: &SidebarInputs, scenario: &Value) -> Vec<Va
         payloads.push((
             json!({ "type": "setSessionsSleeping", "sessionIds": ids, "sleeping": true, "source": "sleepBelow" }),
             Vec::new(),
+            true,
         ));
         payloads.push((
             json!({ "type": "setSessionsSleeping", "sessionIds": ids, "sleeping": false }),
             Vec::new(),
+            true,
         ));
         payloads.push((
             json!({ "type": "closeSessions", "sessionIds": ids }),
             Vec::new(),
+            true,
         ));
     }
+    // Every probe states the app-tab list it was planned against, including that there is none to
+    // state: `SidebarInputs::default()` no longer means "no tabs", so a probe that left the field
+    // alone would be asking the not-supplied question by accident and the whole project half would
+    // read as refused.
+    let probe_inputs = |tabs: &[Value], supplied: bool| {
+        let mut probe = inputs.clone();
+        probe.host.browser_tabs = match supplied {
+            true => BrowserTabsInput::supplied(tabs.iter().map(browser_tab_input).collect()),
+            false => BrowserTabsInput::default(),
+        };
+        probe
+    };
     payloads
         .into_iter()
-        .map(|(payload, tabs)| {
-            let mut probe;
-            let inputs = match tabs.is_empty() {
-                true => inputs,
-                false => {
-                    probe = inputs.clone();
-                    probe.host.browser_tabs = tabs.iter().map(browser_tab_input).collect();
-                    &probe
-                }
-            };
+        .map(|(payload, tabs, supplied)| {
+            let probe = probe_inputs(&tabs, supplied);
             bulk_entry(
-                plan_bulk_request(core, inputs, &payload),
+                plan_bulk_request(core, &probe, &payload),
                 payload,
                 tabs,
+                supplied,
                 false,
             )
         })
         .chain(unloaded_payloads.into_iter().map(|payload| {
+            let probe = probe_inputs(&[], true);
             bulk_entry(
-                plan_bulk_request(&unloaded, inputs, &payload),
+                plan_bulk_request(&unloaded, &probe, &payload),
                 payload,
                 Vec::new(),
+                true,
                 true,
             )
         }))
@@ -1395,11 +1415,13 @@ fn bulk_entry(
     planned: Option<ghostex_gx_core::BulkRequest>,
     payload: Value,
     tabs: Vec<Value>,
+    tabs_supplied: bool,
     unloaded: bool,
 ) -> Value {
     let mut entry = json!({
         "payload": payload,
         "browserTabs": Value::Array(tabs),
+        "tabsSupplied": tabs_supplied,
         "presentation": match unloaded { true => "none", false => "loaded" },
     });
     let object = entry.as_object_mut().expect("object");
