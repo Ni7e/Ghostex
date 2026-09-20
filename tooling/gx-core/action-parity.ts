@@ -150,6 +150,41 @@ function mutateFork(name: string | undefined, entry: Json): Json {
   }
 }
 
+/** The flags half's mutations. */
+function mutateFlags(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  switch (name) {
+    // A cleared tag written as a null instead of as an absent field, which is the shape the row
+    // really takes and the one a port collapses.
+    case 'clear-a-tag-as-null':
+      for (const answer of Object.values(clone.answers ?? {}) as Json[])
+        if (answer?.row && answer.row.sessionTag === null) answer.row.sessionTag = 'null';
+      return clone;
+    // A tag set without the star it implies, which leaves the two disagreeing until the daemon's
+    // own row arrives.
+    case 'tag-without-the-star':
+      if (clone.request?.rpc?.params) delete clone.request.rpc.params.isFavorite;
+      return clone;
+    // An optimistic value applied to a call that failed.
+    case 'patch-a-failed-flag-call':
+      if (clone.answers?.failed) clone.answers.failed.row = clone.answers?.accepted?.row ?? null;
+      return clone;
+    // Parking that never asks for the sleep the setting turns on.
+    case 'park-never-sleeps':
+      if (clone.request) clone.request.thenSleep = false;
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+const FLAGS_MUTATIONS = [
+  'clear-a-tag-as-null',
+  'tag-without-the-star',
+  'patch-a-failed-flag-call',
+  'park-never-sleeps',
+];
+
 const FORK_MUTATIONS = ['place-a-pane-with-no-session', 'forget-the-placement-target', 'always-activate'];
 
 const CLOSE_MUTATIONS = [
@@ -219,13 +254,19 @@ async function compare([outDir, ...flags]: string[]) {
   const injectAt = flags.indexOf('--inject');
   const mutationName = injectAt >= 0 ? flags[injectAt + 1] : undefined;
   const mutate = mutationName ? (MUTATIONS[mutationName] ?? ((calls: Json[]) => calls)) : undefined;
-  const known = [...Object.keys(MUTATIONS), ...LIFECYCLE_MUTATIONS, ...CLOSE_MUTATIONS, ...FORK_MUTATIONS];
+  const known = [
+    ...Object.keys(MUTATIONS),
+    ...LIFECYCLE_MUTATIONS,
+    ...CLOSE_MUTATIONS,
+    ...FORK_MUTATIONS,
+    ...FLAGS_MUTATIONS,
+  ];
   if (mutationName && !known.includes(mutationName)) {
     console.error(`unknown mutation ${mutationName}; one of ${known.join(', ')}`);
     process.exit(2);
   }
   const { runTypeScriptActions } = await import('./action-parity-typescript.ts');
-  const { runTypeScriptLifecycle, runTypeScriptClose, runTypeScriptFork } =
+  const { runTypeScriptLifecycle, runTypeScriptClose, runTypeScriptFork, runTypeScriptFlags } =
     await import('./lifecycle-parity-typescript.ts');
   const names = readdirSync(outDir)
     .filter((name) => name.startsWith('scenario-') && name.endsWith('.json'))
@@ -236,6 +277,7 @@ async function compare([outDir, ...flags]: string[]) {
   let transitions = 0;
   let closes = 0;
   let forks = 0;
+  let flagCalls = 0;
   let overlayKept = 0;
   let closesRestored = 0;
   let stoppedUnhidden = 0;
@@ -256,6 +298,28 @@ async function compare([outDir, ...flags]: string[]) {
     if (entries.length !== ours.length) {
       differences.push(`${name}: ${entries.length} payloads against ${ours.length} answers`);
       continue;
+    }
+    const theirFlags = await runTypeScriptFlags(scenario, rust);
+    for (const [index, entry] of ((rust.flags ?? []) as Json[]).entries()) {
+      if (entry.owned !== true) continue;
+      flagCalls += 1;
+      const theirs = theirFlags[index];
+      if (!theirs) {
+        differences.push(`${name} flags #${index}: the TypeScript side produced no answer`);
+        continue;
+      }
+      const where = `${name} flags #${index} ${String((entry.payload as Json)?.type)} sleepWhenParking=${entry.sleepWhenParking}`;
+      const mine = mutate ? mutateFlags(mutationName, entry) : entry;
+      if (canonical(mine.request?.rpc ?? null) !== canonical(theirs.rpc))
+        differences.push(`${where} rpc: rust ${canonical(mine.request?.rpc ?? null)} ts ${canonical(theirs.rpc)}`);
+      if ((mine.request?.thenSleep ?? false) !== (theirs.thenSleep ?? false))
+        differences.push(`${where} thenSleep: rust ${mine.request?.thenSleep} ts ${theirs.thenSleep}`);
+      for (const answer of ['accepted', 'failed']) {
+        const left = mine.answers?.[answer]?.row ?? null;
+        const right = theirs.answers?.[answer]?.row ?? null;
+        if (canonical(left) !== canonical(right))
+          differences.push(`${where} ${answer} row: rust ${canonical(left)} ts ${canonical(right)}`);
+      }
     }
     const theirFork = await runTypeScriptFork(scenario, rust);
     for (const [index, entry] of ((rust.fork ?? []) as Json[]).entries()) {
@@ -374,7 +438,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );

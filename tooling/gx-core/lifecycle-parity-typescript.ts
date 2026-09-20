@@ -374,3 +374,89 @@ export async function runTypeScriptFork(scenario: Json, rustActions: Json): Prom
   }
   return out;
 }
+
+/**
+ * The flags half. Drives the shipped `updateSessionFlags` and `setSessionParked` and records the
+ * call, the row the patch leaves behind, and whether parking asked for a sleep.
+ *
+ * `setSessionSleeping` is replaced by a recorder rather than run: parking's sleep is the lifecycle
+ * action that already has its own half of this gate, and running it here would compare it twice
+ * and for the wrong reasons.
+ */
+export async function runTypeScriptFlags(scenario: Json, rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const out: Json[] = [];
+  for (const entry of (rustActions.flags ?? []) as Json[]) {
+    if (entry.owned !== true) {
+      out.push({ owned: false });
+      continue;
+    }
+    const payload = entry.payload as Json;
+    const reference = parseSidebarSessionId(String(payload.sessionId));
+    const answers: Json = {};
+    let rpc: Json | null = null;
+    let thenSleep = false;
+    for (const accepted of [true, false]) {
+      const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+      runtime.presentation = scenario.snapshot;
+      // `createGpuiSidebarSettings` normalizes `runtimeSettings.settings`, not `runtimeSettings`
+      // itself, so the flag has to sit one level down or it reads as the default and the whole
+      // parking-sleeps leg silently never fires.
+      runtime.runtimeSettings = { settings: { sleepSessionWhenParking: entry.sleepWhenParking === true } };
+      runtime.publishPresentation = () => {};
+      const follow: Json[] = [];
+      runtime.setSessionSleeping = (sessionId: string) => {
+        follow.push({ follow: 'sleep', session: sessionId });
+        return Promise.resolve();
+      };
+      runtime.client = {
+        rpc(path: string, params: Json) {
+          rpc = { path, params };
+          return accepted ? Promise.resolve({}) : Promise.reject(new Error('transport'));
+        },
+      };
+      // `handleSidebarMessage` awaits these and lets a rejection out, which nothing catches.
+      try {
+        if (payload.type === 'setSessionParked')
+          await runtime.setSessionParked(String(payload.sessionId), payload.parked === true);
+        else if (payload.type === 'setSessionPinned')
+          await runtime.updateSessionFlags(String(payload.sessionId), { isPinned: payload.pinned === true });
+        else if (payload.type === 'setSessionFavorite')
+          await runtime.updateSessionFlags(String(payload.sessionId), {
+            isFavorite: payload.favorite === true,
+            sessionTag: payload.favorite === true ? 'favorite' : null,
+          });
+        else
+          await runtime.updateSessionFlags(String(payload.sessionId), {
+            isFavorite: payload.sessionTag === 'favorite',
+            sessionTag: payload.sessionTag ?? null,
+          });
+      } catch {
+        // The unhandled rejection the shipped code produces. Nothing local follows it.
+      }
+      if (accepted) thenSleep = follow.some((item) => item.follow === 'sleep');
+      answers[accepted ? 'accepted' : 'failed'] = {
+        // The patch is compared by the row it leaves, like every other action in this gate: the
+        // two sides express an optimistic value differently and only the drawn row is comparable.
+        follow,
+        row: flagsRow(runtime.presentation as Json, reference),
+      };
+    }
+    out.push({ owned: true, rpc, thenSleep, answers });
+  }
+  return out;
+}
+
+function flagsRow(presentation: Json, reference: { projectId: string; sessionId: string } | undefined): Json | null {
+  if (!reference) return null;
+  const row = ((presentation?.sessions ?? []) as Json[]).find(
+    (session) => session.projectId === reference.projectId && session.sessionId === reference.sessionId
+  );
+  if (!row) return null;
+  return {
+    isPinned: row.isPinned ?? false,
+    isParked: row.isParked ?? false,
+    isFavorite: row.isFavorite ?? false,
+    sessionTag: row.sessionTag ?? null,
+  };
+}

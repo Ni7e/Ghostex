@@ -25,10 +25,11 @@ use std::time::Instant;
 
 use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
-    apply_close_answer, apply_fork_answer, apply_lifecycle_answer, close_optimistic_follow_ups,
-    encode_uri_component, plan_close_request, plan_fork_request, plan_lifecycle_request,
-    plan_read_only_action, ActiveGroup, CloseAnswer, CloseFollowUp, Core, Event, ForkFollowUp,
-    Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey, SessionKey, SidebarInputs,
+    apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
+    close_optimistic_follow_ups, encode_uri_component, plan_close_request, plan_flags_request,
+    plan_fork_request, plan_lifecycle_request, plan_read_only_action, ActiveGroup, CloseAnswer,
+    CloseFollowUp, Core, Event, FlagsFollowUp, ForkFollowUp, Intent, LifecycleAnswer,
+    LifecycleFollowUp, MachineId, ProjectKey, SessionKey, SidebarInputs,
     QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES,
 };
 use serde_json::{json, Map, Value};
@@ -89,6 +90,7 @@ fn main() -> ExitCode {
     let mut total_lifecycle = 0usize;
     let mut total_close = 0usize;
     let mut total_fork = 0usize;
+    let mut total_flags = 0usize;
     let mut resolve_micros: Vec<u128> = Vec::new();
     for path in &scenarios {
         let scenario: Value = match std::fs::read_to_string(path)
@@ -112,6 +114,7 @@ fn main() -> ExitCode {
         total_lifecycle += dump.lifecycle;
         total_close += dump.close;
         total_fork += dump.fork;
+        total_flags += dump.flags;
         let out = path.with_file_name(
             path.file_name()
                 .and_then(|name| name.to_str())
@@ -145,7 +148,7 @@ fn main() -> ExitCode {
         .copied()
         .unwrap_or(0);
     println!(
-        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} resolveUs median {median} max {}",
+        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} flags {total_flags} resolveUs median {median} max {}",
         scenarios.len(),
         resolve_micros.last().copied().unwrap_or(0)
     );
@@ -167,6 +170,7 @@ struct Dump {
     lifecycle: usize,
     close: usize,
     fork: usize,
+    flags: usize,
 }
 
 /// The menu dump `sidebar_menu_parity` writes for the same scenario, when it has been run.
@@ -313,6 +317,8 @@ fn build(
     let close_count = closes.len();
     let forks = fork_entries(&core, scenario, now_ms);
     let fork_count = forks.len();
+    let flags = flags_entries(&core, scenario, menu_dump, now_ms);
+    let flags_count = flags.len();
     Some(Dump {
         payloads: entries.len(),
         calls,
@@ -320,12 +326,14 @@ fn build(
         lifecycle: lifecycle_count,
         close: close_count,
         fork: fork_count,
+        flags: flags_count,
         value: json!({
             "parkedProjectId": parked,
             "entries": Value::Array(entries),
             "lifecycle": Value::Array(lifecycle),
             "close": Value::Array(closes),
             "fork": Value::Array(forks),
+            "flags": Value::Array(flags),
         }),
     })
 }
@@ -968,4 +976,155 @@ fn fork_answers(session_id: &str) -> Vec<(&'static str, Result<Value, String>)> 
         ("failed", Err("transport".to_string())),
         ("neverAnswered", Err("timeout".to_string())),
     ]
+}
+
+/// The flags half of the gate.
+///
+/// Four commands, one call, and two details that are easy to lose: a tag also writes the star, and
+/// a cleared tag reaches the daemon as an explicit `null` but reaches the row as an ABSENT field.
+/// Both are probed directly rather than left to whichever tags a recording happens to contain, and
+/// every tag the real menus can emit is added on top of them from the menu dump.
+fn flags_entries(
+    core: &Core,
+    scenario: &Value,
+    menu_dump: Option<&Value>,
+    now_ms: u64,
+) -> Vec<Value> {
+    let rows: Vec<Value> = scenario
+        .pointer("/snapshot/sessions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut tags: Vec<Value> = vec![
+        Value::String("favorite".to_string()),
+        Value::String("later".to_string()),
+        // The clear, which is the leg a port collapses into "say nothing".
+        Value::Null,
+    ];
+    if let Some(dump) = menu_dump {
+        let mut found: Vec<Value> = Vec::new();
+        collect_tag_values(dump, &mut found);
+        for tag in found {
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+    }
+    let mut entries = Vec::new();
+    for row in rows.iter().take(FLAGS_ROWS_PER_SCENARIO) {
+        let (Some(project_id), Some(session_id)) = (
+            row.get("projectId").and_then(Value::as_str),
+            row.get("sessionId").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        let session = SessionKey::local(project_id, session_id);
+        let sidebar_session_id = session.to_sidebar_session_id();
+        let mut payloads: Vec<Value> = vec![
+            json!({ "type": "setSessionPinned", "sessionId": sidebar_session_id, "pinned": true }),
+            json!({ "type": "setSessionPinned", "sessionId": sidebar_session_id, "pinned": false }),
+            json!({ "type": "setSessionParked", "sessionId": sidebar_session_id, "parked": true }),
+            json!({ "type": "setSessionParked", "sessionId": sidebar_session_id, "parked": false }),
+            json!({ "type": "setSessionFavorite", "sessionId": sidebar_session_id, "favorite": true }),
+            json!({ "type": "setSessionFavorite", "sessionId": sidebar_session_id, "favorite": false }),
+        ];
+        for tag in &tags {
+            payloads.push(json!({
+                "type": "setSessionTag",
+                "sessionId": sidebar_session_id,
+                "sessionTag": tag,
+            }));
+        }
+        for payload in payloads {
+            // Parking is the one leg a setting changes, so both settings are driven.
+            for sleep_when_parking in [false, true] {
+                let Some(request) = plan_flags_request(&payload, sleep_when_parking) else {
+                    entries.push(json!({ "payload": payload, "sleepWhenParking": sleep_when_parking, "owned": false }));
+                    continue;
+                };
+                let mut answers = Map::new();
+                for accepted in [true, false] {
+                    let follow_ups = apply_flags_answer(&request, accepted, now_ms);
+                    let mut store = core.clone();
+                    for follow_up in &follow_ups {
+                        if let FlagsFollowUp::Patch { session, patch } = follow_up {
+                            store.handle(
+                                Event::Intent(Intent::PatchSession {
+                                    session: session.clone(),
+                                    patch: patch.clone(),
+                                }),
+                                now_ms,
+                            );
+                        }
+                    }
+                    answers.insert(
+                        match accepted {
+                            true => "accepted".to_string(),
+                            false => "failed".to_string(),
+                        },
+                        json!({
+                            "follow": Value::Array(
+                                follow_ups.iter().map(FlagsFollowUp::to_json).collect(),
+                            ),
+                            "row": flags_row(&store, &session),
+                        }),
+                    );
+                }
+                entries.push(json!({
+                    "payload": payload,
+                    "sleepWhenParking": sleep_when_parking,
+                    "owned": true,
+                    "request": request.to_json(),
+                    "answers": Value::Object(answers),
+                }));
+            }
+        }
+    }
+    entries
+}
+
+/// Enough rows to cover the shapes without multiplying the whole recording by twenty payloads:
+/// the flags path reads nothing about the row, so a second hundred rows would add no branch.
+const FLAGS_ROWS_PER_SCENARIO: usize = 12;
+
+/// The four fields a flag call can move, as the sidebar would draw them.
+fn flags_row(core: &Core, session: &SessionKey) -> Value {
+    match core
+        .presentation()
+        .machine(&session.machine)
+        .and_then(|entry| entry.effective_session(&session.project_id, &session.session_id))
+    {
+        Some(row) => json!({
+            "isPinned": row.is_pinned,
+            "isParked": row.is_parked,
+            "isFavorite": row.is_favorite,
+            "sessionTag": row.session_tag,
+        }),
+        None => Value::Null,
+    }
+}
+
+/// Every `sessionTag` value anywhere in a menu dump, so the gate asks about the tags the user's
+/// own catalog really offers and not only the two written above.
+fn collect_tag_values(value: &Value, found: &mut Vec<Value>) {
+    match value {
+        Value::Object(entries) => {
+            if entries.get("type") == Some(&Value::String("setSessionTag".to_string())) {
+                if let Some(tag) = entries.get("sessionTag") {
+                    if !found.contains(tag) {
+                        found.push(tag.clone());
+                    }
+                }
+            }
+            for item in entries.values() {
+                collect_tag_values(item, found);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_tag_values(item, found);
+            }
+        }
+        _ => {}
+    }
 }
