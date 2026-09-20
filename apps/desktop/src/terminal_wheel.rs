@@ -8,13 +8,13 @@
 
 use gpui::ScrollDelta;
 
-/// Neutral value of `mouse-scroll-multiplier`: the multiplier at which a
-/// wheel notch scrolls exactly what the platform asks for. Ghostty's own
-/// neutral is its default of 3 discrete rows per tick; ghostex's setting
-/// defaults to 1 and documents itself as a plain multiple of the platform
-/// default, so one notch travels the same distance in both, only the number
-/// in the settings field differs.
-const NEUTRAL_DISCRETE_MULTIPLIER: f32 = 1.0;
+/// Neutral value of `mouse-scroll-multiplier`: the value at which a wheel
+/// notch scrolls exactly what the platform asks for. This is ghostty's own
+/// default of 3 rows per tick, and the Discrete scroll multiplier field is
+/// that ghostty key (it is written straight into the ghostty config the
+/// embedded macOS surfaces load), so the same number must mean the same
+/// speed everywhere: 3 is platform speed, 6 is twice it.
+const NEUTRAL_DISCRETE_MULTIPLIER: f32 = 3.0;
 
 /// "Scroll one screen at a time" (`SPI_GETWHEELSCROLLLINES` sentinel).
 #[cfg(target_os = "windows")]
@@ -100,8 +100,9 @@ pub(crate) fn normalize(
     cell_height: f32,
     viewport_height: f32,
 ) -> Option<WheelScroll> {
-    let _ = shift;
-    let _ = viewport_height;
+    // Only the Windows branch consults the system wheel settings.
+    #[cfg(not(target_os = "windows"))]
+    let _ = (shift, cell_height, viewport_height);
     match delta {
         // Trackpads and other precise devices. Ghostty's AppKit surface
         // applies a 2x speed multiplier to precise deltas before the core

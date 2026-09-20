@@ -2446,8 +2446,9 @@ impl TerminalView {
             self.row_cache.fill(None);
         }
 
-        // CDXC:DesignSystem 2026-09-15 DECISION:
-        // User: terminal scrollbars share the floating 5px hover-only app style; the thumb must not reserve terminal columns.
+        // CDXC:DesignSystem 2026-09-20 DECISION:
+        // User: terminal scrollbars share the floating 5px app style and the thumb must not reserve terminal columns.
+        // Supersedes the 2026-09-15 "hover-only" reveal: the bar now appears while the viewport is actually scrolled and fades out again (terminal_scrollbar_reveal.rs), matching what ghostty's overlay scrollbars do.
         let content_width = bounds.size.width.max(metrics.cell_width);
         let cols = ((content_width / metrics.cell_width) as u16).max(1);
         let rows = ((bounds.size.height / metrics.line_height) as u16).max(1);
