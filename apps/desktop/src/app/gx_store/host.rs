@@ -11,7 +11,9 @@ use super::diagnostics::GxStoreDiagnostics;
 use super::layout_persist::LayoutPersist;
 use super::local_focus::LocalFocus;
 use super::shadow_diff::{ObservedFocus, ShadowDiff};
+use super::sidebar_list::SidebarList;
 use super::sidebar_shadow::SidebarShadow;
+use super::sidebar_ui::SidebarUiHost;
 use crate::GhostexGpuiApp;
 use crate::app::helpers::GpuiGxserverPresentationFocusEcho;
 use crate::app::model::GpuiGxserverPresentationFocusState;
@@ -76,6 +78,8 @@ pub(crate) struct GxStoreHost {
     pub(super) counters: GxStoreCounters,
     connecting_since: Option<Instant>,
     pub(super) shadow: ShadowDiff,
+    pub(crate) sidebar_ui: SidebarUiHost,
+    pub(crate) sidebar_list: SidebarList,
     pub(super) sidebar_shadow: SidebarShadow,
     pub(super) diagnostics: GxStoreDiagnostics,
     pub(crate) local_focus: LocalFocus,
@@ -119,8 +123,8 @@ impl GxStoreHost {
         self.counters.events += events.len() as u64;
         self.counters.largest_burst = self.counters.largest_burst.max(events.len());
         let output = self.core.handle_batch(events, now_ms());
-        // The sidebar list derives from these; the comparison applies them when it next runs.
-        self.sidebar_shadow.note_changes(&output.changes);
+        // The sidebar list derives from these; it applies them when it next updates.
+        self.sidebar_list.note_changes(&output.changes);
         if let Some(loaded) = self.core.presentation().loaded(&MachineId::Local) {
             self.held_revision.store(loaded.revision, Ordering::Release);
         }
@@ -267,6 +271,8 @@ impl GhostexGpuiApp {
         self.gx_store
             .restore_focus_once(&self.sidebar_gxserver_presentation_focus_state);
         self.start_gx_store_layout_persist_task(cx);
+        // The sidebar's own state is read once, and again later if that read failed.
+        self.gx_store_restore_sidebar_ui(cx);
         if self.gx_store.transport == next {
             return;
         }
@@ -372,6 +378,9 @@ impl GhostexGpuiApp {
         if self.gx_store_after_pump(outcome.tab_lists_changed, cx) {
             cx.notify();
         }
+        // The list reads the store, so it is brought up to date once per burst rather than per
+        // event, and does nothing at all when the burst changed nothing it draws.
+        self.gx_store_update_sidebar_list(cx);
         outcome.thread_ended
     }
 

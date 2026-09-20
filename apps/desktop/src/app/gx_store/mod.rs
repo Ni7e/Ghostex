@@ -17,9 +17,14 @@ mod layout_persist;
 mod local_focus;
 mod session_walk;
 mod shadow_diff;
+mod sidebar_list;
+mod sidebar_list_inputs;
 mod sidebar_shadow;
 mod sidebar_shadow_compare;
-mod sidebar_shadow_inputs;
-mod sidebar_shadow_storage;
+mod sidebar_snapshot;
+mod sidebar_ui;
+mod sidebar_ui_commands;
+mod sidebar_ui_storage;
 
 pub(crate) use host::GxStoreHost;
+pub(crate) use sidebar_list::SidebarListSource;

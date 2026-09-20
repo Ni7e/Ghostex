@@ -7,8 +7,10 @@ use serde_json::json;
 
 use super::host::GxStoreCounters;
 use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
+use super::sidebar_list::{SidebarListCounters, SidebarListSource};
 use super::sidebar_shadow::SidebarShadowCounters;
 use super::sidebar_shadow_compare::{FieldDiff, SidebarMismatch};
+use super::sidebar_ui::SidebarUiCounters;
 use crate::{shared_settings, support_logs};
 
 /// Distinct mismatch records one app run may write; later ones are only counted.
@@ -36,6 +38,8 @@ pub(crate) struct GxStoreDiagnostics {
     logged_sidebar_mismatches: HashSet<u64>,
     sidebar_summary_considered_at: Option<Instant>,
     sidebar_summary_written: SidebarShadowCounters,
+    sidebar_ui_summary_considered_at: Option<Instant>,
+    sidebar_ui_summary_written: SidebarUiCounters,
     sidebar_storage_warnings: u32,
 }
 
@@ -331,13 +335,14 @@ impl GxStoreDiagnostics {
         );
     }
 
-    /// The running totals of the sidebar comparison, at most once a minute and only when they
-    /// moved.
+    /// The running totals of the sidebar list and its comparison, at most once a minute and only
+    /// when they moved.
     pub(super) fn sidebar_summary(
         &mut self,
         counters: &SidebarShadowCounters,
+        list: &SidebarListCounters,
+        source: SidebarListSource,
         pending: bool,
-        stored_error: Option<&'static str>,
         groups: usize,
         rows: usize,
     ) {
@@ -356,6 +361,10 @@ impl GxStoreDiagnostics {
         append(
             "gxStore.sidebarShadow.summary",
             json!({
+                "source": match source {
+                    SidebarListSource::Store => "store",
+                    SidebarListSource::Projection => "projection",
+                },
                 "observed": counters.observed,
                 "compared": counters.compared,
                 "matches": counters.matches,
@@ -366,9 +375,7 @@ impl GxStoreDiagnostics {
                 "skippedForeignFocus": counters.skipped_foreign_focus,
                 "skippedNotLoaded": counters.skipped_not_loaded,
                 "skippedNotLive": counters.skipped_not_live,
-                "skippedStoredUnknown": counters.skipped_stored_unknown,
-                "storedReadFailures": counters.stored_read_failures,
-                "storedReadError": stored_error,
+                "skippedNotRestored": counters.skipped_not_restored,
                 "questionCountOnly": counters.question_count_only,
                 "tooltipOnly": counters.tooltip_only,
                 "frozenFieldsOnly": counters.frozen_fields_only,
@@ -376,8 +383,15 @@ impl GxStoreDiagnostics {
                 "neverSettled": counters.never_settled,
                 "scratchChecks": counters.scratch_checks,
                 "scratchMismatches": counters.scratch_mismatches,
-                "updateUs": counters.last_update_us,
-                "updateMaxUs": counters.update_max_us,
+                "updates": list.updates,
+                "updatesIdle": list.idle,
+                "viewChanges": list.view_changes,
+                "installs": list.installs,
+                "deadlineWakes": list.deadline_wakes,
+                "updateUs": list.last_update_us,
+                "updateMaxUs": list.update_max_us,
+                "installUs": list.last_install_us,
+                "installMaxUs": list.install_max_us,
                 "compareUs": counters.last_compare_us,
                 "compareMaxUs": counters.compare_max_us,
                 "pending": pending,
@@ -387,17 +401,51 @@ impl GxStoreDiagnostics {
         );
     }
 
-    /// The sidebar state only client storage holds could not be read, so nothing is compared.
-    /// The code is a fixed word: a database error string can carry the file's path.
-    pub(super) fn sidebar_stored_state_failed(&mut self, error: &'static str) {
+    /// The running totals of the sidebar's own state and its writes, on the same schedule.
+    pub(super) fn sidebar_ui_summary(&mut self, counters: &SidebarUiCounters) {
+        if *counters == self.sidebar_ui_summary_written
+            || self
+                .sidebar_ui_summary_considered_at
+                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+        {
+            return;
+        }
+        self.sidebar_ui_summary_considered_at = Some(Instant::now());
+        if !routine_logging_enabled() {
+            return;
+        }
+        self.sidebar_ui_summary_written = *counters;
+        append(
+            "gxStore.sidebarUi.summary",
+            json!({
+                "intents": counters.intents,
+                "writes": counters.writes,
+                "writeFailures": counters.write_failures,
+                "readFailures": counters.read_failures,
+                "writeMaxUs": counters.write_max_us,
+            }),
+        );
+    }
+
+    /// The sidebar's own state could not be read from client storage, so the Rust list is not
+    /// drawn and nothing is written. The code is a fixed word: a database error string can carry
+    /// the file's path.
+    pub(super) fn sidebar_ui_read_failed(&mut self, error: &'static str) {
+        self.sidebar_storage_warning("gxStore.sidebarUi.read.warning", error);
+    }
+
+    /// A write of the sidebar's own state did not reach client storage. The change is still held
+    /// in memory and is written again with the next one.
+    pub(super) fn sidebar_ui_write_failed(&mut self, error: &'static str) {
+        self.sidebar_storage_warning("gxStore.sidebarUi.write.warning", error);
+    }
+
+    fn sidebar_storage_warning(&mut self, event: &'static str, error: &'static str) {
         if self.sidebar_storage_warnings >= 3 {
             return;
         }
         self.sidebar_storage_warnings += 1;
-        self.warning(
-            "gxStore.sidebarShadow.storedState.warning",
-            json!({ "error": error }),
-        );
+        self.warning(event, json!({ "error": error }));
     }
 }
 

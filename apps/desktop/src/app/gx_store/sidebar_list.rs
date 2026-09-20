@@ -1,0 +1,310 @@
+//! The Rust sidebar list inside the app: built from the store and the sidebar's own state, kept up
+//! to date, and drawn when the renderer is switched to it.
+//!
+//! CDXC:Sidebar 2026-09-20 DECISION:
+//! User: the desktop app stops running product logic in QuickJS; one Rust state store owns it, and
+//! every interaction is a local state change plus one redraw. The list is derived here rather than
+//! projected in QuickJS and posted over a bridge. It is rebuilt only when the store, the sidebar's
+//! own state, the settings, the app's own browser tabs or the clock deadline of a row moved, never
+//! per frame, and an update with nothing changed does no work at all. Which list the renderer
+//! draws is the `sidebarListSource` setting, so the two can be compared in one running app.
+
+use std::time::{Duration, Instant};
+
+use ghostex_gx_core::{
+    ChangeSummary, ConnectionPhase, MachineId, SidebarInputs, SidebarSettings, SidebarView,
+    SidebarViewModel, UnavailableState,
+};
+use serde_json::Value;
+
+use super::host::now_ms;
+use super::sidebar_list_inputs::{InputsCache, refresh_inputs, sort_mode};
+use super::sidebar_snapshot::{SnapshotCache, snapshot_from_view};
+use crate::GhostexGpuiApp;
+
+/// How long the settings verdict is reused. Asking stats the settings file and clones its map
+/// under a global lock, and an update can run several times a second.
+const SETTINGS_MAX_AGE: Duration = Duration::from_millis(1000);
+/// The earliest a clock deadline is allowed to wake the list, so a row whose countdown ends in a
+/// millisecond does not book a timer per millisecond.
+const MIN_DEADLINE_WAIT: Duration = Duration::from_millis(50);
+
+/// Which list the renderer draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SidebarListSource {
+    /// The snapshot the TypeScript projection publishes, as before this milestone.
+    #[default]
+    Projection,
+    /// The list derived from the Rust store.
+    Store,
+}
+
+/// What happened since the app started. Memory only; the log lines are built from it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SidebarListCounters {
+    pub(crate) updates: u64,
+    /// Updates that found nothing to do.
+    pub(crate) idle: u64,
+    pub(crate) view_changes: u64,
+    pub(crate) installs: u64,
+    pub(crate) deadline_wakes: u64,
+    pub(crate) update_max_us: u64,
+    pub(crate) install_max_us: u64,
+    pub(crate) last_update_us: u64,
+    pub(crate) last_install_us: u64,
+}
+
+/// The Rust list and everything the host keeps around it.
+#[derive(Default)]
+pub(crate) struct SidebarList {
+    model: SidebarViewModel,
+    /// What the store changed since the last update.
+    changes: ChangeSummary,
+    /// Something besides the store moved (the sidebar's own state, the app's browser tabs, a new
+    /// publish of the values still mirrored).
+    dirty: bool,
+    settings: Option<(u64, SidebarSettings)>,
+    settings_read_at: Option<Instant>,
+    unavailable: UnavailableState,
+    /// The clock deadline a timer is already booked for.
+    deadline_booked: Option<u64>,
+    snapshot_cache: SnapshotCache,
+    inputs_cache: InputsCache,
+    /// The inputs the newest view was built from, so the shadow compares the same moment. Kept
+    /// rather than rebuilt: an update that changed one session must not re-parse the browser tabs
+    /// or clone the sidebar's whole state.
+    pub(super) last_inputs: SidebarInputs,
+    pub(super) last_built_at_ms: u64,
+    pub(super) counters: SidebarListCounters,
+}
+
+impl SidebarList {
+    pub(crate) fn view(&self) -> &SidebarView {
+        self.model.view()
+    }
+
+    /// Folds what one pump changed into what the next update must apply.
+    pub(super) fn note_changes(&mut self, changes: &ChangeSummary) {
+        self.changes.merge(changes.clone());
+    }
+
+    /// Something besides the store moved.
+    pub(super) fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// The settings the list depends on, re-read at most once a second.
+    fn settings(
+        &mut self,
+        published: Option<&crate::app::native_sidebar::model::NativeSidebarSnapshot>,
+    ) -> SidebarSettings {
+        let sort_mode = sort_mode(published);
+        if let Some((hash, settings)) = &self.settings {
+            if self
+                .settings_read_at
+                .is_some_and(|read_at| read_at.elapsed() < SETTINGS_MAX_AGE)
+                && settings.sort_mode == sort_mode
+            {
+                let _ = hash;
+                return settings.clone();
+            }
+        }
+        let saved = crate::shared_settings::shared_sidebar_settings_snapshot();
+        self.settings_read_at = Some(Instant::now());
+        if let Some((hash, settings)) = &self.settings {
+            if *hash == saved.content_hash() && settings.sort_mode == sort_mode {
+                return settings.clone();
+            }
+        }
+        let settings =
+            SidebarSettings::from_settings_json(&Value::Object(saved.object().clone()), sort_mode);
+        self.settings = Some((saved.content_hash(), settings.clone()));
+        settings
+    }
+
+    /// Tracks how long the local daemon has been unavailable, which the empty-state copy reads.
+    fn note_machine_state(&mut self, loaded: bool, now_ms: u64) {
+        if loaded {
+            self.unavailable.since_ms = None;
+            self.unavailable.observed_available = true;
+        } else if self.unavailable.since_ms.is_none() {
+            self.unavailable.since_ms = Some(now_ms);
+        }
+    }
+}
+
+impl GhostexGpuiApp {
+    /// Which list the renderer draws. Read from the saved settings, so it can be moved in a
+    /// running app: the file is re-read whenever it changes on disk.
+    pub(crate) fn gx_store_sidebar_list_source(&self) -> SidebarListSource {
+        // The store's list is only drawn once the sidebar's own state has been read; before that
+        // it would show every project expanded and no hidden item hidden.
+        if !self.gx_store.sidebar_ui.restored() {
+            return SidebarListSource::Projection;
+        }
+        match crate::shared_settings::shared_sidebar_settings_snapshot()
+            .object()
+            .get("sidebarListSource")
+            .and_then(Value::as_str)
+        {
+            Some("store") => SidebarListSource::Store,
+            _ => SidebarListSource::Projection,
+        }
+    }
+
+    /// The sidebar's own state moved. The list is rebuilt at once, because a click must show in
+    /// the same frame.
+    pub(crate) fn gx_store_sidebar_state_changed(&mut self, cx: &mut gpui::Context<Self>) {
+        self.gx_store.sidebar_list.mark_dirty();
+        self.gx_store_update_sidebar_list(cx);
+    }
+
+    /// Rebuilds the list if anything it reads moved, installs it when the renderer is on it, and
+    /// books the next clock deadline. Cheap to call: an update with nothing changed returns at
+    /// once.
+    pub(crate) fn gx_store_update_sidebar_list(&mut self, cx: &mut gpui::Context<Self>) {
+        let now_ms = now_ms();
+        let machine = self.gx_store.core.presentation().machine(&MachineId::Local);
+        let loaded = machine.is_some_and(|machine| machine.loaded().is_some());
+        let live =
+            machine.is_some_and(|machine| machine.connection().phase == ConnectionPhase::Live);
+        let _ = live;
+        self.gx_store
+            .sidebar_list
+            .note_machine_state(loaded, now_ms);
+
+        let published = self.native_sidebar.projection.clone();
+        let settings = self.gx_store.sidebar_list.settings(published.as_deref());
+        let ui_generation = self.gx_store.sidebar_ui.generation();
+        let changes = std::mem::take(&mut self.gx_store.sidebar_list.changes);
+        let dirty = std::mem::take(&mut self.gx_store.sidebar_list.dirty);
+        let mut inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
+        let unavailable = self.gx_store.sidebar_list.unavailable;
+        let store = &mut self.gx_store;
+        refresh_inputs(
+            &mut inputs,
+            &mut store.sidebar_list.inputs_cache,
+            store.sidebar_ui.state(),
+            ui_generation,
+            settings,
+            published.as_deref(),
+            &self.sidebar_browser_tabs_snapshot,
+            &store.sidebar_ui.stored_project_collections,
+            unavailable,
+        );
+        let started = Instant::now();
+        let changed =
+            self.gx_store
+                .sidebar_list
+                .model
+                .update(&self.gx_store.core, &inputs, &changes, now_ms);
+        let update_us = started.elapsed().as_micros() as u64;
+        {
+            let list = &mut self.gx_store.sidebar_list;
+            list.counters.updates += 1;
+            list.counters.last_update_us = update_us;
+            list.counters.update_max_us = list.counters.update_max_us.max(update_us);
+            if !changed && !dirty && changes.is_empty() {
+                list.counters.idle += 1;
+            }
+            if changed {
+                list.counters.view_changes += 1;
+            }
+            list.last_inputs = inputs;
+            list.last_built_at_ms = now_ms;
+        }
+        self.gx_store_prune_sidebar_selection(cx);
+        self.gx_store_book_sidebar_deadline(cx);
+        if changed && self.gx_store_sidebar_list_source() == SidebarListSource::Store {
+            self.gx_store_install_sidebar_list(cx);
+        }
+    }
+
+    /// Drops rows the list no longer draws from the multi-selection, the way the old projection
+    /// prunes its own selection before it builds.
+    fn gx_store_prune_sidebar_selection(&mut self, cx: &mut gpui::Context<Self>) {
+        if self
+            .gx_store
+            .sidebar_ui
+            .state()
+            .selected_session_ids
+            .is_empty()
+        {
+            return;
+        }
+        let drawn: Vec<String> = self
+            .gx_store
+            .sidebar_list
+            .view()
+            .groups
+            .iter()
+            .flat_map(|group| group.core.sessions.iter())
+            .map(|session| session.row.sidebar_session_id.clone())
+            .collect();
+        if self
+            .gx_store
+            .sidebar_ui
+            .retain_selected_sessions(|session_id| drawn.iter().any(|drawn| drawn == session_id))
+        {
+            self.gx_store.sidebar_list.mark_dirty();
+            cx.notify();
+        }
+    }
+
+    /// Replaces the list the renderer draws with the one derived from the store.
+    pub(super) fn gx_store_install_sidebar_list(&mut self, cx: &mut gpui::Context<Self>) {
+        let Some(published) = self.native_sidebar.projection.clone() else {
+            // Nothing has been published yet, so the menus, the HUD and the machine tabs the list
+            // still borrows are not there. The renderer keeps drawing nothing, as it does today
+            // before the first publish.
+            return;
+        };
+        let started = Instant::now();
+        let now_ms = self.gx_store.sidebar_list.last_built_at_ms;
+        let snapshot = {
+            let list = &mut self.gx_store.sidebar_list;
+            let view = list.model.view().clone();
+            snapshot_from_view(&view, &published, &mut list.snapshot_cache, now_ms)
+        };
+        let install_us = started.elapsed().as_micros() as u64;
+        let list = &mut self.gx_store.sidebar_list;
+        list.counters.installs += 1;
+        list.counters.last_install_us = install_us;
+        list.counters.install_max_us = list.counters.install_max_us.max(install_us);
+        self.install_native_sidebar_snapshot(std::sync::Arc::new(snapshot), cx);
+    }
+
+    /// Books one timer for the next moment a row moves on its own (a new session stops leading the
+    /// list, a snooze ends, a countdown ticks). Nothing else wakes the list on time.
+    fn gx_store_book_sidebar_deadline(&mut self, cx: &mut gpui::Context<Self>) {
+        let Some(deadline) = self.gx_store.sidebar_list.next_deadline_ms() else {
+            self.gx_store.sidebar_list.deadline_booked = None;
+            return;
+        };
+        let booked = self.gx_store.sidebar_list.deadline_booked;
+        // A timer for an earlier or equal deadline already covers this one.
+        if booked.is_some_and(|booked| booked <= deadline) {
+            return;
+        }
+        self.gx_store.sidebar_list.deadline_booked = Some(deadline);
+        let wait = Duration::from_millis(deadline.saturating_sub(now_ms())).max(MIN_DEADLINE_WAIT);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.gx_store.sidebar_list.deadline_booked != Some(deadline) {
+                    return;
+                }
+                this.gx_store.sidebar_list.deadline_booked = None;
+                this.gx_store.sidebar_list.counters.deadline_wakes += 1;
+                this.gx_store_update_sidebar_list(cx);
+            });
+        })
+        .detach();
+    }
+}
+
+impl SidebarList {
+    fn next_deadline_ms(&self) -> Option<u64> {
+        self.model.next_deadline_ms()
+    }
+}

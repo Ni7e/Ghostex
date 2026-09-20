@@ -10,7 +10,7 @@ use std::hash::{Hash, Hasher};
 use ghostex_gx_core::{GroupView, SectionView, SessionView, SidebarView};
 use serde_json::Value;
 
-use super::sidebar_shadow_inputs::{detail_bool, detail_str, detail_u64};
+use super::sidebar_list_inputs::{detail_bool, detail_str, detail_u64};
 use crate::app::native_sidebar::model::{
     NativeSidebarGroup, NativeSidebarSection, NativeSidebarSession, NativeSidebarSnapshot,
 };

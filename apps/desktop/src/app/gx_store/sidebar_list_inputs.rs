@@ -1,19 +1,22 @@
-//! The inputs the Rust sidebar view model is built from while the old projection still owns them.
+//! The inputs the Rust sidebar list is built from besides the store.
 //!
-//! Per field, the value comes from wherever it is most faithful: the sidebar's own UI state is
-//! mirrored from the snapshot the old projection just published (it is the exact state that
-//! projection used), the settings and the browser tabs come from this app's own copies, and the
-//! hidden items are read from the client storage the sidebar persists them in, because a hidden
-//! project is absent from the snapshot and cannot be mirrored.
+//! CDXC:Sidebar 2026-09-20 WHY:
+//! Three kinds of value meet here and the file keeps them apart on purpose. The sidebar's own
+//! state (collapse, Space, filters, hidden items, selection) is the Rust store's, owned since
+//! M4b. The browser tabs, the stored collections and the unavailable clock are this app's own
+//! facts. The rest are still read from the snapshot the old projection publishes, because their
+//! real source has not moved into Rust yet: the sort mode and the Recent Projects come from the
+//! daemon's sidebar HUD, the git numbers from the old runtime's background probe, and the Close
+//! After Done and Delayed Send timers from the runtime that owns them. Each of those is handed to
+//! M5 with the HUD and the session lifecycle; until then they are mirrored here and nowhere else,
+//! so there is one list of what is still borrowed.
 
 use ghostex_gx_core::{
-    BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, ProjectDiffStats, SectionCollapse,
-    SectionId, SessionSortMode, SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState,
-    UnavailableState,
+    BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, ProjectDiffStats, SessionSortMode,
+    SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState, UnavailableState,
 };
 use serde_json::Value;
 
-use super::sidebar_shadow_storage::StoredSidebarState;
 use crate::app::native_sidebar::model::{NativeSidebarSession, NativeSidebarSnapshot};
 
 /// Most browser tabs the host publishes; the same bound the sidebar runtime applies.
@@ -23,93 +26,88 @@ const MAX_BROWSER_TABS: usize = 256;
 /// own favicon bound, which is a different contract that happens to hold the same number.
 const FAVICON_URL_MAX_CHARS: usize = 2048;
 
-/// Builds everything the view model reads from the snapshot the old projection published, this
-/// app's browser tabs, and the persisted hidden items.
-pub(super) fn mirror_inputs(
-    snapshot: &NativeSidebarSnapshot,
-    browser_tabs_json: &str,
-    settings: SidebarSettings,
-    stored: StoredSidebarState,
-    unavailable: UnavailableState,
-) -> SidebarInputs {
-    let mut ui = SidebarUiState {
-        selected_machine_id: snapshot.selected_machine_id.clone(),
-        hidden_items: stored.hidden_items,
-        ..SidebarUiState::default()
-    };
-    let section_key = ui.section_key();
-    if let Some(space_id) = snapshot
-        .scroll_scope
-        .split_once('|')
-        .map(|(_, space_id)| space_id)
-        .filter(|space_id| !space_id.is_empty() && *space_id != "all")
-    {
-        ui.collapse
-            .selected_space_by_section
-            .insert(section_key.clone(), space_id.to_string());
-    }
-    for group in &snapshot.groups {
-        if group.collapsed {
-            ui.collapse.collapsed_groups.insert(group.group_id.clone());
-        }
-        if group.expanded {
-            ui.collapse
-                .expanded_session_lists
-                .insert(group.storage_id.clone());
-        }
-        if group.hover_actions_expanded {
-            ui.collapse
-                .expanded_hover_actions
-                .insert(group.storage_id.clone());
-        }
-        let mut sections = SectionCollapse::default();
-        for section in &group.sections {
-            if let Some(id) = section_id(&section.id) {
-                sections.set(id, section.collapsed);
-            }
-        }
-        ui.collapse
-            .section_collapse
-            .insert(group.storage_id.clone(), sections);
-        for session in &group.sessions {
-            if detail_bool(session, "isMultiSelected") {
-                ui.selected_session_ids.push(session.session_id.clone());
-            }
-        }
-    }
-    for collection in &snapshot.collections {
-        if collection.collapsed {
-            ui.collapse
-                .collapsed_collections
-                .insert(collection.storage_id.clone());
-        }
-    }
-    let (show_hidden, tag_filters) = more_menu_state(&snapshot.more_menu);
-    ui.show_hidden = show_hidden;
-    ui.selected_tag_filters = tag_filters;
+/// What the assembled inputs were built from, so an update that changes none of it does no work.
+#[derive(Default)]
+pub(super) struct InputsCache {
+    /// Identity of the sidebar's own state: bumped by every intent and by the restore.
+    ui_generation: u64,
+    /// Contents of the browser tab list this app last published, which arrives as JSON.
+    browser_tabs_hash: Option<u64>,
+    /// Address of the snapshot the mirrored values were taken from.
+    published: Option<usize>,
+    stored_collections: Option<Option<Value>>,
+    settings: Option<SidebarSettings>,
+    unavailable: Option<UnavailableState>,
+}
 
-    let recent_projects = snapshot
-        .hud
-        .get("recentProjects")
+/// Brings the assembled inputs up to date in place. Each part is rebuilt only when its own source
+/// moved, so a pump that changed one session does not re-parse the browser tabs or re-read every
+/// published row.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn refresh_inputs(
+    inputs: &mut SidebarInputs,
+    cache: &mut InputsCache,
+    ui: &SidebarUiState,
+    ui_generation: u64,
+    settings: SidebarSettings,
+    published: Option<&NativeSidebarSnapshot>,
+    browser_tabs_json: &str,
+    stored_project_collections: &Option<Value>,
+    unavailable: UnavailableState,
+) {
+    if cache.ui_generation != ui_generation || cache.settings.is_none() {
+        cache.ui_generation = ui_generation;
+        inputs.ui = ui.clone();
+    }
+    if cache.settings.as_ref() != Some(&settings) {
+        cache.settings = Some(settings.clone());
+        inputs.settings = settings;
+    }
+    let browser_hash = text_hash(browser_tabs_json);
+    if cache.browser_tabs_hash != Some(browser_hash) {
+        cache.browser_tabs_hash = Some(browser_hash);
+        inputs.host.browser_tabs = browser_tabs(browser_tabs_json);
+    }
+    if cache.stored_collections.as_ref() != Some(stored_project_collections) {
+        cache.stored_collections = Some(stored_project_collections.clone());
+        inputs.host.stored_project_collections = stored_project_collections.clone();
+    }
+    if cache.unavailable != Some(unavailable) {
+        cache.unavailable = Some(unavailable);
+        inputs.host.unavailable = unavailable;
+    }
+    let published_identity = published.map_or(0, |snapshot| snapshot as *const _ as usize);
+    if cache.published == Some(published_identity) {
+        return;
+    }
+    cache.published = Some(published_identity);
+    refresh_mirrored(&mut inputs.host, published);
+}
+
+/// The values whose real source has not moved into Rust yet, taken from the newest publish of the
+/// old projection. Every one of them is handed to M5 with the HUD and the session lifecycle.
+fn refresh_mirrored(host: &mut SidebarHostInputs, published: Option<&NativeSidebarSnapshot>) {
+    let recent_projects = published
+        .and_then(|snapshot| snapshot.hud.get("recentProjects"))
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let mut host = SidebarHostInputs {
-        browser_tabs: browser_tabs(browser_tabs_json),
-        // The projection hides a parked project by its own id; a remote machine's entry carries a
-        // machine-scoped one and belongs to that machine's section.
-        recent_project_ids: recent_projects
-            .iter()
-            .filter(|project| project.get("remoteMachineId").is_none())
-            .filter_map(|project| project.get("projectId").and_then(Value::as_str))
-            .map(str::to_string)
-            .collect(),
-        recent_project_count: recent_projects.len(),
-        stored_project_collections: stored.project_collections,
-        unavailable,
-        ..SidebarHostInputs::default()
-    };
-    for group in &snapshot.groups {
+    // The projection hides a parked project by its own id; a remote machine's entry carries a
+    // machine-scoped one and belongs to that machine's section.
+    host.recent_project_ids = recent_projects
+        .iter()
+        .filter(|project| project.get("remoteMachineId").is_none())
+        .filter_map(|project| project.get("projectId").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    host.recent_project_count = recent_projects.len();
+    host.project_diff_stats.clear();
+    host.close_after_done.clear();
+    host.local_delayed_sends.clear();
+    for group in published
+        .map(|snapshot| snapshot.groups.as_slice())
+        .unwrap_or_default()
+    {
         if let Some((project_id, stats)) = project_diff_stats(group.project_context.as_ref()) {
             host.project_diff_stats.insert(project_id, stats);
         }
@@ -124,32 +122,25 @@ pub(super) fn mirror_inputs(
             }
         }
     }
-
-    SidebarInputs { ui, settings, host }
 }
 
-/// The sort mode the old projection used, from the HUD it published.
-pub(super) fn sort_mode(snapshot: &NativeSidebarSnapshot) -> SessionSortMode {
+fn text_hash(value: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The sort mode, from the daemon's sidebar HUD as the old projection publishes it. The HUD moves
+/// into the store with the session lifecycle (M5); until then this is the one reader of it.
+pub(super) fn sort_mode(snapshot: Option<&NativeSidebarSnapshot>) -> SessionSortMode {
     match snapshot
-        .hud
-        .get("activeSessionsSortMode")
+        .and_then(|snapshot| snapshot.hud.get("activeSessionsSortMode"))
         .and_then(Value::as_str)
     {
         Some("manual") => SessionSortMode::Manual,
         _ => SessionSortMode::LastActivity,
     }
-}
-
-fn section_id(value: &str) -> Option<SectionId> {
-    Some(match value {
-        "browser" => SectionId::Browser,
-        "pinned" => SectionId::Pinned,
-        "drafts" => SectionId::Drafts,
-        "sessions" => SectionId::Sessions,
-        "parked" => SectionId::Parked,
-        "snoozed" => SectionId::Snoozed,
-        _ => return None,
-    })
 }
 
 pub(super) fn detail_bool(session: &NativeSidebarSession, key: &str) -> bool {
@@ -166,37 +157,6 @@ pub(super) fn detail_u64(session: &NativeSidebarSession, key: &str) -> u64 {
         .get(key)
         .and_then(Value::as_u64)
         .unwrap_or(0)
-}
-
-/// Show Hidden and the ticked tag filters, which only the "more" menu of the snapshot reveals.
-fn more_menu_state(more_menu: &Value) -> (bool, Vec<String>) {
-    let mut show_hidden = false;
-    let mut filters: Vec<String> = Vec::new();
-    let mut walk: Vec<&Value> = more_menu.as_array().into_iter().flatten().collect();
-    while let Some(item) = walk.pop() {
-        if let Some(children) = item.get("children").and_then(Value::as_array) {
-            walk.extend(children);
-        }
-        let Some(command) = item.get("command") else {
-            continue;
-        };
-        match command.get("type").and_then(Value::as_str) {
-            Some("sidebarAction")
-                if command.get("action").and_then(Value::as_str) == Some("showHidden") =>
-            {
-                show_hidden = item.get("checked").and_then(Value::as_bool) == Some(true);
-            }
-            Some("toggleTagFilter")
-                if item.get("checked").and_then(Value::as_bool) == Some(true) =>
-            {
-                if let Some(tag) = command.get("tag").and_then(Value::as_str) {
-                    filters.push(tag.to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    (show_hidden, filters)
 }
 
 /// The browser tabs this app last published to the sidebar runtime, read back with the same
