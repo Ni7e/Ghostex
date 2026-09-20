@@ -53,7 +53,21 @@ impl GhostexGpuiApp {
         CDXC:Workarea 2026-06-22-14:40:
         The Agents workspace root must be a vertical flex container, not only a flex-sized child of the command-pane wrapper. The rendered split or leaf tree uses flex_1 sizing, so it needs this parent layout context to fill the available height above the command pane instead of leaving a black shell gap below the terminal pane.
         */
-        let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
+        /*
+        CDXC:Titlebar 2026-09-20 WHY:
+        This column is the one the header floats over, so it starts at the window's top edge while
+        it holds the GPUI chat the fade is drawn over, and one header height down in every other
+        case, so a tab bar, a pane outline, a terminal grid or a CEF page never ends up behind the
+        header. The top edge is the header's own line there, so the pane draws no border against it,
+        exactly as it draws none against a resize rail. The rule is in
+        render/workarea_header/overlap.rs and the decision behind it on the header itself.
+        */
+        let flows_under_header = self.agents_column_flows_under_workarea_header(cx);
+        let top_inset = self.workarea_header_column_top_inset(flows_under_header);
+        let outer_rail_edges = RailFacingEdges {
+            top: flows_under_header,
+            ..self.main_workspace_outer_rail_edges(window)
+        };
         let rail_edges = match layout {
             AgentsWorkspaceLayout::FullWidth => outer_rail_edges,
             // The split divider is the column's right-hand rail, so the panes there own no border.
@@ -64,6 +78,8 @@ impl GhostexGpuiApp {
         };
         let root = v_flex()
             .id("ghostex-gpui-agents-workspace")
+            .relative()
+            .pt(px(top_inset))
             .min_h_0()
             .overflow_hidden()
             .bg(workspace_background_color());
@@ -85,6 +101,9 @@ impl GhostexGpuiApp {
                 self.render_workspace_node(&self.agents_workspace.root, rail_edges, window, cx)
             },
         )
+        .when(flows_under_header, |this| {
+            this.child(self.render_workarea_header_content_fade())
+        })
         .into_any_element()
     }
 

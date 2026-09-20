@@ -30,7 +30,7 @@ use crate::*;
 
 /// CDXC:Titlebar 2026-09-20 DECISION:
 /// User: Ask Ghostex, Tips & Tricks, Resources, Dev servers and Extensions leave the titlebar for one trailing "⋯" menu, so the titlebar row holds only the active project's own controls.
-/// Each row opens the panel it always opened, anchored to the ⋯ button, and an item switched off in Settings or scoped away from this project by "Available in" is not listed at all.
+/// Each row opens the panel it always opened, anchored to the ⋯ button, and an item switched off in Settings or scoped away from this project by its view scope is not listed at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GpuiTitlebarMoreMenuItem {
     AskGhostex,
@@ -81,7 +81,7 @@ impl GpuiTitlebarMoreMenuItem {
         }
     }
 
-    /// The Settings switch and the "Available in" scope key this item's titlebar
+    /// The Settings switch and the view scope key this item's titlebar
     /// button was gated by, so the one gate keeps deciding whether it is offered.
     fn visibility_gate(self) -> (&'static str, &'static str) {
         match self {

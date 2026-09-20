@@ -8,6 +8,7 @@
 pub(crate) mod action_buttons;
 pub(crate) mod anchor;
 pub(crate) mod breadcrumb;
+pub(crate) mod overlap;
 pub(crate) mod shell;
 pub(crate) mod toggles;
 

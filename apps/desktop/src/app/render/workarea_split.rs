@@ -70,13 +70,28 @@ impl GhostexGpuiApp {
                 window,
                 cx,
             ))
-            .child(self.render_workarea_split_divider(cx))
+            .child(
+                /*
+                CDXC:Titlebar 2026-09-20 WHY:
+                The rail and the view panel start one header height down because neither may pass
+                under the floating header: the rail is a grab target, and the panel's content is a
+                CEF page, an AppKit child view that paints over everything GPUI draws and would hide
+                the header instead of fading under it. Only the Agents column, and only while it
+                holds the GPUI chat, reaches the window's top edge.
+                */
+                v_flex()
+                    .flex_shrink_0()
+                    .h_full()
+                    .pt(px(WORKAREA_HEADER_HEIGHT))
+                    .child(self.render_workarea_split_divider(cx)),
+            )
             .child(
                 // CDXC:Workarea 2026-09-14 WHY:
                 // Browser owns its borders inside its leaves; other views own a surface border.
                 // Keep those borders inside the flex allocation so switching views cannot change the
                 // Agents column's width.
                 v_flex()
+                    .pt(px(WORKAREA_HEADER_HEIGHT))
                     .flex_grow(1.0 - split_ratio)
                     .flex_shrink_1()
                     .flex_basis(relative(0.0))

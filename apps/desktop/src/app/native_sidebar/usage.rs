@@ -2,6 +2,7 @@
 // Commands row. The meters themselves are the shared renderer in
 // app/titlebar/account_usage.rs; this module owns only the strip around them.
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, ClickEvent, InteractiveElement as _, IntoElement, ParentElement as _,
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
@@ -38,10 +39,20 @@ impl GhostexGpuiApp {
             return None;
         }
         let scale = appearance.scale;
-        let expanded = self.sidebar_usage_expanded;
         let usable_width = (self.sidebar_width - 20.0 * scale).max(0.0);
         let columns = ((usable_width / (SIDEBAR_USAGE_METER_MIN_WIDTH * scale)).floor() as usize)
             .clamp(1, SIDEBAR_USAGE_MAX_COLUMNS);
+        /*
+        CDXC:Sidebar 2026-09-20 WHY:
+        Expanding only ever adds the accounts the collapsed row had no column for, so with four
+        accounts or fewer at the default sidebar width the two states are the same row and the
+        toggle looks broken. The strip is the toggle, so when there is nothing to expand there is no
+        toggle: no hover highlight, no click, and the meters keep their own popups. Making the two
+        states differ some other way would have meant inventing a second presentation for the
+        expanded strip that the 2026-09-19 screens do not draw.
+        */
+        let expandable = meters.len() > columns;
+        let expanded = self.sidebar_usage_expanded && expandable;
         if !expanded {
             // Stable, so accounts that are equally far from their limit keep the
             // machine/provider/account order gxserver published them in.
@@ -83,11 +94,14 @@ impl GhostexGpuiApp {
                         .gap(px(4.0 * scale))
                         .rounded(px(9.0 * scale))
                         .cursor_default()
-                        .hover(|strip| strip.bg(appearance.hover))
-                        .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
-                            cx.stop_propagation();
-                            app.toggle_native_sidebar_usage_expanded(cx);
-                        }))
+                        .when(expandable, |strip| {
+                            strip
+                                .hover(|strip| strip.bg(appearance.hover))
+                                .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+                                    cx.stop_propagation();
+                                    app.toggle_native_sidebar_usage_expanded(cx);
+                                }))
+                        })
                         .children(rows),
                 )
                 .into_any_element(),

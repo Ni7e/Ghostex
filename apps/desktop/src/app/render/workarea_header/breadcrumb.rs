@@ -17,21 +17,29 @@ use crate::app::helpers::*;
 use crate::*;
 
 impl GhostexGpuiApp {
-    /// The title of the session the breadcrumb names, taken from the sidebar snapshot's focused
-    /// row so the header and the sidebar can never disagree about which session is current.
+    /// CDXC:Titlebar 2026-09-20 DECISION:
+    /// User: the breadcrumb names the project and the focused session of the sessions column, as
+    /// the 2026-09-19 screens draw it. It is the open view's tab, not the breadcrumb, that says
+    /// which view is on the right, so the title comes from the focused Agents pane's active tab.
+    /// This supersedes the phase 2 rule that read the sidebar snapshot's focused row, which named
+    /// the Browser's page ("Ghostex / Example Domain") as soon as a view took that row.
+    ///
+    /// CDXC:Titlebar 2026-09-20 WHY:
+    /// The pane's title is the sidebar's own projection of that session (`agents_workspace.session`
+    /// is written from the sidebar snapshot), so the header and the sidebar still cannot disagree
+    /// about what a session is called; they only stop disagreeing about which session is current.
     pub(crate) fn workarea_header_session_title(&self) -> Option<String> {
-        let snapshot = self.native_sidebar.snapshot.as_ref()?;
-        snapshot
-            .groups
-            .iter()
-            .flat_map(|group| group.sessions.iter())
-            .find(|session| session.is_focused)
-            .map(|session| {
-                session
-                    .display_title
-                    .clone()
-                    .unwrap_or_else(|| session.alias.clone())
-            })
+        let workspace = &self.agents_workspace;
+        let pane_id = workspace
+            .focus_mode_pane
+            .into_iter()
+            .chain(std::iter::once(workspace.focused_pane))
+            .chain(workspace.rendered_leaf_order())
+            .find(|pane_id| workspace.find_leaf(*pane_id).is_some())?;
+        let session_id = workspace.active_session_in_pane(pane_id)?;
+        workspace
+            .session(session_id)
+            .map(|session| session.title.clone())
             .filter(|title| !title.trim().is_empty())
     }
 

@@ -71,6 +71,7 @@ import {
 import {
   extensionViewScopeKey,
   ghostexViewScope,
+  isDefaultGhostexViewScope,
   officialViewScopeKey,
   setGhostexViewScope,
   viewScopeDescription,
@@ -131,10 +132,11 @@ const OFFICIAL_TITLEBAR_EXTENSIONS = GHOSTEX_OFFICIAL_EXTENSIONS.filter(
 );
 
 /**
- * CDXC:Extensions 2026-09-18 DECISION:
- * User: every view and extension row gets the same Edit button as a custom view, so its "Available in"
- * scope can be narrowed to selected projects or selected spaces. One controls object carries the three
- * things a row needs, so the official rows and the store rows stay one behaviour instead of two.
+ * CDXC:Extensions 2026-09-20 DECISION:
+ * User (ruling 3A): every view and extension row gets the same Edit button as a custom view, and behind it
+ * a Default of shown or hidden plus per-project and per-space overrides. Supersedes the 2026-09-18 wording
+ * that called this an "Available in" allow-list. One controls object carries the three things a row needs,
+ * so the official rows and the store rows stay one behaviour instead of two.
  */
 type ViewScopeControls = {
   /** The row's scope summary, or undefined while the view is available everywhere. */
@@ -225,7 +227,7 @@ export function ExtensionsSettingsTab({
   const scopeControls: ViewScopeControls = {
     describe: (key) => {
       const scope = ghostexViewScope(settings.viewScopes, key);
-      return scope.availability === 'all' ? undefined : viewScopeDescription(scope, { projects, spaces });
+      return isDefaultGhostexViewScope(scope) ? undefined : viewScopeDescription(scope, { projects, spaces });
     },
     edit: (key, title) => setScopeEditor({ draft: ghostexViewScope(settings.viewScopes, key), key, title }),
     renderEditor: (key) =>
@@ -236,20 +238,13 @@ export function ExtensionsSettingsTab({
           onChange={(apply) => setScopeEditor((current) => (current ? apply(current) : current))}
           onSave={() => {
             /*
-             * CDXC:Extensions 2026-09-18 WHY:
-             * "Selected projects" or "Selected spaces" with nothing ticked hides the view everywhere,
-             * which reads as the app losing a tab. Refuse the save the way the custom-view editor does.
+             * CDXC:Extensions 2026-09-20 WHY:
+             * A Default of "Hidden unless chosen" with nothing chosen is saved as it stands, and hides the
+             * view everywhere. The 2026-09-18 editor refused that save because its allow-list could only
+             * ever mean "show it in these", so an empty list read as a mistake; under the override model it
+             * is the user asking for the view to be gone, and the view picker is where it comes back.
              */
-            const { draft } = scopeEditor;
-            if (draft.availability === 'selected' && !draft.projectIds.length) {
-              setScopeEditor({ ...scopeEditor, error: 'Choose at least one project.' });
-              return;
-            }
-            if (draft.availability === 'spaces' && !draft.spaceRefs.length) {
-              setScopeEditor({ ...scopeEditor, error: 'Choose at least one space.' });
-              return;
-            }
-            onUpdateSetting('viewScopes', setGhostexViewScope(settings.viewScopes, scopeEditor.key, draft));
+            onUpdateSetting('viewScopes', setGhostexViewScope(settings.viewScopes, scopeEditor.key, scopeEditor.draft));
             setScopeEditor(undefined);
           }}
           projects={projects}

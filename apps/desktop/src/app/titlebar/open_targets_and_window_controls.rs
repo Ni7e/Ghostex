@@ -30,7 +30,7 @@ impl GhostexGpuiApp {
     /*
     CDXC:Extensions 2026-09-18 DECISION:
     User: a titlebar button is scoped exactly like a workarea, so "hidden" means either the
-    Extensions page switch is off OR the button's "Available in" scope excludes the active project.
+    Extensions page switch is off OR the button's view scope hides it in the active project.
     Every button and every ⋯ menu row asks this one question, so they stay one behaviour.
     SEE-ALSO: apps/desktop/src/app/view_scopes.rs, apps/desktop/src/app/titlebar/more_menu.rs, packages/core-ui/settings-modal/tabs/extensions.tsx.
     */

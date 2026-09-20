@@ -4339,7 +4339,7 @@ body.app-modal-host-body {
 
 /*
  * CDXC:Settings 2026-09-18 DECISION:
- * User: the "Available in" scope choices are toggle cards, three to a row, instead of a checkbox list.
+ * User: the view scope choices are toggle cards, three to a row, instead of a checkbox list.
  *
  * Written as real CSS rather than Tailwind utilities because the app-modal Settings page loads the
  * pre-generated `shadcn.generated.css`, so a utility that appears nowhere else in the tree (an arbitrary

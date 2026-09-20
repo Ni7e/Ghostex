@@ -412,7 +412,7 @@ const storySpaces: ProjectViewSpace[] = [
 /*
  * CDXC:Extensions 2026-09-18:
  * Settings -> Extensions with Spaces and Projects available, so the per-row Edit button and its
- * "Available in" editor can be reviewed on the Workareas, Title bar buttons, and Your views lists.
+ * view scope editor can be reviewed on the Workareas, Title bar buttons, and Your views lists.
  * The Extensions Store section needs a gxserver bootstrap and is absent here by design.
  */
 const storyPluginStatus: SidebarPluginSettingsStatusMessage = {

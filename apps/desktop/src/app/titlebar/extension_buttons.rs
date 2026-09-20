@@ -96,7 +96,7 @@ impl GhostexGpuiApp {
             .values()
             /*
             CDXC:Extensions 2026-09-18 DECISION:
-            User: an extension's "Available in" scope decides where it is shown, so a pinned titlebar
+            User: an extension's view scope decides where it is shown, so a pinned titlebar
             button disappears in a project the extension is not scoped to, exactly like its view tab.
             SEE-ALSO: apps/desktop/src/app/view_scopes.rs.
             */

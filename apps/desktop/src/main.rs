@@ -162,7 +162,7 @@ pub(crate) use crate::app::model::*;
 // the sibling modules that hold `Entity<GhostexGpuiApp>`, and the FFI bridge.
 pub(crate) use crate::app::core::*;
 // CDXC:Extensions 2026-09-18 SEE-ALSO:
-// The per-view "Available in" scope keys are read from workarea.rs and the titlebar modules.
+// The per-view scope keys are read from workarea.rs and the titlebar modules.
 pub(crate) use crate::app::view_scopes::*;
 
 fn main() {

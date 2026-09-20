@@ -105,14 +105,33 @@ impl GhostexGpuiApp {
                 .items_stretch()
                 .overflow_hidden()
                 .child(self.render_main_workspace(window, cx))
-                .child(self.render_command_pane_side_divider(cx))
-                .child(self.render_command_pane_panel(
-                    GpuiCommandPaneSide::Right,
-                    panel_width,
-                    false,
-                    command_pane_panel_chrome_width(panel_width, false),
-                    cx,
-                ))
+                /*
+                CDXC:Titlebar 2026-09-20 WHY:
+                The right dock and its rail keep their old top edge, one header height down: the
+                floating header would otherwise cover the command pane's own tab bar and its grab
+                strip. Only the Agents column, and only while its content is the GPUI chat the fade
+                is drawn over, reaches the window's top edge.
+                */
+                .child(
+                    v_flex()
+                        .flex_shrink_0()
+                        .h_full()
+                        .pt(px(WORKAREA_HEADER_HEIGHT))
+                        .child(self.render_command_pane_side_divider(cx)),
+                )
+                .child(
+                    v_flex()
+                        .flex_shrink_0()
+                        .h_full()
+                        .pt(px(WORKAREA_HEADER_HEIGHT))
+                        .child(self.render_command_pane_panel(
+                            GpuiCommandPaneSide::Right,
+                            panel_width,
+                            false,
+                            command_pane_panel_chrome_width(panel_width, false),
+                            cx,
+                        )),
+                )
                 .into_any_element(),
             CommandPaneWorkspaceLayoutPlan::Floating {
                 panel_height,

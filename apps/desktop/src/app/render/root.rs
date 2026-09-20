@@ -1146,16 +1146,26 @@ impl Render for GhostexGpuiApp {
                         this.child(self.render_sidebar_resize_divider(cx))
                     })
                     .child(
+                        /*
+                        CDXC:Titlebar 2026-09-20 WHY:
+                        The header floats (the decision is on it, in
+                        render/workarea_header/shell.rs), so the workspace owns the whole column
+                        height and starts at the window's top edge. The header is the column's last
+                        child because paint order is what puts it over the content it floats above;
+                        every column that cannot let its content pass under it starts one header
+                        height down instead (`workarea_header_column_top_inset`).
+                        */
                         v_flex()
                             .id("ghostex-gpui-workspace-column")
+                            .relative()
                             .flex_1()
                             .h_full()
                             .min_w_0()
                             .min_h_0()
                             .overflow_hidden()
                             .bg(workspace_background_color())
-                            .child(self.render_workarea_header(window, cx))
-                            .child(self.render_workspace_with_command_pane(window, cx)),
+                            .child(self.render_workspace_with_command_pane(window, cx))
+                            .child(self.render_workarea_header(window, cx)),
                     ),
             )
             .child(self.render_gpui_status_pet_presentation(cx))

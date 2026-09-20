@@ -985,20 +985,25 @@ docs directory), `hideProjectHeaderDiffStats`,
   Extension commands use the active local project's folder unless the extension
   supplies a folder; relative folders are resolved inside the active project.
   Every row on this page has an Edit (pencil) button that chooses where that
-  view, title bar button, or extension appears: All projects, Selected projects
-  (tick the projects), or Selected spaces (tick the spaces). Worktrees follow
-  their parent project, and a project inside a group follows the group. A row
-  narrowed this way shows its scope under its description, and the view or
-  button is simply absent while you work in a project it does not cover, so its
-  hotkeys and command palette entries go away with it. Custom views under Your
-  views use the same Available in picker inside their own editor.
+  view, title bar button, or extension appears. Pick a Default of Shown
+  everywhere or Hidden unless chosen, then turn individual projects and spaces
+  on or off to override it, so a view can be hidden in one project without
+  listing every other one. A project's own setting wins over its space, and a
+  space's setting wins over the Default. Worktrees follow their parent project,
+  and a project inside a group follows the group. A row narrowed this way shows
+  its scope under its description, and the view or button is simply absent
+  wherever it is hidden, so its hotkeys and command palette entries go away with
+  it. Custom views under Your views keep their own Available in picker inside
+  their own editor.
   Its Titlebar account usage section lets you star saved Claude and Codex
   accounts to show their usage at the bottom of the desktop sidebar, or unstar
   them to hide it. These are the same per-account stars available in
   Settings > Accounts. The usage strip starts collapsed to a single row holding
-  as many meters as fit, the accounts closest to their limit first; click the
-  strip to show every account four per row, and click it again to collapse it.
-  Ghostex remembers the choice.
+  as many meters as fit, the accounts closest to their limit first; when you
+  have starred more accounts than fit in that row, click the strip to show every
+  account four per row, and click it again to collapse it. Ghostex remembers the
+  choice. When every starred account already fits, there is nothing to expand
+  and the strip is not clickable.
   Claude meters show the two tightest of the weekly, five-hour, and Fable
   limits, so the Fable limit is never hidden when it is running out; launcher
   and picker rows and the Accounts figures use the same two numbers. Each

@@ -1,5 +1,5 @@
-//! The header row itself: its frame, its window-control duties, its drag behaviour, and the
-//! decorative fade that replaces the hairline the old titlebar drew under itself.
+//! The header row itself: its frame, its window-control duties, its drag behaviour, and the float
+//! that replaces the hairline the old titlebar drew under itself.
 
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
@@ -96,31 +96,38 @@ impl GhostexGpuiApp {
         let compact = self.workarea_header_compact(window);
 
         /*
+        CDXC:Titlebar 2026-09-20 DECISION:
+        User: "they just do nice fade from bottom mask thingy at the top". The header floats over
+        the workspace column instead of sitting above it, so the transcript scrolls under it and
+        fades out; it paints the workspace background, draws no bottom border, and there is no edge
+        at all where it meets the content. This is the overlap the user approved, and it is scoped
+        to the header over the content beneath it: the row is opaque and occludes the mouse, so the
+        band it covers is the drag area it has always been, and the ramp below it
+        (`render_workarea_header_content_fade`) carries no hitbox at all, so everything under the
+        faded strip keeps every click, drag and scroll. Nothing here licenses another overlay.
+
         CDXC:Titlebar 2026-09-20 WHY:
-        The header paints the workspace background, not the old chrome gradient, and draws no bottom
-        border, so there is no edge at all where it meets the content. Its background is the
-        mockup's fade (solid down to 60%, transparent at the bottom) rather than a flat fill, which
-        is what the design asks for and what a floating header over a scrolling transcript needs.
-        It is invisible today on purpose: the header is a normal sibling above the workspace, so the
-        only thing behind its lower band is the same background. Making content actually scroll
-        under it means overlapping an interactive region with another, which AGENTS.md does not
-        allow without the user's explicit approval, and it would move the workspace's top edge, which
-        phase 2 leaves alone.
+        `occlude()` is what makes the float honest rather than a second input layer: without it the
+        row's own hitbox would not stop a click on the empty drag area from also reaching the
+        transcript painted underneath, and the same press would both drag the window and land in the
+        chat. It blocks the mouse only where the header is actually drawn, and only while no drag is
+        in flight (`workarea_header_blocks_mouse`).
         */
         let header_background = workspace_background_color();
         let header = div()
             .id("ghostex-gpui-workarea-header")
-            .relative()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
             .flex()
             .items_center()
             .flex_shrink_0()
-            .w_full()
             .h(px(WORKAREA_HEADER_HEIGHT))
-            .bg(gpui::linear_gradient(
-                180.0,
-                gpui::linear_color_stop(header_background, 0.6),
-                gpui::linear_color_stop(header_background.opacity(0.0), 1.0),
-            ))
+            .bg(header_background)
+            .when(self.workarea_header_blocks_mouse(), |header| {
+                header.occlude()
+            })
             .text_color(titlebar_text_color())
             .font_family("Inter Variable")
             .line_height(px(TITLEBAR_CONTROL_HEIGHT))

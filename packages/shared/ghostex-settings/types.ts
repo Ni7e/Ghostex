@@ -749,10 +749,11 @@ export type ghostexSettings = {
   customViews: GhostexCustomView[];
   customViewTemplates: ProjectViewTemplate[];
   /**
-   * CDXC:Extensions 2026-09-18 DECISION:
-   * User: built-in views and extensions get the same "Available in" picker as custom views, so each one can be
-   * limited to selected projects or selected spaces. Keyed by `officialViewScopeKey` / `extensionViewScopeKey`;
-   * a view with no entry is available everywhere.
+   * CDXC:Extensions 2026-09-20 DECISION:
+   * User (ruling 3A): each built-in view and extension carries a default of shown or hidden plus per-project and
+   * per-space overrides, resolved project then space then default, so a view can be hidden in one project without
+   * listing every other one. Supersedes the 2026-09-18 "Available in" allow-list. Keyed by `officialViewScopeKey` /
+   * `extensionViewScopeKey`; a view with no entry is shown everywhere.
    */
   viewScopes: GhostexViewScopes;
   titlebarViewOrder: string[];

@@ -3,23 +3,29 @@ import { IconCheck, IconX } from '@tabler/icons-react';
 import { Button } from '@/packages/components/ui/button';
 import { Switch } from '@/packages/components/ui/switch';
 import type { ProjectViewProject, ProjectViewSpace } from '@/packages/shared/ghostex-settings/project-views';
-import type { GhostexViewScope } from '@/packages/shared/ghostex-settings/view-scopes';
+import {
+  parseViewScopeSpaceKey,
+  viewScopeSpaceKey,
+  withViewScopeOverride,
+  type GhostexViewScope,
+  type GhostexViewScopeOverrideTarget,
+} from '@/packages/shared/ghostex-settings/view-scopes';
 import { SettingRow, SelectField } from '../fields';
 
 /**
- * CDXC:Extensions 2026-09-18 DECISION:
- * User: built-in views and extensions get the same Edit button and the same "Available in" picker as the
- * custom views, so a workarea, a titlebar button, or a store extension can be limited to chosen projects
- * or chosen spaces instead of only being on or off app-wide. The projects and spaces are picked as a
- * three-per-row grid of toggle cards, not a checkbox list.
+ * CDXC:Extensions 2026-09-20 DECISION:
+ * User (ruling 3A): a view's scope is a Default of shown or hidden plus per-project and per-space
+ * overrides. So this editor is a Default picker and two grids of toggle cards, each card writing one
+ * override for one project or one space. It supersedes the 2026-09-18 "Available in" allow-list
+ * (All projects / Selected projects / Selected spaces), which could not say "hide this one here".
  *
  * Two deliberate differences from the custom-view editor: there is no "Matching projects" option, because
  * only a custom view has a source that can fail to resolve, and the project list is ticked HERE rather
  * than one project at a time in Settings → Projects, because a built-in view carries no per-project
  * binding (URL, command, working directory) that would need a project page to edit.
- * SEE-ALSO: packages/core-ui/settings-modal/project-views/editor.tsx renders the same two controls.
+ * SEE-ALSO: packages/core-ui/settings-modal/project-views/editor.tsx renders the custom-view picker.
  */
-export type ViewScopeEditorState = { draft: GhostexViewScope; error?: string; key: string; title: string };
+export type ViewScopeEditorState = { draft: GhostexViewScope; key: string; title: string };
 
 /**
  * CDXC:Settings 2026-09-18 DECISION:
@@ -91,104 +97,97 @@ export function ViewScopeEditor({
 }) {
   const id = useId();
   const scope = editor.draft;
-  const update = (patch: Partial<GhostexViewScope>) =>
-    onChange((current) => ({ ...current, draft: { ...current.draft, ...patch }, error: undefined }));
+  const override = (target: GhostexViewScopeOverrideTarget, checked: boolean) =>
+    onChange((current) => ({
+      ...current,
+      draft: withViewScopeOverride(current.draft, target, checked ? 'shown' : 'hidden'),
+    }));
   /*
-   * A saved scope can outlive the space or project it names — a space deleted in the sidebar, a project
-   * closed, a remote machine disconnected. Keep the stored entry visible and untickable-away-by-accident
-   * rather than dropping it silently, so saving an unrelated edit cannot quietly widen the scope.
+   * A saved override can outlive the space or project it names — a space deleted in the sidebar, a
+   * project closed, a remote machine disconnected. Keep the stored entry visible and editable rather
+   * than dropping it silently, so saving an unrelated edit cannot quietly widen or narrow the scope.
    */
-  const spaceOptions = [
+  const spaceOptions: ProjectViewSpace[] = [
     ...spaces,
-    ...scope.spaceRefs
-      .filter((ref) => !spaces.some((space) => space.sectionKey === ref.sectionKey && space.spaceId === ref.spaceId))
-      .map((ref) => ({ ...ref, name: 'Unavailable space' })),
+    ...Object.keys(scope.spaces).flatMap((key) => {
+      if (spaces.some((space) => viewScopeSpaceKey(space) === key)) return [];
+      const ref = parseViewScopeSpaceKey(key);
+      return ref ? [{ ...ref, name: 'Unavailable space' }] : [];
+    }),
   ];
-  const projectOptions = [
+  const projectOptions: ProjectViewProject[] = [
     ...projects,
-    ...scope.projectIds
-      .filter((projectId) => !projects.some((project) => project.projectId === projectId))
-      .map((projectId) => ({ name: 'Unavailable project', path: '', projectId })),
+    ...Object.keys(scope.projects).flatMap((projectId) =>
+      projects.some((project) => project.projectId === projectId)
+        ? []
+        : [{ name: 'Unavailable project', path: '', projectId }]
+    ),
   ];
+  /*
+   * CDXC:Extensions 2026-09-20 WHY:
+   * A card shows its own override, or the Default when it has none. It cannot show the space a project
+   * inherits from, because Settings is given the sidebar's project rows and its space rows but not the
+   * membership between them; that is resolved live, per active project, by the sidebar runtime. The note
+   * under Projects says so, and a view tab's own menu (which knows the project it is on) is where the
+   * fully resolved state is ticked.
+   */
+  const spacesNarrow = Object.values(scope.spaces).some((state) => state !== scope.default);
   return (
     <div className='settings-list-panel py-3'>
       <SelectField
-        description={`Choose where ${editor.title} appears.`}
-        label='Available in'
-        value={scope.availability}
-        onChange={(availability) => update({ availability: availability as GhostexViewScope['availability'] })}
+        description={`Where ${editor.title} appears unless a project or space below says otherwise.`}
+        label='Default'
+        value={scope.default}
+        onChange={(next) =>
+          onChange((current) => ({
+            ...current,
+            draft: { ...current.draft, default: next === 'hidden' ? 'hidden' : 'shown' },
+          }))
+        }
         options={[
-          { value: 'all', label: 'All projects' },
-          { value: 'selected', label: 'Selected projects' },
-          { value: 'spaces', label: 'Selected spaces' },
+          { value: 'shown', label: 'Shown everywhere' },
+          { value: 'hidden', label: 'Hidden unless chosen' },
         ]}
       />
-      {scope.availability === 'selected' ? (
-        <SettingRow
-          label='Projects'
-          htmlFor={`${id}-projects`}
-          description={`Show ${editor.title} only in the projects you turn on here.`}
-          wide
-        >
-          <ScopeToggleGrid emptyState='No projects in the sidebar yet.' id={`${id}-projects`}>
-            {projectOptions.map((project) => {
-              const checked = scope.projectIds.includes(project.projectId);
-              return (
-                <ScopeToggleCard
-                  checked={checked}
-                  key={project.projectId}
-                  label={project.name}
-                  onToggle={(selected) =>
-                    update({
-                      projectIds: selected
-                        ? [...scope.projectIds, project.projectId]
-                        : scope.projectIds.filter((projectId) => projectId !== project.projectId),
-                    })
-                  }
-                  title={project.path || undefined}
-                />
-              );
-            })}
-          </ScopeToggleGrid>
-        </SettingRow>
-      ) : null}
-      {scope.availability === 'spaces' ? (
-        <SettingRow
-          label='Spaces'
-          htmlFor={`${id}-spaces`}
-          description={`Show ${editor.title} for any project in a space you turn on here, including projects in its groups and their worktrees.`}
-          wide
-        >
-          <ScopeToggleGrid emptyState='No spaces available. Create a space in the sidebar first.' id={`${id}-spaces`}>
-            {spaceOptions.map((space) => {
-              const checked = scope.spaceRefs.some(
-                (ref) => ref.sectionKey === space.sectionKey && ref.spaceId === space.spaceId
-              );
-              return (
-                <ScopeToggleCard
-                  checked={checked}
-                  key={`${space.sectionKey}:${space.spaceId}`}
-                  label={space.name}
-                  onToggle={(selected) =>
-                    update({
-                      spaceRefs: selected
-                        ? [...scope.spaceRefs, { sectionKey: space.sectionKey, spaceId: space.spaceId }]
-                        : scope.spaceRefs.filter(
-                            (ref) => ref.sectionKey !== space.sectionKey || ref.spaceId !== space.spaceId
-                          ),
-                    })
-                  }
-                />
-              );
-            })}
-          </ScopeToggleGrid>
-        </SettingRow>
-      ) : null}
-      {editor.error ? (
-        <p className='text-sm text-destructive' role='alert'>
-          {editor.error}
-        </p>
-      ) : null}
+      <SettingRow
+        label='Projects'
+        htmlFor={`${id}-projects`}
+        description={`Turn ${editor.title} on or off for one project. A project wins over its space and over the default.${
+          spacesNarrow ? ' Projects you leave alone follow their space below.' : ''
+        }`}
+        wide
+      >
+        <ScopeToggleGrid emptyState='No projects in the sidebar yet.' id={`${id}-projects`}>
+          {projectOptions.map((project) => (
+            <ScopeToggleCard
+              checked={(scope.projects[project.projectId] ?? scope.default) === 'shown'}
+              key={project.projectId}
+              label={project.name}
+              onToggle={(checked) => override({ kind: 'project', projectId: project.projectId }, checked)}
+              title={project.path || undefined}
+            />
+          ))}
+        </ScopeToggleGrid>
+      </SettingRow>
+      <SettingRow
+        label='Spaces'
+        htmlFor={`${id}-spaces`}
+        description={`Turn ${editor.title} on or off for a whole space, including projects in its groups and their worktrees.`}
+        wide
+      >
+        <ScopeToggleGrid emptyState='No spaces available. Create a space in the sidebar first.' id={`${id}-spaces`}>
+          {spaceOptions.map((space) => (
+            <ScopeToggleCard
+              checked={(scope.spaces[viewScopeSpaceKey(space)] ?? scope.default) === 'shown'}
+              key={viewScopeSpaceKey(space)}
+              label={space.name}
+              onToggle={(checked) =>
+                override({ kind: 'space', space: { sectionKey: space.sectionKey, spaceId: space.spaceId } }, checked)
+              }
+            />
+          ))}
+        </ScopeToggleGrid>
+      </SettingRow>
       <div className='settings-management-actions flex-wrap py-3'>
         <Button onClick={onCancel} type='button' variant='outline'>
           <IconX data-icon='inline-start' />

@@ -184,6 +184,15 @@ SEE-ALSO: apps/desktop/src/app/render/workarea_header/, apps/desktop/src/app/ren
 */
 pub(crate) const WORKAREA_HEADER_HEIGHT: f32 = 36.0;
 
+/*
+CDXC:Titlebar 2026-09-20 WHY:
+How far below the floating header's bottom edge the content passing under it finishes fading out.
+The ramp lives in the column that owns that content, so it is only ever painted over scrolling
+content, never over a pane outline or a tab bar; the decision it serves is on the header itself in
+render/workarea_header/shell.rs.
+*/
+pub(crate) const WORKAREA_HEADER_FADE_HEIGHT: f32 = 28.0;
+
 /// Below this workspace-column width the header drops its labels and the project half of the
 /// breadcrumb, the way the mockup's narrow chat column does.
 pub(crate) const WORKAREA_HEADER_COMPACT_WIDTH: f32 = 720.0;
