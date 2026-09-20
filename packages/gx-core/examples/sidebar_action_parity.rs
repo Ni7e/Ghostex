@@ -26,14 +26,19 @@ use std::time::Instant;
 use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
     apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
-    close_optimistic_follow_ups, encode_uri_component, plan_close_request, plan_flags_request,
-    plan_fork_request, plan_lifecycle_request, plan_modal_action, plan_read_only_action,
-    rename_seed_title, ActiveGroup, CloseAnswer, CloseFollowUp, Core, Event, FlagsFollowUp,
-    ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey, SessionKey,
-    SidebarInputs, SidebarView, SidebarViewModel, QUICK_AUTOMATIONS_PROJECT_ID,
-    READ_ONLY_MESSAGE_TYPES,
+    apply_snooze_answer, close_optimistic_follow_ups, encode_uri_component, iso_string_from_ms,
+    plan_close_request, plan_flags_request, plan_fork_request, plan_lifecycle_request,
+    plan_modal_action, plan_read_only_action, plan_snooze_action, plan_snooze_request,
+    rename_seed_title, session_is_snoozed, snooze_wake_ms, ActiveGroup, CloseAnswer, CloseFollowUp,
+    Core, Event, FlagsFollowUp, ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp,
+    MachineId, ProjectKey, SectionCollapse, SessionKey, SidebarInputs, SidebarView,
+    SidebarViewModel, SnoozeClock, SnoozeFollowUp, QUICK_AUTOMATIONS_PROJECT_ID,
+    READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
 };
 use serde_json::{json, Map, Value};
+
+/// The clock facts file the harness writes beside the scenarios.
+const SNOOZE_CLOCK_FILE: &str = "snooze-clock.json";
 
 /// Every id shape that is not a live local project group, so each branch of the resolution is
 /// probed even when the recording has no row of that kind.
@@ -93,7 +98,21 @@ fn main() -> ExitCode {
     let mut total_fork = 0usize;
     let mut total_flags = 0usize;
     let mut total_modals = 0usize;
+    let mut total_snooze = 0usize;
     let mut resolve_micros: Vec<u128> = Vec::new();
+    // The clock facts the snooze rule is answered against. The harness writes them under a pinned
+    // time zone because this crate reads neither a clock nor a zone; without the file the snooze
+    // probes are empty and `action-parity.ts compare` fails rather than reporting a clean run it
+    // never measured.
+    let clock_file: Option<Value> =
+        std::fs::read_to_string(std::path::Path::new(&directory).join(SNOOZE_CLOCK_FILE))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok());
+    if clock_file.is_none() {
+        eprintln!(
+            "no {SNOOZE_CLOCK_FILE} in {directory}: run `bun tooling/gx-core/action-parity.ts snooze-clock {directory}` first, or the snooze half measures nothing"
+        );
+    }
     for path in &scenarios {
         let scenario: Value = match std::fs::read_to_string(path)
             .ok()
@@ -106,7 +125,12 @@ fn main() -> ExitCode {
             }
         };
         let menu_dump = menu_dump_beside(path);
-        let Some(dump) = build(&scenario, menu_dump.as_ref(), &mut resolve_micros) else {
+        let Some(dump) = build(
+            &scenario,
+            menu_dump.as_ref(),
+            clock_file.as_ref(),
+            &mut resolve_micros,
+        ) else {
             eprintln!("cannot build {}", path.display());
             return ExitCode::FAILURE;
         };
@@ -118,6 +142,7 @@ fn main() -> ExitCode {
         total_fork += dump.fork;
         total_flags += dump.flags;
         total_modals += dump.modals;
+        total_snooze += dump.snooze;
         let out = path.with_file_name(
             path.file_name()
                 .and_then(|name| name.to_str())
@@ -151,7 +176,7 @@ fn main() -> ExitCode {
         .copied()
         .unwrap_or(0);
     println!(
-        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} flags {total_flags} modals {total_modals} resolveUs median {median} max {}",
+        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} flags {total_flags} modals {total_modals} snooze {total_snooze} resolveUs median {median} max {}",
         scenarios.len(),
         resolve_micros.last().copied().unwrap_or(0)
     );
@@ -175,6 +200,7 @@ struct Dump {
     fork: usize,
     flags: usize,
     modals: usize,
+    snooze: usize,
 }
 
 /// The menu dump `sidebar_menu_parity` writes for the same scenario, when it has been run.
@@ -210,6 +236,7 @@ fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
 fn build(
     scenario: &Value,
     menu_dump: Option<&Value>,
+    clock_file: Option<&Value>,
     resolve_micros: &mut Vec<u128>,
 ) -> Option<Dump> {
     let now_ms = scenario.get("nowMs").and_then(Value::as_u64).unwrap_or(0);
@@ -332,6 +359,12 @@ fn build(
     let flags_count = flags.len();
     let modals = modal_entries(model.view());
     let modal_count = modals.len();
+    let snooze_clock = snooze_clock_entries(clock_file);
+    let snooze_boundary = snooze_boundary_entries(&core, scenario, model.view());
+    let snooze_actions = snooze_action_entries(model.view(), clock_file);
+    let snooze_calls = snooze_call_entries(scenario);
+    let snooze_count =
+        snooze_clock.len() + snooze_boundary.len() + snooze_actions.len() + snooze_calls.len();
     Some(Dump {
         payloads: entries.len(),
         calls,
@@ -341,6 +374,7 @@ fn build(
         fork: fork_count,
         flags: flags_count,
         modals: modal_count,
+        snooze: snooze_count,
         value: json!({
             "parkedProjectId": parked,
             "entries": Value::Array(entries),
@@ -350,6 +384,10 @@ fn build(
             "flags": Value::Array(flags),
             "modals": Value::Array(modals),
             "titleRule": Value::Array(title_rule_entries()),
+            "snoozeClock": Value::Array(snooze_clock),
+            "snoozeBoundary": Value::Array(snooze_boundary),
+            "snoozeActions": Value::Array(snooze_actions),
+            "snoozeCalls": Value::Array(snooze_calls),
         }),
     })
 }
@@ -1187,6 +1225,378 @@ fn modal_entries(view: &SidebarView) -> Vec<Value> {
     }
     entries
 }
+
+/// The wake-time half of the gate, driven directly from clock facts the harness wrote.
+///
+/// The rule reads the clock twice (the instant, and the local calendar behind "Tomorrow" and
+/// "Next week"), so neither side may read a real clock while the gate runs: the harness pins a
+/// time zone, writes a fixed instant per case together with the local offset at that instant and
+/// the offset at 09:00 local on each of the next seven days, and both sides answer for exactly
+/// those. A case list chosen here instead would be a list of instants that miss the two days a
+/// year the answer is hard.
+fn snooze_clock_entries(clock_file: Option<&Value>) -> Vec<Value> {
+    let cases = clock_file
+        .and_then(|file| file.get("cases"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    cases
+        .iter()
+        .filter_map(|case| {
+            let clock = snooze_clock_from_case(case)?;
+            let mut wake = Map::new();
+            for preset in SESSION_SNOOZE_PRESETS {
+                wake.insert(
+                    preset.to_string(),
+                    match snooze_wake_ms(preset, &clock) {
+                        Some(ms) => Value::String(iso_string_from_ms(ms)),
+                        None => Value::Null,
+                    },
+                );
+            }
+            // An unknown preset is refused rather than answered, and the harness asserts the
+            // TypeScript throws on it rather than posting a call.
+            wake.insert(
+                "notAPreset".to_string(),
+                match snooze_wake_ms("notAPreset", &clock) {
+                    Some(ms) => Value::String(iso_string_from_ms(ms)),
+                    None => Value::Null,
+                },
+            );
+            Some(json!({
+                "case": case.get("case").cloned().unwrap_or(Value::Null),
+                "nowMs": clock.now_ms,
+                "wake": Value::Object(wake),
+            }))
+        })
+        .collect()
+}
+
+fn snooze_clock_from_case(case: &Value) -> Option<SnoozeClock> {
+    let now_ms = case.get("nowMs")?.as_i64()?;
+    let offset_ms = case.get("offsetMs")?.as_i64()?;
+    let mut clock = SnoozeClock::fixed(now_ms, offset_ms);
+    let offsets = case.get("morningOffsetsMs")?.as_array()?;
+    for (index, slot) in clock.morning_offset_ms.iter_mut().enumerate() {
+        if let Some(offset) = offsets.get(index).and_then(Value::as_i64) {
+            *slot = offset;
+        }
+    }
+    Some(clock)
+}
+
+/// The boundary half: the exact moment a snooze ends.
+///
+/// The action surface is not the only thing that has to agree about it. The section a row is drawn
+/// in and the menu item that offers Snooze or Unsnooze read the same instant, and a port where
+/// those drift by a tick draws a row under the Snoozed heading whose own menu already offers the
+/// presets. So the probe reports what the shared predicate says AND which section the row really
+/// lands in, rebuilt through the whole view model, and the harness holds both against the one
+/// TypeScript predicate.
+fn snooze_boundary_entries(core: &Core, scenario: &Value, view: &SidebarView) -> Vec<Value> {
+    // A row the list really draws, so the section below is a section and not a `None`.
+    let Some((session, row_id, storage_id)) = view
+        .groups
+        .iter()
+        .find_map(|group| {
+            let row = group
+                .core
+                .sessions
+                .iter()
+                .find(|session| !session.row.is_browser)?;
+            Some((row, group.core.storage_id.clone()))
+        })
+        .and_then(|(session, storage_id)| {
+            Some((
+                SessionKey::parse_sidebar_session_id(&session.row.sidebar_session_id)?,
+                session.row.sidebar_session_id.clone(),
+                storage_id,
+            ))
+        })
+    else {
+        return Vec::new();
+    };
+    // Every heading open and the whole list shown, because a `SectionView` carries the rows it
+    // DRAWS: Snoozed starts collapsed, so a probe under the defaults read `None` for exactly the
+    // cases it exists to check and would have agreed with any answer at all.
+    let mut inputs = SidebarInputs::default();
+    inputs.ui.collapse.section_collapse.insert(
+        storage_id.clone(),
+        SectionCollapse {
+            browser: false,
+            pinned: false,
+            drafts: false,
+            sessions: false,
+            parked: false,
+            snoozed: false,
+        },
+    );
+    inputs.ui.collapse.expanded_session_lists.insert(storage_id);
+    let Some(server_row) = scenario
+        .pointer("/snapshot/sessions")
+        .and_then(Value::as_array)
+        .and_then(|rows| {
+            rows.iter().find(|row| {
+                row.get("projectId").and_then(Value::as_str) == Some(session.project_id.as_str())
+                    && row.get("sessionId").and_then(Value::as_str)
+                        == Some(session.session_id.as_str())
+            })
+        })
+        .cloned()
+    else {
+        return Vec::new();
+    };
+    // A round local instant, and the four stamps around it that decide the boundary.
+    let now_ms: i64 = 1_800_000_000_000;
+    let cases: Vec<(&str, Option<String>)> = vec![
+        ("aTickBefore", Some(iso_string_from_ms(now_ms - 1))),
+        ("exactly", Some(iso_string_from_ms(now_ms))),
+        ("aTickAfter", Some(iso_string_from_ms(now_ms + 1))),
+        ("aMinuteAfter", Some(iso_string_from_ms(now_ms + 60_000))),
+        ("longPast", Some(iso_string_from_ms(now_ms - 86_400_000))),
+        ("absent", None),
+        ("empty", Some(String::new())),
+        ("notADate", Some("not-a-date".to_string())),
+    ];
+    cases
+        .into_iter()
+        .map(|(name, snoozed_until)| {
+            let mut echoed = core.clone();
+            let mut echo_row = server_row.clone();
+            match &snoozed_until {
+                Some(value) => {
+                    echo_row["snoozedUntil"] = Value::String(value.clone());
+                }
+                None => {
+                    if let Some(object) = echo_row.as_object_mut() {
+                        object.remove("snoozedUntil");
+                    }
+                }
+            }
+            let frame = json!({
+                "type": "presentationDelta",
+                "protocolVersion": 1,
+                "serverId": "parity",
+                "clientId": "parity",
+                "revision": now_revision(&echoed, &session),
+                "delta": { "type": "sessionUpdated", "session": echo_row },
+            });
+            let parsed = ServerEvent::parse(&frame.to_string())
+                .unwrap_or_else(|error| panic!("the snooze echo frame does not parse: {error:?}"));
+            let output = echoed.handle(
+                Event::Frame {
+                    machine: MachineId::Local,
+                    frame: Box::new(parsed),
+                },
+                now_ms as u64,
+            );
+            assert!(
+                output.changes.ignored.is_none(),
+                "the snooze echo frame was ignored: {:?}",
+                output.changes.ignored
+            );
+            let mut model = SidebarViewModel::new();
+            model.update(&echoed, &inputs, &output.changes, now_ms as u64);
+            let drawn = model
+                .view()
+                .groups
+                .iter()
+                .flat_map(|group| group.core.sessions.iter())
+                .find(|session| session.row.sidebar_session_id == row_id);
+            let snoozed_until_ms = drawn.and_then(|session| session.row.timing.snoozed_until_ms);
+            let section = model
+                .view()
+                .groups
+                .iter()
+                .flat_map(|group| group.core.sections.iter())
+                .find(|section| section.session_ids.iter().any(|id| *id == row_id))
+                .map(|section| section.id.as_str().to_string());
+            json!({
+                "case": name,
+                "snoozedUntil": snoozed_until,
+                "nowMs": now_ms,
+                "parsedMs": snoozed_until_ms,
+                "isSnoozed": session_is_snoozed(snoozed_until_ms, now_ms as u64),
+                "section": section,
+            })
+        })
+        .collect()
+}
+
+/// The menu row: what `sessionAction: snooze` posts, for every preset, both tag shapes and the
+/// absent one, under every clock case the harness wrote.
+fn snooze_action_entries(view: &SidebarView, clock_file: Option<&Value>) -> Vec<Value> {
+    let cases = clock_file
+        .and_then(|file| file.get("cases"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let rows: Vec<String> = view
+        .groups
+        .iter()
+        .flat_map(|group| group.core.sessions.iter())
+        .filter(|session| !session.row.is_browser)
+        .take(SNOOZE_ACTION_ROWS_PER_SCENARIO)
+        .map(|session| session.row.sidebar_session_id.clone())
+        .collect();
+    let mut entries = Vec::new();
+    for case in &cases {
+        let Some(clock) = snooze_clock_from_case(case) else {
+            continue;
+        };
+        for sidebar_session_id in &rows {
+            for payload in snooze_action_payloads(sidebar_session_id) {
+                entries.push(snooze_action_entry(view, &payload, &clock));
+            }
+        }
+    }
+    // A row the list does not draw stops the whole action before the switch, which is the one
+    // refusal the menu itself cannot produce and the harness asserts posts nothing.
+    if let Some(clock) = cases.first().and_then(snooze_clock_from_case) {
+        for payload in snooze_action_payloads("combined-session:nope:nope") {
+            entries.push(snooze_action_entry(view, &payload, &clock));
+        }
+    }
+    entries
+}
+
+fn snooze_action_entry(view: &SidebarView, payload: &Value, clock: &SnoozeClock) -> Value {
+    let planned = plan_snooze_action(view, payload, clock);
+    // Whether the list draws the row travels with the entry rather than being decided again on
+    // the other side: which rows a group holds is M4a's gate, and what this one asks is what the
+    // two sides make of the SAME row. The TypeScript half seeds its store from this.
+    let drawn = payload
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .is_some_and(|id| {
+            view.groups
+                .iter()
+                .flat_map(|group| group.core.sessions.iter())
+                .any(|session| session.row.sidebar_session_id == id)
+        });
+    json!({
+        "payload": payload,
+        "nowMs": clock.now_ms,
+        "drawn": drawn,
+        "owned": planned.is_some(),
+        "messages": planned.map(|action| action.to_json()).unwrap_or(Value::Null),
+    })
+}
+
+/// Enough rows to cover the shapes: the action reads nothing about a row beyond whether it is
+/// drawn, so a second hundred rows would add no branch and would multiply by every clock case.
+const SNOOZE_ACTION_ROWS_PER_SCENARIO: usize = 2;
+
+/// Every shape `snooze_with_tag` and the plain preset row can build, plus the two the renderer can
+/// be handed with no preset at all.
+fn snooze_action_payloads(sidebar_session_id: &str) -> Vec<Value> {
+    let mut payloads = Vec::new();
+    for preset in SESSION_SNOOZE_PRESETS {
+        for tag in [None, Some(Value::Null), Some(Value::String("later".into()))] {
+            let mut payload = json!({
+                "type": "sessionAction",
+                "sessionId": sidebar_session_id,
+                "action": "snooze",
+                "preset": preset,
+            });
+            if let Some(tag) = tag {
+                payload["sessionTag"] = tag;
+            }
+            payloads.push(payload);
+        }
+    }
+    payloads.push(json!({
+        "type": "sessionAction",
+        "sessionId": sidebar_session_id,
+        "action": "snooze",
+        "sessionTag": "favorite",
+    }));
+    payloads.push(json!({
+        "type": "sessionAction",
+        "sessionId": sidebar_session_id,
+        "action": "snooze",
+    }));
+    // `if (command.preset)` is a truthiness test, so the empty string posts nothing.
+    payloads.push(json!({
+        "type": "sessionAction",
+        "sessionId": sidebar_session_id,
+        "action": "snooze",
+        "preset": "",
+    }));
+    payloads
+}
+
+/// The two calls: what they send, and what an accepted and a refused answer do.
+fn snooze_call_entries(scenario: &Value) -> Vec<Value> {
+    let rows: Vec<Value> = scenario
+        .pointer("/snapshot/sessions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut sidebar_session_ids: Vec<String> = rows
+        .iter()
+        .take(SNOOZE_CALL_ROWS_PER_SCENARIO)
+        .filter_map(|row| {
+            Some(
+                SessionKey::local(
+                    row.get("projectId")?.as_str()?,
+                    row.get("sessionId")?.as_str()?,
+                )
+                .to_sidebar_session_id(),
+            )
+        })
+        .collect();
+    sidebar_session_ids
+        .push(SessionKey::local(QUICK_AUTOMATIONS_PROJECT_ID, "quick-1").to_sidebar_session_id());
+    sidebar_session_ids.push("combined-session:unknown-project:unknown-session".to_string());
+    sidebar_session_ids.push("gpui-browser:P0erj:tab-1".to_string());
+    sidebar_session_ids.push("remote:machine-1:session:P0erj:S1".to_string());
+    sidebar_session_ids.push(String::new());
+    let mut entries = Vec::new();
+    for sidebar_session_id in &sidebar_session_ids {
+        let payloads = vec![
+            json!({
+                "type": "snoozeSession",
+                "sessionId": sidebar_session_id,
+                "snoozedUntil": "2026-09-21T09:00:00.000Z",
+            }),
+            // No `snoozedUntil` at all: the TypeScript spreads an `undefined` and `JSON.stringify`
+            // drops the key, so the call must carry no key either.
+            json!({ "type": "snoozeSession", "sessionId": sidebar_session_id }),
+            json!({ "type": "unsnoozeSession", "sessionId": sidebar_session_id }),
+        ];
+        for payload in payloads {
+            let Some(request) = plan_snooze_request(&payload) else {
+                entries.push(json!({ "payload": payload, "owned": false }));
+                continue;
+            };
+            let mut answers = Map::new();
+            for accepted in [true, false] {
+                answers.insert(
+                    match accepted {
+                        true => "accepted".to_string(),
+                        false => "failed".to_string(),
+                    },
+                    Value::Array(
+                        apply_snooze_answer(&request, accepted)
+                            .iter()
+                            .map(SnoozeFollowUp::to_json)
+                            .collect(),
+                    ),
+                );
+            }
+            entries.push(json!({
+                "payload": payload,
+                "owned": true,
+                "request": request.to_json(),
+                "answers": Value::Object(answers),
+            }));
+        }
+    }
+    entries
+}
+
+const SNOOZE_CALL_ROWS_PER_SCENARIO: usize = 6;
 
 /// The seed-title rule, driven directly.
 ///

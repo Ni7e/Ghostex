@@ -22,6 +22,11 @@
 import { resetBrowserStorage } from './browser-shim';
 import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
 import { createGxserverPresentationSidebarSessionKey } from '@/packages/shared/gxserver-presentation-sidebar-projection';
+import {
+  isSidebarSessionSnoozed,
+  resolveSessionSnoozeWakeTime,
+  SESSION_SNOOZE_PRESETS,
+} from '@/packages/shared/session-snooze';
 import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
 import { buildLatestGroups } from './action-parity-typescript';
 
@@ -516,6 +521,160 @@ function installModalRecorder(calls: Json[]): void {
     },
   };
   window.__ghostex_APP_MODAL_HOST_SURFACE__ = undefined;
+}
+
+/**
+ * The wake-time half. Runs the shipped `resolveSessionSnoozeWakeTime` at each fixed instant the
+ * clock file names and returns the ISO string it produces.
+ *
+ * `now` is a PARAMETER of the shipped function, so nothing has to be stubbed here: the gate gives
+ * both sides the same instant rather than letting either read a clock. The time zone is pinned by
+ * the caller and asserted there, because "Tomorrow" is 09:00 local and a run in another zone would
+ * compare two different questions.
+ */
+export function runTypeScriptSnoozeClock(rustActions: Json): Json[] {
+  return ((rustActions.snoozeClock ?? []) as Json[]).map((entry) => {
+    const now = new Date(Number(entry.nowMs));
+    const wake: Json = {};
+    for (const preset of SESSION_SNOOZE_PRESETS) wake[preset] = resolveSessionSnoozeWakeTime(preset, now).toISOString();
+    // The shape the `switch` has no case for. It falls out with `undefined` and `.toISOString()`
+    // throws, which is why the port refuses the payload instead of answering it, and why a port
+    // that DID answer it would be a difference here.
+    try {
+      wake.notAPreset = (resolveSessionSnoozeWakeTime as (preset: string, now: Date) => Date)(
+        'notAPreset',
+        now
+      ).toISOString();
+    } catch {
+      wake.notAPreset = null;
+    }
+    return { wake };
+  });
+}
+
+/**
+ * The boundary half: `isSidebarSessionSnoozed` and `Date.parse`, on the same stamps the Rust side
+ * drew a row with. The Rust entry carries three answers (the shared predicate, the parsed stamp and
+ * the section the row really landed in) and all three are held against this one value, because the
+ * failure this probe exists for is the drawing and the deciding disagreeing by a tick.
+ */
+export function runTypeScriptSnoozeBoundary(rustActions: Json): Json[] {
+  return ((rustActions.snoozeBoundary ?? []) as Json[]).map((entry) => {
+    const snoozedUntil = entry.snoozedUntil === null ? undefined : String(entry.snoozedUntil);
+    const nowMs = Number(entry.nowMs);
+    const parsed = snoozedUntil ? Date.parse(snoozedUntil) : Number.NaN;
+    return {
+      isSnoozed: isSidebarSessionSnoozed({ snoozedUntil }, nowMs),
+      parsedMs: Number.isFinite(parsed) ? parsed : null,
+    };
+  });
+}
+
+/**
+ * The menu-row half. Drives the shipped `runNativeSessionAction` and records what it POSTS, which
+ * is the whole of what a snooze menu row does.
+ *
+ * The clock is the one seam: `resolveSessionSnoozeWakeTime` is called with no `now` inside that
+ * function, so `Date` is replaced with one pinned to the entry's instant for the duration of the
+ * call. Whether the row is drawn is handed over from the Rust dump, the same contract the dialog
+ * half uses.
+ */
+export async function runTypeScriptSnoozeActions(rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const { runNativeSessionAction } = await import('@/apps/desktop/sidebar/native-sidebar/session-actions');
+  const { sidebarStore } = await import('@/packages/core-ui/sidebar-store-model');
+  const out: Json[] = [];
+  for (const entry of (rustActions.snoozeActions ?? []) as Json[]) {
+    const payload = entry.payload as Json;
+    const sessionId = String(payload.sessionId);
+    sidebarStore.setState({
+      sessionsById: entry.drawn === true ? ({ [sessionId]: { sessionId, alias: '' } } as never) : ({} as never),
+    });
+    const posts: Json[] = [];
+    withFixedNow(Number(entry.nowMs), () => runNativeSessionAction(payload as never, (message) => posts.push(message)));
+    out.push({ posts });
+  }
+  return out;
+}
+
+/**
+ * `Date` pinned to one instant, for the one shipped function that reads it with no parameter.
+ *
+ * Nothing else in this harness stubs a clock, and this one is restored in a `finally` so a throw
+ * cannot leave the rest of the gate running against a frozen `Date`.
+ */
+function withFixedNow<T>(nowMs: number, run: () => T): T {
+  const RealDate = Date;
+  class FixedDate extends RealDate {
+    constructor(...args: unknown[]) {
+      if (args.length === 0) super(nowMs);
+      else super(...(args as []));
+    }
+    static now(): number {
+      return nowMs;
+    }
+  }
+  (globalThis as Json).Date = FixedDate;
+  try {
+    return run();
+  } finally {
+    (globalThis as Json).Date = RealDate;
+  }
+}
+
+/**
+ * The call half. Drives the shipped `snoozeSession` and `runSessionLifecycleCommand` through both
+ * answers and records the call, the toast and the sleep.
+ *
+ * `setSessionSleeping` is recorded rather than run, exactly as the flags half records parking's
+ * sleep: it is the lifecycle action that already has its own half of this gate, and running it here
+ * would compare it twice and for the wrong reasons. `requestRemoteGxserver` is recorded too, so a
+ * refused remote row can be shown to be a HAND-OFF to something this port cannot do rather than a
+ * lost call.
+ */
+export async function runTypeScriptSnoozeCalls(scenario: Json, rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const out: Json[] = [];
+  for (const entry of (rustActions.snoozeCalls ?? []) as Json[]) {
+    const payload = entry.payload as Json;
+    const answers: Json = {};
+    let rpc: Json | null = null;
+    let remote = false;
+    for (const accepted of [true, false]) {
+      const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+      runtime.presentation = scenario.snapshot;
+      runtime.publishPresentation = () => {};
+      const follow: Json[] = [];
+      runtime.setSessionSleeping = (sessionId: string) => {
+        follow.push({ follow: 'sleep', session: sessionId });
+        return Promise.resolve();
+      };
+      runtime.postSidebarActionToast = (level: string, title: string, options?: Json) => {
+        follow.push({
+          follow: 'toast',
+          level,
+          title,
+          hasDescription: typeof options?.description === 'string' && options.description.length > 0,
+        });
+      };
+      runtime.requestRemoteGxserver = () => {
+        remote = true;
+        return accepted ? Promise.resolve({}) : Promise.reject(new Error('transport'));
+      };
+      runtime.client = {
+        rpc(path: string, params: Json) {
+          rpc = { path, params };
+          return accepted ? Promise.resolve({}) : Promise.reject(new Error('transport'));
+        },
+      };
+      if (payload.type === 'snoozeSession')
+        await runtime.snoozeSession(String(payload.sessionId), payload.snoozedUntil as string);
+      else await runtime.runSessionLifecycleCommand(String(payload.sessionId), '/api/unsnoozeSession', {});
+      answers[accepted ? 'accepted' : 'failed'] = follow;
+    }
+    out.push({ rpc, remote, answers });
+  }
+  return out;
 }
 
 /**
