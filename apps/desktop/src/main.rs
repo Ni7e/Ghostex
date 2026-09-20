@@ -375,10 +375,19 @@ fn main() {
             */
             #[cfg(target_os = "linux")]
             window_decorations: Some(gpui::WindowDecorations::Client),
+            /*
+            CDXC:Titlebar 2026-09-20 WHY:
+            The lights are placed against whatever row owns the window's top-left corner, and that
+            row is no longer the 28px titlebar this offset was measured for. It is the sidebar's
+            35px Search row while the sidebar is docked and the 36px work area header while it is
+            collapsed, and both centre their own contents near y = 18. At the old y = 8 the lights
+            sat three and a half pixels above everything beside them in both states; 11.5 puts a
+            12px light on that same centreline.
+            */
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Ghostex".into()),
                 appears_transparent: true,
-                traffic_light_position: Some(gpui::point(px(11.0), px(8.0))),
+                traffic_light_position: Some(gpui::point(px(11.0), px(11.5))),
             }),
             ..Default::default()
         };

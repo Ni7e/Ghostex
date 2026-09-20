@@ -68,30 +68,52 @@ impl GhostexGpuiApp {
             .border_color(chrome_ink().opacity(0.12))
             .flex_shrink_0()
             .text_color(titlebar_active_text_color().opacity(0.52))
+            /*
+            CDXC:Sidebar 2026-09-20 WHY:
+            The sidebar can be dragged down to `SIDEBAR_MIN_WIDTH`, and this row now carries more
+            than it used to: the macOS traffic-light reserve, the notification bell and the Settings
+            gear. Without a clip and without fixed-size trailing controls the glyphs simply painted
+            over each other there, so the label is the one thing that shrinks and is clipped, and
+            everything beside it keeps its own box.
+            */
             .child(
                 h_flex()
                     .id(format!("native-sidebar-{label}"))
                     .flex_1()
                     .h(px((if footer { 28.0 } else { 27.0 }) * scale))
                     .min_w_0()
+                    .overflow_hidden()
                     .pl(px((if footer { 12.0 } else { 7.0 }) * scale))
                     .pr(px(15.0 * scale))
                     .gap(px(11.0 * scale))
                     .cursor_default()
                     .hover(|row| row.text_color(titlebar_active_text_color()))
-                    .child(titlebar_svg_icon(
-                        if footer {
-                            "titlebar/bolt.svg"
-                        } else {
-                            BROWSER_ICON_SEARCH
-                        },
-                        15.0 * scale,
-                        titlebar_active_text_color().opacity(0.52),
-                    ))
-                    .child(label)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_shrink_0()
+                            .items_center()
+                            .child(titlebar_svg_icon(
+                                if footer {
+                                    "titlebar/bolt.svg"
+                                } else {
+                                    BROWSER_ICON_SEARCH
+                                },
+                                15.0 * scale,
+                                titlebar_active_text_color().opacity(0.52),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .child(label),
+                    )
                     .child(div().flex_1())
                     .child(
                         div()
+                            .flex_shrink_0()
                             .text_color(titlebar_active_text_color().opacity(0.38))
                             .text_size(px(11.0 * scale))
                             .child(shortcut.clone().unwrap_or_default()),
@@ -118,6 +140,7 @@ impl GhostexGpuiApp {
                         .w(px(40.0 * scale))
                         .rounded(px(5.0 * scale))
                         .flex()
+                        .flex_shrink_0()
                         .items_center()
                         .justify_center()
                         .cursor_default()

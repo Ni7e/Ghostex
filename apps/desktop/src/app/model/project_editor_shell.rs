@@ -380,6 +380,23 @@ pub(crate) fn project_view_state_to_shell_state_json(
     })
 }
 
+/// CDXC:Workarea 2026-09-20 DECISION:
+/// User: "keep saved widths" - a user who had already sized the split keeps that number, and
+/// `WORKAREA_SPLIT_DEFAULT_RATIO` applies only where nothing is saved. The companion's
+/// `companionWidthRatio` (per project) and `leftCompanionWidthRatio` (app-wide) measured the same
+/// thing this ratio does, the left column's share of the workarea, at the same scope and with the
+/// same 0.10..0.85 clamp, so each old key is read back in place of its own successor and nothing is
+/// rescaled. This supersedes the phase 3 decision to drop the old keys and start everyone at 0.44.
+fn workarea_split_ratio_from_shell_state(
+    object: &serde_json::Map<String, serde_json::Value>,
+    legacy_key: &str,
+) -> f32 {
+    json_f32_field(object, "workareaSplitRatio")
+        .or_else(|| json_f32_field(object, legacy_key))
+        .map(workarea_split_ratio)
+        .unwrap_or(WORKAREA_SPLIT_DEFAULT_RATIO)
+}
+
 pub(crate) fn project_view_state_from_shell_state(
     value: &serde_json::Value,
 ) -> Option<GpuiProjectViewState> {
@@ -395,9 +412,7 @@ pub(crate) fn project_view_state_from_shell_state(
             .and_then(serde_json::Value::as_str)
             .and_then(TitlebarMode::from_slug)
             .filter(|mode| *mode != TitlebarMode::Agents),
-        workarea_split_ratio: json_f32_field(object, "workareaSplitRatio")
-            .map(workarea_split_ratio)
-            .unwrap_or(WORKAREA_SPLIT_DEFAULT_RATIO),
+        workarea_split_ratio: workarea_split_ratio_from_shell_state(object, "companionWidthRatio"),
     })
 }
 
@@ -417,9 +432,10 @@ pub(crate) fn project_editor_shell_from_shell_state(
 ) -> Option<ProjectEditorShellModel> {
     let object = value.as_object()?;
     let mut model = ProjectEditorShellModel {
-        workarea_split_ratio: json_f32_field(object, "workareaSplitRatio")
-            .map(workarea_split_ratio)
-            .unwrap_or(WORKAREA_SPLIT_DEFAULT_RATIO),
+        workarea_split_ratio: workarea_split_ratio_from_shell_state(
+            object,
+            "leftCompanionWidthRatio",
+        ),
         ..ProjectEditorShellModel::shell_default()
     };
 
