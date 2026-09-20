@@ -16,11 +16,22 @@ pub(crate) fn is_new_session(row: &SessionRow, now_ms: u64) -> bool {
         .is_some_and(|created| created + NEW_SESSION_PRIORITY_MS > now_ms as i64)
 }
 
-/// `isSidebarSessionSnoozed`.
+/// `isSidebarSessionSnoozed`, on the parsed wake time alone.
+///
+/// CDXC:Sessions 2026-09-20 WHY:
+/// One function, because three things have to agree about the exact moment a snooze ends: the
+/// section a row is drawn in, whether its menu offers Snooze or Unsnooze, and (M5) the action
+/// surface. A second copy of `wake_at > now` in the menu builder was the shape that lets the two
+/// drift by a tick, which would draw a row in the Snoozed section whose menu already offers the
+/// presets. The boundary is strictly greater: gxserver keeps `snoozedUntil` on the row until its
+/// own sweep clears it, so a wake time in the past must never hide a session.
+pub fn session_is_snoozed(snoozed_until_ms: Option<i64>, now_ms: u64) -> bool {
+    snoozed_until_ms.is_some_and(|wake_at| wake_at > now_ms as i64)
+}
+
+/// `isSidebarSessionSnoozed` for a drawn row.
 pub(crate) fn is_snoozed(row: &SessionRow, now_ms: u64) -> bool {
-    row.timing
-        .snoozed_until_ms
-        .is_some_and(|wake_at| wake_at > now_ms as i64)
+    session_is_snoozed(row.timing.snoozed_until_ms, now_ms)
 }
 
 /// `isSidebarDraftSectionSession`.

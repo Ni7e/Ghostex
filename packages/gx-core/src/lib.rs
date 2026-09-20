@@ -48,15 +48,18 @@ pub use crate::selectors::{
 };
 pub use crate::sidebar_actions::{
     apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
-    close_optimistic_follow_ups, local_project_group_project_id, owns_close_message,
-    owns_flags_message, owns_fork_message, owns_lifecycle_message, owns_modal_message,
+    apply_snooze_answer, close_optimistic_follow_ups, iso_string_from_ms,
+    local_project_group_project_id, owns_close_message, owns_flags_message, owns_fork_message,
+    owns_lifecycle_message, owns_modal_message, owns_snooze_action, owns_snooze_message,
     plan_close_request, plan_flags_request, plan_fork_request, plan_lifecycle_request,
-    plan_modal_action, plan_read_only_action, rename_seed_title, ActionEffect, CloseAnswer,
-    CloseFollowUp, CloseRequest, FlagsFollowUp, FlagsRequest, ForkFollowUp, ForkRequest,
-    LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, ModalAction, SessionFlags,
-    SidebarActionPlan, ToastLevel, FLAGS_MESSAGE_TYPES, LIFECYCLE_PATCH_TTL_MS,
-    NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE, NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
-    READ_ONLY_MESSAGE_TYPES,
+    plan_modal_action, plan_read_only_action, plan_snooze_action, plan_snooze_request,
+    rename_seed_title, snooze_wake_ms, ActionEffect, CloseAnswer, CloseFollowUp, CloseRequest,
+    FlagsFollowUp, FlagsRequest, ForkFollowUp, ForkRequest, LifecycleAnswer, LifecycleCall,
+    LifecycleFollowUp, LifecycleRequest, ModalAction, SessionFlags, SidebarActionPlan,
+    SnoozeAction, SnoozeCall, SnoozeClock, SnoozeFollowUp, SnoozeRequest, ToastLevel,
+    FLAGS_MESSAGE_TYPES, LIFECYCLE_PATCH_TTL_MS, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
+    NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION, READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
+    SNOOZE_MESSAGE_TYPES,
 };
 pub use crate::sidebar_menu::{
     agent_launcher_items, agent_logo_icons, colored_agent_logo, hover_strip, menu_to_json,
@@ -72,10 +75,10 @@ pub use crate::sidebar_ui::{
     SIDEBAR_WINDOW_SCOPE_ID,
 };
 pub use crate::sidebar_view::{
-    reveal_plan, space_for_focused_row, BrowserTabInput, CloseAfterDoneInput, CollectionView,
-    DelayedSendInput, DelayedSendView, EmptyState, GroupCore, GroupSummary, GroupView,
-    LabelDeadline, MachineSummary, MachineTabInput, MachineTabView, OrderItem, OrderKind,
-    ProjectContextView, ProjectDiffStats, RemoteMachineView, SectionCollapse, SectionId,
+    reveal_plan, session_is_snoozed, space_for_focused_row, BrowserTabInput, CloseAfterDoneInput,
+    CollectionView, DelayedSendInput, DelayedSendView, EmptyState, GroupCore, GroupSummary,
+    GroupView, LabelDeadline, MachineSummary, MachineTabInput, MachineTabView, OrderItem,
+    OrderKind, ProjectContextView, ProjectDiffStats, RemoteMachineView, SectionCollapse, SectionId,
     SectionView, SessionMenuFacts, SessionRow, SessionSortMode, SessionTiming, SessionView,
     SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs, SidebarInputs, SidebarRevealPlan,
     SidebarSettings, SidebarUiState, SidebarUpdateWork, SidebarView, SidebarViewModel, SpaceView,

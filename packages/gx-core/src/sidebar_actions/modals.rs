@@ -21,9 +21,9 @@
 
 use serde_json::{json, Value};
 
-use crate::sidebar_view::view::{SessionRow, SidebarView};
+use crate::sidebar_view::SidebarView;
 
-use super::resolve::text_field;
+use super::resolve::{drawn_row, text_field};
 
 /// The dialog a sidebar action opens, and the dismissal it closes the previous one with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -127,16 +127,6 @@ pub fn rename_seed_title(
         }
     }
     alias.to_string()
-}
-
-/// The row as the list draws it. `if (!session) return;` in the TypeScript is the same guard on
-/// its own copy of the sessions.
-fn drawn_row<'a>(view: &'a SidebarView, sidebar_session_id: &str) -> Option<&'a SessionRow> {
-    view.groups
-        .iter()
-        .flat_map(|group| group.core.sessions.iter())
-        .find(|session| session.row.sidebar_session_id == sidebar_session_id)
-        .map(|session| session.row.as_ref())
 }
 
 /// Whether this payload is one this file answers, without building anything.

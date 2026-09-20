@@ -10,6 +10,7 @@ use crate::core::Core;
 use crate::keys::{MachineId, ProjectKey};
 use crate::sidebar_view::projects::build_project_meta;
 use crate::sidebar_view::text::js_trim;
+use crate::sidebar_view::view::{SessionRow, SidebarView};
 use crate::sidebar_view::SidebarInputs;
 
 use super::plan::ActionEffect;
@@ -83,4 +84,18 @@ pub fn local_project_group_project_id(
 /// The string field of a command payload, without the JSON indexing that panics on a non-object.
 pub(crate) fn text_field<'a>(message: &'a Value, key: &str) -> Option<&'a str> {
     message.get(key).and_then(Value::as_str)
+}
+
+/// The row as the list draws it, which is where the two renderer-side actions look it up:
+/// `runNativeSessionAction` reads `sidebarStore.getState().sessionsById[...]` and gives up when it
+/// is not there. Shared by `modals.rs` and `snooze.rs` because both are that one function's arms.
+pub(super) fn drawn_row<'a>(
+    view: &'a SidebarView,
+    sidebar_session_id: &str,
+) -> Option<&'a SessionRow> {
+    view.groups
+        .iter()
+        .flat_map(|group| group.core.sessions.iter())
+        .find(|session| session.row.sidebar_session_id == sidebar_session_id)
+        .map(|session| session.row.as_ref())
 }

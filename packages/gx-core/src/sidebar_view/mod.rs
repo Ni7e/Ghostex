@@ -16,7 +16,7 @@ mod inputs;
 mod machines;
 mod membership;
 mod model;
-mod ordering;
+pub(crate) mod ordering;
 pub(crate) mod projects;
 mod reveal;
 mod rows;
@@ -34,6 +34,7 @@ pub use inputs::{
     LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED,
 };
 pub use model::{SidebarUpdateWork, SidebarViewModel};
+pub use ordering::session_is_snoozed;
 pub use reveal::{reveal_plan, space_for_focused_row, SidebarRevealPlan};
 pub use spaces::OTHER_SPACE_ID;
 pub use tags::{TagListItem, TagListItemKind, TagPresentation, UNTAGGED_TAG_FILTER};

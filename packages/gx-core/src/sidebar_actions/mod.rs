@@ -9,8 +9,9 @@
 //! `close` holds the one whose optimistic update takes a row away before the call and puts it back
 //! when the call does not come home, and `fork` the one where nothing local happens until the
 //! daemon has already made the session. `flags` holds the four that are one call with
-//! different fields: pin, park, tag and favorite, and `modals` the two that call nothing and
-//! only open a dialog.
+//! different fields: pin, park, tag and favorite, `modals` the two that call nothing and
+//! only open a dialog, and `snooze` the only one whose answer depends on the clock and on the
+//! local calendar.
 
 mod close;
 mod flags;
@@ -20,6 +21,7 @@ mod modals;
 mod plan;
 mod read_only;
 mod resolve;
+mod snooze;
 
 pub use close::{
     apply_close_answer, close_optimistic_follow_ups, owns_close_message, plan_close_request,
@@ -42,4 +44,9 @@ pub use read_only::{plan_read_only_action, READ_ONLY_MESSAGE_TYPES};
 pub use resolve::{
     local_project_group_project_id, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
     NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
+};
+pub use snooze::{
+    apply_snooze_answer, iso_string_from_ms, owns_snooze_action, owns_snooze_message,
+    plan_snooze_action, plan_snooze_request, snooze_wake_ms, SnoozeAction, SnoozeCall, SnoozeClock,
+    SnoozeFollowUp, SnoozeRequest, SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES,
 };

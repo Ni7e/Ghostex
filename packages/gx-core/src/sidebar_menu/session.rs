@@ -8,6 +8,7 @@
 //! hover button keeps the diagonal pin. Every sidebar menu label is Title Case ("Close Inactive",
 //! "Pin Selected"), except disabled status sentences.
 
+use crate::sidebar_view::ordering::session_is_snoozed;
 use crate::sidebar_view::tags::{enabled_visible_tag_sections, tag_presentation, TagCatalog};
 use crate::sidebar_view::view::SessionRow;
 use crate::sidebar_view::SidebarSettings;
@@ -229,10 +230,10 @@ fn action_rows(
             .collect()
     };
     let sleeping = row.lifecycle_state == "sleeping";
-    let snoozed = row
-        .timing
-        .snoozed_until_ms
-        .is_some_and(|wake_at| wake_at > input.now_ms as i64);
+    // The same function the section rule and the action surface read, not a second copy of its
+    // comparison: the menu that offers Unsnooze and the section that draws the row must change at
+    // the identical millisecond.
+    let snoozed = session_is_snoozed(row.timing.snoozed_until_ms, input.now_ms);
     let rows = ActionRows {
         close: Some(
             MenuItem::row(
