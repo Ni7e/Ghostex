@@ -22,6 +22,9 @@ const MAX_NEVER_SETTLED_RECORDS: u32 = 4;
 /// Records of the kept list disagreeing with a fresh one. Each one is a bug, so a handful is
 /// plenty to name it and the counter carries the rate.
 const MAX_SCRATCH_RECORDS: u32 = 4;
+/// Records of a sidebar action. One per click is the whole rate, and the totals ride in each one,
+/// so the cap only stops a renderer that repeats a command from filling the log.
+const MAX_SIDEBAR_ACTION_RECORDS: u32 = 200;
 /// Records of an update slow enough to drop a frame. Enough to see whether the spikes are one
 /// shape or several; the max in the summary carries the size.
 const MAX_SLOW_UPDATE_RECORDS: u32 = 8;
@@ -63,6 +66,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_scratch_records: u32,
     sidebar_slow_update_records: u32,
     sidebar_storage_warnings: u32,
+    sidebar_action_records: u32,
 }
 
 /// A count as a whole percent of a total, which is what tells a skip that fires now and then apart
@@ -799,6 +803,63 @@ impl GxStoreDiagnostics {
         }
         self.sidebar_storage_warnings += 1;
         self.warning(event, json!({ "error": error }));
+    }
+
+    /// One line per sidebar action the store answered: the message type, which calls it made, how
+    /// long deciding them took, and the run's totals.
+    ///
+    /// The record names calls and counts only. The text a copy action carries is a session title,
+    /// a project path or a resume command line, and the ids it resolves are the same strings, so
+    /// nothing derived from a payload is written beyond its `type`, which is a fixed vocabulary.
+    /// `planUs` is the decision, not the call: it is the only part this milestone added to a click
+    /// and it is non-zero for the three project-path actions, which resolve the group against the
+    /// project facts.
+    pub(super) fn sidebar_action_ran(
+        &mut self,
+        kind: &str,
+        plan: &ghostex_gx_core::SidebarActionPlan,
+        plan_us: u64,
+        counters: super::sidebar_actions::SidebarActionCounters,
+    ) {
+        if self.sidebar_action_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled() {
+            return;
+        }
+        self.sidebar_action_records += 1;
+        let calls: Vec<serde_json::Value> = plan
+            .effects
+            .iter()
+            .take(SANITIZER_MAX_ENTRIES)
+            .map(|effect| {
+                serde_json::Value::String(log_text(match effect {
+                    ghostex_gx_core::ActionEffect::CopyText { .. } => "copyText".to_string(),
+                    // The action name, never the project id the payload carries.
+                    ghostex_gx_core::ActionEffect::NativeProjectPathAction { payload } => format!(
+                        "nativeProjectPathAction={}",
+                        payload
+                            .get("action")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                    ),
+                    ghostex_gx_core::ActionEffect::Toast { level, .. } => {
+                        format!("toast={}", level.as_str())
+                    }
+                }))
+            })
+            .collect();
+        record(
+            "gxStore.sidebarAction",
+            json!({
+                "type": log_text(kind.to_string()),
+                "calls": calls,
+                "planUs": plan_us,
+                "handled": counters.handled,
+                "nothing": counters.nothing,
+                "copyText": counters.copy_text,
+                "nativeProjectPath": counters.native_project_path,
+                "toast": counters.toast,
+                "declinedSource": counters.declined_source,
+            }),
+        );
     }
 }
 

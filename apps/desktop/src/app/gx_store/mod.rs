@@ -9,6 +9,7 @@
 //! sidebar list from the store beside the old projection's and compares them (`_inputs` mirrors
 //! what it reads, `_compare` names the differences, `_storage` reads the hidden projects);
 //! `sidebar_menus.rs` builds the menus, hover buttons and header buttons the drawn list carries;
+//! `sidebar_actions.rs` performs what a menu row, hover button or header button does;
 //! `diagnostics.rs` writes the log lines.
 
 mod burst;
@@ -20,6 +21,7 @@ mod local_focus;
 mod remote_clients;
 mod session_walk;
 mod shadow_diff;
+mod sidebar_actions;
 mod sidebar_list;
 mod sidebar_list_inputs;
 mod sidebar_menus;

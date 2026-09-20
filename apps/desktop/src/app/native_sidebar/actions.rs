@@ -107,6 +107,12 @@ impl GhostexGpuiApp {
         if self.gx_store_answer_session_menu(&command, cx) {
             return;
         }
+        // An action the store owns is performed here and goes no further: the old runtime resolved
+        // the same ids and came straight back over the fixed native bridge, so sending it on would
+        // run the action twice (gx_store/sidebar_actions.rs).
+        if self.gx_store_run_sidebar_action(&command, cx) {
+            return;
+        }
         // Two of the menus' inputs live in client storage and are written by the handler this
         // command is on its way to; the cached copy is dropped so the redraw that follows reads
         // the new value instead of waiting out its second.

@@ -87,6 +87,7 @@ pub(crate) struct GxStoreHost {
     /// One client per connected remote machine, and the machine tabs the sidebar draws.
     pub(crate) remote: super::remote_clients::RemoteClients,
     pub(super) menu_host: super::sidebar_menus::MenuHostCache,
+    pub(super) sidebar_actions: super::sidebar_actions::SidebarActionCounters,
 }
 
 impl GxStoreHost {

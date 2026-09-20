@@ -3,7 +3,6 @@ use std::collections::HashSet;
 // RefCell backs cross-platform runtime state (window frame persistence), not
 // just the macOS-only shims that first introduced the import.
 
-use gpui::ClipboardItem;
 use gpui::Window;
 
 use crate::app::consts::*;
@@ -310,13 +309,14 @@ impl GhostexGpuiApp {
                 self.handle_gpui_pick_repository_folder_message(cx);
             }
             "copySessionDetails" => {
+                // One function, because the sidebar's own copy actions reach the same clipboard
+                // write from Rust now without passing through this bridge
+                // (gx_store/sidebar_actions.rs).
                 if let Some(details_text) = message
                     .get("detailsText")
                     .and_then(serde_json::Value::as_str)
-                    .filter(|details_text| !details_text.trim().is_empty())
                 {
-                    cx.write_to_clipboard(ClipboardItem::new_string(details_text.to_string()));
-                    gpui_play_copy_sound();
+                    self.gpui_copy_session_details_text(details_text, cx);
                 }
             }
             "gpuiRemoteGxserverSidebarRequest" => {
