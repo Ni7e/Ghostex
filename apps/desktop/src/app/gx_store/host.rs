@@ -90,6 +90,7 @@ pub(crate) struct GxStoreHost {
     pub(super) sidebar_actions: super::sidebar_actions::SidebarActionCounters,
     pub(super) sidebar_lifecycle: super::sidebar_lifecycle::SidebarLifecycleCounters,
     pub(super) sidebar_flags: super::sidebar_flags::SidebarFlagsCounters,
+    pub(super) sidebar_modals: super::sidebar_modals::SidebarModalCounters,
 }
 
 impl GxStoreHost {

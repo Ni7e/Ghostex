@@ -846,6 +846,36 @@ impl GxStoreDiagnostics {
         );
     }
 
+    /// One line per dialog the sidebar opened. Which dialog, and whether it was seeded, and
+    /// nothing else: the seed IS the user's own title or note.
+    pub(super) fn sidebar_modal_opened(
+        &mut self,
+        is_rename: bool,
+        seeded: bool,
+        counters: super::sidebar_modals::SidebarModalCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarModal",
+            json!({
+                "modal": log_text(match is_rename {
+                    true => "renameSession",
+                    false => "sessionNote",
+                }),
+                "seeded": seeded,
+                "renames": counters.renames,
+                "notes": counters.notes,
+                "declinedSource": counters.declined_source,
+                "declinedRow": counters.declined_row,
+            }),
+        );
+    }
+
     /// One line per flag call: whether the daemon took it, and how long it took.
     ///
     /// No tag id and no session id. A tag is a short fixed word today, but the catalog is the
