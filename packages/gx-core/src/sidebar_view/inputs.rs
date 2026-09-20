@@ -360,6 +360,56 @@ pub struct BrowserTabInput {
     pub is_visible: bool,
 }
 
+/// The host's app-tab list, which may not have been supplied at all.
+///
+/// CDXC:Sessions 2026-09-21 WHY:
+/// "No tabs" and "I was not told about the tabs" are different answers and only one of them is
+/// safe to act on. A project's Sleep All, Wake All and both Close Inactive payloads sleep or close
+/// the project's app tabs alongside its sessions, through the browser bridge; this crate refuses
+/// such a payload and hands it over WHOLE, because half of a Sleep All is worse than none. That
+/// refusal reads this list, and on 2026-09-20 the desktop host stopped filling it when browser tabs
+/// moved from the sidebar to the view panel's tab strip, while the old runtime's own `browserTabs`
+/// still lists them. A plain `Vec` cannot tell those apart, so an unfilled list read as "this
+/// project has no tabs" and the payload would have been performed with the sessions put to sleep
+/// and the app tabs left awake. The default is therefore NOT SUPPLIED, which refuses.
+///
+/// It derefs to the slice so everything that only DRAWS tabs is unchanged and unaffected: a list
+/// nobody supplied draws nothing, which is what an empty one draws. Only a caller that would act on
+/// absence has to ask `is_supplied`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BrowserTabsInput {
+    supplied: bool,
+    tabs: Vec<BrowserTabInput>,
+}
+
+impl BrowserTabsInput {
+    /// The host supplies this list, even when it is empty.
+    pub fn supplied(tabs: Vec<BrowserTabInput>) -> Self {
+        Self {
+            supplied: true,
+            tabs,
+        }
+    }
+
+    /// Whether the host answers the question at all. `false` is the default and means the store
+    /// does not know whether this project has app tabs, not that it has none.
+    pub fn is_supplied(&self) -> bool {
+        self.supplied
+    }
+
+    pub fn tabs(&self) -> &[BrowserTabInput] {
+        &self.tabs
+    }
+}
+
+impl std::ops::Deref for BrowserTabsInput {
+    type Target = [BrowserTabInput];
+
+    fn deref(&self) -> &Self::Target {
+        &self.tabs
+    }
+}
+
 /// The git numbers a project header draws.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProjectDiffStats {
@@ -402,8 +452,9 @@ pub struct UnavailableState {
 /// Facts the host owns and the store does not hold.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarHostInputs {
-    /// In the order the host publishes them.
-    pub browser_tabs: Vec<BrowserTabInput>,
+    /// In the order the host publishes them, or not supplied at all, which is not the same as
+    /// empty: see `BrowserTabsInput`.
+    pub browser_tabs: BrowserTabsInput,
     /// The sidebar's own copy of the project collections, as client storage holds it. Read only
     /// while the daemon has published none: the sidebar shows this copy until its first adoption.
     pub stored_project_collections: Option<Value>,

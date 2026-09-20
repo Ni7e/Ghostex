@@ -28,10 +28,10 @@ pub(crate) mod text;
 pub(crate) mod view;
 
 pub use inputs::{
-    BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, MachineTabInput, ProjectDiffStats,
-    SectionCollapse, SectionId, SessionSortMode, SidebarCollapseState, SidebarHiddenItems,
-    SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState, UnavailableState,
-    LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED,
+    BrowserTabInput, BrowserTabsInput, CloseAfterDoneInput, DelayedSendInput, MachineTabInput,
+    ProjectDiffStats, SectionCollapse, SectionId, SessionSortMode, SidebarCollapseState,
+    SidebarHiddenItems, SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState,
+    UnavailableState, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED,
 };
 pub use model::{SidebarUpdateWork, SidebarViewModel};
 pub use ordering::session_is_snoozed;

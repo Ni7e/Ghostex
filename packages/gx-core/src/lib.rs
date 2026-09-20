@@ -77,15 +77,15 @@ pub use crate::sidebar_ui::{
     SIDEBAR_WINDOW_SCOPE_ID,
 };
 pub use crate::sidebar_view::{
-    reveal_plan, session_is_snoozed, space_for_focused_row, BrowserTabInput, CloseAfterDoneInput,
-    CollectionView, DelayedSendInput, DelayedSendView, EmptyState, GroupCore, GroupSummary,
-    GroupView, LabelDeadline, MachineSummary, MachineTabInput, MachineTabView, OrderItem,
-    OrderKind, ProjectContextView, ProjectDiffStats, RemoteMachineView, SectionCollapse, SectionId,
-    SectionView, SessionMenuFacts, SessionRow, SessionSortMode, SessionTiming, SessionView,
-    SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs, SidebarInputs, SidebarRevealPlan,
-    SidebarSettings, SidebarUiState, SidebarUpdateWork, SidebarView, SidebarViewModel, SpaceView,
-    TagListItem, TagListItemKind, TagPresentation, UnavailableState, WorktreeView,
-    LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
+    reveal_plan, session_is_snoozed, space_for_focused_row, BrowserTabInput, BrowserTabsInput,
+    CloseAfterDoneInput, CollectionView, DelayedSendInput, DelayedSendView, EmptyState, GroupCore,
+    GroupSummary, GroupView, LabelDeadline, MachineSummary, MachineTabInput, MachineTabView,
+    OrderItem, OrderKind, ProjectContextView, ProjectDiffStats, RemoteMachineView, SectionCollapse,
+    SectionId, SectionView, SessionMenuFacts, SessionRow, SessionSortMode, SessionTiming,
+    SessionView, SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs, SidebarInputs,
+    SidebarRevealPlan, SidebarSettings, SidebarUiState, SidebarUpdateWork, SidebarView,
+    SidebarViewModel, SpaceView, TagListItem, TagListItemKind, TagPresentation, UnavailableState,
+    WorktreeView, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
 };
 
 /// The wire types, re-exported so a host needs one dependency.

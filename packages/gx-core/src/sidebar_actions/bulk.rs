@@ -31,7 +31,7 @@
 //! apps/desktop/sidebar/bulk-sleep-pacing.ts, apps/desktop/sidebar/native-sidebar/controller.ts
 //! (the `batch` arm), apps/desktop/src/app/gx_store/sidebar_bulk.rs.
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 use crate::core::Core;
 use crate::keys::{ProjectKey, SessionKey};
@@ -170,6 +170,11 @@ pub fn owns_batch_command(command: &Value) -> bool {
 ///   the host cannot reach that bridge from this path (it needs a `Window`), so a payload whose set
 ///   would contain even one is handed over WHOLE rather than performed in half: half of a Sleep All
 ///   is worse than none, and the old runtime still does all of it.
+/// - **A host that does not supply the app-tab list at all**, which is not the same as a host that
+///   says there are none. The answer decides whether a payload is performed, so a question the host
+///   never answered must not be read as a "no": the desktop host stopped filling it on 2026-09-20
+///   while the old runtime's own `browserTabs` still lists tabs, and reading absence as emptiness
+///   would put a project's sessions to sleep and leave its app tabs awake.
 /// - **A remote group**, which needs that machine's tunnel.
 /// - **A user-made session group** (`gpui-wsg:`), whose membership is the workspace session groups
 ///   document, the fourth client-storage key with its own writer and its own pending-push guard.
@@ -201,7 +206,7 @@ pub fn plan_bulk_request(
         // The project-scoped ones resolve their own set.
         kind => {
             let project = local_project_of_group(message)?;
-            if project_has_browser_tab(inputs, &project.project_id) {
+            if !project_tabs_known_absent(inputs, &project.project_id) {
                 return None;
             }
             // `if (!projectId || !this.presentation) return`. Three of the four payloads would
@@ -301,22 +306,23 @@ fn local_project_of_group(message: &Value) -> Option<ProjectKey> {
     project.machine.is_local().then_some(project)
 }
 
-/// Whether the project has an app tab at all. The TypeScript's sets filter on the tab's own state
-/// (sleeping, visible) per payload, but this is a refusal and not a set: a project with tabs is
-/// handed over whole, so the question is only whether any exist.
+/// Whether the host has told us this project has NO app tabs. Three answers, and only this one
+/// lets the payload be performed.
 ///
-/// The one thing this reads is `SidebarInputs::host.browser_tabs`, and the old runtime's own
+/// The TypeScript's sets filter on the tab's own state (sleeping, visible) per payload, but this is
+/// a refusal and not a set, so the question is only whether any exist. It is asked in the positive
+/// ("known absent") on purpose: the two ways of not knowing, a host that supplies nothing and a
+/// host that lists a tab, both have to refuse, and a predicate named for the tab's presence invites
+/// the one caller it has to write `!has_tab` and turn silence into a "no".
+///
+/// The list it reads is `SidebarInputs::host.browser_tabs`, and the old runtime's own
 /// `this.browserTabs` is a SEPARATE list that no change here empties. So a host that stops feeding
 /// this one does not stop the old runtime from sleeping a project's app tabs: it stops this side
-/// from knowing they exist, and a Sleep All would then be performed in half, with the sessions
-/// asleep and the app tabs awake, which is the outcome the refusal exists to prevent. If the tabs
-/// move off the sidebar, this predicate needs whatever list replaces them, not a removal.
-fn project_has_browser_tab(inputs: &SidebarInputs, project_id: &str) -> bool {
-    inputs
-        .host
-        .browser_tabs
-        .iter()
-        .any(|tab| tab.project_id == project_id)
+/// from knowing they exist. If the tabs move off the sidebar, this predicate needs whatever list
+/// replaces them, not a removal.
+fn project_tabs_known_absent(inputs: &SidebarInputs, project_id: &str) -> bool {
+    let tabs = &inputs.host.browser_tabs;
+    tabs.is_supplied() && !tabs.iter().any(|tab| tab.project_id == project_id)
 }
 
 /// `isGpuiInactiveProjectPresentationSession`: awake, and neither working nor waiting on the user.
