@@ -26,6 +26,7 @@ pub(crate) mod session_note_modal;
 pub(crate) mod space_editor_modal;
 mod titlebar_notifications_panel;
 pub(crate) mod titlebar_panels;
+pub(crate) mod titlebar_popup_chrome;
 pub(crate) mod toast;
 pub(crate) mod update_available_modal;
 
@@ -47,5 +48,6 @@ pub(crate) use rename_worktree_modal::*;
 pub(crate) use session_note_modal::*;
 pub(crate) use space_editor_modal::*;
 pub(crate) use titlebar_panels::*;
+pub(crate) use titlebar_popup_chrome::*;
 pub(crate) use toast::*;
 pub(crate) use update_available_modal::*;

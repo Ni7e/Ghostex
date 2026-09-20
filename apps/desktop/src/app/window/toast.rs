@@ -258,19 +258,6 @@ pub(crate) fn attach_gpui_app_modal_window_to_main_window(
 ) {
 }
 
-#[cfg(target_os = "macos")]
-pub(crate) fn prepare_gpui_titlebar_popup_window_chrome(window: &mut Window) {
-    let Ok(handle) = window.window_handle() else {
-        return;
-    };
-    if let RawWindowHandle::AppKit(handle) = handle.as_raw() {
-        unsafe { GhostexGpuiPrepareTitlebarPopupWindow(handle.ns_view.as_ptr()) };
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn prepare_gpui_titlebar_popup_window_chrome(_window: &mut Window) {}
-
 pub(crate) struct GpuiAppToastWindow {
     pub(crate) app: gpui::WeakEntity<GhostexGpuiApp>,
     pub(crate) toasts: Vec<GpuiAppToast>,
