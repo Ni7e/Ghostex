@@ -121,6 +121,10 @@ pub(crate) struct SidebarList {
     /// settings file and a clone of its map under a global lock, and several callers ask per
     /// publish. Held in a cell because the readers are `&self`.
     source: std::cell::Cell<Option<(Instant, SidebarListSource)>>,
+    /// Whether the diagnostic scenario is on, on the same one-second gate and for the same reason:
+    /// asking takes the settings lock, and the per-update CPU clock below is only read while
+    /// someone is measuring.
+    measuring: std::cell::Cell<Option<(Instant, bool)>>,
     /// The clock deadline a timer is already booked for, and what asked for it, so a wake once a
     /// second can be read as a countdown doing its job or as something booking a time nobody draws.
     deadline_booked: Option<u64>,
@@ -155,6 +159,7 @@ impl Default for SidebarList {
             built: false,
             last_ui_generation: 0,
             source: std::cell::Cell::new(None),
+            measuring: std::cell::Cell::new(None),
             deadline_booked: None,
             deadline_kind: "none",
             installed_carry: None,
@@ -248,6 +253,20 @@ impl SidebarList {
                 .model
                 .next_deadline_ms()
                 .is_some_and(|deadline| now_ms >= deadline)
+    }
+
+    /// Whether the per-update CPU clock is worth two syscalls right now: only while the diagnostic
+    /// scenario that would record it is on. The verdict is reused for a second, because asking
+    /// takes the settings lock this is partly trying to measure around.
+    fn measuring(&self) -> bool {
+        if let Some((taken_at, measuring)) = self.measuring.get() {
+            if taken_at.elapsed() < SETTINGS_MAX_AGE {
+                return measuring;
+            }
+        }
+        let measuring = super::diagnostics::routine_logging_enabled();
+        self.measuring.set(Some((Instant::now(), measuring)));
+        measuring
     }
 
     /// Tracks how long the local daemon has been unavailable, which the empty-state copy reads.
@@ -417,6 +436,16 @@ impl GhostexGpuiApp {
             settings_moved,
         };
         self.gx_store.sidebar_list.last_ui_generation = ui_generation;
+        // CDXC:Sidebar 2026-09-20 WHY:
+        // The wall clock alone cannot tell a slow update from a stalled thread, and the first two
+        // slow ones this recorded rebuilt one row and one group of a hundred and thirteen and still
+        // took ten milliseconds. Nothing inside `update` takes a lock or touches the file system
+        // (gx-core has neither the dependency nor the permission), so the question is whether the
+        // thread was running at all: CPU time near the wall time is work this code did, and CPU
+        // time far below it is the thread descheduled or in the kernel. Two syscalls, and only
+        // while the scenario that records them is on.
+        let measuring = self.gx_store.sidebar_list.measuring();
+        let cpu_started = measuring.then(thread_cpu_time_us).flatten();
         let started = Instant::now();
         let changed =
             self.gx_store
@@ -424,6 +453,8 @@ impl GhostexGpuiApp {
                 .model
                 .update(&self.gx_store.core, &inputs, &changes, now_ms);
         let update_us = started.elapsed().as_micros() as u64;
+        let cpu_us =
+            cpu_started.and_then(|start| thread_cpu_time_us().map(|end| end.saturating_sub(start)));
         // An update this slow is a dropped frame on the thread that draws, and the only thing that
         // tells one apart from the next is which caches it had to drop. The view model reports
         // that; the host has the change summary that caused it.
@@ -431,7 +462,7 @@ impl GhostexGpuiApp {
             let work = self.gx_store.sidebar_list.model.last_work();
             self.gx_store
                 .diagnostics
-                .sidebar_slow_update(update_us, &last_update, &work);
+                .sidebar_slow_update(update_us, cpu_us, &last_update, &work);
         }
         {
             let list = &mut self.gx_store.sidebar_list;
@@ -545,7 +576,13 @@ impl GhostexGpuiApp {
         };
         // The menu host reads two client-storage values behind a one-second cache, so it is taken
         // before the list is borrowed rather than inside the build.
+        //
+        // Measured, because it was the last main-thread work on this path that neither `installUs`
+        // nor `updateUs` covered: at most once a second it opens client storage and reads two
+        // indexed rows, and a slow one would have been invisible in both numbers.
+        let host_started = Instant::now();
         let host = self.gx_store_menu_host(Some(&published));
+        let host_us = host_started.elapsed().as_micros() as u64;
         let started = Instant::now();
         // The labels are formatted against the clock of the moment they are drawn, not the moment
         // the list was last built: a wake that only ticks a countdown does not rebuild the list.
@@ -584,6 +621,7 @@ impl GhostexGpuiApp {
         let install_us = started.elapsed().as_micros() as u64;
         let list = &mut self.gx_store.sidebar_list;
         list.snapshot_cache.phases.fingerprint_us = fingerprint_us;
+        list.snapshot_cache.phases.host_us = host_us;
         list.installed_carry = Some(carry);
         list.counters.installs += 1;
         list.counters.last_install_us = install_us;
@@ -722,5 +760,29 @@ impl SidebarList {
     /// The menu-host generation the installed list was built with, if one is installed.
     pub(super) fn installed_menu_host_generation(&self) -> Option<u64> {
         self.installed_carry.map(|(_, generation)| generation)
+    }
+}
+
+/// The CPU time this thread has used so far, in microseconds.
+///
+/// `None` where the platform has no per-thread clock (Windows), which reads in the record as "not
+/// measured" rather than as zero. Measured at 256 ns a call on this computer, and read twice per
+/// update only while the scenario is on, against a median update of tens of microseconds.
+fn thread_cpu_time_us() -> Option<u64> {
+    #[cfg(unix)]
+    {
+        let mut spec = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: `clock_gettime` writes only the `timespec` it is given and returns non-zero on
+        // failure, which is the case a platform without this clock takes.
+        let read = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut spec) };
+        (read == 0)
+            .then(|| (spec.tv_sec.max(0) as u64) * 1_000_000 + (spec.tv_nsec.max(0) as u64) / 1_000)
+    }
+    #[cfg(not(unix))]
+    {
+        None
     }
 }

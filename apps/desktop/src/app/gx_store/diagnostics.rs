@@ -571,6 +571,7 @@ impl GxStoreDiagnostics {
                 // guess: the shared key, the rows, the group menus, the collection menus, the more
                 // menu, or the tail that copies what a publish still owns.
                 "install": {
+                    "hostUs": phases.host_us,
                     "fingerprintUs": phases.fingerprint_us,
                     "keyUs": phases.key_us,
                     "rowsUs": phases.rows_us,
@@ -606,10 +607,12 @@ impl GxStoreDiagnostics {
     /// landed in the same release. The counts here answer it outright: `rowsAllDirty` with a row
     /// count is the tag catalog or Debugging Mode moving, `reset` is a machine (un)loading,
     /// `meta` is the project facts, and all three false with a large `rowsBuilt` is the store
-    /// having really changed that many rows.
+    /// having really changed that many rows. `offCpuUs` near `updateUs` with all of them small is
+    /// none of those: the thread was not running, and the update is a victim rather than a cause.
     pub(super) fn sidebar_slow_update(
         &mut self,
         update_us: u64,
+        cpu_us: Option<u64>,
         last_update: &LastUpdate,
         work: &ghostex_gx_core::SidebarUpdateWork,
     ) {
@@ -622,6 +625,11 @@ impl GxStoreDiagnostics {
             "gxStore.sidebarList.slowUpdate",
             json!({
                 "updateUs": update_us,
+                // What the thread actually spent running, and what it spent not running. Nothing
+                // inside the update takes a lock or touches the file system, so a large gap is the
+                // thread descheduled or in the kernel rather than this code being slow.
+                "cpuUs": cpu_us,
+                "offCpuUs": cpu_us.map(|cpu| update_us.saturating_sub(cpu)),
                 "work": {
                     "reset": work.reset,
                     "rowsAllDirty": work.rows_all_dirty,

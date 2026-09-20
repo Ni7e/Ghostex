@@ -145,6 +145,9 @@ pub(super) struct SnapshotCache {
 /// of the build it came from rather than inviting a guess.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct InstallPhases {
+    /// Reading the two client-storage values the menus need, behind its own one-second cache.
+    /// Measured and written by the caller for the same reason as `fingerprint_us`.
+    pub(super) host_us: u64,
     /// Hashing the values the installed list still takes from a publish, which walks the whole HUD
     /// document. Measured and written by the caller AFTER the build, because it runs before it and
     /// the build resets these.
