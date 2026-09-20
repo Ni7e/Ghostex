@@ -95,16 +95,24 @@ pub struct TagPresentation {
 }
 
 /// One custom tag after client normalization.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct CustomTag {
     pub(crate) name: String,
     pub(crate) icon: String,
     pub(crate) color: String,
 }
 
-/// The custom tag catalogs a row resolves ids against (the local daemon's; remote catalogs join
-/// with the remote machines).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// A custom tag catalog: one machine's document, or several merged for a lookup.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// The TypeScript uses three different catalogs and the difference only shows with a second
+/// machine, so this crate used one for all three until M4d made remote catalogs reachable.
+/// `findCustomSessionTag` resolves a tag id against EVERY machine's catalog with this computer's
+/// first (`getSessionTagCatalogs`), which is what a label and a tag icon read;
+/// `normalizeSidebarSessionTagListItems` is handed THIS COMPUTER's alone, which is what decides
+/// which filter rows the Sort & Filter menu offers and which ticked filters survive a prune; and a
+/// row's own tag submenu is handed the catalog of the machine that row is on.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct TagCatalog {
     /// In catalog order.
     pub(crate) order: Vec<String>,
@@ -112,6 +120,29 @@ pub(crate) struct TagCatalog {
 }
 
 impl TagCatalog {
+    /// Several catalogs as one, for a LOOKUP. A tag id that several machines define resolves to
+    /// the first catalog that has it, which is `findCustomSessionTag`'s rule with this computer's
+    /// catalog passed first.
+    pub(crate) fn merged<'a>(
+        states: impl IntoIterator<Item = Option<&'a CustomSessionTagsState>>,
+    ) -> Self {
+        let mut merged = Self::default();
+        for state in states {
+            let catalog = Self::from_state(state);
+            for id in &catalog.order {
+                if merged.tags.contains_key(id) {
+                    continue;
+                }
+                let Some(tag) = catalog.tags.get(id) else {
+                    continue;
+                };
+                merged.order.push(id.clone());
+                merged.tags.insert(id.clone(), tag.clone());
+            }
+        }
+        merged
+    }
+
     /// `normalizeCustomSessionTagsState`: the order array is authoritative, tags missing from it
     /// follow in map order, and every kept tag has a bounded name, an icon, and a lowercase
     /// `#rrggbb` color.
@@ -425,6 +456,92 @@ fn normalize_tag_list_item(candidate: &Value) -> Option<TagListItem> {
         enabled: bool_field("enabled"),
         visible: bool_field("visible"),
     })
+}
+
+/// One heading of the Tag As menu and the tags under it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TagSection {
+    pub(crate) label: &'static str,
+    /// `(tag id, label)` in menu order.
+    pub(crate) options: Vec<(String, String)>,
+}
+
+const SECTION_LABELS: [&str; 3] = ["Priority", "Progress", "Type"];
+
+/// `getEnabledVisibleSidebarSessionTagSections`: the built-in sections filtered to the tags the
+/// user left enabled and visible, then a Custom section, with empty sections dropped.
+/// `include_tags` puts a tag the user has already set back on the menu even when they hid it, so
+/// it can be taken off again.
+pub(crate) fn enabled_visible_tag_sections(
+    settings_items: &Value,
+    catalog: &TagCatalog,
+    include_tags: &[&str],
+) -> Vec<TagSection> {
+    let mut visible: Vec<String> = Vec::new();
+    let mut visible_custom: Vec<String> = Vec::new();
+    for item in normalize_tag_list_items(settings_items, Some(catalog)) {
+        if item.kind == TagListItemKind::Tag && item.enabled && item.visible {
+            if !visible.iter().any(|seen| *seen == item.id) {
+                visible.push(item.id.clone());
+                if is_custom_tag_id(&item.id) {
+                    visible_custom.push(item.id);
+                }
+            }
+        }
+    }
+    for tag in include_tags {
+        if visible.iter().any(|seen| seen == *tag) {
+            continue;
+        }
+        visible.push((*tag).to_string());
+        if is_custom_tag_id(tag) {
+            visible_custom.push((*tag).to_string());
+        }
+    }
+    let mut sections: Vec<TagSection> = SECTION_LABELS
+        .iter()
+        .enumerate()
+        .map(|(index, label)| TagSection {
+            label,
+            options: TAG_OPTIONS
+                .iter()
+                .filter(|(section, value, _)| {
+                    usize::from(*section) == index && visible.iter().any(|tag| tag == value)
+                })
+                .map(|(_, value, label)| ((*value).to_string(), (*label).to_string()))
+                .collect(),
+        })
+        .collect();
+    sections.push(TagSection {
+        label: "Custom",
+        options: visible_custom
+            .into_iter()
+            .filter_map(|tag_id| {
+                catalog
+                    .tags
+                    .get(&tag_id)
+                    .map(|tag| (tag_id.clone(), tag.name.clone()))
+            })
+            .collect(),
+    });
+    sections.retain(|section| !section.options.is_empty());
+    sections
+}
+
+/// `getSidebarSessionTagListItemLabel`.
+pub(crate) fn tag_list_item_label(item: &TagListItem, catalog: &TagCatalog) -> String {
+    match item.kind {
+        TagListItemKind::Tag => {
+            tag_label(Some(&item.id), catalog).unwrap_or_else(|| item.id.clone())
+        }
+        TagListItemKind::Untagged => "No tag".to_string(),
+        TagListItemKind::Separator => "Separator".to_string(),
+    }
+}
+
+/// `getSidebarSessionTagListItemFilter`, for a menu builder outside this module.
+pub(crate) fn tag_list_item_filter(item: &TagListItem) -> Option<&str> {
+    item.filter()
 }
 
 /// `getEnabledVisibleSidebarSessionTagFilters(normalizeSidebarSessionTagListItems(items,

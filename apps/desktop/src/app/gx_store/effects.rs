@@ -9,10 +9,17 @@ impl GxStoreHost {
     pub(super) fn run_effects(&mut self, effects: Vec<Effect>) {
         for effect in effects {
             match effect {
-                Effect::ResubscribePresentation { reason, .. } => {
+                // Routed by machine: a remote machine's snapshot has to be asked of that
+                // machine's client, and asking the local one would resubscribe the wrong daemon
+                // while the machine that needs a snapshot waits for ever.
+                Effect::ResubscribePresentation { machine, reason } => {
                     self.counters.resubscribes_requested += 1;
                     self.diagnostics.resubscribe_requested(&reason);
-                    if let Some(client) = &self.client {
+                    let client = match machine.remote_id() {
+                        None => self.client.as_ref(),
+                        Some(machine_id) => self.remote.client(machine_id),
+                    };
+                    if let Some(client) = client {
                         client.request_resubscribe();
                     }
                 }

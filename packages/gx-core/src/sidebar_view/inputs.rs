@@ -12,6 +12,40 @@ use super::tags::{TagCatalog, TagListItem};
 /// The machine tab id of this computer's daemon.
 pub const LOCAL_MACHINE_ID: &str = "local";
 
+/// The connection state word of a machine the host can build a list for.
+pub const MACHINE_STATE_CONNECTED: &str = "connected";
+
+/// One machine tab, as the host knows it.
+///
+/// The machine tabs are the host's list, not the store's: which machines are saved, whether they
+/// are enabled in the sidebar, what the user named them, and how their SSH tunnel is doing are all
+/// facts of the remote transport. The store only holds their rows, and only for the ones the host
+/// says it feeds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineTabInput {
+    /// [`LOCAL_MACHINE_ID`], or the saved remote machine's settings id.
+    pub machine_id: String,
+    pub label: String,
+    /// The host's connection state word (`connected`, `connecting`, `disconnected`, `sshFailed`,
+    /// and the rest of the connect ladder). Always `connected` for this computer.
+    pub state: String,
+    /// The already-sanitized failure summary, when the host has one.
+    pub message: Option<String>,
+    /// The host subscribes to this machine's presentation and feeds it into the store, so a list
+    /// can be built for it. A machine the host does not feed keeps whatever the caller drew.
+    pub fed: bool,
+}
+
+impl MachineTabInput {
+    pub fn is_local(&self) -> bool {
+        self.machine_id == LOCAL_MACHINE_ID
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.state == MACHINE_STATE_CONNECTED
+    }
+}
+
 /// Which sessions a project's list shows first, and in which order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,11 +207,27 @@ pub struct SidebarSettings {
     pub enable_session_parking: bool,
     pub project_session_list_collapsed_count: u32,
     pub sidebar_spaces_enabled: bool,
+    /// The section follows the active session into its Space.
+    pub sidebar_space_follow_active_session: bool,
+    /// A session card draws the relative time of its last interaction.
+    pub show_last_active_time: bool,
     pub debugging_mode: bool,
     /// The user's tag filter list, raw as it sits in settings; normalized where it is read.
     pub tag_list_items: Value,
     /// The sort mode the sidebar HUD publishes.
     pub sort_mode: SessionSortMode,
+    /// The hover button strip, raw as it sits in settings; normalized where it is read.
+    pub session_card_hover_buttons: Value,
+    /// Park and Snooze offer the tag submenu.
+    pub show_tag_menu_when_parking: bool,
+    /// The hover strip's actions are repeated at the top of the row's context menu.
+    pub show_session_card_hover_buttons_in_context_menu: bool,
+    pub show_session_command_copy_actions: bool,
+    pub show_session_details_copy_action: bool,
+    pub show_beta_features: bool,
+    pub hide_keep_awake_titlebar_control: bool,
+    /// The project header offers New Browser Tab.
+    pub browser_view_tab_hidden: bool,
 }
 
 impl Default for SidebarSettings {
@@ -186,9 +236,19 @@ impl Default for SidebarSettings {
             enable_session_parking: true,
             project_session_list_collapsed_count: 13,
             sidebar_spaces_enabled: false,
+            sidebar_space_follow_active_session: false,
+            show_last_active_time: true,
             debugging_mode: false,
             tag_list_items: Value::Null,
             sort_mode: SessionSortMode::LastActivity,
+            session_card_hover_buttons: Value::Null,
+            show_tag_menu_when_parking: true,
+            show_session_card_hover_buttons_in_context_menu: true,
+            show_session_command_copy_actions: false,
+            show_session_details_copy_action: false,
+            show_beta_features: false,
+            hide_keep_awake_titlebar_control: false,
+            browser_view_tab_hidden: false,
         }
     }
 }
@@ -221,18 +281,61 @@ impl SidebarSettings {
                 "sidebarSpacesEnabled",
                 defaults.sidebar_spaces_enabled,
             ),
+            sidebar_space_follow_active_session: boolean(
+                "sidebarSpaceFollowActiveSession",
+                defaults.sidebar_space_follow_active_session,
+            ),
+            show_last_active_time: !boolean("hideLastActiveTimeOnSessionCards", false),
             debugging_mode: boolean("debuggingMode", defaults.debugging_mode),
             tag_list_items: settings
                 .get("sidebarSessionTagListItems")
                 .cloned()
                 .unwrap_or(Value::Null),
             sort_mode,
+            session_card_hover_buttons: settings
+                .get("sessionCardHoverButtons")
+                .cloned()
+                .unwrap_or(Value::Null),
+            show_tag_menu_when_parking: boolean(
+                "showTagMenuWhenParking",
+                defaults.show_tag_menu_when_parking,
+            ),
+            show_session_card_hover_buttons_in_context_menu: boolean(
+                "showSessionCardHoverButtonsInContextMenu",
+                defaults.show_session_card_hover_buttons_in_context_menu,
+            ),
+            show_session_command_copy_actions: boolean(
+                "showSessionCommandCopyActions",
+                defaults.show_session_command_copy_actions,
+            ),
+            show_session_details_copy_action: boolean(
+                "showSessionDetailsCopyAction",
+                defaults.show_session_details_copy_action,
+            ),
+            show_beta_features: boolean("showBetaFeatures", defaults.show_beta_features),
+            hide_keep_awake_titlebar_control: boolean(
+                "hideKeepAwakeTitlebarControl",
+                defaults.hide_keep_awake_titlebar_control,
+            ),
+            browser_view_tab_hidden: boolean(
+                "browserViewTabHidden",
+                defaults.browser_view_tab_hidden,
+            ),
         }
     }
 
     /// The tag filters the Sort & Filter menu offers.
     pub(crate) fn enabled_tag_filters(&self, catalog: &TagCatalog) -> Vec<String> {
         super::tags::enabled_visible_tag_filters(&self.tag_list_items, catalog)
+    }
+
+    /// The filters the Sort & Filter menu offers, for a host that has to prune a ticked one the
+    /// settings or the daemon's catalog took away.
+    pub fn offered_tag_filters(
+        &self,
+        catalog_state: Option<&ghostex_gx_protocol::CustomSessionTagsState>,
+    ) -> Vec<String> {
+        self.enabled_tag_filters(&TagCatalog::from_state(catalog_state))
     }
 
     /// The tag filter list itself, for a menu builder.
@@ -304,10 +407,18 @@ pub struct SidebarHostInputs {
     /// The sidebar's own copy of the project collections, as client storage holds it. Read only
     /// while the daemon has published none: the sidebar shows this copy until its first adoption.
     pub stored_project_collections: Option<Value>,
+    /// The machine tabs, this computer first, in the order the sidebar draws them.
+    pub machines: Vec<MachineTabInput>,
     /// Projects the daemon parked as Recent Projects, by their own id. The daemon keeps them out
     /// of the presentation, so this list only matters while a project is being parked or
     /// restored, but it is the authoritative one and the list hides them either way.
+    ///
+    /// This computer's only; a remote machine's parked projects are in
+    /// [`Self::remote_recent_project_ids`], because a project id is unique per daemon and two
+    /// machines can hand out the same one.
     pub recent_project_ids: BTreeSet<String>,
+    /// The same list per REMOTE machine, keyed by machine id.
+    pub remote_recent_project_ids: BTreeMap<String, BTreeSet<String>>,
     /// By project id.
     pub project_diff_stats: BTreeMap<String, ProjectDiffStats>,
     /// By sidebar session id (`combined-session:<project>:<session>`).
@@ -318,6 +429,35 @@ pub struct SidebarHostInputs {
     /// The empty state reads it to tell a first run from a list the user emptied.
     pub recent_project_count: usize,
     pub unavailable: UnavailableState,
+}
+
+impl SidebarHostInputs {
+    /// The machine tab with this id.
+    pub fn machine(&self, machine_id: &str) -> Option<&MachineTabInput> {
+        self.machines
+            .iter()
+            .find(|machine| machine.machine_id == machine_id)
+    }
+
+    /// Whether the host feeds this machine's presentation into the store. This computer always is;
+    /// a remote machine is only while its client runs, and an empty machine list is the moment
+    /// before the host has published one.
+    pub fn feeds(&self, machine_id: &str) -> bool {
+        machine_id == LOCAL_MACHINE_ID
+            || self.machine(machine_id).is_some_and(|machine| machine.fed)
+    }
+
+    /// The projects a machine has parked as Recent Projects.
+    pub(crate) fn parked_project_ids(&self, machine: &crate::keys::MachineId) -> &BTreeSet<String> {
+        static EMPTY: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
+        match machine.remote_id() {
+            None => &self.recent_project_ids,
+            Some(machine_id) => self
+                .remote_recent_project_ids
+                .get(machine_id)
+                .unwrap_or_else(|| EMPTY.get_or_init(BTreeSet::new)),
+        }
+    }
 }
 
 /// Everything besides the store.

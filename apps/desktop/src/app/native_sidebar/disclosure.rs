@@ -43,27 +43,31 @@ impl SidebarDisclosures {
                     .unwrap_or_default(),
             )
         };
-        let mut next = Vec::new();
+        // CDXC:Sidebar 2026-09-20 WHY:
+        // Keyed rather than a list scanned per held item: with the sidebar list built in Rust this
+        // runs on every change the list draws, a focus step during a held hotkey included, and the
+        // scan was one comparison per drawn heading per held heading.
+        let mut next: HashMap<String, (bool, Vec<String>)> = HashMap::new();
         for group in &snapshot.groups {
-            next.push((format!("group:{}", group.group_id), group.collapsed, vec![]));
+            next.insert(
+                format!("group:{}", group.group_id),
+                (group.collapsed, Vec::new()),
+            );
             for section in &group.sections {
-                next.push((
+                next.insert(
                     format!("section:{}:{}", group.group_id, section.id),
-                    section.collapsed,
-                    section.session_ids.clone(),
-                ));
+                    (section.collapsed, section.session_ids.clone()),
+                );
             }
         }
         for collection in &snapshot.collections {
-            next.push((
+            next.insert(
                 format!("collection:{}", collection.collection_id),
-                collection.collapsed,
-                vec![],
-            ));
+                (collection.collapsed, Vec::new()),
+            );
         }
-        self.items
-            .retain(|key, _| next.iter().any(|(id, _, _)| id == key));
-        for (key, collapsed, ids) in next {
+        self.items.retain(|key, _| next.contains_key(key));
+        for (key, (collapsed, ids)) in next {
             if let Some(item) = self.items.get_mut(&key) {
                 if item.collapsed != collapsed {
                     item.from = item.fraction();

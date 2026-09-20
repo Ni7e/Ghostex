@@ -833,9 +833,11 @@ configured agent IDs; `agents create <agent-id> --task "<task>"` starts one in
 the caller's project (`--project-id` selects another). `agents list` finds
 sessions, and `agents send <session-ref> "<text>"` attaches the sender's identity
 and reply reference automatically. Use `--body-file` for multiline messages,
-`--interrupt` for an urgent correction, or `--queue` to wait until the current
-turn finishes. `agents close <session-ref>` ends that session, including any
-unfinished work. `ghostex read-session-chat` and `ghostex read-text` read replies.
+`--interrupt` for an urgent correction, or `--queue` to leave the message
+waiting until the current turn finishes. A queued message waits as long as that
+turn does, so send normally unless the point is to have the next task ready for
+an agent whose final message you have already read. `agents close
+<session-ref>` ends that session, including any unfinished work. `ghostex read-session-chat` and `ghostex read-text` read replies.
 On older versions without `agents`, use the existing commands below.
 
 Cross-agent orchestration also works through the `$ghostex-cli` skill. For

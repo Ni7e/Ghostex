@@ -1754,6 +1754,9 @@ impl GhostexGpuiApp {
             return false;
         }
         self.sidebar_browser_tabs_snapshot = snapshot;
+        // The browser rows of the store's sidebar list are built from this list, and it is the one
+        // input of that list this app owns outright (gx_store/sidebar_list_inputs.rs).
+        self.gx_store_sidebar_state_changed(cx);
         if pending_reveal_is_published {
             self.dispatch_pending_sidebar_browser_tab_reveal(cx);
         } else {

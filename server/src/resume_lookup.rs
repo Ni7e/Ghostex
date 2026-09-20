@@ -53,9 +53,14 @@ pub fn run_resume_lookup(args: Vec<String>) -> Result<()> {
     }
 }
 
+/// CDXC:AgentProviders 2026-09-18 WHY:
+/// HOME is unset on Windows, so this returned "." and the account usage-history scan looked for transcripts under the process working directory.
 pub(crate) fn home_dir() -> PathBuf {
-    env::var_os("HOME")
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .filter_map(env::var_os)
         .map(PathBuf::from)
+        .find(|path| path.is_absolute())
         .unwrap_or_else(|| PathBuf::from("."))
 }
 

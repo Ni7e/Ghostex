@@ -172,8 +172,9 @@ pub(crate) struct ShadowCounters {
     pub(crate) distinct_mismatches: u64,
     /// Tabs whose resolved agent icon differs (expected for catalog-mapped icons).
     pub(crate) icon_differences: u64,
-    /// Publishes that named a remote machine. The store holds only the local machine until remote
-    /// machines move into it, so these are neither mirrored nor compared.
+    /// Publishes whose active project is on a machine the store holds no rows for: a remote
+    /// machine with no client, or one whose first snapshot has not arrived. Zero once its client
+    /// has loaded it.
     pub(crate) remote_skipped: u64,
     /// Old-runtime focus updates the core dropped as older than a local selection. Expected
     /// while the user moves through tabs faster than the old runtime is told.
@@ -251,19 +252,6 @@ impl ShadowDiff {
     ) -> ObservedFocus {
         let observed_stamp = echo.focus_stamp.unwrap_or(0);
         self.counters.observed += 1;
-        if names_remote_focus(old_state) {
-            // Nothing is mirrored and nothing is compared: the core keeps the last local focus,
-            // and a difference that was waiting is dropped with the publish it belonged to.
-            self.counters.remote_skipped += 1;
-            self.old_focus = None;
-            self.old_tabs = None;
-            self.pending = None;
-            return if observed_stamp < core.focus().local_stamp {
-                ObservedFocus::Stale
-            } else {
-                ObservedFocus::Foreign
-            };
-        }
         self.old_tabs = old_state
             .active_project_tab_sessions
             .as_ref()
@@ -275,9 +263,27 @@ impl ShadowDiff {
             visible_session_ids: old_state.visible_session_ids.clone(),
             observed_stamp,
         });
-        let observed = self.mirror_focus(core, now_ms);
-        if lists_remote_tab(old_state) {
-            // A list with remote rows has no counterpart in the store yet.
+        // A remote focus is still not mirrored, and the list is still compared.
+        //
+        // CDXC:FocusRouting 2026-09-20 WHY:
+        // Mirroring it would make the store's active project and active group a remote machine's,
+        // and the workspace reads `active_tab_sessions` for its own tabs; the store does not own
+        // remote focus until the session lifecycle milestone does, so it keeps this computer's.
+        // The tab LIST is another question: the rows are in the store now, so the comparison
+        // resolves the group from the project the old runtime named rather than from focus, which
+        // is what lets `skippedRemote` reach zero without handing the store a focus it cannot
+        // finish.
+        let observed = if names_remote_focus(old_state) {
+            if observed_stamp < core.focus().local_stamp {
+                ObservedFocus::Stale
+            } else {
+                ObservedFocus::Foreign
+            }
+        } else {
+            self.mirror_focus(core, now_ms)
+        };
+        // A machine whose rows are not in the store has no list to compare against.
+        if self.names_unheld_machine(core) {
             self.counters.remote_skipped += 1;
             self.pending = None;
             return observed;
@@ -359,31 +365,66 @@ impl ShadowDiff {
         }
     }
 
+    /// Whether the old runtime's active project is on a machine the store holds no rows for.
+    fn names_unheld_machine(&self, core: &Core) -> bool {
+        self.old_project()
+            .is_some_and(|project| core.presentation().loaded(&project.machine).is_none())
+    }
+
+    fn old_project(&self) -> Option<ProjectKey> {
+        self.old_focus
+            .as_ref()
+            .and_then(|old_focus| old_focus.active_project_id.as_deref())
+            .and_then(ProjectKey::parse_workspace_project_id)
+    }
+
+    /// The group whose tab list is compared, or `None` when the two sides are not answering the
+    /// same question.
+    ///
+    /// For a LOCAL project it is the store's own active group, because the store owns this
+    /// computer's focus and is ahead of the old runtime from a selection until it is told. For a
+    /// remote project the store has no focus opinion at all, so the group is derived from what the
+    /// old runtime named, the same way `external_focus_update` derives it.
+    fn compared_group(&self, core: &Core) -> Option<ActiveGroup> {
+        let old_project = self.old_project()?;
+        let store = core.presentation();
+        if old_project.machine.is_local() {
+            if Some(&old_project) != core.focus().active_project.as_ref() {
+                return None;
+            }
+            return core.focus().active_group.clone();
+        }
+        let selected = self
+            .old_focus
+            .as_ref()
+            .and_then(|old_focus| old_focus.active_group_id.as_deref())
+            .and_then(ActiveGroup::parse_sidebar_group_id)
+            .filter(|group| group_belongs_to(store, group, &old_project));
+        Some(selected.unwrap_or_else(|| default_group_for_project(store, &old_project)))
+    }
+
     fn compare(&mut self, core: &Core) -> Comparison {
         let Some(old_tabs) = &self.old_tabs else {
             return Comparison::NotComparable;
         };
-        // The two lists are the same list only while both sides have the same project active. The
-        // store is ahead of the old runtime from a local selection until the old runtime is told.
-        let old_project = self
-            .old_focus
-            .as_ref()
-            .and_then(|old_focus| old_focus.active_project_id.as_deref())
-            .and_then(ProjectKey::parse_workspace_project_id);
-        if old_project.as_ref() != core.focus().active_project.as_ref() {
+        let Some(group) = self.compared_group(core) else {
+            return Comparison::NotComparable;
+        };
+        // A workspace that holds a tab from another machine than its project's is a list the store
+        // has no shape for: its tab list is a group's sessions, and a group belongs to one machine.
+        let owner = self.old_project().map(|project| project.machine);
+        if old_tabs
+            .iter()
+            .any(|tab| Some(&tab.key.machine) != owner.as_ref())
+        {
             return Comparison::NotComparable;
         }
-        let Loadable::Loaded(store_tabs) = core.active_tab_sessions() else {
+        let Loadable::Loaded(store_tabs) = core.presentation().tab_sessions(&group) else {
             return Comparison::NotComparable;
         };
         let label = |key: &SessionKey| format!("{}:{}", key.project_id, key.session_id);
         let mut mismatch = ShadowMismatch {
-            store_group: core
-                .focus()
-                .active_group
-                .as_ref()
-                .map(ActiveGroup::to_sidebar_group_id)
-                .unwrap_or_default(),
+            store_group: group.to_sidebar_group_id(),
             old_tab_count: old_tabs.len(),
             store_tab_count: store_tabs.len(),
             ..ShadowMismatch::default()
@@ -471,14 +512,6 @@ fn group_belongs_to(store: &PresentationStore, group: &ActiveGroup, project: &Pr
             *machine == project.machine && store.is_chat_project(project)
         }
     }
-}
-
-fn lists_remote_tab(old_state: &GpuiGxserverPresentationFocusState) -> bool {
-    old_state
-        .active_project_tab_sessions
-        .iter()
-        .flatten()
-        .any(|tab| matches!(tab.key, GpuiWorkspaceTerminalSessionKey::Remote(_)))
 }
 
 /// The old runtime's focus as an external update, quoting the stamp the old runtime echoed, so

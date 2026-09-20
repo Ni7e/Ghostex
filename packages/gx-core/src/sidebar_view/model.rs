@@ -19,12 +19,13 @@ use super::groups::{
     build_group, FocusKey, GroupBuild, GroupKind, GroupPlan, ProjectContextInput, RowRef,
 };
 use super::inputs::{BrowserTabInput, SectionCollapse, SidebarInputs, LOCAL_MACHINE_ID};
+use super::machines::machine_tab_summary;
 use super::membership::{project_members, ProjectMembers};
 use super::projects::ProjectMeta;
 use super::rows::{browser_row, session_row, RowContext};
 use super::spaces::SpacesState;
 use super::tags::TagCatalog;
-use super::view::SidebarView;
+use super::view::{MachineSummary, RemoteMachineView, SidebarView};
 
 /// The inputs of one group, so a group that nothing touched is kept as it is.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +51,10 @@ struct GroupKey {
     enable_parking: bool,
     compact_count: u32,
     sort_mode: super::inputs::SessionSortMode,
+    /// The machine's stream dropped while its rows are held, which fades the whole group.
+    is_stale: bool,
+    /// The remote machine's name as the settings spell it; it rides in the group's Copy Details.
+    machine_name: Option<String>,
 }
 
 struct CachedGroup {
@@ -57,11 +62,42 @@ struct CachedGroup {
     build: GroupBuild,
 }
 
+/// What one update actually did.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// An update that takes twenty milliseconds and one that takes twenty microseconds are the same
+/// call with the same arguments from outside, and the difference is always which caches it had to
+/// drop. Counts only, never a clock: this crate reads no clock, and the host times the call it
+/// makes anyway. The flags are the three that invalidate everything at once, which is what a slow
+/// update almost always is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SidebarUpdateWork {
+    /// The whole cache was dropped: another machine, a machine that (un)loaded, or a reload.
+    pub reset: bool,
+    /// Every row was re-derived: the tag catalog or Debugging Mode moved.
+    pub rows_all_dirty: bool,
+    /// Every project fact was rebuilt.
+    pub meta_dirty: bool,
+    /// Rows derived from a session this time; the rest were kept.
+    pub rows_built: usize,
+    /// Rows derived from a browser tab this time.
+    pub browser_rows_built: usize,
+    /// Groups ordered, sectioned and summarised this time.
+    pub groups_built: usize,
+    /// Machines whose badge was counted off the store this time.
+    pub machine_summaries_built: usize,
+    /// What the update ended up holding, so a count is read against a size.
+    pub group_count: usize,
+    pub row_count: usize,
+}
+
 struct CacheState {
     machine: MachineId,
     inputs: SidebarInputs,
     focus: FocusKey,
     catalog: TagCatalog,
+    /// This computer's catalog alone; see [`TagCatalog`].
+    filter_catalog: TagCatalog,
     meta: Arc<ProjectMeta>,
     membership: BTreeMap<String, Arc<ProjectMembers>>,
     project_contexts: BTreeMap<String, Arc<ProjectContextInput>>,
@@ -73,6 +109,10 @@ struct CacheState {
     view: SidebarView,
     next_deadline_ms: Option<u64>,
     machine_loaded: bool,
+    /// The badge counts of every machine tab, kept until that machine's rows move. The selected
+    /// machine's come out of its built groups; the others are counted straight off the store.
+    machine_summaries: BTreeMap<MachineId, MachineSummary>,
+    work: SidebarUpdateWork,
 }
 
 /// The sidebar list of one machine, kept up to date from the store.
@@ -99,6 +139,16 @@ impl SidebarViewModel {
     /// snooze ends). The host re-runs the update then; nothing else has to.
     pub fn next_deadline_ms(&self) -> Option<u64> {
         self.state.as_ref().and_then(|state| state.next_deadline_ms)
+    }
+
+    /// What the newest [`Self::update`] had to rebuild. An update that returned early because
+    /// nothing moved leaves the previous answer standing, which is why the host only reads this
+    /// for an update it timed.
+    pub fn last_work(&self) -> SidebarUpdateWork {
+        self.state
+            .as_ref()
+            .map(|state| state.work)
+            .unwrap_or_default()
     }
 
     /// Builds the whole list without any cache. The incremental update must give the same result;
@@ -145,13 +195,33 @@ impl SidebarViewModel {
         }
 
         let mut previous = self.state.take();
-        let catalog = TagCatalog::from_state(
+        // What a tag id RESOLVES to: every machine's catalog, this computer's first, which is
+        // `getSessionTagCatalogs`. A row's label and its tag icon read this.
+        let catalog = TagCatalog::merged(
+            std::iter::once(MachineId::Local)
+                .chain(
+                    store
+                        .machines()
+                        .map(|(machine, _)| machine.clone())
+                        .filter(|machine| !machine.is_local()),
+                )
+                .map(|machine| {
+                    store
+                        .machine(&machine)
+                        .and_then(|entry| entry.side_state().custom_session_tags.as_ref())
+                })
+                .collect::<Vec<_>>(),
+        );
+        // Which tag FILTERS the sidebar offers, and which ticked ones survive a prune: this
+        // computer's catalog alone, whichever machine tab is selected.
+        let filter_catalog = TagCatalog::from_state(
             store
-                .machine(&machine)
+                .machine(&MachineId::Local)
                 .and_then(|machine| machine.side_state().custom_session_tags.as_ref()),
         );
         let rows_all_dirty = previous.as_ref().is_none_or(|state| {
             state.catalog != catalog
+                || state.filter_catalog != filter_catalog
                 || state.inputs.settings.debugging_mode != inputs.settings.debugging_mode
         });
         let meta_dirty = previous.as_ref().is_none_or(|previous| {
@@ -161,11 +231,13 @@ impl SidebarViewModel {
                 || !changes.chat_collection_changed.is_empty()
                 || changes.side_state.workspace_groups
                 || previous.inputs.host.recent_project_ids != inputs.host.recent_project_ids
+                || previous.inputs.host.remote_recent_project_ids
+                    != inputs.host.remote_recent_project_ids
         });
         // The projection prunes the ticked filters to the ones the Sort & Filter menu still
         // offers before it reads them, so a filter whose tag was turned off in settings (or whose
         // custom tag the daemon dropped) filters nothing.
-        let enabled_filters = inputs.settings.enabled_tag_filters(&catalog);
+        let enabled_filters = inputs.settings.enabled_tag_filters(&filter_catalog);
         let effective_inputs: Cow<'_, SidebarInputs> = if inputs
             .ui
             .selected_tag_filters
@@ -185,6 +257,7 @@ impl SidebarViewModel {
         let row_context = RowContext {
             catalog: &catalog,
             debugging_mode: effective.settings.debugging_mode,
+            always_show_state_tooltip: !machine.is_local(),
         };
 
         // 1. Project facts.
@@ -193,12 +266,17 @@ impl SidebarViewModel {
             _ => Arc::new(match store.machine(&machine) {
                 Some(entry) => super::projects::build_project_meta(
                     entry,
-                    store
-                        .machine(&MachineId::Local)
-                        .and_then(|local| local.side_state().workspace_groups.as_ref())
+                    // The machine's OWN order document. `orderGpuiRemotePresentationGroups` reads
+                    // `presentation.workspaceGroups.projectOrder` of the remote daemon, so reading
+                    // this computer's here would order a remote machine's projects by a list of
+                    // project ids that belong to another daemon.
+                    entry
+                        .side_state()
+                        .workspace_groups
+                        .as_ref()
                         .map(|groups| groups.project_order.as_slice())
                         .unwrap_or_default(),
-                    &inputs.host.recent_project_ids,
+                    inputs.host.parked_project_ids(&machine),
                 ),
                 None => ProjectMeta::default(),
             }),
@@ -306,6 +384,7 @@ impl SidebarViewModel {
             inputs: inputs.clone(),
             focus,
             catalog: catalog.clone(),
+            filter_catalog,
             meta: meta.clone(),
             membership,
             project_contexts: BTreeMap::new(),
@@ -316,6 +395,45 @@ impl SidebarViewModel {
             view: SidebarView::default(),
             next_deadline_ms: None,
             machine_loaded,
+            machine_summaries: BTreeMap::new(),
+            work: SidebarUpdateWork {
+                reset,
+                rows_all_dirty,
+                meta_dirty,
+                ..SidebarUpdateWork::default()
+            },
+        };
+        // A machine whose rows are held while its stream is not live draws them faded rather than
+        // dropping them, which is what `createRemoteSidebarGroups` does with its last-seen copy.
+        // Never for this computer: the old projection has an unavailable placeholder group for it
+        // and marks no group stale.
+        //
+        // CDXC:RemoteMachines 2026-09-20 WHY:
+        // "Not live" rather than `Stale`, which is what this first tested. A client that cannot
+        // reach its daemon walks a reconnect ladder, and every rung emits `Connecting` before the
+        // failure emits `Lost`; the store maps only the second of those to `Stale`, so an
+        // unreachable machine alternated faded and not faded once per rung, and each flip cost a
+        // badge recount and a full install of the list.
+        let is_stale = !machine.is_local()
+            && store.machine(&machine).is_some_and(|entry| {
+                entry.loaded().is_some() && entry.connection().phase != crate::ConnectionPhase::Live
+            });
+        let machine_name = machine
+            .remote_id()
+            .map(|machine_id| {
+                effective
+                    .host
+                    .machine(machine_id)
+                    .map(|tab| tab.label.clone())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let remote_context = |project_id: Option<&str>| -> Option<RemoteMachineView> {
+            machine.remote_id().map(|machine_id| RemoteMachineView {
+                machine_id: machine_id.to_string(),
+                machine_name: machine_name.clone(),
+                project_id: project_id.map(str::to_string),
+            })
         };
         let mut plans: Vec<GroupPlan> = Vec::new();
         let chat_members: Vec<(String, String)> = meta
@@ -347,11 +465,13 @@ impl SidebarViewModel {
             .collect();
         plans.push(GroupPlan {
             group_id: chats_group_id(&machine),
-            storage_id: chats_group_id(&machine),
+            storage_id: storage_id(&machine, &chats_group_id(&machine)),
             title: "Chats".to_string(),
             kind: GroupKind::Chats,
             rows: chat_rows,
             project: None,
+            remote_machine: remote_context(None),
+            is_stale,
         });
         for project_id in meta.project_order.iter() {
             let project_key = ProjectKey {
@@ -363,10 +483,15 @@ impl SidebarViewModel {
                 .get(project_id)
                 .cloned()
                 .unwrap_or_default();
+            // The app's browser tabs carry the MACHINE-SCOPED project id for a remote project
+            // (`withRemoteBrowserTabSessions` matches on it), and the raw id for a local one,
+            // which is the same string.
+            let tab_project_id = project_key.to_workspace_project_id();
             let mut rows: Vec<RowRef> = browser_rows_for_project(
                 &mut state,
-                previous.as_ref(),
+                previous.as_ref().filter(|_| !rows_all_dirty),
                 project_id,
+                &tab_project_id,
                 effective,
                 &row_context,
             );
@@ -402,7 +527,11 @@ impl SidebarViewModel {
             }
             plans.push(GroupPlan {
                 group_id: project_key.to_sidebar_group_id(),
-                storage_id: project_id.clone(),
+                // `projectNativeSidebarGroup` keys a project group by
+                // `projectContext.editor.projectId`, which is the workspace project id: the raw id
+                // locally, `remote:<machine>:project:<id>` on a remote machine. The prefix below
+                // is then applied on top of it, which is what the persisted collapse state holds.
+                storage_id: storage_id(&machine, &tab_project_id),
                 title: project
                     .as_ref()
                     .map(|project| project.title.clone())
@@ -410,6 +539,8 @@ impl SidebarViewModel {
                 kind: GroupKind::Project,
                 rows,
                 project,
+                remote_machine: remote_context(Some(project_id)),
+                is_stale,
             });
             for subgroup in &members.subgroups {
                 let mut rows: Vec<RowRef> = Vec::new();
@@ -428,11 +559,13 @@ impl SidebarViewModel {
                 }
                 plans.push(GroupPlan {
                     group_id: subgroup.sidebar_group_id.clone(),
-                    storage_id: subgroup.sidebar_group_id.clone(),
+                    storage_id: storage_id(&machine, &subgroup.sidebar_group_id),
                     title: subgroup.title.clone(),
                     kind: GroupKind::Subgroup,
                     rows,
                     project: None,
+                    remote_machine: remote_context(Some(project_id)),
+                    is_stale,
                 });
             }
         }
@@ -452,13 +585,16 @@ impl SidebarViewModel {
                 });
             let build = match reuse {
                 Some(cached) => cached.build,
-                None => build_group(
-                    plan,
-                    &state.focus,
-                    &effective.ui,
-                    &effective.settings,
-                    now_ms,
-                ),
+                None => {
+                    state.work.groups_built += 1;
+                    build_group(
+                        plan,
+                        &state.focus,
+                        &effective.ui,
+                        &effective.settings,
+                        now_ms,
+                    )
+                }
             };
             state.next_deadline_ms = min_deadline(state.next_deadline_ms, build.deadline_ms);
             builds.insert(plan.group_id.clone(), build.clone());
@@ -467,7 +603,21 @@ impl SidebarViewModel {
                 .insert(plan.group_id.clone(), CachedGroup { key, build });
         }
 
-        // 6. The list itself.
+        // 6. The machine tabs. The selected machine's counts come out of the groups just built;
+        // every other machine's are counted off the store and kept until its rows move.
+        let (summaries, summaries_built) = machine_summaries(
+            store,
+            &machine,
+            effective,
+            previous
+                .as_ref()
+                .map(|previous| &previous.machine_summaries),
+            changes,
+        );
+        state.machine_summaries = summaries;
+        state.work.machine_summaries_built = summaries_built;
+
+        // 7. The list itself.
         let side_state = store.machine(&machine).map(|entry| entry.side_state());
         state.view = assemble(AssembleInput {
             plans: &plans,
@@ -492,9 +642,22 @@ impl SidebarViewModel {
                     .map(CollectionsState::from_local_json)
                     .unwrap_or_default(),
             },
-            machine_loaded,
+            local_machine_loaded: store.loaded(&MachineId::Local).is_some(),
+            machine_summaries: &state.machine_summaries,
+            // Asked only when the two cheap tests before it both say no, which on a populated
+            // sidebar they never do; walking every machine's projects is not per-update work.
+            any_machine_draws_a_project: &|| {
+                super::machines::any_machine_draws_a_project(store, &effective.host)
+            },
             now_ms,
         });
+        state.work.group_count = state.view.groups.len();
+        state.work.row_count = state
+            .view
+            .groups
+            .iter()
+            .map(|group| group.core.sessions.len())
+            .sum();
         let changed = previous
             .as_ref()
             .is_none_or(|previous| previous.view != state.view);
@@ -504,10 +667,20 @@ impl SidebarViewModel {
 }
 
 /// Every row of a project's browser tabs, kept until the tabs themselves change.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// `previous` is withheld when every row is dirty, and that is the whole point of the argument
+/// rather than a detail. A browser row is built from the same [`RowContext`] as a session row, so
+/// its tooltip carries the tag catalog and Debugging Mode, and reusing it on the strength of an
+/// unchanged tab list alone kept a pre-catalog tooltip on a row whose id never moved, which kept
+/// its group's cache key unchanged, which kept the whole group. It survived every replay because
+/// no recording carries browser tabs; it took a live sidebar with a browser row open and one tag
+/// catalog change to show, as one row differing from a build with no cache at all.
 fn browser_rows_for_project(
     state: &mut CacheState,
     previous: Option<&CacheState>,
     project_id: &str,
+    tab_project_id: &str,
     inputs: &SidebarInputs,
     context: &RowContext<'_>,
 ) -> Vec<RowRef> {
@@ -515,7 +688,7 @@ fn browser_rows_for_project(
         .host
         .browser_tabs
         .iter()
-        .filter(|tab| tab.project_id == project_id)
+        .filter(|tab| tab.project_id == tab_project_id)
         .cloned()
         .collect();
     if tabs.is_empty() {
@@ -528,6 +701,7 @@ fn browser_rows_for_project(
     let rows = reuse.unwrap_or_else(|| {
         tabs.iter()
             .map(|tab| {
+                state.work.browser_rows_built += 1;
                 state.next_row_id += 1;
                 RowRef {
                     id: state.next_row_id,
@@ -568,8 +742,9 @@ fn resolve_row(
         project_id: project_id.to_string(),
         session_id: session_id.to_string(),
     };
-    let sidebar_id = super::rows::sidebar_session_id(project_id, session_id);
+    let sidebar_id = key.to_sidebar_session_id();
     state.next_row_id += 1;
+    state.work.rows_built += 1;
     let row = RowRef {
         id: state.next_row_id,
         row: Arc::new(session_row(
@@ -602,13 +777,24 @@ fn project_context(
     let worktree = overlay.and_then(|overlay| overlay.worktree.clone());
     // `project-sections.ts` counts the GROUPS the sidebar holds, so a parked or otherwise
     // unlisted worktree project does not raise the number.
+    //
+    // It compares a candidate's `worktree.parentProjectId`, which is the RAW project id of the
+    // daemon that published it, against this project's `projectContext.editor.projectId`, which is
+    // the WORKSPACE project id. The two are the same string for a local project and never the same
+    // for a remote one, so a remote project's worktree count is zero there and has to be zero
+    // here: the number on a remote header is the TypeScript's, not a better one.
+    let owner_id = ProjectKey {
+        machine: machine.clone(),
+        project_id: project_id.to_string(),
+    }
+    .to_workspace_project_id();
     let worktree_count = meta
         .project_order
         .iter()
         .filter(|candidate| {
             meta.overlay(candidate)
                 .and_then(|overlay| overlay.worktree.as_ref())
-                .is_some_and(|worktree| worktree.parent_project_id == project_id)
+                .is_some_and(|worktree| worktree.parent_project_id == owner_id)
         })
         .count();
     Some(ProjectContextInput {
@@ -625,6 +811,13 @@ fn project_context(
             .copied()
             .unwrap_or_default(),
         worktree_count,
+        // `Tri` keeps "not probed" apart from "probed, no origin"; the menu tests the value for
+        // truthiness, so both collapse to nothing here.
+        git_remote_origin_url: project
+            .git_remote_origin_url
+            .value()
+            .filter(|url| !url.is_empty())
+            .cloned(),
     })
 }
 
@@ -685,6 +878,11 @@ fn group_key(plan: &GroupPlan, focus: &FocusKey, inputs: &SidebarInputs) -> Grou
         enable_parking: inputs.settings.enable_session_parking,
         compact_count: inputs.settings.project_session_list_collapsed_count,
         sort_mode: inputs.settings.sort_mode,
+        is_stale: plan.is_stale,
+        machine_name: plan
+            .remote_machine
+            .as_ref()
+            .map(|remote| remote.machine_name.clone()),
     }
 }
 
@@ -718,6 +916,78 @@ fn changed_timer_keys(previous: &SidebarInputs, next: &SidebarInputs) -> BTreeSe
 fn parse_sidebar_session_key(sidebar_session_id: &str) -> Option<(String, String)> {
     SessionKey::parse_sidebar_session_id(sidebar_session_id)
         .map(|key| (key.project_id, key.session_id))
+}
+
+/// The id a group's own UI state is stored under.
+///
+/// `projectNativeSidebarGroup` prefixes every group of a remote machine with `remote:<machine>:`,
+/// on top of an id that already names the machine for a project group. The double prefix is what
+/// the persisted collapse state holds, so it is reproduced rather than tidied up.
+fn storage_id(machine: &MachineId, raw: &str) -> String {
+    match machine.remote_id() {
+        None => raw.to_string(),
+        Some(machine_id) => format!("remote:{machine_id}:{raw}"),
+    }
+}
+
+/// The badge counts of every machine tab the host offers EXCEPT the selected one, whose counts
+/// come out of the groups the list just built.
+///
+/// A machine whose rows the burst did not touch keeps the count it had: the walk is over every
+/// session of that machine and a tab strip is redrawn far more often than a machine's rows move.
+/// Leaving the selected machine out is what keeps a one-machine sidebar paying nothing for this.
+fn machine_summaries(
+    store: &PresentationStore,
+    selected: &MachineId,
+    inputs: &SidebarInputs,
+    previous: Option<&BTreeMap<MachineId, MachineSummary>>,
+    changes: &ChangeSummary,
+) -> (BTreeMap<MachineId, MachineSummary>, usize) {
+    let mut summaries: BTreeMap<MachineId, MachineSummary> = BTreeMap::new();
+    let mut built = 0usize;
+    let wanted = inputs
+        .host
+        .machines
+        .iter()
+        .map(|machine| machine_id(&machine.machine_id))
+        .chain(std::iter::once(MachineId::Local));
+    for machine in wanted {
+        if machine == *selected || summaries.contains_key(&machine) {
+            continue;
+        }
+        let touched = changes.machines_reloaded.contains(&machine)
+            || changes.connection_changed.contains(&machine)
+            || changes.project_order_changed.contains(&machine)
+            || changes.chat_collection_changed.contains(&machine)
+            || changes
+                .sessions_changed
+                .iter()
+                .chain(&changes.sessions_removed)
+                .any(|session| session.machine == machine)
+            || changes
+                .projects_changed
+                .iter()
+                .chain(&changes.projects_removed)
+                .any(|project| project.machine == machine)
+            || changes
+                .session_order_changed
+                .iter()
+                .any(|project| project.machine == machine)
+            // The user-made groups of every machine live in this computer's document.
+            || changes.side_state.workspace_groups;
+        let summary = match previous
+            .filter(|_| !touched)
+            .and_then(|held| held.get(&machine))
+        {
+            Some(summary) => *summary,
+            None => {
+                built += 1;
+                machine_tab_summary(store, &machine, inputs.host.parked_project_ids(&machine))
+            }
+        };
+        summaries.insert(machine, summary);
+    }
+    (summaries, built)
 }
 
 fn machine_id(selected_machine_id: &str) -> MachineId {

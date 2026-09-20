@@ -9,7 +9,7 @@ use super::text::{
     is_js_line_terminator, js_trim, js_trim_start, normalized_non_empty, parse_iso_ms, utf16_len,
     utf16_prefix, utf16_suffix,
 };
-use super::view::SessionRow;
+use super::view::{LabelDeadline, SessionRow};
 
 const DEFAULT_TERMINAL_SESSION_TITLE: &str = "Terminal Session";
 const TERMINAL_TITLE_MARKER: &str = "∗";
@@ -495,4 +495,64 @@ pub(crate) fn last_interaction_label(at: &str, now_ms: u64) -> String {
         return format!("{hours}h");
     }
     format!("{}d", hours / 24)
+}
+
+/// The next host time at which the time a row draws reads differently.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// The labels are the one part of a row the host formats against its own clock, so nothing in the
+/// store ever tells it they moved. The projection this port replaces refreshed them from a timer
+/// that ran once a second for the life of the app; this says exactly when the next one changes, so
+/// a countdown still ticks every second while it runs and an idle sidebar with an hour-old row
+/// wakes once an hour instead of three thousand six hundred times. A row draws one time and only
+/// one: a live countdown, else a standing timer label that never moves, else the relative time,
+/// and only when the card shows it at all. Asking about the two the row does not draw is how a
+/// sidebar full of working sessions ends up waking every second for labels nobody sees.
+pub(crate) fn next_label_deadline(
+    row: &SessionRow,
+    now_ms: u64,
+    show_relative_time: bool,
+) -> Option<LabelDeadline> {
+    let now = now_ms as i64;
+    let countdown = [
+        row.delayed_send
+            .as_ref()
+            .and_then(|delayed| delayed.deadline_at.as_deref()),
+        row.close_after_done
+            .as_ref()
+            .and_then(|close| close.deadline_at.as_deref()),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|value| !value.is_empty())
+    .filter_map(parse_iso_ms)
+    // A countdown that has run out reads `00:00` and stands still.
+    .filter(|deadline| *deadline > now)
+    // The seconds the countdown shows are rounded up, so it changes on the second boundaries
+    // measured back from the deadline.
+    .map(|deadline| deadline - ((deadline - now - 1) / 1000) * 1000)
+    .min();
+    if let Some(countdown) = countdown {
+        return Some(LabelDeadline::Countdown(countdown.max(now + 1) as u64));
+    }
+    // A Delayed Send or Close After Done with no deadline still owns the slot, with a label that
+    // says what it is waiting for rather than a time.
+    if timer_trailing_label(row, now_ms).is_some() {
+        return None;
+    }
+    // The relative time is drawn only when the card shows it and the row is neither working nor
+    // waiting for an answer, which are drawn as their own state instead.
+    if !show_relative_time || row.activity == "working" || row.activity == "attention" {
+        return None;
+    }
+    let at = parse_iso_ms(row.last_interaction_at.as_deref()?)?;
+    let elapsed = (now - at).max(0);
+    let step = match elapsed {
+        ..60_000 => 1_000,
+        ..3_600_000 => 60_000,
+        ..86_400_000 => 3_600_000,
+        _ => 86_400_000,
+    };
+    let deadline = at + (elapsed / step + 1) * step;
+    (deadline > now).then_some(LabelDeadline::Relative(deadline as u64))
 }

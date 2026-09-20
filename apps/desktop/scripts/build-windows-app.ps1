@@ -22,6 +22,24 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $GpuiDir = Resolve-Path (Join-Path $ScriptDir "..")
 $RepoRoot = Resolve-Path (Join-Path $GpuiDir "../..")
+
+<#
+CDXC:Build 2026-09-18 WHY:
+create-deterministic-tar.sh is a Git for Windows script: it takes Windows paths
+and branches on a MINGW/MSYS/CYGWIN `uname`. Resolving it through `bash` on PATH
+picked WSL's Linux bash on any machine with WSL installed, because Git for
+Windows keeps bash.exe in Git\bin, which it deliberately leaves off PATH. WSL
+bash cannot open `C:\...` arguments, so packaging died with no diagnostic.
+Resolve bash beside git.exe, the same way build-windows-code-server.ps1 does.
+#>
+function Get-GitBash {
+    $GitPath = (Get-Command git.exe -ErrorAction Stop).Source
+    $GitRoot = Split-Path (Split-Path $GitPath -Parent) -Parent
+    $Bash = Join-Path $GitRoot "bin/bash.exe"
+    if (!(Test-Path $Bash)) { throw "Git for Windows bash.exe was not found beside git.exe." }
+    return $Bash
+}
+$GitBash = Get-GitBash
 $AppName = "Ghostex"
 $AppDir = Join-Path $GpuiDir "build/windows/$AppName"
 $OnDemandComponents = $env:GHOSTEX_ON_DEMAND_ASSETS -eq "1"
@@ -221,7 +239,7 @@ if ($OnDemandComponents) {
     }
     if ($SwiftshaderIcd) { Copy-Item -LiteralPath $SwiftshaderIcd $CefComponentStage }
     Copy-Item -Recurse -LiteralPath $Locales -Destination (Join-Path $CefComponentStage "locales")
-    & bash (Join-Path $RepoRoot "tooling/release-gpui/create-deterministic-tar.sh") $CefComponentStage $CefComponentAsset --windows-component
+    & $GitBash (Join-Path $RepoRoot "tooling/release-gpui/create-deterministic-tar.sh") $CefComponentStage $CefComponentAsset --windows-component
     if ($LASTEXITCODE -ne 0) { throw "Could not create the deterministic Windows CEF component asset" }
     Remove-Item -Recurse -Force $CefComponentStage
     & node (Join-Path $RepoRoot "tooling/release-gpui/publish-component.mjs") `
@@ -319,7 +337,7 @@ if ($WslCodeServerArchive -and (Test-Path $WslCodeServerArchive)) {
     New-Item -ItemType Directory -Force -Path $ComponentStage | Out-Null
     Copy-Item $WslCodeServerArchive (Join-Path $ComponentStage $InnerArchiveName)
     Copy-Item "$WslCodeServerArchive.sha256" (Join-Path $ComponentStage "$InnerArchiveName.sha256")
-    & bash (Join-Path $RepoRoot "tooling/release-gpui/create-deterministic-tar.sh") $ComponentStage $ComponentAsset --windows-component
+    & $GitBash (Join-Path $RepoRoot "tooling/release-gpui/create-deterministic-tar.sh") $ComponentStage $ComponentAsset --windows-component
     if ($LASTEXITCODE -ne 0) { throw "Could not create the deterministic Windows code-server component asset" }
     Remove-Item -Recurse -Force $ComponentStage
     $ComponentAssetSha = (Get-FileHash -Algorithm SHA256 $ComponentAsset).Hash.ToLowerInvariant()
