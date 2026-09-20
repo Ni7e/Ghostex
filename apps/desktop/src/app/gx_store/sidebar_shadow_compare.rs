@@ -196,6 +196,12 @@ const TIMING_FIELDS: [&str; 1] = ["lastInteractionAt"];
 ///
 /// Only that direction is classified. A field the old side holds and the store does not is
 /// reported, because that is the shape a real loss in this port would take.
+///
+/// The recording is evidence, not a protocol guarantee: `projectUpdated` carries a whole project
+/// row, so a daemon that retracted the icon in a delta the store missed would land in this bucket
+/// and read as explained. A missed delta normally disagrees in several fields at once, which one
+/// unlisted field is enough to defeat, so the hole is narrow; it is named here rather than left
+/// for the next reader to find.
 const STALE_PUBLISH_FIELDS: [&str; 2] = ["projectContext.discoveredIconDataUrl", "faviconDataUrl"];
 
 impl SidebarMismatch {
