@@ -1320,6 +1320,176 @@ async function compare([outDir, ...flags]: string[]) {
  * Whether the shipped code reaches `runGpuiSidebarBulkSleepPaced` for this payload: the three ways
  * into `setSessionsSleeping` with `sleeping === true`, and nothing else.
  */
+
+/**
+ * The workspace-groups guard, compared step by step.
+ *
+ * This is its own mode rather than a section of `compare` because it answers a different question
+ * with a different input: not "does this payload make the same call" but "does what the user is
+ * looking at agree after EVERY event of an interleaving". Oscillation is invisible in a final
+ * state, so a comparison that only looked at the end would pass on the exact bug the guard exists
+ * to prevent.
+ */
+async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
+  if (!outDir) throw new Error('workspace-groups <out-dir>');
+  pinTimeZone();
+  const injectAt = flags.indexOf('--inject');
+  const mutationName = injectAt >= 0 ? flags[injectAt + 1] : undefined;
+  if (mutationName && !GROUPS_MUTATIONS.includes(mutationName)) {
+    console.error(`unknown mutation ${mutationName}; one of ${GROUPS_MUTATIONS.join(', ')}`);
+    process.exit(2);
+  }
+  const { runTypeScriptWorkspaceGroupsCase } = await import('./workspace-groups-typescript.ts');
+  let dump: Json;
+  try {
+    dump = JSON.parse(readFileSync(join(outDir, 'rust-groups.json'), 'utf8')) as Json;
+  } catch {
+    console.error(`no rust-groups.json in ${outDir}: run the workspace_groups_guard example first`);
+    process.exit(2);
+  }
+  const documents = (dump.documents ?? []) as Json[];
+  ECHO_DOCUMENTS = documents;
+  const cases = (dump.cases ?? []) as Json[];
+  const differences: string[] = [];
+  let steps = 0;
+  let ignoredPending = 0;
+  let adopted = 0;
+  let scheduledPushes = 0;
+  let retries = 0;
+  for (const entry of cases) {
+    const script = (entry.script ?? []) as string[];
+    const start = documents[entry.start === 'a' ? 1 : entry.start === 'b' ? 2 : 0];
+    const theirs = await runTypeScriptWorkspaceGroupsCase(start, script, documents);
+    const mine = mutateGroups(mutationName, entry).steps as Json[];
+    for (const [index, step] of mine.entries()) {
+      steps += 1;
+      if (step.outcome === 'ignoredPending') ignoredPending += 1;
+      if (step.outcome === 'adopted') adopted += 1;
+      if (step.outcome === 'scheduledPush') scheduledPushes += 1;
+      if (((step.schedules ?? []) as number[]).includes(5000)) retries += 1;
+      const other = theirs[index];
+      const where = `${entry.start} [${script.join(' ')}] step ${index} ${String(step.event)}`;
+      if (canonical(normalizeDocument(step.document)) !== canonical(normalizeDocument(other?.document)))
+        differences.push(
+          `${where}: rust ${canonical(normalizeDocument(step.document))} ts ${canonical(normalizeDocument(other?.document))}`
+        );
+      if ((step.pending === true) !== (other?.pending === true))
+        differences.push(`${where} pending: rust ${step.pending === true} ts ${other?.pending === true}`);
+    }
+  }
+  console.log(
+    `workspace groups: ${cases.length} cases ${steps} steps ignoredPending ${ignoredPending} adopted ${adopted} scheduledPushes ${scheduledPushes} retries ${retries} differences ${differences.length}${
+      mutationName ? ` (injected ${mutationName})` : ''
+    }`
+  );
+  for (const difference of differences.slice(0, 20)) console.log(`  ${difference}`);
+  if (differences.length > 20) console.log(`  … and ${differences.length - 20} more`);
+  const measured: [string, number][] = [
+    ['steps', steps],
+    ['ignoredPending', ignoredPending],
+    ['adopted', adopted],
+    ['scheduledPushes', scheduledPushes],
+    ['retries', retries],
+  ];
+  const collapsed = measured.filter(([, count]) => count === 0);
+  if (mutationName) {
+    const noticed = differences.length > 0 || collapsed.length > 0;
+    process.exitCode = noticed ? 0 : 1;
+    if (!noticed)
+      console.log(`  the injected mutation ${mutationName} produced NO difference and collapsed no counter`);
+    return;
+  }
+  if (!differences.length && collapsed.length) {
+    console.log(`  ${collapsed.map(([label]) => label).join(', ')} counted nothing`);
+    process.exitCode = 1;
+    return;
+  }
+  process.exitCode = differences.length ? 1 : 0;
+}
+
+/**
+ * The document with the parts that are not data taken out.
+ *
+ * The Rust side holds `projects` in a sorted map and the TypeScript in insertion order, which is
+ * the same document written two ways; `projectOrder` is the ordering that IS data and is compared
+ * as it stands.
+ */
+function normalizeDocument(document: unknown): Json {
+  const record = (document ?? {}) as Json;
+  const projects = (record.projects ?? {}) as Json;
+  const sorted: Json = {};
+  for (const key of Object.keys(projects).sort()) sorted[key] = projects[key];
+  return { projectOrder: record.projectOrder ?? [], projects: sorted };
+}
+
+/**
+ * The guard's mutations. Each one is the guard removed in a way that reads as reasonable and
+ * produces the oscillation it exists to prevent.
+ */
+function mutateGroups(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  const steps = (clone.steps ?? []) as Json[];
+  switch (name) {
+    // The guard gone: an echo is applied whether or not a push is outstanding, which is the stale
+    // echo undoing a local move and the push then redoing it.
+    case 'adopt-while-pending':
+      for (const [index, step] of steps.entries()) {
+        if (step.outcome !== 'ignoredPending') continue;
+        const echoed = String(step.event) === 'echoA' ? 1 : String(step.event) === 'echoB' ? 2 : undefined;
+        if (echoed === undefined) continue;
+        for (let later = index; later < steps.length; later += 1) {
+          if (steps[later].event === 'editA' || steps[later].event === 'editB') break;
+          steps[later].document = ECHO_DOCUMENTS[echoed];
+        }
+      }
+      return clone;
+    // The flag cleared by a push that left with an older document, which is the identity check
+    // replaced by "a push came home, so we must be in sync".
+    case 'clear-pending-on-any-success':
+      for (const [index, step] of steps.entries()) {
+        if (String(step.event) !== 'pushOk') continue;
+        for (let later = index; later < steps.length; later += 1) {
+          if (steps[later].event === 'editA' || steps[later].event === 'editB') break;
+          steps[later].pending = false;
+        }
+      }
+      return clone;
+    // A failed push that gives up, so the document never reaches the server and the next echo
+    // silently wins.
+    case 'give-up-after-a-failed-push':
+      for (const [index, step] of steps.entries()) {
+        if (String(step.event) !== 'pushFail') continue;
+        for (let later = index; later < steps.length; later += 1) {
+          if (steps[later].event === 'editA' || steps[later].event === 'editB') break;
+          steps[later].pending = false;
+        }
+      }
+      return clone;
+    // An empty server document adopted instead of pushed, which deletes every group the user has.
+    case 'adopt-an-empty-server-document':
+      for (const [index, step] of steps.entries()) {
+        if (step.outcome !== 'scheduledPush') continue;
+        for (let later = index; later < steps.length; later += 1) {
+          if (steps[later].event === 'editA' || steps[later].event === 'editB') break;
+          steps[later].document = { projectOrder: [], projects: {} };
+        }
+      }
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+/** Filled from the dump so a mutation can say what the echo would have made the document. */
+let ECHO_DOCUMENTS: Json[] = [];
+
+const GROUPS_MUTATIONS = [
+  'adopt-while-pending',
+  'clear-pending-on-any-success',
+  'give-up-after-a-failed-push',
+  'adopt-an-empty-server-document',
+];
+
 function pacedPayload(payload: Json): boolean {
   const kind = String(payload.type);
   if (kind === 'sleepInactiveProjectSessions') return true;
@@ -1381,7 +1551,10 @@ function sortKeys(value: unknown): unknown {
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === 'compare') await compare(rest);
 else if (mode === 'snooze-clock') writeSnoozeClock(rest);
+else if (mode === 'workspace-groups') await compareWorkspaceGroups(rest);
 else {
-  console.error('usage: action-parity.ts snooze-clock <out-dir> | compare <out-dir> [--inject <mutation>]');
+  console.error(
+    'usage: action-parity.ts snooze-clock <out-dir> | compare <out-dir> [--inject <mutation>] | workspace-groups <out-dir> [--inject <mutation>]'
+  );
   process.exit(2);
 }
