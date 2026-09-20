@@ -65,6 +65,10 @@ struct RemoteClient {
     generation: u64,
     started_at: Option<Instant>,
     restart_attempt: u32,
+    /// The earliest a replacement may start after the thread ended on its own. Without it the
+    /// reconcile, which runs on the publish path, would start a new client within a second of
+    /// every death and the backoff ladder would never be walked.
+    restart_due_at: Option<Instant>,
 }
 
 /// Every remote machine's client, and the machine tabs the sidebar draws.
@@ -110,7 +114,9 @@ impl RemoteClients {
         }
         let step = (remote.restart_attempt as usize).min(CLIENT_RESTART_BACKOFF_MS.len() - 1);
         remote.restart_attempt = remote.restart_attempt.saturating_add(1);
-        Duration::from_millis(CLIENT_RESTART_BACKOFF_MS[step])
+        let delay = Duration::from_millis(CLIENT_RESTART_BACKOFF_MS[step]);
+        remote.restart_due_at = Some(Instant::now() + delay);
+        delay
     }
 }
 
@@ -169,6 +175,10 @@ impl GxStoreHost {
             return;
         };
         remote.client = None;
+        // Cleared here and set again by `next_restart_delay` when a thread death is what retired
+        // it. A machine that simply reconnected through another port must not sit out the ladder
+        // of the client that died before it.
+        remote.restart_due_at = None;
         let machine = MachineId::Remote(machine_id.to_string());
         let still_connected = self
             .core
@@ -260,8 +270,16 @@ impl GhostexGpuiApp {
             self.gx_store.remote.counters.stops += 1;
             self.gx_store
                 .retire_remote_client(&machine_id, "the machine is no longer connected");
-            if wanted.is_none() {
-                self.gx_store.remote.clients.remove(&machine_id);
+            match wanted {
+                // Still connected, through a new tunnel: a fresh target is a fresh start.
+                Some(_) => {
+                    if let Some(remote) = self.gx_store.remote.clients.get_mut(&machine_id) {
+                        remote.restart_attempt = 0;
+                    }
+                }
+                None => {
+                    self.gx_store.remote.clients.remove(&machine_id);
+                }
             }
         }
         // A machine that left the settings, or that the user disabled, loses its rows and its tab.
@@ -297,7 +315,14 @@ impl GhostexGpuiApp {
                 .is_some_and(|remote| {
                     remote.client.is_some() && remote.port == *port && remote.token == *token
                 });
-            if running {
+            let waiting = self
+                .gx_store
+                .remote
+                .clients
+                .get(machine_id)
+                .and_then(|remote| remote.restart_due_at)
+                .is_some_and(|due| Instant::now() < due);
+            if running || waiting {
                 continue;
             }
             self.start_gx_store_remote_client(machine_id, *port, token, cx);
@@ -349,12 +374,22 @@ impl GhostexGpuiApp {
                 // The sanitized failure summary is the old projection's; it moves with the rest of
                 // the connect state in M5.
                 message: None,
+                // "The store can draw this machine's list", which is what `supported` gates the
+                // renderer on. A machine the host has a client for, running or waiting out a
+                // backoff, and a machine whose rows are still held after its stream dropped, both
+                // qualify; a machine that has not connected in this run does not, and its tab
+                // keeps drawing the old projection's last-seen copy.
                 fed: self
                     .gx_store
                     .remote
                     .clients
-                    .get(machine_id.as_str())
-                    .is_some_and(|remote| remote.client.is_some()),
+                    .contains_key(machine_id.as_str())
+                    || self
+                        .gx_store
+                        .core
+                        .presentation()
+                        .loaded(&MachineId::Remote(machine_id.clone()))
+                        .is_some(),
             });
         }
         tabs
@@ -381,11 +416,13 @@ impl GhostexGpuiApp {
                 generation: 0,
                 started_at: None,
                 restart_attempt: 0,
+                restart_due_at: None,
             });
         // Dropping the client stops its thread; its wake channel closes and ends the old pump.
         entry.client = None;
         entry.port = port;
         entry.token = token.to_string();
+        entry.restart_due_at = None;
         entry.generation += 1;
         let generation = entry.generation;
         // The revision the store holds for this machine, so a restart resumes rather than asking
