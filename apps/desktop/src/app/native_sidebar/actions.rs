@@ -101,6 +101,12 @@ impl GhostexGpuiApp {
         command: Value,
         cx: &mut gpui::Context<Self>,
     ) {
+        // A row's context menu is built for the row the user opened, and since M4c the store
+        // builds it: the panel is filled in this frame instead of after a round trip through the
+        // old runtime (gx_store/sidebar_menus.rs).
+        if self.gx_store_answer_session_menu(&command, cx) {
+            return;
+        }
         let Some(service) = self.sidebar.clone() else {
             return;
         };

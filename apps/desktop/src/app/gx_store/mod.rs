@@ -7,6 +7,7 @@
 //! runtime's focus into the core and compares its tab list; `sidebar_shadow.rs` builds the
 //! sidebar list from the store beside the old projection's and compares them (`_inputs` mirrors
 //! what it reads, `_compare` names the differences, `_storage` reads the hidden projects);
+//! `sidebar_menus.rs` builds the menus, hover buttons and header buttons the drawn list carries;
 //! `diagnostics.rs` writes the log lines.
 
 mod burst;
@@ -19,6 +20,7 @@ mod session_walk;
 mod shadow_diff;
 mod sidebar_list;
 mod sidebar_list_inputs;
+mod sidebar_menus;
 mod sidebar_scratch_compare;
 mod sidebar_shadow;
 mod sidebar_shadow_compare;

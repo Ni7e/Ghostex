@@ -12,8 +12,8 @@
 use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{
-    ChangeSummary, ConnectionPhase, FocusState, MachineId, SidebarInputs, SidebarSettings,
-    SidebarView, SidebarViewModel, UnavailableState,
+    ChangeSummary, ConnectionPhase, FocusState, MachineId, SidebarInputs, SidebarMenus,
+    SidebarSettings, SidebarView, SidebarViewModel, UnavailableState,
 };
 use serde_json::Value;
 
@@ -73,6 +73,10 @@ pub(crate) struct SidebarListCounters {
     pub(crate) installs: u64,
     /// Wakes that found no drawn time had moved, so the list was left as it was.
     pub(crate) installs_skipped: u64,
+    /// Publishes accepted while the store's list was drawn, and the ones that moved a value the
+    /// list still takes from them. The difference is what M4c stopped reinstalling for.
+    pub(crate) publishes_seen: u64,
+    pub(crate) installs_from_carry: u64,
     pub(crate) deadline_wakes: u64,
     /// Rows whose drawn time had really moved, summed over every wake, and the most any one wake
     /// moved. A wake per second with one row each is a row in its first minute; a wake per second
@@ -111,9 +115,11 @@ pub(crate) struct SidebarList {
     /// second can be read as a countdown doing its job or as something booking a time nobody draws.
     deadline_booked: Option<u64>,
     pub(super) deadline_kind: &'static str,
-    /// Address of the published list the installed one last carried the menus of, so a publish
-    /// that left the store's own list unchanged still refreshes them.
-    installed_projection: usize,
+    /// The publish the installed list took its carried fields from, so a publish that moved one of
+    /// them is installed and a publish that moved none is not. Held rather than compared by
+    /// address: the carried fields are what matters, not which object they arrived in.
+    installed_carry:
+        Option<std::sync::Arc<crate::app::native_sidebar::model::NativeSidebarSnapshot>>,
     snapshot_cache: SnapshotCache,
     inputs_cache: InputsCache,
     /// The inputs the newest view was built from, so the shadow compares the same moment. Kept
@@ -142,7 +148,7 @@ impl Default for SidebarList {
             source: std::cell::Cell::new(None),
             deadline_booked: None,
             deadline_kind: "none",
-            installed_projection: 0,
+            installed_carry: None,
             snapshot_cache: SnapshotCache::default(),
             inputs_cache: InputsCache::default(),
             last_inputs: SidebarInputs::default(),
@@ -293,9 +299,52 @@ impl GhostexGpuiApp {
         source
     }
 
-    /// Whether the installed list already carries the menus of this publish.
-    pub(crate) fn gx_store_sidebar_list_carries_projection(&self, identity: usize) -> bool {
-        self.gx_store.sidebar_list.installed_projection == identity
+    /// A publish arrived while the store's list was drawn.
+    pub(crate) fn gx_store_note_sidebar_publish_seen(&mut self) {
+        self.gx_store.sidebar_list.counters.publishes_seen += 1;
+    }
+
+    /// A publish moved a carried value, so the list was installed for it rather than for itself.
+    pub(crate) fn gx_store_note_sidebar_install_from_carry(&mut self) {
+        self.gx_store.sidebar_list.counters.installs_from_carry += 1;
+    }
+
+    /// Whether a publish moved one of the values the installed list still takes from it.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// Until M4c every accepted publish forced an install, because the list carried that publish's
+    /// menus, hover buttons and header buttons by id. The menus are the store's now, so only the
+    /// fields named in `sidebar_snapshot.rs` are left, and they move far less often than the rows
+    /// do: the HUD, the machine tabs, the two requests, and the per-group facts of a remote
+    /// machine or of a project's editor state. The daemon revision is deliberately not compared:
+    /// nothing the renderer draws reads it, and it changes on nearly every publish.
+    pub(crate) fn gx_store_sidebar_carry_changed(
+        &self,
+        published: &crate::app::native_sidebar::model::NativeSidebarSnapshot,
+    ) -> bool {
+        let Some(installed) = self.gx_store.sidebar_list.installed_carry.as_deref() else {
+            return true;
+        };
+        if installed.hud != published.hud
+            || installed.machines != published.machines
+            || installed.rename_request != published.rename_request
+            || installed.reveal_request != published.reveal_request
+            || installed.search_shortcut != published.search_shortcut
+            || installed.commands_shortcut != published.commands_shortcut
+            || installed.groups.len() != published.groups.len()
+        {
+            return true;
+        }
+        installed
+            .groups
+            .iter()
+            .zip(&published.groups)
+            .any(|(installed, published)| {
+                installed.group_id != published.group_id
+                    || installed.is_stale != published.is_stale
+                    || installed.remote_machine_context != published.remote_machine_context
+                    || installed.project_context != published.project_context
+            })
     }
 
     /// Whether the renderer draws the store's list right now. A machine tab the view model cannot
@@ -497,24 +546,33 @@ impl GhostexGpuiApp {
             // before the first publish.
             return;
         };
+        // The menu host reads two client-storage values behind a one-second cache, so it is taken
+        // before the list is borrowed rather than inside the build.
+        let host = self.gx_store_menu_host(Some(&published));
         let started = Instant::now();
         // The labels are formatted against the clock of the moment they are drawn, not the moment
         // the list was last built: a wake that only ticks a countdown does not rebuild the list.
         let now_ms = now_ms();
         let snapshot = {
-            // Borrowed rather than cloned: the model and the cache are separate fields, so the
-            // whole list does not have to be copied to build the one the renderer draws.
+            // Borrowed rather than cloned: the model, the inputs and the cache are separate
+            // fields, so the whole list does not have to be copied to build the one the renderer
+            // draws.
+            let core = &self.gx_store.core;
             let list = &mut self.gx_store.sidebar_list;
+            let menus =
+                SidebarMenus::new(core, list.model.view(), &list.last_inputs, &host, now_ms);
             snapshot_from_view(
                 list.model.view(),
+                &menus,
                 &published,
                 &mut list.snapshot_cache,
+                &list.last_inputs.settings,
                 now_ms,
             )
         };
         let install_us = started.elapsed().as_micros() as u64;
         let list = &mut self.gx_store.sidebar_list;
-        list.installed_projection = std::sync::Arc::as_ptr(&published) as usize;
+        list.installed_carry = Some(published.clone());
         list.counters.installs += 1;
         list.counters.last_install_us = install_us;
         list.counters.install_max_us = list.counters.install_max_us.max(install_us);

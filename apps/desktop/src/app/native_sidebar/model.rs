@@ -106,7 +106,7 @@ impl NativeSidebarSession {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeSidebarMachine {
     pub(crate) working_count: usize,
@@ -185,14 +185,14 @@ pub(crate) struct NativeSidebarClockRow {
     pub(crate) armed_actions: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeSidebarRevealRequest {
     pub(crate) session_id: String,
     pub(crate) request_id: u64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeSidebarRenameRequest {
     pub(crate) collection_id: String,

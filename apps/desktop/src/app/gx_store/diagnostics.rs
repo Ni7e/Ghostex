@@ -449,6 +449,11 @@ impl GxStoreDiagnostics {
                     "viewChanges": list.view_changes,
                     "installs": list.installs,
                     "installsSkipped": list.installs_skipped,
+                    // Publishes accepted while the store's list was drawn, and the ones that moved
+                    // a value the list still takes from a publish. Before M4c the two were equal,
+                    // because the list carried that publish's menus.
+                    "publishesSeen": list.publishes_seen,
+                    "installsFromCarry": list.installs_from_carry,
                     "deadlineWakes": list.deadline_wakes,
                     "wakeRowsMoved": list.wake_rows_moved,
                     "wakeRowsMovedMax": list.wake_rows_moved_max,

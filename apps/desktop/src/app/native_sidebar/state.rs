@@ -112,10 +112,12 @@ impl GhostexGpuiApp {
                     .clone()
                     .expect("assigned above");
                 if self.gx_store_sidebar_draws_store_list() {
-                    // The menus, the HUD and the machine tabs the store's list carries are this
-                    // publish's, so it is rebuilt even when nothing the store owns moved.
-                    let identity = Arc::as_ptr(&published) as usize;
-                    if !self.gx_store_sidebar_list_carries_projection(identity) {
+                    // The store's list owns its menus since M4c; only the HUD, the machine tabs,
+                    // the two requests and a few per-group facts still ride on a publish, so a
+                    // publish is installed when one of THOSE moved and skipped otherwise.
+                    self.gx_store_note_sidebar_publish_seen();
+                    if self.gx_store_sidebar_carry_changed(&published) {
+                        self.gx_store_note_sidebar_install_from_carry();
                         self.gx_store_install_sidebar_list(cx);
                     }
                 } else {

@@ -84,6 +84,7 @@ pub(crate) struct GxStoreHost {
     pub(super) diagnostics: GxStoreDiagnostics,
     pub(crate) local_focus: LocalFocus,
     pub(crate) layout_persist: LayoutPersist,
+    pub(super) menu_host: super::sidebar_menus::MenuHostCache,
 }
 
 impl GxStoreHost {

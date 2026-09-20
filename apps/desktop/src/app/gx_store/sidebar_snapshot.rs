@@ -4,22 +4,23 @@
 //! The renderer reads one list, and this milestone moves where that list comes from without
 //! rewriting the thirty files that draw it. Every value the list itself decides (which groups,
 //! which rows, their order, sections, titles, tooltips, labels, counts, collapse and focus flags)
-//! is taken from the store's view model. The menus, hover actions and header actions are the one
-//! part the old projection still owns until M4c, so they are carried over from its newest publish
-//! by group, collection and row id, and so are the fields no milestone has moved yet (the HUD, the
-//! machine tabs, the more menu). Nothing here derives product state: a value is either the view
-//! model's or the old projection's, and this file says which.
+//! is the store's view model, and since M4c so are the menus, the hover buttons, the header
+//! buttons, the more menu and the agent artwork (`sidebar_menus.rs`).
 //!
-//! A row, group or collection the store holds and the old projection has not published yet has
-//! nothing to carry, so it draws with no context menu, no hover buttons and its fallback icon
-//! until the next publish, which is the following frame in practice. That is the shape of the
-//! seam until M4c moves the menus; it is not a fallback for a missing value, because there is no
-//! second source for a menu this app does not build yet.
+//! What is still taken from the old projection's newest publish is named here and nowhere else:
+//! the HUD, the machine tabs, the reveal and rename requests, the daemon revision, and the
+//! per-group facts only a remote machine has (`isStale`, its machine context) plus the project
+//! facts no milestone has moved (`canRemoveProject`, the editor state, the theme). Each of those
+//! belongs to M4d or M5. Nothing here derives product state: a value is either the view model's
+//! or the old projection's, and this file says which.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ghostex_gx_core::{CollectionView, GroupView, SessionView, SidebarView, TagPresentation};
+use ghostex_gx_core::{
+    CollectionView, GroupView, SessionView, SidebarMenus, SidebarSettings, SidebarView,
+    TagPresentation, colored_agent_logo, menu_to_json,
+};
 use serde_json::{Map, Value, json};
 
 use crate::app::native_sidebar::model::{
@@ -38,10 +39,12 @@ use crate::app::native_sidebar::model::{
 /// no other row can ever be given its address.
 struct CachedRow {
     row: Arc<ghostex_gx_core::SessionRow>,
-    published: Option<Arc<NativeSidebarSession>>,
     is_focused: bool,
     is_visible: bool,
     is_multi_selected: bool,
+    /// The one menu input that moves on its own: a snooze ends without the row changing, and the
+    /// hover button turns from Unsnooze back into Snooze.
+    is_snoozed: bool,
     timer_label: Option<String>,
     last_interaction_label: Option<String>,
     element: Arc<NativeSidebarSession>,
@@ -51,17 +54,13 @@ impl CachedRow {
     fn matches(
         &self,
         row: &Arc<ghostex_gx_core::SessionRow>,
-        published: Option<&Arc<NativeSidebarSession>>,
         session: &SessionView,
+        is_snoozed: bool,
         timer_label: &Option<String>,
         last_interaction_label: &Option<String>,
     ) -> bool {
         Arc::ptr_eq(&self.row, row)
-            && match (&self.published, published) {
-                (Some(held), Some(published)) => Arc::ptr_eq(held, published),
-                (None, None) => true,
-                _ => false,
-            }
+            && self.is_snoozed == is_snoozed
             && self.is_focused == session.is_focused
             && self.is_visible == session.is_visible
             && self.is_multi_selected == session.is_multi_selected
@@ -74,6 +73,9 @@ impl CachedRow {
 #[derive(Default)]
 pub(super) struct SnapshotCache {
     rows: HashMap<String, CachedRow>,
+    /// The settings the cached rows' hover buttons were built from. A settings change does not
+    /// touch a row in the view model, so nothing else would invalidate them.
+    settings: Option<SidebarSettings>,
 }
 
 impl SnapshotCache {
@@ -104,13 +106,15 @@ impl SnapshotCache {
     }
 }
 
-/// Builds the list the renderer draws from the view model, keeping what the old projection still
-/// owns. `published` is its newest snapshot; `now_ms` is the clock the time labels are formatted
-/// against.
+/// Builds the list the renderer draws from the view model and the menus. `published` is the old
+/// projection's newest snapshot, which the fields named in the module comment still come from;
+/// `now_ms` is the clock the time labels are formatted against.
 pub(super) fn snapshot_from_view(
     view: &SidebarView,
+    menus: &SidebarMenus<'_>,
     published: &NativeSidebarSnapshot,
     cache: &mut SnapshotCache,
+    settings: &SidebarSettings,
     now_ms: u64,
 ) -> NativeSidebarSnapshot {
     let published_groups: HashMap<&str, &NativeSidebarGroup> = published
@@ -118,18 +122,11 @@ pub(super) fn snapshot_from_view(
         .iter()
         .map(|group| (group.group_id.as_str(), group))
         .collect();
-    let published_collections: HashMap<&str, &NativeSidebarCollection> = published
-        .collections
-        .iter()
-        .map(|collection| (collection.collection_id.as_str(), collection))
-        .collect();
-    let published_rows: HashMap<&str, &Arc<NativeSidebarSession>> = published
-        .groups
-        .iter()
-        .flat_map(|group| group.sessions.iter())
-        .map(|session| (session.session_id.as_str(), session))
-        .collect();
 
+    if cache.settings.as_ref() != Some(settings) {
+        cache.settings = Some(settings.clone());
+        cache.rows.clear();
+    }
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     let groups: Vec<NativeSidebarGroup> = view
         .groups
@@ -142,10 +139,10 @@ pub(super) fn snapshot_from_view(
                 .iter()
                 .map(|session| {
                     used.insert(session.row.sidebar_session_id.clone());
-                    session_element(session, &published_rows, cache, now_ms)
+                    session_element(group, session, menus, cache, now_ms)
                 })
                 .collect();
-            native_group(group, published, sessions)
+            native_group(group, menus, published, sessions)
         })
         .collect();
     cache
@@ -204,14 +201,7 @@ pub(super) fn snapshot_from_view(
         collections: view
             .collections
             .iter()
-            .map(|collection| {
-                native_collection(
-                    collection,
-                    published_collections
-                        .get(collection.collection_id.as_str())
-                        .copied(),
-                )
-            })
+            .map(|collection| native_collection(collection, menus))
             .collect(),
         order: view
             .order
@@ -224,7 +214,9 @@ pub(super) fn snapshot_from_view(
                 id: item.id.clone(),
             })
             .collect(),
-        more_menu: published.more_menu.clone(),
+        more_menu: menu_to_json(&menus.more_menu()),
+        // The two hotkey labels are the hotkey settings formatted for the current platform, not a
+        // menu; they move with the rest of the HUD in M5.
         search_shortcut: published.search_shortcut.clone(),
         commands_shortcut: published.commands_shortcut.clone(),
     }
@@ -232,6 +224,7 @@ pub(super) fn snapshot_from_view(
 
 fn native_group(
     group: &GroupView,
+    menus: &SidebarMenus<'_>,
     published: Option<&NativeSidebarGroup>,
     sessions: Vec<Arc<NativeSidebarSession>>,
 ) -> NativeSidebarGroup {
@@ -251,9 +244,12 @@ fn native_group(
         hidden_session_count: core.hidden_session_count,
         show_list_toggle: core.show_list_toggle,
         hover_actions_expanded: core.hover_actions_expanded,
-        // The project menu and the header buttons are the old projection's until M4c.
-        menu: published.map_or(Value::Null, |group| group.menu.clone()),
-        header_actions: published.map_or_else(Vec::new, |group| group.header_actions.clone()),
+        menu: menu_to_json(&menus.project_menu(group)),
+        header_actions: menus
+            .header_actions(group)
+            .iter()
+            .map(ghostex_gx_core::MenuItem::to_json)
+            .collect(),
         sections: core
             .sections
             .iter()
@@ -336,7 +332,7 @@ fn project_context(group: &GroupView, published: Option<&NativeSidebarGroup>) ->
 
 fn native_collection(
     collection: &CollectionView,
-    published: Option<&NativeSidebarCollection>,
+    menus: &SidebarMenus<'_>,
 ) -> NativeSidebarCollection {
     NativeSidebarCollection {
         awake_count: collection.awake_count as u64,
@@ -349,26 +345,29 @@ fn native_collection(
         contains_active_session: collection.contains_active_session,
         working_count: collection.working_count,
         attention_count: collection.attention_count,
-        // The collection menu is the old projection's until M4c.
-        menu: published.map_or(Value::Null, |collection| collection.menu.clone()),
+        menu: menu_to_json(&menus.collection_menu(collection)),
     }
 }
 
 fn session_element(
+    group: &GroupView,
     session: &SessionView,
-    published_rows: &HashMap<&str, &Arc<NativeSidebarSession>>,
+    menus: &SidebarMenus<'_>,
     cache: &mut SnapshotCache,
     now_ms: u64,
 ) -> Arc<NativeSidebarSession> {
     let row = &session.row;
-    let published = published_rows.get(row.sidebar_session_id.as_str()).copied();
     let timer_label = row.timer_label(now_ms);
     let last_interaction_label = row.last_interaction_label(now_ms);
+    let is_snoozed = row
+        .timing
+        .snoozed_until_ms
+        .is_some_and(|wake_at| wake_at > now_ms as i64);
     if let Some(cached) = cache.rows.get(&row.sidebar_session_id) {
         if cached.matches(
             row,
-            published,
             session,
+            is_snoozed,
             &timer_label,
             &last_interaction_label,
         ) {
@@ -376,8 +375,9 @@ fn session_element(
         }
     }
     let element = Arc::new(build_session(
+        group,
         session,
-        published,
+        menus,
         timer_label.clone(),
         last_interaction_label.clone(),
     ));
@@ -385,10 +385,10 @@ fn session_element(
         row.sidebar_session_id.clone(),
         CachedRow {
             row: row.clone(),
-            published: published.cloned(),
             is_focused: session.is_focused,
             is_visible: session.is_visible,
             is_multi_selected: session.is_multi_selected,
+            is_snoozed,
             timer_label,
             last_interaction_label,
             element: element.clone(),
@@ -397,16 +397,36 @@ fn session_element(
     element
 }
 
-/// Every key the view model owns, written over the details the old projection published so the
-/// row's menu and hover actions survive until M4c moves them.
+/// One drawn row: every key the view model owns, plus the hover buttons and the placeholder menu
+/// the store builds for it.
 fn build_session(
+    group: &GroupView,
     session: &SessionView,
-    published: Option<&Arc<NativeSidebarSession>>,
+    menus: &SidebarMenus<'_>,
     timer_label: Option<String>,
     last_interaction_label: Option<String>,
 ) -> NativeSidebarSession {
     let row = &session.row;
-    let mut details = published.map_or_else(Map::new, |session| session.details.clone());
+    let mut details = Map::new();
+    let actions = menus.row_actions(group, session);
+    details.insert("menu".to_string(), menu_to_json(&actions.menu));
+    details.insert(
+        "hoverBefore".to_string(),
+        menu_to_json(&actions.hover_before),
+    );
+    details.insert("hoverAfter".to_string(), menu_to_json(&actions.hover_after));
+    details.insert(
+        "hoverChevron".to_string(),
+        Value::Bool(actions.hover_chevron),
+    );
+    insert_optional(
+        &mut details,
+        "agentLogoDataUrl",
+        row.agent_icon
+            .as_deref()
+            .and_then(colored_agent_logo)
+            .map(str::to_string),
+    );
     details.insert(
         "titleTooltip".to_string(),
         Value::String(row.title_tooltip.clone()),
@@ -420,15 +440,18 @@ fn build_session(
         Value::Bool(session.is_multi_selected),
     );
     details.insert("isFavorite".to_string(), Value::Bool(row.is_favorite));
+    // Read by the direct-focus path to decide whether a row has a transcript to open.
+    insert_optional(
+        &mut details,
+        "agentSessionId",
+        row.menu_facts.agent_session_id.clone(),
+    );
     insert_optional(&mut details, "sessionTag", row.session_tag.clone());
     insert_optional(&mut details, "effectiveTag", row.effective_tag.clone());
     details.insert(
         "tagPresentation".to_string(),
         tag_presentation(row.tag_presentation.as_ref()),
     );
-    // `agentLogoDataUrl` is the coloured logo the TypeScript asset map resolves from `agentIcon`,
-    // which has no Rust source yet, so the published value is kept. A row the store holds and the
-    // old projection has not published draws its fallback terminal icon until it does (M4c).
     details.insert(
         "queuedPromptFailedCount".to_string(),
         Value::from(row.queued_prompt_failed_count.unwrap_or(0)),

@@ -142,12 +142,57 @@ pub(super) fn client_storage_path() -> PathBuf {
         .join("client-storage.sqlite3")
 }
 
+/// `PRIMARY_AGENT_LAUNCHER_STORAGE_KEY` (packages/core-ui/primary-agent-launcher.ts).
+const PRIMARY_AGENT_LAUNCHER_STORAGE_KEY: &str = "ghostex-sidebar-project-terminal-launcher";
+/// `SIDEBAR_KEEP_AWAKE_RUNTIME_STORAGE_KEY` (packages/core-ui/sidebar-app/collapse-state.ts).
+const KEEP_AWAKE_RUNTIME_STORAGE_KEY: &str = "ghostex.titlebar.keepAwakeRuntime";
+
 fn collapse_key() -> String {
     sidebar_window_storage_key(COLLAPSE_STORAGE_KEY, SIDEBAR_WINDOW_SCOPE_ID)
 }
 
 fn machine_tab_key() -> String {
     sidebar_window_storage_key(MACHINE_TAB_STORAGE_KEY, SIDEBAR_WINDOW_SCOPE_ID)
+}
+
+/// The two client-storage values the sidebar's menus read that are not part of its own state:
+/// the agent the user launched last, and the keep-awake duration that is running. Both are
+/// written by the TypeScript side and read fresh (behind a short cache) rather than restored
+/// once, because either can change while the app runs.
+pub(super) fn read_menu_host_state() -> Result<(Option<String>, Option<i64>), &'static str> {
+    let mut held = connections()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.read.is_none() {
+        held.read = Some(open(OpenFlags::SQLITE_OPEN_READ_ONLY)?);
+    }
+    let connection = held.read.as_ref().expect("opened above");
+    let result = read_menu_host(connection);
+    if result.is_err() {
+        held.read = None;
+    }
+    result
+}
+
+/// `ghostex-sidebar-project-terminal-launcher` (`readPrimaryAgentLauncherId`) and
+/// `ghostex.titlebar.keepAwakeRuntime` (`readSidebarKeepAwakeRuntime`).
+fn read_menu_host(connection: &Connection) -> Result<(Option<String>, Option<i64>), &'static str> {
+    let primary = read_preference(connection, PRIMARY_AGENT_LAUNCHER_STORAGE_KEY)?
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let keep_awake = read_preference(connection, KEEP_AWAKE_RUNTIME_STORAGE_KEY)?
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|value| {
+            let minutes = value.get("durationMinutes").and_then(Value::as_i64)?;
+            // An expired runtime reads as none, the way `readSidebarKeepAwakeRuntime` drops it.
+            let fire_at = value.get("fireAtMs").and_then(Value::as_f64);
+            let now_ms = super::host::now_ms() as f64;
+            match fire_at {
+                Some(fire_at) if fire_at <= now_ms => None,
+                _ => Some(minutes),
+            }
+        });
+    Ok((primary, keep_awake))
 }
 
 /// Reads everything the sidebar state is seeded from. `Err` is a fixed word saying which step
