@@ -22,8 +22,10 @@
 use std::time::Duration;
 
 use ghostex_gx_core::{
-    Event, Intent, LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, SessionKey,
-    apply_lifecycle_answer, owns_lifecycle_message, plan_lifecycle_request,
+    CloseAnswer, CloseFollowUp, CloseRequest, Event, Intent, LifecycleAnswer, LifecycleCall,
+    LifecycleFollowUp, LifecycleRequest, SessionKey, apply_close_answer, apply_lifecycle_answer,
+    close_optimistic_follow_ups, owns_close_message, owns_lifecycle_message, plan_close_request,
+    plan_lifecycle_request,
 };
 use serde_json::Value;
 
@@ -54,6 +56,12 @@ pub(crate) struct SidebarLifecycleCounters {
     pub(crate) focus_follow_ups: u64,
     /// Payloads the store owns but did not answer because the renderer is not drawing its list.
     pub(crate) declined_source: u64,
+    pub(crate) closes: u64,
+    /// Closes the daemon confirmed.
+    pub(crate) closes_accepted: u64,
+    /// Closes whose row came back because the daemon never confirmed. Every one of these is a row
+    /// the TypeScript would have left missing for the rest of the run.
+    pub(crate) closes_restored: u64,
 }
 
 impl GhostexGpuiApp {
@@ -117,6 +125,126 @@ impl GhostexGpuiApp {
         true
     }
 
+    /// Answers a `closeSession` command in Rust when the store owns it.
+    ///
+    /// The row goes at once, before the call, which is the TypeScript's order and the reason the
+    /// click feels instant. What is NOT the TypeScript's is the answer: a call that does not come
+    /// home puts the row back instead of leaving it missing (packages/gx-core/src/sidebar_actions/close.rs).
+    pub(crate) fn gx_store_run_sidebar_close(
+        &mut self,
+        command: &Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if command.get("type").and_then(Value::as_str) != Some("command") {
+            return false;
+        }
+        let Some(message) = command.get("message") else {
+            return false;
+        };
+        if !owns_close_message(message) {
+            return false;
+        }
+        if !self.gx_store_sidebar_draws_store_list() {
+            self.gx_store.sidebar_lifecycle.declined_source += 1;
+            return false;
+        }
+        let Some(request) = plan_close_request(&self.gx_store.core, message) else {
+            return false;
+        };
+        self.gx_store.sidebar_lifecycle.closes += 1;
+        self.gx_store_run_close_follow_ups(close_optimistic_follow_ups(&request), cx);
+        let path = request.rpc_path;
+        let params = request.rpc_params.clone();
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let started = std::time::Instant::now();
+            let result = background
+                .spawn(
+                    async move { gpui_gxserver_rpc_result(path, &params, LIFECYCLE_RPC_TIMEOUT) },
+                )
+                .await;
+            let elapsed = started.elapsed();
+            // A call that spent the whole timeout and came back with an error never answered; the
+            // distinction changes no follow-up and is kept because it is the one case the two
+            // clients cannot both reach (the TypeScript's `fetch` has no timeout at all).
+            let answer = match (
+                CloseAnswer::read(result.as_ref().map_err(String::as_str)),
+                elapsed >= LIFECYCLE_RPC_TIMEOUT,
+            ) {
+                (CloseAnswer::Failed, true) => CloseAnswer::NeverAnswered,
+                (answer, _) => answer,
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.gx_store_apply_close_answer(&request, answer, elapsed.as_millis() as u64, cx);
+            });
+        })
+        .detach();
+        true
+    }
+
+    fn gx_store_apply_close_answer(
+        &mut self,
+        request: &CloseRequest,
+        answer: CloseAnswer,
+        round_trip_ms: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        match answer {
+            CloseAnswer::Accepted => self.gx_store.sidebar_lifecycle.closes_accepted += 1,
+            _ => self.gx_store.sidebar_lifecycle.closes_restored += 1,
+        }
+        self.gx_store_run_close_follow_ups(apply_close_answer(request, answer), cx);
+        self.gx_store.diagnostics.sidebar_close_ran(
+            answer.as_str(),
+            round_trip_ms,
+            self.gx_store.sidebar_lifecycle,
+        );
+    }
+
+    fn gx_store_run_close_follow_ups(
+        &mut self,
+        follow_ups: Vec<CloseFollowUp>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let now = now_ms();
+        let mut moved = false;
+        let mut focus_target: Option<SessionKey> = None;
+        for follow_up in follow_ups {
+            match follow_up {
+                CloseFollowUp::Hide { session } => {
+                    let output = self
+                        .gx_store
+                        .core
+                        .handle(Event::Intent(Intent::HideSession { session }), now);
+                    if !output.changes.is_empty() {
+                        moved = true;
+                        self.gx_store.sidebar_list.note_changes(&output.changes);
+                    }
+                }
+                CloseFollowUp::Unhide { session } => {
+                    let output = self
+                        .gx_store
+                        .core
+                        .handle(Event::Intent(Intent::UnhideSession { session }), now);
+                    if !output.changes.is_empty() {
+                        moved = true;
+                        self.gx_store.sidebar_list.note_changes(&output.changes);
+                    }
+                }
+                CloseFollowUp::Focus { session } => {
+                    self.gx_store.sidebar_lifecycle.focus_follow_ups += 1;
+                    focus_target = Some(session);
+                }
+            }
+        }
+        if moved {
+            self.gx_store_update_sidebar_list(cx);
+        }
+        if let Some(session) = focus_target {
+            self.gx_store_focus_local_workspace_session(&session, cx);
+        }
+    }
+
     /// The half after the round trip. Runs on the UI thread, so the focus it reads is the focus
     /// the user has now and not the one the call left with.
     fn gx_store_apply_lifecycle_answer(
@@ -168,29 +296,37 @@ impl GhostexGpuiApp {
             self.gx_store_update_sidebar_list(cx);
         }
         if let Some(session) = focus_target {
-            // `focusLocalWorkspaceSession` with no options, which is what the TypeScript sends
-            // here: the ordinary selection, never a remount and never a wake intent, because the
-            // wake has already happened above.
-            self.focus_local_workspace_terminal_from_message(
-                &GpuiSidebarWorkspaceTerminalFocusMessage {
-                    force_remount: false,
-                    placement: GpuiWorkspaceTerminalFocusPlacement::Tab,
-                    placement_target_session_id: None,
-                    preferred_interface: GpuiPreferredAgentInterface::Terminal,
-                    project_id: session.project_id.clone(),
-                    session_id: session.session_id.clone(),
-                    startup_restore: false,
-                    keep_view: false,
-                    wake_sleeping: false,
-                },
-                cx,
-            );
+            self.gx_store_focus_local_workspace_session(&session, cx);
         }
         self.gx_store.diagnostics.sidebar_lifecycle_ran(
             request,
             answer.as_str(),
             round_trip_ms,
             self.gx_store.sidebar_lifecycle,
+        );
+    }
+
+    /// `focusLocalWorkspaceSession` with no options, which is what the TypeScript sends from every
+    /// one of these paths: the ordinary selection, never a remount and never a wake intent,
+    /// because whatever wake was needed has already happened.
+    fn gx_store_focus_local_workspace_session(
+        &mut self,
+        session: &SessionKey,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.focus_local_workspace_terminal_from_message(
+            &GpuiSidebarWorkspaceTerminalFocusMessage {
+                force_remount: false,
+                placement: GpuiWorkspaceTerminalFocusPlacement::Tab,
+                placement_target_session_id: None,
+                preferred_interface: GpuiPreferredAgentInterface::Terminal,
+                project_id: session.project_id.clone(),
+                session_id: session.session_id.clone(),
+                startup_restore: false,
+                keep_view: false,
+                wake_sleeping: false,
+            },
+            cx,
         );
     }
 }

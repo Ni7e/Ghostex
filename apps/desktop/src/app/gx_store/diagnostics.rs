@@ -846,6 +846,36 @@ impl GxStoreDiagnostics {
         );
     }
 
+    /// One line per close: what the daemon said, how long it took, and whether the row came back.
+    ///
+    /// `closesRestored` is the number to watch. Every one of them is a row the TypeScript would
+    /// have left missing for the rest of the run, and a run where it is not zero says the daemon
+    /// is refusing or dropping closes, which is worth seeing on its own.
+    pub(super) fn sidebar_close_ran(
+        &mut self,
+        answer: &str,
+        round_trip_ms: u64,
+        counters: super::sidebar_lifecycle::SidebarLifecycleCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarClose",
+            json!({
+                "answer": log_text(answer),
+                "roundTripMs": round_trip_ms,
+                "closes": counters.closes,
+                "closesAccepted": counters.closes_accepted,
+                "closesRestored": counters.closes_restored,
+                "declinedSource": counters.declined_source,
+            }),
+        );
+    }
+
     /// One line per sidebar action the store answered: the message type, which calls it made, how
     /// long deciding them took, and the run's totals.
     ///
