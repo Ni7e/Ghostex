@@ -137,6 +137,7 @@ impl GhostexGpuiApp {
         // Which machines exist is the old projection's answer until M4d, and a stored tab whose
         // machine is gone has to fall back to this computer, or the list would draw nothing.
         self.gx_store_correct_sidebar_machine_tab(cx);
+        self.gx_store_follow_active_session_space(cx);
         // The mirrored inputs (the HUD's sort mode and Recent Projects, the git numbers, the two
         // armed timers) come from this payload, so the list is rebuilt whether or not anyone is
         // comparing.
@@ -207,6 +208,38 @@ impl GhostexGpuiApp {
             },
             cx,
         );
+    }
+
+    /// Moves the section into the focused row's Space while `sidebarSpaceFollowActiveSession` is
+    /// on, which `rememberNativeSidebarFocus` does to the old projection's copy on every focus
+    /// change. Without it the two sides would filter by different Spaces, and the drawn rows would
+    /// lose the menus they carry from a publish built for the other Space.
+    fn gx_store_follow_active_session_space(&mut self, cx: &mut gpui::Context<Self>) {
+        let Some(focused) = self
+            .gx_store
+            .core
+            .focus()
+            .focused_session
+            .as_ref()
+            .map(ghostex_gx_core::SessionKey::to_sidebar_session_id)
+        else {
+            return;
+        };
+        let space_id = {
+            let store = &self.gx_store;
+            ghostex_gx_core::space_for_focused_row(
+                &store.core,
+                &store.sidebar_list.last_inputs,
+                store.sidebar_list.view(),
+                &focused,
+            )
+        };
+        if let Some(space_id) = space_id {
+            self.gx_store_apply_sidebar_ui_intent(
+                ghostex_gx_core::SidebarUiIntent::SelectSpace { space_id },
+                cx,
+            );
+        }
     }
 
     /// Compares the old projection's newest list with the Rust one.

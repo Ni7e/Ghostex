@@ -357,32 +357,45 @@ fn section_id(value: &str) -> Option<SectionId> {
 }
 
 impl GhostexGpuiApp {
-    /// Puts a row on screen: the group, its collection and its heading are opened, Show Hidden and
-    /// the tag filters are lifted where they hide it, and the full list is shown when the compact
-    /// one would still leave it out. The old projection does the same to its own copy, from the
-    /// same request, so the two stay in step.
+    /// Puts a row on screen: the Space that shows it is selected, the group, its collection and
+    /// its heading are opened, Show Hidden and the tag filters are lifted where they hide it, and
+    /// the full list is shown when the compact one would still leave it out. The old projection
+    /// does the same to its own copy, from the same request, so the two stay in step.
     ///
-    /// The Space the row belongs to is not selected here: the Space memory and the follow-active
-    /// rule are still the old projection's (M4c).
+    /// Only while this app draws the store's list: working the plan out reads the list and may
+    /// build it again, and nothing on screen would use the answer otherwise.
     pub(crate) fn gx_store_note_sidebar_reveal(
         &mut self,
         sidebar_session_id: &str,
         request_id: u64,
         cx: &mut gpui::Context<Self>,
     ) {
+        if !self.gx_store_sidebar_draws_store_list() {
+            return;
+        }
         if !self.gx_store.sidebar_ui.take_reveal_request(request_id) {
             return;
         }
         let now_ms = super::host::now_ms();
         let plan = {
             let store = &self.gx_store;
-            let inputs = &store.sidebar_list.last_inputs;
-            ghostex_gx_core::reveal_plan(&store.core, inputs, sidebar_session_id, now_ms)
+            ghostex_gx_core::reveal_plan(
+                &store.core,
+                &store.sidebar_list.last_inputs,
+                store.sidebar_list.view(),
+                sidebar_session_id,
+                now_ms,
+            )
         };
         let Some(plan) = plan else {
             return;
         };
         let mut intents: Vec<SidebarUiIntent> = Vec::new();
+        // The Space first: it decides which groups the section draws at all, which is what the
+        // TypeScript does by running `rememberNativeSidebarFocus` before everything else.
+        if let Some(space_id) = plan.select_space {
+            intents.push(SidebarUiIntent::SelectSpace { space_id });
+        }
         if plan.show_hidden {
             intents.push(SidebarUiIntent::ToggleShowHidden);
         }
