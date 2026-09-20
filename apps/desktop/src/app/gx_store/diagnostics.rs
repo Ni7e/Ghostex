@@ -846,6 +846,37 @@ impl GxStoreDiagnostics {
         );
     }
 
+    /// One line per flag call: whether the daemon took it, and how long it took.
+    ///
+    /// No tag id and no session id. A tag is a short fixed word today, but the catalog is the
+    /// user's and a custom tag is text they typed, so it is counted and never written.
+    pub(super) fn sidebar_flags_ran(
+        &mut self,
+        accepted: bool,
+        round_trip_ms: u64,
+        counters: super::sidebar_flags::SidebarFlagsCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarFlags",
+            json!({
+                "accepted": accepted,
+                "roundTripMs": round_trip_ms,
+                "calls": counters.calls,
+                "acceptedTotal": counters.accepted,
+                "failed": counters.failed,
+                "alreadyAgreed": counters.already_agreed,
+                "parksThatSleep": counters.parks_that_sleep,
+                "declinedSource": counters.declined_source,
+            }),
+        );
+    }
+
     /// One line per fork: whether the daemon made one, and how long it took.
     ///
     /// No id and no failure text. The text a fork failure carries is the daemon's or the

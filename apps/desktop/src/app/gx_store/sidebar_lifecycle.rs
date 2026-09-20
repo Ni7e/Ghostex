@@ -43,6 +43,11 @@ use crate::app::model::{
 /// as a refusal.
 const LIFECYCLE_RPC_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The same bound for the sibling action files, so one number covers every sidebar call.
+pub(super) fn rpc_timeout() -> Duration {
+    LIFECYCLE_RPC_TIMEOUT
+}
+
 /// What this app run did with the lifecycle actions the store owns.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SidebarLifecycleCounters {
