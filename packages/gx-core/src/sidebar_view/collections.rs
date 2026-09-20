@@ -18,17 +18,17 @@ const COLLECTION_COLORS: &[&str] = &[
 ];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct Collection {
-    pub(crate) collection_id: String,
-    pub(crate) title: String,
-    pub(crate) color: String,
-    pub(crate) project_ids: Vec<String>,
+pub struct Collection {
+    pub collection_id: String,
+    pub title: String,
+    pub color: String,
+    pub project_ids: Vec<String>,
 }
 
 /// One machine's collections after client normalization.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct CollectionsState {
-    pub(crate) collections: Vec<Collection>,
+pub struct CollectionsState {
+    pub collections: Vec<Collection>,
 }
 
 /// One collection as it arrives, before the client sanitizer.
@@ -42,7 +42,7 @@ struct RawCollection<'a> {
 impl CollectionsState {
     /// `parseSidebarProjectCollectionsFromGxserver`: the order array first, then anything the map
     /// holds beyond it.
-    pub(crate) fn from_wire(state: &WireCollectionsState) -> Self {
+    pub fn from_wire(state: &WireCollectionsState) -> Self {
         let mut ordered_ids: Vec<&String> = Vec::new();
         for entry in &state.order {
             if state.collections.contains_key(entry) && !ordered_ids.contains(&entry) {
@@ -82,7 +82,7 @@ impl CollectionsState {
     ///
     /// CDXC:Projects 2026-09-20 WHY:
     /// The sidebar seeds its collections from this key and shows them until the daemon's first document arrives, pushing them up rather than dropping them (`sidebar-app.tsx`, first adoption). A list built from the daemon alone would show no collections, no colours and another top-level order for the whole window between a cold start and that first echo, so the same seed is read here. From the first document on, the daemon is authoritative, an empty one included: the sidebar writes every adopted document straight back to this key.
-    pub(crate) fn from_local_json(value: &Value) -> Self {
+    pub fn from_local_json(value: &Value) -> Self {
         let collections = value
             .get("collections")
             .and_then(Value::as_array)

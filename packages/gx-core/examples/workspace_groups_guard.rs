@@ -412,6 +412,12 @@ fn outcome_name(outcome: AdoptOutcome) -> &'static str {
         // 2026-09-21: folding it into `ignoredPending` made the guard's own counter count the
         // guard never being asked.
         AdoptOutcome::NoEcho => "noEcho",
+        // Structurally unreachable for THIS document and named rather than hidden under a
+        // wildcard: `parseGpuiWorkspaceSessionGroupsState` answers an empty document for anything
+        // that is not an object, so nothing the daemon can send refuses to parse here. A run that
+        // ever reports it means that rule changed, which is what a named arm says and a `_` does
+        // not.
+        AdoptOutcome::Unparsable => "unparsable",
         AdoptOutcome::IgnoredPending => "ignoredPending",
         AdoptOutcome::IgnoredEqual => "ignoredEqual",
         AdoptOutcome::ScheduledPush => "scheduledPush",

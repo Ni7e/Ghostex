@@ -39,7 +39,8 @@ pub use model::{SidebarUpdateWork, SidebarViewModel};
 pub use ordering::session_is_snoozed;
 pub use reveal::{reveal_plan, space_for_focused_row, FocusedRowSpace, SidebarRevealPlan};
 pub use slot_hotkey::{project_slot_plan, ProjectSlotPlan};
-pub use spaces::OTHER_SPACE_ID;
+pub use collections::{Collection, CollectionsState};
+pub use spaces::{Space, SpacesState, OTHER_SPACE_ID};
 pub use tags::{TagListItem, TagListItemKind, TagPresentation, UNTAGGED_TAG_FILTER};
 pub use view::{
     CollectionView, DelayedSendView, EmptyState, GroupCore, GroupSummary, GroupView, LabelDeadline,

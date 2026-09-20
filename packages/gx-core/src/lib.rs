@@ -16,6 +16,7 @@
 mod change;
 mod connection;
 mod core;
+mod doc_sync;
 mod focus;
 mod keys;
 mod overlay;
@@ -31,6 +32,7 @@ mod workspace_groups;
 pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
 pub use crate::connection::{ConnectionPhase, ConnectionState, ConnectionUpdate};
 pub use crate::core::{Core, Effect, Event, Intent, Output, ResubscribeReason};
+pub use crate::doc_sync::{DocumentSync, EmptyEchoRule, SyncEffect, SyncPolicy, SyncedDocument};
 pub use crate::focus::{
     default_group_for_project, next_visible_sessions_for_local_focus, ActiveGroup,
     ExternalFocusUpdate, FocusField, FocusOutcome, FocusState,
@@ -86,14 +88,17 @@ pub use crate::sidebar_ui::{
 };
 pub use crate::sidebar_view::{
     project_slot_plan, reveal_plan, session_is_snoozed, space_for_focused_row, BrowserTabInput,
-    BrowserTabsInput, CloseAfterDoneInput, CollectionView, DelayedSendInput, DelayedSendView,
-    EmptyState, FocusedRowSpace, GroupCore, GroupSummary, GroupView, LabelDeadline, MachineSummary,
+    BrowserTabsInput, CloseAfterDoneInput, Collection, CollectionView, CollectionsState,
+    DelayedSendInput, DelayedSendView,
+    EmptyState, FocusedRowSpace, GroupCore, GroupSummary, GroupView, LabelDeadline,
+    MachineSummary,
     MachineTabInput, MachineTabView, OrderItem, OrderKind, ProjectContextView, ProjectDiffStats,
     ProjectSlotPlan, RemoteMachineView, SectionCollapse,
     SectionId, SectionView, SessionMenuFacts, SessionRow, SessionSortMode, SessionTiming,
     SessionView, SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs, SidebarInputs,
     SidebarRevealPlan, SidebarSettings, SidebarUiState, SidebarUpdateWork, SidebarView,
-    SidebarViewModel, SpaceView, TagListItem, TagListItemKind, TagPresentation, UnavailableState,
+    SidebarViewModel, Space, SpaceView, SpacesState, TagListItem, TagListItemKind,
+    TagPresentation, UnavailableState,
     WorktreeView, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
 };
 pub use crate::workspace_groups::{

@@ -1079,6 +1079,10 @@ impl GxStoreDiagnostics {
                 "echoesAdopted": counters.echoes_adopted,
                 "echoesEqual": counters.echoes_equal,
                 "echoesAbsent": counters.echoes_absent,
+                // Its own key, not folded into `echoesAbsent`: an outcome standing for two is what
+                // made `echoesRefused` count the guard never being asked. Expected to stay at zero
+                // for this document, which is what makes a non-zero value worth reading.
+                "echoesUnparsable": counters.echoes_unparsable,
                 "echoesPushedBack": counters.echoes_pushed_back,
                 "handOffs": counters.hand_offs,
                 "handBacks": counters.hand_backs,

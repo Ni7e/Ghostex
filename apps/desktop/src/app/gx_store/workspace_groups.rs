@@ -110,6 +110,13 @@ pub(crate) struct WorkspaceGroupsCounters {
     pub(crate) echoes_refused: u64,
     /// Reconciles where the daemon had sent no document at all.
     pub(crate) echoes_absent: u64,
+    /// Echoes that were not a document at all. Its OWN counter rather than a share of
+    /// `echoes_absent` or `echoes_refused`, for the reason the review round split `NoEcho` out of
+    /// `IgnoredPending`: an outcome standing for two makes the number that is supposed to be
+    /// evidence count something else. **Structurally unreachable for THIS document** and therefore
+    /// the one to watch: `parseGpuiWorkspaceSessionGroupsState` answers an empty document for
+    /// anything that is not an object, so a non-zero value here means that rule changed.
+    pub(crate) echoes_unparsable: u64,
     pub(crate) echoes_adopted: u64,
     pub(crate) echoes_equal: u64,
     pub(crate) echoes_pushed_back: u64,
@@ -446,6 +453,9 @@ impl GhostexGpuiApp {
             .adopt(value.as_ref().filter(|_| server_state.is_some()));
         match outcome {
             AdoptOutcome::NoEcho => self.gx_store.workspace_groups.counters.echoes_absent += 1,
+            AdoptOutcome::Unparsable => {
+                self.gx_store.workspace_groups.counters.echoes_unparsable += 1
+            }
             AdoptOutcome::Adopted => self.gx_store.workspace_groups.counters.echoes_adopted += 1,
             AdoptOutcome::IgnoredEqual => self.gx_store.workspace_groups.counters.echoes_equal += 1,
             AdoptOutcome::IgnoredPending => {

@@ -28,26 +28,26 @@ const SPACE_COLOR_PRESETS: &[&str] = &[
 ];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct Space {
-    pub(crate) space_id: String,
-    pub(crate) name: String,
-    pub(crate) icon: String,
-    pub(crate) color: String,
-    pub(crate) member_collection_ids: Vec<String>,
-    pub(crate) member_project_ids: Vec<String>,
+pub struct Space {
+    pub space_id: String,
+    pub name: String,
+    pub icon: String,
+    pub color: String,
+    pub member_collection_ids: Vec<String>,
+    pub member_project_ids: Vec<String>,
 }
 
 /// One machine's Spaces after client normalization.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct SpacesState {
-    pub(crate) order: Vec<String>,
-    pub(crate) spaces: BTreeMap<String, Space>,
+pub struct SpacesState {
+    pub order: Vec<String>,
+    pub spaces: BTreeMap<String, Space>,
 }
 
 impl SpacesState {
     /// `sanitizeSidebarSpacesState`: the order array is authoritative, a project belongs to at
     /// most one Space, and every kept Space has a name, an icon, and a `#rrggbb` colour.
-    pub(crate) fn from_wire(state: &WireSpacesState) -> Self {
+    pub fn from_wire(state: &WireSpacesState) -> Self {
         let mut candidates: Vec<(String, &ghostex_gx_protocol::SidebarSpace)> = Vec::new();
         // A Space the `order` array does not name follows in id order here, where `Object.keys`
         // gives the TypeScript the document's own order, so the two can draw the Space rows in a
