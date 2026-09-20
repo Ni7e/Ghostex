@@ -1,5 +1,6 @@
-//! Checks that a reveal reaches a row in another Space, and that a hidden collection does not move
-//! the section to a Space the user was not in.
+//! Checks the Space rules the drawn list cannot answer on its own: that a reveal reaches a row in
+//! another Space, that the follow-active rule does too, that a hidden collection does not move the
+//! section to a Space the user was not in, and that a worktree follows its parent project.
 //!
 //! Usage: `cargo run --example sidebar_reveal_spaces`
 //!
@@ -15,13 +16,20 @@
 //!    claims that collection rather than the project. The collection is dropped from the drawn
 //!    list while its projects are still drawn, so a plan that read the collection from there would
 //!    answer the Space question on the wrong branch and move the section for no reason.
+//! 3. Seven Spaces and three collections, the shape of a real sidebar rather than the smallest one
+//!    that exercises a branch: the follow-active rule on a row in another Space, a worktree whose
+//!    Space is its parent project's, two Spaces claiming one project so the order tie-break has a
+//!    choice, and a section sitting on the built-in Other view.
 //!
 //! This is tooling, not a test suite; it prints what it found and fails the process on a
 //! difference.
 
 use std::process::ExitCode;
 
-use ghostex_gx_core::{reveal_plan, Core, MachineId, SidebarInputs, SidebarView, SidebarViewModel};
+use ghostex_gx_core::{
+    reveal_plan, space_for_focused_row, Core, Event, MachineId, SidebarInputs, SidebarView,
+    SidebarViewModel,
+};
 use serde_json::{json, Value};
 
 const NOW_MS: u64 = 1_790_000_000_000;
@@ -140,11 +148,201 @@ fn main() -> ExitCode {
         format!("{:?}", plan.as_ref().map(|plan| plan.show_hidden)),
     );
 
+    seven_spaces(&check);
+
     if failures.get() == 0 {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// A sidebar the size of a real one: seven Spaces, three collections, a worktree, and a project
+/// two Spaces both claim.
+fn seven_spaces(check: &dyn Fn(&str, bool, String)) {
+    let core = seven_space_core();
+    let selected = |space_id: &str| {
+        let mut inputs = base_inputs();
+        inputs.settings.sidebar_space_follow_active_session = true;
+        inputs
+            .ui
+            .collapse
+            .selected_space_by_section
+            .insert("local".to_string(), space_id.to_string());
+        inputs
+    };
+    let inputs = selected("s1");
+    let view = SidebarViewModel::build_from_scratch(&core, &inputs, NOW_MS);
+    check(
+        "seven Spaces: the section draws only its own",
+        drawn_groups(&view) == vec!["combined-project:P1".to_string()],
+        format!("{:?}", drawn_groups(&view)),
+    );
+
+    // The rule this whole function exists for: the focused row is in another Space.
+    let follow = |inputs: &SidebarInputs, view: &SidebarView, session: &str| {
+        space_for_focused_row(&core, inputs, view, session, NOW_MS)
+    };
+    check(
+        "follow-active moves to the focused row's Space",
+        follow(&inputs, &view, "combined-session:P4:S4").as_deref() == Some("s4"),
+        format!("{:?}", follow(&inputs, &view, "combined-session:P4:S4")),
+    );
+    check(
+        "follow-active moves to a Space at the far end of the order",
+        follow(&inputs, &view, "combined-session:P7:S7").as_deref() == Some("s7"),
+        format!("{:?}", follow(&inputs, &view, "combined-session:P7:S7")),
+    );
+    check(
+        "follow-active leaves a row the section already shows alone",
+        follow(&inputs, &view, "combined-session:P1:S1").is_none(),
+        format!("{:?}", follow(&inputs, &view, "combined-session:P1:S1")),
+    );
+    let mut off = inputs.clone();
+    off.settings.sidebar_space_follow_active_session = false;
+    check(
+        "follow-active does nothing with the setting off",
+        follow(&off, &view, "combined-session:P4:S4").is_none(),
+        format!("{:?}", follow(&off, &view, "combined-session:P4:S4")),
+    );
+
+    // A worktree belongs to the Space that claims the project it was cut from.
+    check(
+        "a worktree follows its parent project's Space",
+        follow(&inputs, &view, "combined-session:PW:SW").as_deref() == Some("s3"),
+        format!("{:?}", follow(&inputs, &view, "combined-session:PW:SW")),
+    );
+
+    // Two Spaces name P5; the earlier one in `order` is the one that claims it.
+    check(
+        "the earlier Space wins a project two of them claim",
+        follow(&inputs, &view, "combined-session:P5:S5").as_deref() == Some("s5"),
+        format!("{:?}", follow(&inputs, &view, "combined-session:P5:S5")),
+    );
+
+    // A project no Space claims lives in the built-in Other view.
+    let other = selected("other");
+    let other_view = SidebarViewModel::build_from_scratch(&core, &other, NOW_MS);
+    check(
+        "Other draws the project no Space claims",
+        drawn_groups(&other_view) == vec!["combined-project:P8".to_string()],
+        format!("{:?}", drawn_groups(&other_view)),
+    );
+    check(
+        "follow-active moves off Other into a claimed row's Space",
+        follow(&other, &other_view, "combined-session:P1:S1").as_deref() == Some("s1"),
+        format!(
+            "{:?}",
+            follow(&other, &other_view, "combined-session:P1:S1")
+        ),
+    );
+
+    // And a reveal, on the same presentation, answers the same way.
+    let plan = reveal_plan(&core, &inputs, &view, "combined-session:P7:S7", NOW_MS);
+    check(
+        "a reveal across seven Spaces names the Space and the group",
+        plan.as_ref().and_then(|plan| plan.select_space.as_deref()) == Some("s7")
+            && plan.as_ref().map(|plan| plan.group_id.as_str()) == Some("combined-project:P7"),
+        format!(
+            "{:?}",
+            plan.as_ref()
+                .map(|plan| (plan.select_space.clone(), plan.group_id.clone()))
+        ),
+    );
+    let worktree_plan = reveal_plan(&core, &inputs, &view, "combined-session:PW:SW", NOW_MS);
+    check(
+        "a reveal of a worktree names its parent's Space",
+        worktree_plan
+            .as_ref()
+            .and_then(|plan| plan.select_space.as_deref())
+            == Some("s3"),
+        format!(
+            "{:?}",
+            worktree_plan.as_ref().map(|plan| plan.select_space.clone())
+        ),
+    );
+}
+
+/// Eight projects, one of them a worktree of the third, in seven Spaces and three collections.
+fn seven_space_core() -> Core {
+    let projects = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "PW"];
+    let spaces = json!({
+        "order": ["s1", "s2", "s3", "s4", "s5", "s6", "s7"],
+        "spaces": {
+            "s1": space("s1", "One", [], ["P1"]),
+            "s2": space("s2", "Two", ["c1"], []),
+            "s3": space("s3", "Three", [], ["P3"]),
+            "s4": space("s4", "Four", [], ["P4"]),
+            // Both name P5; `sanitizeSidebarSpacesState` gives it to the earlier one.
+            "s5": space("s5", "Five", [], ["P5"]),
+            "s6": space("s6", "Six", ["c2"], ["P5", "P6"]),
+            "s7": space("s7", "Seven", [], ["P7"]),
+        }
+    });
+    let frame = json!({
+        "type": "presentationSnapshot",
+        "protocolVersion": ghostex_gx_core::protocol::GXSERVER_PROTOCOL_VERSION,
+        "serverId": "reveal-spaces",
+        "revision": 1,
+        "snapshot": {
+            "revision": 1,
+            "generatedAt": "2026-09-20T00:00:00.000Z",
+            "projects": projects
+                .iter()
+                .map(|project_id| project(project_id, project_id))
+                .collect::<Vec<_>>(),
+            "groups": projects.iter().map(|project_id| group(project_id)).collect::<Vec<_>>(),
+            "sessions": projects
+                .iter()
+                .map(|project_id| session(project_id, &format!("S{}", &project_id[1..])))
+                .collect::<Vec<_>>(),
+            "sidebarSpaces": spaces,
+            "sidebarProjectCollections": {
+                "order": ["c1", "c2", "c3"],
+                "collections": {
+                    "c1": collection("c1", "Held", ["P2"]),
+                    "c2": collection("c2", "Six", ["P6"]),
+                    "c3": collection("c3", "Empty", []),
+                },
+            },
+        }
+    });
+    let mut core = Core::new();
+    core.handle_raw_frame(MachineId::Local, &frame.to_string(), NOW_MS)
+        .expect("the frame parses");
+    // The worktree metadata rides on the domain rows, not on the presentation.
+    core.handle(
+        Event::DomainProjectsRead {
+            machine: MachineId::Local,
+            projects: vec![json!({
+                "projectId": "PW",
+                "name": "PW",
+                "path": "/tmp/PW",
+                "worktree": {
+                    "branch": "feature",
+                    "name": "PW",
+                    "parentProjectId": "P3",
+                    "parentProjectName": "P3",
+                    "parentProjectPath": "/tmp/P3",
+                },
+            })],
+        },
+        NOW_MS,
+    );
+    core
+}
+
+fn collection(
+    collection_id: &str,
+    title: &str,
+    projects: impl IntoIterator<Item = &'static str>,
+) -> Value {
+    json!({
+        "collectionId": collection_id,
+        "title": title,
+        "color": "#3aa675",
+        "projectIds": projects.into_iter().collect::<Vec<_>>(),
+    })
 }
 
 fn drawn_groups(view: &SidebarView) -> Vec<String> {

@@ -21,6 +21,8 @@
 //!
 //! The cost is one clone of the inputs, reused, and between zero and two builds: none when the row
 //! is already drawn, one when something filters it out or its heading is closed, two when both.
+//! The second build keeps whichever tag filters the plan leaves in place, because the compact list
+//! it measures is the one the user will be looking at.
 //!
 //! SEE-ALSO: apps/desktop/sidebar/native-sidebar/reveal.ts,
 //! apps/desktop/sidebar/native-sidebar/space-navigation.ts (`rememberNativeSidebarFocus`).
@@ -146,6 +148,14 @@ pub fn reveal_plan(
         Some(probe) => probe,
         None => probe.insert(unfiltered(inputs)),
     };
+    // With the filters the user will still have afterwards, which is not always none:
+    // `applyNativeSidebarReveal` works the compact list out after it has decided whether to clear
+    // them, and a filter that stays in place takes rows out of the list the cut is measured on.
+    probe.ui.selected_tag_filters = if plan.clear_tag_filters {
+        Vec::new()
+    } else {
+        inputs.ui.selected_tag_filters.clone()
+    };
     probe
         .ui
         .collapse
@@ -171,29 +181,47 @@ fn unfiltered(inputs: &SidebarInputs) -> SidebarInputs {
     probe
 }
 
-/// The Space the section should follow the focused row into, when the setting asks it to.
+/// The Space the section has to move to for the focused row to be the one it shows.
 ///
-/// `rememberNativeSidebarFocus` runs on every focus change, not only on a reveal, and moves the
-/// section's Space when `sidebarSpaceFollowActiveSession` is on. Only the list as it stands is
-/// read: a row it does not draw is in another Space, and following a row the user cannot see is
-/// not what that setting asks for.
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// This is the whole of `sidebarSpaceFollowActiveSession`, and it only ever has work to do when
+/// the focused row is NOT in the drawn list, because a row the section already shows is already in
+/// the selected Space. So the drawn list is read only to answer "nothing to do", and the question
+/// that matters is asked of a list built with nothing filtering, exactly as
+/// `rememberNativeSidebarFocus` asks it of `state.groupOrder`, the unfiltered inventory. Asking
+/// the drawn list instead answers `None` for every row, because `assemble` keeps a group only when
+/// the selection shows it and `space_for_group` returns that same selection under the same test.
+///
+/// The build is the reason the caller must only ask when the focused row CHANGED: one build per
+/// focus into a row of another Space is the cost of the feature, one per publish would not be.
 pub fn space_for_focused_row(
     core: &Core,
     inputs: &SidebarInputs,
     view: &SidebarView,
     sidebar_session_id: &str,
+    now_ms: u64,
 ) -> Option<String> {
     if !inputs.settings.sidebar_space_follow_active_session {
         return None;
     }
-    let group = view.groups.iter().find(|group| {
+    // Drawn means the selected Space shows it, which is the answer without building anything.
+    if find_group(view, sidebar_session_id).is_some() {
+        return None;
+    }
+    let unfiltered_inputs = unfiltered(inputs);
+    let built = SidebarViewModel::build_from_scratch(core, &unfiltered_inputs, now_ms);
+    let group = find_group(&built, sidebar_session_id)?;
+    space_for_reveal(core, inputs, group, group.collection_id.as_deref())
+}
+
+fn find_group<'a>(view: &'a SidebarView, sidebar_session_id: &str) -> Option<&'a GroupView> {
+    view.groups.iter().find(|group| {
         group
             .core
             .sessions
             .iter()
             .any(|session| session.row.sidebar_session_id == sidebar_session_id)
-    })?;
-    space_for_reveal(core, inputs, group, group.collection_id.as_deref())
+    })
 }
 
 /// Where a row sits in a list.
@@ -213,13 +241,7 @@ fn locate(
     enable_parking: bool,
     now_ms: u64,
 ) -> Option<Located> {
-    let group = view.groups.iter().find(|group| {
-        group
-            .core
-            .sessions
-            .iter()
-            .any(|session| session.row.sidebar_session_id == sidebar_session_id)
-    })?;
+    let group = find_group(view, sidebar_session_id)?;
     let row = group
         .core
         .sessions

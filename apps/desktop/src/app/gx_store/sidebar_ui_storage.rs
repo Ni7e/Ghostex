@@ -47,6 +47,9 @@ const MAX_ENTRY_BYTES: usize = 64 * 1024;
 /// `maxBytes` of the collapse store; the other two keep the 128 KiB default.
 const MAX_STORE_BYTES_COLLAPSE: usize = 256 * 1024;
 const MAX_STORE_BYTES_DEFAULT: usize = 128 * 1024;
+/// `maxEntries`: a collection store holds 2,000 keys, a singleton exactly one.
+const MAX_ENTRIES_COLLECTION: usize = 2_000;
+const MAX_ENTRIES_SINGLETON: usize = 1;
 /// `STORAGE_BUDGETS.local`, shared with every other preference key the app has.
 const MAX_BACKEND_BYTES: usize = 2 * 1024 * 1024;
 
@@ -216,15 +219,15 @@ fn write_inside_transaction(
     let mut totals = Totals::read(connection)?;
     let mut report = SidebarWriteReport::default();
     let store = |connection: &Connection,
-                     report: &mut SidebarWriteReport,
-                     totals: &mut Totals,
-                     name: &'static str,
-                     key: &str,
-                     raw: &str,
-                     max_store_bytes: usize,
-                     store_prefix: &str|
+                 report: &mut SidebarWriteReport,
+                 totals: &mut Totals,
+                 name: &'static str,
+                 key: &str,
+                 raw: &str,
+                 bounds: StoreBounds,
+                 store_prefix: &str|
      -> Result<(), &'static str> {
-        match totals.admits(key, raw, max_store_bytes, store_prefix) {
+        match totals.admits(key, raw, bounds, store_prefix) {
             Some(bound) => {
                 report
                     .refused
@@ -249,7 +252,10 @@ fn write_inside_transaction(
             "collapse",
             &key,
             &raw,
-            MAX_STORE_BYTES_COLLAPSE,
+            StoreBounds {
+                max_bytes: MAX_STORE_BYTES_COLLAPSE,
+                max_entries: MAX_ENTRIES_COLLECTION,
+            },
             COLLAPSE_STORAGE_KEY,
         )?;
     }
@@ -261,7 +267,10 @@ fn write_inside_transaction(
             "hiddenItems",
             HIDDEN_ITEMS_STORAGE_KEY,
             hidden,
-            MAX_STORE_BYTES_DEFAULT,
+            StoreBounds {
+                max_bytes: MAX_STORE_BYTES_DEFAULT,
+                max_entries: MAX_ENTRIES_SINGLETON,
+            },
             HIDDEN_ITEMS_STORAGE_KEY,
         )?;
     }
@@ -274,22 +283,33 @@ fn write_inside_transaction(
             "machineTab",
             &key,
             machine_id,
-            MAX_STORE_BYTES_DEFAULT,
+            StoreBounds {
+                max_bytes: MAX_STORE_BYTES_DEFAULT,
+                max_entries: MAX_ENTRIES_COLLECTION,
+            },
             MACHINE_TAB_STORAGE_KEY,
         )?;
     }
     Ok(report)
 }
 
-/// Every preference row's size, so the three bounds `admission` checks can be checked here too.
+/// What one store admits, from its row in the catalog.
+#[derive(Clone, Copy)]
+struct StoreBounds {
+    max_bytes: usize,
+    max_entries: usize,
+}
+
+/// Every preference row's size, so the bounds `admission` checks can be checked here too.
 ///
 /// CDXC:Sidebar 2026-09-20 WHY:
 /// The entry bound alone is not what the client-storage decision is about: a second door that
 /// respects only its own entry size can still push the shared 2 MiB local budget past the limit,
-/// which is exactly the "storage silently fills up" the first door exists to prevent. All three of
-/// `admission`'s bounds are checked here against the same numbers, in the same UTF-16 accounting,
-/// inside the same transaction that writes. Cache eviction is the one part not ported, because
-/// none of these keys is a cache store and `admission` only evicts for those.
+/// which is exactly the "storage silently fills up" the first door exists to prevent. Every one of
+/// `admission`'s four refusals is checked here against the same numbers, in the same UTF-16
+/// accounting, inside the same transaction that writes: the entry size, the store's own bytes, the
+/// store's entry count, and the shared backend total. Cache eviction is the one part not ported,
+/// because none of these keys is a cache store and `admission` only evicts for those.
 struct Totals {
     rows: Vec<(String, usize)>,
 }
@@ -315,7 +335,7 @@ impl Totals {
         &self,
         key: &str,
         raw: &str,
-        max_store_bytes: usize,
+        bounds: StoreBounds,
         store_prefix: &str,
     ) -> Option<&'static str> {
         let next = storage_bytes(key, raw);
@@ -327,14 +347,17 @@ impl Totals {
             .iter()
             .find(|(held, _)| held == key)
             .map_or(0, |(_, bytes)| *bytes);
-        let store: usize = self
+        let others: Vec<usize> = self
             .rows
             .iter()
             .filter(|(held, _)| held.starts_with(store_prefix) && held != key)
             .map(|(_, bytes)| *bytes)
-            .sum();
-        if store + next > max_store_bytes {
+            .collect();
+        if others.iter().sum::<usize>() + next > bounds.max_bytes {
             return Some("store");
+        }
+        if others.len() + 1 > bounds.max_entries {
+            return Some("entries");
         }
         let backend: usize = self.rows.iter().map(|(_, bytes)| *bytes).sum();
         (backend - previous + next > MAX_BACKEND_BYTES).then_some("backend")

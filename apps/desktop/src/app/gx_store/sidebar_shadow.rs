@@ -137,11 +137,13 @@ impl GhostexGpuiApp {
         // Which machines exist is the old projection's answer until M4d, and a stored tab whose
         // machine is gone has to fall back to this computer, or the list would draw nothing.
         self.gx_store_correct_sidebar_machine_tab(cx);
-        self.gx_store_follow_active_session_space(cx);
         // The mirrored inputs (the HUD's sort mode and Recent Projects, the git numbers, the two
         // armed timers) come from this payload, so the list is rebuilt whether or not anyone is
         // comparing.
         self.gx_store_sidebar_state_changed(cx);
+        // After the rebuild, so the drawn list it reads is this publish's rather than the last
+        // one's: whether the focused row is drawn is the question that decides whether it builds.
+        self.gx_store_follow_active_session_space(cx);
         if !self.gx_store.sidebar_shadow.enabled() {
             return;
         }
@@ -212,8 +214,9 @@ impl GhostexGpuiApp {
 
     /// Moves the section into the focused row's Space while `sidebarSpaceFollowActiveSession` is
     /// on, which `rememberNativeSidebarFocus` does to the old projection's copy on every focus
-    /// change. Without it the two sides would filter by different Spaces, and the drawn rows would
-    /// lose the menus they carry from a publish built for the other Space.
+    /// change. Without it the two sides filter by different Spaces, and every drawn row then loses
+    /// the menu, the hover buttons and the agent logo it carries from a publish built for the
+    /// other Space, for as long as the two disagree.
     fn gx_store_follow_active_session_space(&mut self, cx: &mut gpui::Context<Self>) {
         let focused = self
             .gx_store
@@ -242,6 +245,7 @@ impl GhostexGpuiApp {
                 &store.sidebar_list.last_inputs,
                 store.sidebar_list.view(),
                 &focused,
+                super::host::now_ms(),
             )
         };
         if let Some(space_id) = space_id {
