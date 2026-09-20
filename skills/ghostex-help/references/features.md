@@ -214,8 +214,11 @@ where they are while you open, change and close views.
   projects never moves it. The sidebar keeps one state everywhere by default;
   "Sidebar visibility memory" (`sidebarVisibilityMemory`, Advanced) can remember it
   the same two ways instead, and then a project switch that hides it leaves it
-  floating while you hover it. While collapsed, hovering the 10px edge on the
-  sidebar's side reveals it as a floating panel.
+  floating while you hover it. While collapsed, hovering the strip at the window's
+  left edge floats the sidebar back over your work, and it slides away when you
+  move off it. If you have also expanded a view to fill the window, the sessions
+  column floats back with it, so you can glance at your agents without leaving the
+  view. This works on macOS, Windows and Linux.
 - Pane width: agent panes have a minimum resize width of 388px, and so does the
   sessions column when a view is open beside it. In the desktop app, an open Code,
   Browser, Kanban, Automate, or Docs view has a minimum width of 455px.
