@@ -262,7 +262,7 @@ impl GhostexGpuiApp {
         }
         self.gx_store.sidebar_list.last_focus = Some(self.gx_store.core.focus().clone());
         let changes = std::mem::take(&mut self.gx_store.sidebar_list.changes);
-        let dirty = std::mem::take(&mut self.gx_store.sidebar_list.dirty);
+        self.gx_store.sidebar_list.dirty = false;
         let mut inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
         let unavailable = self.gx_store.sidebar_list.unavailable;
         let store = &mut self.gx_store;
@@ -301,6 +301,7 @@ impl GhostexGpuiApp {
         let mut changed = changed;
         if self.gx_store_prune_sidebar_selection() {
             let mut inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
+            let settings = inputs.settings.clone();
             let ui_generation = self.gx_store.sidebar_ui.generation();
             let store = &mut self.gx_store;
             refresh_inputs(
@@ -308,7 +309,7 @@ impl GhostexGpuiApp {
                 &mut store.sidebar_list.inputs_cache,
                 store.sidebar_ui.state(),
                 ui_generation,
-                store.sidebar_list.last_inputs.settings.clone(),
+                settings,
                 published.as_deref(),
                 &self.sidebar_browser_tabs_snapshot,
                 &store.sidebar_ui.stored_project_collections,
