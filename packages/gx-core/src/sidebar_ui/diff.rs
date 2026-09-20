@@ -1,13 +1,15 @@
 //! What one burst of intents changed about the collapse state, and applying exactly that to the
 //! stored envelope.
 //!
-//! CDXC:Sidebar 2026-09-20 WHY:
-//! The desktop app is not the only writer of this key while the port runs: the TypeScript sidebar
-//! still owns the per-Space session memory, the Space the active session pulls the section to, and
-//! the selection a deleted Space leaves behind, and it writes the whole object when it persists
-//! them. Writing the whole object from here would undo those, so a write carries the difference
-//! this state made and applies it to whatever is stored at that moment. Once nothing else writes
-//! the key, the difference is simply applied to what this state wrote last.
+//! CDXC:Sidebar 2026-09-21 WHY:
+//! A write carries the difference this state made and applies it to whatever is stored at that
+//! moment, rather than serializing the whole object. That was first needed because the TypeScript
+//! sidebar was a second writer of the same key; since M5 piece 7c it is not, and the reason the
+//! difference stays is the one that outlives it: `isReferenceChatsCollapsed` belongs to the React
+//! sidebar, and an envelope written by a BUILD THIS ONE CANNOT READ still has to keep its own
+//! fields when a click lands on it. Supersedes the 2026-09-20 note, which named the TypeScript
+//! sidebar's ownership of the per-Space session memory, the followed Space and the selection a
+//! deleted Space leaves behind; all three are this state's now.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,6 +29,11 @@ pub struct SidebarCollapseDiff {
     expanded_hover_actions: SetDiff,
     section_collapse: BTreeMap<String, Option<SectionCollapse>>,
     selected_space_by_section: BTreeMap<String, Option<String>>,
+    /// Per SECTION, not per Space: `rememberSidebarSpaceSession` rebuilds a whole section's object
+    /// and this writer is the only one that touches it, so the section is the unit that is
+    /// replaced. A finer diff would buy nothing and would need a third level of Option to say
+    /// "this Space's list was removed", which nothing produces.
+    recent_sessions_by_space: BTreeMap<String, Option<BTreeMap<String, Vec<String>>>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -84,6 +91,10 @@ impl SidebarCollapseDiff {
                 &base.selected_space_by_section,
                 &next.selected_space_by_section,
             ),
+            recent_sessions_by_space: map_diff(
+                &base.recent_sessions_by_space,
+                &next.recent_sessions_by_space,
+            ),
         }
     }
 
@@ -94,6 +105,7 @@ impl SidebarCollapseDiff {
             && self.expanded_hover_actions.is_empty()
             && self.section_collapse.is_empty()
             && self.selected_space_by_section.is_empty()
+            && self.recent_sessions_by_space.is_empty()
     }
 
     /// The envelope to store: the stored one with this difference applied, stamped with the
@@ -175,6 +187,36 @@ impl SidebarCollapseDiff {
             object.insert(
                 "selectedSpaceIdBySectionKey".to_string(),
                 Value::Object(spaces),
+            );
+        }
+        if !self.recent_sessions_by_space.is_empty() {
+            let mut sections = match object.get("recentSessionIdsBySpace") {
+                Some(Value::Object(object)) => object.clone(),
+                _ => Map::new(),
+            };
+            for (section_key, by_space) in &self.recent_sessions_by_space {
+                match by_space {
+                    Some(by_space) => {
+                        sections.insert(
+                            section_key.clone(),
+                            Value::Object(
+                                by_space
+                                    .iter()
+                                    .map(|(space_id, session_ids)| {
+                                        (space_id.clone(), json!(session_ids))
+                                    })
+                                    .collect(),
+                            ),
+                        );
+                    }
+                    None => {
+                        sections.remove(section_key);
+                    }
+                }
+            }
+            object.insert(
+                "recentSessionIdsBySpace".to_string(),
+                Value::Object(sections),
             );
         }
         json!({ "state": Value::Object(object), "version": version }).to_string()

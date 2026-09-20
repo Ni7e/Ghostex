@@ -65,6 +65,28 @@ pub enum SidebarUiIntent {
     },
     /// Collapse every drawn project of the machine, or put back the ones that were expanded.
     ToggleAllProjects(ToggleAllProjectsInput),
+    /// Put this row at the front of the Space's memory, so switching back to that Space restores
+    /// it. `rememberSidebarSpaceSession`, which runs on every focus change and every reveal.
+    RememberSpaceSession {
+        section_key: String,
+        space_id: String,
+        sidebar_session_id: String,
+    },
+    /// Drop a section's chosen Space, which is what deleting the Space the section was filtered by
+    /// leaves behind. The section then resolves to its first Space again.
+    ForgetSectionSpace {
+        section_key: String,
+    },
+    /// Expand a project row and, when the setting asks for it, put its session list back to the
+    /// compact one. A slot hotkey DELETES both keys rather than toggling them, which is why this is
+    /// not two `Toggle` intents: pressing cmd+1 on an already-expanded project must leave it
+    /// expanded.
+    ExpandProjectForSlotJump {
+        group_id: String,
+        /// The session list to collapse back to its compact form, when
+        /// `showLessForExpandedProjectJumps` is on.
+        collapse_session_list_storage_id: Option<String>,
+    },
 }
 
 /// The drawn project rows of a machine, in the order the list draws them.

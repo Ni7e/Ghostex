@@ -489,6 +489,10 @@ impl GhostexGpuiApp {
                 message.insert(field.to_string(), serde_json::json!(value));
             }
         }
+        // Deleting the Space a section is filtered by leaves that section naming a Space that is
+        // gone, and the sidebar's own state is the store's since M5 piece 7c
+        // (gx_store/sidebar_ui_paths.rs). The document itself stays the page's.
+        self.gx_store_note_sidebar_space_editor_result(&message, cx);
         self.dispatch_gpui_sidebar_host_message(serde_json::Value::Object(message), cx)
     }
 

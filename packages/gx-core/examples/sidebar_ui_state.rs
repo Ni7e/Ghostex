@@ -8,8 +8,8 @@
 //! 1. A payload written by the TypeScript build that this port replaces reads back with the same
 //!    collapsed groups, collections, lists, hover rows, sections and Space selection.
 //! 2. What this writes is byte-for-byte what `writeSidebarUiCollapseState` wrote for the same
-//!    state, including the two fields the sidebar state does not own, so a build from before the
-//!    port reads its own shape back.
+//!    state, including `isReferenceChatsCollapsed`, the one field the sidebar state does not own,
+//!    so a build from before the port reads its own shape back.
 //! 3. A long intent sequence survives a write and a read: state, storage, state again.
 //!
 //! This is tooling, not a test suite; it prints what it found and fails the process on a
@@ -24,9 +24,11 @@ use ghostex_gx_core::{
     ToggleAllProjectsInput, COLLAPSE_STORAGE_KEY, MACHINE_TAB_STORAGE_KEY, SIDEBAR_WINDOW_SCOPE_ID,
 };
 
-/// A version 3 envelope as the TypeScript build wrote it, with the two fields this state does not
-/// own carrying values, a section record holding both persisted headings, and a `false` entry that
-/// only `true` counts as.
+/// A version 3 envelope as the TypeScript build wrote it, with `isReferenceChatsCollapsed` (the
+/// one field this state does not own) and the per-Space session memory (which it does, since M5
+/// piece 7c) carrying values, a section record holding both persisted headings, and a `false` entry
+/// that only `true` counts as. The memory's duplicated id is there because the stored payload can
+/// hold one and both readers drop it.
 const STORED_COLLAPSE: &str = r#"{"state":{"collapsedGroupsById":{"project:alpha":true,"project:beta":false},"collapsedProjectCollectionsByKey":{"local:c1":true},"expandedProjectSessionListsById":{"alpha":true},"expandedSessionCardHoverActionsById":{"beta":true},"collapsedProjectSessionSectionsById":{"alpha":{"pinned":true,"sessions":false}},"isReferenceChatsCollapsed":true,"recentSessionIdsBySpace":{"local":{"s1":["combined-session:alpha:one","combined-session:alpha:one","combined-session:alpha:two"]}},"selectedSpaceIdBySectionKey":{"local":"s1","":"ignored"}},"version":3}"#;
 
 /// The state as a restart would see it: the two headings storage keeps, and everything else.
@@ -47,20 +49,19 @@ fn persisted_only(
 /// object, so the envelope is replaced rather than edited. Its copy of the owned fields mirrors the
 /// same commands and is therefore the state as of the last write, which is exactly what the
 /// difference this state carries is measured against.
-fn foreign_whole_object_write(base: &ghostex_gx_core::SidebarCollapseState, step: usize) -> String {
+fn foreign_whole_object_write(base: &ghostex_gx_core::SidebarCollapseState) -> String {
     let mirrored = collapse_into_storage(base, None);
     let mut envelope: serde_json::Value = serde_json::from_str(&mirrored).unwrap_or_default();
     if let Some(state) = envelope
         .pointer_mut("/state")
         .and_then(|state| state.as_object_mut())
     {
+        // The one field this state does not own. `recentSessionIdsBySpace` used to be injected
+        // here too, and since M5 piece 7c it is this state's, so a foreign writer that replaced it
+        // would be testing a downgrade rather than another owner.
         state.insert(
             "isReferenceChatsCollapsed".to_string(),
             serde_json::Value::Bool(true),
-        );
-        state.insert(
-            "recentSessionIdsBySpace".to_string(),
-            serde_json::json!({"local": {"s0": [format!("combined-session:p{}:one", step % 7)]}}),
         );
     }
     envelope.to_string()
@@ -191,15 +192,30 @@ fn main() -> ExitCode {
         format!("{legacy:?}"),
     );
 
-    // What a write produces for the state that was just read: the owned fields re-derived and the
-    // two unowned ones carried through byte for byte, duplicate entry included, because editing
-    // another writer's value is not this writer's business.
+    // What a write produces for the state that was just read: every owned field re-derived, and
+    // the one unowned field (`isReferenceChatsCollapsed`) carried through byte for byte, because
+    // editing another writer's value is not this writer's business. The per-Space session memory
+    // IS owned since M5 piece 7c, so the duplicate the stored payload carries is normalized away
+    // exactly as `normalizeStoredRecentSessionIdsBySpace` drops it on the way in.
     let written = collapse_into_storage(&read, Some(STORED_COLLAPSE));
-    const EXPECTED: &str = r#"{"state":{"collapsedGroupsById":{"project:alpha":true},"collapsedProjectCollectionsByKey":{"local:c1":true},"collapsedProjectSessionSectionsById":{"alpha":{"pinned":true,"sessions":false}},"expandedProjectSessionListsById":{"alpha":true},"expandedSessionCardHoverActionsById":{"beta":true},"isReferenceChatsCollapsed":true,"recentSessionIdsBySpace":{"local":{"s1":["combined-session:alpha:one","combined-session:alpha:one","combined-session:alpha:two"]}},"selectedSpaceIdBySectionKey":{"local":"s1"}},"version":3}"#;
+    const EXPECTED: &str = r#"{"state":{"collapsedGroupsById":{"project:alpha":true},"collapsedProjectCollectionsByKey":{"local:c1":true},"collapsedProjectSessionSectionsById":{"alpha":{"pinned":true,"sessions":false}},"expandedProjectSessionListsById":{"alpha":true},"expandedSessionCardHoverActionsById":{"beta":true},"isReferenceChatsCollapsed":true,"recentSessionIdsBySpace":{"local":{"s1":["combined-session:alpha:one","combined-session:alpha:two"]}},"selectedSpaceIdBySectionKey":{"local":"s1"}},"version":3}"#;
     check(
-        "write keeps the unowned fields and the version",
+        "write keeps the unowned field, the memory and the version",
         written == EXPECTED,
         written.clone(),
+    );
+    check(
+        "the per-Space session memory is read and re-derived, not carried",
+        read.recent_sessions_by_space
+            .get("local")
+            .and_then(|by_space| by_space.get("s1"))
+            .is_some_and(|ids| {
+                ids == &[
+                    "combined-session:alpha:one".to_string(),
+                    "combined-session:alpha:two".to_string(),
+                ]
+            }),
+        format!("{:?}", read.recent_sessions_by_space),
     );
     check(
         "a first write spells out the unowned defaults",
@@ -306,7 +322,11 @@ fn main() -> ExitCode {
             7 => SidebarUiIntent::ToggleTagFilter {
                 tag: format!("tag{}", step % 5),
             },
-            8 => SidebarUiIntent::ToggleShowHidden,
+            8 => SidebarUiIntent::RememberSpaceSession {
+                section_key: store.state().section_key(),
+                space_id: format!("s{}", step % 4),
+                sidebar_session_id: format!("combined-session:p{}:one", step % 7),
+            },
             9 => {
                 if step % 22 == 9 {
                     SidebarUiIntent::HideGroup { group_id }
@@ -332,7 +352,7 @@ fn main() -> ExitCode {
         // Every so often the other writer replaces the whole envelope with its own object, the way
         // the TypeScript sidebar still does while the port runs.
         if step % 17 == 16 {
-            raw = foreign_whole_object_write(&base, step);
+            raw = foreign_whole_object_write(&base);
             foreign_writes += 1;
         }
         if outcome.changed && !pending.is_empty() {
@@ -357,11 +377,11 @@ fn main() -> ExitCode {
     let _ = final_state;
     let stored_tail: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
     check(
-        "a write keeps another writer's fields",
+        "a write keeps another writer's field and stores this writer's memory",
         stored_tail
-            .pointer("/state/recentSessionIdsBySpace/local/s0")
-            .and_then(|value| value.as_array())
-            .is_some_and(|ids| !ids.is_empty())
+            .pointer("/state/recentSessionIdsBySpace/local")
+            .and_then(|value| value.as_object())
+            .is_some_and(|by_space| !by_space.is_empty())
             && stored_tail.pointer("/state/isReferenceChatsCollapsed")
                 == Some(&serde_json::Value::Bool(true)),
         raw.clone(),

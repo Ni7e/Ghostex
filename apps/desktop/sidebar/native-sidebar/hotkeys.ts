@@ -88,6 +88,16 @@ export function runNativeProjectSlotHotkey(ui: NativeSidebarUiState, slotNumber:
   if (!group?.projectContext) return;
   const settings = nativeSidebarSettings();
   const collapsed = ui.collapse.collapsedGroupsById[group.groupId];
+  /*
+  CDXC:Sidebar 2026-09-21 WHY:
+  These two deletions are the app's as well since M5 piece 7c: `gpuiProjectSlotHotkey` is neither of
+  the two sidebar-command envelopes, so nothing in Rust used to see the jump, and with
+  `showLessForExpandedProjectJumps` on it removed the very storage id the reveal that follows the
+  same jump was asking for. The app applies both to its own copy before this message is forwarded
+  and it is the only writer of the key; this keeps this page's copy in step for the projection it
+  draws with the list-source switch off.
+  SEE-ALSO: apps/desktop/src/app/gx_store/sidebar_ui_paths.rs.
+  */
   if (collapsed && settings.expandCollapsedProjectsOnJump) {
     delete ui.collapse.collapsedGroupsById[group.groupId];
     if (settings.showLessForExpandedProjectJumps) delete ui.collapse.expandedProjectSessionListsById[group.storageId];

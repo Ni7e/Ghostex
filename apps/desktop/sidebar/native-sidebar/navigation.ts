@@ -1,9 +1,6 @@
 import { nativeTagPresentation } from './tag-presentation';
 import { closeAppModal, openAppModal, openQuickAccess } from '@/packages/core-ui/app-modal-host-bridge';
-import {
-  readSidebarKeepAwakeRuntime,
-  writeSidebarUiCollapseState,
-} from '@/packages/core-ui/sidebar-app/collapse-state';
+import { readSidebarKeepAwakeRuntime } from '@/packages/core-ui/sidebar-app/collapse-state';
 import { formatSidebarHotkeyLabel } from '@/packages/core-ui/hotkey-label';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { KEEP_AWAKE_DURATION_OPTIONS } from '@/packages/shared/ghostex-settings';
@@ -166,7 +163,6 @@ export function runNativeSidebarAction(
     } else
       for (const id of ui.previousExpandedGroups[ui.selectedMachineId] ?? ids)
         delete ui.collapse.collapsedGroupsById[id];
-    writeSidebarUiCollapseState('main', ui.collapse);
     return;
   }
   closeAppModal('SettingsDismissal:sidebarNavigation');

@@ -371,8 +371,11 @@ impl GhostexGpuiApp {
     /// the full list is shown when the compact one would still leave it out. The old projection
     /// does the same to its own copy, from the same request, so the two stay in step.
     ///
-    /// Only while this app draws the store's list: working the plan out reads the list and may
-    /// build it again, and nothing on screen would use the answer otherwise.
+    /// Runs whichever list is drawn. It used to be gated on the store's list being the drawn one,
+    /// because working the plan out reads the list and may build it again and nothing on screen
+    /// would have used the answer; since M5 piece 7c this state is the only writer of the collapse
+    /// key in either position of the switch, so a reveal that did not run here would simply not be
+    /// stored.
     pub(crate) fn gx_store_note_sidebar_reveal(
         &mut self,
         sidebar_session_id: &str,
@@ -385,7 +388,7 @@ impl GhostexGpuiApp {
         // switch moved: a group expanding, Show Hidden lifting and the filters clearing out of
         // nowhere, for something the user asked for minutes ago.
         let fresh = self.gx_store.sidebar_ui.take_reveal_request(request_id);
-        if !fresh || !self.gx_store_sidebar_draws_store_list() {
+        if !fresh {
             return;
         }
         let now_ms = super::host::now_ms();
@@ -457,6 +460,12 @@ impl GhostexGpuiApp {
         }
         for intent in intents {
             self.gx_store_apply_sidebar_ui_intent(intent, cx);
+        }
+        // `rememberNativeSidebarFocus` runs FIRST inside `applyNativeSidebarReveal` and remembers
+        // the row under the Space it belongs to, whatever the follow setting says. The plan carries
+        // that Space, resolved from the same group the rest of the plan was built from.
+        if let Some(resolved) = plan.remember_space {
+            self.gx_store_remember_space_session(&resolved, sidebar_session_id, cx);
         }
     }
 }

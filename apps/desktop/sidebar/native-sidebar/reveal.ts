@@ -7,7 +7,6 @@ import {
 } from '@/packages/core-ui/sidebar-app/project-session-section-model';
 import { getVisibleProjectSessionIds } from '@/packages/core-ui/project-session-list-toggle';
 import { createDisplaySessionLayout } from '@/packages/shared/active-sessions-sort';
-import { writeSidebarUiCollapseState } from '@/packages/core-ui/sidebar-app/collapse-state';
 import { describeNativeSidebarMachine, rememberNativeSidebarFocus } from './space-navigation';
 import type { NativeSidebarUiState } from './ui-state';
 
@@ -66,5 +65,4 @@ export function applyNativeSidebarReveal(ui: NativeSidebarUiState) {
   if (!visible.includes(session.sessionId) && group.projectContext)
     ui.collapse.expandedProjectSessionListsById[storageId] = true;
   ui.handledRevealRequestId = request.requestId;
-  writeSidebarUiCollapseState('main', ui.collapse);
 }

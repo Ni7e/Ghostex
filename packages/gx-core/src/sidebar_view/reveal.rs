@@ -49,6 +49,9 @@ pub struct SidebarRevealPlan {
     pub storage_id: String,
     /// The Space that shows the group, when it is not the one the section is filtered by.
     pub select_space: Option<String>,
+    /// The Space the revealed row is remembered under, and the section that memory is keyed by.
+    /// `rememberSidebarSpaceSession`, which a reveal does as well as an ordinary focus change.
+    pub remember_space: Option<FocusedRowSpace>,
     /// The collection holding that group, when it is in one and that collection is collapsed.
     pub collapsed_collection_storage_id: Option<String>,
     /// The heading the row falls under, when it is collapsed.
@@ -161,6 +164,14 @@ pub fn reveal_plan(
                 &inputs.ui.selected_tag_filters,
             ),
         select_space: space_for_reveal(core, inputs, group, collection_id.as_deref()),
+        remember_space: space_of_group(core, inputs, group, collection_id.as_deref()).map(
+            |space_id| FocusedRowSpace {
+                section_key: inputs.ui.section_key(),
+                // The reveal's own `select_space` above carries the move; this is only the memory.
+                follow: false,
+                space_id,
+            },
+        ),
         select_machine,
         group_id: found.group_id.clone(),
         storage_id: found.storage_id.clone(),
@@ -227,18 +238,34 @@ pub fn space_for_focused_row(
     view: &SidebarView,
     sidebar_session_id: &str,
     now_ms: u64,
-) -> Option<String> {
-    if !inputs.settings.sidebar_space_follow_active_session {
+) -> Option<FocusedRowSpace> {
+    // Spaces off is the whole answer, and it is the common case: `describeNativeSidebarMachine`
+    // reads no Spaces state at all then, so neither the follow nor the memory has anything to say
+    // and nothing below runs.
+    if !inputs.settings.sidebar_spaces_enabled {
         return None;
     }
-    // Drawn means the selected Space shows it, which is the answer without building anything.
-    if find_group(view, sidebar_session_id).is_some() {
-        return None;
-    }
-    let unfiltered_inputs = unfiltered(inputs);
-    let built = SidebarViewModel::build_from_scratch(core, &unfiltered_inputs, now_ms);
-    let group = find_group(&built, sidebar_session_id)?;
-    space_for_reveal(core, inputs, group, group.collection_id.as_deref())
+    let section_key = inputs.ui.section_key();
+    // Drawn means the selected Space shows it, so `space_for_group` answers the selection without
+    // anything being built. That shortcut is why the memory can be asked on EVERY focus change.
+    let space_id = match find_group(view, sidebar_session_id) {
+        Some(group) => space_of_group(core, inputs, group, group.collection_id.as_deref())?,
+        None => {
+            let unfiltered_inputs = unfiltered(inputs);
+            let built = SidebarViewModel::build_from_scratch(core, &unfiltered_inputs, now_ms);
+            let group = find_group(&built, sidebar_session_id)?;
+            space_of_group(core, inputs, group, group.collection_id.as_deref())?
+        }
+    };
+    // `rememberNativeSidebarFocus` writes the section's Space when the setting is on, and writes it
+    // unconditionally, so a section that has never been written gets its first value here.
+    let follow = inputs.settings.sidebar_space_follow_active_session
+        && section_space_moves(inputs, &section_key, &space_id);
+    Some(FocusedRowSpace {
+        section_key,
+        space_id,
+        follow,
+    })
 }
 
 fn find_group<'a>(view: &'a SidebarView, sidebar_session_id: &str) -> Option<&'a GroupView> {
@@ -299,9 +326,13 @@ fn locate(
     })
 }
 
-/// `rememberNativeSidebarFocus` with `reveal`: the Space that shows the group, preferring the one
-/// the section is already filtered by. `None` when Spaces are off or the section already shows it.
-fn space_for_reveal(
+/// `resolveSidebarSpaceForRevealedGroup`: the Space that shows the group, preferring the one the
+/// section is already filtered by. `None` only when Spaces are off or the section has no Spaces.
+///
+/// One function rather than two: the reveal, the follow and the per-Space session memory all ask
+/// exactly this question, and the reveal once had its own copy of the "has it moved" test as well,
+/// which is how the follow and the drawing could have drifted by one section key.
+fn space_of_group(
     core: &Core,
     inputs: &SidebarInputs,
     group: &GroupView,
@@ -319,14 +350,17 @@ fn space_for_reveal(
             .as_ref()?,
     );
     let section_key = inputs.ui.section_key();
-    let stored = inputs
-        .ui
-        .collapse
-        .selected_space_by_section
-        .get(&section_key);
-    let selection = resolve_selected_space(&spaces, stored.map(String::as_str));
+    let selection = resolve_selected_space(
+        &spaces,
+        inputs
+            .ui
+            .collapse
+            .selected_space_by_section
+            .get(&section_key)
+            .map(String::as_str),
+    );
     let context = group.core.project_context.as_ref();
-    let space_id = space_for_group(
+    Some(space_for_group(
         &spaces,
         &selection,
         context.map(|context| context.project_id.as_str()),
@@ -334,13 +368,53 @@ fn space_for_reveal(
         context
             .and_then(|context| context.worktree.as_ref())
             .map(|worktree| worktree.parent_project_id.as_str()),
-    );
-    // `rememberNativeSidebarFocus` writes the section's Space unconditionally, so a section that
-    // has never been written gets its first value here even when the resolved Space is already the
-    // one it falls back to. That matters most for a REMOTE section, which a cross-machine reveal
-    // is usually the first thing ever to touch: leaving it unwritten means the section keeps
-    // resolving to whichever Space happens to be first, and moves on its own when the order does.
-    (stored.is_none() || space_id != selection.space_id()).then_some(space_id)
+    ))
+}
+
+/// Whether writing this Space into the section changes anything.
+///
+/// `rememberNativeSidebarFocus` writes it unconditionally, so a section that has never been written
+/// gets its first value even when the resolved Space is the one it already falls back to. That
+/// matters most for a REMOTE section, which a cross-machine reveal is usually the first thing ever
+/// to touch: leaving it unwritten means the section keeps resolving to whichever Space happens to
+/// be first, and moves on its own when the order does.
+fn section_space_moves(inputs: &SidebarInputs, section_key: &str, space_id: &str) -> bool {
+    match inputs
+        .ui
+        .collapse
+        .selected_space_by_section
+        .get(section_key)
+    {
+        None => true,
+        Some(stored) => stored != space_id,
+    }
+}
+
+/// The reveal's own use of the two above: the Space to select, when it is not already selected.
+fn space_for_reveal(
+    core: &Core,
+    inputs: &SidebarInputs,
+    group: &GroupView,
+    collection_id: Option<&str>,
+) -> Option<String> {
+    let space_id = space_of_group(core, inputs, group, collection_id)?;
+    section_space_moves(inputs, &inputs.ui.section_key(), &space_id).then_some(space_id)
+}
+
+/// The Space a focused row belongs to, and whether the section has to move to it.
+///
+/// Both answers come from one question, because `rememberNativeSidebarFocus` asks it once and does
+/// two things with it: it always remembers the row under that Space, and it moves the section there
+/// only when `sidebarSpaceFollowActiveSession` is on. Splitting them would mean building the
+/// unfiltered list twice for one focus change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FocusedRowSpace {
+    /// The section the memory is keyed by, which is the SELECTED machine's.
+    pub section_key: String,
+    /// The Space that shows the row.
+    pub space_id: String,
+    /// The section must move to that Space.
+    pub follow: bool,
 }
 
 /// The machine tab a sidebar row belongs to, from its id alone.

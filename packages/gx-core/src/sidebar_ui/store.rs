@@ -219,7 +219,64 @@ impl SidebarUiStore {
                 outcome(moved, SidebarPersistSet::default())
             }
             SidebarUiIntent::ToggleAllProjects(input) => self.toggle_all_projects(input),
+            SidebarUiIntent::RememberSpaceSession {
+                section_key,
+                space_id,
+                sidebar_session_id,
+            } => self.remember_space_session(section_key, space_id, sidebar_session_id),
+            SidebarUiIntent::ForgetSectionSpace { section_key } => {
+                let moved = self
+                    .state
+                    .collapse
+                    .selected_space_by_section
+                    .remove(&section_key)
+                    .is_some();
+                outcome(moved, SidebarPersistSet::collapse())
+            }
+            SidebarUiIntent::ExpandProjectForSlotJump {
+                group_id,
+                collapse_session_list_storage_id,
+            } => {
+                // DELETE, not toggle: `runNativeProjectSlotHotkey` removes both keys, so a jump to
+                // a project that is already expanded leaves it expanded.
+                let mut moved = self.state.collapse.collapsed_groups.remove(&group_id);
+                if let Some(storage_id) = collapse_session_list_storage_id {
+                    moved |= self
+                        .state
+                        .collapse
+                        .expanded_session_lists
+                        .remove(&storage_id);
+                }
+                outcome(moved, SidebarPersistSet::collapse())
+            }
         }
+    }
+
+    /// `rememberSidebarSpaceSession`: the row to the front of that Space's list, capped, with the
+    /// list left exactly as it is when the row is already first.
+    ///
+    /// A section whose object ends up empty is not stored empty, because the reader drops an empty
+    /// one and the two sides must agree on the object that is written.
+    fn remember_space_session(
+        &mut self,
+        section_key: String,
+        space_id: String,
+        sidebar_session_id: String,
+    ) -> SidebarUiOutcome {
+        let by_space = self
+            .state
+            .collapse
+            .recent_sessions_by_space
+            .entry(section_key)
+            .or_default();
+        let current = by_space.entry(space_id).or_default();
+        if current.first().map(String::as_str) == Some(sidebar_session_id.as_str()) {
+            return outcome(false, SidebarPersistSet::collapse());
+        }
+        current.retain(|held| *held != sidebar_session_id);
+        current.insert(0, sidebar_session_id);
+        current.truncate(crate::sidebar_view::MAX_RECENT_SPACE_SESSION_IDS);
+        changed(SidebarPersistSet::collapse())
     }
 
     /// `toggleProjects`: collapse every drawn project when any is expanded, else put back the ones

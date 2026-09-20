@@ -2379,6 +2379,10 @@ impl GhostexGpuiApp {
                 if let Some(slot_number) =
                     gpui_command_palette_project_slot_hotkey_number(action_id)
                 {
+                    // The store applies what the jump does to the sidebar's own state before the
+                    // message goes on, because the old runtime no longer writes that state and the
+                    // reveal that follows this jump is the store's (gx_store/sidebar_ui_paths.rs).
+                    self.gx_store_note_project_slot_hotkey(slot_number, cx);
                     self.dispatch_gpui_sidebar_host_message(
                         serde_json::json!({
                             "type": "gpuiProjectSlotHotkey",

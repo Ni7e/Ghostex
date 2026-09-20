@@ -18,7 +18,9 @@
 //! batch envelope, `sidebar_drag.rs` the session moves and what their order messages write, and
 //! `workspace_groups.rs` the client-owned groups document those writes land in, with its stored
 //! key, its debounced push and the guard that refuses the daemon's echo while one is outstanding;
-//! `diagnostics.rs` writes the log lines.
+//! `sidebar_ui_paths.rs` holds the three routes into the sidebar's own state that are NOT
+//! sidebar commands (the per-Space session memory, the Space-editor delete, and the project slot
+//! hotkey); `diagnostics.rs` writes the log lines.
 
 mod burst;
 mod diagnostics;
@@ -46,8 +48,8 @@ mod sidebar_snapshot;
 mod sidebar_snooze;
 mod sidebar_ui;
 mod sidebar_ui_commands;
+mod sidebar_ui_paths;
 mod sidebar_ui_storage;
 mod workspace_groups;
 
 pub(crate) use host::GxStoreHost;
-pub(crate) use sidebar_list::SidebarListSource;

@@ -203,11 +203,13 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    /// Moves the section into the focused row's Space while `sidebarSpaceFollowActiveSession` is
-    /// on, which `rememberNativeSidebarFocus` does to the old projection's copy on every focus
-    /// change. Without it the two sides filter by different Spaces, and every drawn row then loses
-    /// the menu, the hover buttons and the agent logo it carries from a publish built for the
-    /// other Space, for as long as the two disagree.
+    /// Remembers the focused row under its Space, and moves the section into that Space while
+    /// `sidebarSpaceFollowActiveSession` is on. Both halves of `rememberNativeSidebarFocus`, which
+    /// ran on every focus change.
+    ///
+    /// The memory is what a Space switch restores the focus to when `sidebarSpaceSwitchBehavior` is
+    /// `restore`, and it is written whatever the follow setting says: the two are asked as one
+    /// question so the unfiltered list is built at most once per focus change.
     fn gx_store_follow_active_session_space(&mut self, cx: &mut gpui::Context<Self>) {
         let focused = self
             .gx_store
@@ -229,7 +231,7 @@ impl GhostexGpuiApp {
         let Some(focused) = focused else {
             return;
         };
-        let space_id = {
+        let resolved = {
             let store = &self.gx_store;
             ghostex_gx_core::space_for_focused_row(
                 &store.core,
@@ -239,9 +241,17 @@ impl GhostexGpuiApp {
                 super::host::now_ms(),
             )
         };
-        if let Some(space_id) = space_id {
+        let Some(resolved) = resolved else {
+            return;
+        };
+        // The memory first: the follow moves the section, and the row has to be remembered under
+        // the Space it belongs to and not under whichever one the section was showing.
+        self.gx_store_remember_space_session(&resolved, &focused, cx);
+        if resolved.follow {
             self.gx_store_apply_sidebar_ui_intent(
-                ghostex_gx_core::SidebarUiIntent::SelectSpace { space_id },
+                ghostex_gx_core::SidebarUiIntent::SelectSpace {
+                    space_id: resolved.space_id,
+                },
                 cx,
             );
         }

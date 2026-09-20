@@ -3,10 +3,7 @@ import {
   resolveSelectedSidebarSpace,
   resolveSidebarSpaceForRevealedGroup,
 } from '@/packages/core-ui/sidebar-app/space-filtering';
-import {
-  rememberSidebarSpaceSession,
-  writeSidebarUiCollapseState,
-} from '@/packages/core-ui/sidebar-app/collapse-state';
+import { rememberSidebarSpaceSession } from '@/packages/core-ui/sidebar-app/collapse-state';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { nativeSidebarSettings } from './settings';
 import { openAppModal } from '@/packages/core-ui/app-modal-host-bridge';
@@ -76,7 +73,6 @@ export function rememberNativeSidebarFocus(ui: NativeSidebarUiState, sessionId: 
     if (reveal || nativeSidebarSettings().sidebarSpaceFollowActiveSession)
       ui.collapse.selectedSpaceIdBySectionKey[section.sectionKey] = spaceId;
   }
-  writeSidebarUiCollapseState('main', ui.collapse);
 }
 
 export function editNativeSidebarSpace(ui: NativeSidebarUiState, spaceId?: string): void {

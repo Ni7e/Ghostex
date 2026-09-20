@@ -1,14 +1,24 @@
 import { readSidebarHiddenItems } from '@/packages/core-ui/sidebar-hidden-items';
 import type { SidebarSessionTagFilter } from '@/packages/shared/session-tags';
-import { readSidebarUiCollapseState, writeSidebarUiCollapseState } from '@/packages/core-ui/sidebar-app/collapse-state';
-import {
-  readSidebarSelectedMachineTabId,
-  writeSidebarSelectedMachineTabId,
-} from '@/packages/core-ui/sidebar-app/machine-tab-selection';
+import { readSidebarUiCollapseState } from '@/packages/core-ui/sidebar-app/collapse-state';
+import { readSidebarSelectedMachineTabId } from '@/packages/core-ui/sidebar-app/machine-tab-selection';
 import { DEFAULT_PROJECT_SESSION_SECTION_COLLAPSE_STATE } from '@/packages/core-ui/sidebar-app/project-session-section-model';
 import { NativeSidebarMetadata } from './metadata';
 import type { NativeSidebarCommand } from '@/packages/shared/native-sidebar';
 
+/*
+CDXC:Sidebar 2026-09-21 WHY:
+This state is READ from client storage at construction and is never written back. The app owns the
+three keys since M5 piece 7c (`ghostex-sidebar-ui-collapse-state:window:main`,
+`ghostex-sidebar-selected-machine-tab`, `ghostex.sidebar.hidden-items.v1`), and it applies every one
+of these commands to its own copy in the same frame this one does, so the two move together and
+only one of them writes. What is kept here is the in-memory copy the paths this page still owns read
+from: the projection it draws with the list-source switch off, the Space switch's focus restore, the
+reveal, and the project slot hotkey.
+SEE-ALSO: apps/desktop/src/app/gx_store/sidebar_ui.rs,
+apps/desktop/src/app/gx_store/sidebar_ui_commands.rs,
+apps/desktop/src/app/gx_store/sidebar_ui_paths.rs.
+*/
 export class NativeSidebarUiState {
   renameRequest?: { collectionId: string; requestId: number };
   pendingAddedProject?: { machineId: string; projectId: string };
@@ -65,10 +75,8 @@ export class NativeSidebarUiState {
         break;
       case 'selectMachine':
         this.selectedMachineId = command.machineId;
-        writeSidebarSelectedMachineTabId('main', command.machineId);
         return;
     }
-    writeSidebarUiCollapseState('main', this.collapse);
   }
 }
 

@@ -4,8 +4,6 @@ import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import { projectSidebarCollections } from '@/packages/core-ui/sidebar-app/project-collection-model';
 import { getAwakeTerminalAndBrowserCount, getGroupSessionSummary } from '@/packages/core-ui/group-session-summary';
 import { updateSidebarProjectCollection, removeSidebarProjectCollection } from '@/packages/core-ui/project-collections';
-import { writeSidebarUiCollapseState } from '@/packages/core-ui/sidebar-app/collapse-state';
-import { writeSidebarHiddenItems } from '@/packages/core-ui/sidebar-hidden-items';
 import type {
   NativeSidebarCollection,
   NativeSidebarCommand,
@@ -67,7 +65,6 @@ export function runNativeCollectionAction(
     case 'toggle':
       if (ui.collapse.collapsedProjectCollectionsByKey[key]) delete ui.collapse.collapsedProjectCollectionsByKey[key];
       else ui.collapse.collapsedProjectCollectionsByKey[key] = true;
-      writeSidebarUiCollapseState('main', ui.collapse);
       return;
     case 'select':
       ui.selectedSessionIds = ids.flatMap((id) => sidebarStore.getState().sessionIdsByGroup[id] ?? []);
@@ -78,14 +75,12 @@ export function runNativeCollectionAction(
         ui.previousExpandedGroups[key] = expanded;
         for (const id of ids) ui.collapse.collapsedGroupsById[id] = true;
       } else for (const id of ui.previousExpandedGroups[key] ?? ids) delete ui.collapse.collapsedGroupsById[id];
-      writeSidebarUiCollapseState('main', ui.collapse);
       return;
     }
     case 'hide':
       ui.hiddenItems.collectionKeys = ui.hiddenItems.collectionKeys.includes(key)
         ? ui.hiddenItems.collectionKeys.filter((id) => id !== key)
         : [...ui.hiddenItems.collectionKeys, key];
-      writeSidebarHiddenItems(ui.hiddenItems);
       return;
   }
   const next =

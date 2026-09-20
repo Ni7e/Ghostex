@@ -16,7 +16,6 @@ import {
   toggleSpaceCollectionMembership,
   toggleSpaceProjectMembership,
 } from '@/packages/core-ui/spaces';
-import { writeSidebarHiddenItems } from '@/packages/core-ui/sidebar-hidden-items';
 import { openAppModal } from '@/packages/core-ui/app-modal-host-bridge';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import type { NativeSidebarCommand, NativeSidebarMenuItem } from '@/packages/shared/native-sidebar';
@@ -158,7 +157,6 @@ export function runNativeMembershipAction(
     ui.hiddenItems.groupIds = ui.hiddenItems.groupIds.includes(command.groupId)
       ? ui.hiddenItems.groupIds.filter((id) => id !== command.groupId)
       : [...ui.hiddenItems.groupIds, command.groupId];
-    writeSidebarHiddenItems(ui.hiddenItems);
     return;
   }
   const group = sidebarStore.getState().groupsById[command.groupId];

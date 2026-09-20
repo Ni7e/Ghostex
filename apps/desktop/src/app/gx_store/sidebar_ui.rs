@@ -1,14 +1,12 @@
 //! The sidebar's own state inside the app: seeded from client storage once, moved by intents, and
 //! written back on a debounce.
 //!
-//! CDXC:Sidebar 2026-09-20 WHY:
-//! The state moves whatever the list source is, because the comparison between the two lists is
-//! only worth anything while both are fed by the same clicks. The WRITE is another matter and runs
-//! only while the store's list is the drawn one. Until M4c the TypeScript sidebar is still a
-//! writer of the same three keys, and it serializes its whole in-memory object with no re-read and
-//! no transaction, on every focus change; two writers with one of them blind is how a value that
-//! exists on only one side disappears. So a build with the switch off keeps exactly one writer,
-//! and turning the switch on is what hands the keys over.
+//! CDXC:Sidebar 2026-09-21 WHY:
+//! The state moves whatever the list source is, and since M5 piece 7c so does the WRITE: the
+//! sidebar page no longer writes any of the three keys, so gating the write on the switch would
+//! leave a build with the switch off with no writer at all. The switch decides which list is drawn
+//! and which app performs an action, nothing about who owns this state. Supersedes the 2026-09-20
+//! note, which gated the write to keep exactly one writer while the page was still the other one.
 
 use std::time::{Duration, Instant};
 
@@ -55,6 +53,14 @@ pub(crate) struct SidebarUiCounters {
     pub(crate) replayed_intents: u64,
     /// Clicks dropped because the queue was full while the read kept failing.
     pub(crate) dropped_intents: u64,
+    /// Rows put at the front of a Space's memory, which is what a Space switch restores the focus
+    /// to. A run with focus changes and Spaces on and a zero here means nothing is being
+    /// remembered and every Space switch will land on the first row it finds.
+    pub(crate) space_memory_writes: u64,
+    /// Sections whose chosen Space was dropped because that Space was deleted.
+    pub(crate) space_forgets: u64,
+    /// Project slot hotkeys (cmd+1..9) this state answered.
+    pub(crate) slot_jumps: u64,
     pub(crate) write_max_us: u64,
     /// Where the slowest write's time went, so a slow one says which step was slow rather than
     /// leaving the whole write as the suspect.
@@ -330,10 +336,21 @@ impl GhostexGpuiApp {
         true
     }
 
-    /// Whether this app writes the sidebar's own state at all. Only the drawn list's owner writes:
-    /// the TypeScript sidebar is still a blind whole-object writer of the same keys until M4c.
+    /// Whether this app writes the sidebar's own state at all: it does, and the sidebar page does
+    /// not, in either position of the list-source switch.
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// The write used to be gated on the store's list being the drawn one, so that a build with the
+    /// switch off had exactly one writer while the TypeScript sidebar was still a blind
+    /// whole-object writer of the same keys. M5 piece 7c deleted those writes, which turns the gate
+    /// into the opposite hazard: with the switch off NOBODY would write and a restart would lose
+    /// every collapse, Space and hidden item of the session. The switch now decides only which list
+    /// is drawn and which app performs an action; the state, its three non-command routes and the
+    /// write run either way. Supersedes the 2026-09-20 note on this function.
     pub(crate) fn gx_store_sidebar_ui_writes(&self) -> bool {
-        self.gx_store_sidebar_list_source() == super::SidebarListSource::Store
+        // The read still has to have landed: writing before it would measure the difference
+        // against an empty state. `gx_store_schedule_sidebar_ui_write` checks that.
+        true
     }
 
     /// Reports a value a bound refused. Not retried on its own: the payload does not shrink by

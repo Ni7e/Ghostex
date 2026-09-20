@@ -19,6 +19,7 @@ use serde_json::{json, Map, Value};
 use crate::keys::encode_uri_component;
 use crate::sidebar_view::{
     SectionCollapse, SidebarCollapseState, SidebarHiddenItems, LOCAL_MACHINE_ID,
+    MAX_RECENT_SPACE_SESSION_IDS,
 };
 
 /// The unscoped part of the collapse key; the window scope is appended.
@@ -120,16 +121,17 @@ pub fn collapse_into_storage(state: &SidebarCollapseState, existing: Option<&str
                 .collect(),
         ),
     );
-    // The two fields this state does not own travel untouched: normalizing them here would be
-    // this writer quietly editing another writer's value, and the reader on either side already
-    // normalizes what it finds. A first write spells out the defaults a reader would otherwise
+    object.insert(
+        "recentSessionIdsBySpace".to_string(),
+        recent_sessions_into_storage(&state.recent_sessions_by_space),
+    );
+    // The one field this state does not own travels untouched: normalizing it here would be this
+    // writer quietly editing another writer's value, and the reader on either side already
+    // normalizes what it finds. A first write spells out the default a reader would otherwise
     // normalize to, so the object an older build reads back is the one it would have written.
     object
         .entry("isReferenceChatsCollapsed".to_string())
         .or_insert(Value::Bool(false));
-    object
-        .entry("recentSessionIdsBySpace".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
     json!({ "state": Value::Object(object), "version": COLLAPSE_STORAGE_VERSION }).to_string()
 }
 
@@ -206,7 +208,71 @@ fn normalize_collapse_state(state: Option<&Value>) -> SidebarCollapseState {
         selected_space_by_section: normalize_selected_spaces(
             state.get("selectedSpaceIdBySectionKey"),
         ),
+        recent_sessions_by_space: normalize_recent_sessions(state.get("recentSessionIdsBySpace")),
     }
+}
+
+/// `normalizeStoredRecentSessionIdsBySpace`: non-empty section key, non-empty Space id, a list of
+/// unique non-empty ids cut to the cap. A section or a Space that normalizes to nothing is dropped
+/// rather than stored empty, which is what keeps the written object equal to the one the sidebar
+/// wrote before this port.
+fn normalize_recent_sessions(
+    value: Option<&Value>,
+) -> BTreeMap<String, BTreeMap<String, Vec<String>>> {
+    let Some(Value::Object(object)) = value else {
+        return BTreeMap::new();
+    };
+    let mut sections = BTreeMap::new();
+    for (section_key, spaces) in object {
+        let Some(spaces) = spaces.as_object().filter(|_| !section_key.is_empty()) else {
+            continue;
+        };
+        let mut by_space: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (space_id, session_ids) in spaces {
+            let Some(session_ids) = session_ids.as_array().filter(|_| !space_id.is_empty()) else {
+                continue;
+            };
+            let mut unique: Vec<String> = Vec::new();
+            for session_id in session_ids {
+                let Some(session_id) = session_id.as_str().filter(|id| !id.is_empty()) else {
+                    continue;
+                };
+                if !unique.iter().any(|seen| seen == session_id) {
+                    unique.push(session_id.to_string());
+                }
+            }
+            unique.truncate(MAX_RECENT_SPACE_SESSION_IDS);
+            if !unique.is_empty() {
+                by_space.insert(space_id.clone(), unique);
+            }
+        }
+        if !by_space.is_empty() {
+            sections.insert(section_key.clone(), by_space);
+        }
+    }
+    sections
+}
+
+/// The stored shape of the per-Space session memory.
+pub(super) fn recent_sessions_into_storage(
+    sections: &BTreeMap<String, BTreeMap<String, Vec<String>>>,
+) -> Value {
+    Value::Object(
+        sections
+            .iter()
+            .map(|(section_key, by_space)| {
+                (
+                    section_key.clone(),
+                    Value::Object(
+                        by_space
+                            .iter()
+                            .map(|(space_id, session_ids)| (space_id.clone(), json!(session_ids)))
+                            .collect(),
+                    ),
+                )
+            })
+            .collect(),
+    )
 }
 
 /// `normalizeStoredCollapsedGroupsById`: only entries whose value is exactly `true` count.

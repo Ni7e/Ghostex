@@ -16,6 +16,10 @@
 //!    claims that collection rather than the project. The collection is dropped from the drawn
 //!    list while its projects are still drawn, so a plan that read the collection from there would
 //!    answer the Space question on the wrong branch and move the section for no reason.
+//! It also covers `project_slot_plan` (cmd+1..9), because the fixture it needs is exactly this
+//! one: several local projects drawn in a known order, one of them collapsed. Building a tenth
+//! presentation for six assertions would have been the more expensive answer.
+//!
 //! 3. Seven Spaces and three collections, the shape of a real sidebar rather than the smallest one
 //!    that exercises a branch: the follow-active rule on a row in another Space, a worktree whose
 //!    Space is its parent project's, two Spaces claiming one project so the order tie-break has a
@@ -27,8 +31,8 @@
 use std::process::ExitCode;
 
 use ghostex_gx_core::{
-    reveal_plan, space_for_focused_row, Core, Event, MachineId, SidebarInputs, SidebarView,
-    SidebarViewModel,
+    project_slot_plan, reveal_plan, space_for_focused_row, Core, Event, MachineId, SidebarInputs,
+    SidebarView, SidebarViewModel,
 };
 use serde_json::{json, Value};
 
@@ -180,8 +184,18 @@ fn seven_spaces(check: &dyn Fn(&str, bool, String)) {
     );
 
     // The rule this whole function exists for: the focused row is in another Space.
-    let follow = |inputs: &SidebarInputs, view: &SidebarView, session: &str| {
+    //
+    // `space_for_focused_row` answers two things since M5 piece 7c: the Space the row belongs to
+    // (which is remembered whatever the setting says) and whether the section MOVES to it. These
+    // assertions are about the move, so they read `follow` and the Space together; the Space alone
+    // is asserted below.
+    let resolved = |inputs: &SidebarInputs, view: &SidebarView, session: &str| {
         space_for_focused_row(&core, inputs, view, session, NOW_MS)
+    };
+    let follow = |inputs: &SidebarInputs, view: &SidebarView, session: &str| {
+        resolved(inputs, view, session)
+            .filter(|resolved| resolved.follow)
+            .map(|resolved| resolved.space_id)
     };
     check(
         "follow-active moves to the focused row's Space",
@@ -235,6 +249,110 @@ fn seven_spaces(check: &dyn Fn(&str, bool, String)) {
             "{:?}",
             follow(&other, &other_view, "combined-session:P1:S1")
         ),
+    );
+
+    // The memory is written whatever the follow setting says, and under the row's own Space: with
+    // the setting off nothing moves and the row is still remembered where it belongs.
+    check(
+        "the Space memory answers with the setting off",
+        resolved(&off, &view, "combined-session:P4:S4")
+            .is_some_and(|resolved| resolved.space_id == "s4" && !resolved.follow),
+        format!("{:?}", resolved(&off, &view, "combined-session:P4:S4")),
+    );
+    check(
+        "a row the section already shows is still remembered, under the shown Space",
+        resolved(&inputs, &view, "combined-session:P1:S1")
+            .is_some_and(|resolved| resolved.space_id == "s1" && !resolved.follow),
+        format!("{:?}", resolved(&inputs, &view, "combined-session:P1:S1")),
+    );
+    check(
+        "the memory is keyed by the section the tab is on",
+        resolved(&inputs, &view, "combined-session:P4:S4")
+            .is_some_and(|resolved| resolved.section_key == "local"),
+        format!("{:?}", resolved(&inputs, &view, "combined-session:P4:S4")),
+    );
+
+    // The project slot hotkeys, on the same nine-project fixture rather than a tenth one built for
+    // six assertions. `project_slot_plan` reads the DRAWN list, so it needs a list with several
+    // projects in a known order, which this one is once Spaces are off.
+    let mut all = base_inputs();
+    all.settings.sidebar_spaces_enabled = false;
+    all.ui
+        .collapse
+        .collapsed_groups
+        .insert("combined-project:P2".to_string());
+    let all_view = SidebarViewModel::build_from_scratch(&core, &all, NOW_MS);
+    let slot = |inputs: &SidebarInputs, view: &SidebarView, number: u32| {
+        project_slot_plan(view, &inputs.ui, &inputs.settings, number)
+    };
+    let drawn = drawn_groups(&all_view);
+    check(
+        "slot hotkey: the nth drawn project, in the drawn order",
+        slot(&all, &all_view, 2).map(|plan| plan.group_id) == drawn.get(1).cloned(),
+        format!("{:?} of {drawn:?}", slot(&all, &all_view, 2)),
+    );
+    // Asked for every slot rather than for one: `|| drawn.len() >= 9` would have made this pass
+    // whatever the answer on a fixture with nine projects, which is the gate-that-cannot-fail shape
+    // this port keeps hitting.
+    check(
+        "slot hotkey: a slot names a project exactly while one is drawn there",
+        (1..=9u32).all(|number| {
+            slot(&all, &all_view, number).is_some() == (number as usize <= drawn.len())
+        }),
+        format!(
+            "{:?} of {} drawn",
+            (1..=9u32)
+                .map(|number| slot(&all, &all_view, number).is_some())
+                .collect::<Vec<_>>(),
+            drawn.len()
+        ),
+    );
+    check(
+        "slot hotkey: 0 and 10 are refused",
+        slot(&all, &all_view, 0).is_none() && slot(&all, &all_view, 10).is_none(),
+        format!(
+            "{:?} {:?}",
+            slot(&all, &all_view, 0),
+            slot(&all, &all_view, 10)
+        ),
+    );
+    let collapsed_slot = drawn
+        .iter()
+        .position(|group_id| group_id == "combined-project:P2")
+        .map(|index| index as u32 + 1)
+        .unwrap_or_default();
+    check(
+        "slot hotkey: an expanded project is left expanded",
+        slot(&all, &all_view, 1).is_some_and(|plan| !plan.was_collapsed && !plan.expand_group),
+        format!("{:?}", slot(&all, &all_view, 1)),
+    );
+    check(
+        "slot hotkey: a collapsed project is expanded, its list untouched",
+        slot(&all, &all_view, collapsed_slot).is_some_and(|plan| {
+            plan.was_collapsed
+                && plan.expand_group
+                && plan.collapse_session_list_storage_id.is_none()
+        }),
+        format!("{:?}", slot(&all, &all_view, collapsed_slot)),
+    );
+    let mut show_less = all.clone();
+    show_less.settings.show_less_for_expanded_project_jumps = true;
+    check(
+        "slot hotkey: Show Less also puts the session list back",
+        slot(&show_less, &all_view, collapsed_slot)
+            .is_some_and(|plan| plan.collapse_session_list_storage_id.is_some()),
+        format!("{:?}", slot(&show_less, &all_view, collapsed_slot)),
+    );
+    let mut no_expand = show_less.clone();
+    no_expand.settings.expand_collapsed_projects_on_jump = false;
+    check(
+        "slot hotkey: with the jump setting off neither key moves",
+        slot(&no_expand, &all_view, collapsed_slot).is_some_and(|plan| {
+            plan.was_collapsed
+                && !plan.expand_group
+                && plan.collapse_session_list_storage_id.is_none()
+        }),
+        format!("{:?}", slot(&no_expand, &all_view, collapsed_slot)),
     );
 
     // And a reveal, on the same presentation, answers the same way.

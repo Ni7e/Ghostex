@@ -1,6 +1,5 @@
 import { openAppModal } from '@/packages/core-ui/app-modal-host-bridge';
 import { addSpaceProjectMember } from '@/packages/core-ui/spaces';
-import { writeSidebarUiCollapseState } from '@/packages/core-ui/sidebar-app/collapse-state';
 import { moveProjectGroupFamilyToStart } from '@/packages/core-ui/sidebar-app/drag-drop-geometry';
 import { sidebarStore } from '@/packages/core-ui/sidebar-store-model';
 import type { ExtensionToSidebarMessage } from '@/packages/shared/session-grid-contract';
@@ -15,10 +14,8 @@ export function receiveNativeSidebarEvent(
 ) {
   if (message.type === 'applySidebarSpaceEditorResult' && message.mode === 'delete') {
     const key = message.remoteMachineId ? `remote:${message.remoteMachineId}` : 'local';
-    if (ui.collapse.selectedSpaceIdBySectionKey[key] === message.spaceId) {
+    if (ui.collapse.selectedSpaceIdBySectionKey[key] === message.spaceId)
       delete ui.collapse.selectedSpaceIdBySectionKey[key];
-      writeSidebarUiCollapseState('main', ui.collapse);
-    }
   }
   if (message.type === 'promptGitCommit') openAppModal({ type: 'open', modal: 'gitCommit', gitCommitDraft: message });
   if (message.type === 'assignAddedProjectToSelectedSpace') {

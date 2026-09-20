@@ -153,7 +153,17 @@ pub struct SidebarCollapseState {
     pub section_collapse: BTreeMap<String, SectionCollapse>,
     /// Keyed by section key (`local`, `remote:<machine>`).
     pub selected_space_by_section: BTreeMap<String, String>,
+    /// The sessions each Space of each section was last focused into, newest first, capped at
+    /// [`MAX_RECENT_SPACE_SESSION_IDS`]. Keyed by section key, then by Space id.
+    ///
+    /// This is what a Space switch restores the focus to when `sidebarSpaceSwitchBehavior` is
+    /// `restore`. It is written on every focus change, which is why it is a plain list and not
+    /// something richer: a value the sidebar writes that often has to be cheap to compare.
+    pub recent_sessions_by_space: BTreeMap<String, BTreeMap<String, Vec<String>>>,
 }
+
+/// `MAX_RECENT_SIDEBAR_SPACE_SESSION_IDS`.
+pub const MAX_RECENT_SPACE_SESSION_IDS: usize = 20;
 
 /// Projects and collections the user hid from the list.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -228,6 +238,10 @@ pub struct SidebarSettings {
     pub hide_keep_awake_titlebar_control: bool,
     /// The project header offers New Browser Tab.
     pub browser_view_tab_hidden: bool,
+    /// A project slot hotkey (cmd+1..9) expands the project it jumps to.
+    pub expand_collapsed_projects_on_jump: bool,
+    /// That jump also puts the project's session list back to the compact one.
+    pub show_less_for_expanded_project_jumps: bool,
 }
 
 impl Default for SidebarSettings {
@@ -249,6 +263,8 @@ impl Default for SidebarSettings {
             show_beta_features: false,
             hide_keep_awake_titlebar_control: false,
             browser_view_tab_hidden: false,
+            expand_collapsed_projects_on_jump: true,
+            show_less_for_expanded_project_jumps: false,
         }
     }
 }
@@ -320,6 +336,14 @@ impl SidebarSettings {
             browser_view_tab_hidden: boolean(
                 "browserViewTabHidden",
                 defaults.browser_view_tab_hidden,
+            ),
+            expand_collapsed_projects_on_jump: boolean(
+                "expandCollapsedProjectsOnJump",
+                defaults.expand_collapsed_projects_on_jump,
+            ),
+            show_less_for_expanded_project_jumps: boolean(
+                "showLessForExpandedProjectJumps",
+                defaults.show_less_for_expanded_project_jumps,
             ),
         }
     }
