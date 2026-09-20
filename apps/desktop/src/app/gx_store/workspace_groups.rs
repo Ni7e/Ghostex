@@ -135,8 +135,11 @@ pub(crate) struct WorkspaceGroupsCounters {
     pub(crate) hand_offs_refused: u64,
     /// Times the page was asked to hand its document over again after a refusal.
     pub(crate) hand_offs_requested: u64,
-    /// Daemon echoes left unjudged for the same reason.
+    /// Daemon echoes left unjudged for the same reason. **Read this beside `deferred_recovered`:**
+    /// equal means every deferral was judged when the read landed, and `echoes_deferred` ahead of
+    /// it means one is still owed, which is the daemon's copy never being adopted at all.
     pub(crate) echoes_deferred: u64,
+    pub(crate) deferred_recovered: u64,
     /// Hand-backs whose script the service refused to evaluate. The page's copy is then the stale
     /// base of its next edit, which is declared difference 29 in a second shape, so the record of
     /// what it was told is NOT advanced and the next change tells it again.
@@ -161,6 +164,9 @@ pub(crate) struct WorkspaceGroupsHost {
     write_retries: u32,
     /// A read is on the background executor right now, so the pump must not book a second one.
     restoring: bool,
+    /// The page holds an edit this app refused and has not handed over again yet, so nothing may be
+    /// told to the page until it does: a hand-back would replace that edit.
+    page_holds_newer: bool,
     read_retries: u32,
     read_retry_scheduled: bool,
 }
@@ -235,11 +241,21 @@ impl GhostexGpuiApp {
                 .restore(document.clone());
             self.gx_store_apply_workspace_groups_to_store(&document, cx);
         }
+        // The daemon's copy arrived while the read was on its way and was deferred. This is its
+        // only other chance: nothing else will report that field as changed.
+        if self.gx_store.workspace_groups.counters.echoes_deferred
+            > self.gx_store.workspace_groups.counters.deferred_recovered
+        {
+            self.gx_store.workspace_groups.counters.deferred_recovered =
+                self.gx_store.workspace_groups.counters.echoes_deferred;
+            // This tells the page and emits the record on its way, unless the page holds newer.
+            self.gx_store_reconcile_workspace_groups(cx);
+        }
         // An edit the page made while the read was on its way is only in the page's copy, and
         // handing the stored document back would replace it: the user would watch the rename they
         // just made revert. So the page is asked to hand its own document over again instead, which
         // is one `persistWorkspaceGroups` and therefore the same path every other edit takes.
-        if self.gx_store.workspace_groups.counters.hand_offs_refused > 0 {
+        if self.gx_store.workspace_groups.page_holds_newer {
             self.gx_store_ask_old_runtime_for_workspace_groups(cx);
             return;
         }
@@ -293,9 +309,12 @@ impl GhostexGpuiApp {
         // the page keeps the document in memory and its next edit carries it.
         if !self.gx_store_restore_workspace_groups(cx) {
             self.gx_store.workspace_groups.counters.hand_offs_refused += 1;
+            self.gx_store.workspace_groups.page_holds_newer = true;
             return;
         }
         self.gx_store.workspace_groups.counters.hand_offs += 1;
+        // The page's document is here; this app is the holder again.
+        self.gx_store.workspace_groups.page_holds_newer = false;
         // Taken as an edit even when the document is equal to the held one, because that is what
         // `persistWorkspaceGroups` did: it wrote the key and booked the push unconditionally, and
         // `syncGpuiWorkspaceSessionOrderInSubgroup` really does hand back an equal document
@@ -391,11 +410,25 @@ impl GhostexGpuiApp {
     pub(crate) fn gx_store_reconcile_workspace_groups(&mut self, cx: &mut gpui::Context<Self>) {
         // The stored key is the instant-edit source and has to be in hand before the first echo is
         // judged, or a cold start would adopt the daemon's copy over a document the user edited
-        // offline. One read, on the first call, and an echo arriving before it lands is left
-        // entirely alone: the daemon's value stays in the side state and the next reconcile, after
-        // the retry, judges it properly.
+        // offline.
+        //
+        // CDXC:Sessions 2026-09-21 WHY:
+        // An echo that arrives before the read lands is DEFERRED, and the deferral has to be
+        // recovered by the read rather than by the next frame, because there is usually no next
+        // frame: `side_state.workspace_groups` is true on the frame that moved the document and on
+        // no later one, and on a normal launch that frame is the initial snapshot. Leaving it to
+        // "the next reconcile" meant the daemon's copy was never adopted for the life of the run,
+        // so a group made on the phone or another computer never appeared. `gx_store_adopt_stored_workspace_groups`
+        // calls this again when the read lands.
         if !self.gx_store_restore_workspace_groups(cx) {
             self.gx_store.workspace_groups.counters.echoes_deferred += 1;
+            // The record goes out on THIS path too. It used to sit only at the end, and since the
+            // read became asynchronous the first call always returns here, so a normal launch
+            // produced no line at all: the record that was added so a run with no group edit could
+            // still be read was unreadable in exactly that run.
+            self.gx_store
+                .diagnostics
+                .workspace_groups_reconciled(self.gx_store.workspace_groups.counters);
             return;
         }
         let server_state = self
@@ -462,6 +495,12 @@ impl GhostexGpuiApp {
     }
 
     fn gx_store_tell_old_runtime_workspace_groups(&mut self, cx: &mut gpui::Context<Self>) {
+        // While the page is the only holder of an edit this app had to refuse, telling it anything
+        // would replace that edit. It is asked for its document instead, and told again once it
+        // arrives.
+        if self.gx_store.workspace_groups.page_holds_newer {
+            return;
+        }
         let held = self.gx_store.workspace_groups.sync.document();
         if self.gx_store.workspace_groups.handed_back.as_ref() == Some(held) {
             return;

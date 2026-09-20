@@ -1090,6 +1090,7 @@ impl GxStoreDiagnostics {
                 "handOffsRefused": counters.hand_offs_refused,
                 "handOffsRequested": counters.hand_offs_requested,
                 "echoesDeferred": counters.echoes_deferred,
+                "deferredRecovered": counters.deferred_recovered,
             }),
         );
     }
