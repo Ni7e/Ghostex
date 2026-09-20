@@ -37,6 +37,10 @@ mod terminal_element;
 mod terminal_environment;
 #[path = "../terminal_model.rs"]
 mod terminal_model;
+#[path = "../terminal_scrollbar_reveal.rs"]
+mod terminal_scrollbar_reveal;
+#[path = "../terminal_wheel.rs"]
+mod terminal_wheel;
 
 use gpui::{
     App, AppContext as _, Bounds, Focusable as _, TitlebarOptions, WindowBounds, WindowOptions, px,

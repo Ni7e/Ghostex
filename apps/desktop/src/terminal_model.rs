@@ -807,6 +807,17 @@ impl TerminalModel {
     /// caller should treat the key as handled), false when the encoder had
     /// nothing to send (bare modifiers, unbound cmd shortcuts, ...).
     pub fn send_key(&mut self, input: &VtKeyInput<'_>) -> bool {
+        self.send_key_repeat(input, 1)
+    }
+
+    /// Send the same key `count` times as one PTY write, the way ghostty
+    /// queues a wheel notch's worth of cursor keys onto a single io write:
+    /// the program reads the whole burst in one go instead of repainting
+    /// between rows.
+    pub fn send_key_repeat(&mut self, input: &VtKeyInput<'_>, count: usize) -> bool {
+        if count == 0 {
+            return false;
+        }
         {
             let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
             let Some(terminal) = terminal.as_mut() else {
@@ -819,7 +830,7 @@ impl TerminalModel {
         if self.key_encoder.encode(input, &mut bytes).is_err() || bytes.is_empty() {
             return false;
         }
-        let _ = self.write_input(&bytes);
+        let _ = self.write_input(&bytes.repeat(count));
         true
     }
 
@@ -860,6 +871,21 @@ impl TerminalModel {
     /// Positions are DEVICE pixels relative to the grid origin, matching the
     /// cell pixel sizes given to [`resize`](Self::resize).
     pub fn send_mouse(&mut self, input: &VtMouseInput, any_button_pressed: bool) -> bool {
+        self.send_mouse_repeat(input, any_button_pressed, 1)
+    }
+
+    /// Send the same mouse event `count` times as one PTY write. Wheel
+    /// reports are the only repeated event, and ghostty likewise queues a
+    /// notch's reports together.
+    pub fn send_mouse_repeat(
+        &mut self,
+        input: &VtMouseInput,
+        any_button_pressed: bool,
+        count: usize,
+    ) -> bool {
+        if count == 0 {
+            return false;
+        }
         {
             let mut terminal = self.terminal.lock().expect("terminal lock poisoned");
             let Some(terminal) = terminal.as_mut() else {
@@ -881,7 +907,7 @@ impl TerminalModel {
         if self.mouse_encoder.encode(input, &mut bytes).is_err() || bytes.is_empty() {
             return false;
         }
-        let _ = self.write_input(&bytes);
+        let _ = self.write_input(&bytes.repeat(count));
         true
     }
 

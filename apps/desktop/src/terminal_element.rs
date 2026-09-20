@@ -61,7 +61,7 @@ use std::sync::Arc;
 use std::{
     ops::Range,
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use futures::StreamExt as _;
@@ -74,10 +74,10 @@ use gpui::{
     FontWeight, Global, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement,
     IntoElement, KeyContext, KeyDownEvent, KeyUpEvent, Keystroke, LayoutId, Modifiers,
     ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Point, Render, RenderImage, Rgba, ScrollDelta, ScrollWheelEvent,
-    ShapedLine, SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign, TextRun,
-    UTF16Selection, UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill, outline,
-    point, prelude::FluentBuilder as _, px, size,
+    ParentElement, Pixels, Point, Render, RenderImage, Rgba, ScrollWheelEvent, ShapedLine,
+    SharedString, Size, StrikethroughStyle, Style, Styled, TextAlign, TextRun, UTF16Selection,
+    UnderlineStyle as GpuiUnderlineStyle, Window, canvas, div, fill, outline, point,
+    prelude::FluentBuilder as _, px, size,
 };
 use gpui_component::tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement, Tooltip};
 
@@ -90,6 +90,8 @@ use crate::terminal_model::{
     TerminalExit, TerminalModel, TerminalPasteDiagnostic, TerminalSnapshot, TerminalSpawnConfig,
     TerminalTextRow, UnderlineStyle as CellUnderline, WheelRoute,
 };
+use crate::terminal_scrollbar_reveal::ScrollbarReveal;
+use crate::terminal_wheel;
 
 gpui::actions!(
     ghostex_terminal,
@@ -100,6 +102,10 @@ pub(crate) const TERMINAL_KEY_CONTEXT: &str = "GhostexGpuiTerminal";
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const TERMINAL_SCROLLBAR_THICKNESS: f32 = 5.0;
 const TERMINAL_SCROLLBAR_MIN_KNOB_HEIGHT: f32 = 24.0;
+/// Extra pointer room beside the track that keeps a revealed bar up while the
+/// pointer travels to it (ghostty's win32 apprt widens the track itself; the
+/// 5px app style is fixed, so only the hover region grows).
+const TERMINAL_SCROLLBAR_GUTTER_PADDING: f32 = 6.0;
 const TERMINAL_SCROLL_BUTTON_SIZE: f32 = 28.125;
 /// Edge inset for the terminal's remaining overlay chrome: scroll-to-top and
 /// scroll-to-bottom sit 13px in from the bottom-right pane edge.
@@ -606,10 +612,13 @@ pub struct TerminalView {
     /// and release goes to the PTY even if modes change mid-drag.
     reporting_drag: bool,
     left_button_down: bool,
-    /// Fractional wheel rows not yet dispatched (trackpad smoothness).
-    wheel_accum: f32,
-    /// Runtime scrollbar reveal state for hovering or dragging the terminal.
-    scrollbar_visible: bool,
+    /// Sub-row wheel distance not yet dispatched (trackpad smoothness).
+    wheel_accum: terminal_wheel::WheelAccumulator,
+    /// Scroll-activity reveal state for the overlay scrollbar
+    /// ([`terminal_scrollbar_reveal`]).
+    scrollbar_reveal: ScrollbarReveal,
+    /// A fade/auto-hide driver is running for `scrollbar_reveal`.
+    scrollbar_reveal_driving: bool,
     scrollbar_drag_offset: Option<f32>,
     terminal_bounds: Option<Bounds<Pixels>>,
     scroll_button_visibility: TerminalScrollButtonVisibility,
@@ -746,8 +755,9 @@ impl TerminalView {
             drag: None,
             reporting_drag: false,
             left_button_down: false,
-            wheel_accum: 0.,
-            scrollbar_visible: false,
+            wheel_accum: terminal_wheel::WheelAccumulator::default(),
+            scrollbar_reveal: ScrollbarReveal::default(),
+            scrollbar_reveal_driving: false,
             scrollbar_drag_offset: None,
             terminal_bounds: None,
             scroll_button_visibility: TerminalScrollButtonVisibility::default(),
@@ -790,6 +800,7 @@ impl TerminalView {
         self.hover_cell = None;
         self.hovered_link = None;
         self.drag = None;
+        self.scrollbar_reveal.reset();
         self.model.release_viewer_emulator();
     }
 
@@ -1133,6 +1144,7 @@ impl TerminalView {
             TerminalScrollEdge::Top => VtScrollViewport::Top,
             TerminalScrollEdge::Bottom => VtScrollViewport::Bottom,
         });
+        self.note_scrollbar_activity(cx);
         self.refresh_snapshot();
         cx.notify();
     }
@@ -1223,6 +1235,7 @@ impl TerminalView {
             .unwrap_or(1);
         self.model
             .scroll_viewport_to_row(row.saturating_sub(viewport_len / 2));
+        self.note_scrollbar_activity(cx);
         self.refresh_snapshot();
         cx.notify();
     }
@@ -1802,6 +1815,8 @@ impl TerminalView {
                     scrollbar.knob.size.height.as_f32() / 2.0
                 };
                 self.scrollbar_drag_offset = Some(grab_offset);
+                self.scrollbar_reveal.set_dragging(true, Instant::now());
+                self.drive_scrollbar_reveal(cx);
                 self.scrollbar_to_pointer(event.position.y, grab_offset);
                 self.refresh_snapshot();
                 cx.notify();
@@ -1936,10 +1951,14 @@ impl TerminalView {
         hovered: bool,
         cx: &mut Context<Self>,
     ) {
-        let visible = hovered || self.scrollbar_drag_offset.is_some();
-        if self.scrollbar_visible != visible {
-            self.scrollbar_visible = visible;
-            cx.notify();
+        let over_gutter = hovered
+            && self
+                .scrollbar_gutter_bounds()
+                .is_some_and(|gutter| gutter.contains(&event.position));
+        self.scrollbar_reveal
+            .set_hovered(over_gutter, Instant::now());
+        if over_gutter {
+            self.drive_scrollbar_reveal(cx);
         }
         if let Some(grab_offset) = self.scrollbar_drag_offset
             && event.pressed_button == Some(MouseButton::Left)
@@ -1976,7 +1995,7 @@ impl TerminalView {
                 };
                 if delta != 0 {
                     self.model.scroll_viewport(VtScrollViewport::Delta(delta));
-
+                    self.note_scrollbar_activity(cx);
                     self.refresh_snapshot();
                 }
             }
@@ -2084,6 +2103,8 @@ impl TerminalView {
         if event.button == MouseButton::Left {
             self.left_button_down = false;
             if self.scrollbar_drag_offset.take().is_some() {
+                self.scrollbar_reveal.set_dragging(false, Instant::now());
+                self.drive_scrollbar_reveal(cx);
                 cx.notify();
                 return;
             }
@@ -2119,11 +2140,76 @@ impl TerminalView {
 
     fn current_scrollbar_layout(&self) -> Option<ScrollbarLayout> {
         layout_scrollbar(
-            self.settings.scrollbar_visible && self.scrollbar_visible,
+            self.settings.scrollbar_visible,
+            self.scrollbar_reveal.alpha(Instant::now()),
             self.frame.as_ref()?.scrollbar,
             self.terminal_bounds?,
             self.settings.light_theme,
         )
+    }
+
+    /// The user moved the viewport: reveal the bar and restart its countdown.
+    /// Output that scrolls the screen on its own is not activity, so a busy
+    /// terminal does not sit behind a permanently lit scrollbar.
+    fn note_scrollbar_activity(&mut self, cx: &mut Context<Self>) {
+        if !self.settings.scrollbar_visible {
+            return;
+        }
+        self.scrollbar_reveal.note_scroll_activity(Instant::now());
+        self.drive_scrollbar_reveal(cx);
+    }
+
+    /// Run the fade and auto-hide clock until the bar is hidden again. The
+    /// state itself decides when it next needs attention, so a bar that is
+    /// simply up costs one wakeup rather than a frame timer.
+    fn drive_scrollbar_reveal(&mut self, cx: &mut Context<Self>) {
+        if self.scrollbar_reveal_driving {
+            return;
+        }
+        self.scrollbar_reveal_driving = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(Some(delay)) = this.update(cx, |view, _cx| {
+                    view.scrollbar_reveal.next_tick(Instant::now())
+                }) else {
+                    break;
+                };
+                cx.background_executor().timer(delay).await;
+                let Ok(keep_running) = this.update(cx, |view, cx| {
+                    if view.scrollbar_reveal.tick(Instant::now()) {
+                        cx.notify();
+                    }
+                    if view.scrollbar_reveal.hidden() {
+                        view.scrollbar_reveal_driving = false;
+                        return false;
+                    }
+                    true
+                }) else {
+                    break;
+                };
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Pointer region that holds the bar open. The visible 5px track is the
+    /// grab target; the few pixels of gutter beside it only keep the bar up
+    /// long enough to aim at it.
+    fn scrollbar_gutter_bounds(&self) -> Option<Bounds<Pixels>> {
+        let bounds = self.terminal_bounds?;
+        let scrollbar = self.frame.as_ref()?.scrollbar;
+        if !self.settings.scrollbar_visible || scrollbar.total <= scrollbar.len {
+            return None;
+        }
+        let width = px(TERMINAL_SCROLLBAR_THICKNESS + TERMINAL_SCROLLBAR_GUTTER_PADDING);
+        Some(Bounds::new(
+            point(bounds.right() - width, bounds.top()),
+            size(width, bounds.size.height),
+        ))
     }
 
     fn scrollbar_to_pointer(&mut self, pointer_y: Pixels, grab_offset: f32) {
@@ -2159,19 +2245,28 @@ impl TerminalView {
             .cached_metrics
             .map(|metrics| metrics.line_height)
             .unwrap_or(px(16.));
-        let lines = match event.delta {
-            ScrollDelta::Pixels(delta) => {
-                // Ghostty's AppKit surface doubles precise trackpad deltas.
-                delta.y.as_f32() / line_height.as_f32() * self.settings.mouse_scroll_precision * 2.0
-            }
-            ScrollDelta::Lines(delta) => delta.y * self.settings.mouse_scroll_discrete,
+        let viewport_height = self.terminal_bounds.map_or_else(
+            || line_height.as_f32(),
+            |bounds| bounds.size.height.as_f32(),
+        );
+        let Some(scroll) = terminal_wheel::normalize(
+            event.delta,
+            event.modifiers.shift,
+            line_height.as_f32(),
+            viewport_height,
+        ) else {
+            return;
         };
-        self.wheel_accum += lines;
-        let steps = self.wheel_accum.trunc() as i32;
+        let steps = terminal_wheel::wheel_rows(
+            &mut self.wheel_accum,
+            scroll,
+            line_height.as_f32(),
+            self.settings.mouse_scroll_precision,
+            self.settings.mouse_scroll_discrete,
+        );
         if steps == 0 {
             return;
         }
-        self.wheel_accum -= steps as f32;
 
         // Shift-wheel always scrolls locally (mirrors the selection
         // override for reporting modes).
@@ -2189,18 +2284,20 @@ impl TerminalView {
                     VtMouseButton::WheelDown
                 };
                 // Wheel reports are press-only events (xterm buttons 64/65).
-                for _ in 0..steps.abs() {
-                    self.model.send_mouse(
-                        &VtMouseInput {
-                            action: VtMouseAction::Press,
-                            button: Some(button),
-                            mods: vt_mods(&event.modifiers),
-                            x,
-                            y,
-                        },
-                        self.left_button_down,
-                    );
-                }
+                // Ghostty queues every repeat onto one io write, so the
+                // program reads a whole notch at once instead of waking up
+                // and repainting per row.
+                self.model.send_mouse_repeat(
+                    &VtMouseInput {
+                        action: VtMouseAction::Press,
+                        button: Some(button),
+                        mods: vt_mods(&event.modifiers),
+                        x,
+                        y,
+                    },
+                    self.left_button_down,
+                    steps.unsigned_abs() as usize,
+                );
             }
             WheelRoute::ArrowKeys => {
                 let key = if steps > 0 {
@@ -2217,15 +2314,14 @@ impl TerminalView {
                     unshifted_codepoint: 0,
                     composing: false,
                 };
-                for _ in 0..steps.abs() {
-                    self.model.send_key(&input);
-                }
+                self.model
+                    .send_key_repeat(&input, steps.unsigned_abs() as usize);
             }
             WheelRoute::Viewport => {
                 // Viewport delta: up (positive wheel) is negative rows.
                 self.model
                     .scroll_viewport(VtScrollViewport::Delta(-(steps as isize)));
-
+                self.note_scrollbar_activity(cx);
                 self.refresh_snapshot();
                 cx.notify();
             }
@@ -2460,7 +2556,8 @@ impl TerminalView {
                 window,
             ),
             scrollbar: layout_scrollbar(
-                self.settings.scrollbar_visible && self.scrollbar_visible,
+                self.settings.scrollbar_visible,
+                self.scrollbar_reveal.alpha(Instant::now()),
                 frame.scrollbar,
                 bounds,
                 self.settings.light_theme,
@@ -4337,12 +4434,13 @@ fn layout_search(
 }
 
 fn layout_scrollbar(
-    visible: bool,
+    enabled: bool,
+    alpha: f32,
     scrollbar: VtScrollbar,
     bounds: Bounds<Pixels>,
     light_theme: bool,
 ) -> Option<ScrollbarLayout> {
-    if !visible || scrollbar.total <= scrollbar.len || bounds.size.height <= px(0.) {
+    if !enabled || alpha <= 0. || scrollbar.total <= scrollbar.len || bounds.size.height <= px(0.) {
         return None;
     }
 
@@ -4366,10 +4464,12 @@ fn layout_scrollbar(
 
     // CDXC:DesignSystem 2026-09-16 SEE-ALSO:
     // Exact app scrollbar colors are shared with packages/components/ui/scrollbar-theme.css.
+    let mut knob_color: Hsla = gpui::rgb(if light_theme { 0xbcbcbd } else { 0x424346 }).into();
+    knob_color.a *= alpha.clamp(0., 1.);
     Some(ScrollbarLayout {
         slot,
         knob,
-        knob_color: gpui::rgb(if light_theme { 0xbcbcbd } else { 0x424346 }).into(),
+        knob_color,
     })
 }
 

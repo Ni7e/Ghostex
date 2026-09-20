@@ -31,8 +31,10 @@ mod terminal_gpui_engine;
 mod terminal_model;
 mod terminal_native_view;
 mod terminal_osc_title;
+mod terminal_scrollbar_reveal;
 mod terminal_surface_host;
 mod terminal_surface_lifecycle;
+mod terminal_wheel;
 mod windows_terminal_backend;
 #[cfg(target_os = "windows")]
 mod windows_updater;
