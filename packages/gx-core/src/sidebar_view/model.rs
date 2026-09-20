@@ -365,7 +365,7 @@ impl SidebarViewModel {
                 .unwrap_or_default();
             let mut rows: Vec<RowRef> = browser_rows_for_project(
                 &mut state,
-                previous.as_ref(),
+                previous.as_ref().filter(|_| !rows_all_dirty),
                 project_id,
                 effective,
                 &row_context,
@@ -504,6 +504,15 @@ impl SidebarViewModel {
 }
 
 /// Every row of a project's browser tabs, kept until the tabs themselves change.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// `previous` is withheld when every row is dirty, and that is the whole point of the argument
+/// rather than a detail. A browser row is built from the same [`RowContext`] as a session row, so
+/// its tooltip carries the tag catalog and Debugging Mode, and reusing it on the strength of an
+/// unchanged tab list alone kept a pre-catalog tooltip on a row whose id never moved, which kept
+/// its group's cache key unchanged, which kept the whole group. It survived every replay because
+/// no recording carries browser tabs; it took a live sidebar with a browser row open and one tag
+/// catalog change to show, as one row differing from a build with no cache at all.
 fn browser_rows_for_project(
     state: &mut CacheState,
     previous: Option<&CacheState>,

@@ -21,9 +21,9 @@ use ghostex_gx_core::protocol::{
     CustomSessionTag, CustomSessionTagsState, ServerEvent, GXSERVER_PROTOCOL_VERSION,
 };
 use ghostex_gx_core::{
-    collapse_into_storage, collapse_state_from_storage, reveal_plan, Core, Event, Intent,
-    MachineId, SectionId, SessionSortMode, SidebarCollapseDiff, SidebarInputs, SidebarUiIntent,
-    SidebarUiStore, SidebarView, SidebarViewModel, ToggleAllProjectsInput,
+    collapse_into_storage, collapse_state_from_storage, reveal_plan, BrowserTabInput, Core, Event,
+    Intent, MachineId, SectionId, SessionSortMode, SidebarCollapseDiff, SidebarInputs,
+    SidebarUiIntent, SidebarUiStore, SidebarView, SidebarViewModel, ToggleAllProjectsInput,
 };
 use serde_json::Value;
 
@@ -429,6 +429,37 @@ fn churn_inputs(inputs: &mut SidebarInputs, ui: &mut UiState, view: &SidebarView
         .flat_map(|group| group.core.sessions.iter())
         .nth(index % 17)
         .map(|session| session.row.sidebar_session_id.clone());
+    // Browser tabs, which only the host has: the recording carries none, and a browser row is the
+    // one row whose every field comes from this side rather than from the daemon.
+    if inputs.host.browser_tabs.is_empty() {
+        if let Some(project_id) = view
+            .groups
+            .iter()
+            .find_map(|group| group.core.project_context.as_ref())
+            .map(|context| context.project_id.clone())
+        {
+            inputs.host.browser_tabs = vec![
+                BrowserTabInput {
+                    project_id: project_id.clone(),
+                    tab_id: "1".to_string(),
+                    title: "Replay tab".to_string(),
+                    favicon_url: Some("https://example.invalid/favicon.ico".to_string()),
+                    is_active: true,
+                    is_sleeping: false,
+                    is_visible: true,
+                },
+                BrowserTabInput {
+                    project_id,
+                    tab_id: "2".to_string(),
+                    title: "Replay tab two".to_string(),
+                    favicon_url: None,
+                    is_active: false,
+                    is_sleeping: true,
+                    is_visible: false,
+                },
+            ];
+        }
+    }
     match index % 13 {
         0 => {
             if let Some(group_id) = group_id {

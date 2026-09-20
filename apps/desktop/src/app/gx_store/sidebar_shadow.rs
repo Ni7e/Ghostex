@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{LOCAL_MACHINE_ID, SidebarViewModel};
 
+use super::sidebar_scratch_compare::compare_views;
 use super::sidebar_shadow_compare::compare;
 use crate::GhostexGpuiApp;
 
@@ -469,8 +470,9 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// Every so often the list is also built from scratch: a difference there is a gap in the
-    /// incremental path, not in the port. `None` when this round did not check.
+    /// Every so often the list is also built from scratch: a difference there is this port's own
+    /// cache failing to invalidate, never a difference with the old projection, so it is named in
+    /// its own record. `None` when this round did not check.
     fn gx_store_sidebar_scratch_check(&mut self) -> Option<bool> {
         let shadow = &mut self.gx_store.sidebar_shadow;
         shadow.compares_since_scratch_check += 1;
@@ -482,6 +484,13 @@ impl GhostexGpuiApp {
         let inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
         let scratch = SidebarViewModel::build_from_scratch(&self.gx_store.core, &inputs, now_ms);
         self.gx_store.sidebar_list.last_inputs = inputs;
-        Some(scratch != *self.gx_store.sidebar_list.view())
+        let difference = compare_views(self.gx_store.sidebar_list.view(), &scratch);
+        if let Some(difference) = &difference {
+            let last_update = self.gx_store.sidebar_list.last_update;
+            self.gx_store
+                .diagnostics
+                .sidebar_scratch_mismatch(difference, &last_update);
+        }
+        Some(difference.is_some())
     }
 }

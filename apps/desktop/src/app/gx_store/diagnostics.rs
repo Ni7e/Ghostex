@@ -7,7 +7,8 @@ use serde_json::json;
 
 use super::host::GxStoreCounters;
 use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
-use super::sidebar_list::{SidebarListCounters, SidebarListSource};
+use super::sidebar_list::{LastUpdate, SidebarListCounters, SidebarListSource};
+use super::sidebar_scratch_compare::ScratchDifference;
 use super::sidebar_shadow::SidebarShadowCounters;
 use super::sidebar_shadow_compare::{FieldDiff, MAX_IDS_PER_RECORD, SidebarMismatch};
 use super::sidebar_ui::SidebarUiCounters;
@@ -18,6 +19,9 @@ const MAX_DISTINCT_MISMATCH_RECORDS: usize = 200;
 /// Records of a difference that never settled. A few are enough to name the fields; the counter
 /// carries the rate.
 const MAX_NEVER_SETTLED_RECORDS: u32 = 4;
+/// Records of the kept list disagreeing with a fresh one. Each one is a bug, so a handful is
+/// plenty to name it and the counter carries the rate.
+const MAX_SCRATCH_RECORDS: u32 = 4;
 /// Unconditional warning lines one app run may write. A daemon that keeps producing a bad row
 /// must not be able to fill the disk through this path.
 const MAX_WARNING_LINES: u32 = 40;
@@ -45,6 +49,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_ui_summary_written: SidebarUiCounters,
     sidebar_refusal_warnings: u32,
     sidebar_never_settled_records: u32,
+    sidebar_scratch_records: u32,
     sidebar_storage_warnings: u32,
 }
 
@@ -433,6 +438,57 @@ impl GxStoreDiagnostics {
                 "pending": pending,
                 "storeGroups": groups,
                 "storeRows": rows,
+            }),
+        );
+    }
+
+    /// One record per distinct difference between the kept list and one built from nothing.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// This is the record for a cache this port failed to invalidate, which is a different animal
+    /// from a difference with the old projection: both sides here are this code reading the same
+    /// store at the same instant, so one of them is simply wrong. It carries what the newest
+    /// update was handed as well as the difference, because the answer is always "which input
+    /// moved without the thing that depends on it being dropped", and the update's flags are where
+    /// that starts.
+    pub(super) fn sidebar_scratch_mismatch(
+        &mut self,
+        difference: &ScratchDifference,
+        last_update: &LastUpdate,
+    ) {
+        if self.sidebar_scratch_records >= MAX_SCRATCH_RECORDS || !routine_logging_enabled() {
+            return;
+        }
+        self.sidebar_scratch_records += 1;
+        append(
+            "gxStore.sidebarShadow.scratchMismatch",
+            json!({
+                "onlyIncrementalGroups": difference.only_incremental_groups,
+                "onlyScratchGroups": difference.only_scratch_groups,
+                "groupOrderDiffers": difference.group_order_differs,
+                "topLevel": difference.top_level,
+                "groups": difference.groups,
+                "rows": difference.rows,
+                "onlyIncrementalRows": difference.only_incremental_rows,
+                "onlyScratchRows": difference.only_scratch_rows,
+                "lastUpdate": {
+                    "changesEmpty": last_update.changes_empty,
+                    "sessionsChanged": last_update.sessions_changed,
+                    "sessionsRemoved": last_update.sessions_removed,
+                    "projectsChanged": last_update.projects_changed,
+                    "projectsRemoved": last_update.projects_removed,
+                    "sessionOrderChanged": last_update.session_order_changed,
+                    "projectOrderChanged": last_update.project_order_changed,
+                    "machinesReloaded": last_update.machines_reloaded,
+                    "focusChanged": last_update.focus_changed,
+                    "workspaceGroups": last_update.workspace_groups,
+                    "projectCollections": last_update.project_collections,
+                    "spaces": last_update.spaces,
+                    "customSessionTags": last_update.custom_session_tags,
+                    "dirty": last_update.dirty,
+                    "uiGenerationMoved": last_update.ui_generation_moved,
+                    "settingsMoved": last_update.settings_moved,
+                },
             }),
         );
     }

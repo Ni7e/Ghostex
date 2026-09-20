@@ -19,6 +19,7 @@ mod session_walk;
 mod shadow_diff;
 mod sidebar_list;
 mod sidebar_list_inputs;
+mod sidebar_scratch_compare;
 mod sidebar_shadow;
 mod sidebar_shadow_compare;
 mod sidebar_snapshot;

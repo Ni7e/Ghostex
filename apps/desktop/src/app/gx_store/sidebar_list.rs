@@ -39,6 +39,30 @@ pub(crate) enum SidebarListSource {
     Store,
 }
 
+/// What the newest update was handed, in the shape a log line needs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LastUpdate {
+    pub(crate) changes_empty: bool,
+    pub(crate) sessions_changed: usize,
+    pub(crate) sessions_removed: usize,
+    pub(crate) projects_changed: usize,
+    pub(crate) projects_removed: usize,
+    pub(crate) session_order_changed: usize,
+    pub(crate) project_order_changed: usize,
+    pub(crate) machines_reloaded: usize,
+    pub(crate) focus_changed: bool,
+    pub(crate) workspace_groups: bool,
+    pub(crate) project_collections: bool,
+    pub(crate) spaces: bool,
+    pub(crate) custom_session_tags: bool,
+    /// Something besides the store marked the list.
+    pub(crate) dirty: bool,
+    /// The sidebar's own state moved.
+    pub(crate) ui_generation_moved: bool,
+    /// The settings the rows depend on moved.
+    pub(crate) settings_moved: bool,
+}
+
 /// What happened since the app started. Memory only; the log lines are built from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SidebarListCounters {
@@ -77,6 +101,8 @@ pub(crate) struct SidebarList {
     last_focus: Option<FocusState>,
     /// Whether a list has ever been built, so the first update is never skipped.
     built: bool,
+    /// The sidebar state generation the newest update read.
+    last_ui_generation: u64,
     /// The newest "which list is drawn" verdict and when it was taken. Asking costs a stat of the
     /// settings file and a clone of its map under a global lock, and several callers ask per
     /// publish. Held in a cell because the readers are `&self`.
@@ -94,6 +120,9 @@ pub(crate) struct SidebarList {
     /// rather than rebuilt: an update that changed one session must not re-parse the browser tabs
     /// or clone the sidebar's whole state.
     pub(super) last_inputs: SidebarInputs,
+    /// What the newest update was given, so a difference between the kept list and a fresh one can
+    /// say what the cache was reacting to when it went wrong.
+    pub(super) last_update: LastUpdate,
     pub(super) last_built_at_ms: u64,
     pub(super) counters: SidebarListCounters,
 }
@@ -109,6 +138,7 @@ impl Default for SidebarList {
             unavailable: UnavailableState::default(),
             last_focus: None,
             built: false,
+            last_ui_generation: 0,
             source: std::cell::Cell::new(None),
             deadline_booked: None,
             deadline_kind: "none",
@@ -116,6 +146,7 @@ impl Default for SidebarList {
             snapshot_cache: SnapshotCache::default(),
             inputs_cache: InputsCache::default(),
             last_inputs: SidebarInputs::default(),
+            last_update: LastUpdate::default(),
             last_built_at_ms: 0,
             counters: SidebarListCounters::default(),
         }
@@ -315,7 +346,7 @@ impl GhostexGpuiApp {
         self.gx_store_prune_sidebar_tag_filters(&settings);
         let ui_generation = self.gx_store.sidebar_ui.generation();
         let changes = std::mem::take(&mut self.gx_store.sidebar_list.changes);
-        self.gx_store.sidebar_list.dirty = false;
+        let dirty = std::mem::take(&mut self.gx_store.sidebar_list.dirty);
         let mut inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
         let unavailable = self.gx_store.sidebar_list.unavailable;
         let store = &mut self.gx_store;
@@ -330,6 +361,26 @@ impl GhostexGpuiApp {
             &store.sidebar_ui.stored_project_collections,
             unavailable,
         );
+        let settings_moved = self.gx_store.sidebar_list.last_inputs.settings != inputs.settings;
+        let last_update = LastUpdate {
+            changes_empty: changes.is_empty(),
+            sessions_changed: changes.sessions_changed.len(),
+            sessions_removed: changes.sessions_removed.len(),
+            projects_changed: changes.projects_changed.len(),
+            projects_removed: changes.projects_removed.len(),
+            session_order_changed: changes.session_order_changed.len(),
+            project_order_changed: changes.project_order_changed.len(),
+            machines_reloaded: changes.machines_reloaded.len(),
+            focus_changed: changes.focus_changed,
+            workspace_groups: changes.side_state.workspace_groups,
+            project_collections: changes.side_state.project_collections,
+            spaces: changes.side_state.spaces,
+            custom_session_tags: changes.side_state.custom_session_tags,
+            dirty,
+            ui_generation_moved: self.gx_store.sidebar_list.last_ui_generation != ui_generation,
+            settings_moved,
+        };
+        self.gx_store.sidebar_list.last_ui_generation = ui_generation;
         let started = Instant::now();
         let changed =
             self.gx_store
@@ -339,6 +390,7 @@ impl GhostexGpuiApp {
         let update_us = started.elapsed().as_micros() as u64;
         {
             let list = &mut self.gx_store.sidebar_list;
+            list.last_update = last_update;
             list.counters.updates += 1;
             list.counters.last_update_us = update_us;
             list.counters.update_max_us = list.counters.update_max_us.max(update_us);
