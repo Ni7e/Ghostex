@@ -357,6 +357,26 @@ function mutateBulk(name: string | undefined, entry: Json): Json {
     case 'drop-the-project-focus':
       if (clone.request) clone.request.focusProject = null;
       return clone;
+    // The refusal this piece leads with, taken away: a project with app tabs answered as an
+    // ordinary one. The port would then sleep the project's sessions and leave its app tabs awake,
+    // which is half of a Sleep All and is why the payload is handed over whole. It is here because
+    // the probe that makes the refusal reachable is new, and a probe that cannot fail is worse than
+    // none.
+    // A machine with no presentation answered as a loaded one. For a project wake that is a jump
+    // to a project whose rows nobody has, which the TypeScript's `!this.presentation` early return
+    // happens just in time to prevent.
+    case 'answer-an-unloaded-project':
+      if (clone.presentation === 'none' && clone.owned !== true) {
+        clone.owned = true;
+        clone.request = { action: 'wake', focusProject: 'probe', intervalMs: 0, messages: [] };
+      }
+      return clone;
+    case 'drop-the-browser-handoff':
+      if (((clone.browserTabs ?? []) as Json[]).length && clone.owned !== true) {
+        clone.owned = true;
+        clone.request = { action: 'sleep', focusProject: null, intervalMs: 0, messages: [] };
+      }
+      return clone;
     default:
       return clone;
   }
@@ -387,6 +407,8 @@ const BULK_MUTATIONS = [
   'sleep-inactive-takes-stopped-rows',
   'group-sleep-ignores-lifecycle',
   'drop-the-project-focus',
+  'drop-the-browser-handoff',
+  'answer-an-unloaded-project',
   'batch-keeps-the-selection',
   'reorder-the-batch',
 ];
@@ -406,7 +428,7 @@ function mutateSnoozeClock(name: string | undefined, entry: Json, clockCase: Jso
   const offsetMs = Number(clockCase.offsetMs);
   const offsets = (clockCase.morningOffsetsMs ?? []) as number[];
   const localDay = Math.floor((nowMs + offsetMs) / dayMs);
-  const weekday = ((localDay + 4) % 7 + 7) % 7;
+  const weekday = (((localDay + 4) % 7) + 7) % 7;
   const daysFor = (preset: string): number => (preset === 'tomorrow' ? 1 : (8 - weekday) % 7 || 7);
   const morning = (days: number, offset: number, hourMs: number): string =>
     new Date((localDay + days) * dayMs + hourMs - offset).toISOString();
@@ -655,7 +677,9 @@ async function compare([outDir, ...flags]: string[]) {
     const file = JSON.parse(readFileSync(join(outDir, SNOOZE_CLOCK_FILE), 'utf8')) as Json;
     for (const entry of (file.cases ?? []) as Json[]) clockCases.set(String(entry.case), entry);
   } catch {
-    console.error(`no ${SNOOZE_CLOCK_FILE} in ${outDir}: run \`bun tooling/gx-core/action-parity.ts snooze-clock ${outDir}\` and re-run the example`);
+    console.error(
+      `no ${SNOOZE_CLOCK_FILE} in ${outDir}: run \`bun tooling/gx-core/action-parity.ts snooze-clock ${outDir}\` and re-run the example`
+    );
     process.exit(2);
   }
   const names = readdirSync(outDir)
@@ -681,6 +705,8 @@ async function compare([outDir, ...flags]: string[]) {
   let snoozeRefusals = 0;
   let bulkSets = 0;
   let bulkRefusals = 0;
+  let bulkBrowserHandOffs = 0;
+  let bulkNotLoaded = 0;
   let bulkMessages = 0;
   let batchPlans = 0;
   const differences: string[] = [];
@@ -690,9 +716,13 @@ async function compare([outDir, ...flags]: string[]) {
     // n rows means exactly n - 1 waits, each the shipped interval. Both bounds, no tolerance.
     const expectedWaits = Number(measured.rows) - 1;
     if (Number(measured.waits) !== expectedWaits)
-      differences.push(`pacing: the shipped helper asked for ${measured.waits} waits over ${measured.rows} rows, expected ${expectedWaits}`);
+      differences.push(
+        `pacing: the shipped helper asked for ${measured.waits} waits over ${measured.rows} rows, expected ${expectedWaits}`
+      );
     if (canonical(measured.distinctIntervals) !== canonical([Number(measured.intervalMs)]))
-      differences.push(`pacing: the shipped helper waited ${canonical(measured.distinctIntervals)}, expected only ${measured.intervalMs}`);
+      differences.push(
+        `pacing: the shipped helper waited ${canonical(measured.distinctIntervals)}, expected only ${measured.intervalMs}`
+      );
     if (Number(measured.completed) !== Number(measured.rows))
       differences.push(`pacing: the shipped helper completed ${measured.completed} of ${measured.rows}`);
   }
@@ -730,15 +760,44 @@ async function compare([outDir, ...flags]: string[]) {
       const theirs = theirBulk[index];
       const payload = (entry.payload ?? {}) as Json;
       const where = `${name} bulk #${index} ${String(payload.type)}`;
-      if (entry.owned !== true) {
+      const mine = mutate ? mutateBulk(mutationName, entry) : entry;
+      // The hand-off probe: a project the Rust side was shown app tabs for. A refusal only means
+      // something if the TypeScript it hands the payload to really does the work, so that is what
+      // is asserted, rather than the refusal being counted and skipped the way every other one was.
+      const tabs = (entry.browserTabs ?? []) as Json[];
+      if (tabs.length) {
+        const theirCalls = (theirs?.calls ?? []) as Json[];
+        const forTabs = theirCalls.filter((call) => String(call.session).startsWith('gpui-browser:'));
+        if (mine.owned === true)
+          differences.push(
+            `${where}: performed a set for a project with ${tabs.length} app tabs instead of handing it over`
+          );
+        else if (!forTabs.length)
+          differences.push(
+            `${where}: the hand-off probe measured no app-tab call on the TypeScript side, so the refusal proves nothing`
+          );
+        else bulkBrowserHandOffs += 1;
+      }
+      // The not-loaded probe. `!this.presentation` is an early return, and for a project wake it
+      // happens BEFORE `focusProjectId`, so answering with an empty set is not the same as not
+      // answering: it would move the user to a project whose rows nobody has.
+      if (entry.presentation === 'none') {
+        const theirCalls = (theirs?.calls ?? []) as Json[];
+        if (mine.owned === true)
+          differences.push(`${where}: answered a machine with no presentation, where the TypeScript returns early`);
+        else if (theirCalls.length || (theirs?.focusProject ?? null) !== null)
+          differences.push(
+            `${where}: the not-loaded probe measured the TypeScript acting, so it is not the early return`
+          );
+        else bulkNotLoaded += 1;
+      }
+      if (mine.owned !== true) {
         bulkRefusals += 1;
         continue;
       }
       bulkSets += 1;
-      const mine = mutate ? mutateBulk(mutationName, entry) : entry;
       const myCalls = ((mine.request?.messages ?? []) as Json[]).map((message) => ({
-        call:
-          message.type === 'closeSession' ? 'close' : message.sleeping === true ? 'sleep' : 'wake',
+        call: message.type === 'closeSession' ? 'close' : message.sleeping === true ? 'sleep' : 'wake',
         session: message.sessionId,
       }));
       bulkMessages += myCalls.length;
@@ -746,7 +805,9 @@ async function compare([outDir, ...flags]: string[]) {
         differences.push(`${where}: rust ${canonical(myCalls)} ts ${canonical(theirs?.calls ?? [])}`);
       const myFocus = (mine.request?.focusProject ?? null) as string | null;
       if (canonical(myFocus) !== canonical(theirs?.focusProject ?? null))
-        differences.push(`${where} focusProject: rust ${canonical(myFocus)} ts ${canonical(theirs?.focusProject ?? null)}`);
+        differences.push(
+          `${where} focusProject: rust ${canonical(myFocus)} ts ${canonical(theirs?.focusProject ?? null)}`
+        );
       // The interval is compared against the shipped CALL GRAPH, which the pacing probe above
       // measured through the real helper. The first cut of this rule read only
       // `setSessionsSleeping` and reported 364 differences that were the harness being wrong:
@@ -802,9 +863,7 @@ async function compare([outDir, ...flags]: string[]) {
       // The half a comparison of the predicate alone cannot see: the row is drawn under the
       // Snoozed heading exactly when the predicate says it is snoozed.
       if ((mine.section === 'snoozed') !== theirs?.isSnoozed)
-        differences.push(
-          `${where} section: rust ${String(mine.section)} ts isSnoozed ${String(theirs?.isSnoozed)}`
-        );
+        differences.push(`${where} section: rust ${String(mine.section)} ts isSnoozed ${String(theirs?.isSnoozed)}`);
     }
     // The menu row: what it posts.
     const theirSnoozeActions = await runTypeScriptSnoozeActions(rust);
@@ -832,7 +891,9 @@ async function compare([outDir, ...flags]: string[]) {
         // no daemon session, and an unparseable id is the TypeScript's own early return.
         const sessionId = String(payload.sessionId ?? '');
         if (!sessionId.startsWith('remote:') && (theirs?.rpc || theirs?.remote))
-          differences.push(`${where}: refused here, but the TypeScript still calls ${canonical(theirs?.rpc ?? 'remote')}`);
+          differences.push(
+            `${where}: refused here, but the TypeScript still calls ${canonical(theirs?.rpc ?? 'remote')}`
+          );
         if (sessionId.startsWith('remote:') && !theirs?.remote)
           differences.push(`${where}: refused as a remote hand-off, but the TypeScript made no remote call`);
         continue;
@@ -840,7 +901,9 @@ async function compare([outDir, ...flags]: string[]) {
       snoozeCalls += 1;
       const mine = mutate ? mutateSnoozeCall(mutationName, entry) : entry;
       if (canonical(mine.request?.rpc ?? null) !== canonical(theirs?.rpc ?? null))
-        differences.push(`${where} rpc: rust ${canonical(mine.request?.rpc ?? null)} ts ${canonical(theirs?.rpc ?? null)}`);
+        differences.push(
+          `${where} rpc: rust ${canonical(mine.request?.rpc ?? null)} ts ${canonical(theirs?.rpc ?? null)}`
+        );
       for (const answer of ['accepted', 'failed']) {
         // The sleep is compared by its presence, not by its session id: the TypeScript hands
         // `setSessionSleeping` the sidebar id it was given and the port hands it the key it
@@ -1014,7 +1077,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkBrowserHandOffs ${bulkBrowserHandOffs} bulkNotLoaded ${bulkNotLoaded} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
@@ -1036,6 +1099,8 @@ async function compare([outDir, ...flags]: string[]) {
     ['bulkSets', bulkSets],
     ['bulkMessages', bulkMessages],
     ['bulkRefusals', bulkRefusals],
+    ['bulkBrowserHandOffs', bulkBrowserHandOffs],
+    ['bulkNotLoaded', bulkNotLoaded],
     ['batchPlans', batchPlans],
   ];
   const collapsed = measured.filter(([, count]) => count === 0);
@@ -1052,7 +1117,9 @@ async function compare([outDir, ...flags]: string[]) {
   }
   // A clean run with a zero among them is a gate that stopped measuring.
   if (!differences.length && collapsed.length) {
-    console.log(`  ${collapsed.map(([label]) => label).join(', ')} counted nothing, so the gate is not exercising what it claims`);
+    console.log(
+      `  ${collapsed.map(([label]) => label).join(', ')} counted nothing, so the gate is not exercising what it claims`
+    );
     process.exitCode = 1;
     return;
   }

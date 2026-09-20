@@ -534,9 +534,13 @@ function installModalRecorder(calls: Json[]): void {
  * compare them twice and for the wrong reasons. `focusProjectId` is recorded because a project
  * wake moves the active project before it fans out.
  *
- * `browserTabs` is empty on purpose. A project with app tabs is refused WHOLE by the port (the
- * host cannot reach the browser bridge from this path), so the set the two sides compare is the
- * set for a project without them; the refusal itself is asserted separately.
+ * `browserTabs` is the list the Rust probe recorded for this entry, not a constant. It was a hard
+ * `[]` here, and since no recording and no scenario host carries an app tab either, the refusal
+ * this piece leads with (a project with app tabs is handed over WHOLE, because the host cannot
+ * reach the browser bridge from this path) was unreachable on both sides at once: a port that had
+ * dropped the refusal entirely would have produced the same sets and passed. The probe builds the
+ * case and hands the same two tabs to this side, which is what lets the comparison ask that the
+ * work the port declined is work the TypeScript really does.
  */
 export async function runTypeScriptBulk(scenario: Json, rustActions: Json): Promise<Json[]> {
   resetBrowserStorage();
@@ -544,8 +548,10 @@ export async function runTypeScriptBulk(scenario: Json, rustActions: Json): Prom
   for (const entry of (rustActions.bulk ?? []) as Json[]) {
     const payload = entry.payload as Json;
     const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
-    runtime.presentation = scenario.snapshot;
-    runtime.browserTabs = [];
+    // `presentation: 'none'` is the probe for `!this.presentation`, which every scenario is the
+    // opposite of and which no recording can produce.
+    runtime.presentation = entry.presentation === 'none' ? undefined : orderedPresentation(scenario.snapshot as Json);
+    runtime.browserTabs = (entry.browserTabs ?? []) as Json[];
     runtime.remotePresentations = new Map();
     // The shape `getGpuiWorkspaceSessionSubgroups` indexes: a user-made session group id reaches
     // it before anything else in `setGroupSleeping`, and the port refuses exactly that shape.
@@ -577,6 +583,48 @@ export async function runTypeScriptBulk(scenario: Json, rustActions: Json): Prom
     out.push({ calls, focusProject });
   }
   return out;
+}
+
+/**
+ * The presentation in the session order the shipped runtime can actually hold.
+ *
+ * The bulk sets are built by walking `this.presentation.sessions`, so the ORDER of that array is
+ * the order the requests go out in, and a paced sleep makes it visible. The store has no array to
+ * walk (M1 keeps rows by id), so the port rebuilds the order from `sortKey`, which is exactly what
+ * both of the real paths produce: gxserver sorts each project's sessions by `session_sort_key`
+ * before it emits them (server/src/presentation/snapshot.rs), and the client's own reducer re-sorts
+ * the whole array by projectId, groupId, sortKey then sessionId on EVERY delta
+ * (`orderPresentationSessions` in packages/shared/gxserver-presentation-cache.ts). There is no
+ * moment in the app where the array is in any other order.
+ *
+ * The synthetic scenario was in a third order: hand-written declaration order with every `sortKey`
+ * set to the same letter, which no daemon emits and which the first delta would rewrite. That is
+ * where 20 of this gate's differences came from, and they were the harness's, not the port's: the
+ * 28 scenarios built from the recording were already in this order and reported none.
+ *
+ * The comparison is by code point rather than `localeCompare`, because the app runs this in QuickJS
+ * where `localeCompare` is NFC plus a code-point comparison, and this harness runs in Bun where it
+ * is ICU collation. Using the shipped comparator here would compare the port against a collation
+ * the app does not have.
+ */
+function orderedPresentation(snapshot: Json): Json {
+  const sessions = [...((snapshot?.sessions ?? []) as Json[])].sort((left, right) =>
+    compareCodePoints(
+      [left.projectId, left.groupId, left.sortKey, left.sessionId],
+      [right.projectId, right.groupId, right.sortKey, right.sessionId]
+    )
+  );
+  return { ...snapshot, sessions };
+}
+
+function compareCodePoints(left: unknown[], right: unknown[]): number {
+  for (let index = 0; index < left.length; index += 1) {
+    const a = String(left[index] ?? '');
+    const b = String(right[index] ?? '');
+    if (a < b) return -1;
+    if (a > b) return 1;
+  }
+  return 0;
 }
 
 async function runTypeScriptBulkPayload(runtime: Json, payload: Json): Promise<void> {
@@ -618,9 +666,8 @@ async function runTypeScriptBulkPayload(runtime: Json, payload: Json): Promise<v
  * printed a line: a probe that cannot finish is worse than one that cannot fail.
  */
 export async function runTypeScriptBulkPacing(): Promise<Json[]> {
-  const { runGpuiSidebarBulkSleepPaced, GPUI_SIDEBAR_BULK_SLEEP_INTERVAL_MS } = await import(
-    '@/apps/desktop/sidebar/bulk-sleep-pacing'
-  );
+  const { runGpuiSidebarBulkSleepPaced, GPUI_SIDEBAR_BULK_SLEEP_INTERVAL_MS } =
+    await import('@/apps/desktop/sidebar/bulk-sleep-pacing');
   const rows = ['a', 'b', 'c'];
   const waits: number[] = [];
   const counts = await runGpuiSidebarBulkSleepPaced(rows, async () => {}, {

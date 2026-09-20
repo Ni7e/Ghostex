@@ -25,17 +25,17 @@ use std::time::Instant;
 
 use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
+    ActiveGroup, BrowserTabInput, CloseAnswer, CloseFollowUp, Core, Event, FlagsFollowUp,
+    ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey,
+    QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS, SectionCollapse,
+    SessionKey, SidebarInputs, SidebarView, SidebarViewModel, SnoozeClock, SnoozeFollowUp,
     apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
     apply_snooze_answer, close_optimistic_follow_ups, encode_uri_component, iso_string_from_ms,
     plan_batch, plan_bulk_request, plan_close_request, plan_flags_request, plan_fork_request,
     plan_lifecycle_request, plan_modal_action, plan_read_only_action, plan_snooze_action,
-    plan_snooze_request, rename_seed_title, session_is_snoozed, snooze_wake_ms, ActiveGroup,
-    CloseAnswer, CloseFollowUp, Core, Event, FlagsFollowUp, ForkFollowUp, Intent, LifecycleAnswer,
-    LifecycleFollowUp, MachineId, ProjectKey, SectionCollapse, SessionKey, SidebarInputs,
-    SidebarView, SidebarViewModel, SnoozeClock, SnoozeFollowUp, QUICK_AUTOMATIONS_PROJECT_ID,
-    READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
+    plan_snooze_request, rename_seed_title, session_is_snoozed, snooze_wake_ms,
 };
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 /// The clock facts file the harness writes beside the scenarios.
 const SNOOZE_CLOCK_FILE: &str = "snooze-clock.json";
@@ -1245,6 +1245,14 @@ fn modal_entries(view: &SidebarView) -> Vec<Value> {
 /// Every project of the recording is probed with all four project payloads, and the two explicit
 /// ones with id lists taken from the recording plus the shapes no recording contains (an empty
 /// list, an id the store does not hold, a browser id, a remote id).
+///
+/// **The browser refusal is BUILT here rather than looked for.** No recording carries a browser tab
+/// and the harness's own runtime was handed an empty tab list, so the refusal this piece leads with
+/// (a set that would include an app tab is handed over whole) was structurally unreachable on both
+/// sides: a port that had dropped it entirely would have passed. The probe therefore gives the
+/// FIRST probed project one app tab, records the tab list it planned against so the TypeScript half
+/// is handed the same one, and the comparison then asks the thing that matters about a hand-off:
+/// that the TypeScript really does the work this side declined.
 fn bulk_entries(core: &Core, inputs: &SidebarInputs, scenario: &Value) -> Vec<Value> {
     let project_ids: Vec<String> = scenario
         .pointer("/snapshot/projects")
@@ -1257,20 +1265,74 @@ fn bulk_entries(core: &Core, inputs: &SidebarInputs, scenario: &Value) -> Vec<Va
                 .collect()
         })
         .unwrap_or_default();
-    let mut payloads: Vec<Value> = Vec::new();
+    // Each probe carries the app-tab list it is planned against, which is empty for all but the
+    // browser probe below and is what the TypeScript half is handed for the same entry.
+    let mut payloads: Vec<(Value, Vec<Value>)> = Vec::new();
+    let project_payloads = |group_id: &str| {
+        vec![
+            json!({ "type": "setGroupSleeping", "groupId": group_id, "sleeping": true }),
+            json!({ "type": "setGroupSleeping", "groupId": group_id, "sleeping": false }),
+            json!({ "type": "wakeProjectSleepingSessions", "groupId": group_id }),
+            json!({ "type": "sleepInactiveProjectSessions", "groupId": group_id }),
+            json!({ "type": "closeInactiveProjectSessions", "groupId": group_id }),
+        ]
+    };
     for project_id in project_ids.iter().take(BULK_PROJECTS_PER_SCENARIO) {
         let group_id = format!("combined-project:{}", encode_uri_component(project_id));
-        payloads.push(json!({ "type": "setGroupSleeping", "groupId": group_id, "sleeping": true }));
-        payloads
-            .push(json!({ "type": "setGroupSleeping", "groupId": group_id, "sleeping": false }));
-        payloads.push(json!({ "type": "wakeProjectSleepingSessions", "groupId": group_id }));
-        payloads.push(json!({ "type": "sleepInactiveProjectSessions", "groupId": group_id }));
-        payloads.push(json!({ "type": "closeInactiveProjectSessions", "groupId": group_id }));
+        for payload in project_payloads(&group_id) {
+            payloads.push((payload, Vec::new()));
+        }
+    }
+    // The same four project payloads for a project that has an app tab, which is the refusal this
+    // piece leads with and which no recording and no scenario host can produce. Two tabs, one awake
+    // and visible and one asleep, because the TypeScript's four sets filter on exactly those two
+    // fields and a probe with one tab could not tell a set that drops the wrong half from a set
+    // that drops none.
+    for project_id in project_ids.iter().take(1) {
+        let group_id = format!("combined-project:{}", encode_uri_component(project_id));
+        let tabs = vec![
+            json!({
+                "projectId": project_id,
+                "tabId": "probe-tab-awake",
+                "title": "Probe tab",
+                "isActive": false,
+                "isSleeping": false,
+                "isVisible": false,
+            }),
+            json!({
+                "projectId": project_id,
+                "tabId": "probe-tab-asleep",
+                "title": "Probe tab",
+                "isActive": false,
+                "isSleeping": true,
+                "isVisible": false,
+            }),
+        ];
+        for payload in project_payloads(&group_id) {
+            payloads.push((payload, tabs.clone()));
+        }
     }
     // The group shapes that resolve to no local project, each a refusal with its own reason.
     for group_id in SYNTHETIC_GROUP_IDS {
-        payloads.push(json!({ "type": "setGroupSleeping", "groupId": group_id, "sleeping": true }));
-        payloads.push(json!({ "type": "wakeProjectSleepingSessions", "groupId": group_id }));
+        payloads.push((
+            json!({ "type": "setGroupSleeping", "groupId": group_id, "sleeping": true }),
+            Vec::new(),
+        ));
+        payloads.push((
+            json!({ "type": "wakeProjectSleepingSessions", "groupId": group_id }),
+            Vec::new(),
+        ));
+    }
+    // The same four payloads against a store with NO presentation for the machine, which is
+    // `!this.presentation` and which every scenario is the opposite of. Three of the four cannot
+    // tell an empty set from the early return, but a project wake moves the active project before
+    // the early return would have happened, so this is the one branch where answering with zero
+    // rows is not the same as not answering.
+    let unloaded = Core::new();
+    let mut unloaded_payloads: Vec<Value> = Vec::new();
+    for project_id in project_ids.iter().take(1) {
+        let group_id = format!("combined-project:{}", encode_uri_component(project_id));
+        unloaded_payloads.extend(project_payloads(&group_id));
     }
     // The explicit lists a multi-selection sends.
     let selected: Vec<String> = session_ids(scenario)
@@ -1284,24 +1346,93 @@ fn bulk_entries(core: &Core, inputs: &SidebarInputs, scenario: &Value) -> Vec<Va
         vec!["gpui-browser:P0erj:tab-1".to_string()],
         vec!["remote:machine-1:session:P0erj:S1".to_string()],
     ] {
-        payloads.push(
+        payloads.push((
             json!({ "type": "setSessionsSleeping", "sessionIds": ids, "sleeping": true, "source": "sleepBelow" }),
-        );
-        payloads
-            .push(json!({ "type": "setSessionsSleeping", "sessionIds": ids, "sleeping": false }));
-        payloads.push(json!({ "type": "closeSessions", "sessionIds": ids }));
+            Vec::new(),
+        ));
+        payloads.push((
+            json!({ "type": "setSessionsSleeping", "sessionIds": ids, "sleeping": false }),
+            Vec::new(),
+        ));
+        payloads.push((
+            json!({ "type": "closeSessions", "sessionIds": ids }),
+            Vec::new(),
+        ));
     }
     payloads
         .into_iter()
-        .map(|payload| match plan_bulk_request(core, inputs, &payload) {
-            Some(request) => json!({
-                "payload": payload,
-                "owned": true,
-                "request": request.to_json(),
-            }),
-            None => json!({ "payload": payload, "owned": false }),
+        .map(|(payload, tabs)| {
+            let mut probe;
+            let inputs = match tabs.is_empty() {
+                true => inputs,
+                false => {
+                    probe = inputs.clone();
+                    probe.host.browser_tabs = tabs.iter().map(browser_tab_input).collect();
+                    &probe
+                }
+            };
+            bulk_entry(
+                plan_bulk_request(core, inputs, &payload),
+                payload,
+                tabs,
+                false,
+            )
         })
+        .chain(unloaded_payloads.into_iter().map(|payload| {
+            bulk_entry(
+                plan_bulk_request(&unloaded, inputs, &payload),
+                payload,
+                Vec::new(),
+                true,
+            )
+        }))
         .collect()
+}
+
+/// One probe's answer, together with the two facts it was planned against, so the TypeScript half
+/// starts from the same ones rather than from a label.
+fn bulk_entry(
+    planned: Option<ghostex_gx_core::BulkRequest>,
+    payload: Value,
+    tabs: Vec<Value>,
+    unloaded: bool,
+) -> Value {
+    let mut entry = json!({
+        "payload": payload,
+        "browserTabs": Value::Array(tabs),
+        "presentation": match unloaded { true => "none", false => "loaded" },
+    });
+    let object = entry.as_object_mut().expect("object");
+    match planned {
+        Some(request) => {
+            object.insert("owned".to_string(), Value::Bool(true));
+            object.insert("request".to_string(), request.to_json());
+        }
+        None => {
+            object.insert("owned".to_string(), Value::Bool(false));
+        }
+    }
+    entry
+}
+
+/// The probe's own app tab in the shape the host feeds the view model.
+fn browser_tab_input(tab: &Value) -> BrowserTabInput {
+    let text = |key: &str| {
+        tab.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let flag = |key: &str| tab.get(key).and_then(Value::as_bool).unwrap_or(false);
+    BrowserTabInput {
+        project_id: text("projectId"),
+        tab_id: text("tabId"),
+        title: text("title"),
+        favicon_url: None,
+        is_active: flag("isActive"),
+        is_sleeping: flag("isSleeping"),
+        is_visible: flag("isVisible"),
+    }
 }
 
 /// Enough projects to cover the shapes without multiplying the recording by five payloads. The
