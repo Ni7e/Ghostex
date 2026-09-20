@@ -22,10 +22,11 @@
 use std::time::Duration;
 
 use ghostex_gx_core::{
-    CloseAnswer, CloseFollowUp, CloseRequest, Event, Intent, LifecycleAnswer, LifecycleCall,
-    LifecycleFollowUp, LifecycleRequest, SessionKey, apply_close_answer, apply_lifecycle_answer,
-    close_optimistic_follow_ups, owns_close_message, owns_lifecycle_message, plan_close_request,
-    plan_lifecycle_request,
+    CloseAnswer, CloseFollowUp, CloseRequest, Event, ForkFollowUp, ForkRequest, Intent,
+    LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, SessionKey,
+    apply_close_answer, apply_fork_answer, apply_lifecycle_answer, close_optimistic_follow_ups,
+    owns_close_message, owns_fork_message, owns_lifecycle_message, plan_close_request,
+    plan_fork_request, plan_lifecycle_request,
 };
 use serde_json::Value;
 
@@ -62,6 +63,9 @@ pub(crate) struct SidebarLifecycleCounters {
     /// Closes whose row came back because the daemon never confirmed. Every one of these is a row
     /// the TypeScript would have left missing for the rest of the run.
     pub(crate) closes_restored: u64,
+    pub(crate) forks: u64,
+    pub(crate) forks_placed: u64,
+    pub(crate) forks_failed: u64,
 }
 
 impl GhostexGpuiApp {
@@ -123,6 +127,104 @@ impl GhostexGpuiApp {
         })
         .detach();
         true
+    }
+
+    /// Answers a `forkSession` command in Rust when the store owns it.
+    ///
+    /// Nothing local happens until the daemon has made the session, so there is no optimistic
+    /// half here and nothing to take back: the only thing that moves before the call is which
+    /// project is active, and a failed fork leaves the user looking at the row they clicked
+    /// (packages/gx-core/src/sidebar_actions/fork.rs).
+    pub(crate) fn gx_store_run_sidebar_fork(
+        &mut self,
+        command: &Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        if command.get("type").and_then(Value::as_str) != Some("command") {
+            return false;
+        }
+        let Some(message) = command.get("message") else {
+            return false;
+        };
+        if !owns_fork_message(message) {
+            return false;
+        }
+        if !self.gx_store_sidebar_draws_store_list() {
+            self.gx_store.sidebar_lifecycle.declined_source += 1;
+            return false;
+        }
+        let Some(request) = plan_fork_request(&self.gx_store.core, message) else {
+            return false;
+        };
+        self.gx_store.sidebar_lifecycle.forks += 1;
+        if let Some(project) = request.activate.clone() {
+            let output = self
+                .gx_store
+                .core
+                .handle(Event::Intent(Intent::FocusProject { project }), now_ms());
+            if !output.changes.is_empty() {
+                self.gx_store.sidebar_list.note_changes(&output.changes);
+                self.gx_store_update_sidebar_list(cx);
+            }
+        }
+        let path = request.rpc_path;
+        let params = request.rpc_params.clone();
+        let background = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let started = std::time::Instant::now();
+            let result = background
+                .spawn(
+                    async move { gpui_gxserver_rpc_result(path, &params, LIFECYCLE_RPC_TIMEOUT) },
+                )
+                .await;
+            let round_trip_ms = started.elapsed().as_millis() as u64;
+            let _ = this.update(cx, |this, cx| {
+                this.gx_store_apply_fork_answer(&request, result, round_trip_ms, cx);
+            });
+        })
+        .detach();
+        true
+    }
+
+    fn gx_store_apply_fork_answer(
+        &mut self,
+        request: &ForkRequest,
+        result: Result<Value, String>,
+        round_trip_ms: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let follow_ups = apply_fork_answer(request, result.as_ref().map_err(String::as_str));
+        let mut placed = false;
+        for follow_up in follow_ups {
+            match follow_up {
+                ForkFollowUp::PlacePane {
+                    session,
+                    placement_target,
+                } => {
+                    placed = true;
+                    self.gx_store.sidebar_lifecycle.forks_placed += 1;
+                    self.gx_store_place_local_workspace_session(
+                        &session,
+                        Some(&placement_target),
+                        cx,
+                    );
+                }
+                ForkFollowUp::Toast { level, title, .. } => {
+                    self.gx_store.sidebar_lifecycle.forks_failed += 1;
+                    // The description is the failure text, which is the daemon's or the
+                    // transport's. It reaches the user and never a log line.
+                    let description = result.as_ref().err().cloned().unwrap_or_else(|| {
+                        "gxserver did not return the forked session.".to_string()
+                    });
+                    self.dispatch_gpui_app_modal_toast(level.as_str(), &title, &description, cx);
+                }
+            }
+        }
+        self.gx_store.diagnostics.sidebar_fork_ran(
+            placed,
+            round_trip_ms,
+            self.gx_store.sidebar_lifecycle,
+        );
     }
 
     /// Answers a `closeSession` command in Rust when the store owns it.
@@ -314,11 +416,24 @@ impl GhostexGpuiApp {
         session: &SessionKey,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.gx_store_place_local_workspace_session(session, None, cx);
+    }
+
+    /// The same selection with a placement target, which is what a fork sends: the new pane is
+    /// appended beside the row it was forked from rather than beside whichever pane happens to be
+    /// focused when the call comes back.
+    fn gx_store_place_local_workspace_session(
+        &mut self,
+        session: &SessionKey,
+        placement_target: Option<&SessionKey>,
+        cx: &mut gpui::Context<Self>,
+    ) {
         self.focus_local_workspace_terminal_from_message(
             &GpuiSidebarWorkspaceTerminalFocusMessage {
                 force_remount: false,
                 placement: GpuiWorkspaceTerminalFocusPlacement::Tab,
-                placement_target_session_id: None,
+                placement_target_session_id: placement_target
+                    .map(|target| target.session_id.clone()),
                 preferred_interface: GpuiPreferredAgentInterface::Terminal,
                 project_id: session.project_id.clone(),
                 session_id: session.session_id.clone(),

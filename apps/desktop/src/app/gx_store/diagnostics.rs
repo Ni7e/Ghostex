@@ -846,6 +846,34 @@ impl GxStoreDiagnostics {
         );
     }
 
+    /// One line per fork: whether the daemon made one, and how long it took.
+    ///
+    /// No id and no failure text. The text a fork failure carries is the daemon's or the
+    /// transport's and it reaches the user through a toast; it is never written here.
+    pub(super) fn sidebar_fork_ran(
+        &mut self,
+        placed: bool,
+        round_trip_ms: u64,
+        counters: super::sidebar_lifecycle::SidebarLifecycleCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarFork",
+            json!({
+                "placed": placed,
+                "roundTripMs": round_trip_ms,
+                "forks": counters.forks,
+                "forksPlaced": counters.forks_placed,
+                "forksFailed": counters.forks_failed,
+            }),
+        );
+    }
+
     /// One line per close: what the daemon said, how long it took, and whether the row came back.
     ///
     /// `closesRestored` is the number to watch. Every one of them is a row the TypeScript would
