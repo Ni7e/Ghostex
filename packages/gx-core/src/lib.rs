@@ -47,13 +47,15 @@ pub use crate::selectors::{
     QUICK_AUTOMATIONS_PROJECT_ID, TAB_SESSION_TITLE_MAX_UTF16,
 };
 pub use crate::sidebar_actions::{
-    apply_close_answer, apply_fork_answer, apply_lifecycle_answer, close_optimistic_follow_ups,
-    local_project_group_project_id, owns_close_message, owns_fork_message, owns_lifecycle_message,
-    plan_close_request, plan_fork_request, plan_lifecycle_request, plan_read_only_action,
-    ActionEffect, CloseAnswer, CloseFollowUp, CloseRequest, ForkFollowUp, ForkRequest,
-    LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, SidebarActionPlan,
-    ToastLevel, LIFECYCLE_PATCH_TTL_MS, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
-    NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION, READ_ONLY_MESSAGE_TYPES,
+    apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
+    close_optimistic_follow_ups, local_project_group_project_id, owns_close_message,
+    owns_flags_message, owns_fork_message, owns_lifecycle_message, plan_close_request,
+    plan_flags_request, plan_fork_request, plan_lifecycle_request, plan_read_only_action,
+    ActionEffect, CloseAnswer, CloseFollowUp, CloseRequest, FlagsFollowUp, FlagsRequest,
+    ForkFollowUp, ForkRequest, LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest,
+    SessionFlags, SidebarActionPlan, ToastLevel, FLAGS_MESSAGE_TYPES, LIFECYCLE_PATCH_TTL_MS,
+    NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE, NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
+    READ_ONLY_MESSAGE_TYPES,
 };
 pub use crate::sidebar_menu::{
     agent_launcher_items, agent_logo_icons, colored_agent_logo, hover_strip, menu_to_json,

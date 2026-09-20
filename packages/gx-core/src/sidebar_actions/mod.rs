@@ -8,9 +8,11 @@
 //! in the middle, whose optimistic value is only applied once the daemon has accepted it, and
 //! `close` holds the one whose optimistic update takes a row away before the call and puts it back
 //! when the call does not come home, and `fork` the one where nothing local happens until the
-//! daemon has already made the session.
+//! daemon has already made the session. `flags` holds the four that are one call with
+//! different fields: pin, park, tag and favorite.
 
 mod close;
+mod flags;
 mod fork;
 mod lifecycle;
 mod plan;
@@ -20,6 +22,10 @@ mod resolve;
 pub use close::{
     apply_close_answer, close_optimistic_follow_ups, owns_close_message, plan_close_request,
     CloseAnswer, CloseFollowUp, CloseRequest,
+};
+pub use flags::{
+    apply_flags_answer, owns_flags_message, plan_flags_request, FlagsFollowUp, FlagsRequest,
+    SessionFlags, FLAGS_MESSAGE_TYPES,
 };
 pub use fork::{
     apply_fork_answer, owns_fork_message, plan_fork_request, ForkFollowUp, ForkRequest,
