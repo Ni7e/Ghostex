@@ -92,6 +92,17 @@ pub(super) struct SidebarMismatch {
     /// Every difference in this record is a value only the store holds, in a field the old
     /// projection can hold a stale absence of for the whole run.
     pub(super) only_stale_fields: bool,
+    /// Every difference in this record is explained by one of the three rules above, whichever
+    /// mix of them it takes.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// The three flags are each all-or-nothing over the whole record, so a record holding one
+    /// frozen field and one stale field satisfied none of them and was counted as a real
+    /// difference. That is not an edge case in a live sidebar: a row the old store froze and a
+    /// browser row a publish behind arrive in the same comparison constantly. This asks the
+    /// question the gate actually wants, which is whether anything in the record is unaccounted
+    /// for, and it is the one number to watch: mismatches minus this is the milestone's gate.
+    pub(super) only_explained_fields: bool,
     /// Where a group's row order first diverges: the group, the index, and the row each side has
     /// there. A bare "the order differs" cannot be diagnosed, and this is the smallest thing that
     /// can: a row only one side holds reads as a row that moved unless the ids are named.
@@ -282,6 +293,22 @@ pub(super) fn compare(
         || !mismatch.only_old_sessions.is_empty()
         || !mismatch.only_store_sessions.is_empty()
         || !mismatch.top_level.is_empty();
+    // Whether one field is accounted for, by whichever of the three rules covers it.
+    let explained = |field: &FieldDiff| {
+        FROZEN_FIELDS.contains(&field.name)
+            || TIMING_FIELDS.contains(&field.name)
+            || (STALE_PUBLISH_FIELDS.contains(&field.name)
+                && field.store_has_value
+                && !field.old_has_value)
+    };
+    mismatch.only_explained_fields = !structural
+        && (!mismatch.groups.is_empty() || !mismatch.sessions.is_empty())
+        && mismatch
+            .groups
+            .iter()
+            .chain(&mismatch.sessions)
+            .flat_map(|(_, fields)| fields)
+            .all(explained);
     mismatch.only_stale_fields = !structural
         && (!mismatch.groups.is_empty() || !mismatch.sessions.is_empty())
         && mismatch

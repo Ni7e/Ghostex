@@ -22,6 +22,11 @@ const MAX_NEVER_SETTLED_RECORDS: u32 = 4;
 /// Records of the kept list disagreeing with a fresh one. Each one is a bug, so a handful is
 /// plenty to name it and the counter carries the rate.
 const MAX_SCRATCH_RECORDS: u32 = 4;
+/// Comfortably inside the sanitizer's own 120, so a value is cut here where it can say it was cut
+/// rather than there where it cannot.
+const LOG_TEXT_MAX_CHARS: usize = 110;
+/// `MAX_SANITIZED_STRING_CHARS` in support_logs.rs, which this must stay under.
+const SANITIZER_MAX_CHARS: usize = 120;
 /// Unconditional warning lines one app run may write. A daemon that keeps producing a bad row
 /// must not be able to fill the disk through this path.
 const MAX_WARNING_LINES: u32 = 40;
@@ -241,12 +246,12 @@ impl GxStoreDiagnostics {
         append(
             "gxStore.shadow.mismatch",
             json!({
-                "storeGroup": mismatch.store_group,
+                "storeGroup": log_text(mismatch.store_group.as_str()),
                 "storeRevision": store_revision(core),
                 "oldTabCount": mismatch.old_tab_count,
                 "storeTabCount": mismatch.store_tab_count,
-                "onlyOld": mismatch.only_old,
-                "onlyStore": mismatch.only_store,
+                "onlyOld": log_texts(&mismatch.only_old),
+                "onlyStore": log_texts(&mismatch.only_store),
                 "orderDiffers": mismatch.order_differs,
                 "fields": fields,
             }),
@@ -317,13 +322,13 @@ impl GxStoreDiagnostics {
         let entries = |fields: &[FieldDiff]| -> Vec<serde_json::Value> {
             fields
                 .iter()
-                .map(|field| serde_json::Value::String(encode_field(field)))
+                .map(|field| serde_json::Value::String(log_text(encode_field(field))))
                 .collect()
         };
         let named = |fields: &[(String, Vec<FieldDiff>)]| -> Vec<serde_json::Value> {
             fields
                 .iter()
-                .map(|(id, names)| json!({ "id": id, "fields": entries(names) }))
+                .map(|(id, names)| json!({ "id": log_text(id.as_str()), "fields": entries(names) }))
                 .collect()
         };
         // Every differing field of the whole record, once, at a depth nothing can cap.
@@ -334,35 +339,36 @@ impl GxStoreDiagnostics {
                 "snapshotRevision": snapshot_revision,
                 "oldGroupCount": mismatch.old_group_count,
                 "storeGroupCount": mismatch.store_group_count,
-                "onlyOldGroups": mismatch.only_old_groups,
-                "onlyStoreGroups": mismatch.only_store_groups,
+                "onlyOldGroups": log_texts(&mismatch.only_old_groups),
+                "onlyStoreGroups": log_texts(&mismatch.only_store_groups),
                 "groupOrderDiffers": mismatch.group_order_differs,
-                "fields": distinct,
+                "fields": log_texts(&distinct),
                 "topLevel": entries(&mismatch.top_level),
                 "groups": named(&mismatch.groups),
                 "sessions": named(&mismatch.sessions),
-                "onlyOldSessions": mismatch.only_old_sessions,
-                "onlyStoreSessions": mismatch.only_store_sessions,
+                "onlyOldSessions": log_texts(&mismatch.only_old_sessions),
+                "onlyStoreSessions": log_texts(&mismatch.only_store_sessions),
                 "questionCountOnly": mismatch.question_count_only,
                 "tooltipOnly": mismatch.tooltip_only,
                 "onlyFrozenFields": mismatch.only_frozen_fields,
                 "onlyTimingFields": mismatch.only_timing_fields,
                 "onlyStaleFields": mismatch.only_stale_fields,
-                // One string per group whose order differs: where it first diverges and what each
-                // side has there. Depth 2, so nothing caps it.
+                "onlyExplainedFields": mismatch.only_explained_fields,
+                // One object per group whose order differs. Separate short values rather than one
+                // sentence: the sentence was long enough to be redacted and carried a slash, which
+                // redacts on its own. Each value here sits at depth 3.
                 "orderDivergence": mismatch
                     .order_divergence
                     .iter()
                     .map(|divergence| {
-                        serde_json::Value::String(format!(
-                            "{} at {} old={} store={} lens={}/{}",
-                            divergence.group_id,
-                            divergence.index,
-                            divergence.old_id.as_deref().unwrap_or("-"),
-                            divergence.store_id.as_deref().unwrap_or("-"),
-                            divergence.old_len,
-                            divergence.store_len,
-                        ))
+                        json!({
+                            "group": log_text(divergence.group_id.as_str()),
+                            "index": divergence.index,
+                            "old": divergence.old_id.as_deref().map(log_text),
+                            "store": divergence.store_id.as_deref().map(log_text),
+                            "oldLen": divergence.old_len,
+                            "storeLen": divergence.store_len,
+                        })
                     })
                     .collect::<Vec<_>>(),
             }),
@@ -417,6 +423,8 @@ impl GxStoreDiagnostics {
                 "frozenFieldsOnly": counters.frozen_fields_only,
                 "timingFieldsOnly": counters.timing_fields_only,
                 "staleFieldsOnly": counters.stale_fields_only,
+                "explainedOnly": counters.explained_only,
+                "unexplained": counters.mismatches.saturating_sub(counters.explained_only),
                 "neverSettled": counters.never_settled,
                 "scratchChecks": counters.scratch_checks,
                 "scratchMismatches": counters.scratch_mismatches,
@@ -463,14 +471,14 @@ impl GxStoreDiagnostics {
         append(
             "gxStore.sidebarShadow.scratchMismatch",
             json!({
-                "onlyIncrementalGroups": difference.only_incremental_groups,
-                "onlyScratchGroups": difference.only_scratch_groups,
+                "onlyIncrementalGroups": log_texts(&difference.only_incremental_groups),
+                "onlyScratchGroups": log_texts(&difference.only_scratch_groups),
                 "groupOrderDiffers": difference.group_order_differs,
-                "topLevel": difference.top_level,
-                "groups": difference.groups,
-                "rows": difference.rows,
-                "onlyIncrementalRows": difference.only_incremental_rows,
-                "onlyScratchRows": difference.only_scratch_rows,
+                "topLevel": log_texts(&difference.top_level),
+                "groups": named_fields(&difference.groups),
+                "rows": named_fields(&difference.rows),
+                "onlyIncrementalRows": log_texts(&difference.only_incremental_rows),
+                "onlyScratchRows": log_texts(&difference.only_scratch_rows),
                 "lastUpdate": {
                     "changesEmpty": last_update.changes_empty,
                     "sessionsChanged": last_update.sessions_changed,
@@ -517,27 +525,29 @@ impl GxStoreDiagnostics {
             json!({
                 // What MOVED between the two judgements, which is the thing a shape that never
                 // settles is only ever visible through. The constant fields are in neither list.
-                "gained": next_fields
-                    .iter()
-                    .filter(|field| !previous_fields.contains(field))
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                "lost": previous_fields
-                    .iter()
-                    .filter(|field| !next_fields.contains(field))
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                "fields": next_fields,
+                "gained": log_texts(
+                    next_fields
+                        .iter()
+                        .filter(|field| !previous_fields.contains(field))
+                        .collect::<Vec<_>>(),
+                ),
+                "lost": log_texts(
+                    previous_fields
+                        .iter()
+                        .filter(|field| !next_fields.contains(field))
+                        .collect::<Vec<_>>(),
+                ),
+                "fields": log_texts(&next_fields),
                 "sessions": mismatch
                     .sessions
                     .iter()
-                    .map(|(id, _)| id.clone())
+                    .map(|(id, _)| serde_json::Value::String(log_text(id.as_str())))
                     .take(MAX_IDS_PER_RECORD)
                     .collect::<Vec<_>>(),
                 "groups": mismatch
                     .groups
                     .iter()
-                    .map(|(id, _)| id.clone())
+                    .map(|(id, _)| serde_json::Value::String(log_text(id.as_str())))
                     .take(MAX_IDS_PER_RECORD)
                     .collect::<Vec<_>>(),
             }),
@@ -611,6 +621,69 @@ impl GxStoreDiagnostics {
         self.sidebar_storage_warnings += 1;
         self.warning(event, json!({ "error": error }));
     }
+}
+
+/// A string the log's sanitizer will print rather than replace.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// `sanitize_string_value` (support_logs.rs:492) replaces a value with `[redacted]` when it runs
+/// past 120 characters or contains a slash, a backslash or a control character, and it does that
+/// to object KEYS as well as values. Three diagnostics in this milestone have failed at the moment
+/// they were needed, twice for the depth cap and once here, so every string these records emit
+/// goes through this: over-long values are cut with a marker instead of vanishing, and a slash is
+/// replaced rather than taking the whole value with it. Nothing this writes is private: these
+/// records carry ids, field names and counts, and the length rule is about paths, which none of
+/// them are.
+///
+/// The depth rule is the other half and is not something a helper can enforce: a value must sit at
+/// depth 4 or less, counting `details` as 0. An array of short strings under `details` is depth 2,
+/// and `details.<key>[i].<k>[j]` is depth 4, which is the deepest shape any record here uses.
+fn log_text(value: impl Into<String>) -> String {
+    let value: String = value.into();
+    let value = value.replace(['/', '\\'], "|");
+    let value: String = value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect();
+    let value = if value.chars().count() <= LOG_TEXT_MAX_CHARS {
+        value
+    } else {
+        let kept: String = value.chars().take(LOG_TEXT_MAX_CHARS - 3).collect();
+        format!("{kept}...")
+    };
+    // The rules this has to satisfy are `sanitize_string_value`'s, and a value that fails them is
+    // not logged, it is replaced by a word that says nothing. A debug build says so at the point
+    // the value is built rather than leaving it to be discovered in a support log months later.
+    debug_assert!(
+        value.chars().count() <= SANITIZER_MAX_CHARS
+            && !value.contains('/')
+            && !value.contains('\\')
+            && !value.chars().any(char::is_control),
+        "a log value must survive the sanitizer"
+    );
+    value
+}
+
+/// `[{id, fields:[...]}]`: the id at depth 3 and each field name at depth 4, both inside the
+/// sanitizer's length rule because a field name is one short word.
+fn named_fields(entries: &[(String, Vec<String>)]) -> Vec<serde_json::Value> {
+    entries
+        .iter()
+        .map(|(id, fields)| json!({ "id": log_text(id.as_str()), "fields": log_texts(fields) }))
+        .collect()
+}
+
+fn log_texts<'a>(values: impl IntoIterator<Item = &'a String>) -> Vec<serde_json::Value> {
+    values
+        .into_iter()
+        .map(|value| serde_json::Value::String(log_text(value.as_str())))
+        .collect()
 }
 
 /// One short string per differing field: the name alone when both sides carry a value, and

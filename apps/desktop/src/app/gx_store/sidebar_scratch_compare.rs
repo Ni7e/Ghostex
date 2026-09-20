@@ -22,10 +22,11 @@ pub(super) struct ScratchDifference {
     pub(super) only_incremental_groups: Vec<String>,
     pub(super) only_scratch_groups: Vec<String>,
     pub(super) group_order_differs: bool,
-    /// `<group id>: field, field`.
-    pub(super) groups: Vec<String>,
-    /// `<row id>: field, field`.
-    pub(super) rows: Vec<String>,
+    /// Per group and per row: the id, and the names of the fields that differ. Kept apart rather
+    /// than joined into a sentence, because the log redacts a string over 120 characters and a
+    /// joined field list reaches that easily.
+    pub(super) groups: Vec<(String, Vec<String>)>,
+    pub(super) rows: Vec<(String, Vec<String>)>,
     pub(super) only_incremental_rows: Vec<String>,
     pub(super) only_scratch_rows: Vec<String>,
     /// The list itself, when the difference is above the groups.
@@ -140,9 +141,10 @@ pub(super) fn compare_views(
                     .map(|session| session.row.sidebar_session_id.as_str())),
         );
         if !fields.is_empty() {
-            difference
-                .groups
-                .push(format!("{}: {}", kept.group_id, fields.join(", ")));
+            difference.groups.push((
+                kept.group_id.clone(),
+                fields.into_iter().map(str::to_string).collect(),
+            ));
         }
         compare_rows(
             kept.sessions.as_slice(),
@@ -241,7 +243,10 @@ fn compare_rows(kept: &[SessionView], built: &[SessionView], difference: &mut Sc
         if fields.is_empty() {
             fields.push("otherRowField");
         }
-        difference.rows.push(format!("{id}: {}", fields.join(", ")));
+        difference.rows.push((
+            id.to_string(),
+            fields.into_iter().map(str::to_string).collect(),
+        ));
     }
     for session in built {
         let id = session.row.sidebar_session_id.as_str();

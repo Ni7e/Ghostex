@@ -85,6 +85,11 @@ pub(crate) struct SidebarShadowCounters {
     /// projection goes stale in. The store is the newer of the two there; see
     /// `STALE_PUBLISH_FIELDS`.
     pub(crate) stale_fields_only: u64,
+    /// Confirmed differences in which every differing field is accounted for by one of the three
+    /// rules, in whatever mix. `mismatches` minus this is the milestone's gate: it is what is
+    /// left once the old side standing still, a timestamp moving on its own and a value the old
+    /// side has not caught up with are all taken out.
+    pub(crate) explained_only: u64,
     /// Differences that were replaced by another shape before they could settle. A number that
     /// keeps climbing while `matches` and `mismatches` stand still means something flapping.
     pub(crate) never_settled: u64,
@@ -360,6 +365,9 @@ impl GhostexGpuiApp {
                     }
                     if difference.only_stale_fields {
                         shadow.counters.stale_fields_only += 1;
+                    }
+                    if difference.only_explained_fields {
+                        shadow.counters.explained_only += 1;
                     }
                     if shadow.confirmed_signatures.len() < MAX_CONFIRMED_SIGNATURES
                         && shadow.confirmed_signatures.insert(signature)
