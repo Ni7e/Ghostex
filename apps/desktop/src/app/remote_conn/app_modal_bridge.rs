@@ -615,7 +615,7 @@ impl GhostexGpuiApp {
             // pending-push guard (gx_store/workspace_groups.rs). A payload whose `state` is not an
             // object is dropped rather than parsed, because an empty document REMOVES the key and a
             // malformed message must never be the thing that deletes the user's groups.
-            "persistWorkspaceGroups" => {
+            ghostex_gx_core::WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE => {
                 let Some(state) = message.get("state").filter(|state| state.is_object()) else {
                     return;
                 };

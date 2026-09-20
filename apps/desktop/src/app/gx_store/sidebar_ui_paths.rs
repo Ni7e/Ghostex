@@ -119,15 +119,19 @@ impl GhostexGpuiApp {
             return;
         };
         self.gx_store.sidebar_ui.counters.slot_jumps += 1;
-        // The multi-selection goes whatever the collapse state does: `selectNativeSidebarSession`
-        // clears it on every slot jump, which was declared difference 4 for exactly as long as
-        // nothing in Rust saw this route.
-        self.gx_store_apply_sidebar_ui_intent(
-            SidebarUiIntent::SetSelectedSessions {
-                session_ids: Vec::new(),
-            },
-            cx,
-        );
+        // The multi-selection is cleared by the SELECTION the jump makes, not by the jump, so a
+        // slot naming a project with no drawn row leaves it alone. That is what
+        // `runNativeProjectSlotHotkey` does, where `selectNativeSidebarSession` is inside
+        // `if (session)`; clearing it unconditionally would have been a new difference in the
+        // course of closing declared difference 4.
+        if plan.has_session {
+            self.gx_store_apply_sidebar_ui_intent(
+                SidebarUiIntent::SetSelectedSessions {
+                    session_ids: Vec::new(),
+                },
+                cx,
+            );
+        }
         if !plan.expand_group {
             return;
         }

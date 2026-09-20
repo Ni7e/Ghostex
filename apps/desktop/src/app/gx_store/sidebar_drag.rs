@@ -71,7 +71,13 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_drag.declined_source += 1;
             return false;
         }
-        self.gx_store_restore_workspace_groups(cx);
+        // A move edits the document, so the stored key has to be in hand first. A read that has
+        // not landed refuses the drop rather than writing an order over a document this app cannot
+        // see; the old runtime performs it instead, which is what a `false` return means.
+        if !self.gx_store_restore_workspace_groups(cx) {
+            self.gx_store.sidebar_drag.declined_source += 1;
+            return false;
+        }
         // A browser row on either end and a malformed payload are refused inside the planner, each
         // with the reason written down there.
         let plan = {
@@ -118,7 +124,10 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_drag.declined_source += 1;
             return false;
         }
-        self.gx_store_restore_workspace_groups(cx);
+        if !self.gx_store_restore_workspace_groups(cx) {
+            self.gx_store.sidebar_drag.declined_source += 1;
+            return false;
+        }
         self.gx_store_run_sidebar_order_write_message(&message, cx)
     }
 

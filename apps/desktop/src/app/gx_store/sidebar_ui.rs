@@ -32,8 +32,10 @@ const MAX_WRITE_RETRIES: u32 = 3;
 /// does is lost while it fails: the state still moves and the clicks are queued, only the write is
 /// refused until the state is known.
 const READ_RETRY: Duration = Duration::from_secs(5);
-/// How often a failed read is retried before the run gives up on the stored state.
+/// How many fast attempts before the standing slow one takes over. It never gives up.
 const MAX_READ_RETRIES: u32 = 6;
+/// The standing retry after those, so a database that was locked for a minute still ends up read.
+const READ_RETRY_SLOW: Duration = Duration::from_secs(30);
 /// Most clicks held while the first read is on its way. A burst larger than this is a user holding
 /// a key through a database that will not open, and the list they end up with is the stored one.
 const MAX_QUEUED_INTENTS: usize = 64;
@@ -88,7 +90,7 @@ impl SidebarUiCounters {
 
 /// The sidebar's own state and everything the host needs around it.
 pub(crate) struct SidebarUiHost {
-    store: SidebarUiStore,
+    pub(super) store: SidebarUiStore,
     /// The state is only written once it is known: writing before the read lands would store an
     /// empty collapse state over the user's own.
     restored: bool,
@@ -289,16 +291,28 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    /// Books another read after a failure, a bounded number of times.
+    /// Books another read after a failure. The first `MAX_READ_RETRIES` come quickly; after that it
+    /// keeps trying on a slow standing timer, because giving up means this app writes none of the
+    /// three keys for the rest of the run and the user loses every collapse and hidden item at the
+    /// next restart. The moment it gives up would be the moment nothing says so, which is why the
+    /// last fast attempt warns.
     fn gx_store_schedule_sidebar_ui_read_retry(&mut self, cx: &mut gpui::Context<Self>) {
         let ui = &mut self.gx_store.sidebar_ui;
-        if ui.retry_scheduled || ui.read_retries >= MAX_READ_RETRIES {
+        if ui.retry_scheduled {
             return;
         }
+        let exhausted = ui.read_retries >= MAX_READ_RETRIES;
         ui.read_retries += 1;
         ui.retry_scheduled = true;
+        if exhausted && ui.read_retries == MAX_READ_RETRIES + 1 {
+            self.gx_store.diagnostics.sidebar_ui_read_unavailable();
+        }
+        let delay = match exhausted {
+            true => READ_RETRY_SLOW,
+            false => READ_RETRY,
+        };
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(READ_RETRY).await;
+            cx.background_executor().timer(delay).await;
             let _ = this.update(cx, |this, cx| {
                 this.gx_store.sidebar_ui.retry_scheduled = false;
                 this.gx_store_restore_sidebar_ui(cx);
@@ -353,14 +367,33 @@ impl GhostexGpuiApp {
         true
     }
 
-    /// Reports a value a bound refused. Not retried on its own: the payload does not shrink by
-    /// trying again, and the next intent carries it with whatever else changed.
+    /// Reports the values a bound refused and OWES each of them again.
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// A refusal is not retried on its own, because the payload does not shrink by trying again;
+    /// what it must not do is disappear. `take_write` has already cleared the pending set, so a
+    /// refused value is only in memory, and the collapse envelope happens to self-heal (its next
+    /// diff is measured against a base this write did not advance) while the hidden items and the
+    /// machine tab do not: hide a project, have the write refused, never touch hidden items again,
+    /// and that project is back after a restart. Each refused key is owed again so the next write
+    /// carries it, which is also what makes a refusal that was caused by ANOTHER key's growth
+    /// recover on its own once that key shrinks.
     fn gx_store_note_sidebar_write_refusals(&mut self, report: &SidebarWriteReport) {
+        let mut owed = SidebarPersistSet::default();
         for refusal in &report.refused {
             self.gx_store.sidebar_ui.counters.write_refusals += 1;
+            match refusal.key {
+                "collapse" => owed.collapse = true,
+                "hiddenItems" => owed.hidden_items = true,
+                "machineTab" => owed.machine_tab = true,
+                _ => {}
+            }
             self.gx_store
                 .diagnostics
                 .sidebar_ui_write_refused(refusal.key, refusal.bound);
+        }
+        if !owed.is_empty() {
+            self.gx_store.sidebar_ui.store.mark_pending(owed);
         }
     }
 

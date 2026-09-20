@@ -26,14 +26,20 @@
  *   is what makes an echo DURING a push expressible at all.
  * - client storage is the harness's shim, so a write is counted rather than persisted.
  *
+ * `writeStoredGpuiWorkspaceSessionGroupsState` is frozen here too, for the same reason and with the
+ * same consequence: it was deleted from the app because nothing called it any more, and a reference
+ * implementation that depended on shipped code kept alive only for the reference would be a second
+ * writer of `ghostex-gpui-workspace-session-groups` waiting for someone to wire it back.
+ *
  * SEE-ALSO: packages/gx-core/src/workspace_groups/sync.rs,
  * apps/desktop/sidebar/gxserver-runtime/workspace-groups-sync.ts.
  */
 import { resetBrowserStorage } from './browser-shim';
+import { storageScope } from '@/packages/client-storage';
 import {
+  GPUI_WORKSPACE_SESSION_GROUPS_STORAGE_KEY,
   isEmptyGpuiWorkspaceSessionGroupsState,
   parseGpuiWorkspaceSessionGroupsState,
-  writeStoredGpuiWorkspaceSessionGroupsState,
 } from '@/apps/desktop/sidebar/workspace-session-groups';
 import {
   GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS,
@@ -47,6 +53,21 @@ type Json = Record<string, any>;
  * rewritten: every branch, every identity test and the `catch` that retries for ever are the
  * originals.
  */
+const clientStorage = storageScope(['workspaceGroups']);
+
+/** `writeStoredGpuiWorkspaceSessionGroupsState`, as it shipped on 2026-09-21. */
+function writeStoredGpuiWorkspaceSessionGroupsState(state: Json): void {
+  try {
+    if (state.projectOrder.length === 0 && Object.keys(state.projects).length === 0) {
+      clientStorage.removeItem(GPUI_WORKSPACE_SESSION_GROUPS_STORAGE_KEY);
+      return;
+    }
+    clientStorage.setItem(GPUI_WORKSPACE_SESSION_GROUPS_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Storage availability must never gate sidebar group behavior.
+  }
+}
+
 function createFrozenRuntime(start: Json, settleHolder: { settle?: (ok: boolean) => void }): Json {
   const runtime: Json = {
     workspaceGroups: parseGpuiWorkspaceSessionGroupsState(start),

@@ -20,6 +20,10 @@ impl GhostexGpuiApp {
         // The sidebar's own state is written on a debounce, so the last clicks before a quit are
         // still only in memory (gx_store/sidebar_ui.rs).
         self.gx_store_flush_sidebar_ui_write();
+        // The workspace session groups document is the fourth key and is written the same way: a
+        // rename or a move whose write lost a lock race is still owed, and its debounced push has
+        // not gone out either (gx_store/workspace_groups.rs).
+        self.gx_store_flush_workspace_groups_write();
     }
 
     pub(crate) fn project_scoped_workarea_availability(&self) -> ProjectScopedWorkareaAvailability {

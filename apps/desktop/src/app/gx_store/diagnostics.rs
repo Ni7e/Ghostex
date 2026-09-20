@@ -62,6 +62,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_ui_summary_considered_at: Option<Instant>,
     sidebar_ui_summary_written: SidebarUiCounters,
     sidebar_refusal_warnings: u32,
+    workspace_groups_warnings: u32,
     sidebar_never_settled_records: u32,
     sidebar_scratch_records: u32,
     sidebar_slow_update_records: u32,
@@ -799,6 +800,52 @@ impl GxStoreDiagnostics {
         );
     }
 
+    /// The sidebar's own state could not be read after every fast attempt. Said once, as a
+    /// warning rather than a routine line, because from here nothing the user collapses, hides or
+    /// filters will survive a restart until a read lands.
+    pub(super) fn sidebar_ui_read_unavailable(&mut self) {
+        self.warning("gxStore.sidebarUi.read.unavailable", json!({}));
+    }
+
+    /// A bound refused the workspace session groups document. Its own warning budget, because a
+    /// refusal here means that document is not reaching disk at all and it is nothing like a
+    /// refused collapse entry.
+    pub(super) fn workspace_groups_write_refused(&mut self, bound: &'static str) {
+        if self.workspace_groups_warnings >= 3 {
+            return;
+        }
+        self.workspace_groups_warnings += 1;
+        self.warning(
+            "gxStore.workspaceGroups.write.refused",
+            json!({ "bound": bound }),
+        );
+    }
+
+    /// A read of the stored document that did not land. Retried; until it does, nothing is adopted
+    /// and nothing is edited.
+    pub(super) fn workspace_groups_read_failed(&mut self, error: &'static str) {
+        if self.workspace_groups_warnings >= 3 {
+            return;
+        }
+        self.workspace_groups_warnings += 1;
+        self.warning(
+            "gxStore.workspaceGroups.read.failed",
+            json!({ "error": error }),
+        );
+    }
+
+    /// A storage write of that document that did not land. Retried; the warning says it happened.
+    pub(super) fn workspace_groups_write_failed(&mut self, error: &'static str) {
+        if self.workspace_groups_warnings >= 3 {
+            return;
+        }
+        self.workspace_groups_warnings += 1;
+        self.warning(
+            "gxStore.workspaceGroups.write.failed",
+            json!({ "error": error }),
+        );
+    }
+
     fn sidebar_storage_warning(&mut self, event: &'static str, error: &'static str) {
         if self.sidebar_storage_warnings >= 3 {
             return;
@@ -993,10 +1040,17 @@ impl GxStoreDiagnostics {
                 "echoesRefused": counters.echoes_refused,
                 "echoesAdopted": counters.echoes_adopted,
                 "echoesEqual": counters.echoes_equal,
+                "echoesAbsent": counters.echoes_absent,
                 "echoesPushedBack": counters.echoes_pushed_back,
                 "handOffs": counters.hand_offs,
                 "handBacks": counters.hand_backs,
+                "handBacksDropped": counters.hand_backs_dropped,
+                "hostMessagesDropped": super::workspace_groups::native_host_messages_dropped(),
                 "prunes": counters.prunes,
+                "storageRefusals": counters.storage_refusals,
+                "readFailures": counters.read_failures,
+                "handOffsRefused": counters.hand_offs_refused,
+                "echoesDeferred": counters.echoes_deferred,
             }),
         );
     }

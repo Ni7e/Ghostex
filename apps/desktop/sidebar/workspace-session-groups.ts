@@ -1,6 +1,6 @@
 import { storageScope } from '@/packages/client-storage';
 
-const clientStorage = storageScope(["workspaceGroups"]);
+const clientStorage = storageScope(['workspaceGroups']);
 /*
  * CDXC:Workarea 2026-07-02-03:49:
  * GPUI needs the sidebar's named session-group controls before gxserver has durable group storage.
@@ -352,17 +352,17 @@ export function readStoredGpuiWorkspaceSessionGroupsState(): GpuiWorkspaceSessio
   }
 }
 
-export function writeStoredGpuiWorkspaceSessionGroupsState(state: GpuiWorkspaceSessionGroupsState): void {
-  try {
-    if (state.projectOrder.length === 0 && Object.keys(state.projects).length === 0) {
-      clientStorage.removeItem(GPUI_WORKSPACE_SESSION_GROUPS_STORAGE_KEY);
-      return;
-    }
-    clientStorage.setItem(GPUI_WORKSPACE_SESSION_GROUPS_STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // Storage availability must never gate sidebar group behavior.
-  }
-}
+/*
+CDXC:Sessions 2026-09-21 WHY:
+There is no `writeStoredGpuiWorkspaceSessionGroupsState` here any more, and that is deliberate
+rather than an oversight. Since M5 piece 7c the app is the only writer of
+`ghostex-gpui-workspace-session-groups`: this page edits the document and hands it to the app, which
+writes the key behind the pending-push guard. A writer left in this file with no caller is a second
+writer waiting for someone to wire it back, which is the condition that whole piece removed. The
+read stays, because this page seeds its own copy from the key at construction.
+SEE-ALSO: apps/desktop/src/app/gx_store/workspace_groups.rs,
+apps/desktop/sidebar/gxserver-runtime/workspace-groups-sync.ts (`persistWorkspaceGroups`).
+*/
 
 function normalizeStoredProjectGroups(value: unknown): GpuiProjectWorkspaceGroups | undefined {
   if (typeof value !== 'object' || value === null) {

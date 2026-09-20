@@ -33,6 +33,10 @@ pub struct ProjectSlotPlan {
     /// The session list to put back to its compact form, which is the same branch plus
     /// `showLessForExpandedProjectJumps`.
     pub collapse_session_list_storage_id: Option<String>,
+    /// The group draws a row to jump to. `runNativeProjectSlotHotkey` selects a session only when
+    /// one exists, and the multi-selection is cleared by that selection and not by the jump, so a
+    /// slot naming an empty project leaves the selection alone.
+    pub has_session: bool,
 }
 
 /// The project a slot names, and what the jump does to its collapse state.
@@ -62,6 +66,7 @@ pub fn project_slot_plan(
         group_id: group.core.group_id.clone(),
         was_collapsed,
         expand_group,
+        has_session: !group.core.sessions.is_empty(),
         collapse_session_list_storage_id: (expand_group
             && settings.show_less_for_expanded_project_jumps)
             .then(|| group.core.storage_id.clone()),

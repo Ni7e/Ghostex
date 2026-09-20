@@ -236,9 +236,19 @@ impl GhostexGpuiApp {
             let mut async_cx = async_cx.clone();
             foreground
                 .spawn(async move {
-                    let _ = app.update_in(&mut async_cx, |this, window, cx| {
-                        this.receive_app_modal_host_bridge_event(event, window, cx);
-                    });
+                    // `update_in` needs an active window, and a message that arrives without one is
+                    // dropped. That was invisible until the sidebar page started handing the
+                    // workspace session groups document over this bridge, where a dropped message
+                    // is a rename that never reaches disk, so the drop is counted
+                    // (gx_store/workspace_groups.rs reports it as `hostMessagesDropped`).
+                    if app
+                        .update_in(&mut async_cx, |this, window, cx| {
+                            this.receive_app_modal_host_bridge_event(event, window, cx);
+                        })
+                        .is_err()
+                    {
+                        crate::app::gx_store::note_native_host_message_dropped();
+                    }
                 })
                 .detach();
         })

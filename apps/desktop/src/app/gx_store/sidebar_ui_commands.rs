@@ -11,10 +11,11 @@
 //! here because the list belongs beside the code that decides it rather than only in a review:
 //! `collectionAction:select` and `collectionAction:toggleProjects` act on the rows and groups the
 //! list DRAWS, where `nativeCollectionGroups` acts on the collection's membership including its
-//! filtered and hidden projects; `sidebarAction:toggleProjects` likewise leaves hidden projects
-//! alone; and a sidebar slot hotkey clears the TypeScript multi-selection but not this one,
-//! because it arrives as `gpuiProjectSlotHotkey` and never reaches this file. The full list, with
-//! the reveal and the Space differences, is in docs/2026-09-19/rust-core/PROGRESS.md.
+//! filtered and hidden projects; and `sidebarAction:toggleProjects` likewise leaves hidden projects
+//! alone. A sidebar slot hotkey used to be the fourth: it arrives as `gpuiProjectSlotHotkey` and
+//! still never reaches this file, but since M5 piece 7c it reaches `sidebar_ui_paths.rs`, which
+//! clears the multi-selection the way the hotkey does. The full list, with the reveal and the Space
+//! differences, is in docs/2026-09-19/rust-core/PROGRESS.md.
 
 use ghostex_gx_core::{SectionId, SidebarUiIntent, ToggleAllProjectsInput};
 use serde_json::Value;

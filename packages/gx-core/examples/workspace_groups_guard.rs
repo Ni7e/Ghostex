@@ -25,8 +25,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ghostex_gx_core::{
-    AdoptOutcome, ProjectWorkspaceGroups, WorkspaceGroupsDocument, WorkspaceGroupsEffect,
-    WorkspaceGroupsSync, WorkspaceSubgroup,
+    workspace_groups_hand_back_script, AdoptOutcome, ProjectWorkspaceGroups,
+    WorkspaceGroupsDocument, WorkspaceGroupsEffect, WorkspaceGroupsSync, WorkspaceSubgroup,
+    WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE, WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER,
 };
 use serde_json::{json, Value};
 
@@ -70,6 +71,7 @@ fn main() {
         .map(|case| case["steps"].as_array().map(Vec::len).unwrap_or(0))
         .sum();
     let prune_cases = prune_cases();
+    let hand_off = hand_off_edges();
     let path = std::path::Path::new(&out_dir).join("rust-groups.json");
     std::fs::write(
         &path,
@@ -77,6 +79,7 @@ fn main() {
             "documents": documents.iter().map(WorkspaceGroupsDocument::to_json).collect::<Vec<_>>(),
             "cases": cases,
             "pruneCases": prune_cases,
+            "handOff": hand_off,
         }))
         .expect("serialize"),
     )
@@ -87,6 +90,32 @@ fn main() {
         prune_cases.len(),
         path.display()
     );
+}
+
+/// The two edges of the hand-off bridge, so the TypeScript half can drive the REAL ones.
+///
+/// The message type is the constant the host's routing arm matches on, and the script is the real
+/// text the host evaluates in the page, built for a placeholder the harness substitutes a document
+/// into. The substitution is asserted here rather than assumed: a template that did not rebuild
+/// byte for byte would make the gate run against text the app never sends, which is the shape of
+/// every gate failure this port has had.
+fn hand_off_edges() -> Value {
+    let template = workspace_groups_hand_back_script(&json!(WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER));
+    let sample = documents()[1].to_json();
+    let substituted = template.replace(
+        &json!(WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER).to_string(),
+        &sample.to_string(),
+    );
+    assert_eq!(
+        substituted,
+        workspace_groups_hand_back_script(&sample),
+        "the script template must rebuild the real script byte for byte"
+    );
+    json!({
+        "messageType": WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE,
+        "scriptTemplate": template,
+        "placeholder": json!(WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER).to_string(),
+    })
 }
 
 /// The prune, case by case. Each entry carries the document, the projects the presentation lists
@@ -379,6 +408,10 @@ fn run(
 
 fn outcome_name(outcome: AdoptOutcome) -> &'static str {
     match outcome {
+        // `echoNone` is the one script event that produces this, and it is its own outcome since
+        // 2026-09-21: folding it into `ignoredPending` made the guard's own counter count the
+        // guard never being asked.
+        AdoptOutcome::NoEcho => "noEcho",
         AdoptOutcome::IgnoredPending => "ignoredPending",
         AdoptOutcome::IgnoredEqual => "ignoredEqual",
         AdoptOutcome::ScheduledPush => "scheduledPush",

@@ -53,3 +53,4 @@ mod sidebar_ui_storage;
 mod workspace_groups;
 
 pub(crate) use host::GxStoreHost;
+pub(crate) use workspace_groups::note_native_host_message_dropped;

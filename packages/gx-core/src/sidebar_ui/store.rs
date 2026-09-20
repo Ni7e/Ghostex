@@ -162,16 +162,12 @@ impl SidebarUiStore {
             }
             SidebarUiIntent::SelectSpace { space_id } => {
                 let section_key = self.state.section_key();
-                let previous = self
-                    .state
-                    .collapse
-                    .selected_space_by_section
-                    .insert(section_key, space_id.clone());
-                outcome(
-                    previous.as_deref() != Some(space_id.as_str()),
-                    SidebarPersistSet::collapse(),
-                )
+                self.set_section_space(section_key, space_id)
             }
+            SidebarUiIntent::SetSectionSpace {
+                section_key,
+                space_id,
+            } => self.set_section_space(section_key, space_id),
             SidebarUiIntent::SelectMachine { machine_id } => {
                 let moved = self.state.selected_machine_id != machine_id;
                 self.state.selected_machine_id = machine_id;
@@ -250,6 +246,21 @@ impl SidebarUiStore {
                 outcome(moved, SidebarPersistSet::collapse())
             }
         }
+    }
+
+    /// One section's chosen Space. `SelectSpace` is this against the section the tab is on and
+    /// `SetSectionSpace` against a named one; they are one function because the follow and the
+    /// renderer's command must not be able to disagree about what writing a Space means.
+    fn set_section_space(&mut self, section_key: String, space_id: String) -> SidebarUiOutcome {
+        let previous = self
+            .state
+            .collapse
+            .selected_space_by_section
+            .insert(section_key, space_id.clone());
+        outcome(
+            previous.as_deref() != Some(space_id.as_str()),
+            SidebarPersistSet::collapse(),
+        )
     }
 
     /// `rememberSidebarSpaceSession`: the row to the front of that Space's list, capped, with the

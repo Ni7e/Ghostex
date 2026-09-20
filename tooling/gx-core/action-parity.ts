@@ -1354,6 +1354,7 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
   const differences: string[] = [];
   let steps = 0;
   let ignoredPending = 0;
+  let noEcho = 0;
   let adopted = 0;
   let scheduledPushes = 0;
   let retries = 0;
@@ -1365,6 +1366,7 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
     for (const [index, step] of mine.entries()) {
       steps += 1;
       if (step.outcome === 'ignoredPending') ignoredPending += 1;
+      if (step.outcome === 'noEcho') noEcho += 1;
       if (step.outcome === 'adopted') adopted += 1;
       if (step.outcome === 'scheduledPush') scheduledPushes += 1;
       if (((step.schedules ?? []) as number[]).includes(5000)) retries += 1;
@@ -1379,12 +1381,18 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `workspace groups: ${cases.length} cases ${steps} steps ignoredPending ${ignoredPending} adopted ${adopted} scheduledPushes ${scheduledPushes} retries ${retries} differences ${differences.length}${
+    `workspace groups: ${cases.length} cases ${steps} steps ignoredPending ${ignoredPending} noEcho ${noEcho} adopted ${adopted} scheduledPushes ${scheduledPushes} retries ${retries} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
   for (const difference of differences.slice(0, 20)) console.log(`  ${difference}`);
   if (differences.length > 20) console.log(`  … and ${differences.length - 20} more`);
+  const trip = await runWorkspaceGroupsRoundTrips(dump.handOff as Json, mutationName);
+  differences.push(...trip.differences);
+  console.log(
+    `workspace groups round trip: ${trip.scripts} scripts roundTripPosts ${trip.posts} roundTripHandBacks ${trip.handBacks} roundTripParked ${trip.parked} roundTripCarried ${trip.carried} differences ${trip.differences.length}`
+  );
+  for (const difference of trip.differences.slice(0, 10)) console.log(`  ${difference}`);
   const prune = compareWorkspaceGroupPrune((dump.pruneCases ?? []) as Json[], mutationName);
   differences.push(...prune.differences);
   console.log(
@@ -1394,6 +1402,7 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
   const measured: [string, number][] = [
     ['steps', steps],
     ['ignoredPending', ignoredPending],
+    ['noEcho', noEcho],
     ['adopted', adopted],
     ['scheduledPushes', scheduledPushes],
     ['retries', retries],
@@ -1401,6 +1410,10 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
     ['pruneIdentities', prune.identities],
     ['pruneDropped', prune.dropped],
     ['pruneUntouchedProjects', prune.untouched],
+    ['roundTripPosts', trip.posts],
+    ['roundTripHandBacks', trip.handBacks],
+    ['roundTripParked', trip.parked],
+    ['roundTripCarried', trip.carried],
   ];
   const collapsed = measured.filter(([, count]) => count === 0);
   if (mutationName) {
@@ -1431,6 +1444,159 @@ function normalizeDocument(document: unknown): Json {
   const sorted: Json = {};
   for (const key of Object.keys(projects).sort()) sorted[key] = projects[key];
   return { projectOrder: record.projectOrder ?? [], projects: sorted };
+}
+
+/**
+ * The hand-off round trip, driven end to end against the SHIPPED page code.
+ *
+ * The app half is `WorkspaceGroupsSync::edit`, which sets the held document to what it was handed;
+ * the only property of it this gate depends on is that the document comes back NORMALIZED and with
+ * its `projects` keys SORTED, because the app holds them in a sorted map and the page builds them
+ * in insertion order. That is modelled with the shipped normalizer plus a sort rather than
+ * re-implemented: the equivalence of the two document parsers is what the 22,572-step guard gate
+ * above proves, and what nothing proved before this one is the BRIDGE.
+ */
+/** The member the app's side prunes and the page's does not, which is what makes a hand-back visible. */
+const PRUNED_SESSION_ID = 'S9';
+
+/**
+ * Two projects, so the app's sorted map and the page's insertion order are not the same object, and
+ * a member the app prunes on every pass.
+ */
+function roundTripStart(): Json {
+  return {
+    projectOrder: ['P2', 'P1'],
+    projects: {
+      P2: { groups: [{ groupId: 'group-2', sessionIds: ['T1'], title: 'Two' }], nextGroupNumber: 3 },
+      P1: {
+        groups: [{ groupId: 'group-2', sessionIds: ['S1', 'S2', PRUNED_SESSION_ID], title: 'Group 2' }],
+        nextGroupNumber: 3,
+      },
+    },
+  };
+}
+
+async function runWorkspaceGroupsRoundTrips(
+  handOff: Json,
+  mutationName: string | undefined
+): Promise<{
+  scripts: number;
+  posts: number;
+  handBacks: number;
+  parked: number;
+  carried: number;
+  differences: string[];
+}> {
+  const { runWorkspaceGroupsRoundTrip } = await import('./workspace-groups-round-trip.ts');
+  const { parseGpuiWorkspaceSessionGroupsState } = await import('@/apps/desktop/sidebar/workspace-session-groups');
+  const differences: string[] = [];
+  let posts = 0;
+  let handBacks = 0;
+  let parked = 0;
+  let carried = 0;
+  const held: Json[] = [];
+  const bridge = {
+    messageType:
+      mutationName === 'hand-off-uses-the-wrong-type' ? 'notTheMessageTheHostRoutes' : String(handOff.messageType),
+    scriptTemplate:
+      mutationName === 'hand-back-never-arrives'
+        ? 'void 0;'
+        : mutationName === 'hand-back-loses-the-parking-branch'
+          ? String(handOff.scriptTemplate).replace('else bridge.pendingWorkspaceGroups = state;', '')
+          : String(handOff.scriptTemplate),
+    placeholder: String(handOff.placeholder),
+    edit: (state: Json) => {
+      const parsed = parseGpuiWorkspaceSessionGroupsState(state) as Json;
+      // The app's map is sorted; the page's is not. A round trip that only ever saw one order
+      // would not notice a comparison that is really a key-order test (`applyWorkspaceGroupsFromHost`).
+      const projects: Json = {};
+      for (const key of Object.keys(parsed.projects ?? {}).sort()) {
+        const entry = parsed.projects[key] as Json;
+        projects[key] = {
+          ...entry,
+          // The app PRUNES a member whose session the daemon no longer lists, on every pump, and
+          // the page does not. Without an app-side change the hand-back is invisible: the app would
+          // hold exactly what the page posted, and a gate that never evaluated the script at all
+          // would pass. This is the smallest real difference between the two documents.
+          groups: ((entry.groups ?? []) as Json[]).map((group) => ({
+            ...group,
+            sessionIds: ((group.sessionIds ?? []) as string[]).filter((id) => id !== PRUNED_SESSION_ID),
+          })),
+        };
+      }
+      const document = { ...parsed, projects };
+      held.push(document);
+      return document;
+    },
+  };
+  // A rename computed from what came back, a move then a rename (the shape declared difference 29
+  // is about: an edit built on a document the page did not itself produce), a create then a
+  // reorder, and the parking branch, where the hook is installed only after the first hand-back
+  // has already been evaluated.
+  const scripts: { name: string; script: string[]; installLate?: boolean }[] = [
+    { name: 'rename twice', script: ['rename', 'rename'] },
+    { name: 'move then rename', script: ['move', 'rename'] },
+    { name: 'create then reorder', script: ['create', 'reorder'] },
+    { name: 'parked until the hook is installed', script: ['rename', 'installHook', 'rename'], installLate: true },
+  ];
+  for (const entry of scripts) {
+    held.length = 0;
+    let result;
+    try {
+      result = runWorkspaceGroupsRoundTrip(roundTripStart(), entry.script, bridge, {
+        installLate: entry.installLate,
+      });
+    } catch (error) {
+      differences.push(`round trip ${entry.name}: ${String(error instanceof Error ? error.message : error)}`);
+      continue;
+    }
+    posts += result.steps.filter((step) => step.posted).length;
+    handBacks += result.handBacks;
+    parked += result.parked;
+    for (const [index, step] of result.steps.entries()) {
+      const handedSoFar = result.steps.slice(0, index + 1).filter((earlier) => earlier.posted).length;
+      if (step.step === 'installHook' && handedSoFar > 0) {
+        // The drain: a document parked before the hook existed has to reach the page when it does.
+        // Checked here rather than inferred from a later step, because a drain that did nothing
+        // would look identical once the next edit posted.
+        const parkedDocument = held[handedSoFar - 1];
+        if (canonical(normalizeDocument(step.page)) !== canonical(normalizeDocument(parkedDocument)))
+          differences.push(
+            `round trip ${entry.name} step ${index}: the parked document was not drained, page ${canonical(normalizeDocument(step.page))}`
+          );
+      }
+      if (!step.posted) continue;
+      const app = held[handedSoFar - 1];
+      // A parked hand-back has NOT reached the page yet, by design, so the page legitimately still
+      // holds its own document until the hook is installed and drains it.
+      if (step.parkedHere) continue;
+      // The page must be holding what the app handed back, which is what proves the script ran and
+      // called `applyWorkspaceGroups` rather than silently doing nothing.
+      if (canonical(normalizeDocument(step.page)) !== canonical(normalizeDocument(app)))
+        differences.push(
+          `round trip ${entry.name} step ${index} ${step.step}: page ${canonical(normalizeDocument(step.page))} app ${canonical(normalizeDocument(app))}`
+        );
+      // And the NEXT edit must be computed from it: the document the page posts at a later step
+      // has to contain what the app handed back, not what the page had before.
+      const later = result.steps.slice(index + 1).find((entry) => entry.posted);
+      if (later) {
+        carried += 1;
+        const groups = ((later.posted!.state as Json).projects ?? {}) as Json;
+        const appGroups = (app.projects ?? {}) as Json;
+        for (const [projectId, value] of Object.entries(appGroups)) {
+          const ids = ((value as Json).groups ?? []).flatMap((group: Json) => group.sessionIds ?? []);
+          const nextIds = ((groups[projectId]?.groups ?? []) as Json[]).flatMap((group) => group.sessionIds ?? []);
+          for (const sessionId of ids) {
+            if (!nextIds.includes(sessionId))
+              differences.push(
+                `round trip ${entry.name} step ${index}: ${String(sessionId)} was handed back and the next edit dropped it`
+              );
+          }
+        }
+      }
+    }
+  }
+  return { scripts: scripts.length, posts, handBacks, parked, carried, differences };
 }
 
 /**
@@ -1594,6 +1760,9 @@ function mutateGroups(name: string | undefined, entry: Json): Json {
 let ECHO_DOCUMENTS: Json[] = [];
 
 const GROUPS_MUTATIONS = [
+  'hand-back-never-arrives',
+  'hand-off-uses-the-wrong-type',
+  'hand-back-loses-the-parking-branch',
   'adopt-while-pending',
   'clear-pending-on-any-success',
   'give-up-after-a-failed-push',

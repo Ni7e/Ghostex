@@ -35,6 +35,33 @@ use serde_json::Value;
 
 use super::document::WorkspaceGroupsDocument;
 
+/// The `type` of the message the sidebar page posts when it hands an edited document over.
+///
+/// A constant shared by the host's routing arm and the gate, because the two ends of a bridge
+/// agreeing on a string is the one thing neither side can check alone: piece 3d shipped an entire
+/// dialog port dead on exactly that, with a clean gate beside it.
+pub const WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE: &str = "persistWorkspaceGroups";
+
+/// The placeholder the gate substitutes a document into. A JSON string, so
+/// [`workspace_groups_hand_back_script`] serializes it with quotes and the substitution is exact.
+pub const WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER: &str = "__GX_WORKSPACE_GROUPS_STATE__";
+
+/// The script the host runs in the sidebar page to hand the held document back.
+///
+/// Here rather than in the desktop crate so a harness can evaluate the REAL text against the real
+/// page code: the function name, the parking branch and the guard on a bridge that is not there yet
+/// are all things only an end-to-end run can check, and everything else about this piece is
+/// gateable without it.
+///
+/// The parking branch is not a fallback that hides a failure: the controller drains
+/// `pendingWorkspaceGroups` when it installs the hook, so a document that arrives before the page
+/// has connected its sidebar is delivered late rather than lost.
+pub fn workspace_groups_hand_back_script(state: &Value) -> String {
+    format!(
+        "(function(bridge, state) {{ if (!bridge) return; if (bridge.applyWorkspaceGroups) bridge.applyWorkspaceGroups(state); else bridge.pendingWorkspaceGroups = state; }})(window.ghostexGpui, {state}); undefined;"
+    )
+}
+
 /// `GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS`.
 pub const WORKSPACE_GROUPS_SYNC_DELAY_MS: u64 = 400;
 /// `GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS`.
@@ -54,6 +81,14 @@ pub enum WorkspaceGroupsEffect {
 /// What an echo from the daemon did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdoptOutcome {
+    /// There was no echo to judge: `serverState === undefined`, which the TypeScript returns on
+    /// before the guard is asked at all.
+    ///
+    /// Its own outcome since 2026-09-21 rather than the `IgnoredPending` it used to share. The host
+    /// maps outcomes straight onto counters, so folding "nothing arrived" into "the guard refused
+    /// an echo" made `echoesRefused`, the one number that says the guard is doing its job, count
+    /// the guard never being asked.
+    NoEcho,
     /// A push is outstanding, so the local document is newer and the echo is dropped. This is the
     /// case the whole guard exists for.
     IgnoredPending,
@@ -163,7 +198,7 @@ impl WorkspaceGroupsSync {
         server_state: Option<&Value>,
     ) -> (AdoptOutcome, Vec<WorkspaceGroupsEffect>) {
         let Some(server_state) = server_state else {
-            return (AdoptOutcome::IgnoredPending, Vec::new());
+            return (AdoptOutcome::NoEcho, Vec::new());
         };
         if self.pending {
             return (AdoptOutcome::IgnoredPending, Vec::new());

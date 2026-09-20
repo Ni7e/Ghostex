@@ -25,6 +25,7 @@ import {
   GPUI_SIDEBAR_SPACES_SERVER_SYNC_DELAY_MS,
   GPUI_SIDEBAR_SPACES_SERVER_SYNC_RETRY_DELAY_MS,
 } from './constants';
+import type { GpuiWorkspaceSessionGroupsState } from '../workspace-session-groups';
 import type { GpuiSidebarRuntime } from './core';
 import { createGpuiPresentationProjectProjectionMetadata } from './helpers/presentation-projection';
 import {
@@ -100,6 +101,17 @@ export interface GpuiSidebarRuntimeWorkspaceGroupMethods {
   workspaceSubgroupSidebarIdForSession(projectId: string, sessionId: string | undefined): string | undefined;
 }
 
+/** The document with its object keys in a fixed order, so two equal documents compare equal. */
+function canonicalWorkspaceGroupsJson(state: GpuiWorkspaceSessionGroupsState): string {
+  return JSON.stringify(state, (_key, value) =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(
+          Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        )
+      : value
+  );
+}
+
 export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
   /*
   CDXC:Workarea 2026-07-02-03:49:
@@ -137,7 +149,10 @@ export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
    */
   applyWorkspaceGroupsFromHost(this: GpuiSidebarRuntime, state: unknown): void {
     const parsed = parseGpuiWorkspaceSessionGroupsState(state);
-    if (JSON.stringify(parsed) === JSON.stringify(this.workspaceGroups)) {
+    // A CONTENT comparison, not `JSON.stringify` on the two objects: the app emits `projects` from
+    // a sorted map and this page builds it in insertion order, so two equal documents can stringify
+    // differently and the test would answer "it moved" for a document that did not.
+    if (canonicalWorkspaceGroupsJson(parsed) === canonicalWorkspaceGroupsJson(this.workspaceGroups)) {
       return;
     }
     this.workspaceGroups = parsed;

@@ -49,6 +49,11 @@ const TOTALS_MAX_AGE: Duration = Duration::from_secs(10);
 /// this side stored would be one the other side cannot write: `admission` would throw, the
 /// TypeScript sidebar swallows that, and it would stop persisting while this side kept writing.
 const MAX_ENTRY_BYTES: usize = 64 * 1024;
+/// The `workspaceGroups` store's own row: `{ maxEntryBytes: 256 * KiB, maxBytes: 256 * KiB }` on
+/// top of the singleton defaults. Its own constants because the document is the one key here that
+/// is allowed to be larger than the 64 KiB the other three share.
+const MAX_ENTRY_BYTES_WORKSPACE_GROUPS: usize = 256 * 1024;
+const MAX_STORE_BYTES_WORKSPACE_GROUPS: usize = 256 * 1024;
 /// `maxBytes` of the collapse store; the other two keep the 128 KiB default.
 const MAX_STORE_BYTES_COLLAPSE: usize = 256 * 1024;
 const MAX_STORE_BYTES_DEFAULT: usize = 128 * 1024;
@@ -353,10 +358,7 @@ fn write_inside_transaction(
             "collapse",
             &key,
             &raw,
-            StoreBounds {
-                max_bytes: MAX_STORE_BYTES_COLLAPSE,
-                max_entries: MAX_ENTRIES_COLLECTION,
-            },
+            StoreBounds::sidebar(MAX_STORE_BYTES_COLLAPSE, MAX_ENTRIES_COLLECTION),
             COLLAPSE_STORAGE_KEY,
         )?;
     }
@@ -368,10 +370,7 @@ fn write_inside_transaction(
             "hiddenItems",
             HIDDEN_ITEMS_STORAGE_KEY,
             hidden,
-            StoreBounds {
-                max_bytes: MAX_STORE_BYTES_DEFAULT,
-                max_entries: MAX_ENTRIES_SINGLETON,
-            },
+            StoreBounds::sidebar(MAX_STORE_BYTES_DEFAULT, MAX_ENTRIES_SINGLETON),
             HIDDEN_ITEMS_STORAGE_KEY,
         )?;
     }
@@ -384,10 +383,7 @@ fn write_inside_transaction(
             "machineTab",
             &key,
             machine_id,
-            StoreBounds {
-                max_bytes: MAX_STORE_BYTES_DEFAULT,
-                max_entries: MAX_ENTRIES_COLLECTION,
-            },
+            StoreBounds::sidebar(MAX_STORE_BYTES_DEFAULT, MAX_ENTRIES_COLLECTION),
             MACHINE_TAB_STORAGE_KEY,
         )?;
     }
@@ -397,8 +393,29 @@ fn write_inside_transaction(
 /// What one store admits, from its row in the catalog.
 #[derive(Clone, Copy)]
 struct StoreBounds {
+    max_entry_bytes: usize,
     max_bytes: usize,
     max_entries: usize,
+}
+
+impl StoreBounds {
+    /// The three the sidebar's own keys share, differing only in the store's byte and entry counts.
+    const fn sidebar(max_bytes: usize, max_entries: usize) -> Self {
+        Self {
+            max_entry_bytes: MAX_ENTRY_BYTES,
+            max_bytes,
+            max_entries,
+        }
+    }
+
+    /// The `workspaceGroups` row.
+    const fn workspace_groups() -> Self {
+        Self {
+            max_entry_bytes: MAX_ENTRY_BYTES_WORKSPACE_GROUPS,
+            max_bytes: MAX_STORE_BYTES_WORKSPACE_GROUPS,
+            max_entries: MAX_ENTRIES_SINGLETON,
+        }
+    }
 }
 
 /// Every preference row's size, so the bounds `admission` checks can be checked here too.
@@ -440,7 +457,7 @@ impl Totals {
         store_prefix: &str,
     ) -> Option<&'static str> {
         let next = storage_bytes(key, raw);
-        if next > MAX_ENTRY_BYTES {
+        if next > bounds.max_entry_bytes {
             return Some("entry");
         }
         let previous = self
@@ -462,6 +479,11 @@ impl Totals {
         }
         let backend: usize = self.rows.iter().map(|(_, bytes)| *bytes).sum();
         (backend - previous + next > MAX_BACKEND_BYTES).then_some("backend")
+    }
+
+    /// Records a key this transaction removed, so the next bound measured in it sees the space back.
+    fn forget(&mut self, key: &str) {
+        self.rows.retain(|(held, _)| held != key);
     }
 
     /// Records a value this transaction stored, so the next key in it measures against the total
@@ -503,9 +525,20 @@ pub(super) fn read_preference_value(key: &str) -> Result<Option<String>, &'stati
     result
 }
 
-/// Writes one preference, or REMOVES it when `raw` is absent, which is what
-/// `writeStoredGpuiWorkspaceSessionGroupsState` does with an empty document.
-pub(super) fn write_preference_value(key: &str, raw: Option<&str>) -> Result<(), &'static str> {
+/// Writes the workspace session groups document, or REMOVES the key when the document is empty,
+/// which is what `writeStoredGpuiWorkspaceSessionGroupsState` does. `Ok(Some(bound))` is a refusal.
+///
+/// CDXC:Sessions 2026-09-21 WHY:
+/// This goes through the same door the other three keys do, and that is the point rather than
+/// tidiness. A second writer that respects only its own entry size can still push the shared 2 MiB
+/// local budget past the limit, which is the "storage silently fills up" the first door exists to
+/// prevent; the first cut of K4's write was a bare `INSERT ... ON CONFLICT` with none of
+/// `admission`'s four refusals, inside no transaction. The bounds are the `workspaceGroups`
+/// catalog row's own, which are four times the entry size the other three share.
+pub(super) fn write_workspace_groups_value(
+    key: &str,
+    raw: Option<&str>,
+) -> Result<Option<&'static str>, &'static str> {
     let mut held = connections()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -514,16 +547,59 @@ pub(super) fn write_preference_value(key: &str, raw: Option<&str>) -> Result<(),
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
         )?);
     }
+    // Read before the transaction opens, for the same reason the sidebar's own write does: the
+    // totals read is the slow part and it must not sit inside the window another writer's busy
+    // timeout is waiting through.
+    let cached = held
+        .totals
+        .take()
+        .filter(|(read_at, _)| read_at.elapsed() < TOTALS_MAX_AGE)
+        .map(|(_, totals)| totals);
     let connection = held.write.as_ref().expect("opened above");
-    let result = match raw {
-        Some(raw) => write_preference(connection, key, raw),
-        None => connection
-            .execute("DELETE FROM preferences WHERE key=?1", [key])
-            .map(|_| ())
-            .map_err(|_| "delete"),
+    let mut totals = match cached {
+        Some(totals) => totals,
+        None => Totals::read(connection)?,
     };
-    if result.is_err() {
-        held.write = None;
+    let result = write_workspace_groups_in_transaction(connection, key, raw, &mut totals);
+    match &result {
+        Ok(_) => held.totals = Some((Instant::now(), totals)),
+        Err(_) => {
+            held.write = None;
+            held.totals = None;
+        }
+    }
+    result
+}
+
+fn write_workspace_groups_in_transaction(
+    connection: &Connection,
+    key: &str,
+    raw: Option<&str>,
+    totals: &mut Totals,
+) -> Result<Option<&'static str>, &'static str> {
+    connection
+        .execute_batch("BEGIN IMMEDIATE")
+        .map_err(|_| "begin")?;
+    let result = (|| -> Result<Option<&'static str>, &'static str> {
+        let Some(raw) = raw else {
+            // A removal only shrinks every total, so no bound can refuse it.
+            connection
+                .execute("DELETE FROM preferences WHERE key=?1", [key])
+                .map_err(|_| "delete")?;
+            totals.forget(key);
+            return Ok(None);
+        };
+        if let Some(bound) = totals.admits(key, raw, StoreBounds::workspace_groups(), key) {
+            return Ok(Some(bound));
+        }
+        write_preference(connection, key, raw)?;
+        totals.accept(key, raw);
+        Ok(None)
+    })();
+    if result.is_ok() {
+        connection.execute_batch("COMMIT").map_err(|_| "commit")?;
+    } else {
+        let _ = connection.execute_batch("ROLLBACK");
     }
     result
 }

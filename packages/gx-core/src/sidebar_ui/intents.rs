@@ -32,8 +32,15 @@ pub enum SidebarUiIntent {
     ToggleCollectionCollapsed {
         storage_id: String,
     },
-    /// Filter the section by a Space.
+    /// Filter the section the machine tab is on by a Space. The renderer's `selectSpace`.
     SelectSpace {
+        space_id: String,
+    },
+    /// Filter a NAMED section by a Space, which is what the Space follow needs: a focused row on
+    /// another machine moves that machine's section without switching the tab, exactly as
+    /// `rememberNativeSidebarFocus` writes `selectedSpaceIdBySectionKey[section.sectionKey]`.
+    SetSectionSpace {
+        section_key: String,
         space_id: String,
     },
     /// Switch the machine tab.

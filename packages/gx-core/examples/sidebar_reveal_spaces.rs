@@ -153,6 +153,7 @@ fn main() -> ExitCode {
     );
 
     seven_spaces(&check);
+    two_machines(&check);
 
     if failures.get() == 0 {
         ExitCode::SUCCESS
@@ -461,6 +462,109 @@ fn collection(
         "color": "#3aa675",
         "projectIds": projects.into_iter().collect::<Vec<_>>(),
     })
+}
+
+/// Two machines, because the section the per-Space session memory and the Space follow are keyed by
+/// is the ROW's machine and not the machine tab.
+///
+/// The single-machine fixture above cannot tell the two apart: `section_key` is `"local"` whichever
+/// rule is in force, which is exactly what the first cut of the assertion locked in. With the tab
+/// on the remote machine, a focused LOCAL row has to answer for the local section, and the tab must
+/// not move; a reveal of the same row moves the tab, which is the one difference between them.
+fn two_machines(check: &dyn Fn(&str, bool, String)) {
+    let core = two_machine_core();
+    // The tab is on the remote machine; the focused row is on this computer.
+    let mut remote_tab = base_inputs();
+    remote_tab.settings.sidebar_space_follow_active_session = true;
+    remote_tab.ui.selected_machine_id = "m1".to_string();
+    let remote_view = SidebarViewModel::build_from_scratch(&core, &remote_tab, NOW_MS);
+    let local_row = "combined-session:P1:PS1";
+    let answer = space_for_focused_row(&core, &remote_tab, &remote_view, local_row, NOW_MS);
+    check(
+        "two machines: a local row answers for the local section from a remote tab",
+        answer
+            .as_ref()
+            .is_some_and(|resolved| resolved.section_key == "local" && resolved.space_id == "s1"),
+        format!("{answer:?}"),
+    );
+    check(
+        "two machines: and the follow still applies, without moving the tab",
+        answer.as_ref().is_some_and(|resolved| resolved.follow),
+        format!("{answer:?}"),
+    );
+    // The mirror image: the tab is local and the focused row is on the remote machine, which is
+    // where the remote section's own Space document decides the answer.
+    let mut local_tab = base_inputs();
+    local_tab.settings.sidebar_space_follow_active_session = true;
+    let local_view = SidebarViewModel::build_from_scratch(&core, &local_tab, NOW_MS);
+    let remote_row = "remote:m1:session:R1:RS1";
+    let remote_answer = space_for_focused_row(&core, &local_tab, &local_view, remote_row, NOW_MS);
+    check(
+        "two machines: a remote row answers for its own section and its own Space",
+        remote_answer.as_ref().is_some_and(|resolved| {
+            resolved.section_key == "remote:m1" && resolved.space_id == "r1"
+        }),
+        format!("{remote_answer:?}"),
+    );
+    // A reveal of the same row is the one that moves the tab.
+    let revealed = reveal_plan(&core, &local_tab, &local_view, remote_row, NOW_MS);
+    check(
+        "two machines: a reveal of that row moves the tab, a focus change does not",
+        revealed
+            .as_ref()
+            .is_some_and(|plan| plan.select_machine.as_deref() == Some("m1")),
+        format!(
+            "{:?}",
+            revealed.as_ref().map(|plan| plan.select_machine.clone())
+        ),
+    );
+}
+
+/// This computer with one Space and one project, and a remote machine with its own.
+fn two_machine_core() -> Core {
+    let mut core = Core::new();
+    let frame = |server_id: &str, projects: &[&str], spaces: Value| {
+        json!({
+            "type": "presentationSnapshot",
+            "protocolVersion": ghostex_gx_core::protocol::GXSERVER_PROTOCOL_VERSION,
+            "serverId": server_id,
+            "revision": 1,
+            "snapshot": {
+                "revision": 1,
+                "generatedAt": "2026-09-20T00:00:00.000Z",
+                "projects": projects.iter().map(|id| project(id, id)).collect::<Vec<_>>(),
+                "groups": projects.iter().map(|id| group(id)).collect::<Vec<_>>(),
+                "sessions": projects
+                    .iter()
+                    .map(|id| session(id, &format!("{}S{}", &id[..1], &id[1..])))
+                    .collect::<Vec<_>>(),
+                "sidebarSpaces": spaces,
+            }
+        })
+    };
+    core.handle_raw_frame(
+        MachineId::Local,
+        &frame(
+            "local",
+            &["P1"],
+            json!({"order": ["s1"], "spaces": {"s1": space("s1", "One", [], ["P1"])}}),
+        )
+        .to_string(),
+        NOW_MS,
+    )
+    .expect("the local frame parses");
+    core.handle_raw_frame(
+        MachineId::Remote("m1".to_string()),
+        &frame(
+            "m1",
+            &["R1"],
+            json!({"order": ["r1"], "spaces": {"r1": space("r1", "Remote", [], ["R1"])}}),
+        )
+        .to_string(),
+        NOW_MS,
+    )
+    .expect("the remote frame parses");
+    core
 }
 
 fn drawn_groups(view: &SidebarView) -> Vec<String> {

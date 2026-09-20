@@ -81,17 +81,15 @@ pub fn reveal_plan(
 ) -> Option<SidebarRevealPlan> {
     // The machine has to be settled before anything else: the section key, the storage ids and the
     // Space memory below all belong to whichever machine's section the row is in.
-    let select_machine = row_machine_id(sidebar_session_id)
-        .filter(|machine_id| *machine_id != inputs.ui.selected_machine_id)
-        .filter(|machine_id| {
-            core.presentation()
-                .loaded(&machine_key(machine_id))
-                .is_some()
-        });
-    let switched = select_machine.as_ref().map(|machine_id| {
-        let mut moved = inputs.clone();
-        moved.ui.selected_machine_id = machine_id.clone();
-        moved
+    let (switched, other_machine) = inputs_for_row_machine(core, inputs, sidebar_session_id);
+    // A reveal SWITCHES the tab, which is the one thing an ordinary focus change does not do.
+    let select_machine = other_machine.then(|| {
+        switched
+            .as_ref()
+            .expect("moved inputs accompany another machine")
+            .ui
+            .selected_machine_id
+            .clone()
     });
     let inputs = switched.as_ref().unwrap_or(inputs);
     let parking = inputs.settings.enable_session_parking;
@@ -219,19 +217,31 @@ fn unfiltered(inputs: &SidebarInputs) -> SidebarInputs {
     probe
 }
 
-/// The Space the section has to move to for the focused row to be the one it shows.
+/// The Space the focused row belongs to, the section its memory is keyed by, and whether the
+/// section moves to it.
 ///
-/// CDXC:Sidebar 2026-09-20 WHY:
-/// This is the whole of `sidebarSpaceFollowActiveSession`, and it only ever has work to do when
-/// the focused row is NOT in the drawn list, because a row the section already shows is already in
-/// the selected Space. So the drawn list is read only to answer "nothing to do", and the question
-/// that matters is asked of a list built with nothing filtering, exactly as
-/// `rememberNativeSidebarFocus` asks it of `state.groupOrder`, the unfiltered inventory. Asking
-/// the drawn list instead answers `None` for every row, because `assemble` keeps a group only when
-/// the selection shows it and `space_for_group` returns that same selection under the same test.
+/// CDXC:Sidebar 2026-09-21 WHY:
+/// **The row's machine decides everything here, not the machine tab.**
+/// `rememberNativeSidebarFocus` resolves the group from `state.groupOrder`, which holds EVERY
+/// machine's groups, and then asks `describeNativeSidebarMachine(ui, thatMachine)`: the section
+/// key, the Spaces document and the stored selection all belong to the row's machine, and the tab
+/// is NOT switched (only a reveal switches it). A first cut of this port took the section from the
+/// selected tab instead, so with the tab on a remote machine every focus on a local row answered
+/// `None`: the drawn list is one machine's, and `unfiltered` lifts Show Hidden, the tag filters and
+/// Spaces but deliberately not the machine, so neither list held the row. `reveal_plan` had the
+/// right shape one function away, which is the fifth time in this port that a fix existed beside
+/// the defect; the machine move is shared with it now rather than written twice.
+///
+/// The drawn list answers without building anything only when the row is on the SELECTED machine,
+/// because that is the only machine it holds. Otherwise the question is asked of a list built with
+/// nothing filtering, exactly as `rememberNativeSidebarFocus` asks it of `state.groupOrder`.
+/// Asking the drawn list instead would answer `None` for every row in another Space too, because
+/// `assemble` keeps a group only when the selection shows it and `space_for_group` returns that
+/// same selection under the same test.
 ///
 /// The build is the reason the caller must only ask when the focused row CHANGED: one build per
-/// focus into a row of another Space is the cost of the feature, one per publish would not be.
+/// focus into a row of another Space or another machine is the cost of the feature, one per publish
+/// would not be.
 pub fn space_for_focused_row(
     core: &Core,
     inputs: &SidebarInputs,
@@ -245,10 +255,14 @@ pub fn space_for_focused_row(
     if !inputs.settings.sidebar_spaces_enabled {
         return None;
     }
+    let (moved, other_machine) = inputs_for_row_machine(core, inputs, sidebar_session_id);
+    let inputs = moved.as_ref().unwrap_or(inputs);
     let section_key = inputs.ui.section_key();
-    // Drawn means the selected Space shows it, so `space_for_group` answers the selection without
-    // anything being built. That shortcut is why the memory can be asked on EVERY focus change.
-    let space_id = match find_group(view, sidebar_session_id) {
+    // The drawn list is the SELECTED machine's, so it can only answer for a row on it.
+    let drawn = (!other_machine)
+        .then(|| find_group(view, sidebar_session_id))
+        .flatten();
+    let space_id = match drawn {
         Some(group) => space_of_group(core, inputs, group, group.collection_id.as_deref())?,
         None => {
             let unfiltered_inputs = unfiltered(inputs);
@@ -266,6 +280,31 @@ pub fn space_for_focused_row(
         space_id,
         follow,
     })
+}
+
+/// The inputs as the ROW's machine sees them, and whether that machine is a different one.
+///
+/// `None` for the first element means the row is on the selected machine and the caller's own
+/// inputs are the answer. A machine the store holds no rows for is left alone: nothing could be
+/// resolved in it anyway, and it is the same machine `reveal_plan` refuses to switch to.
+fn inputs_for_row_machine(
+    core: &Core,
+    inputs: &SidebarInputs,
+    sidebar_session_id: &str,
+) -> (Option<SidebarInputs>, bool) {
+    let Some(machine_id) = row_machine_id(sidebar_session_id)
+        .filter(|machine_id| *machine_id != inputs.ui.selected_machine_id)
+        .filter(|machine_id| {
+            core.presentation()
+                .loaded(&machine_key(machine_id))
+                .is_some()
+        })
+    else {
+        return (None, false);
+    };
+    let mut moved = inputs.clone();
+    moved.ui.selected_machine_id = machine_id;
+    (Some(moved), true)
 }
 
 fn find_group<'a>(view: &'a SidebarView, sidebar_session_id: &str) -> Option<&'a GroupView> {
