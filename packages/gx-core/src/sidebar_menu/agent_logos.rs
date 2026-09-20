@@ -141,9 +141,21 @@ pub fn agent_logo_icons() -> Vec<&'static str> {
 
 /// `COLORED_AGENT_LOGOS[icon]`: the brand-coloured artwork as a data URL, or `None` for an icon
 /// key with no artwork.
-pub fn colored_agent_logo(icon: &str) -> Option<String> {
-    let (_, color, svg) = LOGOS.iter().find(|(key, _, _)| *key == icon)?;
-    Some(colorized_data_url(svg, color))
+///
+/// The twenty-four URLs are built once. A host draws them for every row of every project on every
+/// install, and percent-encoding a kilobyte of SVG that many times is work with one answer.
+pub fn colored_agent_logo(icon: &str) -> Option<&'static str> {
+    static BUILT: std::sync::OnceLock<Vec<(&'static str, String)>> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            LOGOS
+                .iter()
+                .map(|(key, color, svg)| (*key, colorized_data_url(svg, color)))
+                .collect()
+        })
+        .iter()
+        .find(|(key, _)| *key == icon)
+        .map(|(_, url)| url.as_str())
 }
 
 /// `svgTextToColorizedDataUrl`.

@@ -235,7 +235,7 @@ fn build(scenario: &Value) -> Option<Dump> {
         .map(|icon| {
             (
                 icon.to_string(),
-                colored_agent_logo(icon).map_or(Value::Null, Value::String),
+                colored_agent_logo(icon).map_or(Value::Null, |url| Value::String(url.to_string())),
             )
         })
         .collect();

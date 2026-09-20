@@ -100,7 +100,9 @@ pub fn project_header_actions(
         )),
         icon: Some("sparkles".to_string()),
         agent_icon: primary_icon.map(str::to_string),
-        image_data_url: primary_icon.and_then(colored_agent_logo),
+        image_data_url: primary_icon
+            .and_then(colored_agent_logo)
+            .map(str::to_string),
         command: Some(MenuCommand::project_action(
             group_id,
             "agent",
@@ -133,7 +135,7 @@ pub fn agent_launcher_items(group_id: &str, host: &MenuHost) -> Vec<MenuItem> {
                 supports_chat: transcript_agent(Some(&agent.agent_id), icon).is_some(),
                 label: Some(agent.name.clone()),
                 agent_icon: icon.map(str::to_string),
-                image_data_url: icon.and_then(colored_agent_logo),
+                image_data_url: icon.and_then(colored_agent_logo).map(str::to_string),
                 icon: icon.is_none().then(|| "code".to_string()),
                 keep_open: true,
                 command: Some(MenuCommand::agent_accounts(
