@@ -76,6 +76,33 @@ pub(super) struct SnapshotCache {
     rows: HashMap<String, CachedRow>,
 }
 
+impl SnapshotCache {
+    /// Whether any drawn row's time would read differently now than in the list that is installed.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// A clock wake books a rebuild for the moment a label changes, but it books one for the
+    /// EARLIEST of them, and a list of two hundred rows has one coming due most seconds while only
+    /// that row's label moves. Installing on every wake rebuilt the whole list, resynced the
+    /// disclosures and repainted the sidebar for nothing. This asks the question the install would
+    /// have answered, over the same cached labels, without building anything.
+    pub(super) fn labels_changed(&self, view: &SidebarView, now_ms: u64) -> bool {
+        view.groups
+            .iter()
+            .flat_map(|group| group.core.sessions.iter())
+            .any(|session| {
+                let row = &session.row;
+                match self.rows.get(&row.sidebar_session_id) {
+                    // A row with no element yet is one the install has to build anyway.
+                    None => true,
+                    Some(cached) => {
+                        cached.timer_label != row.timer_label(now_ms)
+                            || cached.last_interaction_label != row.last_interaction_label(now_ms)
+                    }
+                }
+            })
+    }
+}
+
 /// Builds the list the renderer draws from the view model, keeping what the old projection still
 /// owns. `published` is its newest snapshot; `now_ms` is the clock the time labels are formatted
 /// against.

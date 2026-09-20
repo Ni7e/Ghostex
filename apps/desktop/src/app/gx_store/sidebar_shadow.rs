@@ -320,6 +320,7 @@ impl GhostexGpuiApp {
                 shadow.counters.scratch_mismatches += 1;
             }
         }
+        let mut replaced: Option<super::sidebar_shadow_compare::SidebarMismatch> = None;
         let confirmed = match difference {
             None => {
                 shadow.counters.matches += 1;
@@ -358,6 +359,7 @@ impl GhostexGpuiApp {
                         // changing shape never counts as anything, so it is counted here.
                         Some(_) => {
                             shadow.counters.never_settled += 1;
+                            replaced = Some(difference.clone());
                             shadow.pending = Some(PendingDifference {
                                 since: Instant::now(),
                                 signature,
@@ -382,6 +384,11 @@ impl GhostexGpuiApp {
                 .diagnostics
                 .sidebar_mismatch(mismatch, revision);
         }
+        // A shape that was replaced before it could settle is never confirmed, so this is the only
+        // place its field names are ever seen.
+        if let Some(mismatch) = &replaced {
+            self.gx_store.diagnostics.sidebar_never_settled(mismatch);
+        }
         let counters = self.gx_store.sidebar_shadow.counters;
         let pending = self.gx_store.sidebar_shadow.is_pending();
         let list = self.gx_store.sidebar_list.counters;
@@ -396,9 +403,16 @@ impl GhostexGpuiApp {
             )
         };
         let source = self.gx_store_sidebar_list_source();
-        self.gx_store
-            .diagnostics
-            .sidebar_summary(&counters, &list, source, pending, groups, rows);
+        let deadline_kind = self.gx_store.sidebar_list.deadline_kind;
+        self.gx_store.diagnostics.sidebar_summary(
+            &counters,
+            &list,
+            source,
+            deadline_kind,
+            pending,
+            groups,
+            rows,
+        );
         let ui = self.gx_store.sidebar_ui.counters;
         self.gx_store.diagnostics.sidebar_ui_summary(&ui);
         // A difference that no later publish resolves still has to be judged, so it books one

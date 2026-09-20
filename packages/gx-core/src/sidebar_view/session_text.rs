@@ -9,7 +9,7 @@ use super::text::{
     is_js_line_terminator, js_trim, js_trim_start, normalized_non_empty, parse_iso_ms, utf16_len,
     utf16_prefix, utf16_suffix,
 };
-use super::view::SessionRow;
+use super::view::{LabelDeadline, SessionRow};
 
 const DEFAULT_TERMINAL_SESSION_TITLE: &str = "Terminal Session";
 const TERMINAL_TITLE_MARKER: &str = "∗";
@@ -508,11 +508,11 @@ pub(crate) fn last_interaction_label(at: &str, now_ms: u64) -> String {
 /// one: a live countdown, else a standing timer label that never moves, else the relative time,
 /// and only when the card shows it at all. Asking about the two the row does not draw is how a
 /// sidebar full of working sessions ends up waking every second for labels nobody sees.
-pub(crate) fn next_label_deadline_ms(
+pub(crate) fn next_label_deadline(
     row: &SessionRow,
     now_ms: u64,
     show_relative_time: bool,
-) -> Option<u64> {
+) -> Option<LabelDeadline> {
     let now = now_ms as i64;
     let countdown = [
         row.delayed_send
@@ -533,7 +533,7 @@ pub(crate) fn next_label_deadline_ms(
     .map(|deadline| deadline - ((deadline - now - 1) / 1000) * 1000)
     .min();
     if let Some(countdown) = countdown {
-        return Some(countdown.max(now + 1) as u64);
+        return Some(LabelDeadline::Countdown(countdown.max(now + 1) as u64));
     }
     // A Delayed Send or Close After Done with no deadline still owns the slot, with a label that
     // says what it is waiting for rather than a time.
@@ -554,5 +554,5 @@ pub(crate) fn next_label_deadline_ms(
         _ => 86_400_000,
     };
     let deadline = at + (elapsed / step + 1) * step;
-    (deadline > now).then_some(deadline as u64)
+    (deadline > now).then_some(LabelDeadline::Relative(deadline as u64))
 }

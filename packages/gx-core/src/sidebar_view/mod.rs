@@ -36,7 +36,7 @@ pub use reveal::{reveal_plan, space_for_focused_row, SidebarRevealPlan};
 pub use spaces::OTHER_SPACE_ID;
 pub use tags::{TagListItem, TagListItemKind, TagPresentation, UNTAGGED_TAG_FILTER};
 pub use view::{
-    CollectionView, DelayedSendView, EmptyState, GroupCore, GroupSummary, GroupView,
+    CollectionView, DelayedSendView, EmptyState, GroupCore, GroupSummary, GroupView, LabelDeadline,
     MachineSummary, OrderItem, OrderKind, ProjectContextView, SectionView, SessionRow,
     SessionTiming, SessionView, SidebarView, SpaceView, WorktreeView,
 };

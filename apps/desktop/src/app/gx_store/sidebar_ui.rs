@@ -56,6 +56,23 @@ pub(crate) struct SidebarUiCounters {
     /// Clicks dropped because the queue was full while the read kept failing.
     pub(crate) dropped_intents: u64,
     pub(crate) write_max_us: u64,
+    /// Where the slowest write's time went, so a slow one says which step was slow rather than
+    /// leaving the whole write as the suspect.
+    pub(crate) write_open_max_us: u64,
+    pub(crate) write_totals_max_us: u64,
+    pub(crate) write_begin_max_us: u64,
+    pub(crate) write_stored_max_us: u64,
+    pub(crate) write_commit_max_us: u64,
+}
+
+impl SidebarUiCounters {
+    fn note_write(&mut self, report: &SidebarWriteReport) {
+        self.write_open_max_us = self.write_open_max_us.max(report.open_us);
+        self.write_totals_max_us = self.write_totals_max_us.max(report.totals_us);
+        self.write_begin_max_us = self.write_begin_max_us.max(report.begin_us);
+        self.write_stored_max_us = self.write_stored_max_us.max(report.stored_us);
+        self.write_commit_max_us = self.write_commit_max_us.max(report.commit_us);
+    }
 }
 
 /// The sidebar's own state and everything the host needs around it.
@@ -374,6 +391,7 @@ impl GhostexGpuiApp {
                 match result {
                     Ok(report) => {
                         ui.counters.writes += 1;
+                        ui.counters.note_write(&report);
                         ui.last_error = None;
                         ui.write_retries = 0;
                         if stored
@@ -423,6 +441,7 @@ impl GhostexGpuiApp {
         match write_sidebar_ui_state(&write) {
             Ok(report) => {
                 ui.counters.writes += 1;
+                ui.counters.note_write(&report);
                 if write.collapse.is_some()
                     && !report
                         .refused

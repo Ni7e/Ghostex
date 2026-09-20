@@ -9,12 +9,15 @@ use super::host::GxStoreCounters;
 use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
 use super::sidebar_list::{SidebarListCounters, SidebarListSource};
 use super::sidebar_shadow::SidebarShadowCounters;
-use super::sidebar_shadow_compare::{FieldDiff, SidebarMismatch};
+use super::sidebar_shadow_compare::{FieldDiff, MAX_IDS_PER_RECORD, SidebarMismatch};
 use super::sidebar_ui::SidebarUiCounters;
 use crate::{shared_settings, support_logs};
 
 /// Distinct mismatch records one app run may write; later ones are only counted.
 const MAX_DISTINCT_MISMATCH_RECORDS: usize = 200;
+/// Records of a difference that never settled. A few are enough to name the fields; the counter
+/// carries the rate.
+const MAX_NEVER_SETTLED_RECORDS: u32 = 4;
 /// Unconditional warning lines one app run may write. A daemon that keeps producing a bad row
 /// must not be able to fill the disk through this path.
 const MAX_WARNING_LINES: u32 = 40;
@@ -41,6 +44,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_ui_summary_considered_at: Option<Instant>,
     sidebar_ui_summary_written: SidebarUiCounters,
     sidebar_refusal_warnings: u32,
+    sidebar_never_settled_records: u32,
     sidebar_storage_warnings: u32,
 }
 
@@ -296,16 +300,19 @@ impl GxStoreDiagnostics {
             return;
         }
         self.logged_sidebar_mismatches.insert(signature);
+        // CDXC:Sidebar 2026-09-20 WHY:
+        // Every value in this record sits at depth 4 or less, because the log's sanitizer replaces
+        // anything deeper with the string "[depth-capped]" (support_logs.rs:463). `details` itself
+        // is depth 0, so an array under it is 1, an object in that array is 2, that object's array
+        // is 3 and its strings are 4. The first shape of this record put each differing field in
+        // an object inside that array, which put the field NAME at depth 5, and every record
+        // printed three capped strings and told nobody anything. A field is one short string here,
+        // and `fields` repeats the whole record's names at depth 2 so the answer survives even if
+        // this record is ever nested one level deeper.
         let entries = |fields: &[FieldDiff]| -> Vec<serde_json::Value> {
             fields
                 .iter()
-                .map(|field| {
-                    json!({
-                        "name": field.name,
-                        "oldHasValue": field.old_has_value,
-                        "storeHasValue": field.store_has_value,
-                    })
-                })
+                .map(|field| serde_json::Value::String(encode_field(field)))
                 .collect()
         };
         let named = |fields: &[(String, Vec<FieldDiff>)]| -> Vec<serde_json::Value> {
@@ -314,6 +321,8 @@ impl GxStoreDiagnostics {
                 .map(|(id, names)| json!({ "id": id, "fields": entries(names) }))
                 .collect()
         };
+        // Every differing field of the whole record, once, at a depth nothing can cap.
+        let distinct = distinct_fields(mismatch);
         append(
             "gxStore.sidebarShadow.mismatch",
             json!({
@@ -323,6 +332,7 @@ impl GxStoreDiagnostics {
                 "onlyOldGroups": mismatch.only_old_groups,
                 "onlyStoreGroups": mismatch.only_store_groups,
                 "groupOrderDiffers": mismatch.group_order_differs,
+                "fields": distinct,
                 "topLevel": entries(&mismatch.top_level),
                 "groups": named(&mismatch.groups),
                 "sessions": named(&mismatch.sessions),
@@ -343,6 +353,7 @@ impl GxStoreDiagnostics {
         counters: &SidebarShadowCounters,
         list: &SidebarListCounters,
         source: SidebarListSource,
+        deadline_kind: &'static str,
         pending: bool,
         groups: usize,
         rows: usize,
@@ -388,7 +399,9 @@ impl GxStoreDiagnostics {
                 "updatesIdle": list.idle,
                 "viewChanges": list.view_changes,
                 "installs": list.installs,
+                "installsSkipped": list.installs_skipped,
                 "deadlineWakes": list.deadline_wakes,
+                "deadlineKind": deadline_kind,
                 "updateUs": list.last_update_us,
                 "updateMaxUs": list.update_max_us,
                 "installUs": list.last_install_us,
@@ -398,6 +411,40 @@ impl GxStoreDiagnostics {
                 "pending": pending,
                 "storeGroups": groups,
                 "storeRows": rows,
+            }),
+        );
+    }
+
+    /// One record for a difference that was replaced before it could settle, a few per run.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// A difference that takes a new shape on every judgement never settles, so it never reaches
+    /// the mismatch record, and `neverSettled` counted them without ever saying what they were.
+    /// A list that genuinely churns and a field that flaps look identical from the counter; the
+    /// field names are what tells them apart.
+    pub(super) fn sidebar_never_settled(&mut self, mismatch: &SidebarMismatch) {
+        if self.sidebar_never_settled_records >= MAX_NEVER_SETTLED_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_never_settled_records += 1;
+        append(
+            "gxStore.sidebarShadow.neverSettled",
+            json!({
+                "fields": distinct_fields(mismatch),
+                "sessions": mismatch
+                    .sessions
+                    .iter()
+                    .map(|(id, _)| id.clone())
+                    .take(MAX_IDS_PER_RECORD)
+                    .collect::<Vec<_>>(),
+                "groups": mismatch
+                    .groups
+                    .iter()
+                    .map(|(id, _)| id.clone())
+                    .take(MAX_IDS_PER_RECORD)
+                    .collect::<Vec<_>>(),
             }),
         );
     }
@@ -425,6 +472,11 @@ impl GxStoreDiagnostics {
                 "readFailures": counters.read_failures,
                 "writeRefusals": counters.write_refusals,
                 "writeMaxUs": counters.write_max_us,
+                "writeOpenMaxUs": counters.write_open_max_us,
+                "writeTotalsMaxUs": counters.write_totals_max_us,
+                "writeBeginMaxUs": counters.write_begin_max_us,
+                "writeStoredMaxUs": counters.write_stored_max_us,
+                "writeCommitMaxUs": counters.write_commit_max_us,
             }),
         );
     }
@@ -463,6 +515,34 @@ impl GxStoreDiagnostics {
         self.sidebar_storage_warnings += 1;
         self.warning(event, json!({ "error": error }));
     }
+}
+
+/// One short string per differing field: the name alone when both sides carry a value, and
+/// `name=old` or `name=store` when only one of them does.
+fn encode_field(field: &FieldDiff) -> String {
+    match (field.old_has_value, field.store_has_value) {
+        (true, false) => format!("{}=old", field.name),
+        (false, true) => format!("{}=store", field.name),
+        _ => field.name.to_string(),
+    }
+}
+
+/// Every differing field of a whole record, once.
+fn distinct_fields(mismatch: &SidebarMismatch) -> Vec<String> {
+    let mut distinct: Vec<String> = Vec::new();
+    for field in mismatch
+        .top_level
+        .iter()
+        .chain(mismatch.groups.iter().flat_map(|(_, fields)| fields))
+        .chain(mismatch.sessions.iter().flat_map(|(_, fields)| fields))
+    {
+        let encoded = encode_field(field);
+        if !distinct.contains(&encoded) {
+            distinct.push(encoded);
+        }
+    }
+    distinct.truncate(MAX_IDS_PER_RECORD);
+    distinct
 }
 
 fn store_revision(core: &Core) -> Option<i64> {

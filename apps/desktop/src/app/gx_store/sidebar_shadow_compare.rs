@@ -59,7 +59,7 @@ macro_rules! note {
 }
 
 /// Most ids one record names per list; the support log caps arrays at 32 anyway.
-const MAX_IDS_PER_RECORD: usize = 24;
+pub(super) const MAX_IDS_PER_RECORD: usize = 24;
 
 /// A confirmed difference between the two lists: ids, counts, and field names.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]

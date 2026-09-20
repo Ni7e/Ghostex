@@ -26,7 +26,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{
     COLLAPSE_STORAGE_KEY, HIDDEN_ITEMS_STORAGE_KEY, MACHINE_TAB_STORAGE_KEY,
@@ -39,6 +39,11 @@ use serde_json::Value;
 
 /// How long a read or a write waits for the service thread's own transaction.
 const BUSY_TIMEOUT: Duration = Duration::from_millis(500);
+/// How long the sizes the storage bounds are measured against are reused before they are read
+/// again. They are a guard against filling a shared budget, so a few seconds of drift in what
+/// OTHER keys hold is not worth a scan of the whole table per write; this app's own keys are kept
+/// exact whatever the age.
+const TOTALS_MAX_AGE: Duration = Duration::from_secs(10);
 /// `maxEntryBytes` of the stores these keys belong to (`packages/client-storage/catalog.ts`). The
 /// service in QuickJS refuses a larger entry, and this door has to refuse it too, or a payload
 /// this side stored would be one the other side cannot write: `admission` would throw, the
@@ -83,11 +88,20 @@ pub(super) struct SidebarWriteRefusal {
     pub(super) bound: &'static str,
 }
 
-/// What one write managed. An empty list of refusals is a write that stored everything it was
-/// given.
+/// What one write managed, and where its time went. An empty list of refusals is a write that
+/// stored everything it was given.
 #[derive(Clone, Debug, Default)]
 pub(super) struct SidebarWriteReport {
     pub(super) refused: Vec<SidebarWriteRefusal>,
+    /// Opening the connection, which only the first write of a run pays.
+    pub(super) open_us: u64,
+    /// Reading the sizes every bound is measured against, outside the transaction.
+    pub(super) totals_us: u64,
+    /// Waiting for the other writer's transaction to end.
+    pub(super) begin_us: u64,
+    /// The reads and writes inside the transaction.
+    pub(super) stored_us: u64,
+    pub(super) commit_us: u64,
 }
 
 /// What one write has to store. A field left empty is not written at all.
@@ -111,6 +125,8 @@ impl SidebarUiWrite {
 struct Connections {
     read: Option<Connection>,
     write: Option<Connection>,
+    /// The sizes the bounds were last measured against, and when.
+    totals: Option<(Instant, Totals)>,
 }
 
 fn connections() -> &'static Mutex<Connections> {
@@ -172,39 +188,78 @@ fn read_all(connection: &Connection) -> Result<StoredSidebarUi, &'static str> {
 /// Stores what changed. The collapse envelope is re-read inside the transaction and the state's
 /// own difference applied to it, so a field another writer owns survives.
 ///
-/// `Err` is a transient failure the caller owes again; a value too large for one of the three
-/// bounds comes back as a refusal in the report instead, because owing it again would retry a
-/// write that cannot succeed. A refused key does not take the others down with it.
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// The sizes the bounds are measured against are read BEFORE the transaction opens, and reused for
+/// a few seconds. They were read inside it, which made the transaction as long as a scan of every
+/// preference key in the database, and that is the exact window the other writer's busy timeout
+/// has to sit through. The bounds are a guard against filling a shared budget, not an invariant:
+/// measuring them against the database as it was a moment ago is the right trade for not holding
+/// an immediate transaction open while doing it. The keys this app writes are always exact,
+/// because it applies its own accepted writes to the cached totals itself.
+///
+/// `Err` is a transient failure the caller owes again; a value too large for one of the bounds
+/// comes back as a refusal in the report instead, because owing it again would retry a write that
+/// cannot succeed. A refused key does not take the others down with it.
 pub(super) fn write_sidebar_ui_state(
     write: &SidebarUiWrite,
 ) -> Result<SidebarWriteReport, &'static str> {
     if write.is_empty() {
         return Ok(SidebarWriteReport::default());
     }
+    let mut report = SidebarWriteReport::default();
     let mut held = connections()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if held.write.is_none() {
+        let started = Instant::now();
         held.write = Some(open(OpenFlags::SQLITE_OPEN_READ_WRITE)?);
+        report.open_us = started.elapsed().as_micros() as u64;
     }
+    // Reused while it is recent, and always before the transaction opens.
+    let cached = held
+        .totals
+        .take()
+        .filter(|(read_at, _)| read_at.elapsed() < TOTALS_MAX_AGE)
+        .map(|(_, totals)| totals);
     let connection = held.write.as_ref().expect("opened above");
-    let result = write_in_transaction(connection, write);
-    if result.is_err() {
-        held.write = None;
+    let mut totals = match cached {
+        Some(totals) => totals,
+        None => {
+            let started = Instant::now();
+            let totals = Totals::read(connection)?;
+            report.totals_us = started.elapsed().as_micros() as u64;
+            totals
+        }
+    };
+    let result = write_in_transaction(connection, write, &mut totals, &mut report);
+    match &result {
+        Ok(()) => held.totals = Some((Instant::now(), totals)),
+        Err(_) => {
+            held.write = None;
+            held.totals = None;
+        }
     }
-    result
+    result.map(|()| report)
 }
 
 fn write_in_transaction(
     connection: &Connection,
     write: &SidebarUiWrite,
-) -> Result<SidebarWriteReport, &'static str> {
+    totals: &mut Totals,
+    report: &mut SidebarWriteReport,
+) -> Result<(), &'static str> {
+    let started = Instant::now();
     connection
         .execute_batch("BEGIN IMMEDIATE")
         .map_err(|_| "begin")?;
-    let result = write_inside_transaction(connection, write);
+    report.begin_us = started.elapsed().as_micros() as u64;
+    let started = Instant::now();
+    let result = write_inside_transaction(connection, write, totals, report);
+    report.stored_us = started.elapsed().as_micros() as u64;
     if result.is_ok() {
+        let started = Instant::now();
         connection.execute_batch("COMMIT").map_err(|_| "commit")?;
+        report.commit_us = started.elapsed().as_micros() as u64;
     } else {
         let _ = connection.execute_batch("ROLLBACK");
     }
@@ -214,10 +269,9 @@ fn write_in_transaction(
 fn write_inside_transaction(
     connection: &Connection,
     write: &SidebarUiWrite,
-) -> Result<SidebarWriteReport, &'static str> {
-    // The totals the three bounds are measured against, read once for the whole transaction.
-    let mut totals = Totals::read(connection)?;
-    let mut report = SidebarWriteReport::default();
+    totals: &mut Totals,
+    report: &mut SidebarWriteReport,
+) -> Result<(), &'static str> {
     let store = |connection: &Connection,
                  report: &mut SidebarWriteReport,
                  totals: &mut Totals,
@@ -247,8 +301,8 @@ fn write_inside_transaction(
         let raw = diff.apply(stored.as_deref(), fallback);
         store(
             connection,
-            &mut report,
-            &mut totals,
+            report,
+            totals,
             "collapse",
             &key,
             &raw,
@@ -262,8 +316,8 @@ fn write_inside_transaction(
     if let Some(hidden) = &write.hidden_items {
         store(
             connection,
-            &mut report,
-            &mut totals,
+            report,
+            totals,
             "hiddenItems",
             HIDDEN_ITEMS_STORAGE_KEY,
             hidden,
@@ -278,8 +332,8 @@ fn write_inside_transaction(
         let key = machine_tab_key();
         store(
             connection,
-            &mut report,
-            &mut totals,
+            report,
+            totals,
             "machineTab",
             &key,
             machine_id,
@@ -290,7 +344,7 @@ fn write_inside_transaction(
             MACHINE_TAB_STORAGE_KEY,
         )?;
     }
-    Ok(report)
+    Ok(())
 }
 
 /// What one store admits, from its row in the catalog.

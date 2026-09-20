@@ -47,6 +47,8 @@ pub(crate) struct SidebarListCounters {
     pub(crate) idle: u64,
     pub(crate) view_changes: u64,
     pub(crate) installs: u64,
+    /// Wakes that found no drawn time had moved, so the list was left as it was.
+    pub(crate) installs_skipped: u64,
     pub(crate) deadline_wakes: u64,
     pub(crate) update_max_us: u64,
     pub(crate) install_max_us: u64,
@@ -55,7 +57,6 @@ pub(crate) struct SidebarListCounters {
 }
 
 /// The Rust list and everything the host keeps around it.
-#[derive(Default)]
 pub(crate) struct SidebarList {
     model: SidebarViewModel,
     /// What the store changed since the last update.
@@ -75,8 +76,10 @@ pub(crate) struct SidebarList {
     /// settings file and a clone of its map under a global lock, and several callers ask per
     /// publish. Held in a cell because the readers are `&self`.
     source: std::cell::Cell<Option<(Instant, SidebarListSource)>>,
-    /// The clock deadline a timer is already booked for.
+    /// The clock deadline a timer is already booked for, and what asked for it, so a wake once a
+    /// second can be read as a countdown doing its job or as something booking a time nobody draws.
     deadline_booked: Option<u64>,
+    pub(super) deadline_kind: &'static str,
     /// Address of the published list the installed one last carried the menus of, so a publish
     /// that left the store's own list unchanged still refreshes them.
     installed_projection: usize,
@@ -88,6 +91,30 @@ pub(crate) struct SidebarList {
     pub(super) last_inputs: SidebarInputs,
     pub(super) last_built_at_ms: u64,
     pub(super) counters: SidebarListCounters,
+}
+
+impl Default for SidebarList {
+    fn default() -> Self {
+        Self {
+            model: SidebarViewModel::default(),
+            changes: ChangeSummary::default(),
+            dirty: false,
+            settings: None,
+            settings_read_at: None,
+            unavailable: UnavailableState::default(),
+            last_focus: None,
+            built: false,
+            source: std::cell::Cell::new(None),
+            deadline_booked: None,
+            deadline_kind: "none",
+            installed_projection: 0,
+            snapshot_cache: SnapshotCache::default(),
+            inputs_cache: InputsCache::default(),
+            last_inputs: SidebarInputs::default(),
+            last_built_at_ms: 0,
+            counters: SidebarListCounters::default(),
+        }
+    }
 }
 
 impl SidebarList {
@@ -136,18 +163,24 @@ impl SidebarList {
 
     /// The next moment one of the drawn times reads differently. The view model does not hold the
     /// labels, so this is the host's own deadline beside the one the list reports.
-    fn next_label_deadline_ms(&self, now_ms: u64, show_relative_time: bool) -> Option<u64> {
+    fn next_label_deadline(
+        &self,
+        now_ms: u64,
+        show_relative_time: bool,
+    ) -> Option<ghostex_gx_core::LabelDeadline> {
         self.model
             .view()
             .groups
             .iter()
             .flat_map(|group| group.core.sessions.iter())
-            .filter_map(|session| {
-                session
-                    .row
-                    .next_label_deadline_ms(now_ms, show_relative_time)
-            })
-            .min()
+            .filter_map(|session| session.row.next_label_deadline(now_ms, show_relative_time))
+            .min_by_key(|deadline| deadline.at_ms())
+    }
+
+    /// Whether any drawn time would read differently now than in the installed list.
+    pub(super) fn labels_changed(&self, now_ms: u64) -> bool {
+        self.snapshot_cache
+            .labels_changed(self.model.view(), now_ms)
     }
 
     /// Whether a card draws the relative time at all (`hideLastActiveTimeOnSessionCards`).
@@ -444,19 +477,26 @@ impl GhostexGpuiApp {
             .then(|| {
                 self.gx_store
                     .sidebar_list
-                    .next_label_deadline_ms(now, show_relative_time)
+                    .next_label_deadline(now, show_relative_time)
             })
             .flatten();
-        let Some(deadline) = [
-            self.gx_store.sidebar_list.next_deadline_ms(),
-            label_deadline,
-        ]
-        .into_iter()
-        .flatten()
-        .min() else {
-            self.gx_store.sidebar_list.deadline_booked = None;
-            return;
+        let row_deadline = self.gx_store.sidebar_list.next_deadline_ms();
+        let label_kind = match label_deadline {
+            Some(ghostex_gx_core::LabelDeadline::Countdown(_)) => "countdown",
+            Some(ghostex_gx_core::LabelDeadline::Relative(_)) => "relative",
+            None => "none",
         };
+        let (deadline, kind) = match (row_deadline, label_deadline.map(|at| at.at_ms())) {
+            (Some(row), Some(label)) if row <= label => (row, "row"),
+            (_, Some(label)) => (label, label_kind),
+            (Some(row), None) => (row, "row"),
+            (None, None) => {
+                self.gx_store.sidebar_list.deadline_booked = None;
+                self.gx_store.sidebar_list.deadline_kind = "none";
+                return;
+            }
+        };
+        self.gx_store.sidebar_list.deadline_kind = kind;
         let booked = self.gx_store.sidebar_list.deadline_booked;
         // A timer for an earlier or equal deadline already covers this one.
         if booked.is_some_and(|booked| booked <= deadline) {
@@ -474,9 +514,15 @@ impl GhostexGpuiApp {
                 this.gx_store.sidebar_list.counters.deadline_wakes += 1;
                 this.gx_store_update_sidebar_list(cx);
                 // A label that reads differently is not a change in the list itself, so the update
-                // above may have found nothing; the drawn rows still have to be rebuilt.
+                // above may have found nothing. Only the rows whose time actually moved need the
+                // list rebuilt, and on a long list the earliest deadline usually belongs to one
+                // row while every other row reads exactly as it did.
                 if this.gx_store_sidebar_draws_store_list() {
-                    this.gx_store_install_sidebar_list(cx);
+                    if this.gx_store.sidebar_list.labels_changed(now_ms()) {
+                        this.gx_store_install_sidebar_list(cx);
+                    } else {
+                        this.gx_store.sidebar_list.counters.installs_skipped += 1;
+                    }
                     this.gx_store_book_sidebar_deadline(cx);
                 }
             });

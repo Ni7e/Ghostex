@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::keys::SessionKey;
 
 use super::inputs::{CloseAfterDoneInput, ProjectDiffStats, SectionId};
-use super::session_text::{last_interaction_label, next_label_deadline_ms, timer_trailing_label};
+use super::session_text::{last_interaction_label, next_label_deadline, timer_trailing_label};
 use super::tags::TagPresentation;
 
 /// The whole list for one machine tab.
@@ -214,8 +214,31 @@ impl SessionRow {
     /// draws none or draws one that never moves. `show_relative_time` is the card setting: with it
     /// off, only a countdown is drawn. A host that draws these wakes then and no more often;
     /// nothing in the store reports it, because they are formatted against the host's clock.
-    pub fn next_label_deadline_ms(&self, now_ms: u64, show_relative_time: bool) -> Option<u64> {
-        next_label_deadline_ms(self, now_ms, show_relative_time)
+    pub fn next_label_deadline(
+        &self,
+        now_ms: u64,
+        show_relative_time: bool,
+    ) -> Option<LabelDeadline> {
+        next_label_deadline(self, now_ms, show_relative_time)
+    }
+}
+
+/// The next moment a row's time reads differently, and which of the two times it is. The kind is
+/// what tells a host whether a wake once a second is a countdown doing its job or a relative time
+/// booked for a row that does not draw one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LabelDeadline {
+    /// A Delayed Send or Close After Done counting down; it moves every second until it ends.
+    Countdown(u64),
+    /// The relative time of the last interaction; it moves by the second only in the first minute.
+    Relative(u64),
+}
+
+impl LabelDeadline {
+    pub fn at_ms(self) -> u64 {
+        match self {
+            LabelDeadline::Countdown(at) | LabelDeadline::Relative(at) => at,
+        }
     }
 }
 

@@ -25,6 +25,8 @@ const MAX_BROWSER_TABS: usize = 256;
 /// URL against, before and after normalizing it. Kept here rather than borrowed from this app's
 /// own favicon bound, which is a different contract that happens to hold the same number.
 const FAVICON_URL_MAX_CHARS: usize = 2048;
+/// The bound `normalizeGpuiBrowserTabs` slices a tab title to, in UTF-16 code units.
+const BROWSER_TITLE_MAX_CHARS: usize = 512;
 
 /// What the assembled inputs were built from, so an update that changes none of it does no work.
 #[derive(Default)]
@@ -177,7 +179,11 @@ fn browser_tabs(json: &str) -> Vec<BrowserTabInput> {
             Some(BrowserTabInput {
                 project_id: non_empty("projectId")?,
                 tab_id: non_empty("tabId")?,
-                title: non_empty("title")?,
+                // `normalizeGpuiBrowserTabs` slices the title; leaving it whole here gave the
+                // store's row a longer title than the published one for a tab whose page has a
+                // title over the bound, and every field derived from it (the heading, the alias,
+                // the tooltip) then differed for as long as that tab was open.
+                title: js_slice_utf16(&non_empty("title")?, BROWSER_TITLE_MAX_CHARS),
                 favicon_url: tab
                     .get("faviconUrl")
                     .and_then(Value::as_str)
@@ -225,6 +231,30 @@ fn normalized_favicon_url(value: &str) -> Option<String> {
 /// The length JavaScript measures, which is code units rather than characters or bytes.
 fn utf16_len(value: &str) -> usize {
     value.chars().map(char::len_utf16).sum()
+}
+
+/// `value.slice(0, max)`: JavaScript counts UTF-16 code units, so a character outside the basic
+/// plane counts twice.
+///
+/// The one case this cannot reproduce is a cut that lands between the two halves of such a
+/// character: JavaScript keeps the first half as a lone surrogate, which is not a string Rust can
+/// hold. The character is dropped whole instead, so the two differ by one character in a title
+/// that is already being cut at exactly that boundary.
+fn js_slice_utf16(value: &str, max: usize) -> String {
+    if utf16_len(value) <= max {
+        return value.to_string();
+    }
+    let mut taken = 0usize;
+    let mut sliced = String::new();
+    for character in value.chars() {
+        let width = character.len_utf16();
+        if taken + width > max {
+            break;
+        }
+        taken += width;
+        sliced.push(character);
+    }
+    sliced
 }
 
 /// The git numbers the old runtime's background probe published for a project.
