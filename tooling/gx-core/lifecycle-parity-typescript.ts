@@ -460,3 +460,77 @@ function flagsRow(presentation: Json, reference: { projectId: string; sessionId:
     sessionTag: row.sessionTag ?? null,
   };
 }
+
+/**
+ * The dialog half. Drives the shipped `runNativeSessionAction` and records the two host calls it
+ * makes: the dismissal the open dialog is closed with, and the payload the new one carries.
+ *
+ * The row it reads is handed over from the Rust dump rather than re-derived here, the same
+ * contract the menu gate uses: which rows a group holds is M4a's question, and what this one asks
+ * is what the two sides make of the SAME row. The app modal host is the only seam.
+ */
+export async function runTypeScriptModals(scenario: Json, rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const { runNativeSessionAction } = await import('@/apps/desktop/sidebar/native-sidebar/session-actions');
+  const { sidebarStore } = await import('@/packages/core-ui/sidebar-store-model');
+  const out: Json[] = [];
+  for (const entry of (rustActions.modals ?? []) as Json[]) {
+    const payload = entry.payload as Json;
+    const row = (entry.row ?? {}) as Json;
+    const sessionId = String(payload.sessionId);
+    sidebarStore.setState({
+      sessionsById: {
+        [sessionId]: {
+          sessionId,
+          alias: row.alias ?? '',
+          primaryTitle: row.primaryTitle ?? undefined,
+          terminalTitle: row.terminalTitle ?? undefined,
+          agentIcon: row.agentIcon ?? undefined,
+          sessionNote: row.sessionNote ?? undefined,
+        } as never,
+      },
+    });
+    const calls: Json[] = [];
+    installModalRecorder(calls);
+    runNativeSessionAction(payload as never, () => {});
+    out.push({ calls });
+  }
+  return out;
+}
+
+/**
+ * The app modal host, recording instead of posting. `closeAppModal` sends `{type:'close'}` and
+ * carries its reason only as a log label, so the label is captured from the recorder's own
+ * knowledge of which call it is rather than invented.
+ */
+function installModalRecorder(calls: Json[]): void {
+  const globals = globalThis as Json;
+  const window = (globals.window ??= {}) as Json;
+  window.webkit = {
+    messageHandlers: {
+      ghostexAppModalHost: {
+        postMessage(message: Json) {
+          calls.push(message?.type === 'close' ? { call: 'close' } : { call: 'open', open: message });
+        },
+      },
+    },
+  };
+  window.__ghostex_APP_MODAL_HOST_SURFACE__ = undefined;
+}
+
+/**
+ * The seed-title rule on its own, over triples chosen to reach every branch of the `||` chain.
+ *
+ * This exists because the rule could not be reached through the recording: no drawn row in it has
+ * a padded or blank title, so the gate's untrimmed-title mutation produced zero differences and
+ * proved nothing. The expression below is the one `runNativeSessionAction` uses, character for
+ * character.
+ */
+export function runTypeScriptTitleRule(rustActions: Json): (string | null)[] {
+  return ((rustActions.titleRule ?? []) as Json[]).map((entry) => {
+    const primaryTitle = entry.primaryTitle as string | null | undefined;
+    const terminalTitle = entry.terminalTitle as string | null | undefined;
+    const alias = String(entry.alias ?? '');
+    return primaryTitle?.trim() || terminalTitle?.trim() || alias;
+  });
+}

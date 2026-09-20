@@ -27,10 +27,11 @@ use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
     apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
     close_optimistic_follow_ups, encode_uri_component, plan_close_request, plan_flags_request,
-    plan_fork_request, plan_lifecycle_request, plan_read_only_action, ActiveGroup, CloseAnswer,
-    CloseFollowUp, Core, Event, FlagsFollowUp, ForkFollowUp, Intent, LifecycleAnswer,
-    LifecycleFollowUp, MachineId, ProjectKey, SessionKey, SidebarInputs,
-    QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES,
+    plan_fork_request, plan_lifecycle_request, plan_modal_action, plan_read_only_action,
+    rename_seed_title, ActiveGroup, CloseAnswer, CloseFollowUp, Core, Event, FlagsFollowUp,
+    ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey, SessionKey,
+    SidebarInputs, SidebarView, SidebarViewModel, QUICK_AUTOMATIONS_PROJECT_ID,
+    READ_ONLY_MESSAGE_TYPES,
 };
 use serde_json::{json, Map, Value};
 
@@ -91,6 +92,7 @@ fn main() -> ExitCode {
     let mut total_close = 0usize;
     let mut total_fork = 0usize;
     let mut total_flags = 0usize;
+    let mut total_modals = 0usize;
     let mut resolve_micros: Vec<u128> = Vec::new();
     for path in &scenarios {
         let scenario: Value = match std::fs::read_to_string(path)
@@ -115,6 +117,7 @@ fn main() -> ExitCode {
         total_close += dump.close;
         total_fork += dump.fork;
         total_flags += dump.flags;
+        total_modals += dump.modals;
         let out = path.with_file_name(
             path.file_name()
                 .and_then(|name| name.to_str())
@@ -148,7 +151,7 @@ fn main() -> ExitCode {
         .copied()
         .unwrap_or(0);
     println!(
-        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} flags {total_flags} resolveUs median {median} max {}",
+        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} flags {total_flags} modals {total_modals} resolveUs median {median} max {}",
         scenarios.len(),
         resolve_micros.last().copied().unwrap_or(0)
     );
@@ -171,6 +174,7 @@ struct Dump {
     close: usize,
     fork: usize,
     flags: usize,
+    modals: usize,
 }
 
 /// The menu dump `sidebar_menu_parity` writes for the same scenario, when it has been run.
@@ -219,13 +223,20 @@ fn build(
         "snapshot": scenario.get("snapshot")?.clone(),
     });
     let frame = ServerEvent::parse(&frame.to_string()).ok()?;
-    core.handle(
-        Event::Frame {
-            machine: MachineId::Local,
-            frame: Box::new(frame),
-        },
-        now_ms,
-    );
+    let changes = core
+        .handle(
+            Event::Frame {
+                machine: MachineId::Local,
+                frame: Box::new(frame),
+            },
+            now_ms,
+        )
+        .changes;
+    // One drawn list, under default inputs, so the dialog probes below ask about rows the sidebar
+    // really draws. Nothing else in this example needs it.
+    let mut model = SidebarViewModel::new();
+    let view_inputs = SidebarInputs::default();
+    model.update(&core, &view_inputs, &changes, now_ms);
 
     let project_ids: Vec<String> = scenario
         .pointer("/snapshot/projects")?
@@ -319,6 +330,8 @@ fn build(
     let fork_count = forks.len();
     let flags = flags_entries(&core, scenario, menu_dump, now_ms);
     let flags_count = flags.len();
+    let modals = modal_entries(model.view());
+    let modal_count = modals.len();
     Some(Dump {
         payloads: entries.len(),
         calls,
@@ -327,6 +340,7 @@ fn build(
         close: close_count,
         fork: fork_count,
         flags: flags_count,
+        modals: modal_count,
         value: json!({
             "parkedProjectId": parked,
             "entries": Value::Array(entries),
@@ -334,6 +348,8 @@ fn build(
             "close": Value::Array(closes),
             "fork": Value::Array(forks),
             "flags": Value::Array(flags),
+            "modals": Value::Array(modals),
+            "titleRule": Value::Array(title_rule_entries()),
         }),
     })
 }
@@ -1127,4 +1143,85 @@ fn collect_tag_values(value: &Value, found: &mut Vec<Value>) {
         }
         _ => {}
     }
+}
+
+/// The dialog half of the gate.
+///
+/// Rename and Note call nothing, so what is compared is the pair of host calls they make: the
+/// dismissal the open dialog is closed with, and the payload the new one is seeded with. The seed
+/// is the row's own title and note, which is where the title rule lives, so the probe drives every
+/// drawn row rather than a sample: a row whose primary title is blank, whose terminal title is
+/// blank, or which has neither takes a different branch of the same `||` chain.
+fn modal_entries(view: &SidebarView) -> Vec<Value> {
+    let mut entries = Vec::new();
+    for group in &view.groups {
+        for session in &group.core.sessions {
+            let sidebar_session_id = session.row.sidebar_session_id.clone();
+            for action in ["rename", "note", "firstMessage", "delayedSend"] {
+                let payload = json!({
+                    "type": "sessionAction",
+                    "sessionId": sidebar_session_id,
+                    "action": action,
+                });
+                // The row the seed comes from travels with the entry. Which rows a group holds
+                // is M4a's gate, not this one; what this one asks is what the two sides make of
+                // the SAME row, so re-deriving the row here would add a second place to differ.
+                let row = json!({
+                    "primaryTitle": session.row.menu_facts.primary_title,
+                    "terminalTitle": session.row.menu_facts.terminal_title,
+                    "alias": session.row.alias,
+                    "agentIcon": session.row.agent_icon,
+                    "sessionNote": session.row.session_note,
+                });
+                match plan_modal_action(view, &payload) {
+                    Some(plan) => entries.push(json!({
+                        "payload": payload,
+                        "row": row,
+                        "owned": true,
+                        "action": plan.to_json(),
+                    })),
+                    None => entries.push(json!({ "payload": payload, "row": row, "owned": false })),
+                }
+            }
+        }
+    }
+    entries
+}
+
+/// The seed-title rule, driven directly.
+///
+/// A recording is not guaranteed to contain a padded or blank title, and this one does not: the
+/// gate's own untrimmed-title mutation produced ZERO differences when the rule was only ever
+/// reached through drawn rows, which is a gate that cannot fail. The triples below reach every
+/// branch of the `||` chain whatever the recording holds.
+fn title_rule_entries() -> Vec<Value> {
+    let cases: [(Option<&str>, Option<&str>, &str); 12] = [
+        (Some("Primary"), Some("Terminal"), "alias"),
+        // Padded: the trim decides the VALUE, not only the test.
+        (Some("  Primary  "), Some("Terminal"), "alias"),
+        (Some("\tPrimary\n"), None, "alias"),
+        // Blank primary falls through to the terminal title.
+        (Some("   "), Some("Terminal"), "alias"),
+        (Some(""), Some("  Terminal  "), "alias"),
+        (None, Some("Terminal"), "alias"),
+        // Both blank falls through to the alias, which is NOT trimmed.
+        (Some("   "), Some("   "), "  alias  "),
+        (None, None, "  alias  "),
+        (Some(""), Some(""), ""),
+        (None, None, ""),
+        // The JavaScript trim also removes these two, which Rust's `str::trim` does not.
+        (Some("\u{0085}Primary\u{0085}"), None, "alias"),
+        (Some("\u{feff}   \u{feff}"), Some("Terminal"), "alias"),
+    ];
+    cases
+        .into_iter()
+        .map(|(primary, terminal, alias)| {
+            json!({
+                "primaryTitle": primary,
+                "terminalTitle": terminal,
+                "alias": alias,
+                "title": rename_seed_title(primary, terminal, alias),
+            })
+        })
+        .collect()
 }

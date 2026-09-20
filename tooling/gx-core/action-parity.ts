@@ -178,6 +178,58 @@ function mutateFlags(name: string | undefined, entry: Json): Json {
   }
 }
 
+/** The dialog half's mutations. */
+function mutateModal(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  switch (name) {
+    // An absent note seeded as a missing key rather than as an empty string, which opens the note
+    // dialog with nothing in it and overwrites the real note on confirm.
+    case 'seed-an-absent-note-as-missing':
+      if (clone.action?.open?.initialNote === '') delete clone.action.open.initialNote;
+      return clone;
+    // The agent icon dropped from the rename dialog.
+    case 'drop-the-rename-icon':
+      if (clone.action?.open?.modal === 'renameSession') delete clone.action.open.sessionAgentIcon;
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+/**
+ * The title rule's mutations, which act on the direct probe rather than on a drawn row: the
+ * recording has no padded or blank title, so the same mutation applied to a row changed nothing
+ * and the gate could not fail.
+ */
+function mutateTitleRule(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  switch (name) {
+    // The seed taken untrimmed, so a padded title reaches the dialog with its padding.
+    case 'seed-the-untrimmed-title':
+      clone.title = String(entry.primaryTitle ?? entry.terminalTitle ?? entry.alias ?? '');
+      return clone;
+    // A blank title accepted instead of falling through to the next candidate.
+    case 'accept-a-blank-title':
+      if (String(clone.title) === String(entry.alias ?? '') && entry.primaryTitle !== null)
+        clone.title = String(entry.primaryTitle ?? '');
+      return clone;
+    // The alias trimmed too, which the chain does not do.
+    case 'trim-the-alias':
+      clone.title = String(clone.title).trim();
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+const MODAL_MUTATIONS = [
+  'seed-the-untrimmed-title',
+  'accept-a-blank-title',
+  'trim-the-alias',
+  'seed-an-absent-note-as-missing',
+  'drop-the-rename-icon',
+];
+
 const FLAGS_MUTATIONS = [
   'clear-a-tag-as-null',
   'tag-without-the-star',
@@ -260,14 +312,21 @@ async function compare([outDir, ...flags]: string[]) {
     ...CLOSE_MUTATIONS,
     ...FORK_MUTATIONS,
     ...FLAGS_MUTATIONS,
+    ...MODAL_MUTATIONS,
   ];
   if (mutationName && !known.includes(mutationName)) {
     console.error(`unknown mutation ${mutationName}; one of ${known.join(', ')}`);
     process.exit(2);
   }
   const { runTypeScriptActions } = await import('./action-parity-typescript.ts');
-  const { runTypeScriptLifecycle, runTypeScriptClose, runTypeScriptFork, runTypeScriptFlags } =
-    await import('./lifecycle-parity-typescript.ts');
+  const {
+    runTypeScriptLifecycle,
+    runTypeScriptClose,
+    runTypeScriptFork,
+    runTypeScriptFlags,
+    runTypeScriptModals,
+    runTypeScriptTitleRule,
+  } = await import('./lifecycle-parity-typescript.ts');
   const names = readdirSync(outDir)
     .filter((name) => name.startsWith('scenario-') && name.endsWith('.json'))
     .sort();
@@ -278,6 +337,9 @@ async function compare([outDir, ...flags]: string[]) {
   let closes = 0;
   let forks = 0;
   let flagCalls = 0;
+  let modalOpens = 0;
+  let modalRefusals = 0;
+  let titleCases = 0;
   let overlayKept = 0;
   let closesRestored = 0;
   let stoppedUnhidden = 0;
@@ -298,6 +360,40 @@ async function compare([outDir, ...flags]: string[]) {
     if (entries.length !== ours.length) {
       differences.push(`${name}: ${entries.length} payloads against ${ours.length} answers`);
       continue;
+    }
+    // The rule the recording cannot reach, driven directly on both sides.
+    const theirTitles = runTypeScriptTitleRule(rust);
+    for (const [index, entry] of ((rust.titleRule ?? []) as Json[]).entries()) {
+      titleCases += 1;
+      const mine = mutate ? mutateTitleRule(mutationName, entry) : entry;
+      if (String(mine.title) !== String(theirTitles[index]))
+        differences.push(
+          `${name} titleRule #${index}: rust ${JSON.stringify(mine.title)} ts ${JSON.stringify(theirTitles[index])}`
+        );
+    }
+    const theirModals = await runTypeScriptModals(scenario, rust);
+    for (const [index, entry] of ((rust.modals ?? []) as Json[]).entries()) {
+      const theirs = theirModals[index];
+      const where = `${name} modal #${index} ${String((entry.payload as Json)?.action)}`;
+      const theirCalls = ((theirs?.calls ?? []) as Json[]).map((call) => call);
+      // A refusal is a HAND-OFF, not a loss: the host forwards the command and the old runtime
+      // opens the dialog, so the TypeScript making a call there is the refusal working. What is
+      // worth asserting is the one refusal that should reach nothing at all: `firstMessage` is
+      // gated on `firstUserMessage`, which this client never has, so a call for it would mean the
+      // item is reachable after all and declared difference 14 is wrong.
+      if (entry.owned !== true) {
+        modalRefusals += 1;
+        if (String((entry.payload as Json)?.action) === 'firstMessage' && theirCalls.length)
+          differences.push(
+            `${where}: firstMessage is supposed to be unreachable, ts makes ${theirCalls.length} call(s)`
+          );
+        continue;
+      }
+      modalOpens += 1;
+      const mine = mutate ? mutateModal(mutationName, entry) : entry;
+      const mineCalls = [{ call: 'close' }, { call: 'open', open: mine.action?.open }];
+      if (canonical(mineCalls) !== canonical(theirCalls))
+        differences.push(`${where}: rust ${canonical(mineCalls)} ts ${canonical(theirCalls)}`);
     }
     const theirFlags = await runTypeScriptFlags(scenario, rust);
     for (const [index, entry] of ((rust.flags ?? []) as Json[]).entries()) {
@@ -438,7 +534,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
