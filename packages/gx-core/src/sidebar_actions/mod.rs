@@ -12,7 +12,9 @@
 //! different fields: pin, park, tag and favorite, `modals` the two that call nothing and
 //! only open a dialog, and `snooze` the only one whose answer depends on the clock and on the
 //! local calendar, and `bulk` the plural payloads, which are a SET and an ORDER over the ones
-//! above rather than new behaviour.
+//! above rather than new behaviour. `reload` and `split` are the same shape one row at a time:
+//! Full Reload is the sleep and the wake in order, and Split Right is a focus that carries where
+//! the pane goes.
 
 mod bulk;
 mod close;
@@ -22,8 +24,10 @@ mod lifecycle;
 mod modals;
 mod plan;
 mod read_only;
+mod reload;
 mod resolve;
 mod snooze;
+mod split;
 
 pub use bulk::{
     bulk_request_summary, owns_batch_command, owns_bulk_message, plan_batch, plan_bulk_request,
@@ -41,12 +45,13 @@ pub use fork::{
     apply_fork_answer, owns_fork_message, plan_fork_request, ForkFollowUp, ForkRequest,
 };
 pub use lifecycle::{
-    apply_lifecycle_answer, owns_lifecycle_message, plan_lifecycle_request, LifecycleAnswer,
-    LifecycleCall, LifecycleFollowUp, LifecycleRequest, LIFECYCLE_PATCH_TTL_MS,
+    apply_lifecycle_answer, owns_lifecycle_message, plan_lifecycle_request, FocusOptions,
+    LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, LIFECYCLE_PATCH_TTL_MS,
 };
 pub use modals::{owns_modal_message, plan_modal_action, rename_seed_title, ModalAction};
 pub use plan::{ActionEffect, SidebarActionPlan, ToastLevel};
 pub use read_only::{plan_read_only_action, READ_ONLY_MESSAGE_TYPES};
+pub use reload::{owns_reload_message, plan_full_reload, ReloadPlan, RELOAD_MESSAGE_TYPES};
 pub use resolve::{
     local_project_group_project_id, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
     NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
@@ -56,3 +61,4 @@ pub use snooze::{
     plan_snooze_action, plan_snooze_request, snooze_wake_ms, SnoozeAction, SnoozeCall, SnoozeClock,
     SnoozeFollowUp, SnoozeRequest, SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES,
 };
+pub use split::{owns_split_message, plan_split_right, SplitAction, SplitPlan};

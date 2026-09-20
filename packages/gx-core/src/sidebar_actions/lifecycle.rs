@@ -27,7 +27,7 @@
 use serde_json::{json, Value};
 
 use crate::core::Core;
-use crate::keys::SessionKey;
+use crate::keys::{MachineId, SessionKey};
 use crate::overlay::SessionPatch;
 use crate::selectors::QUICK_AUTOMATIONS_PROJECT_ID;
 
@@ -84,6 +84,44 @@ pub struct LifecycleRequest {
     /// Focus as it stood when the call left. A wake that lands after the user moved on must not
     /// take the focus back (`focusMovedElsewhereDuringWake`).
     pub focused_before: Option<SessionKey>,
+    /// The `options` the TypeScript hands `focusLocalWorkspaceSession` for THIS row, which are the
+    /// caller's and not the payload's: Full Reload's second leg asks for a remount, and Split Right
+    /// asks for the new pane. They never reach the replacement focus, which the TypeScript selects
+    /// with no options at all.
+    pub focus_options: FocusOptions,
+}
+
+/// The two `focusLocalWorkspaceSession` options a sidebar action can ask for.
+///
+/// CDXC:Sessions 2026-09-21 WHY:
+/// Both exist because the wake and the pane are one step for the user and two for the app. A Full
+/// Reload really cycles the provider, so the local terminal the workspace still holds is dead by
+/// the time the wake lands and `forceRemount` is what tears it down synchronously instead of
+/// re-selecting it (`CDXC:CefRuntime 2026-07-12`). Split Right is a focus with a placement, so the
+/// same wake has to carry where the pane goes or the session opens in the tab it already had.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FocusOptions {
+    pub force_remount: bool,
+    pub split_right: bool,
+}
+
+impl FocusOptions {
+    pub fn to_json(self) -> Value {
+        json!({ "forceRemount": self.force_remount, "splitRight": self.split_right })
+    }
+
+    /// What the message carries. `forceRemount` and `placement` are the two fields the store's own
+    /// compositions set when they build a `setSessionSleeping` message for a row the single-session
+    /// path then answers; a message from the renderer carries neither.
+    pub fn from_message(message: &Value) -> Self {
+        Self {
+            force_remount: message
+                .get("forceRemount")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            split_right: text_field(message, "placement") == Some("splitRight"),
+        }
+    }
 }
 
 impl LifecycleRequest {
@@ -101,6 +139,7 @@ impl LifecycleRequest {
                 .focused_before
                 .as_ref()
                 .map(SessionKey::to_sidebar_session_id),
+            "focusOptions": self.focus_options.to_json(),
         })
     }
 }
@@ -148,7 +187,10 @@ pub enum LifecycleFollowUp {
         patch: SessionPatch,
     },
     /// Select a session in the workspace, exactly as `focusLocalWorkspaceSession` does.
-    Focus { session: SessionKey },
+    Focus {
+        session: SessionKey,
+        options: FocusOptions,
+    },
 }
 
 impl LifecycleFollowUp {
@@ -159,9 +201,10 @@ impl LifecycleFollowUp {
                 "session": session.to_sidebar_session_id(),
                 "lifecycleState": patch.lifecycle_state.as_ref().map(LifecycleState::as_str),
             }),
-            Self::Focus { session } => json!({
+            Self::Focus { session, options } => json!({
                 "follow": "focus",
                 "session": session.to_sidebar_session_id(),
+                "options": options.to_json(),
             }),
         }
     }
@@ -213,6 +256,7 @@ pub fn plan_lifecycle_request(core: &Core, message: &Value) -> Option<LifecycleR
             true => None,
             false => replacement_focus_for_transition(core, &session, focused_before.as_ref()),
         },
+        focus_options: FocusOptions::from_message(message),
         focused_before,
         session,
         call,
@@ -244,8 +288,12 @@ pub fn apply_lifecycle_answer(
     match request.call {
         LifecycleCall::Sleep => {
             if let Some(replacement) = &request.replacement_focus {
+                // The replacement is selected with NO options: it is not the row the caller asked
+                // about, so a Full Reload's remount and a Split Right's pane belong to the row
+                // being reloaded or split and never to whichever row inherits the focus.
                 follow_ups.push(LifecycleFollowUp::Focus {
                     session: replacement.clone(),
+                    options: FocusOptions::default(),
                 });
             }
         }
@@ -258,6 +306,7 @@ pub fn apply_lifecycle_answer(
             if !moved_elsewhere {
                 follow_ups.push(LifecycleFollowUp::Focus {
                     session: request.session.clone(),
+                    options: request.focus_options,
                 });
             }
         }
@@ -364,23 +413,34 @@ fn transition_session_ids(core: &Core, session: &SessionKey) -> Vec<String> {
 /// in that array, so the hide is deliberately NOT consulted here even though the leg above honours
 /// it.
 fn is_running(core: &Core, session: &SessionKey, session_id: &str) -> bool {
-    let Some(entry) = core.presentation().machine(&session.machine) else {
-        return false;
-    };
-    let Some(server) = entry
+    shown_lifecycle(core, &session.machine, &session.project_id, session_id)
+        == Some(LifecycleState::Running)
+}
+
+/// The lifecycle the CLIENT shows for a row, which is the daemon's with this store's own overlay on
+/// top, and `None` for a row it holds nothing for.
+///
+/// One function rather than one per caller. This is what `this.presentation` answers in the
+/// TypeScript, because `patchPresentationSession` writes the optimistic value straight into that
+/// mirror, so every question of the form "is this row awake" has to be asked of the overlay too or
+/// a Full Reload's own wake would read the row it just slept as still running.
+pub(super) fn shown_lifecycle(
+    core: &Core,
+    machine: &MachineId,
+    project_id: &str,
+    session_id: &str,
+) -> Option<LifecycleState> {
+    let entry = core.presentation().machine(machine)?;
+    let server = entry
         .loaded()
-        .and_then(|loaded| loaded.server_session(&session.project_id, session_id))
-    else {
-        return false;
-    };
-    let state = match entry.session_patch(&session.project_id, session_id) {
+        .and_then(|loaded| loaded.server_session(project_id, session_id))?;
+    Some(match entry.session_patch(project_id, session_id) {
         Some(patch) => patch
             .lifecycle_state
             .clone()
             .unwrap_or_else(|| server.lifecycle_state.clone()),
         None => server.lifecycle_state.clone(),
-    };
-    state == LifecycleState::Running
+    })
 }
 
 /// Whether this payload is one this file answers, without building anything. The host asks it
