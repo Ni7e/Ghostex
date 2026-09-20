@@ -572,6 +572,12 @@ export type ghostexSettings = {
    * The companion and the Commands pane always follow the kind of view (Agents versus the wide views: Browser, Code, Docs, Kanban, Automate, extensions).
    * Whether the sessions sidebar also follows the view is this advanced dropdown; the default keeps one sidebar state everywhere while the per-view model is evaluated.
    * This supersedes the 2026-09-09 decision to remember the sidebar, companion and Commands pane per project and view.
+   *
+   * CDXC:Workarea 2026-09-20 WHY:
+   * The companion clause has no object any more: the sessions column replaced it and is never
+   * hidden. The two layouts survive with their meaning re-read rather than changed — "Agents" is a
+   * window with no view open, "wide" a window with a view panel beside the sessions — which keeps
+   * the decision's own rule intact, because a project switch still cannot move the sidebar.
    */
   sidebarVisibilityMemory: SidebarVisibilityMemory;
   /**

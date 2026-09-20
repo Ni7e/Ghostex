@@ -22,7 +22,6 @@ pub(crate) enum ShellFocusTarget {
     BrowserSurface,
     BrowserPane(BrowserPaneId),
     ProjectEditorSurface(TitlebarMode),
-    ProjectEditorCompanion(TitlebarMode),
 }
 
 /// CDXC:FocusRouting 2026-09-11 WHY:
@@ -65,7 +64,6 @@ pub(crate) enum ShellKeyboardOwner {
 pub(crate) enum FirstResponderTerminalSurface {
     Agents(TerminalSessionId),
     Command(CommandSessionId),
-    ProjectEditorCompanion(TerminalSessionId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,7 +71,6 @@ pub(crate) enum FirstResponderCefSurface {
     Sidebar,
     BrowserTab(BrowserTabId),
     ProjectWorkarea(ProjectWorkareaCefSurfaceSlotKey),
-    ProjectEditorCompanion,
     TitlebarExtensionPopup,
     TitlebarTips,
     AppModal,
@@ -266,7 +263,6 @@ pub(crate) enum SpatialFocusTarget {
     AgentsPane(WorkspacePaneId),
     BrowserPane(BrowserPaneId),
     ProjectEditorSurface(TitlebarMode),
-    ProjectEditorCompanion(TitlebarMode),
     CommandPane,
     CommandPaneGroup(CommandPaneGroupId),
 }
@@ -421,8 +417,15 @@ pub(crate) fn render_order_focus_target(
     }
 }
 
+/// CDXC:FocusRouting 2026-09-20 WHY:
+/// The Agents panes, the open view and the Commands pane are one ordered list, because they are all on
+/// screen together. This replaced a second list that started at the companion and never named an Agents
+/// pane, which is why the two used to be separate functions.
 pub(crate) fn workspace_render_order_focus_targets(
     pane_ids: Vec<WorkspacePaneId>,
+    open_view: Option<TitlebarMode>,
+    browser_is_awake: bool,
+    browser_pane_ids: Vec<BrowserPaneId>,
     command_is_expanded: bool,
     command_has_sessions: bool,
     command_group_ids: Vec<CommandPaneGroupId>,
@@ -431,6 +434,17 @@ pub(crate) fn workspace_render_order_focus_targets(
         .into_iter()
         .map(SpatialFocusTarget::AgentsPane)
         .collect::<Vec<_>>();
+    if let Some(mode) = open_view {
+        if mode == TitlebarMode::Browser && browser_is_awake && !browser_pane_ids.is_empty() {
+            targets.extend(
+                browser_pane_ids
+                    .into_iter()
+                    .map(SpatialFocusTarget::BrowserPane),
+            );
+        } else {
+            targets.push(SpatialFocusTarget::ProjectEditorSurface(mode));
+        }
+    }
     /*
     CDXC:CommandPane 2026-06-25-23:35:
     Render-order keyboard fallback must target the same live expanded command groups as spatial focus. Do not append a generic command-pane target for collapsed strips, empty panels, or stored sessions that no longer belong to a rendered command group.
@@ -456,41 +470,4 @@ pub(crate) fn command_pane_render_order_focus_targets(
         .into_iter()
         .map(SpatialFocusTarget::CommandPaneGroup)
         .collect()
-}
-
-pub(crate) fn project_editor_render_order_focus_targets_for_state(
-    mode: TitlebarMode,
-    left_companion_visible: bool,
-    browser_is_awake: bool,
-    browser_pane_ids: Vec<BrowserPaneId>,
-    command_is_expanded: bool,
-    command_has_sessions: bool,
-    command_group_ids: Vec<CommandPaneGroupId>,
-) -> Vec<SpatialFocusTarget> {
-    let mut targets = Vec::new();
-    if left_companion_visible {
-        targets.push(SpatialFocusTarget::ProjectEditorCompanion(mode));
-    }
-
-    if mode == TitlebarMode::Browser && browser_is_awake {
-        if browser_pane_ids.is_empty() {
-            targets.push(SpatialFocusTarget::ProjectEditorSurface(mode));
-        } else {
-            targets.extend(
-                browser_pane_ids
-                    .into_iter()
-                    .map(SpatialFocusTarget::BrowserPane),
-            );
-        }
-    } else {
-        targets.push(SpatialFocusTarget::ProjectEditorSurface(mode));
-    }
-
-    targets.extend(command_pane_render_order_focus_targets(
-        command_is_expanded,
-        command_has_sessions,
-        command_group_ids,
-    ));
-
-    targets
 }

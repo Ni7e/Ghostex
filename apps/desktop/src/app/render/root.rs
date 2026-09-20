@@ -320,7 +320,7 @@ impl Render for GhostexGpuiApp {
                     || self
                         .browser_split_drag
                         .is_some_and(|drag| drag.axis == WorkspaceSplitAxis::Horizontal)
-                    || self.project_editor_companion_drag.is_some()
+                    || self.workarea_split_drag.is_some()
                     || self
                         .workspace_split_drag
                         .is_some_and(|drag| drag.axis == WorkspaceSplitAxis::Horizontal),
@@ -544,11 +544,9 @@ impl Render for GhostexGpuiApp {
                     this.toggle_gpui_sidebar_collapsed(cx);
                 }),
             )
-            .on_action(
-                cx.listener(|this, _: &ToggleProjectEditorCompanion, window, cx| {
-                    this.toggle_project_editor_companion_from_hotkey(window, cx);
-                }),
-            )
+            .on_action(cx.listener(|this, _: &ToggleViewPanel, window, cx| {
+                this.toggle_view_panel(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &SleepFocusedSession, _window, cx| {
                 if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
                     return;
@@ -1100,8 +1098,7 @@ impl Render for GhostexGpuiApp {
                 this.handle_workspace_split_resize_drag_move(event, window, cx);
                 this.handle_command_split_resize_drag_move(event, window, cx);
                 this.handle_browser_split_resize_drag_move(event, window, cx);
-                this.handle_project_editor_companion_resize_drag_move(event, window, cx);
-                this.handle_project_editor_companion_split_resize_drag_move(event, window, cx);
+                this.handle_workarea_split_resize_drag_move(event, window, cx);
             }))
             .on_mouse_up(
                 MouseButton::Left,
@@ -1111,8 +1108,7 @@ impl Render for GhostexGpuiApp {
                     this.handle_workspace_split_resize_mouse_up(event, window, cx);
                     this.handle_command_split_resize_mouse_up(event, window, cx);
                     this.handle_browser_split_resize_mouse_up(event, window, cx);
-                    this.handle_project_editor_companion_resize_mouse_up(event, window, cx);
-                    this.handle_project_editor_companion_split_resize_mouse_up(event, window, cx);
+                    this.handle_workarea_split_resize_mouse_up(event, window, cx);
                     this.finish_workspace_tab_drag(cx);
                     this.finish_command_tab_drag(cx);
                     this.finish_browser_tab_drag(cx);

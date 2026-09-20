@@ -139,22 +139,17 @@ const TERMINAL_AGENT_BAR_ACCOUNT_SUBMENU_WIDTH: f32 = 220.0;
 const TERMINAL_AGENT_BAR_ACCOUNT_SUBMENU_GAP: f32 = 4.0;
 const TERMINAL_AGENT_BAR_COPY_SESSION_ID_ICON: &str = "titlebar/copy.svg";
 
-/// Which pane surface a bar belongs to. Both show Agents workspace sessions and
-/// both resolve into the same shell-session id space, but they focus through
-/// different entry points.
+/// Which pane surface a bar belongs to. One variant today; it stays an enum because the popped-out
+/// view window phase 4 adds is the next one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalAgentBarSurface {
     AgentsPane(WorkspacePaneId),
-    ProjectEditorCompanion(TitlebarMode),
 }
 
 impl TerminalAgentBarSurface {
     fn element_id_suffix(self, session_id: TerminalSessionId) -> String {
         match self {
             Self::AgentsPane(pane_id) => format!("agents-{}-{}", pane_id.0, session_id.0),
-            Self::ProjectEditorCompanion(mode) => {
-                format!("companion-{}-{}", mode.element_slug(), session_id.0)
-            }
         }
     }
 }
@@ -358,23 +353,6 @@ impl GhostexGpuiApp {
         )
     }
 
-    /// The project-editor companion terminal shows the same Agents sessions in
-    /// its own top/bottom split, and had the same overlay cluster, so it gets
-    /// the same bar.
-    pub(crate) fn render_project_editor_companion_terminal_agent_action_bar(
-        &self,
-        mode: TitlebarMode,
-        session_id: Option<TerminalSessionId>,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        let session_id = session_id?;
-        self.render_terminal_agent_action_bar(
-            TerminalAgentBarSurface::ProjectEditorCompanion(mode),
-            session_id,
-            cx,
-        )
-    }
-
     fn render_terminal_agent_action_bar(
         &self,
         surface: TerminalAgentBarSurface,
@@ -504,10 +482,7 @@ impl GhostexGpuiApp {
     can never be drawn enabled while its handler refuses to run it, which is the
     failure the old hard-coded `is_enabled` list invited.
 
-    In Agents, Maximize is the workspace's reversible pane Focus mode. In a
-    project-editor companion it is a route into Agents focused on that exact
-    session; the matching Agents button becomes Minimize and restores the
-    remembered view and companion slot.
+    Maximize is the workspace's reversible pane Focus mode.
     */
     fn terminal_agent_bar_action_state(
         &self,
@@ -564,22 +539,12 @@ impl GhostexGpuiApp {
                 }
             }
             TerminalAgentBarAction::Maximize => {
-                if let TerminalAgentBarSurface::AgentsPane(pane_id) = surface {
-                    let restoring_companion = self
-                        .terminal_agent_bar_companion_focus_return
-                        .is_some_and(|target| target.session_id == session_id);
-                    if restoring_companion || self.agents_workspace.focus_mode_pane == Some(pane_id)
-                    {
-                        state.icon_path = TERMINAL_AGENT_BAR_EXIT_MAXIMIZE_ICON;
-                        state.label = "Exit maximize";
-                    } else if self.agents_workspace.focus_mode_eligible_leaf_count() <= 1 {
-                        state.disabled_reason = Some("Session is not in a split pane".to_string());
-                    }
-                } else {
-                    // The global Agents Focus-mode chord is inert while a
-                    // project view owns the workarea; only advertise the
-                    // companion button's click action here.
-                    state.hotkey_action_id = "";
+                let TerminalAgentBarSurface::AgentsPane(pane_id) = surface;
+                if self.agents_workspace.focus_mode_pane == Some(pane_id) {
+                    state.icon_path = TERMINAL_AGENT_BAR_EXIT_MAXIMIZE_ICON;
+                    state.label = "Exit maximize";
+                } else if self.agents_workspace.focus_mode_eligible_leaf_count() <= 1 {
+                    state.disabled_reason = Some("Session is not in a split pane".to_string());
                 }
             }
             _ => {}
@@ -904,21 +869,15 @@ impl GhostexGpuiApp {
             return;
         }
 
-        match surface {
-            TerminalAgentBarSurface::AgentsPane(pane_id) => {
-                self.focus_agents_terminal_mount_slot(
-                    AgentsTerminalBodyMountSlotId {
-                        pane_id,
-                        session_id,
-                    },
-                    window,
-                    cx,
-                );
-            }
-            TerminalAgentBarSurface::ProjectEditorCompanion(mode) => {
-                self.focus_project_editor_companion_terminal_session(mode, session_id, window, cx);
-            }
-        }
+        let TerminalAgentBarSurface::AgentsPane(pane_id) = surface;
+        self.focus_agents_terminal_mount_slot(
+            AgentsTerminalBodyMountSlotId {
+                pane_id,
+                session_id,
+            },
+            window,
+            cx,
+        );
 
         let Some(view) = self
             .agents_gpui_engine_terminals
@@ -948,94 +907,12 @@ impl GhostexGpuiApp {
     fn perform_terminal_agent_bar_maximize_action(
         &mut self,
         surface: TerminalAgentBarSurface,
-        session_id: TerminalSessionId,
-        window: &mut Window,
+        _session_id: TerminalSessionId,
+        _window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        match surface {
-            TerminalAgentBarSurface::ProjectEditorCompanion(mode) => {
-                let slot = if self.project_editor_companion_terminal_session_id == Some(session_id)
-                {
-                    ProjectEditorCompanionTerminalSlot::Top
-                } else if self.project_editor_companion_secondary_terminal_session_id
-                    == Some(session_id)
-                {
-                    ProjectEditorCompanionTerminalSlot::Bottom
-                } else {
-                    return;
-                };
-                let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) else {
-                    return;
-                };
-
-                self.terminal_agent_bar_companion_focus_return =
-                    Some(TerminalAgentBarCompanionFocusReturn {
-                        mode,
-                        session_id,
-                        slot,
-                    });
-                self.agents_workspace.select_tab(pane_id, session_id);
-                if self.agents_workspace.focus_mode_pane != Some(pane_id) {
-                    if self.agents_workspace.focus_mode_pane.is_some() {
-                        let _ = self.agents_workspace.toggle_focus_mode();
-                    }
-                    let _ = self.agents_workspace.toggle_focus_mode();
-                }
-                if self.set_active_mode(TitlebarMode::Agents, window, cx) {
-                    self.focus_agents_pane(pane_id, cx);
-                    cx.notify();
-                } else {
-                    self.terminal_agent_bar_companion_focus_return = None;
-                }
-            }
-            TerminalAgentBarSurface::AgentsPane(pane_id) => {
-                if self.restore_terminal_agent_bar_companion_focus(session_id, window, cx) {
-                    return;
-                }
-                self.toggle_agents_focus_mode_for_pane(pane_id, cx);
-            }
-        }
-    }
-
-    fn restore_terminal_agent_bar_companion_focus(
-        &mut self,
-        session_id: TerminalSessionId,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let Some(target) = self
-            .terminal_agent_bar_companion_focus_return
-            .filter(|target| target.session_id == session_id)
-        else {
-            return false;
-        };
-        if !self.titlebar_mode_available(target.mode)
-            || !self.agents_workspace.has_session(session_id)
-        {
-            self.terminal_agent_bar_companion_focus_return = None;
-            return false;
-        }
-
-        self.terminal_agent_bar_companion_focus_return = None;
-        if self.agents_workspace.focus_mode_pane.is_some() {
-            let _ = self.agents_workspace.toggle_focus_mode();
-        }
-        match target.slot {
-            ProjectEditorCompanionTerminalSlot::Top => {
-                self.project_editor_companion_terminal_session_id = Some(session_id);
-            }
-            ProjectEditorCompanionTerminalSlot::Bottom => {
-                self.project_editor_shell.left_companion_split_enabled = true;
-                self.project_editor_companion_secondary_terminal_session_id = Some(session_id);
-            }
-        }
-        self.project_editor_companion_focused_terminal_slot = target.slot;
-        if !self.set_active_mode(target.mode, window, cx) {
-            return false;
-        }
-        self.focus_project_editor_companion_terminal_session(target.mode, session_id, window, cx);
-        cx.notify();
-        true
+        let TerminalAgentBarSurface::AgentsPane(pane_id) = surface;
+        self.toggle_agents_focus_mode_for_pane(pane_id, cx);
     }
 }
 

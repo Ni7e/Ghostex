@@ -172,11 +172,6 @@ impl GhostexGpuiApp {
                 {
                     self.request_agents_terminal_text_focus_handoff(slot_id);
                 }
-                Some(FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id))
-                    if slot_id.session_id == session_id =>
-                {
-                    self.request_project_editor_companion_terminal_text_focus_handoff(slot_id);
-                }
                 _ => {}
             }
             self.reconcile_agents_pane_surfaces(cx);
@@ -194,17 +189,6 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         self.request_agents_terminal_text_focus_handoff(slot_id);
-        if self.agents_chat_mode_sessions.contains(&slot_id.session_id) {
-            self.reconcile_agents_pane_surfaces(cx);
-        }
-    }
-
-    pub(crate) fn request_project_editor_companion_session_text_focus_handoff(
-        &mut self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        self.request_project_editor_companion_terminal_text_focus_handoff(slot_id);
         if self.agents_chat_mode_sessions.contains(&slot_id.session_id) {
             self.reconcile_agents_pane_surfaces(cx);
         }
@@ -365,7 +349,7 @@ impl GhostexGpuiApp {
         String,
         String,
     )> {
-        if self.active_mode != TitlebarMode::Agents {
+        if !self.agents_workspace_visible() {
             return Vec::new();
         }
         self.agents_workspace
@@ -1034,9 +1018,6 @@ impl GhostexGpuiApp {
         capability that the app-owned Source surface receives.
         */
         let trusted_clipboard_origin = Some(url.clone());
-        #[cfg(target_os = "macos")]
-        let chat_parent = self.companion_native_parent();
-        #[cfg(not(target_os = "macos"))]
         let chat_parent = self.parent_ns_view;
         let surface = match CefSurface::try_new(
             format!(
@@ -1160,27 +1141,21 @@ impl GhostexGpuiApp {
         let drag_active = self.workspace_tab_drag_active
             || self.browser_tab_drag_active
             || self.command_tab_drag_active;
-        let visible_session_ids = if drag_active {
+        /*
+        CDXC:SessionChat 2026-09-20 WHY:
+        A chat page is visible exactly when its Agents pane is rendered, whatever the view panel
+        shows, because that column is on screen in every view. This supersedes the 2026-08-02 rule
+        that also enumerated the companion side pane's chat slots.
+        */
+        let visible_session_ids = if drag_active || !self.agents_workspace_visible() {
             HashSet::new()
-        } else if self.active_mode == TitlebarMode::Agents {
+        } else {
             self.agents_workspace
                 .rendered_leaf_order()
                 .into_iter()
                 .filter_map(|pane_id| self.agents_workspace.active_session_in_pane(pane_id))
                 .filter(|session_id| self.agents_chat_mode_sessions.contains(session_id))
                 .collect::<HashSet<_>>()
-        } else if self.active_mode.is_project_editor_mode() {
-            // CDXC:SessionChat 2026-08-02: the companion side pane
-            // shows chat-mode sessions in Code/Browser/Kanban/Automate/Docs
-            // too. The mount-slot enumeration already gates on companion
-            // visibility, mode wakefulness, and slot eligibility.
-            self.current_project_editor_companion_terminal_body_mount_slots()
-                .into_iter()
-                .map(|slot_id| slot_id.session_id)
-                .filter(|session_id| self.agents_chat_mode_sessions.contains(session_id))
-                .collect::<HashSet<_>>()
-        } else {
-            HashSet::new()
         };
         for session_id in &visible_session_ids {
             let _ = self.ensure_agents_chat_surface(*session_id, cx);

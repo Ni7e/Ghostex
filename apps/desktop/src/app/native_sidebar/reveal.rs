@@ -89,16 +89,6 @@ impl GhostexGpuiApp {
             self.close_native_sidebar_reveal(cx);
             return;
         }
-        if self.companion_reveal.is_some() {
-            if requested {
-                self.close_floating_companion(cx);
-            } else {
-                self.sync_floating_companion(cx);
-                if self.companion_reveal.is_some() {
-                    return;
-                }
-            }
-        }
         if let Some(reveal) = self.native_sidebar.reveal.as_ref() {
             let visible = unsafe {
                 GhostexGpuiNativeSidebarRevealUpdate(
@@ -116,21 +106,25 @@ impl GhostexGpuiApp {
             }
             return;
         }
+        /*
+        CDXC:Sidebar 2026-09-20 WHY:
+        The native gesture still reports a second reveal zone for the bottom half of the left edge,
+        which used to float the hidden companion. The companion is gone, and the Agents column it was
+        replaced by is never hidden in this phase, so the request always says "no companion here" and
+        zone 2 does nothing. Phase 7 is where the chat column gets its own floating reveal.
+        */
         let request = unsafe {
             GhostexGpuiNativeSidebarRevealRequest(
                 self.parent_ns_view,
                 self.sidebar_width as f64,
                 workarea_header_bottom_y() as f64,
-                self.active_mode.is_project_editor_mode()
-                    && !self.project_editor_shell.left_companion_visible,
+                false,
                 requested,
                 keep_under_pointer,
             )
         };
-        match request {
-            1 => self.open_native_sidebar_reveal(requested, keep_under_pointer, cx),
-            2 => self.open_floating_companion(cx),
-            _ => {}
+        if request == 1 {
+            self.open_native_sidebar_reveal(requested, keep_under_pointer, cx);
         }
     }
 

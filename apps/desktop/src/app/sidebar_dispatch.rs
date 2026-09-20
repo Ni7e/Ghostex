@@ -935,7 +935,11 @@ impl GhostexGpuiApp {
                 .spawn(async move { gpui_os_integration_resolved_terminal_cwd(cwd) })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.switch_workarea_from_hotkey(TitlebarMode::Agents, window, cx);
+                // CDXC:Workarea 2026-09-20 WHY:
+                // "Open Terminal" used to switch the app to Agents so the new terminal was on
+                // screen. The sessions column is always on screen now, so it lands there without
+                // closing whatever view the user had open.
+                let _ = window;
                 let mut message = serde_json::json!({
                     "action": "createQuickTerminal",
                     "cwd": resolved_cwd,
@@ -1769,9 +1773,8 @@ impl GhostexGpuiApp {
         idle agent the user is sitting in front of looked retirable.
 
         Rust is the only party that knows what is on screen, so it publishes
-        that set (Agents rendered leaves in Agents mode, companion terminal
-        mount slots in the project-editor modes — chat-mode sessions included,
-        because the tab still owns its pane) and the sweep protects it. The
+        that set (the Agents column's rendered leaves, chat-mode sessions
+        included, because the tab still owns its pane) and the sweep protects it. The
         bridge carries bounded local gxserver session ids only: no titles,
         paths, commands, terminal output, or project bodies.
         */
@@ -2280,7 +2283,7 @@ impl GhostexGpuiApp {
                     .await;
                 if this
                     .update(cx, |this, cx| {
-                        if this.sidebar_collapsed || this.companion_reveal.is_some() {
+                        if this.sidebar_collapsed {
                             this.update_sidebar_cef_surface_visibility(cx);
                         }
                     })

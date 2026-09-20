@@ -31,7 +31,6 @@ pub(crate) enum GpuiAgentsDelayedSendTarget {
         runtime_session_id: AgentsTerminalRuntimeSessionId,
     },
     AgentsNative(AgentsTerminalBodyMountSlotId),
-    ProjectEditorCompanionNative(ProjectEditorCompanionTerminalBodyMountSlotId),
     #[cfg(target_os = "macos")]
     AgentsParkedNative(AgentsTerminalRuntimeSessionId),
 }

@@ -35,23 +35,12 @@ pub(crate) enum GpuiEngineTerminalEventTarget {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum GpuiTerminalAttachmentTarget {
     Terminal(GpuiEngineTerminalEventTarget),
-    // Companion can display a shell id borrowed from a project-local remote
-    // namespace. Retain the full shared workspace identity across the native
-    // picker and upload so parked projects with the same numeric id cannot
-    // redirect either the upload or its eventual paste.
-    ProjectEditorCompanion {
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-        session_key: GpuiWorkspaceTerminalSessionKey,
-    },
 }
 
 impl GpuiTerminalAttachmentTarget {
     pub(crate) fn engine_target(&self) -> GpuiEngineTerminalEventTarget {
         match self {
             Self::Terminal(target) => *target,
-            Self::ProjectEditorCompanion { slot_id, .. } => {
-                GpuiEngineTerminalEventTarget::Agents(slot_id.session_id)
-            }
         }
     }
 }

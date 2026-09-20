@@ -680,19 +680,10 @@ impl GhostexGpuiApp {
         // The chat surface is only interactive as a rendered pane's active
         // session; focus that pane so the focused-session guard and the
         // "for focused session" modal openers resolve to this session.
-        if self.focused_agents_or_companion_shell_session_id() != Some(session_id) {
-            if self.active_mode.is_project_editor_mode() {
-                // The chat surface is showing in the companion side pane;
-                // focus its slot so focused-session guards resolve here.
-                self.focus_project_editor_companion_terminal_session(
-                    self.active_mode,
-                    session_id,
-                    window,
-                    cx,
-                );
-            } else if let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) {
-                self.focus_agents_pane(pane_id, cx);
-            }
+        if self.focused_agents_or_companion_shell_session_id() != Some(session_id)
+            && let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id)
+        {
+            self.focus_agents_pane(pane_id, cx);
         }
         // Prompt Editor and Attach File or Folder need terminal input even
         // while Chat is visible, so create their viewer on demand.

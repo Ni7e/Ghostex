@@ -1055,9 +1055,8 @@ impl GhostexGpuiApp {
         gate looked only in the native Ghostty surface map, so every terminal
         owned by the GPUI engine was rejected even though the fire path already
         knew how to press Return in that engine. Resolve the exact live owner
-        shared by foreground, background, and project-editor companion
-        terminals before arming; never substitute the focused terminal or
-        another session.
+        shared by foreground and background terminals before arming; never
+        substitute the focused terminal or another session.
         */
         if self
             .gpui_agents_delayed_send_mount_target(session_id)
@@ -1439,20 +1438,6 @@ impl GhostexGpuiApp {
         }
 
         #[cfg(target_os = "macos")]
-        if let Some(slot_id) = self
-            .current_project_editor_companion_terminal_body_mount_slots()
-            .into_iter()
-            .find(|slot_id| {
-                slot_id.session_id == session_id
-                    && self.project_editor_companion_terminal_ghostty_surface_matches(*slot_id)
-            })
-        {
-            return Some(GpuiAgentsDelayedSendTarget::ProjectEditorCompanionNative(
-                slot_id,
-            ));
-        }
-
-        #[cfg(target_os = "macos")]
         if self
             .agents_terminal_parked_runtime_owners
             .get(&runtime_session_id)
@@ -1491,8 +1476,6 @@ impl GhostexGpuiApp {
             GpuiAgentsDelayedSendTarget::AgentsNative(slot_id) => {
                 self.send_return_key_to_mounted_agents_terminal_surface(slot_id, cx)
             }
-            GpuiAgentsDelayedSendTarget::ProjectEditorCompanionNative(slot_id) => self
-                .send_return_key_to_mounted_project_editor_companion_terminal_surface(slot_id, cx),
             #[cfg(target_os = "macos")]
             GpuiAgentsDelayedSendTarget::AgentsParkedNative(runtime_session_id) => {
                 self.send_return_key_to_parked_agents_terminal_surface(runtime_session_id)
@@ -2207,8 +2190,8 @@ impl GhostexGpuiApp {
                     self.toggle_gpui_sidebar_collapsed(cx);
                     return;
                 }
-                if action_id == "toggleCompanionPane" {
-                    self.toggle_project_editor_companion_from_hotkey(window, cx);
+                if action_id == "toggleViewPanel" {
+                    self.toggle_view_panel(window, cx);
                     return;
                 }
                 if action_id == "openExtensions" {
@@ -2229,7 +2212,7 @@ impl GhostexGpuiApp {
                     gpui_command_palette_adjacent_group_focus_direction(action_id)
                 {
                     if gpui_command_palette_adjacent_group_focus_source_allowed(self.shell_focus)
-                        && self.focus_workspace_direction_by_render_order(direction, cx)
+                        && self.focus_workspace_direction_by_render_order(direction, window, cx)
                     {
                         cx.notify();
                     }

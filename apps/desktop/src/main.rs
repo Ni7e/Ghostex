@@ -311,7 +311,7 @@ fn main() {
             ),
             gpui_key_binding_from_shared_hotkey("cmd+w", CloseFocusedSurface, None),
             gpui_key_binding_from_shared_hotkey("cmd+b", ToggleGpuiSidebarCollapsed, None),
-            gpui_key_binding_from_shared_hotkey("cmd+alt+b", ToggleProjectEditorCompanion, None),
+            gpui_key_binding_from_shared_hotkey("cmd+alt+b", ToggleViewPanel, None),
             KeyBinding::new(SLEEP_FOCUSED_SESSION_DEFAULT_KEY, SleepFocusedSession, None),
             gpui_key_binding_from_shared_hotkey("cmd+t", NewTerminalTab, None),
             gpui_key_binding_from_shared_hotkey("cmd+d", SplitFocusedTerminalRight, None),

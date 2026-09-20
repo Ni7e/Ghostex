@@ -240,8 +240,7 @@ impl GhostexGpuiApp {
             || self.workspace_split_drag.is_some()
             || self.command_split_drag.is_some()
             || self.browser_split_drag.is_some()
-            || self.project_editor_companion_drag.is_some()
-            || self.project_editor_companion_split_drag.is_some()
+            || self.workarea_split_drag.is_some()
             || self.command_pane.resize_drag.is_some()
     }
 }

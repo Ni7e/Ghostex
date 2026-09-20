@@ -50,13 +50,7 @@ impl GhostexGpuiApp {
                         if this.local_workspace_latest_focus_key.as_ref() != Some(&key) {
                             return;
                         }
-                        let opened = if this.active_mode == TitlebarMode::Agents
-                            || this.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key)
-                        {
-                            this.open_gpui_local_workspace_terminal(key, plan, this.agents_workspace.focused_pane, false, cx)
-                        } else {
-                            this.open_gpui_local_workspace_terminal_keeping_view(key, plan, this.agents_workspace.focused_pane, cx)
-                        };
+                        let opened = this.open_gpui_local_workspace_terminal(key, plan, this.agents_workspace.focused_pane, false, cx);
                         if opened {
                             Ok(())
                         } else {
@@ -192,13 +186,9 @@ impl GhostexGpuiApp {
             session.agent_icon = icon;
         }
         self.agents_workspace.select_tab(pane_id, session_id);
-        if !keep_view {
-            self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
-        }
+        let _ = keep_view;
         self.activate_preferred_agents_chat_launch_intent(session_id, cx);
-        if self.active_mode == TitlebarMode::Agents {
-            self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
-        }
+        self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
         self.scroll_workspace_pane_active_tab(pane_id);
         self.update_active_mode_cef_child_visibility(cx);
         self.persist_shell_layout_state();

@@ -17,8 +17,8 @@ hotkeys Every shortcut and its default binding
 ## The window
 
 - **Work area header**: the window has no separate title bar. The first row of
-  the work area shows Hide sidebar, the companion toggle, Back/Forward, and the
-  project icon, project name and current session title as one breadcrumb. In the
+  the work area shows Hide sidebar, Back/Forward, and the project icon, project
+  name and current session title as one breadcrumb. In the
   middle are the view tabs (Agents, Code, Browser, Kanban, Automate, Docs), and
   on the right the **Start**, **Open** and **Commit** buttons (Quick Actions,
   Open In and Git actions, each with a caret for its menu), a **⋯** menu holding
@@ -35,9 +35,12 @@ hotkeys Every shortcut and its default binding
   Prompt, Previous Sessions, Mobile & Remote, Extensions). The Notifications
   bell is in its top row; account usage meters sit at the bottom above the
   Commands row, with a Settings gear beside it.
-- **Work area**: the current project's view. In Agents it is a grid of
-  terminal panes and tabs; each pane can show the raw terminal or the Session
-  Chat rendering of the same agent conversation.
+- **Work area**: your sessions, and a view beside them when one is open. The
+  sessions are a grid of terminal panes and tabs; each pane can show the raw
+  terminal or the Session Chat rendering of the same agent conversation. Opening
+  Code, Browser, Kanban, Automate or Docs puts it in a panel on the right with a
+  divider you can drag, and your agents keep running on the left. The view panel
+  toggle at the right end of the header, or Cmd+Option+B, opens and closes it.
 - **Quick Access** (Cmd+Shift+P): search every command, pane action, settings
   shortcut, and recent session. Cmd+P opens it on Recent Sessions.
 - **Settings** (Cmd+,): pages for General, Integrations, Extensions, Remote,

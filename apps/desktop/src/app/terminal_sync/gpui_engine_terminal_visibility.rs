@@ -217,16 +217,10 @@ impl GhostexGpuiApp {
     /// current titlebar mode, including slots rendering chat instead.
     fn displayed_agents_gpui_engine_terminal_sessions(&self) -> HashSet<TerminalSessionId> {
         let mut displayed = HashSet::new();
-        if self.active_mode == TitlebarMode::Agents {
+        if self.agents_workspace_visible() {
             displayed.extend(
                 self.agents_workspace
                     .rendered_terminal_body_mount_slots()
-                    .into_iter()
-                    .map(|slot_id| slot_id.session_id),
-            );
-        } else {
-            displayed.extend(
-                self.current_project_editor_companion_terminal_body_mount_slots()
                     .into_iter()
                     .map(|slot_id| slot_id.session_id),
             );
@@ -291,7 +285,6 @@ impl GhostexGpuiApp {
         self.workspace_tab_drag_active
             || self.command_tab_drag_active
             || self.workspace_split_drag.is_some()
-            || self.project_editor_companion_drag.is_some()
-            || self.project_editor_companion_split_drag.is_some()
+            || self.workarea_split_drag.is_some()
     }
 }

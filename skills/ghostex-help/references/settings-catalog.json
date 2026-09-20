@@ -6894,7 +6894,7 @@
         "openGhostexHelp": "",
         "openHotkeys": "cmd+.",
         "toggleSidebarCollapsed": "cmd+b",
-        "toggleCompanionPane": "cmd+alt+b",
+        "toggleViewPanel": "cmd+alt+b",
         "renameActiveSession": "cmd+r",
         "openBrowserPane": "cmd+n",
         "switchAgentsView": "",
@@ -9351,9 +9351,9 @@
       "defaultKey": "cmd+b"
     },
     {
-      "id": "toggleCompanionPane",
-      "title": "Toggle Companion Pane",
-      "description": "Collapse or expand the project companion pane.",
+      "id": "toggleViewPanel",
+      "title": "Toggle View Panel",
+      "description": "Open or close the view panel beside your sessions.",
       "defaultKey": "cmd+alt+b"
     },
     {

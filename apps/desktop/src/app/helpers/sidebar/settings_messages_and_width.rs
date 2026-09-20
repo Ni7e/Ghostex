@@ -326,9 +326,14 @@ pub(crate) fn gpui_session_chat_simple_mode_from_settings(
         .unwrap_or(false)
 }
 
+/// CDXC:Workarea 2026-09-20 WHY:
+/// With a view open the workarea has to hold the Agents column, the split divider and the view panel,
+/// so the sidebar may only grow into what is left after all three.
 pub(crate) fn current_sidebar_max_width(window: &Window, mode: TitlebarMode) -> f32 {
     let workspace_min_width = if mode.is_project_editor_mode() {
-        PROJECT_EDITOR_MAIN_MIN_WIDTH
+        WORKAREA_AGENTS_COLUMN_MIN_WIDTH
+            + WORKSPACE_SPLIT_HANDLE_THICKNESS
+            + WORKAREA_VIEW_PANEL_MIN_WIDTH
     } else {
         WORKSPACE_MIN_WIDTH
     };

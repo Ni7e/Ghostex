@@ -87,7 +87,6 @@ impl GhostexGpuiApp {
     }
 
     /// CDXC:FocusRouting 2026-09-19 WHY:
-    /// The companion pane of a non-Agents view resolves its session from the runtime's last posted focus state (`project_editor_companion_active_terminal_key`). The bridge path only ran after the runtime had posted the clicked session, but an in-process click runs first, so the companion sync put the previous session back and the tab-selection report listed it as visible next to the clicked one. Nothing corrected that list afterwards, so the previous session's sidebar row kept the visible fill, which reads as a stuck hover.
     /// The click is the new focus: record it here, and the runtime's own focus state confirms it a moment later.
     fn advance_presentation_focus_to_in_process_click(
         &mut self,
@@ -180,27 +179,11 @@ impl GhostexGpuiApp {
         self.agents_workspace.select_tab(pane_id, shell_session_id);
         // The sidebar highlight reads the store, so the staged tab is a selection like any other.
         self.gx_store_select_local_session(&key, false, false, cx);
-        if keep_editor
-            && self.project_editor_companion_terminal_session_is_active_project_eligible(
-                shell_session_id,
-            )
-        {
-            // The runtime's focus payload used to retarget the companion to the staged tab. The selection above already moved the focus that payload carries, so the payload no longer reads as a change; the companion follows here instead.
-            let mode = self.active_mode;
-            let focus_companion =
-                self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode);
-            self.retarget_project_editor_companion_to_workspace_terminal(
-                mode,
-                shell_session_id,
-                &GpuiWorkspaceTerminalSessionKey::Local(key.clone()),
-                focus_companion,
-                cx,
-            );
-        }
-        if !keep_editor {
-            self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
-            self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
-        }
+        // CDXC:Workarea 2026-09-20 WHY:
+        // Staging a tab in the Agents column is enough now: the column is on screen whatever the
+        // view panel shows, so there is no companion to retarget and no view to leave.
+        let _ = keep_editor;
+        self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
         self.scroll_workspace_pane_active_tab(pane_id);
         self.reconcile_agents_pane_surfaces(cx);
         self.update_active_mode_cef_child_visibility(cx);

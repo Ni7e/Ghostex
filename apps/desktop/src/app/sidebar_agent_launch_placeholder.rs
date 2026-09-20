@@ -105,10 +105,10 @@ impl GhostexGpuiApp {
         let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
             return;
         };
-        // The launch keeps a non-Agents view (CDXC:AgentLauncher 2026-09-14), so only an Agents pane takes focus.
-        if self.active_mode == TitlebarMode::Agents {
-            self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
-        }
+        // CDXC:Workarea 2026-09-20 WHY:
+        // The launch keeps the view panel open (CDXC:AgentLauncher 2026-09-14) and the new session's
+        // pane is on screen beside it either way, so the pane takes focus without a view switch.
+        self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
         self.scroll_workspace_pane_active_tab(pane_id);
         self.reconcile_agents_pane_surfaces(cx);
         self.update_active_mode_cef_child_visibility(cx);

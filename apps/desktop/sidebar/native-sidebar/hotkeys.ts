@@ -75,7 +75,7 @@ export function runNativeSidebarHotkey(ui: NativeSidebarUiState, actionId: strin
     case 'switchWorkareaView':
     case 'switchTitlebarView':
     case 'terminalToolbarAction':
-    case 'toggleCompanionPane':
+    case 'toggleViewPanel':
       post({ type: 'runGhostexHotkeyAction', actionId: action.id });
       break;
   }

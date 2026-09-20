@@ -34,7 +34,6 @@ pub(crate) mod chrome_input_focus;
 pub(crate) mod command_pane_auto_minimize;
 pub(crate) mod command_pane_remote_action;
 #[cfg(target_os = "macos")]
-pub(crate) mod companion_reveal;
 pub(crate) mod create_worktree_modal_lifecycle;
 pub(crate) mod delayed_send;
 pub(crate) mod delayed_send_modal_lifecycle;
@@ -95,6 +94,7 @@ pub(crate) mod terminal_sync;
 pub(crate) mod titlebar;
 pub(crate) mod update_available_modal_lifecycle;
 mod view_pane_state;
+mod view_panel;
 pub(crate) mod view_scopes;
 pub(crate) mod view_skeletons;
 pub(crate) mod workarea;

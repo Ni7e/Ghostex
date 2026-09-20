@@ -34,7 +34,7 @@ export type ghostexHotkeyActionId =
   | 'openModelPicker'
   | 'toggleChatView'
   | 'openFindPrompts'
-  | 'toggleCompanionPane'
+  | 'toggleViewPanel'
   | 'toggleAgentActions'
   | 'toggleSidebarCollapsed'
   | 'wakeFocusedSession'
@@ -127,7 +127,7 @@ export type ghostexHotkeyAction =
     }
   | { id: ghostexHotkeyActionId; kind: 'switchTitlebarView'; viewIndex: number }
   | { id: ghostexHotkeyActionId; kind: 'terminalToolbarAction'; terminalToolbarAction: ghostexTerminalToolbarAction }
-  | { id: ghostexHotkeyActionId; kind: 'toggleCompanionPane' }
+  | { id: ghostexHotkeyActionId; kind: 'toggleViewPanel' }
   | { id: ghostexHotkeyActionId; kind: 'toggleSidebarCollapsed' }
   | { direction: 'horizontal' | 'vertical'; id: ghostexHotkeyActionId; kind: 'splitFocusedPane' };
 
@@ -275,15 +275,18 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
     title: 'Toggle Sidebar',
   },
   {
-    action: { id: 'toggleCompanionPane', kind: 'toggleCompanionPane' },
+    action: { id: 'toggleViewPanel', kind: 'toggleViewPanel' },
     /**
-     * CDXC:CodeEditor 2026-07-29-05:03:
-     * Cmd+Option+B toggles the project-editor companion independently from the main app sidebar. Collapsing transfers focus to the active Code, Browser, Kanban, Automate, or Docs pane; expanding restores and focuses the companion.
+     * CDXC:Workarea 2026-09-20 WHY:
+     * Cmd+Option+B opens and closes the view panel beside the sessions, independently of the main app
+     * sidebar. Closing it leaves the sessions the whole work area; opening it comes back to the view
+     * this project last showed. This supersedes the 2026-07-29 companion-pane wording, whose pane the
+     * view panel replaced.
      */
     defaultKey: 'cmd+alt+b',
-    description: 'Collapse or expand the project companion pane.',
-    id: 'toggleCompanionPane',
-    title: 'Toggle Companion Pane',
+    description: 'Open or close the view panel beside your sessions.',
+    id: 'toggleViewPanel',
+    title: 'Toggle View Panel',
   },
   {
     action: { id: 'renameActiveSession', kind: 'renameActiveSession' },

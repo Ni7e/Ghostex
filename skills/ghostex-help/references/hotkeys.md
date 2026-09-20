@@ -17,7 +17,7 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Ask Ghostex Help | unassigned |  | Open the Ghostex Help menu: sample questions an agent can answer and settings it can change for you. | `openGhostexHelp` |
 | Hotkeys | `cmd+.` |  | Open app hotkeys. | `openHotkeys` |
 | Toggle Sidebar | `cmd+b` |  | Collapse or expand the sidebar. | `toggleSidebarCollapsed` |
-| Toggle Companion Pane | `cmd+alt+b` |  | Collapse or expand the project companion pane. | `toggleCompanionPane` |
+| Toggle View Panel | `cmd+alt+b` |  | Open or close the view panel beside your sessions. | `toggleViewPanel` |
 | Rename Active Session | `cmd+r` |  | Rename the focused session. | `renameActiveSession` |
 | Open Browser Pane | `cmd+n` |  | Open a browser tab beside the focused tab. | `openBrowserPane` |
 | Switch to Agents | unassigned |  | Switch to Agents view. | `switchAgentsView` |

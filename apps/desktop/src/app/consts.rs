@@ -238,7 +238,7 @@ pub(crate) const TITLEBAR_BUTTON_WIDTH: f32 = 42.0;
 CDXC:Titlebar 2026-09-19 DECISION:
 User: the trailing titlebar icon buttons and the browser address bar buttons have no border lines
 between them and no gap; each button is its icon plus 7px of padding on each side, so two
-neighbouring icons sit 14px apart. The leading buttons (sidebar collapse, companion toggle,
+neighbouring icons sit 14px apart. The leading buttons (sidebar collapse,
 update, Back, reveal session, Forward, Notifications) use the same padding so their gaps match
 the right side; this supersedes the 2026-09-06 fixed 29px leading width.
 */
@@ -626,10 +626,6 @@ pub(crate) const TITLEBAR_ICON_CHEVRON_LEFT: &str = "titlebar/chevron-left.svg";
 pub(crate) const TITLEBAR_ICON_CHEVRON_DOWN: &str = "titlebar/chevron-down.svg";
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR: &str = "titlebar/layout-sidebar.svg";
-
-pub(crate) const TITLEBAR_ICON_COMPANION_HIDE: &str = "titlebar/companion-hide.svg";
-
-pub(crate) const TITLEBAR_ICON_COMPANION_SHOW: &str = "titlebar/companion-show.svg";
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_EXPAND: &str =
     "titlebar/layout-sidebar-left-expand.svg";
@@ -1129,7 +1125,7 @@ CDXC:Workarea 2026-06-22-06:24:
 GPUI workspace chrome should match the macOS workspace shell constants: terminal tab bars are 36px high, workspace tabs stay in the 170-175px macOS width band, command titlebars and collapsed strips are 26px high, and divider/resize rails remain real layout siblings around 5px with 1px visual separators.
 
 CDXC:Workarea 2026-06-22-06:24:
-The command panel stores an in-memory height ratio, but its default and double-click reset derive from the shared command-pane default-height setting when that fits within the 5%-90% available-content clamp. Project-editor companions default to roughly 32% of the editor area with a practical minimum and persist resize/reset mutations through the GPUI shell state.
+The command panel stores an in-memory height ratio, but its default and double-click reset derive from the shared command-pane default-height setting when that fits within the 5%-90% available-content clamp. The workarea split stores its own ratio the same way, per project, with a practical minimum on each side.
 
 CDXC:CommandPane 2026-06-25-11:29:
 GPUI command-pane initial height, missing persisted height, and double-click reset must honor the same Settings.commandsPanelDefaultHeightPx value as the macOS app. Keep the Rust side on the shared 125px default and 40px-600px setting clamp so changing the Workspace setting affects future opens/resets without rewriting explicit persisted ratios.
@@ -1235,7 +1231,7 @@ pub(crate) const WORKSPACE_SPLIT_HANDLE_THICKNESS: f32 = 1.0;
 pub(crate) const WORKSPACE_BOTTOM_ROW_TOP_RATIO: f32 = 0.72;
 
 /// CDXC:CommandPane 2026-09-14 DECISION:
-/// User: chat view companion sidepanes and agent panes in general have a minimum width of 388px.
+/// User: chat view sidepanes and agent panes in general have a minimum width of 388px.
 pub(crate) const PANE_RESIZE_MINIMUM_WIDTH: f32 = 388.0;
 
 pub(crate) const PANE_RESIZE_MINIMUM_HEIGHT: f32 = 160.0;

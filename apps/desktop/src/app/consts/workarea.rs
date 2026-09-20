@@ -30,25 +30,18 @@ The GPUI command pane should honor the shared native default for Sleep Focused S
 */
 pub(crate) const SLEEP_FOCUSED_SESSION_DEFAULT_KEY: &str = "alt-shift-s";
 
-pub(crate) const PROJECT_EDITOR_COMPANION_WIDTH_RATIO: f32 = 0.32;
+/// CDXC:Workarea 2026-09-20 WHY:
+/// The share of the workarea the Agents column keeps when a view is open. The 2026-09-19 screens draw
+/// the chat column and the view panel at roughly 1 : 1.25, which is this ratio; the old 0.32 default
+/// sized a one-terminal companion strip, not a whole chat.
+pub(crate) const WORKAREA_SPLIT_DEFAULT_RATIO: f32 = 0.44;
 
-pub(crate) const PROJECT_EDITOR_COMPANION_MIN_WIDTH: f32 = PANE_RESIZE_MINIMUM_WIDTH;
+/// The Agents column is a workspace pane tree, so it keeps the same minimum every workspace pane has.
+pub(crate) const WORKAREA_AGENTS_COLUMN_MIN_WIDTH: f32 = PANE_RESIZE_MINIMUM_WIDTH;
 
 /// CDXC:Workarea 2026-09-16 DECISION:
 /// User: main panes in non-agent views, including Docs and Browser, have a minimum width of 455px.
-pub(crate) const PROJECT_EDITOR_MAIN_MIN_WIDTH: f32 = 455.0;
-
-pub(crate) const PROJECT_EDITOR_COMPANION_SPLIT_RATIO: f32 = 0.5;
-
-/// CDXC:Workarea 2026-09-19 DECISION:
-/// User: a new pair of side-by-side companion sidepanes starts at 440px each, and both stay resizable.
-pub(crate) const PROJECT_EDITOR_COMPANION_COLUMN_DEFAULT_WIDTH: f32 = 440.0;
-
-/// A side-by-side sidepane is a companion sidepane too, so it keeps the shared
-/// pane minimum rather than half of it, and the pair reserves both minimums plus
-/// the divider between them.
-pub(crate) const PROJECT_EDITOR_COMPANION_COLUMN_MIN_WIDTH: f32 =
-    PROJECT_EDITOR_COMPANION_MIN_WIDTH;
+pub(crate) const WORKAREA_VIEW_PANEL_MIN_WIDTH: f32 = 455.0;
 
 pub(crate) const PROJECT_EDITOR_AWAKE_MODE_CAP: usize = 3;
 

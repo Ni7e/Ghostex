@@ -141,11 +141,9 @@ impl GhostexGpuiApp {
             return false;
         }
 
-        if self.active_mode == TitlebarMode::Agents {
-            let focused_pane = self.agents_workspace.focused_pane;
-            self.focus_shell_target(ShellFocusTarget::AgentsPane(focused_pane), cx);
-            self.scroll_workspace_pane_active_tab(focused_pane);
-        }
+        let focused_pane = self.agents_workspace.focused_pane;
+        self.focus_shell_target(ShellFocusTarget::AgentsPane(focused_pane), cx);
+        self.scroll_workspace_pane_active_tab(focused_pane);
         self.persist_shell_layout_state();
         cx.notify();
         true

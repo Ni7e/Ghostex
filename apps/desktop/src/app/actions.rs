@@ -25,7 +25,7 @@ gpui::actions!(
         CloseFocusedSurface,
         CloseFocusedSurfaceMenuOnly,
         ToggleGpuiSidebarCollapsed,
-        ToggleProjectEditorCompanion,
+        ToggleViewPanel,
         SleepFocusedSession,
         WakeFocusedSession,
         NewTerminalTab,

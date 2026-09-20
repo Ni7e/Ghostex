@@ -25,13 +25,12 @@ The full view tabs stay centered in the header. When space is tight, they
 become a dropdown on the left right after Next (Forward), before the project
 name. Ask Ghostex, Tips & Tricks, Resources, Dev servers and Extensions are all
 reached from the **⋯** button at the right end of the header. Hovering a view shows its positional shortcut.
-**Hide sidebar** toggles the sidebar. The matching **Hide companion** / **Show companion**
-button sits immediately beside it in every view (greyed out in Agents, which has no
-companion pane), so Back and Forward stay in the same place, and it uses the same
-outlined chat bubble with text lines whether the companion is visible or hidden.
+**Hide sidebar** toggles the sidebar.
 When an update is available, a download button appears just before the project name.
-The header's right end also has two panel toggles: the command terminal, and the
-view panel (not available yet).
+The header's right end has two panel toggles: the command terminal, and the view
+panel. The **view panel toggle** (Cmd+Option+B, `toggleViewPanel`) opens a view beside
+your sessions and closes it again; opening it comes back to the view this project last
+had open, and closes to sessions at full width.
 
 Right-click Code, Browser, Kanban, Automate, Docs, or another web-based view's
 header tab for **Reload** and **Sleep** (or **Wake** when sleeping), followed by **Extensions**. Reload
@@ -150,9 +149,10 @@ projects" to make a Space switch change only the sidebar filter
 to the one that owns a session you open from outside it, for example through
 Back/Forward, Search by Prompt, a notification, or Previous Sessions; otherwise
 the Space row only marks that Space with a dot.
-Switching projects by any route keeps the project's last view. Clicking a session
-inside the current project opens it in the visible companion pane, or switches
-to Agents if the companion is hidden.
+Switching projects by any route keeps the project's last view, its own width for the
+split between sessions and the view, and whether the view panel was open.
+Clicking a session opens it in the sessions column, which is always on screen, so it
+never closes the view you are looking at.
 Leaving a project (by switching Spaces or projects) does not close what you had
 open there: the terminals, chats, and view page that were on screen stay running
 in the background for the "Keep the previous project live for" number of minutes
@@ -161,21 +161,11 @@ instant. Set it to 0 to release them as soon as you leave.
 Starting a new agent from the sidebar launcher or New Thread picker keeps your
 current view open, including Code, Browser, Kanban, Automate, and Docs. Select
 Agents when you want to open the new agent there.
-The companion pane holds a second session two ways, chosen with the two buttons
-in its title bar: split it vertically to stack the sessions, or split it to the
-right to put the second session in its own sidepane beside the first. A fresh
-side-by-side pair starts at 440px each where the window is wide enough for it,
-and narrower windows give both sidepanes less so the main pane keeps its own
-minimum. Drag the divider between the two sidepanes to rebalance them,
-double-click it to make them even again, and drag the outer divider to resize the
-pair together. Clicking the other arrangement's button rearranges the two
-sessions you already have instead of starting a third. The button for the
-arrangement you are in reads "Show one companion session": in a side-by-side pair
-it keeps the sidepane you click it in, and in a stacked split it keeps the active
-session, and the companion goes back to the width it had before it was split.
-Click inside either companion pane to make it active. Selecting another session
-in the sidebar or creating a new session replaces that active pane's session and
-leaves the other pane in place.
+Opening a view puts it beside your sessions rather than over them: the whole grid of
+terminal panes and chats stays on the left, the view takes the right half, and a
+divider separates them. Drag the divider to change the balance and double-click it to
+put it back; each project remembers its own. Your agents keep running and stay exactly
+where they are while you open, change and close views.
 
 - Width: the sidebar sits on the left; drag the divider to resize,
   double-click it to restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
@@ -184,20 +174,16 @@ leaves the other pane in place.
   (below any pinned headers, where scrolling allows), then blinks its outline
   twice: pale blue in light mode and white in dark mode. Active sessions also have a slightly
   stronger background and border in light mode.
-- Pane memory: the companion and Commands panes are remembered for Agents and,
-  separately, for the wide views (Browser, Code, Docs, Kanban, Automate), the
-  same for every project, so switching projects never moves them. The sidebar
-  keeps one state everywhere by default; "Sidebar visibility memory"
-  (`sidebarVisibilityMemory`, Advanced) can remember it per view instead, and
-  then a project switch that hides it leaves it floating while you hover it.
-  While collapsed, hovering the 10px edge on the sidebar's side reveals it as
-  a floating panel; in a wide view with the companion hidden, the lower half
-  of that edge reveals the companion instead.
-- Pane width: agent panes and chat companion sidepanes have a minimum resize
-  width of 388px. In the desktop app, the main pane in Code, Browser, Kanban,
-  Automate, and Docs has a minimum width of 455px. Two side-by-side companion
-  sidepanes share that 388px each where they fit; on a window too narrow for both
-  they divide the width they have.
+- Pane memory: the Commands pane is remembered once for a window with no view open
+  and once for a window with one open, the same for every project, so switching
+  projects never moves it. The sidebar keeps one state everywhere by default;
+  "Sidebar visibility memory" (`sidebarVisibilityMemory`, Advanced) can remember it
+  the same two ways instead, and then a project switch that hides it leaves it
+  floating while you hover it. While collapsed, hovering the 10px edge on the
+  sidebar's side reveals it as a floating panel.
+- Pane width: agent panes have a minimum resize width of 388px, and so does the
+  sessions column when a view is open beside it. In the desktop app, an open Code,
+  Browser, Kanban, Automate, or Docs view has a minimum width of 455px.
 - Presets: Settings > General > Sidebar > Preset switches groups of card
   details at once; the individual rows below it are marked Advanced.
 - Timed Delayed Send: open **Delayed Send** from an agent's right-click menu

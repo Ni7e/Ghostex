@@ -74,7 +74,6 @@ impl GhostexGpuiApp {
             .min_w_0()
             .items_center()
             .child(self.render_sidebar_collapse_button(cx))
-            .child(self.render_titlebar_companion_toggle(cx))
             /*
             CDXC:Navigation 2026-08-19:
             Back/Forward sit LEFT of the project name, next to the sidebar

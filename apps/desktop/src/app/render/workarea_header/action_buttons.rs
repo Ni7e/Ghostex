@@ -458,7 +458,7 @@ impl GhostexGpuiApp {
                     .bg(titlebar_button_border_color()),
             )
             .child(self.render_workarea_header_command_terminal_toggle(cx))
-            .child(self.render_workarea_header_view_panel_toggle())
+            .child(self.render_workarea_header_view_panel_toggle(cx))
             .child(self.render_titlebar_extension_popup_panel(window, cx));
         let controls = h_flex()
             .flex_shrink(1.0)

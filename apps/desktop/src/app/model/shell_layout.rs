@@ -27,6 +27,7 @@ pub(crate) struct GpuiShellLayoutState {
     pub(crate) pending_command_gxserver_cleanup: HashSet<GpuiLocalWorkspaceSessionKey>,
     pub(crate) project_editor_shell: ProjectEditorShellModel,
     pub(crate) project_view_states_by_project: HashMap<String, GpuiProjectViewState>,
+    pub(crate) last_open_view_mode: Option<TitlebarMode>,
     pub(crate) view_pane_layouts: GpuiViewPaneLayouts,
     pub(crate) browser_profiles: BrowserProfileModel,
     pub(crate) browser_tabs: BrowserTabModel,
@@ -85,6 +86,7 @@ impl GpuiShellLayoutState {
             pending_command_gxserver_cleanup: HashSet::new(),
             project_editor_shell: ProjectEditorShellModel::shell_default(),
             project_view_states_by_project: HashMap::new(),
+            last_open_view_mode: None,
             view_pane_layouts: GpuiViewPaneLayouts::shell_default(),
             browser_profiles,
             browser_tabs,
@@ -411,15 +413,17 @@ impl GpuiShellLayoutState {
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
+        let last_open_view_mode = object
+            .get("lastOpenViewMode")
+            .and_then(serde_json::Value::as_str)
+            .and_then(TitlebarMode::from_slug)
+            .filter(|mode| *mode != TitlebarMode::Agents)
+            .or((active_mode != TitlebarMode::Agents).then_some(active_mode));
         let view_pane_layouts = object
             .get("viewPaneLayouts")
             .and_then(GpuiViewPaneLayouts::from_shell_state)
             .unwrap_or_else(|| {
-                GpuiViewPaneLayouts::seeded_from_restored_shell(
-                    active_mode,
-                    &project_editor_shell,
-                    &command_pane,
-                )
+                GpuiViewPaneLayouts::seeded_from_restored_shell(active_mode, &command_pane)
             });
 
         Some(Self {
@@ -443,6 +447,7 @@ impl GpuiShellLayoutState {
             pending_command_gxserver_cleanup,
             project_editor_shell,
             project_view_states_by_project,
+            last_open_view_mode,
             view_pane_layouts,
             browser_profiles,
             browser_tabs,

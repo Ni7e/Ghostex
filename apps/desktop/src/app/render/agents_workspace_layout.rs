@@ -25,9 +25,24 @@ use crate::app::model::*;
 use crate::app::render::resize_rail::*;
 use crate::*;
 
+/// Where the Agents workspace sits in the workarea this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum AgentsWorkspaceLayout {
+    /// No view is open, so the Agents workspace has the whole workarea.
+    FullWidth,
+    /// A view panel is open beside it; `split_ratio` is the Agents column's share of the row.
+    Column { split_ratio: f32 },
+}
+
 impl GhostexGpuiApp {
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// The Agents workspace is rendered on every frame now, either alone or as the left column of a
+    /// workarea whose right half is an open view. Terminals and chats therefore keep recording body
+    /// bounds across a view open, change or close, which is what keeps their Ghostty surfaces and
+    /// chat pages mounted; nothing outside this function decides whether they exist.
     pub(crate) fn render_agents_workspace(
         &self,
+        layout: AgentsWorkspaceLayout,
         window: &Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
@@ -39,28 +54,38 @@ impl GhostexGpuiApp {
         The Agents workspace root must be a vertical flex container, not only a flex-sized child of the command-pane wrapper. The rendered split or leaf tree uses flex_1 sizing, so it needs this parent layout context to fill the available height above the command pane instead of leaving a black shell gap below the terminal pane.
         */
         let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
-        v_flex()
+        let rail_edges = match layout {
+            AgentsWorkspaceLayout::FullWidth => outer_rail_edges,
+            // The split divider is the column's right-hand rail, so the panes there own no border.
+            AgentsWorkspaceLayout::Column { .. } => RailFacingEdges {
+                right: true,
+                ..outer_rail_edges
+            },
+        };
+        let root = v_flex()
             .id("ghostex-gpui-agents-workspace")
-            .flex_1()
-            .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .bg(workspace_background_color())
-            .child(
-                if let Some(pane_id) = self.agents_workspace.focus_mode_pane
-                    && let Some(leaf) = self.agents_workspace.find_leaf(pane_id)
-                {
-                    self.render_workspace_leaf(leaf, outer_rail_edges, window, cx)
-                } else {
-                    self.render_workspace_node(
-                        &self.agents_workspace.root,
-                        outer_rail_edges,
-                        window,
-                        cx,
-                    )
-                },
-            )
-            .into_any_element()
+            .bg(workspace_background_color());
+        let root = match layout {
+            AgentsWorkspaceLayout::FullWidth => root.flex_1().min_w_0(),
+            AgentsWorkspaceLayout::Column { split_ratio } => root
+                .flex_grow(split_ratio)
+                .flex_shrink_1()
+                .flex_basis(relative(0.0))
+                .h_full()
+                .min_w(px(WORKAREA_AGENTS_COLUMN_MIN_WIDTH)),
+        };
+        root.child(
+            if let Some(pane_id) = self.agents_workspace.focus_mode_pane
+                && let Some(leaf) = self.agents_workspace.find_leaf(pane_id)
+            {
+                self.render_workspace_leaf(leaf, rail_edges, window, cx)
+            } else {
+                self.render_workspace_node(&self.agents_workspace.root, rail_edges, window, cx)
+            },
+        )
+        .into_any_element()
     }
 
     /// The sides of the main workspace area, in any view, that touch a rail owned by something outside

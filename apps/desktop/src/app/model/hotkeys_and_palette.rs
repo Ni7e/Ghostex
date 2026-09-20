@@ -226,7 +226,7 @@ pub(crate) fn gpui_source_workarea_allowed_configured_hotkey_action_id(action_id
                 | "navigateHistoryForward"
                 | "openCommandsPanel"
                 | "openNotifications"
-                | "toggleCompanionPane"
+                | "toggleViewPanel"
         )
 }
 
@@ -290,16 +290,13 @@ pub(crate) fn gpui_focused_pane_rotate_agents_hotkey_target(
     CDXC:FocusMode 2026-06-26-06:56:
     Native focused-pane rotation runs only for the active workspace pane group. GPUI must preserve command-terminal default-return behavior and keep Browser/project-editor focus inert, so only `active_mode == Agents` plus `ShellFocusTarget::AgentsPane(_)` may reach the future workspace rotation mutation.
     */
+    let _ = active_mode;
     match shell_focus {
-        ShellFocusTarget::AgentsPane(pane_id) if active_mode == TitlebarMode::Agents => {
-            Some(pane_id)
-        }
+        ShellFocusTarget::AgentsPane(pane_id) => Some(pane_id),
         ShellFocusTarget::CommandPane
         | ShellFocusTarget::BrowserSurface
         | ShellFocusTarget::BrowserPane(_)
-        | ShellFocusTarget::ProjectEditorSurface(_)
-        | ShellFocusTarget::ProjectEditorCompanion(_)
-        | ShellFocusTarget::AgentsPane(_) => None,
+        | ShellFocusTarget::ProjectEditorSurface(_) => None,
     }
 }
 

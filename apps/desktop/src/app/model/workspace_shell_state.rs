@@ -157,6 +157,7 @@ pub(crate) fn gpui_workspace_shell_state_json(app: &GhostexGpuiApp) -> serde_jso
                 (project_id.clone(), project_view_state_to_shell_state_json(state))
             })
             .collect::<serde_json::Map<_, _>>(),
+        "lastOpenViewMode": app.last_open_view_mode.map(TitlebarMode::element_slug),
         "viewPaneLayouts": app.view_pane_layouts_with_live_values().to_shell_state_json(),
     })
 }

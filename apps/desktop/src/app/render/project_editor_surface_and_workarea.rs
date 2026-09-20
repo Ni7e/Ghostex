@@ -32,16 +32,20 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        // CDXC:Workarea 2026-09-20 WHY:
+        // An extension view that loses availability mid-frame closes the panel; the Agents column
+        // beside it is already rendering, so there is nothing to draw in its place here.
         if matches!(mode, TitlebarMode::Extension(_)) && !self.titlebar_mode_available(mode) {
             let _ = self.set_active_mode(TitlebarMode::Agents, window, cx);
-            return self.render_agents_workspace(window, cx);
+            return gpui::div().into_any_element();
         }
         if mode.is_project_editor_mode() && !self.project_editor_shell.is_mode_awake(mode) {
             return self.render_project_editor_sleeping_placeholder(mode, cx);
         }
 
         match mode {
-            TitlebarMode::Agents => self.render_agents_workspace(window, cx),
+            // The Agents workspace is never the view panel's occupant: it is the column beside it.
+            TitlebarMode::Agents => gpui::div().into_any_element(),
             TitlebarMode::Browser => self.render_browser_workspace(window, cx),
             TitlebarMode::Source => self.render_source_workarea_surface(cx),
             TitlebarMode::Kanban => self.render_kanban_workarea_surface(cx),

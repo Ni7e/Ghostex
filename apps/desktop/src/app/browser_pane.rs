@@ -288,8 +288,8 @@ impl GhostexGpuiApp {
         CDXC:Hotkeys 2026-07-14:
         Cmd+=, Cmd+-, and Cmd+0 belong to the exact focused main CEF pane,
         not only Browser tabs. Source, Kanban, Automate, and Docs use the
-        same Chromium host zoom API as Browser while sidebar, modal,
-        titlebar, and companion CEF surfaces remain outside this command.
+        same Chromium host zoom API as Browser while sidebar, modal and
+        titlebar CEF surfaces remain outside this command.
         Resolve only from shell focus plus the active mode and an existing
         owned surface; never infer a target or create a fallback surface.
         */

@@ -557,18 +557,12 @@ impl GhostexGpuiApp {
         &self,
         selected: &GpuiLocalWorkspaceSessionKey,
     ) -> Vec<SessionKey> {
-        let shell_session_ids = if self.active_mode == TitlebarMode::Agents {
-            self.agents_workspace
-                .rendered_leaf_order()
-                .into_iter()
-                .filter_map(|pane_id| self.agents_workspace.active_session_in_pane(pane_id))
-                .collect::<Vec<_>>()
-        } else {
-            self.current_project_editor_companion_terminal_body_mount_slots()
-                .into_iter()
-                .map(|slot_id| slot_id.session_id)
-                .collect::<Vec<_>>()
-        };
+        let shell_session_ids = self
+            .agents_workspace
+            .rendered_leaf_order()
+            .into_iter()
+            .filter_map(|pane_id| self.agents_workspace.active_session_in_pane(pane_id))
+            .collect::<Vec<_>>();
         let mut keys = Vec::with_capacity(shell_session_ids.len() + 1);
         for shell_session_id in shell_session_ids {
             let Some(key) = self

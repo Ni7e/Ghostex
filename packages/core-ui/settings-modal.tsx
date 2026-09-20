@@ -1416,7 +1416,7 @@ export function SettingsModal({
                             ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'sidebarVisibilityMemory') ? (
                               <SelectField
-                                description='Keep one sidebar state everywhere, or remember it separately for Agents and for the wide views (Browser, Code, Docs, Kanban, Automate). The companion and Commands panes always follow the view.'
+                                description='Keep one sidebar state everywhere, or remember it separately for a window with no view open and a window with one open. The Commands pane always follows that same distinction.'
                                 label='Sidebar visibility memory'
                                 {...getSettingModificationProps('sidebarVisibilityMemory')}
                                 onChange={(value) =>

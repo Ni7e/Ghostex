@@ -1,5 +1,5 @@
-//! The header's four panel toggles: hide sidebar and the companion on the leading side, the
-//! command terminal and the view panel on the trailing side.
+//! The header's three panel toggles: hide sidebar on the leading side, the command terminal and the
+//! view panel on the trailing side.
 
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
@@ -70,47 +70,6 @@ pub(crate) fn header_panel_toggle_button(
 }
 
 impl GhostexGpuiApp {
-    /// CDXC:Workarea 2026-09-19 DECISION:
-    /// User: keep the companion toggle next to Hide sidebar in every view and show it greyed out in Agents, so Back/Forward never shift when moving between views or projects with and without a companion. Make the chat control 2px smaller in both dimensions after two 1px reductions, and use the unfilled Side tail with text chat bubble in both the visible and hidden states.
-    /// This supersedes the 2026-09-15 rule that rendered the toggle only in companion views; the toggle still replaces the minimized companion bar.
-    pub(crate) fn render_titlebar_companion_toggle(
-        &self,
-        cx: &mut gpui::Context<Self>,
-    ) -> impl IntoElement {
-        let enabled = self.active_mode.is_project_editor_mode();
-        let visible = enabled && self.project_editor_shell.left_companion_visible;
-        let tooltip = if !enabled {
-            "Companion is not available in Agents".into()
-        } else if visible {
-            titlebar_tooltip_label("Hide companion", "toggleCompanionPane")
-        } else {
-            titlebar_tooltip_label("Show companion", "toggleCompanionPane")
-        };
-        header_panel_toggle_button(
-            "ghostex-gpui-titlebar-companion-toggle",
-            if visible {
-                TITLEBAR_ICON_COMPANION_HIDE
-            } else {
-                TITLEBAR_ICON_COMPANION_SHOW
-            },
-            2.0,
-            enabled,
-        )
-        .when(enabled, |this| {
-            this.on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.toggle_project_editor_companion_from_hotkey(window, cx);
-                }),
-            )
-        })
-        .managed_tooltip_with_placement(ManagedTooltipPlacement::Right, move |window, cx| {
-            titlebar_tooltip(tooltip.clone(), window, cx)
-        })
-    }
-
     pub(crate) fn render_sidebar_collapse_button(
         &self,
         cx: &mut gpui::Context<Self>,
@@ -184,18 +143,41 @@ impl GhostexGpuiApp {
         })
     }
 
-    /// The right-hand view panel does not exist yet: phase 3 of the titlebarless revamp builds it.
-    /// The toggle still renders, disabled, so the header's shape does not change under the user
-    /// when that phase wires it up.
-    pub(crate) fn render_workarea_header_view_panel_toggle(&self) -> impl IntoElement {
+    /// CDXC:Workarea 2026-09-20 DECISION:
+    /// User: the header's view-panel toggle opens the view this project last had open, or the first
+    /// view its context offers when there is none, and closes the panel while a view is open.
+    pub(crate) fn render_workarea_header_view_panel_toggle(
+        &self,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
+        let open = self.view_panel_open();
+        let enabled = open || self.view_panel_toggle_target().is_some();
+        let tooltip = if !enabled {
+            "No view is available for this project".into()
+        } else if open {
+            titlebar_tooltip_label("Close the view panel", "toggleViewPanel")
+        } else {
+            titlebar_tooltip_label("Open the view panel", "toggleViewPanel")
+        };
         header_panel_toggle_button(
             "ghostex-gpui-workarea-header-view-panel-toggle",
             TITLEBAR_ICON_LAYOUT_COLUMNS,
             0.0,
-            false,
+            enabled,
         )
-        .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, |window, cx| {
-            titlebar_tooltip("The view panel is not available yet", window, cx)
+        .when(open, |this| this.bg(titlebar_active_segment_color()))
+        .when(enabled, |this| {
+            this.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.toggle_view_panel(window, cx);
+                }),
+            )
+        })
+        .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
+            titlebar_tooltip(tooltip.clone(), window, cx)
         })
     }
 }
