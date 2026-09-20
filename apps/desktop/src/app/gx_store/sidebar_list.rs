@@ -134,16 +134,28 @@ impl SidebarList {
         settings
     }
 
-    /// The next moment one of the drawn time labels reads differently. The view model does not
-    /// hold them, so this is the host's own deadline beside the one the list reports.
-    fn next_label_deadline_ms(&self, now_ms: u64) -> Option<u64> {
+    /// The next moment one of the drawn times reads differently. The view model does not hold the
+    /// labels, so this is the host's own deadline beside the one the list reports.
+    fn next_label_deadline_ms(&self, now_ms: u64, show_relative_time: bool) -> Option<u64> {
         self.model
             .view()
             .groups
             .iter()
             .flat_map(|group| group.core.sessions.iter())
-            .filter_map(|session| session.row.next_label_deadline_ms(now_ms))
+            .filter_map(|session| {
+                session
+                    .row
+                    .next_label_deadline_ms(now_ms, show_relative_time)
+            })
             .min()
+    }
+
+    /// Whether a card draws the relative time at all (`hideLastActiveTimeOnSessionCards`).
+    fn show_relative_time(&self) -> bool {
+        self.settings
+            .as_ref()
+            .map(|(_, settings)| settings.show_last_active_time)
+            .unwrap_or(true)
     }
 
     /// Whether an update would find nothing to do. Only the cheap signals are read here; the view
@@ -397,9 +409,15 @@ impl GhostexGpuiApp {
         // the list was last built: a wake that only ticks a countdown does not rebuild the list.
         let now_ms = now_ms();
         let snapshot = {
+            // Borrowed rather than cloned: the model and the cache are separate fields, so the
+            // whole list does not have to be copied to build the one the renderer draws.
             let list = &mut self.gx_store.sidebar_list;
-            let view = list.model.view().clone();
-            snapshot_from_view(&view, &published, &mut list.snapshot_cache, now_ms)
+            snapshot_from_view(
+                list.model.view(),
+                &published,
+                &mut list.snapshot_cache,
+                now_ms,
+            )
         };
         let install_us = started.elapsed().as_micros() as u64;
         let list = &mut self.gx_store.sidebar_list;
@@ -414,9 +432,17 @@ impl GhostexGpuiApp {
     /// list, a snooze ends, a countdown ticks). Nothing else wakes the list on time.
     fn gx_store_book_sidebar_deadline(&mut self, cx: &mut gpui::Context<Self>) {
         let now = now_ms();
+        // Only the drawn list's labels are formatted here; the old projection refreshes its own
+        // from the clock rows it publishes. The view model's own deadline is booked either way,
+        // because the order and the sections it moves are the list's, not the labels'.
+        let show_relative_time = self.gx_store.sidebar_list.show_relative_time();
         let label_deadline = self
             .gx_store_sidebar_draws_store_list()
-            .then(|| self.gx_store.sidebar_list.next_label_deadline_ms(now))
+            .then(|| {
+                self.gx_store
+                    .sidebar_list
+                    .next_label_deadline_ms(now, show_relative_time)
+            })
             .flatten();
         let Some(deadline) = [
             self.gx_store.sidebar_list.next_deadline_ms(),

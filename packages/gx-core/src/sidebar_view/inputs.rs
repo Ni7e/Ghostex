@@ -175,6 +175,8 @@ pub struct SidebarSettings {
     pub sidebar_spaces_enabled: bool,
     /// The section follows the active session into its Space.
     pub sidebar_space_follow_active_session: bool,
+    /// A session card draws the relative time of its last interaction.
+    pub show_last_active_time: bool,
     pub debugging_mode: bool,
     /// The user's tag filter list, raw as it sits in settings; normalized where it is read.
     pub tag_list_items: Value,
@@ -189,6 +191,7 @@ impl Default for SidebarSettings {
             project_session_list_collapsed_count: 13,
             sidebar_spaces_enabled: false,
             sidebar_space_follow_active_session: false,
+            show_last_active_time: true,
             debugging_mode: false,
             tag_list_items: Value::Null,
             sort_mode: SessionSortMode::LastActivity,
@@ -228,6 +231,7 @@ impl SidebarSettings {
                 "sidebarSpaceFollowActiveSession",
                 defaults.sidebar_space_follow_active_session,
             ),
+            show_last_active_time: !boolean("hideLastActiveTimeOnSessionCards", false),
             debugging_mode: boolean("debuggingMode", defaults.debugging_mode),
             tag_list_items: settings
                 .get("sidebarSessionTagListItems")

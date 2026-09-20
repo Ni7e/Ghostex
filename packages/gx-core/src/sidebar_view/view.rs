@@ -206,11 +206,12 @@ impl SessionRow {
             .map(|at| last_interaction_label(at, now_ms))
     }
 
-    /// The next host time at which one of those two labels reads differently. A host that draws
-    /// them wakes then and no more often; nothing in the store reports it, because the labels are
-    /// formatted against the host's clock and not held here.
-    pub fn next_label_deadline_ms(&self, now_ms: u64) -> Option<u64> {
-        next_label_deadline_ms(self, now_ms)
+    /// The next host time at which the time this row draws reads differently, or `None` when it
+    /// draws none or draws one that never moves. `show_relative_time` is the card setting: with it
+    /// off, only a countdown is drawn. A host that draws these wakes then and no more often;
+    /// nothing in the store reports it, because they are formatted against the host's clock.
+    pub fn next_label_deadline_ms(&self, now_ms: u64, show_relative_time: bool) -> Option<u64> {
+        next_label_deadline_ms(self, now_ms, show_relative_time)
     }
 }
 

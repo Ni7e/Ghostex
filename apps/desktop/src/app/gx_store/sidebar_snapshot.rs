@@ -21,23 +21,53 @@ use crate::app::native_sidebar::model::{
     NativeSidebarSection, NativeSidebarSession, NativeSidebarSnapshot,
 };
 
-/// The row identity a cached session element was built for, so a focus change rebuilds two rows
-/// rather than two hundred.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct RowIdentity {
-    row: usize,
-    published: usize,
+/// What a cached session element was built from, so a focus change rebuilds two rows rather than
+/// two hundred.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// The two sources are held rather than compared by address. This cache is kept between installs,
+/// so an entry can outlive the row it was built from, and a freed allocation whose address is
+/// handed to the next row would make a stale element compare equal. Holding the two `Arc`s is what
+/// makes `Arc::ptr_eq` a real answer: the allocation cannot be freed while the cache holds it, so
+/// no other row can ever be given its address.
+struct CachedRow {
+    row: Arc<ghostex_gx_core::SessionRow>,
+    published: Option<Arc<NativeSidebarSession>>,
     is_focused: bool,
     is_visible: bool,
     is_multi_selected: bool,
-    timer_label: u64,
-    last_interaction_label: u64,
+    timer_label: Option<String>,
+    last_interaction_label: Option<String>,
+    element: Arc<NativeSidebarSession>,
+}
+
+impl CachedRow {
+    fn matches(
+        &self,
+        row: &Arc<ghostex_gx_core::SessionRow>,
+        published: Option<&Arc<NativeSidebarSession>>,
+        session: &SessionView,
+        timer_label: &Option<String>,
+        last_interaction_label: &Option<String>,
+    ) -> bool {
+        Arc::ptr_eq(&self.row, row)
+            && match (&self.published, published) {
+                (Some(held), Some(published)) => Arc::ptr_eq(held, published),
+                (None, None) => true,
+                _ => false,
+            }
+            && self.is_focused == session.is_focused
+            && self.is_visible == session.is_visible
+            && self.is_multi_selected == session.is_multi_selected
+            && self.timer_label == *timer_label
+            && self.last_interaction_label == *last_interaction_label
+    }
 }
 
 /// Keeps the built rows between publishes.
 #[derive(Default)]
 pub(super) struct SnapshotCache {
-    rows: HashMap<String, (RowIdentity, Arc<NativeSidebarSession>)>,
+    rows: HashMap<String, CachedRow>,
 }
 
 /// Builds the list the renderer draws from the view model, keeping what the old projection still
@@ -300,29 +330,36 @@ fn session_element(
     let published = published_rows.get(row.sidebar_session_id.as_str()).copied();
     let timer_label = row.timer_label(now_ms);
     let last_interaction_label = row.last_interaction_label(now_ms);
-    let identity = RowIdentity {
-        row: Arc::as_ptr(row) as usize,
-        published: published.map_or(0, |session| Arc::as_ptr(session) as usize),
-        is_focused: session.is_focused,
-        is_visible: session.is_visible,
-        is_multi_selected: session.is_multi_selected,
-        timer_label: text_hash(timer_label.as_deref()),
-        last_interaction_label: text_hash(last_interaction_label.as_deref()),
-    };
-    if let Some((cached, element)) = cache.rows.get(&row.sidebar_session_id) {
-        if *cached == identity {
-            return element.clone();
+    if let Some(cached) = cache.rows.get(&row.sidebar_session_id) {
+        if cached.matches(
+            row,
+            published,
+            session,
+            &timer_label,
+            &last_interaction_label,
+        ) {
+            return cached.element.clone();
         }
     }
     let element = Arc::new(build_session(
         session,
         published,
-        timer_label,
-        last_interaction_label,
+        timer_label.clone(),
+        last_interaction_label.clone(),
     ));
-    cache
-        .rows
-        .insert(row.sidebar_session_id.clone(), (identity, element.clone()));
+    cache.rows.insert(
+        row.sidebar_session_id.clone(),
+        CachedRow {
+            row: row.clone(),
+            published: published.cloned(),
+            is_focused: session.is_focused,
+            is_visible: session.is_visible,
+            is_multi_selected: session.is_multi_selected,
+            timer_label,
+            last_interaction_label,
+            element: element.clone(),
+        },
+    );
     element
 }
 
@@ -458,11 +495,4 @@ fn insert_optional(object: &mut Map<String, Value>, key: &str, value: Option<imp
             object.remove(key);
         }
     }
-}
-
-fn text_hash(value: Option<&str>) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    value.hash(&mut hasher);
-    hasher.finish()
 }
