@@ -15,6 +15,10 @@
  * The TypeScript side takes each group's membership from the Rust dump on purpose. Which rows a
  * group holds is the M4a gate; this one is about what their menus offer, and re-deriving the
  * membership here would only add a second place for it to differ.
+ *
+ * What that costs: a difference that comes from the group or row SET rather than from a menu is
+ * invisible here, because both sides are handed the same set. The two known ones are recorded as
+ * M4c declared differences 11 and 12 in PROGRESS.md.
  */
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -185,6 +189,25 @@ function buildScenarios(snapshot: Json, saved: Json | undefined) {
       host: { ...host, keepAwakeMinutes: 120, primaryAgentId: 'codex' },
     },
   ];
+  const projectGroupId = (project: Json) => `combined-project:${encodeURIComponent(String(project.projectId))}`;
+  scenarios.push({
+    name: 'hidden-not-shown',
+    settings: everySetting,
+    ui: { ...emptyUi, hiddenGroupIds: projects.slice(0, 2).map(projectGroupId) },
+    host,
+  });
+  scenarios.push({
+    // Every drawn project collapsed while a hidden one stays expanded: the only state in which the
+    // more menu's Collapse All / Expand Previous label can read differently on the two sides.
+    name: 'hidden-expanded-rest-collapsed',
+    settings: everySetting,
+    ui: {
+      ...emptyUi,
+      hiddenGroupIds: projects.slice(0, 1).map(projectGroupId),
+      collapsedGroups: projects.slice(1).map(projectGroupId),
+    },
+    host,
+  });
   const spaces = ((snapshot.sidebarSpaces as Json | undefined)?.order ?? []) as string[];
   for (const spaceId of [...spaces, 'other']) {
     scenarios.push({
