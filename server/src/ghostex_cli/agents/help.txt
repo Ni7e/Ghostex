@@ -68,6 +68,12 @@ DELIVERY
                 may not stop immediately. Pending input sends are cancelled.
   --queue       Hold in Ghostex until the current turn finishes and input is
                 ready. A sleeping session keeps the message until it wakes.
+                A queued message waits as long as the turn does, so one sent
+                to an agent that works for hours sits unread for hours with
+                nothing to show the sender. Prefer the default, which reaches
+                a busy agent at its next input boundary, and keep --queue for
+                the case it is meant for: you have read an agent's final
+                message and want its next task waiting when it wakes.
 
   Default and interrupt sends require a running session. Wake it first with
   ghostex wake <session-ref>, or use --queue. Sending never wakes it implicitly.

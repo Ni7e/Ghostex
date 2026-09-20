@@ -2,9 +2,11 @@
 name: ghostex-agents-orchestration
 description: >-
   Use this skill when you need other agents to do part of the work inside
-  Ghostex: launching Claude, Codex, or any configured agent in its own
-  session, picking the model and effort for that session, sending it a task
-  or a follow-up, reading its reply, waiting for it to finish, and closing it
+  Ghostex, or when agents have to message each other to coordinate work:
+  launching Claude, Codex, or any configured agent in its own session,
+  picking the model and effort for that session, sending it a task or a
+  follow-up, reading its reply, exchanging progress and results with agents
+  that are already running, waiting for one to finish, and closing it
   afterwards. It points you at the `ghostex` CLI help pages that document
   these commands and adds the habits that keep a multi-agent run reliable.
 disable-model-invocation: true
@@ -50,15 +52,22 @@ guessing a replacement.
    file and point the agent at it; keep the message itself short.
 4. **Record the global reference** from the create result and use it for every
    later send, read, wait, and close. Titles and short ids can be ambiguous.
-5. **Confirm delivery.** Accepted or queued does not mean read. Read the
+5. **Send with the default delivery.** It reaches a busy agent at its next
+   input boundary. Use `--interrupt` only for an urgent correction, and
+   `--queue` only when the user asks for it or when the point is to leave the
+   next task waiting: read the agent's final message first, then queue. A
+   queued message waits as long as the current turn does, so one sent to an
+   agent that works for hours sits unread for hours and the sender sees
+   nothing but "queued".
+6. **Confirm delivery.** Accepted or queued does not mean read. Read the
    session chat (or the queue) after sending before you assume the agent is
    working on it, and before you ever send the same message again.
-6. **Wait on a signal, not a guess.** Ask the agent to end its final message
+7. **Wait on a signal, not a guess.** Ask the agent to end its final message
    with a unique last line (for example `TASK 3 COMPLETE` or
    `TASK 3 BLOCKED: reason`), then use `wait-for-text` or a long-polling chat
    read instead of a hand-rolled sleep loop. Idle alone does not prove the
    work is complete.
-7. **Read the result, then decide.** Read the agent's reply, check the work
+8. **Read the result, then decide.** Read the agent's reply, check the work
    yourself when it matters, and only then close the session or send the next
    task.
 
