@@ -20,8 +20,8 @@ use std::process::ExitCode;
 use ghostex_gx_core::{
     collapse_into_storage, collapse_state_from_storage, hidden_items_from_storage,
     hidden_items_into_storage, machine_tab_from_storage, sidebar_window_storage_key, SectionId,
-    SidebarHiddenItems, SidebarUiIntent, SidebarUiStore, ToggleAllProjectsInput,
-    COLLAPSE_STORAGE_KEY, MACHINE_TAB_STORAGE_KEY, SIDEBAR_WINDOW_SCOPE_ID,
+    SidebarCollapseDiff, SidebarHiddenItems, SidebarUiIntent, SidebarUiStore,
+    ToggleAllProjectsInput, COLLAPSE_STORAGE_KEY, MACHINE_TAB_STORAGE_KEY, SIDEBAR_WINDOW_SCOPE_ID,
 };
 
 /// A version 3 envelope as the TypeScript build wrote it, with the two fields this state does not
@@ -41,6 +41,25 @@ fn persisted_only(
         };
     }
     state
+}
+
+/// Another writer's change to the two fields the sidebar state does not own.
+fn with_foreign_fields(raw: &str, step: usize) -> String {
+    let mut envelope: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
+    if let Some(state) = envelope
+        .pointer_mut("/state")
+        .and_then(|state| state.as_object_mut())
+    {
+        state.insert(
+            "isReferenceChatsCollapsed".to_string(),
+            serde_json::Value::Bool(true),
+        );
+        state.insert(
+            "recentSessionIdsBySpace".to_string(),
+            serde_json::json!({"local": {"s0": [format!("combined-session:p{}:one", step % 7)]}}),
+        );
+    }
+    envelope.to_string()
 }
 
 fn main() -> ExitCode {
@@ -207,8 +226,10 @@ fn main() -> ExitCode {
     let mut store = SidebarUiStore::new();
     let groups: Vec<String> = (0..7).map(|index| format!("project:p{index}")).collect();
     let mut raw = collapse_into_storage(&store.state().collapse.clone(), None);
+    let mut base = store.state().collapse.clone();
     let mut round_trips = 0usize;
     let mut writes = 0usize;
+    let mut foreign_writes = 0usize;
     for step in 0..400usize {
         let group_id = groups[step % groups.len()].clone();
         let storage_id = format!("p{}", step % groups.len());
@@ -252,8 +273,18 @@ fn main() -> ExitCode {
         let outcome = store.apply(intent);
         let pending = store.take_pending();
         if pending.collapse {
-            raw = collapse_into_storage(&store.state().collapse, Some(&raw));
+            // The write the host performs: the difference since the last write, applied to what is
+            // stored at that moment.
+            let diff = SidebarCollapseDiff::between(&base, &store.state().collapse);
+            raw = diff.apply(Some(&raw), &store.state().collapse);
+            base = store.state().collapse.clone();
             writes += 1;
+        }
+        // Every so often another writer touches the two fields this state does not own, the way
+        // the TypeScript sidebar still does while the port runs.
+        if step % 17 == 16 {
+            raw = with_foreign_fields(&raw, step);
+            foreign_writes += 1;
         }
         if outcome.changed && !pending.is_empty() {
             let read_back = collapse_state_from_storage(Some(&raw), None, None);
@@ -273,8 +304,21 @@ fn main() -> ExitCode {
             }
         }
     }
+    let final_state = collapse_state_from_storage(Some(&raw), None, None);
+    let _ = final_state;
+    let stored_tail: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    check(
+        "a write keeps another writer's fields",
+        stored_tail
+            .pointer("/state/recentSessionIdsBySpace/local/s0")
+            .and_then(|value| value.as_array())
+            .is_some_and(|ids| !ids.is_empty())
+            && stored_tail.pointer("/state/isReferenceChatsCollapsed")
+                == Some(&serde_json::Value::Bool(true)),
+        raw.clone(),
+    );
     println!(
-        "\n{writes} collapse writes, {round_trips} round trips, {} failures so far",
+        "\n{writes} collapse writes, {foreign_writes} writes by another owner, {round_trips} round trips, {} failures so far",
         failures.get()
     );
 

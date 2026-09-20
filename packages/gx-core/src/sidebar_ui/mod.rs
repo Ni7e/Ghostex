@@ -4,10 +4,12 @@
 //! rather than the daemon. `intents` is the one way it changes, `persist` is the exact shape the
 //! client storage holds, and `store` keeps the two together with the pending writes.
 
+mod diff;
 mod intents;
 mod persist;
 mod store;
 
+pub use diff::SidebarCollapseDiff;
 pub use intents::{SidebarUiIntent, SidebarUiOutcome, ToggleAllProjectsInput};
 pub use persist::{
     collapse_into_storage, collapse_state_from_storage, hidden_items_from_storage,
