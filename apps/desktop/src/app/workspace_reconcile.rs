@@ -718,12 +718,6 @@ impl GhostexGpuiApp {
         self.land_quick_automations_active_project_on_automate_mode(window, cx);
         self.land_pending_source_file_open_on_source_mode(window, cx);
         self.ensure_project_workarea_runtime_cef_surfaces_for_current_context(cx);
-        #[cfg(target_os = "windows")]
-        {
-            let focus_companion =
-                self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(self.active_mode);
-            self.sync_windows_project_editor_companion_to_presentation_focus(focus_companion, cx);
-        }
         self.broadcast_extension_context_changes(cx);
         cx.notify();
     }
@@ -894,8 +888,6 @@ impl GhostexGpuiApp {
         if self.agents_workspace_project_id == new_project_id {
             return false;
         }
-        #[cfg(target_os = "macos")]
-        self.close_floating_companion(cx);
         self.source_code_server_runtime
             .pending_remote_prompt_editor_request = None;
         self.capture_outgoing_project_view_state();
@@ -1103,8 +1095,6 @@ impl GhostexGpuiApp {
         self.terminal_search_inputs.clear();
         self.terminal_search_input_subscriptions.clear();
         self.terminal_search_focus_pending = None;
-        self.project_editor_companion_terminal_session_id = None;
-        self.project_editor_companion_secondary_terminal_session_id = None;
         #[cfg(target_os = "macos")]
         {
             self.agents_terminal_ghostty_surfaces.clear();
@@ -2167,10 +2157,6 @@ impl GhostexGpuiApp {
             return false;
         }
 
-        if mode != TitlebarMode::Agents {
-            self.terminal_agent_bar_companion_focus_return = None;
-        }
-
         let previous_mode = self.active_mode;
         /*
         CDXC:Telemetry 2026-08-26:
@@ -2200,18 +2186,10 @@ impl GhostexGpuiApp {
         }
         self.agents_terminal_runtime_sessions
             .reconcile_with_workspace(&self.agents_workspace);
-        self.sync_project_editor_companion_terminal_selection();
         if mode == TitlebarMode::Browser {
             self.seed_current_project_browser_tab_if_empty();
         }
-        let restore_companion_focus = mode == TitlebarMode::Browser
-            && self.project_editor_shell.left_companion_visible
-            && self
-                .project_editor_companion_terminal_slot_for_mode(mode)
-                .is_some();
-        if !restore_companion_focus {
-            self.focus_default_surface_for_active_mode(cx);
-        }
+        self.focus_default_surface_for_active_mode(cx);
         let requested_agents_terminal_focus =
             if let Some(FocusedTerminalTextMountTarget::Agents(slot_id)) =
                 self.focused_terminal_text_mount_target()
@@ -2244,20 +2222,8 @@ impl GhostexGpuiApp {
             self.update_active_mode_cef_child_visibility(cx);
         }
         // Session Chat is also a native CEF child view. Reconcile it at the
-        // same mode-switch boundary so entering a project workarea with the
-        // companion hidden removes the old Agents-pane chat view immediately.
+        // same mode-switch boundary as every other surface.
         self.reconcile_agents_pane_surfaces(cx);
-        if restore_companion_focus {
-            /*
-            CDXC:Browser 2026-07-14:
-            Switching workareas may materialize a fresh project Browser tab,
-            but it must leave keyboard focus with the most recently active
-            terminal/chat rendered in the companion pane. Browser chrome and
-            CEF creation stay normal sibling layout; only an explicit Browser
-            pane click transfers focus into the page.
-            */
-            self.focus_project_editor_companion(mode, window, cx);
-        }
         self.scroll_all_active_tab_strips();
         self.persist_shell_layout_state();
         self.schedule_project_editor_auto_sleep_for_inactive_modes(cx);

@@ -175,7 +175,7 @@ CDXC:Hotkeys 2026-07-14:
 The AppKit CEF responder subclass forwards only the standard page-zoom
 commands for Browser, main project-workarea, and Session Chat native views.
 The raw values are the narrow ABI contract with GpuiCefAppKitHooks.m. Sidebar,
-modal, titlebar, and companion CEF views are deliberately absent from the
+modal and titlebar CEF views are deliberately absent from the
 keyboard zoom registry even though they share the browser registry used by
 editing.
 */

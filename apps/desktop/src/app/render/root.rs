@@ -320,7 +320,7 @@ impl Render for GhostexGpuiApp {
                     || self
                         .browser_split_drag
                         .is_some_and(|drag| drag.axis == WorkspaceSplitAxis::Horizontal)
-                    || self.project_editor_companion_drag.is_some()
+                    || self.workarea_split_drag.is_some()
                     || self
                         .workspace_split_drag
                         .is_some_and(|drag| drag.axis == WorkspaceSplitAxis::Horizontal),
@@ -361,6 +361,11 @@ impl Render for GhostexGpuiApp {
                 if this
                     .wake_focused_sleeping_agents_placeholder_from_keystroke(&event.keystroke, cx)
                 {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
+                if this.open_view_from_view_picker_keystroke(&event.keystroke, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                     return;
@@ -544,11 +549,9 @@ impl Render for GhostexGpuiApp {
                     this.toggle_gpui_sidebar_collapsed(cx);
                 }),
             )
-            .on_action(
-                cx.listener(|this, _: &ToggleProjectEditorCompanion, window, cx| {
-                    this.toggle_project_editor_companion_from_hotkey(window, cx);
-                }),
-            )
+            .on_action(cx.listener(|this, _: &ToggleViewPanel, window, cx| {
+                this.toggle_view_panel(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &SleepFocusedSession, _window, cx| {
                 if this.propagate_source_workarea_cef_hotkey_passthrough(cx) {
                     return;
@@ -675,6 +678,52 @@ impl Render for GhostexGpuiApp {
             .on_action(
                 cx.listener(|this, action: &SelectGpuiTitlebarMode, window, cx| {
                     this.select_titlebar_mode_from_menu(action.mode_index, window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &OpenGpuiViewTab, window, cx| {
+                    if let Some(mode) = this.view_tab_mode_for_index(action.mode_index) {
+                        this.open_view_tab(mode, window, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &CloseGpuiViewTab, window, cx| {
+                    if let Some(mode) = this.view_tab_mode_for_index(action.mode_index) {
+                        this.close_view_tab(mode, window, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &PopOutGpuiViewTab, _window, cx| {
+                    if let Some(mode) = this.view_tab_mode_for_index(action.mode_index) {
+                        this.pop_out_view(mode, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &ToggleGpuiViewPanelMaximized, _window, cx| {
+                    this.toggle_view_panel_maximized(cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ToggleGpuiViewProjectScope, _window, cx| {
+                    this.toggle_view_project_scope(action.mode_index, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ToggleGpuiViewSpaceScope, _window, cx| {
+                    this.toggle_view_space_scope(action.mode_index, &action.space_key, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ShowGpuiHiddenViewHere, window, cx| {
+                    this.show_hidden_view_here(action.mode_index, window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &OpenGpuiViewScopeSettings, window, cx| {
+                    this.open_view_scope_settings(action.mode_index, window, cx);
                 }),
             )
             .on_action(
@@ -1100,8 +1149,7 @@ impl Render for GhostexGpuiApp {
                 this.handle_workspace_split_resize_drag_move(event, window, cx);
                 this.handle_command_split_resize_drag_move(event, window, cx);
                 this.handle_browser_split_resize_drag_move(event, window, cx);
-                this.handle_project_editor_companion_resize_drag_move(event, window, cx);
-                this.handle_project_editor_companion_split_resize_drag_move(event, window, cx);
+                this.handle_workarea_split_resize_drag_move(event, window, cx);
             }))
             .on_mouse_up(
                 MouseButton::Left,
@@ -1111,32 +1159,26 @@ impl Render for GhostexGpuiApp {
                     this.handle_workspace_split_resize_mouse_up(event, window, cx);
                     this.handle_command_split_resize_mouse_up(event, window, cx);
                     this.handle_browser_split_resize_mouse_up(event, window, cx);
-                    this.handle_project_editor_companion_resize_mouse_up(event, window, cx);
-                    this.handle_project_editor_companion_split_resize_mouse_up(event, window, cx);
+                    this.handle_workarea_split_resize_mouse_up(event, window, cx);
                     this.finish_workspace_tab_drag(cx);
                     this.finish_command_tab_drag(cx);
                     this.finish_browser_tab_drag(cx);
+                    this.cancel_view_tab_drag(cx);
                 }),
             )
-            .child(self.render_titlebar(window, cx))
             .child(
                 /*
-                Every top-row pane draws its own 1px frame and the titlebar
-                draws a 1px bottom border, so stacked they showed a 2px line
-                above the workspace. Pull the body row up by that 1px so a
-                pane's top edge paints over the titlebar hairline: neutral
-                panes leave one line, and a focused or attention pane shows
-                its outline color on the top edge too. flex_1 absorbs the
-                negative margin, so the row is 1px taller rather than leaving
-                a gap at the bottom. The sidebar column and its divider draw
-                the hairline themselves so it stays continuous across the
-                window.
+                CDXC:Titlebar 2026-09-20 WHY:
+                The body row used to start one pixel above its own origin so a pane's top edge
+                could paint over the titlebar's bottom hairline, and the sidebar column drew that
+                hairline itself to keep it continuous. With the titlebar row deleted there is no
+                hairline above the body, so both are gone: the row starts at the window's top edge
+                and nothing is drawn across it.
                 */
                 h_flex()
                     .flex_1()
                     .w_full()
                     .min_h_0()
-                    .mt(px(-1.0))
                     .items_start()
                     .overflow_hidden()
                     .bg(sidebar_divider_background_color())
@@ -1149,24 +1191,39 @@ impl Render for GhostexGpuiApp {
                             div()
                                 .w(px(self.sidebar_width))
                                 .h_full()
-                                .border_t_1()
-                                .border_color(titlebar_button_border_color())
                                 .child(self.render_native_sidebar(window, cx)),
                         )
                     })
                     .when(sidebar_chrome_visible, |this| {
                         this.child(self.render_sidebar_resize_divider(cx))
                     })
+                    // Collapsed, the body row starts with the reveal's own edge strip instead of
+                    // the sidebar and its divider. It is a sibling frame like they were, so the
+                    // workarea beside it keeps every pixel it owns and every click in them.
+                    .when(!sidebar_chrome_visible, |this| {
+                        this.child(self.render_floating_reveal_edge_strip(cx))
+                    })
                     .child(
+                        /*
+                        CDXC:Titlebar 2026-09-20 WHY:
+                        The header floats (the decision is on it, in
+                        render/workarea_header/shell.rs), so the workspace owns the whole column
+                        height and starts at the window's top edge. The header is the column's last
+                        child because paint order is what puts it over the content it floats above;
+                        every column that cannot let its content pass under it starts one header
+                        height down instead (`workarea_header_column_top_inset`).
+                        */
                         v_flex()
                             .id("ghostex-gpui-workspace-column")
+                            .relative()
                             .flex_1()
                             .h_full()
                             .min_w_0()
                             .min_h_0()
                             .overflow_hidden()
                             .bg(workspace_background_color())
-                            .child(self.render_workspace_with_command_pane(window, cx)),
+                            .child(self.render_workspace_with_command_pane(window, cx))
+                            .child(self.render_workarea_header(window, cx)),
                     ),
             )
             .child(self.render_gpui_status_pet_presentation(cx))

@@ -566,7 +566,7 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:Onboarding 2026-06-24-23:17:
-        The GPUI info glyph opens the shared React `titlebar-host.html?ghostexTitlebarPanel=tips` document inside an app-owned anchored overlay whose top edge is TITLEBAR_HEIGHT. Because the rendered child is a native CEF view, dropdown state changes must explicitly show/hide the CEF surface instead of relying on GPUI paint removal.
+        The GPUI info glyph opens the shared React `titlebar-host.html?ghostexTitlebarPanel=tips` document inside an app-owned anchored overlay whose top edge is the workarea header's measured bottom edge. Because the rendered child is a native CEF view, dropdown state changes must explicitly show/hide the CEF surface instead of relying on GPUI paint removal.
         */
         if open {
             self.close_gpui_titlebar_popup(None, window, cx);
@@ -1184,12 +1184,9 @@ impl GhostexGpuiApp {
             };
             let _ = this.update(cx, |this, cx| {
                 this.titlebar_tips_sidebar_agent_ids = Some(sidebar_agent_ids.clone());
-                if this.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Tips)
-                    && let Some(handle) = this.titlebar_popup_window.clone()
-                {
-                    let _ = handle.update(cx, |popup, window, cx| {
-                        popup.update_tips_sidebar_agent_ids(sidebar_agent_ids, cx);
-                        window.refresh();
+                if let Some(panel) = this.ghostex_page_panels.get(&GhostexPage::Tips).cloned() {
+                    panel.update(cx, |panel, cx| {
+                        panel.update_tips_sidebar_agent_ids(sidebar_agent_ids, cx);
                     });
                 }
             });
@@ -2291,13 +2288,10 @@ impl GhostexGpuiApp {
             }
             _ => {}
         }
-        if self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Tips)
-            && let Some(handle) = self.titlebar_popup_window.clone()
-        {
+        if let Some(panel) = self.ghostex_page_panels.get(&GhostexPage::Tips).cloned() {
             let payload = payload.clone();
-            let _ = handle.update(cx, |popup, window, cx| {
-                popup.update_tips_runtime_status(payload, cx);
-                window.refresh();
+            panel.update(cx, |panel, cx| {
+                panel.update_tips_runtime_status(payload, cx);
             });
         }
         let Some(project_state_update) =

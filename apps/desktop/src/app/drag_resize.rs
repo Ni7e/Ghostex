@@ -2414,30 +2414,14 @@ impl GhostexGpuiApp {
             .insert(split_id, SplitResizeMetrics { content_span });
     }
 
-    pub(crate) fn record_project_editor_companion_layout_metrics(
-        &mut self,
-        child_bounds: &[Bounds<Pixels>],
-    ) {
+    pub(crate) fn record_workarea_split_layout_metrics(&mut self, child_bounds: &[Bounds<Pixels>]) {
         let Some(content_span) =
             split_resize_content_span(child_bounds, WorkspaceSplitAxis::Horizontal)
         else {
             return;
         };
 
-        self.project_editor_companion_layout_metrics = Some(SplitResizeMetrics { content_span });
-    }
-
-    pub(crate) fn record_project_editor_companion_split_layout_metrics(
-        &mut self,
-        axis: WorkspaceSplitAxis,
-        child_bounds: &[Bounds<Pixels>],
-    ) {
-        let Some(content_span) = split_resize_content_span(child_bounds, axis) else {
-            return;
-        };
-
-        self.project_editor_companion_split_layout_metrics =
-            Some(SplitResizeMetrics { content_span });
+        self.workarea_split_layout_metrics = Some(SplitResizeMetrics { content_span });
     }
 
     pub(crate) fn handle_workspace_split_handle_mouse_down(
@@ -2815,69 +2799,66 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn handle_project_editor_companion_divider_mouse_down(
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// One divider now separates the Agents column from the open view, replacing the project-editor
+    /// companion's. The visible two-pixel rail is still the resize control: dragging moves the stored
+    /// split ratio and a double click puts it back at the default share, both inside the clamps that
+    /// keep each side above its minimum. This supersedes the 2026-06-22 companion-divider rule.
+    pub(crate) fn handle_workarea_split_divider_mouse_down(
         &mut self,
-        mode: TitlebarMode,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        /*
-        CDXC:CodeEditor 2026-06-22-06:53:
-        Source, Browser, Kanban, and Manage companion panes use the visible two-pixel divider as the real resize control. Dragging adjusts the stored companion width ratio, double-click resets toward the 0.32 default within practical width clamps, and shell-state persistence happens after reset or finished drag without hidden overlays or root hit-test routing.
-        */
         window.prevent_default();
         cx.stop_propagation();
 
-        self.project_editor_companion_drag = None;
+        self.workarea_split_drag = None;
 
-        if self.active_mode != mode || !self.project_editor_companion_is_visible() {
+        if !self.view_panel_open() {
             return;
         }
 
-        self.set_project_editor_companion_divider_hovering(mode, true, cx);
+        self.set_workarea_split_divider_hovering(true, cx);
 
-        let columns_active = self.project_editor_companion_columns_split_active();
         if event.click_count >= 2 {
             let content_span = self
-                .project_editor_companion_layout_metrics
+                .workarea_split_layout_metrics
                 .map(|metrics| metrics.content_span);
             if self
                 .project_editor_shell
-                .reset_left_companion_width_ratio(content_span, columns_active)
+                .reset_workarea_split_ratio(content_span)
             {
-                self.project_editor_shell
-                    .left_companion_width_ratio_before_columns = None;
                 self.persist_shell_layout_state();
                 cx.notify();
             }
             return;
         }
 
-        let Some(metrics) = self.project_editor_companion_layout_metrics else {
+        let Some(metrics) = self.workarea_split_layout_metrics else {
             return;
         };
 
-        self.project_editor_companion_drag = Some(ProjectEditorCompanionResizeDragState {
+        self.workarea_split_drag = Some(WorkareaSplitResizeDragState {
             start_x: event.position.x.as_f32(),
-            start_ratio: self.project_editor_shell.left_companion_width_ratio,
+            start_ratio: self.project_editor_shell.workarea_split_ratio,
             content_span: metrics.content_span.max(1.0),
         });
         cx.notify();
     }
 
-    pub(crate) fn handle_project_editor_companion_resize_drag_move(
+    pub(crate) fn handle_workarea_split_resize_drag_move(
         &mut self,
         event: &MouseMoveEvent,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        let Some(drag) = self.project_editor_companion_drag else {
+        let Some(drag) = self.workarea_split_drag else {
             return;
         };
 
         if !event.dragging() {
-            self.finish_project_editor_companion_resize_drag(cx);
+            self.finish_workarea_split_resize_drag(cx);
             return;
         }
 
@@ -2886,248 +2867,60 @@ impl GhostexGpuiApp {
 
         let next_ratio =
             drag.start_ratio + (event.position.x.as_f32() - drag.start_x) / drag.content_span;
-        let columns_active = self.project_editor_companion_columns_split_active();
-        if self.project_editor_shell.set_left_companion_width_ratio(
-            next_ratio,
-            drag.content_span,
-            columns_active,
-        ) {
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn handle_project_editor_companion_resize_mouse_up(
-        &mut self,
-        _event: &MouseUpEvent,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if self.project_editor_companion_drag.is_some() {
-            window.prevent_default();
-            cx.stop_propagation();
-        }
-        self.finish_project_editor_companion_resize_drag(cx);
-    }
-
-    pub(crate) fn finish_project_editor_companion_resize_drag(
-        &mut self,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if self.project_editor_companion_drag.take().is_some() {
-            self.project_editor_shell
-                .left_companion_width_ratio_before_columns = None;
-            self.clear_project_editor_companion_divider_hover_state();
-            self.persist_shell_layout_state();
-            cx.notify();
-        }
-    }
-
-    /// `axis` is the arrangement the divider was rendered for, not the stored one:
-    /// a persisted state whose axis and slot occupancy disagree could otherwise
-    /// drive a horizontal ratio from a vertical handle's pointer axis.
-    pub(crate) fn handle_project_editor_companion_split_divider_mouse_down(
-        &mut self,
-        mode: TitlebarMode,
-        axis: WorkspaceSplitAxis,
-        event: &MouseDownEvent,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        window.prevent_default();
-        cx.stop_propagation();
-        self.project_editor_companion_split_drag = None;
-
-        if self.active_mode != mode
-            || !self.project_editor_companion_is_visible()
-            || self
-                .project_editor_companion_secondary_terminal_session_id
-                .is_none()
-        {
-            return;
-        }
-
-        self.set_project_editor_companion_split_divider_hovering(mode, true, cx);
-        if event.click_count >= 2 {
-            let content_span = self
-                .project_editor_companion_split_layout_metrics
-                .map(|metrics| metrics.content_span);
-            let reset = match axis {
-                WorkspaceSplitAxis::Horizontal => self
-                    .project_editor_shell
-                    .reset_left_companion_columns_ratio(content_span),
-                WorkspaceSplitAxis::Vertical => self
-                    .project_editor_shell
-                    .reset_left_companion_split_ratio(content_span),
-            };
-            if reset {
-                self.persist_shell_layout_state();
-                cx.notify();
-            }
-            return;
-        }
-
-        let Some(metrics) = self.project_editor_companion_split_layout_metrics else {
-            return;
-        };
-        self.project_editor_companion_split_drag =
-            Some(ProjectEditorCompanionSplitResizeDragState {
-                axis,
-                start_position: split_resize_event_position(axis, event.position),
-                start_ratio: match axis {
-                    WorkspaceSplitAxis::Horizontal => {
-                        self.project_editor_shell.left_companion_columns_ratio
-                    }
-                    WorkspaceSplitAxis::Vertical => {
-                        self.project_editor_shell.left_companion_split_ratio
-                    }
-                },
-                content_span: metrics.content_span.max(1.0),
-            });
-        cx.notify();
-    }
-
-    pub(crate) fn handle_project_editor_companion_split_resize_drag_move(
-        &mut self,
-        event: &MouseMoveEvent,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(drag) = self.project_editor_companion_split_drag else {
-            return;
-        };
-        if !event.dragging() {
-            self.finish_project_editor_companion_split_resize_drag(cx);
-            return;
-        }
-
-        window.prevent_default();
-        cx.stop_propagation();
-        let next_ratio = drag.start_ratio
-            + (split_resize_event_position(drag.axis, event.position) - drag.start_position)
-                / drag.content_span;
-        let changed = match drag.axis {
-            WorkspaceSplitAxis::Horizontal => self
-                .project_editor_shell
-                .set_left_companion_columns_ratio(next_ratio, drag.content_span),
-            WorkspaceSplitAxis::Vertical => self
-                .project_editor_shell
-                .set_left_companion_split_ratio(next_ratio, drag.content_span),
-        };
-        if changed {
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn handle_project_editor_companion_split_resize_mouse_up(
-        &mut self,
-        _event: &MouseUpEvent,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if self.project_editor_companion_split_drag.is_some() {
-            window.prevent_default();
-            cx.stop_propagation();
-        }
-        self.finish_project_editor_companion_split_resize_drag(cx);
-    }
-
-    pub(crate) fn finish_project_editor_companion_split_resize_drag(
-        &mut self,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if self.project_editor_companion_split_drag.take().is_some() {
-            self.clear_project_editor_companion_split_divider_hover_state();
-            self.persist_shell_layout_state();
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn set_project_editor_companion_split_divider_hovering(
-        &mut self,
-        mode: TitlebarMode,
-        hovered: bool,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if hovered {
-            if self.project_editor_companion_split_divider_hovering == Some(mode) {
-                return;
-            }
-            self.project_editor_companion_split_divider_hover_epoch = self
-                .project_editor_companion_split_divider_hover_epoch
-                .wrapping_add(1);
-            self.project_editor_companion_split_divider_hovering = Some(mode);
-            self.project_editor_companion_split_divider_hover_visible = None;
-            let epoch = self.project_editor_companion_split_divider_hover_epoch;
-            cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(SIDEBAR_DIVIDER_HOVER_DELAY)
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    if this.project_editor_companion_split_divider_hover_epoch == epoch
-                        && this.project_editor_companion_split_divider_hovering == Some(mode)
-                    {
-                        this.project_editor_companion_split_divider_hover_visible = Some(mode);
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-            return;
-        }
-
-        if self.project_editor_companion_split_divider_hovering == Some(mode)
-            || self.project_editor_companion_split_divider_hover_visible == Some(mode)
-        {
-            self.clear_project_editor_companion_split_divider_hover_state();
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn clear_project_editor_companion_split_divider_hover_state(&mut self) -> bool {
         if self
-            .project_editor_companion_split_divider_hovering
-            .is_none()
-            && self
-                .project_editor_companion_split_divider_hover_visible
-                .is_none()
+            .project_editor_shell
+            .set_workarea_split_ratio(next_ratio, drag.content_span)
         {
-            return false;
+            cx.notify();
         }
-        self.project_editor_companion_split_divider_hover_epoch = self
-            .project_editor_companion_split_divider_hover_epoch
-            .wrapping_add(1);
-        self.project_editor_companion_split_divider_hovering = None;
-        self.project_editor_companion_split_divider_hover_visible = None;
-        true
     }
 
-    pub(crate) fn set_project_editor_companion_divider_hovering(
+    pub(crate) fn handle_workarea_split_resize_mouse_up(
         &mut self,
-        mode: TitlebarMode,
+        _event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.workarea_split_drag.is_some() {
+            window.prevent_default();
+            cx.stop_propagation();
+        }
+        self.finish_workarea_split_resize_drag(cx);
+    }
+
+    pub(crate) fn finish_workarea_split_resize_drag(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.workarea_split_drag.take().is_some() {
+            self.clear_workarea_split_divider_hover_state();
+            self.persist_shell_layout_state();
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn set_workarea_split_divider_hovering(
+        &mut self,
         hovered: bool,
         cx: &mut gpui::Context<Self>,
     ) {
         if hovered {
-            if self.project_editor_companion_divider_hovering == Some(mode) {
+            if self.workarea_split_divider_hovering {
                 return;
             }
 
-            self.project_editor_companion_divider_hover_epoch = self
-                .project_editor_companion_divider_hover_epoch
-                .wrapping_add(1);
-            self.project_editor_companion_divider_hovering = Some(mode);
-            self.project_editor_companion_divider_hover_visible = None;
-            let epoch = self.project_editor_companion_divider_hover_epoch;
+            self.workarea_split_divider_hover_epoch =
+                self.workarea_split_divider_hover_epoch.wrapping_add(1);
+            self.workarea_split_divider_hovering = true;
+            self.workarea_split_divider_hover_visible = false;
+            let epoch = self.workarea_split_divider_hover_epoch;
             cx.spawn(async move |this, cx| {
                 cx.background_executor()
                     .timer(SIDEBAR_DIVIDER_HOVER_DELAY)
                     .await;
 
                 let _ = this.update(cx, |this, cx| {
-                    if this.project_editor_companion_divider_hover_epoch == epoch
-                        && this.project_editor_companion_divider_hovering == Some(mode)
+                    if this.workarea_split_divider_hover_epoch == epoch
+                        && this.workarea_split_divider_hovering
                     {
-                        this.project_editor_companion_divider_hover_visible = Some(mode);
+                        this.workarea_split_divider_hover_visible = true;
                         cx.notify();
                     }
                 });
@@ -3137,28 +2930,21 @@ impl GhostexGpuiApp {
             return;
         }
 
-        if self.project_editor_companion_divider_hovering == Some(mode)
-            || self.project_editor_companion_divider_hover_visible == Some(mode)
-        {
-            self.clear_project_editor_companion_divider_hover_state();
+        if self.workarea_split_divider_hovering || self.workarea_split_divider_hover_visible {
+            self.clear_workarea_split_divider_hover_state();
             cx.notify();
         }
     }
 
-    pub(crate) fn clear_project_editor_companion_divider_hover_state(&mut self) -> bool {
-        if self.project_editor_companion_divider_hovering.is_none()
-            && self
-                .project_editor_companion_divider_hover_visible
-                .is_none()
-        {
+    pub(crate) fn clear_workarea_split_divider_hover_state(&mut self) -> bool {
+        if !self.workarea_split_divider_hovering && !self.workarea_split_divider_hover_visible {
             return false;
         }
 
-        self.project_editor_companion_divider_hover_epoch = self
-            .project_editor_companion_divider_hover_epoch
-            .wrapping_add(1);
-        self.project_editor_companion_divider_hovering = None;
-        self.project_editor_companion_divider_hover_visible = None;
+        self.workarea_split_divider_hover_epoch =
+            self.workarea_split_divider_hover_epoch.wrapping_add(1);
+        self.workarea_split_divider_hovering = false;
+        self.workarea_split_divider_hover_visible = false;
         true
     }
 

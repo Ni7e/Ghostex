@@ -72,17 +72,14 @@ pub(crate) fn titlebar_tooltip(
 pub(crate) fn titlebar_popup_menu_width(kind: GpuiTitlebarPopupKind) -> f32 {
     match kind {
         GpuiTitlebarPopupKind::AccountUsage(_) => 380.0,
-        GpuiTitlebarPopupKind::RemoteSites => TITLEBAR_POPUP_RESOURCES_WIDTH,
         GpuiTitlebarPopupKind::Actions
         | GpuiTitlebarPopupKind::ContextMenu
         | GpuiTitlebarPopupKind::BrowserActions(_)
         | GpuiTitlebarPopupKind::OpenTargets => TITLEBAR_POPUP_COMPACT_WIDTH,
         GpuiTitlebarPopupKind::Extensions => TITLEBAR_POPUP_EXTENSIONS_WIDTH,
         GpuiTitlebarPopupKind::Git => TITLEBAR_POPUP_GIT_WIDTH,
-        GpuiTitlebarPopupKind::Help => TITLEBAR_POPUP_HELP_WIDTH,
+        GpuiTitlebarPopupKind::More => TITLEBAR_POPUP_COMPACT_WIDTH,
         GpuiTitlebarPopupKind::Notifications => TITLEBAR_POPUP_NOTIFICATIONS_WIDTH,
-        GpuiTitlebarPopupKind::Resources => TITLEBAR_POPUP_RESOURCES_WIDTH,
-        GpuiTitlebarPopupKind::Tips => TITLEBAR_POPUP_TIPS_WIDTH,
     }
 }
 
@@ -110,26 +107,16 @@ pub(crate) fn titlebar_popup_window_bounds_for_trigger_bounds(
     window: &Window,
 ) -> Bounds<Pixels> {
     let main_window_bounds = window.bounds();
-    if matches!(kind, GpuiTitlebarPopupKind::AccountUsage(_)) {
-        let viewport = window.viewport_size();
-        let width = width.min((viewport.width.as_f32() - 16.0).max(1.0));
-        let height =
-            content_height.min((viewport.height.as_f32() - TITLEBAR_HEIGHT - 8.0).max(1.0));
-        let right = trigger_bounds.right().as_f32().clamp(
-            width + 8.0,
-            (viewport.width.as_f32() - 8.0).max(width + 8.0),
-        );
-        return Bounds::new(
-            main_window_bounds.origin + point(px(right - width), px(TITLEBAR_HEIGHT)),
-            size(px(width), px(height)),
-        );
-    }
+    /*
+    CDXC:AgentProviders 2026-09-20 WHY:
+    Account usage used to be pinned to the top of the window under the titlebar
+    because its trigger was a titlebar button. Its meter now lives at the bottom
+    of the sidebar, so it takes the ordinary trigger-relative path: it grows to
+    the right of the meter and flips above it when there is no room below.
+    */
     let max_height = match kind {
         GpuiTitlebarPopupKind::AccountUsage(_) => 640.0,
         GpuiTitlebarPopupKind::Notifications => TITLEBAR_POPUP_NOTIFICATIONS_MAX_HEIGHT,
-        GpuiTitlebarPopupKind::Resources
-        | GpuiTitlebarPopupKind::Tips
-        | GpuiTitlebarPopupKind::RemoteSites => TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT,
         _ => TITLEBAR_POPUP_MENU_MAX_HEIGHT,
     };
     let available_height = (main_window_bounds.size.height.as_f32() - 28.0).max(180.0);
@@ -139,13 +126,16 @@ pub(crate) fn titlebar_popup_window_bounds_for_trigger_bounds(
     let max_left = main_window_bounds.origin.x.as_f32() + main_window_bounds.size.width.as_f32()
         - width
         - horizontal_margin;
-    // The Notifications bell sits in the left titlebar region, so its dropdown
-    // grows to the right from the trigger like a context menu instead of
-    // hanging off the trigger's right edge like the right-region buttons.
+    // The Notifications bell and the account usage meters sit at the left edge of
+    // the window, in the sidebar, so their dropdowns grow to the right from the
+    // trigger like a context menu instead of hanging off the trigger's right edge
+    // like the titlebar's right-region buttons.
     let desired_left = main_window_bounds.origin.x.as_f32()
         + if matches!(
             kind,
-            GpuiTitlebarPopupKind::ContextMenu | GpuiTitlebarPopupKind::Notifications
+            GpuiTitlebarPopupKind::AccountUsage(_)
+                | GpuiTitlebarPopupKind::ContextMenu
+                | GpuiTitlebarPopupKind::Notifications
         ) {
             trigger_bounds.left().as_f32()
         } else {
@@ -170,7 +160,13 @@ pub(crate) fn titlebar_popup_window_bounds_for_trigger_bounds(
             above_top
         };
 
-    let top = if kind == GpuiTitlebarPopupKind::ContextMenu {
+    // A trigger near the bottom of the window (the sidebar usage strip) leaves no
+    // room either below or fully above it, so the panel is held inside the window
+    // the same way a context menu is.
+    let top = if matches!(
+        kind,
+        GpuiTitlebarPopupKind::AccountUsage(_) | GpuiTitlebarPopupKind::ContextMenu
+    ) {
         let min_top = main_window_bounds.origin.y.as_f32() + horizontal_margin;
         top.clamp(min_top, (bottom_limit - height).max(min_top))
     } else {
@@ -1464,15 +1460,11 @@ pub(crate) fn titlebar_background() -> Hsla {
 
 /*
 CDXC:Theming 2026-07-22:
-The titlebar strip paints the sidebar's shared gradient stops horizontally
-(left = darker sidebar top stop, right = lighter sidebar bottom stop) so the
-chrome reads as one continuous surface. Solid consumers (popup borders, modal
-host fills) keep `titlebar_background()`.
+The sidebar paints its shared gradient stops (darker top stop, lighter bottom stop) so the chrome
+reads as one continuous surface. Solid consumers (popup borders, modal host fills) keep
+`titlebar_background()`. The horizontal variant the titlebar strip painted went with the strip; the
+workarea header that replaced it paints the workspace background so it has no edge against content.
 */
-pub(crate) fn titlebar_gradient_fill() -> gpui::Background {
-    sidebar_chrome_gradient_fill(90.0)
-}
-
 pub(crate) fn sidebar_chrome_gradient_fill(angle: f32) -> gpui::Background {
     gpui::linear_gradient(
         angle,
@@ -1485,6 +1477,17 @@ pub(crate) fn sidebar_chrome_gradient_fill(angle: f32) -> gpui::Background {
             1.,
         ),
     )
+}
+
+/// The colour the sidebar's chrome gradient reaches at its top edge, for anything that has to fade
+/// into the sidebar there rather than sit on a flat fill.
+pub(crate) fn sidebar_chrome_gradient_top_color() -> Hsla {
+    rgb(GPUI_TITLEBAR_GRADIENT_LEFT_RGB.load(Ordering::Relaxed) as u32).into()
+}
+
+/// The same colour at the sidebar's bottom edge.
+pub(crate) fn sidebar_chrome_gradient_bottom_color() -> Hsla {
+    rgb(GPUI_TITLEBAR_GRADIENT_RIGHT_RGB.load(Ordering::Relaxed) as u32).into()
 }
 
 pub(crate) fn titlebar_button_border_color() -> Hsla {
@@ -1616,10 +1619,6 @@ pub(crate) fn titlebar_disabled_text_color() -> Hsla {
     rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
         .opacity(0.30)
         .into()
-}
-
-pub(crate) fn titlebar_disabled_segment_color() -> Hsla {
-    titlebar_overlay_base().opacity(0.025).into()
 }
 
 pub(crate) fn titlebar_icon_color() -> Hsla {
@@ -2856,6 +2855,9 @@ pub(crate) fn titlebar_mode_view_tab_hidden_settings_key(
         TitlebarMode::Kanban => Some(KANBAN_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Automate => Some(AUTOMATE_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Manage => Some(DOCS_VIEW_TAB_HIDDEN_SETTINGS_KEY),
+        // A Ghostex page reuses the Settings switch its titlebar button had, so turning Ghostex
+        // Help, Tips & Tricks or Resources off in Settings still takes the page away everywhere.
+        TitlebarMode::Ghostex(page) => Some(page.hidden_settings_key()),
         TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
     }
 }
@@ -2875,6 +2877,7 @@ pub(crate) fn gpui_titlebar_mode_plugin_display_name(mode: TitlebarMode) -> &'st
         TitlebarMode::Automate => "Automate",
         TitlebarMode::Manage => "Docs",
         TitlebarMode::Extension(id) => id.as_str(),
+        TitlebarMode::Ghostex(page) => page.label(),
     }
 }
 
@@ -2885,6 +2888,25 @@ pub(crate) fn gpui_disabled_project_workarea_copy_noun(mode: TitlebarMode) -> &'
         TitlebarMode::Browser => "Link",
         _ => "Path",
     }
+}
+
+/// CDXC:Titlebar 2026-09-09 SEE-ALSO:
+/// The user's view order from Settings, as mode slugs. `titlebar_mode_switcher_items` sorts the
+/// picker with it and the view panel seeds a new tab's position from it.
+/// packages/shared/ghostex-settings/titlebar-view-order.ts writes the same slugs.
+pub(crate) fn gpui_titlebar_view_order_slugs() -> Vec<String> {
+    shared_settings::shared_sidebar_settings_snapshot()
+        .object()
+        .get("titlebarViewOrder")
+        .and_then(serde_json::Value::as_array)
+        .map(|order| {
+            order
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn gpui_titlebar_mode_hidden_from_settings(mode: TitlebarMode) -> bool {

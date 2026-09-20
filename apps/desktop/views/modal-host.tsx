@@ -288,6 +288,7 @@ type AppModalHostMessage =
       initialRemoteSection?: SettingsRemoteSection;
       initialAgentsSection?: SettingsAgentsSection;
       initialCustomViewId?: string;
+      initialViewScopeKey?: string;
       initialSection?: MainSettingsInitialSectionId;
       initialSidebarTagsAction?: SettingsSidebarTagsAction;
       /** CDXC:SavedPrompts 2026-08-24: see StashedPromptsModalState. */
@@ -1304,6 +1305,7 @@ function AppModalHost() {
     settingsInitialRemoteSection,
     settingsInitialAgentsSection,
     settingsInitialCustomViewId,
+    settingsInitialViewScopeKey,
     settingsInitialSearchQuery,
     settingsInitialTabOverride,
   } = useModalStateFromNative();
@@ -2467,6 +2469,7 @@ function AppModalHost() {
         initialRemoteSection={settingsInitialRemoteSection}
         initialAgentsSection={settingsInitialAgentsSection}
         initialCustomViewId={settingsInitialCustomViewId}
+        initialViewScopeKey={settingsInitialViewScopeKey}
         initialSearchQuery={settingsInitialSearchQuery}
         initialTab={settingsInitialTab}
         isOpen={isSettingsRenderable}
@@ -3091,6 +3094,7 @@ function useModalStateFromNative() {
   const [settingsInitialRemoteSection, setSettingsInitialRemoteSection] = useState<SettingsRemoteSection>();
   const [settingsInitialAgentsSection, setSettingsInitialAgentsSection] = useState<SettingsAgentsSection>();
   const [settingsInitialCustomViewId, setSettingsInitialCustomViewId] = useState<string>();
+  const [settingsInitialViewScopeKey, setSettingsInitialViewScopeKey] = useState<string>();
   const [settingsInitialSearchQuery, setSettingsInitialSearchQuery] = useState<string>();
   const [settingsInitialTabOverride, setSettingsInitialTabOverride] = useState<SettingsModalTab>();
   const activeModalRef = useRef<AppModalKind | undefined>(activeModal);
@@ -3699,6 +3703,9 @@ function useModalStateFromNative() {
             setSettingsInitialCustomViewId(
               typeof message.initialCustomViewId === 'string' ? message.initialCustomViewId : undefined
             );
+            setSettingsInitialViewScopeKey(
+              typeof message.initialViewScopeKey === 'string' ? message.initialViewScopeKey : undefined
+            );
             setSettingsInitialTabOverride(isSettingsModalTab(message.initialTab) ? message.initialTab : undefined);
           } else {
             setSettingsInitialSection(undefined);
@@ -3706,6 +3713,7 @@ function useModalStateFromNative() {
             setSettingsInitialRemoteSection(undefined);
             setSettingsInitialAgentsSection(undefined);
             setSettingsInitialCustomViewId(undefined);
+            setSettingsInitialViewScopeKey(undefined);
             setSettingsInitialSearchQuery(undefined);
             setSettingsInitialTabOverride(undefined);
           }
@@ -4033,6 +4041,7 @@ function useModalStateFromNative() {
     settingsInitialRemoteSection,
     settingsInitialAgentsSection,
     settingsInitialCustomViewId,
+    settingsInitialViewScopeKey,
     settingsInitialSearchQuery,
     settingsInitialTabOverride,
   };

@@ -24,10 +24,15 @@ pub(super) fn resource_header() -> gpui::Div {
         .border_color(chrome_ink().opacity(0.12))
 }
 
+/// Hosted in the view panel these pages can be as narrow as `WORKAREA_VIEW_PANEL_MIN_WIDTH`, where
+/// the header's fixed-width buttons leave the title a few dozen pixels; it clips rather than
+/// pushing them off the row.
 pub(super) fn resource_heading() -> gpui::Div {
     h_flex()
         .min_w_0()
         .flex_1()
+        .overflow_hidden()
+        .whitespace_nowrap()
         .items_center()
         .gap(px(8.0))
         .pl(px(12.0))
@@ -46,13 +51,26 @@ pub(super) fn resource_section_heading() -> gpui::Div {
         .text_color(chrome_ink().opacity(0.62))
 }
 
+/// The fill of a card on one of these pages. Ink at 2.5% is a clear step down from the dark
+/// surface, but on the white light surface it resolves to #f9f9f9 and the card all but disappears,
+/// so light mode carries a stronger alpha for the same amount of separation.
+pub(super) fn resource_card_fill() -> gpui::Hsla {
+    chrome_ink()
+        .opacity(if chrome_uses_light_appearance() {
+            0.05
+        } else {
+            0.025
+        })
+        .into()
+}
+
 pub(super) fn resource_row_frame() -> gpui::Div {
     v_flex()
         .w_full()
         .overflow_hidden()
         .border_1()
         .border_color(chrome_ink().opacity(0.10))
-        .bg(chrome_ink().opacity(0.025))
+        .bg(resource_card_fill())
 }
 
 pub(super) fn resource_row_content() -> gpui::Div {

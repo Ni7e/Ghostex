@@ -192,9 +192,7 @@ pub(crate) fn focused_agents_terminal_surface_mount_slot(
     CDXC:Terminal 2026-06-22-22:59:
     Real Agents Ghostty surface focus is a runtime decision derived from shell focus only: Agents mode, an AgentsPane focus target, a rendered pane, and that pane's selected Running session. Command pane, Browser/project-editor modes, sleeping or hidden Focus-mode panes, stale panes, and missing sessions must leave every mounted terminal surface unfocused without adding input routing or persisted focus ids.
     */
-    if active_mode != TitlebarMode::Agents {
-        return None;
-    }
+    let _ = active_mode;
     let ShellFocusTarget::AgentsPane(focused_pane_id) = shell_focus else {
         return None;
     };
@@ -203,23 +201,6 @@ pub(crate) fn focused_agents_terminal_surface_mount_slot(
         .rendered_terminal_body_mount_slots()
         .into_iter()
         .find(|slot_id| slot_id.pane_id == focused_pane_id)
-}
-
-pub(crate) fn focused_project_editor_companion_terminal_surface_mount_slot(
-    active_mode: TitlebarMode,
-    shell_focus: ShellFocusTarget,
-    selected_session_id: Option<TerminalSessionId>,
-) -> Option<ProjectEditorCompanionTerminalBodyMountSlotId> {
-    let ShellFocusTarget::ProjectEditorCompanion(mode) = shell_focus else {
-        return None;
-    };
-    if active_mode != mode || !mode.is_project_editor_mode() {
-        return None;
-    }
-    Some(ProjectEditorCompanionTerminalBodyMountSlotId {
-        mode,
-        session_id: selected_session_id?,
-    })
 }
 
 pub(crate) fn agents_terminal_surface_focus_states_for_slots(
@@ -389,9 +370,8 @@ pub(crate) fn focused_sleeping_agents_placeholder_wake_target(
     agents_workspace: &WorkspaceModel,
     keystroke: &Keystroke,
 ) -> Option<(WorkspacePaneId, TerminalSessionId)> {
-    if active_mode != TitlebarMode::Agents
-        || !command_pane_sleeping_placeholder_keystroke_requests_wake(keystroke)
-    {
+    let _ = active_mode;
+    if !command_pane_sleeping_placeholder_keystroke_requests_wake(keystroke) {
         return None;
     }
     let ShellFocusTarget::AgentsPane(pane_id) = shell_focus else {

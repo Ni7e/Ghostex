@@ -1,9 +1,11 @@
 /**
- * CDXC:Extensions 2026-09-18 WHY:
- * A scoped view ("Available in → Selected spaces") has to answer "is the ACTIVE project in this space?"
- * while the native titlebar renders, and the answer lives in the owning daemon's collections and spaces
- * documents. Resolve it once here, beside the HUD that already carries `projectViewSpaces`, and let every
- * consumer intersect ids instead of re-deriving sidebar membership.
+ * CDXC:Extensions 2026-09-20 WHY:
+ * A view with a per-space override has to answer "is the ACTIVE project in this space?" while the native
+ * work area header renders, and the answer lives in the owning daemon's collections and spaces documents.
+ * Resolve it once here, beside the HUD that already carries `projectViewSpaces`, and let every consumer
+ * look up override keys instead of re-deriving sidebar membership. This is ruling 1A: a space means the
+ * project's OWN space by membership, including group and worktree-parent inheritance, exactly as the
+ * sidebar resolves it, so a project only the built-in Other space holds resolves into no space at all.
  * SEE-ALSO: packages/shared/sidebar-spaces-other.ts owns the membership rule, and
  * server/src/project_views/scope.rs applies the same rule for custom project views.
  */
@@ -52,7 +54,7 @@ export function createGpuiActiveProjectSpaceRefs({
 
 /**
  * CDXC:Extensions 2026-09-18 DECISION:
- * User: the "Available in → Selected projects" picker lists only the projects currently in the sidebar.
+ * User: the view scope's Projects grid lists only the projects currently in the sidebar.
  * The sidebar rows are the authority, so parked Recent Projects, the synthetic Chats collection and
  * browser groups are all absent, and worktrees appear as their own rows exactly as the sidebar shows them.
  * Ids come from `projectContext.editor.projectId`, the same machine-scoped id space the active project

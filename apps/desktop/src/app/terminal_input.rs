@@ -243,9 +243,6 @@ impl GhostexGpuiApp {
                 &self.agents_workspace,
             )
             .map(|slot| slot.session_id),
-            Some(FocusedTerminalTextTarget::ProjectEditorCompanion) => {
-                self.project_editor_companion_focused_terminal_session_id()
-            }
             _ => None,
         }
     }
@@ -366,13 +363,6 @@ impl GhostexGpuiApp {
     )> {
         match self.focused_terminal_text_mount_target()? {
             FocusedTerminalTextMountTarget::Agents(slot_id) => {
-                let record = self.agents_gpui_engine_terminals.get(&slot_id.session_id)?;
-                Some((
-                    GpuiEngineTerminalEventTarget::Agents(slot_id.session_id),
-                    record.runtime_session_id,
-                ))
-            }
-            FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => {
                 let record = self.agents_gpui_engine_terminals.get(&slot_id.session_id)?;
                 Some((
                     GpuiEngineTerminalEventTarget::Agents(slot_id.session_id),
@@ -511,11 +501,6 @@ impl GhostexGpuiApp {
             {
                 Some(target)
             }
-            FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id)
-                if self.project_editor_companion_terminal_ghostty_surface_matches(slot_id) =>
-            {
-                Some(target)
-            }
             _ => None,
         }
     }
@@ -528,11 +513,6 @@ impl GhostexGpuiApp {
     ) {
         let remote_context = match target {
             FocusedTerminalTextMountTarget::Agents(slot_id) => self
-                .remote_prompt_editor_context_for_shell_session(slot_id.session_id)
-                .map(|(key, connection_generation)| {
-                    (slot_id.session_id, key, connection_generation)
-                }),
-            FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => self
                 .remote_prompt_editor_context_for_shell_session(slot_id.session_id)
                 .map(|(key, connection_generation)| {
                     (slot_id.session_id, key, connection_generation)
@@ -557,13 +537,6 @@ impl GhostexGpuiApp {
         }
         let originating_session_id = match target {
             FocusedTerminalTextMountTarget::Agents(slot_id) => self
-                .local_workspace_session_mappings
-                .iter()
-                .find_map(|(key, mapped_session_id)| {
-                    (*mapped_session_id == slot_id.session_id)
-                        .then(|| format!("{}:{}", key.project_id, key.session_id))
-                }),
-            FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => self
                 .local_workspace_session_mappings
                 .iter()
                 .find_map(|(key, mapped_session_id)| {
@@ -618,30 +591,6 @@ impl GhostexGpuiApp {
                 }
                 let runtime_session_id = command_terminal_runtime_session_id(slot_id);
                 let Some(surface) = self.command_terminal_ghostty_surfaces.get_mut(&slot_id) else {
-                    return false;
-                };
-                if surface.mount_slot_id() != slot_id
-                    || surface.runtime_session_id() != runtime_session_id
-                {
-                    return false;
-                }
-                surface.send_text_bytes(b"\x07");
-                true
-            }
-            FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => {
-                if !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
-                    return false;
-                }
-                let Some(runtime_session_id) = self
-                    .agents_terminal_runtime_sessions
-                    .runtime_session_id_for_shell_session(slot_id.session_id)
-                else {
-                    return false;
-                };
-                let Some(surface) = self
-                    .project_editor_companion_terminal_ghostty_surfaces
-                    .get_mut(&slot_id)
-                else {
                     return false;
                 };
                 if surface.mount_slot_id() != slot_id
@@ -848,17 +797,6 @@ impl GhostexGpuiApp {
         });
     }
 
-    pub(crate) fn request_project_editor_companion_terminal_text_focus_handoff(
-        &mut self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-    ) {
-        self.request_keyboard_handoff(PendingKeyboardHandoff {
-            target: ShellFocusTarget::ProjectEditorCompanion(slot_id.mode),
-            session_id: Some(slot_id.session_id),
-            command_session_id: None,
-        });
-    }
-
     /// The GPUI-engine view backing the focused target, resolved by `shell_keyboard_owner`: a chat-mode session's parked terminal is never returned, so root-forwarded text, paste, and zoom cannot reach a hidden PTY.
     pub(crate) fn focused_gpui_engine_terminal_view(
         &self,
@@ -911,14 +849,6 @@ impl GhostexGpuiApp {
                 focused_command_terminal_surface_mount_slot(self.shell_focus, &self.command_pane)
                     .map(FocusedTerminalTextMountTarget::Command)
             }
-            FocusedTerminalTextTarget::ProjectEditorCompanion => {
-                focused_project_editor_companion_terminal_surface_mount_slot(
-                    self.active_mode,
-                    self.shell_focus,
-                    self.project_editor_companion_focused_terminal_session_id(),
-                )
-                .map(FocusedTerminalTextMountTarget::ProjectEditorCompanion)
-            }
         }
     }
 
@@ -954,18 +884,6 @@ impl GhostexGpuiApp {
         self.drain_pending_keyboard_handoff(window, cx);
     }
 
-    pub(crate) fn register_project_editor_companion_terminal_text_input_handler(
-        &mut self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-        _bounds: Bounds<Pixels>,
-        _view: Entity<Self>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let _ = slot_id;
-        self.drain_pending_keyboard_handoff(window, cx);
-    }
-
     pub(crate) fn terminal_text_service_accepts_text_input(&self, window: &Window) -> bool {
         self.terminal_text_focus_handle.is_focused(window)
             && self.exact_focused_terminal_text_surface_target().is_some()
@@ -982,9 +900,6 @@ impl GhostexGpuiApp {
                 .then_some(target),
             FocusedTerminalTextMountTarget::Command(slot_id) => self
                 .command_terminal_ghostty_surface_matches(slot_id)
-                .then_some(target),
-            FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => self
-                .project_editor_companion_terminal_ghostty_surface_matches(slot_id)
                 .then_some(target),
         }
     }
@@ -1038,28 +953,6 @@ impl GhostexGpuiApp {
                 })
     }
 
-    #[cfg(target_os = "macos")]
-    pub(crate) fn project_editor_companion_terminal_ghostty_surface_matches(
-        &self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-    ) -> bool {
-        if !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
-            return false;
-        }
-        let Some(runtime_session_id) = self
-            .agents_terminal_runtime_sessions
-            .runtime_session_id_for_shell_session(slot_id.session_id)
-        else {
-            return false;
-        };
-        self.project_editor_companion_terminal_ghostty_surfaces
-            .get(&slot_id)
-            .is_some_and(|surface| {
-                surface.mount_slot_id() == slot_id
-                    && surface.runtime_session_id() == runtime_session_id
-            })
-    }
-
     pub(crate) fn set_preedit_on_focused_terminal_surface(&mut self, bytes: &[u8]) -> bool {
         let Some(target) = self.exact_focused_terminal_text_surface_target() else {
             return false;
@@ -1081,8 +974,6 @@ impl GhostexGpuiApp {
                 FocusedTerminalTextMountTarget::Command(slot_id) => {
                     self.set_preedit_bytes_on_command_terminal_surface(slot_id, bytes)
                 }
-                FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => self
-                    .set_preedit_bytes_on_project_editor_companion_terminal_surface(slot_id, bytes),
             }
         }
 
@@ -1136,33 +1027,6 @@ impl GhostexGpuiApp {
         true
     }
 
-    #[cfg(target_os = "macos")]
-    pub(crate) fn set_preedit_bytes_on_project_editor_companion_terminal_surface(
-        &mut self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-        bytes: &[u8],
-    ) -> bool {
-        let Some(runtime_session_id) = self
-            .agents_terminal_runtime_sessions
-            .runtime_session_id_for_shell_session(slot_id.session_id)
-        else {
-            return false;
-        };
-        let Some(surface) = self
-            .project_editor_companion_terminal_ghostty_surfaces
-            .get_mut(&slot_id)
-        else {
-            return false;
-        };
-        if surface.mount_slot_id() != slot_id || surface.runtime_session_id() != runtime_session_id
-        {
-            return false;
-        }
-
-        surface.set_preedit_bytes(bytes);
-        true
-    }
-
     pub(crate) fn clear_focused_terminal_preedit(&mut self) {
         let _ = self.set_preedit_on_focused_terminal_surface(b"");
         self.terminal_text_marked_range = None;
@@ -1195,16 +1059,6 @@ impl GhostexGpuiApp {
                     }
                     let ime_point = self
                         .command_terminal_ghostty_surfaces
-                        .get(&slot_id)?
-                        .ime_point();
-                    terminal_ime_bounds_from_ghostty_point(element_bounds, ime_point)
-                }
-                FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id) => {
-                    if !self.project_editor_companion_terminal_ghostty_surface_matches(slot_id) {
-                        return None;
-                    }
-                    let ime_point = self
-                        .project_editor_companion_terminal_ghostty_surfaces
                         .get(&slot_id)?
                         .ime_point();
                     terminal_ime_bounds_from_ghostty_point(element_bounds, ime_point)
@@ -1242,10 +1096,6 @@ impl GhostexGpuiApp {
                 Some(FocusedTerminalTextTarget::Agents) => {
                     self.send_text_bytes_to_focused_agents_terminal_surface(text.as_bytes())
                 }
-                Some(FocusedTerminalTextTarget::ProjectEditorCompanion) => self
-                    .send_text_bytes_to_focused_project_editor_companion_terminal_surface(
-                        text.as_bytes(),
-                    ),
                 None => false,
             }
         }
@@ -1392,44 +1242,6 @@ impl GhostexGpuiApp {
         true
     }
 
-    #[cfg(target_os = "macos")]
-    pub(crate) fn send_text_bytes_to_focused_project_editor_companion_terminal_surface(
-        &mut self,
-        bytes: &[u8],
-    ) -> bool {
-        let Some(slot_id) = focused_project_editor_companion_terminal_surface_mount_slot(
-            self.active_mode,
-            self.shell_focus,
-            self.project_editor_companion_focused_terminal_session_id(),
-        ) else {
-            return false;
-        };
-        if bytes.is_empty()
-            || !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id)
-        {
-            return false;
-        }
-        let Some(runtime_session_id) = self
-            .agents_terminal_runtime_sessions
-            .runtime_session_id_for_shell_session(slot_id.session_id)
-        else {
-            return false;
-        };
-        let Some(surface) = self
-            .project_editor_companion_terminal_ghostty_surfaces
-            .get_mut(&slot_id)
-        else {
-            return false;
-        };
-        if surface.mount_slot_id() != slot_id || surface.runtime_session_id() != runtime_session_id
-        {
-            return false;
-        }
-
-        surface.send_text_bytes(bytes);
-        true
-    }
-
     pub(crate) fn send_return_key_to_mounted_command_terminal_surface(
         &mut self,
         slot_id: CommandTerminalBodyMountSlotId,
@@ -1544,61 +1356,6 @@ impl GhostexGpuiApp {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = slot_id;
-            false
-        }
-    }
-
-    pub(crate) fn send_return_key_to_mounted_project_editor_companion_terminal_surface(
-        &mut self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        if !self.is_current_project_editor_companion_terminal_body_mount_slot(slot_id) {
-            return false;
-        }
-        let Some(runtime_session_id) = self
-            .agents_terminal_runtime_sessions
-            .runtime_session_id_for_shell_session(slot_id.session_id)
-        else {
-            return false;
-        };
-        if let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id)
-            && record.runtime_session_id == runtime_session_id
-        {
-            let view = record.view.clone();
-            view.update(cx, |view, cx| view.send_return_key(cx));
-            return true;
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            let Some(surface) = self
-                .project_editor_companion_terminal_ghostty_surfaces
-                .get_mut(&slot_id)
-            else {
-                return false;
-            };
-            if surface.mount_slot_id() != slot_id
-                || surface.runtime_session_id() != runtime_session_id
-            {
-                return false;
-            }
-            let Ok(return_text) = std::ffi::CString::new(GPUI_TERMINAL_RETURN_TEXT) else {
-                return false;
-            };
-            surface.send_key(ghostty_kit::ffi::ghostty_input_key_s {
-                action: COMMAND_PANE_GHOSTTY_KEY_ACTION_PRESS,
-                mods: 0,
-                consumed_mods: 0,
-                keycode: GPUI_TERMINAL_RETURN_KEYCODE,
-                text: return_text.as_ptr(),
-                unshifted_codepoint: GPUI_TERMINAL_RETURN_UNSHIFTED_CODEPOINT,
-                composing: false,
-            })
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
             false
         }
     }

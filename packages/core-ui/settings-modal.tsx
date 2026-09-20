@@ -280,6 +280,8 @@ export type SettingsModalProps = {
   /** Agents tab card to scroll to (consumed by the Agents tab). */
   initialAgentsSection?: SettingsAgentsSection;
   initialCustomViewId?: string;
+  /** Open one view's scope editor straight away; see ExtensionsSettingsTab. */
+  initialViewScopeKey?: string;
   initialTab?: SettingsModalTab;
   isOpen: boolean;
   presentation?: SettingsModalPresentation;
@@ -369,6 +371,7 @@ export function SettingsModal({
   initialRemoteSection,
   initialAgentsSection,
   initialCustomViewId,
+  initialViewScopeKey,
   initialTab = 'settings',
   isOpen,
   onChange,
@@ -1266,7 +1269,7 @@ export function SettingsModal({
                             ) : null}
                             {mainSettingVisible(settingsSearch.theming, 'customSidebarTitlebarBackgroundTintColor') ? (
                               <WebColorPickerField
-                                description='Applies a subtle hue to the sidebar and titlebar background in dark mode.'
+                                description='Applies a subtle hue to the sidebar and window chrome background in dark mode.'
                                 label='Dark theme background tint'
                                 {...getSettingModificationProps('customSidebarTitlebarBackgroundTintColor')}
                                 onChange={(value) =>
@@ -1416,7 +1419,7 @@ export function SettingsModal({
                             ) : null}
                             {mainSettingVisible(settingsSearch.sidebar, 'sidebarVisibilityMemory') ? (
                               <SelectField
-                                description='Keep one sidebar state everywhere, or remember it separately for Agents and for the wide views (Browser, Code, Docs, Kanban, Automate). The companion and Commands panes always follow the view.'
+                                description='Keep one sidebar state everywhere, or remember it separately for a window with no view open and a window with one open. The Commands pane always follows that same distinction.'
                                 label='Sidebar visibility memory'
                                 {...getSettingModificationProps('sidebarVisibilityMemory')}
                                 onChange={(value) =>
@@ -2642,15 +2645,15 @@ export function SettingsModal({
                             {mainSettingVisible(settingsSearch.power, 'hideKeepAwakeTitlebarControl') ? (
                               <ToggleField
                                 checked={draft.hideKeepAwakeTitlebarControl}
-                                description='Hide the keep-awake control from the title bar.'
-                                label='Hide title-bar keep-awake control'
+                                description='Hide the Keep Awake entry from the sidebar menu.'
+                                label='Hide Keep Awake'
                                 {...getSettingModificationProps('hideKeepAwakeTitlebarControl')}
                                 onChange={(checked) => updateDraft('hideKeepAwakeTitlebarControl', checked)}
                               />
                             ) : null}
                             {mainSettingVisible(settingsSearch.power, 'keepAwakeDefaultDurationMinutes') ? (
                               <SelectField
-                                description='Choose the duration used by the title-bar keep-awake button.'
+                                description='Choose the duration Keep Awake uses by default.'
                                 label='Default keep-awake duration'
                                 {...getSettingModificationProps('keepAwakeDefaultDurationMinutes')}
                                 onChange={(value) =>
@@ -2849,8 +2852,8 @@ export function SettingsModal({
                                   checked={draft.showBetaFeatures}
                                   description={
                                     automateIsExperimental
-                                      ? 'Show experimental settings, All Automations and Automate pages, and the Keep Awake title-bar button.'
-                                      : 'Show experimental settings, All Automations, and the Keep Awake title-bar button.'
+                                      ? 'Show experimental settings, All Automations and Automate pages, and the Keep Awake menu.'
+                                      : 'Show experimental settings, All Automations, and the Keep Awake menu.'
                                   }
                                   label='Enable Experimental Features'
                                   {...getSettingModificationProps('showBetaFeatures')}
@@ -2865,7 +2868,7 @@ export function SettingsModal({
                                         ? 'All Automations and project Automate pages'
                                         : 'All Automations'}
                                     </li>
-                                    <li>Title bar and Power settings: Keep Awake</li>
+                                    <li>Power settings and the sidebar menu: Keep Awake</li>
                                   </ul>
                                 </div>
                               </>
@@ -2949,6 +2952,7 @@ export function SettingsModal({
                   <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='extensions'>
                     <ExtensionsSettingsTab
                       initialCustomViewId={initialCustomViewId}
+                      initialViewScopeKey={initialViewScopeKey}
                       projects={projectViewProjects}
                       spaces={projectViewSpaces}
                       isActive={isOpen && activeTab === 'extensions'}

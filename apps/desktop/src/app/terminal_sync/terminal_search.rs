@@ -106,20 +106,6 @@ impl GhostexGpuiApp {
                 };
                 (record, &mut self.command_terminal_runtime_osc_states)
             }
-            FocusedTerminalTextTarget::ProjectEditorCompanion => {
-                let Some(slot_id) = focused_project_editor_companion_terminal_surface_mount_slot(
-                    self.active_mode,
-                    self.shell_focus,
-                    self.project_editor_companion_focused_terminal_session_id(),
-                ) else {
-                    return false;
-                };
-                let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id)
-                else {
-                    return false;
-                };
-                (record, &mut self.agents_terminal_runtime_osc_states)
-            }
         };
         let runtime_session_id = record.runtime_session_id;
         let view = record.view.clone();
@@ -189,18 +175,6 @@ impl GhostexGpuiApp {
                     .and_then(|slot_id| self.command_terminal_ghostty_surfaces.get(&slot_id))
                     .is_some_and(|surface| surface.perform_binding_action("start_search"))
             }
-            Some(FocusedTerminalTextTarget::ProjectEditorCompanion) => {
-                focused_project_editor_companion_terminal_surface_mount_slot(
-                    self.active_mode,
-                    self.shell_focus,
-                    self.project_editor_companion_focused_terminal_session_id(),
-                )
-                .and_then(|slot_id| {
-                    self.project_editor_companion_terminal_ghostty_surfaces
-                        .get(&slot_id)
-                })
-                .is_some_and(|surface| surface.perform_binding_action("start_search"))
-            }
             None => false,
         };
         if started {
@@ -238,13 +212,6 @@ impl GhostexGpuiApp {
         }
         if let Some(surface) = self
             .command_terminal_ghostty_surfaces
-            .values()
-            .find(|surface| surface.runtime_session_id() == runtime_session_id)
-        {
-            return surface.perform_binding_action(action);
-        }
-        if let Some(surface) = self
-            .project_editor_companion_terminal_ghostty_surfaces
             .values()
             .find(|surface| surface.runtime_session_id() == runtime_session_id)
         {
@@ -330,29 +297,7 @@ impl GhostexGpuiApp {
         if !closed {
             return;
         }
-        let companion_slot_id = self
-            .project_editor_companion_terminal_ghostty_surfaces
-            .iter()
-            .find_map(|(slot_id, surface)| {
-                (surface.runtime_session_id() == runtime_session_id).then_some(*slot_id)
-            })
-            .or_else(|| {
-                self.current_project_editor_companion_terminal_body_mount_slots()
-                    .into_iter()
-                    .find(|slot_id| {
-                        self.agents_gpui_engine_terminals
-                            .get(&slot_id.session_id)
-                            .is_some_and(|record| record.runtime_session_id == runtime_session_id)
-                    })
-            });
-        if let Some(slot_id) = companion_slot_id {
-            self.focus_project_editor_companion_terminal_session(
-                slot_id.mode,
-                slot_id.session_id,
-                window,
-                cx,
-            );
-        } else if let Some(slot_id) = self
+        if let Some(slot_id) = self
             .agents_terminal_ghostty_surfaces
             .iter()
             .find_map(|(slot_id, surface)| {
@@ -648,48 +593,6 @@ impl GhostexGpuiApp {
         #[cfg(target_os = "macos")]
         {
             let surface = self.command_terminal_ghostty_surfaces.get(&slot_id)?;
-            return (surface.mount_slot_id() == slot_id).then(|| surface.runtime_session_id());
-        }
-        #[cfg(not(target_os = "macos"))]
-        None
-    }
-
-    pub(crate) fn render_project_editor_companion_terminal_search_bar(
-        &self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        let runtime_session_id =
-            self.project_editor_companion_terminal_search_bar_runtime_session_id(slot_id)?;
-        let search = self
-            .agents_terminal_runtime_osc_states
-            .get(&runtime_session_id)?
-            .search
-            .clone()?;
-        Some(self.render_terminal_search_bar(
-            runtime_session_id,
-            &search,
-            format!(
-                "companion-{}-{}",
-                slot_id.mode.element_slug(),
-                slot_id.session_id.0
-            ),
-            cx,
-        ))
-    }
-
-    pub(crate) fn project_editor_companion_terminal_search_bar_runtime_session_id(
-        &self,
-        slot_id: ProjectEditorCompanionTerminalBodyMountSlotId,
-    ) -> Option<AgentsTerminalRuntimeSessionId> {
-        if let Some(record) = self.agents_gpui_engine_terminals.get(&slot_id.session_id) {
-            return Some(record.runtime_session_id);
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let surface = self
-                .project_editor_companion_terminal_ghostty_surfaces
-                .get(&slot_id)?;
             return (surface.mount_slot_id() == slot_id).then(|| surface.runtime_session_id());
         }
         #[cfg(not(target_os = "macos"))]

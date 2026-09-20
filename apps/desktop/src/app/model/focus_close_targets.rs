@@ -22,7 +22,6 @@ pub(crate) enum FocusedSurfaceCloseDecision {
         session_id: CommandSessionId,
     },
     InterceptNoOp,
-    CloseProjectEditorCompanionSession(TitlebarMode),
     CloseAgentsActiveTab,
     CloseBrowserActiveTab,
     NoOp,
@@ -85,11 +84,6 @@ pub(crate) fn focused_surface_close_decision(
     }
 
     match shell_focus {
-        ShellFocusTarget::ProjectEditorCompanion(mode)
-            if active_mode == mode && mode.is_project_editor_mode() =>
-        {
-            FocusedSurfaceCloseDecision::CloseProjectEditorCompanionSession(mode)
-        }
         ShellFocusTarget::ProjectEditorSurface(mode) if mode.is_project_editor_mode() => {
             FocusedSurfaceCloseDecision::NoOp
         }
@@ -98,9 +92,10 @@ pub(crate) fn focused_surface_close_decision(
         {
             FocusedSurfaceCloseDecision::CloseBrowserActiveTab
         }
-        ShellFocusTarget::AgentsPane(_) if active_mode == TitlebarMode::Agents => {
-            FocusedSurfaceCloseDecision::CloseAgentsActiveTab
-        }
+        // CDXC:FocusRouting 2026-09-20 WHY:
+        // Cmd+W in an Agents pane closes its tab whatever the view panel shows, because the pane is
+        // on screen either way. The Commands pane still hands the decision to the active view.
+        ShellFocusTarget::AgentsPane(_) => FocusedSurfaceCloseDecision::CloseAgentsActiveTab,
         ShellFocusTarget::CommandPane => match active_mode {
             TitlebarMode::Agents => FocusedSurfaceCloseDecision::CloseAgentsActiveTab,
             TitlebarMode::Browser => FocusedSurfaceCloseDecision::CloseBrowserActiveTab,
@@ -108,13 +103,12 @@ pub(crate) fn focused_surface_close_decision(
             | TitlebarMode::Kanban
             | TitlebarMode::Automate
             | TitlebarMode::Manage
-            | TitlebarMode::Extension(_) => FocusedSurfaceCloseDecision::NoOp,
+            | TitlebarMode::Extension(_)
+            | TitlebarMode::Ghostex(_) => FocusedSurfaceCloseDecision::NoOp,
         },
-        ShellFocusTarget::AgentsPane(_)
-        | ShellFocusTarget::BrowserSurface
+        ShellFocusTarget::BrowserSurface
         | ShellFocusTarget::BrowserPane(_)
-        | ShellFocusTarget::ProjectEditorSurface(_)
-        | ShellFocusTarget::ProjectEditorCompanion(_) => FocusedSurfaceCloseDecision::NoOp,
+        | ShellFocusTarget::ProjectEditorSurface(_) => FocusedSurfaceCloseDecision::NoOp,
     }
 }
 

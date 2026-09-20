@@ -13,7 +13,6 @@ use gpui::div;
 use gpui::img;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
-use gpui::rgb;
 use gpui_component::ElementExt;
 use gpui_component::Side;
 use gpui_component::h_flex;
@@ -31,9 +30,6 @@ pub(crate) struct TitlebarBadgeButton {
     pub title: String,
     pub icon_image: std::sync::Arc<gpui::Image>,
     pub badge_lines: Vec<String>,
-    pub indicator: Option<String>,
-    pub indicator_color: gpui::Rgba,
-    pub account: bool,
 }
 
 impl GhostexGpuiApp {
@@ -89,21 +85,6 @@ impl GhostexGpuiApp {
             })
     }
 
-    pub(crate) fn render_titlebar_extensions_button(
-        &self,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        self.render_titlebar_native_popup_button(
-            GpuiTitlebarPopupKind::Extensions,
-            TITLEBAR_ICON_EXTENSIONS,
-            TITLEBAR_EXTENSIONS_TOOLTIP,
-            false,
-            window,
-            cx,
-        )
-    }
-
     pub(crate) fn render_titlebar_pinned_extension_buttons(
         &self,
         window: &mut Window,
@@ -115,7 +96,7 @@ impl GhostexGpuiApp {
             .values()
             /*
             CDXC:Extensions 2026-09-18 DECISION:
-            User: an extension's "Available in" scope decides where it is shown, so a pinned titlebar
+            User: an extension's view scope decides where it is shown, so a pinned titlebar
             button disappears in a project the extension is not scoped to, exactly like its view tab.
             SEE-ALSO: apps/desktop/src/app/view_scopes.rs.
             */
@@ -153,9 +134,6 @@ impl GhostexGpuiApp {
                 title: extension.title,
                 icon_image: extension.icon_image,
                 badge_lines: extension.badge_lines,
-                indicator: None,
-                indicator_color: rgb(0xa4a8af),
-                account: false,
             },
             window,
             cx,
@@ -169,13 +147,10 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let extension_id = button.id;
-        let open = if button.account {
-            self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::AccountUsage(extension_id))
-        } else {
-            self.titlebar_extension_popup
-                .as_ref()
-                .is_some_and(|state| state.id == extension_id && state.account == button.account)
-        };
+        let open = self
+            .titlebar_extension_popup
+            .as_ref()
+            .is_some_and(|state| state.id == extension_id && !state.account);
         let anchor_state = window.use_keyed_state(
             format!(
                 "ghostex-gpui-titlebar-extension-{}-anchor",
@@ -197,13 +172,10 @@ impl GhostexGpuiApp {
             .cloned()
             .collect::<Vec<_>>();
         let show_badge = !badge_lines.is_empty();
-        let account_button = button.account;
         let tooltip = button.title.clone();
         let icon_image = button.icon_image.clone();
 
         let icon = |size| {
-            let labelled = button.indicator.is_some();
-            let size = if labelled { 19.2 } else { size };
             div()
                 .relative()
                 .size(px(size))
@@ -216,22 +188,8 @@ impl GhostexGpuiApp {
                         .absolute()
                         .top_0()
                         .left_0()
-                        .size(px(size))
-                        .when(labelled, |this| this.opacity(0.3)),
+                        .size(px(size)),
                 )
-                .when_some(button.indicator.clone(), |this, indicator| {
-                    this.child(
-                        div()
-                            .relative()
-                            .text_color(button.indicator_color)
-                            .text_size(px(9.9))
-                            .line_height(px(9.9))
-                            .font_family(ACCOUNT_INDICATOR_FONT_FAMILY)
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_center()
-                            .child(indicator),
-                    )
-                })
         };
         div()
             .flex_shrink_0()
@@ -264,29 +222,15 @@ impl GhostexGpuiApp {
                         window.request_animation_frame();
                         return;
                     };
-                    if button.account {
-                        this.open_titlebar_account_usage(extension_id, trigger_bounds, window, cx);
-                    } else {
-                        this.close_gpui_titlebar_popup(None, window, cx);
-                        this.launch_extension_from_titlebar(
-                            extension_id.as_str(),
-                            trigger_bounds,
-                            window,
-                            cx,
-                        );
-                    }
+                    this.close_gpui_titlebar_popup(None, window, cx);
+                    this.launch_extension_from_titlebar(
+                        extension_id.as_str(),
+                        trigger_bounds,
+                        window,
+                        cx,
+                    );
                 }),
             )
-            .when(account_button, |this| {
-                this.on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.show_gpui_titlebar_account_menu(event.position, window, cx);
-                    }),
-                )
-            })
             .when(!open, |this| {
                 this.managed_discrete_tooltip_with_placement(
                     ManagedTooltipPlacement::Left,
@@ -313,11 +257,8 @@ impl GhostexGpuiApp {
                     this.child(
                         h_flex().gap(px(4.0)).child(icon(14.0)).child(
                             v_flex()
-                                .text_size(px(if account_button { 9.5 } else { 10.5 }))
-                                .line_height(px(if account_button { 9.5 } else { 10.5 }))
-                                .when(account_button, |this| {
-                                    this.font_family(ACCOUNT_INDICATOR_FONT_FAMILY)
-                                })
+                                .text_size(px(10.5))
+                                .line_height(px(10.5))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(chrome_color(0xb9b9b9, 0x404040))
                                 .children(badge_lines),

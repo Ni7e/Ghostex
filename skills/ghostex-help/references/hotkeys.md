@@ -17,7 +17,7 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Ask Ghostex Help | unassigned |  | Open the Ghostex Help menu: sample questions an agent can answer and settings it can change for you. | `openGhostexHelp` |
 | Hotkeys | `cmd+.` |  | Open app hotkeys. | `openHotkeys` |
 | Toggle Sidebar | `cmd+b` |  | Collapse or expand the sidebar. | `toggleSidebarCollapsed` |
-| Toggle Companion Pane | `cmd+alt+b` |  | Collapse or expand the project companion pane. | `toggleCompanionPane` |
+| Toggle View Panel | `cmd+alt+b` |  | Open or close the view panel beside your sessions. | `toggleViewPanel` |
 | Rename Active Session | `cmd+r` |  | Rename the focused session. | `renameActiveSession` |
 | Open Browser Pane | `cmd+n` |  | Open a browser tab beside the focused tab. | `openBrowserPane` |
 | Switch to Agents | unassigned |  | Switch to Agents view. | `switchAgentsView` |
@@ -26,15 +26,15 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Switch to Kanban | unassigned |  | Switch to Kanban view. | `switchKanbanView` |
 | Switch to Docs | unassigned |  | Switch to Docs view. | `switchManageView` |
 | Switch to Automate | unassigned |  | Switch to Automate view. | `switchAutomateView` |
-| Switch to Titlebar View 1 | `alt+1` |  | Open view 1 in the displayed titlebar order. | `switchTitlebarView1` |
-| Switch to Titlebar View 2 | `alt+2` |  | Open view 2 in the displayed titlebar order. | `switchTitlebarView2` |
-| Switch to Titlebar View 3 | `alt+3` |  | Open view 3 in the displayed titlebar order. | `switchTitlebarView3` |
-| Switch to Titlebar View 4 | `alt+4` |  | Open view 4 in the displayed titlebar order. | `switchTitlebarView4` |
-| Switch to Titlebar View 5 | `alt+5` |  | Open view 5 in the displayed titlebar order. | `switchTitlebarView5` |
-| Switch to Titlebar View 6 | `alt+6` |  | Open view 6 in the displayed titlebar order. | `switchTitlebarView6` |
-| Switch to Titlebar View 7 | `alt+7` |  | Open view 7 in the displayed titlebar order. | `switchTitlebarView7` |
-| Switch to Titlebar View 8 | `alt+8` |  | Open view 8 in the displayed titlebar order. | `switchTitlebarView8` |
-| Switch to Titlebar View 9 | `alt+9` |  | Open view 9 in the displayed titlebar order. | `switchTitlebarView9` |
+| Switch to View Tab 1 | `alt+1` |  | Open tab 1 in the view panel's tab strip. | `switchTitlebarView1` |
+| Switch to View Tab 2 | `alt+2` |  | Open tab 2 in the view panel's tab strip. | `switchTitlebarView2` |
+| Switch to View Tab 3 | `alt+3` |  | Open tab 3 in the view panel's tab strip. | `switchTitlebarView3` |
+| Switch to View Tab 4 | `alt+4` |  | Open tab 4 in the view panel's tab strip. | `switchTitlebarView4` |
+| Switch to View Tab 5 | `alt+5` |  | Open tab 5 in the view panel's tab strip. | `switchTitlebarView5` |
+| Switch to View Tab 6 | `alt+6` |  | Open tab 6 in the view panel's tab strip. | `switchTitlebarView6` |
+| Switch to View Tab 7 | `alt+7` |  | Open tab 7 in the view panel's tab strip. | `switchTitlebarView7` |
+| Switch to View Tab 8 | `alt+8` |  | Open tab 8 in the view panel's tab strip. | `switchTitlebarView8` |
+| Switch to View Tab 9 | `alt+9` |  | Open tab 9 in the view panel's tab strip. | `switchTitlebarView9` |
 | Rotate Panes Clockwise | `ctrl+shift+l` | `cmd+alt+l` | Rotate panes clockwise in the focused group. | `rotatePanesClockwise` |
 | Merge All Tabs | `ctrl+shift+m` | `cmd+alt+m` | Merge the focused group's panes into one tabbed pane. | `mergeAllTabs` |
 | Delayed Actions | `ctrl+shift+s` | `cmd+alt+s` | Open delayed actions for the focused terminal session. | `delayedSend` |
@@ -62,7 +62,7 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Next Group | unassigned |  | Focus the next group. | `focusNextGroup` |
 | Back | `cmd+[` | `cmd+alt+shift+[` | Go back to the previously active session or project. | `navigateHistoryBack` |
 | Forward | `cmd+]` | `cmd+alt+shift+]` | Go forward again after going back. | `navigateHistoryForward` |
-| Open Notifications | `cmd+i` |  | Open the Notifications panel under the titlebar bell. | `openNotifications` |
+| Open Notifications | `cmd+i` |  | Open the Notifications panel under the bell in the sidebar's top row. | `openNotifications` |
 | Jump to Latest Unread Notification | `cmd+shift+u` |  | Jump to the session of the latest unread notification and mark it read. | `jumpToLatestUnreadNotification` |
 | Mark as Oldest Unread and Jump to Next | `cmd+ctrl+u` |  | Push the current session to the back of the unread queue and jump to the next unread notification. | `deferNotificationAndJumpNext` |
 | Previous Session | `ctrl+shift+tab` | `cmd+shift+tab` | Select the previous session shown in the sidebar. | `focusPreviousSession` |

@@ -165,7 +165,7 @@ impl GpuiTitlebarReadingPanel {
             .gap(px(10.0))
             .border_1()
             .border_color(chrome_ink().opacity(0.10))
-            .bg(chrome_ink().opacity(0.025))
+            .bg(resource_card_fill())
             .p(px(8.0))
             .pt(px(9.0))
             .when(read, |this| this.opacity(0.72))
@@ -232,7 +232,7 @@ impl GpuiTitlebarReadingPanel {
             .gap(px(10.0))
             .border_1()
             .border_color(chrome_ink().opacity(0.10))
-            .bg(chrome_ink().opacity(0.025))
+            .bg(resource_card_fill())
             .p(px(8.0))
             .pt(px(9.0))
             .cursor_pointer()
@@ -256,10 +256,12 @@ impl GpuiTitlebarReadingPanel {
                     .items_center()
                     .justify_center()
                     .bg(rgb(0xf59e0b).opacity(0.14))
+                    // The dark-mode amber is a pale yellow glyph on a pale yellow tile once the
+                    // page is white, so light mode takes the darker end of the same ramp.
                     .child(titlebar_svg_icon(
                         "titlebar/alert-triangle.svg",
                         16.0,
-                        rgb(0xfbbf24).opacity(0.95).into(),
+                        chrome_color(0xfbbf24, 0xb45309).opacity(0.95).into(),
                     )),
             )
             .child(

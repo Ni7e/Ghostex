@@ -48,9 +48,10 @@ impl GhostexGpuiApp {
             TitlebarMode::Extension(id) if id.as_str() == "storybook" => {
                 ViewSkeletonKind::Storybook
             }
-            TitlebarMode::Extension(_) | TitlebarMode::Agents | TitlebarMode::Browser => {
-                ViewSkeletonKind::Web
-            }
+            TitlebarMode::Extension(_)
+            | TitlebarMode::Agents
+            | TitlebarMode::Browser
+            | TitlebarMode::Ghostex(_) => ViewSkeletonKind::Web,
         }
     }
 

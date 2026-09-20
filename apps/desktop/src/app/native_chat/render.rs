@@ -7,6 +7,27 @@ use gpui::{
 };
 use serde_json::json;
 
+impl NativeChatView {
+    /*
+    CDXC:SessionChat 2026-09-20 WHY:
+    The desktop shell lets this pane's transcript pass under the floating workarea header, and that
+    is only safe while the transcript really is the first thing in the pane. Everything this render
+    can put above it (the error banner, the "load earlier turns" button, the search bar, the fork
+    branch strip, and the maximized window's bare background) is chrome the header would hide, so
+    the shell asks here first and keeps its old top edge instead. A new region above the transcript
+    belongs in this list.
+    */
+    pub(crate) fn renders_region_above_transcript(&self) -> bool {
+        if self.maximized_window.is_some() {
+            return true;
+        }
+        self.error.is_some()
+            || (self.snapshot["hasMore"] == true && self.list.item_count() == 0)
+            || self.snapshot["transcriptSearch"]["open"] == true
+            || self.snapshot["forkBranches"]["count"].as_u64().is_some()
+    }
+}
+
 impl Render for NativeChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         super::scroll_bottom::register(cx);

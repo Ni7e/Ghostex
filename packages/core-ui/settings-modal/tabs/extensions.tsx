@@ -71,6 +71,7 @@ import {
 import {
   extensionViewScopeKey,
   ghostexViewScope,
+  isDefaultGhostexViewScope,
   officialViewScopeKey,
   setGhostexViewScope,
   viewScopeDescription,
@@ -131,10 +132,11 @@ const OFFICIAL_TITLEBAR_EXTENSIONS = GHOSTEX_OFFICIAL_EXTENSIONS.filter(
 );
 
 /**
- * CDXC:Extensions 2026-09-18 DECISION:
- * User: every view and extension row gets the same Edit button as a custom view, so its "Available in"
- * scope can be narrowed to selected projects or selected spaces. One controls object carries the three
- * things a row needs, so the official rows and the store rows stay one behaviour instead of two.
+ * CDXC:Extensions 2026-09-20 DECISION:
+ * User (ruling 3A): every view and extension row gets the same Edit button as a custom view, and behind it
+ * a Default of shown or hidden plus per-project and per-space overrides. Supersedes the 2026-09-18 wording
+ * that called this an "Available in" allow-list. One controls object carries the three things a row needs,
+ * so the official rows and the store rows stay one behaviour instead of two.
  */
 type ViewScopeControls = {
   /** The row's scope summary, or undefined while the view is available everywhere. */
@@ -146,6 +148,7 @@ type ViewScopeControls = {
 
 export function ExtensionsSettingsTab({
   initialCustomViewId,
+  initialViewScopeKey,
   projects = [],
   spaces = [],
   isActive,
@@ -160,6 +163,7 @@ export function ExtensionsSettingsTab({
   vscode,
 }: {
   initialCustomViewId?: string;
+  initialViewScopeKey?: string;
   projects?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewProject[];
   spaces?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewSpace[];
   isActive: boolean;
@@ -179,6 +183,7 @@ export function ExtensionsSettingsTab({
   const [viewOrderOpen, setViewOrderOpen] = useState(false);
   const customViewEditorRef = useRef<HTMLDivElement>(null);
   const targetedCustomViewId = useRef<string | undefined>(undefined);
+  const targetedViewScopeKey = useRef<string | undefined>(undefined);
   const focusCustomViewEditor = useRef(false);
 
   /**
@@ -215,6 +220,38 @@ export function ExtensionsSettingsTab({
     const view = customViewsById.get(item.id);
     return view ? [view] : [];
   });
+  /**
+   * CDXC:Extensions 2026-09-20 WHY:
+   * "Choose where it's shown…" on a view tab names the view it was opened from, so this page opens
+   * that view's scope editor instead of dropping the user on the list to find the row again. The key
+   * is the same `official:` / `extension:` scope key the rows themselves use.
+   * SEE-ALSO: apps/desktop/src/app/view_tab_menus.rs, apps/desktop/views/modal-host.tsx.
+   */
+  const viewScopeEditorTitle = (key: string): string | undefined => {
+    const official = [...OFFICIAL_VIEW_EXTENSIONS, ...OFFICIAL_TITLEBAR_EXTENSIONS].find(
+      (extension) => officialViewScopeKey(extension.id) === key
+    );
+    if (official) return official.title;
+    const customView = settings.customViews.find((view) => extensionViewScopeKey(view.id) === key);
+    if (customView) return customView.name;
+    return browser.installed.find((extension) => extensionViewScopeKey(extension.id) === key)?.manifest.title;
+  };
+  useEffect(() => {
+    if (!isActive || !initialViewScopeKey) {
+      targetedViewScopeKey.current = undefined;
+      return;
+    }
+    if (targetedViewScopeKey.current === initialViewScopeKey) return;
+    const title = viewScopeEditorTitle(initialViewScopeKey);
+    if (!title) return;
+    targetedViewScopeKey.current = initialViewScopeKey;
+    setScopeEditor({
+      draft: ghostexViewScope(settings.viewScopes, initialViewScopeKey),
+      key: initialViewScopeKey,
+      title,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browser.installed, initialViewScopeKey, isActive, settings.customViews, settings.viewScopes]);
   const detailOpen = Boolean(transport) && browser.detailOpen;
   const showOfficial = (key: string) => shouldShowSetting(search.sections.official, key);
 
@@ -225,7 +262,7 @@ export function ExtensionsSettingsTab({
   const scopeControls: ViewScopeControls = {
     describe: (key) => {
       const scope = ghostexViewScope(settings.viewScopes, key);
-      return scope.availability === 'all' ? undefined : viewScopeDescription(scope, { projects, spaces });
+      return isDefaultGhostexViewScope(scope) ? undefined : viewScopeDescription(scope, { projects, spaces });
     },
     edit: (key, title) => setScopeEditor({ draft: ghostexViewScope(settings.viewScopes, key), key, title }),
     renderEditor: (key) =>
@@ -236,20 +273,13 @@ export function ExtensionsSettingsTab({
           onChange={(apply) => setScopeEditor((current) => (current ? apply(current) : current))}
           onSave={() => {
             /*
-             * CDXC:Extensions 2026-09-18 WHY:
-             * "Selected projects" or "Selected spaces" with nothing ticked hides the view everywhere,
-             * which reads as the app losing a tab. Refuse the save the way the custom-view editor does.
+             * CDXC:Extensions 2026-09-20 WHY:
+             * A Default of "Hidden unless chosen" with nothing chosen is saved as it stands, and hides the
+             * view everywhere. The 2026-09-18 editor refused that save because its allow-list could only
+             * ever mean "show it in these", so an empty list read as a mistake; under the override model it
+             * is the user asking for the view to be gone, and the view picker is where it comes back.
              */
-            const { draft } = scopeEditor;
-            if (draft.availability === 'selected' && !draft.projectIds.length) {
-              setScopeEditor({ ...scopeEditor, error: 'Choose at least one project.' });
-              return;
-            }
-            if (draft.availability === 'spaces' && !draft.spaceRefs.length) {
-              setScopeEditor({ ...scopeEditor, error: 'Choose at least one space.' });
-              return;
-            }
-            onUpdateSetting('viewScopes', setGhostexViewScope(settings.viewScopes, scopeEditor.key, draft));
+            onUpdateSetting('viewScopes', setGhostexViewScope(settings.viewScopes, scopeEditor.key, scopeEditor.draft));
             setScopeEditor(undefined);
           }}
           projects={projects}
@@ -295,7 +325,7 @@ export function ExtensionsSettingsTab({
     if (!name || (needsUrl && !url)) {
       setCustomViewEditor({
         ...customViewEditor,
-        error: !name ? 'Enter a name for the titlebar tab.' : 'Enter a complete HTTP or HTTPS URL.',
+        error: !name ? 'Enter a name for the view tab.' : 'Enter a complete HTTP or HTTPS URL.',
       });
       return;
     }
@@ -384,10 +414,7 @@ export function ExtensionsSettingsTab({
           <>
             {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab) ? searchEmptyState : null}
             {shouldShowSettingsSection(search.sections.viewOrder) ? (
-              <SettingsSection
-                title='Titlebar views'
-                description='Choose the order of built-in, extension, and custom views.'
-              >
+              <SettingsSection title='Views' description='Choose the order of built-in, extension, and custom views.'>
                 <SettingsListItem title='View order'>
                   <Button onClick={() => setViewOrderOpen(true)} type='button' variant='outline'>
                     <IconArrowsSort aria-hidden='true' data-icon='inline-start' />
@@ -429,7 +456,7 @@ export function ExtensionsSettingsTab({
               >
                 <OfficialExtensionList
                   extensions={OFFICIAL_VIEW_EXTENSIONS}
-                  label='Workareas'
+                  label='Views'
                   onReinstallPlugin={onReinstallPlugin}
                   onUpdateSetting={onUpdateSetting}
                   scopeControls={scopeControls}
@@ -439,7 +466,7 @@ export function ExtensionsSettingsTab({
                 />
                 <OfficialExtensionList
                   extensions={OFFICIAL_TITLEBAR_EXTENSIONS}
-                  label='Title bar buttons'
+                  label='Buttons and menus'
                   onReinstallPlugin={onReinstallPlugin}
                   onUpdateSetting={onUpdateSetting}
                   scopeControls={scopeControls}
@@ -697,21 +724,23 @@ function OfficialExtensionList({
         const runtimeId = OFFICIAL_EXTENSION_RUNTIME_IDS[extension.id];
         const runtime = runtimeId ? statusById.get(runtimeId) : undefined;
         const scopeKey = officialViewScopeKey(extension.id);
+        // An app-wide page has no project to be narrowed to, so it shows the switch alone.
+        const scoped = extension.appWide !== true;
         return (
           <Fragment key={extension.id}>
             <OfficialExtensionRow
               description={extension.description}
               enabled={isOfficialExtensionEnabled(settings, extension)}
               icon={OFFICIAL_EXTENSION_ICONS[extension.id]}
-              onEditScope={() => scopeControls.edit(scopeKey, extension.title)}
+              onEditScope={scoped ? () => scopeControls.edit(scopeKey, extension.title) : undefined}
               onEnabledChange={(enabled) => onUpdateSetting(extension.settingsKey, !enabled)}
               onReinstall={runtimeId && onReinstallPlugin ? () => onReinstallPlugin(runtimeId) : undefined}
               reinstallAvailable={Boolean(onReinstallPlugin && runtime?.canReinstall)}
               runtime={runtime}
-              scopeSummary={scopeControls.describe(scopeKey)}
+              scopeSummary={scoped ? scopeControls.describe(scopeKey) : undefined}
               title={extension.title}
             />
-            {scopeControls.renderEditor(scopeKey)}
+            {scoped ? scopeControls.renderEditor(scopeKey) : null}
           </Fragment>
         );
       })}

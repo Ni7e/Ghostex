@@ -307,8 +307,12 @@ impl GpuiTitlebarReadingPanel {
             v_flex()
                 .absolute()
                 .top(px(TITLEBAR_POPUP_READING_HEADER_HEIGHT + 9.0))
+                // Hosted in the view panel this page can be as narrow as
+                // `WORKAREA_VIEW_PANEL_MIN_WIDTH`, where a fixed 620px note started off the left
+                // edge of the frame and had its first characters clipped away.
+                .left(px(12.0))
                 .right(px(12.0))
-                .w(px(620.0))
+                .max_w(px(620.0))
                 .gap(px(10.0))
                 .border_1()
                 .border_color(chrome_ink().opacity(0.14))
@@ -408,12 +412,18 @@ impl GpuiTitlebarReadingPanel {
                 .justify_center()
                 .border_1()
                 .border_color(if action_label == "Quit" {
-                    rgb(0xf87171).opacity(0.28)
+                    chrome_color(0xf87171, 0xc23b3b).opacity(0.40)
                 } else {
                     chrome_ink().opacity(0.13)
                 })
+                // The destructive chip has to read as destructive on white too, where the
+                // dark-mode reds flattened into pale pink.
                 .bg(if action_label == "Quit" {
-                    rgb(0xdc2626).opacity(0.18)
+                    chrome_color(0xdc2626, 0xdc2626).opacity(if chrome_uses_light_appearance() {
+                        0.10
+                    } else {
+                        0.18
+                    })
                 } else {
                     chrome_ink().opacity(0.08)
                 })
@@ -423,7 +433,11 @@ impl GpuiTitlebarReadingPanel {
                 .cursor_pointer()
                 .hover(move |this| {
                     this.bg(if action_label == "Quit" {
-                        rgb(0xdc2626).opacity(0.28)
+                        rgb(0xdc2626).opacity(if chrome_uses_light_appearance() {
+                            0.18
+                        } else {
+                            0.28
+                        })
                     } else {
                         chrome_ink().opacity(0.14)
                     })
@@ -639,7 +653,9 @@ impl GpuiTitlebarReadingPanel {
             svg()
                 .path(icon_path)
                 .size(px(15.0))
-                .text_color(rgb(workspace_tab_agent_icon_accent_color(agent_icon)))
+                // The page's surface is white in light mode, where several agents' white accent
+                // would leave a blank square; `chrome_agent_icon_color` turns those two to ink.
+                .text_color(chrome_agent_icon_color(agent_icon))
                 .into_any_element()
         } else {
             titlebar_svg_icon(row.icon_path, 15.0, chrome_ink().opacity(0.82).into())

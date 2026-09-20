@@ -22,18 +22,27 @@ use gpui_component::v_flex;
 use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
+use crate::app::render::agents_workspace_layout::AgentsWorkspaceLayout;
 use crate::app::render::resize_rail::*;
 use crate::*;
 
 impl GhostexGpuiApp {
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// The Agents workspace and an open view are siblings in one row, not alternatives. This replaced
+    /// a `match self.active_mode` whose `Agents` arm drew the workspace and whose other arms drew a
+    /// project-editor shell instead of it, which is why a view switch used to unmount every terminal
+    /// and chat in the tree.
     pub(crate) fn render_main_workspace(
         &mut self,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        match self.active_mode {
-            TitlebarMode::Agents => self.render_agents_workspace(window, cx),
-            mode => self.render_project_editor_shell(mode, window, cx),
+        match self.open_view_mode() {
+            Some(mode) => self.render_workarea_with_open_view(Some(mode), window, cx),
+            None if self.view_picker_open() => {
+                self.render_workarea_with_open_view(None, window, cx)
+            }
+            None => self.render_agents_workspace(AgentsWorkspaceLayout::FullWidth, window, cx),
         }
     }
 
@@ -99,14 +108,33 @@ impl GhostexGpuiApp {
                 .items_stretch()
                 .overflow_hidden()
                 .child(self.render_main_workspace(window, cx))
-                .child(self.render_command_pane_side_divider(cx))
-                .child(self.render_command_pane_panel(
-                    GpuiCommandPaneSide::Right,
-                    panel_width,
-                    false,
-                    command_pane_panel_chrome_width(panel_width, false),
-                    cx,
-                ))
+                /*
+                CDXC:Titlebar 2026-09-20 WHY:
+                The right dock and its rail keep their old top edge, one header height down: the
+                floating header would otherwise cover the command pane's own tab bar and its grab
+                strip. Only the Agents column, and only while its content is the GPUI chat the fade
+                is drawn over, reaches the window's top edge.
+                */
+                .child(
+                    v_flex()
+                        .flex_shrink_0()
+                        .h_full()
+                        .pt(px(WORKAREA_HEADER_HEIGHT))
+                        .child(self.render_command_pane_side_divider(cx)),
+                )
+                .child(
+                    v_flex()
+                        .flex_shrink_0()
+                        .h_full()
+                        .pt(px(WORKAREA_HEADER_HEIGHT))
+                        .child(self.render_command_pane_panel(
+                            GpuiCommandPaneSide::Right,
+                            panel_width,
+                            false,
+                            command_pane_panel_chrome_width(panel_width, false),
+                            cx,
+                        )),
+                )
                 .into_any_element(),
             CommandPaneWorkspaceLayoutPlan::Floating {
                 panel_height,
@@ -276,11 +304,11 @@ impl GhostexGpuiApp {
             .into_any_element()
     }
 
-    /// The workspace on the leading side of the command pane boundary is a CEF page in every view but
-    /// Agents, and in Agents whenever a pane shows React chat; the grab strip then lies wholly over the
-    /// command pane, which is always GPUI-painted.
+    /// The workarea above the command pane boundary is partly a CEF page whenever a view panel is
+    /// open, and in the Agents column whenever a pane shows React chat; the grab strip then lies
+    /// wholly over the command pane, which is always GPUI-painted.
     fn command_pane_boundary_grab_side(&self) -> ResizeRailGrabSide {
-        let workspace_is_cef = self.active_mode != TitlebarMode::Agents
+        let workspace_is_cef = self.view_panel_shows_cef_page()
             || self.workspace_node_shows_cef_chat(&self.agents_workspace.root);
         if workspace_is_cef {
             ResizeRailGrabSide::Trailing
