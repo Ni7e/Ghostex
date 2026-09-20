@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::keys::SessionKey;
 
 use super::inputs::{CloseAfterDoneInput, ProjectDiffStats, SectionId};
-use super::session_text::{last_interaction_label, timer_trailing_label};
+use super::session_text::{last_interaction_label, next_label_deadline_ms, timer_trailing_label};
 use super::tags::TagPresentation;
 
 /// The whole list for one machine tab.
@@ -204,6 +204,13 @@ impl SessionRow {
         self.last_interaction_at
             .as_deref()
             .map(|at| last_interaction_label(at, now_ms))
+    }
+
+    /// The next host time at which one of those two labels reads differently. A host that draws
+    /// them wakes then and no more often; nothing in the store reports it, because the labels are
+    /// formatted against the host's clock and not held here.
+    pub fn next_label_deadline_ms(&self, now_ms: u64) -> Option<u64> {
+        next_label_deadline_ms(self, now_ms)
     }
 }
 

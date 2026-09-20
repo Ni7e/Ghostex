@@ -106,12 +106,19 @@ impl GhostexGpuiApp {
                 // The values the store's list still borrows moved with this publish, and the
                 // comparison reads it; both run whichever list is drawn.
                 self.gx_store_sidebar_projection_published(cx);
-                if !self.gx_store_sidebar_draws_store_list() {
-                    let published = self
-                        .native_sidebar
-                        .projection
-                        .clone()
-                        .expect("assigned above");
+                let published = self
+                    .native_sidebar
+                    .projection
+                    .clone()
+                    .expect("assigned above");
+                if self.gx_store_sidebar_draws_store_list() {
+                    // The menus, the HUD and the machine tabs the store's list carries are this
+                    // publish's, so it is rebuilt even when nothing the store owns moved.
+                    let identity = Arc::as_ptr(&published) as usize;
+                    if !self.gx_store_sidebar_list_carries_projection(identity) {
+                        self.gx_store_install_sidebar_list(cx);
+                    }
+                } else {
                     self.install_native_sidebar_snapshot(published, cx);
                 }
             }

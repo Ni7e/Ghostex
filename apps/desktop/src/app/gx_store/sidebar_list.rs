@@ -77,6 +77,9 @@ pub(crate) struct SidebarList {
     source: std::cell::Cell<Option<(Instant, SidebarListSource)>>,
     /// The clock deadline a timer is already booked for.
     deadline_booked: Option<u64>,
+    /// Address of the published list the installed one last carried the menus of, so a publish
+    /// that left the store's own list unchanged still refreshes them.
+    installed_projection: usize,
     snapshot_cache: SnapshotCache,
     inputs_cache: InputsCache,
     /// The inputs the newest view was built from, so the shadow compares the same moment. Kept
@@ -129,6 +132,18 @@ impl SidebarList {
             SidebarSettings::from_settings_json(&Value::Object(saved.object().clone()), sort_mode);
         self.settings = Some((saved.content_hash(), settings.clone()));
         settings
+    }
+
+    /// The next moment one of the drawn time labels reads differently. The view model does not
+    /// hold them, so this is the host's own deadline beside the one the list reports.
+    fn next_label_deadline_ms(&self, now_ms: u64) -> Option<u64> {
+        self.model
+            .view()
+            .groups
+            .iter()
+            .flat_map(|group| group.core.sessions.iter())
+            .filter_map(|session| session.row.next_label_deadline_ms(now_ms))
+            .min()
     }
 
     /// Whether an update would find nothing to do. Only the cheap signals are read here; the view
@@ -195,6 +210,11 @@ impl GhostexGpuiApp {
             .source
             .set(Some((Instant::now(), source)));
         source
+    }
+
+    /// Whether the installed list already carries the menus of this publish.
+    pub(crate) fn gx_store_sidebar_list_carries_projection(&self, identity: usize) -> bool {
+        self.gx_store.sidebar_list.installed_projection == identity
     }
 
     /// Whether the renderer draws the store's list right now. A machine tab the view model cannot
@@ -338,7 +358,7 @@ impl GhostexGpuiApp {
     }
 
     /// Replaces the list the renderer draws with the one derived from the store.
-    pub(super) fn gx_store_install_sidebar_list(&mut self, cx: &mut gpui::Context<Self>) {
+    pub(crate) fn gx_store_install_sidebar_list(&mut self, cx: &mut gpui::Context<Self>) {
         let Some(published) = self.native_sidebar.projection.clone() else {
             // Nothing has been published yet, so the menus, the HUD and the machine tabs the list
             // still borrows are not there. The renderer keeps drawing nothing, as it does today
@@ -346,7 +366,9 @@ impl GhostexGpuiApp {
             return;
         };
         let started = Instant::now();
-        let now_ms = self.gx_store.sidebar_list.last_built_at_ms;
+        // The labels are formatted against the clock of the moment they are drawn, not the moment
+        // the list was last built: a wake that only ticks a countdown does not rebuild the list.
+        let now_ms = now_ms();
         let snapshot = {
             let list = &mut self.gx_store.sidebar_list;
             let view = list.model.view().clone();
@@ -354,6 +376,7 @@ impl GhostexGpuiApp {
         };
         let install_us = started.elapsed().as_micros() as u64;
         let list = &mut self.gx_store.sidebar_list;
+        list.installed_projection = std::sync::Arc::as_ptr(&published) as usize;
         list.counters.installs += 1;
         list.counters.last_install_us = install_us;
         list.counters.install_max_us = list.counters.install_max_us.max(install_us);
@@ -363,7 +386,18 @@ impl GhostexGpuiApp {
     /// Books one timer for the next moment a row moves on its own (a new session stops leading the
     /// list, a snooze ends, a countdown ticks). Nothing else wakes the list on time.
     fn gx_store_book_sidebar_deadline(&mut self, cx: &mut gpui::Context<Self>) {
-        let Some(deadline) = self.gx_store.sidebar_list.next_deadline_ms() else {
+        let now = now_ms();
+        let label_deadline = self
+            .gx_store_sidebar_draws_store_list()
+            .then(|| self.gx_store.sidebar_list.next_label_deadline_ms(now))
+            .flatten();
+        let Some(deadline) = [
+            self.gx_store.sidebar_list.next_deadline_ms(),
+            label_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min() else {
             self.gx_store.sidebar_list.deadline_booked = None;
             return;
         };
@@ -383,6 +417,12 @@ impl GhostexGpuiApp {
                 this.gx_store.sidebar_list.deadline_booked = None;
                 this.gx_store.sidebar_list.counters.deadline_wakes += 1;
                 this.gx_store_update_sidebar_list(cx);
+                // A label that reads differently is not a change in the list itself, so the update
+                // above may have found nothing; the drawn rows still have to be rebuilt.
+                if this.gx_store_sidebar_draws_store_list() {
+                    this.gx_store_install_sidebar_list(cx);
+                    this.gx_store_book_sidebar_deadline(cx);
+                }
             });
         })
         .detach();
