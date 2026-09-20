@@ -48,7 +48,6 @@ impl GhostexGpuiApp {
     /// Both the breadcrumb and its label must grow into the width allocated by their parent.
     pub(crate) fn render_workarea_header_breadcrumb(
         &self,
-        show_compact_mode_dropdown: bool,
         compact: bool,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
@@ -91,11 +90,9 @@ impl GhostexGpuiApp {
             not be.
             */
             .child(self.render_titlebar_navigation_history_buttons(cx))
-            .when(show_compact_mode_dropdown, |this| {
-                this.child(self.render_compact_mode_dropdown(cx))
-            })
-            // CDXC:Titlebar 2026-09-19 DECISION:
-            // User: the Update button sits on the left just before the project name, after the bell and the compact view dropdown, so showing or hiding it only moves the project name and never shifts Back/Forward.
+            // CDXC:Titlebar 2026-09-20 DECISION:
+            // User: the Update button sits on the left just before the project name, so showing or hiding it only moves the project name and never shifts Back/Forward.
+            // This supersedes the 2026-09-19 wording, which placed it after the compact view dropdown; the view panel's tab strip replaced that dropdown.
             .when(self.update_available || self.update_downloading, |this| {
                 this.child(self.render_titlebar_update_button(cx))
             })

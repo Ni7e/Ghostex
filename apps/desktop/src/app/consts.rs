@@ -232,12 +232,6 @@ menu, hotkeys, and restored-mode coercion all refuse it in one place.
 pub(crate) const TITLEBAR_REMOTE_SOURCE_DISABLED_REASON: &str =
     "Code is currently disabled for remote projects";
 
-#[cfg(target_os = "macos")]
-pub(crate) const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1050.0;
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1330.0;
-
 /// Fixed square width kept only for the non-macOS leading toggle and the
 /// Windows/Linux caption-control gap; trailing buttons size to their icon now.
 #[cfg(not(target_os = "macos"))]
@@ -267,11 +261,7 @@ pub(crate) const TITLEBAR_MODE_TAB_TOP_INSET: f32 = 1.0;
 
 pub(crate) const TITLEBAR_MODE_TAB_RADIUS: f32 = 6.0;
 
-pub(crate) const TITLEBAR_MODE_TAB_GAP: f32 = 2.0;
-
 pub(crate) const TITLEBAR_MODE_TAB_HORIZONTAL_PADDING: f32 = 12.0;
-
-pub(crate) const TITLEBAR_MODE_TAB_SLIDE_DURATION: Duration = Duration::from_millis(180);
 
 /*
 CDXC:Titlebar 2026-09-06 DECISION:
@@ -676,6 +666,23 @@ pub(crate) const TITLEBAR_ICON_ROCKET: &str = "titlebar/rocket.svg";
 pub(crate) const TITLEBAR_ICON_GIT_PULL_REQUEST: &str = "titlebar/git-pull-request.svg";
 
 pub(crate) const TITLEBAR_ICON_DOWNLOAD: &str = "titlebar/download.svg";
+
+pub(crate) const TITLEBAR_ICON_WORLD: &str = "titlebar/world.svg";
+
+pub(crate) const TITLEBAR_ICON_BOLT: &str = "titlebar/bolt.svg";
+
+pub(crate) const TITLEBAR_ICON_FILE_TEXT: &str = "titlebar/file-text.svg";
+
+pub(crate) const TITLEBAR_ICON_PLUS: &str = "titlebar/plus.svg";
+
+pub(crate) const TITLEBAR_ICON_X: &str = "titlebar/x.svg";
+
+pub(crate) const TITLEBAR_ICON_EXTERNAL_LINK: &str = "titlebar/external-link.svg";
+
+pub(crate) const TITLEBAR_ICON_ARROWS_DIAGONAL: &str = "titlebar/arrows-diagonal.svg";
+
+pub(crate) const TITLEBAR_ICON_ARROWS_DIAGONAL_MINIMIZE: &str =
+    "titlebar/arrows-diagonal-minimize.svg";
 
 pub(crate) const TITLEBAR_TIPS_READ_STORAGE_KEY: &str = "ghostex.titlebar.tips.readIds";
 

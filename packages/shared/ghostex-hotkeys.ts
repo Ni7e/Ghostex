@@ -352,9 +352,9 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
       viewIndex: slot - 1,
     },
     defaultKey: `alt+${slot}`,
-    description: `Open view ${slot} in the displayed titlebar order.`,
+    description: `Open tab ${slot} in the view panel's tab strip.`,
     id: `switchTitlebarView${slot}` as const,
-    title: `Switch to Titlebar View ${slot}`,
+    title: `Switch to View Tab ${slot}`,
   })),
   {
     action: {

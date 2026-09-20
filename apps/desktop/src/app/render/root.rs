@@ -676,6 +676,52 @@ impl Render for GhostexGpuiApp {
                 }),
             )
             .on_action(
+                cx.listener(|this, action: &OpenGpuiViewTab, window, cx| {
+                    if let Some(mode) = this.view_tab_mode_for_index(action.mode_index) {
+                        this.open_view_tab(mode, window, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &CloseGpuiViewTab, window, cx| {
+                    if let Some(mode) = this.view_tab_mode_for_index(action.mode_index) {
+                        this.close_view_tab(mode, window, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &PopOutGpuiViewTab, _window, cx| {
+                    if let Some(mode) = this.view_tab_mode_for_index(action.mode_index) {
+                        this.pop_out_view(mode, cx);
+                    }
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &ToggleGpuiViewPanelMaximized, _window, cx| {
+                    this.toggle_view_panel_maximized(cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ToggleGpuiViewProjectScope, _window, cx| {
+                    this.toggle_view_project_scope(action.mode_index, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ToggleGpuiViewSpaceScope, _window, cx| {
+                    this.toggle_view_space_scope(action.mode_index, &action.space_key, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &ShowGpuiHiddenViewHere, window, cx| {
+                    this.show_hidden_view_here(action.mode_index, window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, action: &OpenGpuiViewScopeSettings, window, cx| {
+                    this.open_view_scope_settings(action.mode_index, window, cx);
+                }),
+            )
+            .on_action(
                 cx.listener(|this, action: &ReloadGpuiTitlebarView, window, cx| {
                     if let Some(mode) = this.titlebar_view_mode_for_index(action.mode_index) {
                         this.reload_titlebar_view(mode, window, cx);
@@ -1112,6 +1158,7 @@ impl Render for GhostexGpuiApp {
                     this.finish_workspace_tab_drag(cx);
                     this.finish_command_tab_drag(cx);
                     this.finish_browser_tab_drag(cx);
+                    this.cancel_view_tab_drag(cx);
                 }),
             )
             .child(

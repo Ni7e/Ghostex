@@ -116,9 +116,15 @@ topology. Keyed by the same canonical workspace project key, so a remote
 project's view memory is machine-scoped and never collides with a same-named
 local project.
 */
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct GpuiProjectViewState {
     pub(crate) active_mode: TitlebarMode,
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// The tab strip in the order the user left it. It is project-owned for the same reason the
+    /// active view is: two projects keep different sets of tabs open, and a project switch must put
+    /// back exactly the strip that project had. `active_mode` is always one of these, or `Agents`
+    /// when the list is empty and the panel is closed.
+    pub(crate) open_views: Vec<TitlebarMode>,
     /// The last view this project had open, kept even while the panel is closed so reopening it
     /// comes back to the same view.
     pub(crate) last_view_mode: Option<TitlebarMode>,
@@ -224,6 +230,19 @@ impl ProjectEditorShellModel {
         }
     }
 
+    /// Every mode this model holds a lifecycle record for: the five built-ins plus whatever
+    /// extension views have been woken in this session.
+    pub(crate) fn lifecycle_modes(&self) -> Vec<TitlebarMode> {
+        let mut modes = project_editor_modes().to_vec();
+        modes.extend(
+            self.extension_lifecycles
+                .keys()
+                .copied()
+                .map(TitlebarMode::Extension),
+        );
+        modes
+    }
+
     pub(crate) fn is_mode_awake(&self, mode: TitlebarMode) -> bool {
         self.lifecycle(mode)
             .is_some_and(|lifecycle| lifecycle.state == ProjectEditorLifecycleState::Awake)
@@ -245,13 +264,19 @@ impl ProjectEditorShellModel {
         true
     }
 
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// The cap used to look at the five built-in modes only, which was enough while exactly one view
+    /// could be on screen. A tab strip can hold extension views too, and an extension page is the
+    /// same live CEF child view as Kanban's, so the cap counts them: without this six tabs really
+    /// would mean six renderer processes.
     pub(crate) fn enforce_awake_mode_cap(&mut self, active_mode: TitlebarMode) {
-        let mut awake_modes = project_editor_modes()
-            .iter()
+        let mut awake_modes = self
+            .lifecycle_modes()
+            .into_iter()
             .filter_map(|mode| {
-                let lifecycle = self.lifecycle(*mode)?;
+                let lifecycle = self.lifecycle(mode)?;
                 if lifecycle.state == ProjectEditorLifecycleState::Awake {
-                    Some((*mode, lifecycle.recency))
+                    Some((mode, lifecycle.recency))
                 } else {
                     None
                 }
@@ -375,6 +400,11 @@ pub(crate) fn project_view_state_to_shell_state_json(
 ) -> serde_json::Value {
     serde_json::json!({
         "activeMode": state.active_mode.element_slug(),
+        "openViews": state
+            .open_views
+            .iter()
+            .map(|mode| serde_json::Value::String(mode.element_slug()))
+            .collect::<Vec<_>>(),
         "lastViewMode": state.last_view_mode.map(TitlebarMode::element_slug),
         "workareaSplitRatio": json_number_f32(workarea_split_ratio(state.workarea_split_ratio)),
     })
@@ -407,6 +437,7 @@ pub(crate) fn project_view_state_from_shell_state(
         .and_then(TitlebarMode::from_slug)?;
     Some(GpuiProjectViewState {
         active_mode,
+        open_views: open_view_modes_from_shell_state(object.get("openViews"), active_mode),
         last_view_mode: object
             .get("lastViewMode")
             .and_then(serde_json::Value::as_str)
@@ -414,6 +445,33 @@ pub(crate) fn project_view_state_from_shell_state(
             .filter(|mode| *mode != TitlebarMode::Agents),
         workarea_split_ratio: workarea_split_ratio_from_shell_state(object, "companionWidthRatio"),
     })
+}
+
+/// CDXC:Workarea 2026-09-20 WHY:
+/// A state written before the tab strip existed holds one active view and no list, so it reads back
+/// as a strip of exactly that view: the user sees the tab they already had, not an empty panel.
+/// `Agents` never enters the list; it is the name for "the panel is closed".
+pub(crate) fn open_view_modes_from_shell_state(
+    value: Option<&serde_json::Value>,
+    active_mode: TitlebarMode,
+) -> Vec<TitlebarMode> {
+    let Some(entries) = value.and_then(serde_json::Value::as_array) else {
+        return Vec::from_iter((active_mode != TitlebarMode::Agents).then_some(active_mode));
+    };
+    let mut modes = Vec::new();
+    for entry in entries {
+        let Some(mode) = entry.as_str().and_then(TitlebarMode::from_slug) else {
+            continue;
+        };
+        if mode == TitlebarMode::Agents || modes.contains(&mode) {
+            continue;
+        }
+        modes.push(mode);
+    }
+    if active_mode != TitlebarMode::Agents && !modes.contains(&active_mode) {
+        modes.push(active_mode);
+    }
+    modes
 }
 
 pub(crate) fn project_editor_shell_to_shell_state_json(

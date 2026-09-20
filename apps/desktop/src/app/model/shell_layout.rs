@@ -6,6 +6,8 @@ use crate::*;
 
 pub(crate) struct GpuiShellLayoutState {
     pub(crate) active_mode: TitlebarMode,
+    pub(crate) open_views: Vec<TitlebarMode>,
+    pub(crate) view_panel_maximized: bool,
     pub(crate) shell_focus: ShellFocusTarget,
     pub(crate) previous_non_command_focus: Option<ShellFocusTarget>,
     pub(crate) pet_overlay_activities_visible: bool,
@@ -64,6 +66,8 @@ impl GpuiShellLayoutState {
             BrowserTabModel::shell_address_only_with_profile(browser_profiles.active_profile_id());
         Self {
             active_mode: TitlebarMode::Agents,
+            open_views: Vec::new(),
+            view_panel_maximized: false,
             shell_focus,
             previous_non_command_focus: Some(shell_focus),
             pet_overlay_activities_visible: true,
@@ -413,6 +417,12 @@ impl GpuiShellLayoutState {
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
+        let open_views = open_view_modes_from_shell_state(object.get("openViews"), active_mode);
+        let view_panel_maximized = object
+            .get("viewPanelMaximized")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            && active_mode != TitlebarMode::Agents;
         let last_open_view_mode = object
             .get("lastOpenViewMode")
             .and_then(serde_json::Value::as_str)
@@ -428,6 +438,8 @@ impl GpuiShellLayoutState {
 
         Some(Self {
             active_mode,
+            open_views,
+            view_panel_maximized,
             shell_focus,
             previous_non_command_focus,
             pet_overlay_activities_visible,

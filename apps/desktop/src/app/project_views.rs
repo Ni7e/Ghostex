@@ -83,35 +83,6 @@ impl GhostexGpuiApp {
             .take()?;
         owned.matches_runtime_url(url).then_some(owned)
     }
-    /// CDXC:Extensions 2026-09-16 DECISION:
-    /// User: keep Start / Restart and Stop removed, but restore Configure view and make it open the clicked view's editor.
-    /// This supersedes the earlier removal of Configure view.
-    pub(crate) fn show_project_view_menu(
-        &self,
-        id: ExtensionId,
-        position: gpui::Point<gpui::Pixels>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        self.titlebar_view_lifecycle_menu(TitlebarMode::Extension(id))
-            .menu(
-                "Command output",
-                Box::new(ProjectViewCommand {
-                    id: id.as_str().into(),
-                    operation: "output".into(),
-                }),
-            )
-            .menu(
-                "Configure view",
-                Box::new(ProjectViewCommand {
-                    id: id.as_str().into(),
-                    operation: "configure".into(),
-                }),
-            )
-            .separator()
-            .menu("Extensions", Box::new(OpenGpuiExtensionsModal))
-            .show(position, window, cx);
-    }
     fn project_view_key(&self, id: ExtensionId) -> Option<String> {
         let project = self
             .latest_sidebar_project_snapshot

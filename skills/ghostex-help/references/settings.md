@@ -275,9 +275,9 @@ How to use this file:
 - **Trycua Permissions** `cuaPermissions` (Settings UI row without a settings key; use `ghostex settings open`): Trycua needs Accessibility to click and type in apps, and Screen Recording to understand what is visible on the desktop.
 ## Extensions (tab `extensions`)
 
-### Titlebar views
+### Views
 
-- **Arrange titlebar views** `titlebarViewOrder` (structured value; change it in Settings, not with `ghostex settings set`): Reorder built-in, extension, and custom views. ⌥1 through ⌥9 follow the visible order.
+- **Arrange views** `titlebarViewOrder` (structured value; change it in Settings, not with `ghostex settings set`): Reorder built-in, extension, and custom views. New tabs open in this order, and ⌥1 through ⌥9 follow the tabs in the view panel.
 - **Hide Code view** `codeViewTabHidden` (boolean, default false): Hide the Code view tab from the titlebar.
 - **Hide Browser view** `browserViewTabHidden` (boolean, default false): Hide the Browser view tab from the titlebar.
 - **Hide Kanban view** `kanbanViewTabHidden` (boolean, default false): Hide the Kanban view tab from the titlebar.

@@ -280,6 +280,8 @@ export type SettingsModalProps = {
   /** Agents tab card to scroll to (consumed by the Agents tab). */
   initialAgentsSection?: SettingsAgentsSection;
   initialCustomViewId?: string;
+  /** Open one view's scope editor straight away; see ExtensionsSettingsTab. */
+  initialViewScopeKey?: string;
   initialTab?: SettingsModalTab;
   isOpen: boolean;
   presentation?: SettingsModalPresentation;
@@ -369,6 +371,7 @@ export function SettingsModal({
   initialRemoteSection,
   initialAgentsSection,
   initialCustomViewId,
+  initialViewScopeKey,
   initialTab = 'settings',
   isOpen,
   onChange,
@@ -2949,6 +2952,7 @@ export function SettingsModal({
                   <TabsContent className='mt-0 min-h-0 flex-1 overflow-hidden' value='extensions'>
                     <ExtensionsSettingsTab
                       initialCustomViewId={initialCustomViewId}
+                      initialViewScopeKey={initialViewScopeKey}
                       projects={projectViewProjects}
                       spaces={projectViewSpaces}
                       isActive={isOpen && activeTab === 'extensions'}

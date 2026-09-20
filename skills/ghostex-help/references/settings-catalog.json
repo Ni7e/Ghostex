@@ -8095,12 +8095,12 @@
     },
     {
       "key": "titlebarViewOrder",
-      "title": "Arrange titlebar views",
-      "subtitle": "Reorder built-in, extension, and custom views. ⌥1 through ⌥9 follow the visible order.",
+      "title": "Arrange views",
+      "subtitle": "Reorder built-in, extension, and custom views. New tabs open in this order, and ⌥1 through ⌥9 follow the tabs in the view panel.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "json",
       "default": [],
       "agentWritable": false
@@ -9406,56 +9406,56 @@
     },
     {
       "id": "switchTitlebarView1",
-      "title": "Switch to Titlebar View 1",
-      "description": "Open view 1 in the displayed titlebar order.",
+      "title": "Switch to View Tab 1",
+      "description": "Open tab 1 in the view panel's tab strip.",
       "defaultKey": "alt+1"
     },
     {
       "id": "switchTitlebarView2",
-      "title": "Switch to Titlebar View 2",
-      "description": "Open view 2 in the displayed titlebar order.",
+      "title": "Switch to View Tab 2",
+      "description": "Open tab 2 in the view panel's tab strip.",
       "defaultKey": "alt+2"
     },
     {
       "id": "switchTitlebarView3",
-      "title": "Switch to Titlebar View 3",
-      "description": "Open view 3 in the displayed titlebar order.",
+      "title": "Switch to View Tab 3",
+      "description": "Open tab 3 in the view panel's tab strip.",
       "defaultKey": "alt+3"
     },
     {
       "id": "switchTitlebarView4",
-      "title": "Switch to Titlebar View 4",
-      "description": "Open view 4 in the displayed titlebar order.",
+      "title": "Switch to View Tab 4",
+      "description": "Open tab 4 in the view panel's tab strip.",
       "defaultKey": "alt+4"
     },
     {
       "id": "switchTitlebarView5",
-      "title": "Switch to Titlebar View 5",
-      "description": "Open view 5 in the displayed titlebar order.",
+      "title": "Switch to View Tab 5",
+      "description": "Open tab 5 in the view panel's tab strip.",
       "defaultKey": "alt+5"
     },
     {
       "id": "switchTitlebarView6",
-      "title": "Switch to Titlebar View 6",
-      "description": "Open view 6 in the displayed titlebar order.",
+      "title": "Switch to View Tab 6",
+      "description": "Open tab 6 in the view panel's tab strip.",
       "defaultKey": "alt+6"
     },
     {
       "id": "switchTitlebarView7",
-      "title": "Switch to Titlebar View 7",
-      "description": "Open view 7 in the displayed titlebar order.",
+      "title": "Switch to View Tab 7",
+      "description": "Open tab 7 in the view panel's tab strip.",
       "defaultKey": "alt+7"
     },
     {
       "id": "switchTitlebarView8",
-      "title": "Switch to Titlebar View 8",
-      "description": "Open view 8 in the displayed titlebar order.",
+      "title": "Switch to View Tab 8",
+      "description": "Open tab 8 in the view panel's tab strip.",
       "defaultKey": "alt+8"
     },
     {
       "id": "switchTitlebarView9",
-      "title": "Switch to Titlebar View 9",
-      "description": "Open view 9 in the displayed titlebar order.",
+      "title": "Switch to View Tab 9",
+      "description": "Open tab 9 in the view panel's tab strip.",
       "defaultKey": "alt+9"
     },
     {

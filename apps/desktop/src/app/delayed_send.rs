@@ -2154,6 +2154,19 @@ impl GhostexGpuiApp {
                     return;
                 }
                 if let Some(index) = gpui_titlebar_view_hotkey_index(action_id) {
+                    /*
+                    CDXC:Hotkeys 2026-09-20 DECISION:
+                    User (screen 07): "⌥1–9 jumps to a view ... Follows the order of the tabs in this
+                    panel." So the numbers walk the open tab strip, and a number past the last tab
+                    falls through to the view in that position in Settings' own order, which is what
+                    opens a view that is not open yet. This supersedes the 2026-09-09 rule that they
+                    followed the titlebar's displayed view list, because that list is gone.
+                    */
+                    let tabs = self.open_view_tabs();
+                    if let Some(mode) = tabs.get(index).copied() {
+                        self.switch_workarea_from_hotkey(mode, window, cx);
+                        return;
+                    }
                     if let Some(item) = self.titlebar_mode_switcher_items().get(index) {
                         self.switch_workarea_from_hotkey(item.mode, window, cx);
                     }

@@ -1,7 +1,7 @@
 # Ghostex features
 
 Hand-written companion to `settings.md` (generated) and `hotkeys.md`
-(generated). When you add or rename a titlebar view, a sidebar surface, a
+(generated). When you add or rename a view, a sidebar surface, a
 session capability, or a CLI verb that users interact with, update the matching
 section here in the same change.
 
@@ -14,32 +14,50 @@ close it; it stays open as you move the pointer across other rows. Long menus
 scroll vertically to keep every action reachable, without a horizontal
 scrollbar.
 
-## Views (header tabs)
+## Views (tabs in the view panel)
 
-Every project has the same six built-in views, switched from the view tabs in
-the work area header or with Option/Alt+1 through 9 in the visible order. Direct built-in view
-shortcuts can be assigned in Settings > Hotkeys. Views other than Agents are extensions:
-they load on demand, sleep when idle (Auto Sleep), and can be hidden or
-reordered in Settings > Extensions > Titlebar views.
-The full view tabs stay centered in the header. When space is tight, they
-become a dropdown on the left right after Next (Forward), before the project
-name. Ask Ghostex, Tips & Tricks, Resources, Dev servers and Extensions are all
-reached from the **⋯** button at the right end of the header. Hovering a view shows its positional shortcut.
-**Hide sidebar** toggles the sidebar.
-When an update is available, a download button appears just before the project name.
-The header's right end has two panel toggles: the command terminal, and the view
-panel. The **view panel toggle** (Cmd+Option+B, `toggleViewPanel`) opens a view beside
-your sessions and closes it again; opening it comes back to the view this project last
-had open, and closes to sessions at full width.
+Views open beside your sessions, in a panel with its own tab strip, and a
+project can keep several of them open at once. The tabs belong to the project,
+so switching sessions leaves them alone and coming back to a project brings the
+same tabs back. Option/Alt+1 through 9 jump to the tabs in the order they appear
+in the strip; direct built-in view shortcuts can be assigned in Settings >
+Hotkeys, and hovering a tab shows its shortcut. Views other than Agents are
+extensions: they load on demand, sleep when idle (Auto Sleep), and can be hidden
+or reordered in Settings > Extensions.
 
-Right-click Code, Browser, Kanban, Automate, Docs, or another web-based view's
-header tab for **Reload** and **Sleep** (or **Wake** when sleeping), followed by **Extensions**. Reload
-refreshes the clicked view (the focused tab in Browser); a sleeping view opens
-again. Sleep unloads the view while keeping its place, and Code also stops its
-editor server. Choose Wake or select the view again to wake it. Resources can stop Code too,
-without closing Ghostex. Custom project views also offer **Command output** and
-**Configure view** before **Extensions**. Configure view opens that view's editor
-in Settings > Extensions and focuses its name field.
+The **+** button at the end of the tabs opens another view. It lists every view,
+with a tick beside the ones already open (clicking one of those focuses its
+tab), then **Hidden here**, which lists the views you hid in this project and
+brings one back in a click, then **Manage views…**. Drag a tab to reorder the
+strip, and close a tab with its **x**, with a middle click, or from its menu.
+Only the view you are looking at, and the two you came from most recently, stay
+loaded; the rest keep their tab and wake when you click them.
+
+The two buttons at the far end of the strip **pop the view out** into its own
+window, for a second monitor, and **expand** it over the sessions column so it
+has the whole work area. The same expand button brings the sessions back.
+
+The **view panel toggle** in the work area header (Cmd+Option+B,
+`toggleViewPanel`) opens and closes the whole panel; opening it comes back to
+the view this project last had open, and closing it leaves your sessions at full
+width. The header itself carries the project breadcrumb, Start, Open and Commit,
+the **⋯** button (Ask Ghostex, Tips & Tricks, Resources, Dev servers and
+Extensions), **Hide sidebar**, and the command terminal toggle. When an update is
+available, a download button appears just before the project name.
+
+Right-click a view tab to choose where that view appears and what happens to it.
+**Show in <project>** and **Show in space <space>** are ticks: unticking one
+hides the view there and leaves it everywhere else, and the space row names the
+project's own space (it is absent when the project is not in one). **Choose
+where it's shown…** opens that view's full scope editor in Settings >
+Extensions. Below that, **Reload** refreshes the clicked view (the focused tab in
+Browser), **Sleep** unloads it while keeping its tab (Code also stops its editor
+server; choose **Wake** or click the tab to bring it back, and Resources can stop
+Code too without closing Ghostex), **Pop out to window** opens its page in its
+own window, and **Close tab** removes it from the strip. **Hidden here** is on
+this menu as well. Custom project views also offer **Command output** and
+**Configure view**, which opens that view's editor in Settings > Extensions and
+focuses its name field.
 
 - **Agents**: the terminal grid. Panes and tabs run agent CLIs or plain shells,
   split horizontally or vertically, in one or more groups. Each pane can show

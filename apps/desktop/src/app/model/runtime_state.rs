@@ -512,6 +512,19 @@ impl ProjectWorkareaCefSurfaceSlotKey {
         }
     }
 
+    /// The slot a view's page lives in, or nothing for the two modes that own no workarea surface:
+    /// `Agents` has no page and `Browser` keeps one surface per tab instead.
+    pub(crate) fn for_titlebar_mode(mode: TitlebarMode) -> Option<Self> {
+        Some(match mode {
+            TitlebarMode::Source => Self::Source,
+            TitlebarMode::Kanban => Self::Kanban,
+            TitlebarMode::Automate => Self::Automate,
+            TitlebarMode::Manage => Self::Manage,
+            TitlebarMode::Extension(id) => Self::Extension(id),
+            TitlebarMode::Agents | TitlebarMode::Browser => return None,
+        })
+    }
+
     pub(crate) fn titlebar_mode(self) -> TitlebarMode {
         match self {
             Self::Source => TitlebarMode::Source,

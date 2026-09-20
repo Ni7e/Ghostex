@@ -52,8 +52,20 @@ impl GhostexGpuiApp {
         }
         self.capture_view_pane_layout();
         self.active_mode = mode;
-        if let Some(view) = self.open_view_mode() {
-            self.last_open_view_mode = Some(view);
+        /*
+        CDXC:Workarea 2026-09-20 WHY:
+        Every route that opens a view ends here, so the tab strip is maintained here too rather than
+        at each entry point: a file opened from chat, a hotkey, the command palette, an extension's
+        own launch and the `+` menu all leave a tab behind, and none of them has to remember to.
+        Closing the panel leaves the strip alone, and it stops being maximised because there is
+        nothing left to maximise.
+        */
+        match self.open_view_mode() {
+            Some(view) => {
+                self.record_open_view_tab(view);
+                self.last_open_view_mode = Some(view);
+            }
+            None => self.view_panel_maximized = false,
         }
         self.apply_view_pane_state(cx);
     }

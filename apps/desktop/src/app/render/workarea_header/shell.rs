@@ -62,37 +62,18 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         /*
-        CDXC:Titlebar 2026-07-04-01:00:
-        Quick/projectless GPUI contexts keep Agents and Source selectable, keep Browser, Kanban, Automate, and Docs visible but disabled, and use the same availability helper for tabs, the compact dropdown, hotkeys, restore, and persistence.
-
         CDXC:Titlebar 2026-09-20 DECISION:
         User: the header keeps only what belongs to the active project. The sidebar toggle stays a flat Tabler layout-sidebar glyph, the right controls are Git, Actions and Open In, and everything occasional (Ask Ghostex, Tips & Tricks, Resources, Dev servers, Extensions) is reached from one trailing menu button.
         This supersedes the 2026-06-22 rule that listed Tips and Resources as their own titlebar buttons; Settings, Keep Awake, the notification bell and the account usage meters live in sidebar chrome, not this strip.
 
         CDXC:Titlebar 2026-09-20 DECISION:
-        User: the window has no titlebar row. This header, the first child of the workspace column,
-        takes over its job: the project breadcrumb, Start/Open/Commit, the trailing ⋯ menu and the
-        two panel toggles, with no line under it. The view tabs still sit here until the view panel
-        owns them, so the header is deliberately busier than the mockup for two phases.
-        This supersedes the 2026-06-14 rule that described a full-width titlebar strip.
+        User: the window has no titlebar row, and the view buttons are not in it. This header carries
+        the project breadcrumb, Start/Open/Commit, the trailing ⋯ menu and the two panel toggles, with
+        no line under it; which views are open is the view panel's own tab strip
+        (render/view_tab_strip.rs), so the centred mode switcher and its compact dropdown are gone.
+        This supersedes the 2026-06-14 full-width titlebar strip and the 2026-09-11 rule that kept
+        the view buttons centred in this row.
         */
-        let mode_switcher_items = self.titlebar_mode_switcher_items();
-        let show_mode_switcher = !mode_switcher_items.is_empty();
-        let extension_mode_width = mode_switcher_items
-            .iter()
-            .filter_map(|item| {
-                let TitlebarMode::Extension(id) = item.mode else {
-                    return None;
-                };
-                let label = gpui_extension_view_presentation(id)
-                    .map(|presentation| presentation.title)
-                    .unwrap_or_else(|| id.as_str().to_string());
-                Some((label.chars().count() as f32 * 7.5 + 28.0).max(70.0))
-            })
-            .sum::<f32>();
-        let use_compact_mode_dropdown = show_mode_switcher
-            && window.bounds().size.width.as_f32()
-                < TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD + extension_mode_width;
         let compact = self.workarea_header_compact(window);
 
         /*
@@ -172,9 +153,6 @@ impl GhostexGpuiApp {
                 }))
         };
 
-        // CDXC:Titlebar 2026-09-20 DECISION:
-        // User: full view buttons stay centered in the window, and the compact dropdown belongs on the left immediately after Next.
-        // This restores the 2026-09-10 wording that the 2026-09-11 rule amended, because the Notifications bell it anchored to has moved to the sidebar; equal side regions still keep the full tabs centered.
         header
             .on_click(|event, window, _cx| {
                 if event.click_count() != 2 {
@@ -197,21 +175,7 @@ impl GhostexGpuiApp {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .child(self.render_workarea_header_breadcrumb(
-                        use_compact_mode_dropdown,
-                        compact,
-                        cx,
-                    )),
-            )
-            .child(
-                h_flex()
-                    .h_full()
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .when(show_mode_switcher && !use_compact_mode_dropdown, |this| {
-                        this.child(self.render_mode_switcher(cx))
-                    }),
+                    .child(self.render_workarea_header_breadcrumb(compact, cx)),
             )
             .child(
                 h_flex()

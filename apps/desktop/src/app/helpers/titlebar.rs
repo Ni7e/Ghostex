@@ -1617,10 +1617,6 @@ pub(crate) fn titlebar_disabled_text_color() -> Hsla {
         .into()
 }
 
-pub(crate) fn titlebar_disabled_segment_color() -> Hsla {
-    titlebar_overlay_base().opacity(0.025).into()
-}
-
 pub(crate) fn titlebar_icon_color() -> Hsla {
     rgb(GPUI_TITLEBAR_FOREGROUND_RGB.load(Ordering::Relaxed) as u32)
         .opacity(0.84)
@@ -2884,6 +2880,25 @@ pub(crate) fn gpui_disabled_project_workarea_copy_noun(mode: TitlebarMode) -> &'
         TitlebarMode::Browser => "Link",
         _ => "Path",
     }
+}
+
+/// CDXC:Titlebar 2026-09-09 SEE-ALSO:
+/// The user's view order from Settings, as mode slugs. `titlebar_mode_switcher_items` sorts the
+/// picker with it and the view panel seeds a new tab's position from it.
+/// packages/shared/ghostex-settings/titlebar-view-order.ts writes the same slugs.
+pub(crate) fn gpui_titlebar_view_order_slugs() -> Vec<String> {
+    shared_settings::shared_sidebar_settings_snapshot()
+        .object()
+        .get("titlebarViewOrder")
+        .and_then(serde_json::Value::as_array)
+        .map(|order| {
+            order
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn gpui_titlebar_mode_hidden_from_settings(mode: TitlebarMode) -> bool {

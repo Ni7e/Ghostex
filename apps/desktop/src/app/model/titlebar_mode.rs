@@ -93,6 +93,31 @@ impl TitlebarMode {
         }
     }
 
+    /// The glyph the view panel's tab strip and the `+` menu draw beside a view's name. Extension
+    /// and custom views share the puzzle glyph because their manifests carry no icon.
+    pub(crate) fn tab_icon(self) -> &'static str {
+        match self {
+            Self::Agents => TITLEBAR_ICON_LAYOUT_COLUMNS,
+            Self::Source => TITLEBAR_ICON_CODE,
+            Self::Browser => TITLEBAR_ICON_WORLD,
+            Self::Kanban => TITLEBAR_ICON_LAYOUT_BOARD_SPLIT,
+            Self::Automate => TITLEBAR_ICON_BOLT,
+            Self::Manage => TITLEBAR_ICON_FILE_TEXT,
+            Self::Extension(_) => TITLEBAR_ICON_EXTENSIONS,
+        }
+    }
+
+    /// The label a tab, a `+` row or a menu row shows for this view, resolving an extension or custom
+    /// view's own title.
+    pub(crate) fn tab_label(self) -> String {
+        match self {
+            Self::Extension(id) => gpui_extension_view_presentation(id)
+                .map(|presentation| presentation.title)
+                .unwrap_or_else(|| id.as_str().to_string()),
+            mode => mode.display_label().to_string(),
+        }
+    }
+
     pub(crate) fn is_project_editor_mode(self) -> bool {
         matches!(
             self,

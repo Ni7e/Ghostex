@@ -60,17 +60,14 @@ export function TitlebarViewOrderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent nested showCloseButton className='ghostex-settings-shadcn settings-titlebar-view-order-dialog'>
         <DialogHeader>
-          <DialogTitle>Arrange titlebar views</DialogTitle>
+          <DialogTitle>Arrange views</DialogTitle>
           <DialogDescription>
-            Drag views into order or use the arrows. Numbered view shortcuts follow the visible order. Hidden views keep
-            their place for when you enable them.
+            Drag views into order or use the arrows. A view you open lands in this order in the view panel's tabs, and
+            numbered view shortcuts follow those tabs. Hidden views keep their place for when you enable them.
           </DialogDescription>
         </DialogHeader>
         <DragDropProvider onDragEnd={onDragEnd}>
-          <div
-            className='settings-titlebar-view-order-list rounded-lg border border-border'
-            aria-label='Titlebar view order'
-          >
+          <div className='settings-titlebar-view-order-list rounded-lg border border-border' aria-label='View order'>
             {items.map((item, index) => {
               const visibleIndex = visibleItems.findIndex((view) => view.id === item.id);
               const actionId = `switchTitlebarView${visibleIndex + 1}` as keyof ghostexSettings['hotkeys'];

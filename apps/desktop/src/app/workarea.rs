@@ -1418,13 +1418,27 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// The scope filter is applied one layer up, because the view panel's `+` menu needs the list
+    /// BEFORE it: `Hidden here ▸` is exactly the views this list holds and the scoped one does not.
+    /// A view switched off in Settings stays out of both, since it is turned off rather than hidden
+    /// in a place.
     pub(crate) fn titlebar_mode_switcher_items(&self) -> Vec<TitlebarModeSwitcherItem> {
+        let mut items = self
+            .titlebar_mode_switcher_items_unscoped()
+            .into_iter()
+            .filter(|item| self.titlebar_mode_view_scope_allows(item.mode))
+            .collect::<Vec<_>>();
+        if items.len() == 1 && items[0].mode == TitlebarMode::Agents {
+            items.clear();
+        }
+        items
+    }
+
+    pub(crate) fn titlebar_mode_switcher_items_unscoped(&self) -> Vec<TitlebarModeSwitcherItem> {
         let mut items = titlebar_mode_switcher_items(self.project_scoped_workarea_availability())
             .into_iter()
-            .filter(|item| {
-                !gpui_titlebar_mode_hidden_from_settings(item.mode)
-                    && self.titlebar_mode_view_scope_allows(item.mode)
-            })
+            .filter(|item| !gpui_titlebar_mode_hidden_from_settings(item.mode))
             .collect::<Vec<_>>();
         let installed_extension_available = self
             .project_scoped_workarea_availability()
@@ -1442,9 +1456,6 @@ impl GhostexGpuiApp {
             .filter_map(|extension| {
                 let id = ExtensionId::new(&extension.id)?;
                 if gpui_custom_view(id).is_some() {
-                    return None;
-                }
-                if !self.view_scope_allows(&extension_view_scope_key(&extension.id)) {
                     return None;
                 }
                 let title = gpui_extension_view_presentation(id)?.title;
@@ -1470,9 +1481,10 @@ impl GhostexGpuiApp {
                     disabled_reason: None,
                 }),
         );
-        // CDXC:Titlebar 2026-09-09 DECISION:
-        // User: titlebar order mixes built-in, extension, and custom views; Option+1..9 follows exactly the displayed list.
-        // SEE-ALSO: packages/shared/ghostex-settings/titlebar-view-order.ts uses the same mode slugs for Settings.
+        // CDXC:Titlebar 2026-09-20 DECISION:
+        // User: the view order mixes built-in, extension, and custom views, and it is what a newly opened view's tab position is seeded from. Option+1..9 follows the tabs in the view panel (screen 07), falling through to this order for a number past the last tab.
+        // This supersedes the 2026-09-09 wording that the numbers followed the titlebar's displayed list, which no longer exists.
+        // SEE-ALSO: packages/shared/ghostex-settings/titlebar-view-order.ts uses the same mode slugs for Settings, and app/view_panel.rs seeds a tab's position from it.
         let snapshot = shared_settings::shared_sidebar_settings_snapshot();
         if let Some(order) = snapshot
             .object()

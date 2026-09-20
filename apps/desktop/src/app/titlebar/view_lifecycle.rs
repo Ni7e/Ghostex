@@ -1,5 +1,3 @@
-use crate::app::actions::*;
-use crate::app::context_menu::GpuiContextMenu;
 use crate::app::model::*;
 use crate::*;
 
@@ -9,66 +7,6 @@ impl GhostexGpuiApp {
             .into_iter()
             .find(|item| item.mode.switcher_index() == index)
             .map(|item| item.mode)
-    }
-
-    /// CDXC:Titlebar 2026-09-16 DECISION:
-    /// User: right-clicking a web-based view's titlebar button offers Reload, Sleep or Wake, a separator, then Extensions.
-    /// Wake replaces the disabled Sleep action when the view is sleeping.
-    /// Actions target the clicked view even when another view is selected; the compact button targets its displayed view.
-    pub(crate) fn titlebar_view_lifecycle_menu(&self, mode: TitlebarMode) -> GpuiContextMenu {
-        let menu = GpuiContextMenu::new();
-        if !mode.is_project_editor_mode() {
-            return menu;
-        }
-        let unavailable = !self.titlebar_mode_available(mode);
-        let menu = menu.menu_with_disabled(
-            "Reload",
-            unavailable,
-            Box::new(ReloadGpuiTitlebarView {
-                mode_index: mode.switcher_index(),
-            }),
-        );
-        let menu = if self.project_editor_shell.is_mode_awake(mode) {
-            menu.menu_with_disabled(
-                "Sleep",
-                unavailable,
-                Box::new(SleepGpuiTitlebarView {
-                    mode_index: mode.switcher_index(),
-                }),
-            )
-        } else {
-            menu.menu_with_disabled(
-                "Wake",
-                unavailable,
-                Box::new(SelectGpuiTitlebarMode {
-                    mode_index: mode.switcher_index(),
-                }),
-            )
-        };
-        menu.separator()
-    }
-
-    pub(crate) fn show_gpui_titlebar_view_menu(
-        &self,
-        mode: TitlebarMode,
-        position: Point<Pixels>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        self.titlebar_view_lifecycle_menu(mode)
-            .menu("Extensions", Box::new(OpenGpuiExtensionsModal))
-            .show(position, window, cx);
-    }
-
-    fn titlebar_view_surface_slot(mode: TitlebarMode) -> Option<ProjectWorkareaCefSurfaceSlotKey> {
-        Some(match mode {
-            TitlebarMode::Source => ProjectWorkareaCefSurfaceSlotKey::Source,
-            TitlebarMode::Kanban => ProjectWorkareaCefSurfaceSlotKey::Kanban,
-            TitlebarMode::Automate => ProjectWorkareaCefSurfaceSlotKey::Automate,
-            TitlebarMode::Manage => ProjectWorkareaCefSurfaceSlotKey::Manage,
-            TitlebarMode::Extension(id) => ProjectWorkareaCefSurfaceSlotKey::Extension(id),
-            TitlebarMode::Agents | TitlebarMode::Browser => return None,
-        })
     }
 
     pub(crate) fn sleep_titlebar_view(&mut self, mode: TitlebarMode, cx: &mut gpui::Context<Self>) {
@@ -85,7 +23,7 @@ impl GhostexGpuiApp {
             for tab_id in tab_ids {
                 self.remove_browser_surface(tab_id, cx);
             }
-        } else if let Some(slot) = Self::titlebar_view_surface_slot(mode) {
+        } else if let Some(slot) = ProjectWorkareaCefSurfaceSlotKey::for_titlebar_mode(mode) {
             self.remove_project_workarea_runtime_cef_surface(slot, cx);
         }
         self.update_active_mode_cef_child_visibility(cx);
@@ -105,7 +43,7 @@ impl GhostexGpuiApp {
         let surface = if mode == TitlebarMode::Browser {
             self.browser_surface_for_pane(self.browser_tabs.focused_pane)
         } else {
-            Self::titlebar_view_surface_slot(mode).and_then(|slot| {
+            ProjectWorkareaCefSurfaceSlotKey::for_titlebar_mode(mode).and_then(|slot| {
                 self.project_workarea_runtime_cef_surfaces
                     .get(&slot)
                     .map(|owned| owned.surface.clone())

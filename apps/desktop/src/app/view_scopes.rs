@@ -59,8 +59,21 @@ fn view_scope_state(value: Option<&Value>) -> Option<ViewScopeState> {
 
 /// A space override is keyed by section and space together, because each gxserver section mints its
 /// space ids independently.
-fn view_scope_space_key(section_key: &str, space_id: &str) -> String {
+pub(crate) fn view_scope_space_key(section_key: &str, space_id: &str) -> String {
     format!("{section_key}:{space_id}")
+}
+
+/// The section and space a `sectionKey:spaceId` override key names. A remote section key contains a
+/// colon of its own, so the space id is everything after the LAST one.
+pub(crate) fn parse_view_scope_space_key(key: &str) -> Option<(&str, &str)> {
+    key.rsplit_once(':')
+}
+
+/// Which of a view scope's two override maps a menu row writes into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewScopeOverrideTarget {
+    Project,
+    Space,
 }
 
 struct ViewScope {
@@ -156,11 +169,61 @@ impl ViewScope {
     }
 }
 
+impl ViewScopeState {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Shown => "shown",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+impl ViewScope {
+    fn to_json(&self) -> Value {
+        let overrides = |map: &HashMap<String, ViewScopeState>| {
+            Value::Object(
+                map.iter()
+                    .map(|(key, state)| (key.clone(), Value::String(state.slug().to_string())))
+                    .collect(),
+            )
+        };
+        serde_json::json!({
+            "default": self.default_state.slug(),
+            "projects": overrides(&self.projects),
+            "spaces": overrides(&self.spaces),
+        })
+    }
+
+    /// The same minimisation the TypeScript writer applies: overrides that provably cannot change
+    /// anything go, so ticking a menu row off and on again leaves no residue. The moment one space
+    /// override differs from the default they are all kept, because a project's `hidden` is then the
+    /// only thing that can beat its space's `shown`.
+    fn pruned(mut self) -> Self {
+        if self
+            .spaces
+            .values()
+            .any(|state| *state != self.default_state)
+        {
+            return self;
+        }
+        self.spaces.clear();
+        self.projects
+            .retain(|_, state| *state != self.default_state);
+        self
+    }
+
+    fn says_nothing(&self) -> bool {
+        self.default_state == ViewScopeState::Shown
+            && self.projects.is_empty()
+            && self.spaces.is_empty()
+    }
+}
+
 impl GhostexGpuiApp {
     /// The spaces the ACTIVE project resolves into, as `sectionKey:spaceId` override keys, with group
     /// and worktree-parent inheritance already applied by the sidebar runtime that owns the daemon
     /// documents. A project only the built-in Other space holds resolves into no space at all.
-    fn active_project_space_keys(&self) -> Vec<String> {
+    pub(crate) fn active_project_space_keys(&self) -> Vec<String> {
         self.native_sidebar
             .snapshot
             .as_ref()
@@ -196,6 +259,138 @@ impl GhostexGpuiApp {
             .map(|id| id.0.as_str());
         ViewScope::from_json(scope).resolve(project_id, &self.active_project_space_keys())
             == ViewScopeState::Shown
+    }
+
+    /// The scope key for a view tab, which is what a right-click menu writes an override under.
+    /// Custom views keep their own availability rule, so they have no scope key.
+    pub(crate) fn titlebar_mode_view_scope_key(&self, mode: TitlebarMode) -> Option<String> {
+        match mode {
+            TitlebarMode::Extension(id) => {
+                (gpui_custom_view(id).is_none()).then(|| extension_view_scope_key(id.as_str()))
+            }
+            _ => titlebar_mode_official_extension_id(mode).map(official_view_scope_key),
+        }
+    }
+
+    /// CDXC:Extensions 2026-09-20 SEE-ALSO:
+    /// One override, written the way `setViewScopeOverride` writes it in
+    /// packages/shared/ghostex-settings/view-scopes.ts: same map shape, same `inherit` meaning, same
+    /// pruning, same "a scope that says nothing is not stored at all" normalisation. Rust owns a
+    /// writer of its own because the view tab's right-click menu is native, and it already owns the
+    /// reader beside it for the same reason; the two implementations must stay word for word.
+    pub(crate) fn set_view_scope_override(
+        &mut self,
+        key: &str,
+        target: ViewScopeOverrideTarget,
+        override_key: &str,
+        state: Option<ViewScopeState>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let mut settings = shared_settings::shared_sidebar_settings_snapshot()
+            .object()
+            .clone();
+        let scopes = settings
+            .entry("viewScopes".to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if !scopes.is_object() {
+            *scopes = Value::Object(serde_json::Map::new());
+        }
+        let scopes = scopes
+            .as_object_mut()
+            .expect("view scopes map must be an object");
+        let mut scope = scopes
+            .get(key)
+            .map(ViewScope::from_json)
+            .unwrap_or_else(|| ViewScope {
+                default_state: ViewScopeState::Shown,
+                projects: HashMap::new(),
+                spaces: HashMap::new(),
+            });
+        let overrides = match target {
+            ViewScopeOverrideTarget::Project => &mut scope.projects,
+            ViewScopeOverrideTarget::Space => &mut scope.spaces,
+        };
+        match state {
+            Some(state) => {
+                overrides.insert(override_key.to_string(), state);
+            }
+            None => {
+                overrides.remove(override_key);
+            }
+        }
+        let scope = scope.pruned();
+        if scope.says_nothing() {
+            scopes.remove(key);
+        } else {
+            scopes.insert(key.to_string(), scope.to_json());
+        }
+        let _ = shared_settings::write_shared_sidebar_settings_object(settings);
+        self.refresh_gpui_plugins_modal(cx);
+        cx.notify();
+    }
+
+    /// The effective state of a view for the active project, which is what a checkable menu row
+    /// shows and what unticking it has to reverse.
+    pub(crate) fn view_scope_state_for_active_project(&self, key: &str) -> ViewScopeState {
+        let settings = shared_settings::shared_sidebar_settings_snapshot();
+        let Some(scope) = settings
+            .object()
+            .get("viewScopes")
+            .and_then(|map| map.get(key))
+        else {
+            return ViewScopeState::Shown;
+        };
+        ViewScope::from_json(scope).resolve(
+            self.active_project_id_for_view_scope().as_deref(),
+            &self.active_project_space_keys(),
+        )
+    }
+
+    pub(crate) fn active_project_id_for_view_scope(&self) -> Option<String> {
+        self.latest_sidebar_project_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.active_project_id.as_ref())
+            .map(|id| id.0.clone())
+    }
+
+    /// The active project's spaces with the names the sidebar shows, so the tab menu can say "Show in
+    /// space ShortPoint". The keys come from `activeProjectSpaceRefs`, which carries membership but
+    /// no name; the names come from `projectViewSpaces`, the same HUD list the Settings scope editor
+    /// labels its cards from, so the two surfaces cannot disagree about what a space is called.
+    pub(crate) fn active_project_space_labels(&self) -> Vec<(String, String)> {
+        let keys = self.active_project_space_keys();
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        let names = self
+            .native_sidebar
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.hud.get("projectViewSpaces"))
+            .and_then(Value::as_array)
+            .map(|spaces| {
+                spaces
+                    .iter()
+                    .filter_map(|space| {
+                        let key = view_scope_space_key(
+                            space.get("sectionKey").and_then(Value::as_str)?,
+                            space.get("spaceId").and_then(Value::as_str)?,
+                        );
+                        Some((key, space.get("name").and_then(Value::as_str)?.to_string()))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+        keys.into_iter()
+            .map(|key| {
+                let name = names.get(&key).cloned().unwrap_or_else(|| {
+                    parse_view_scope_space_key(&key)
+                        .map(|(_, space_id)| space_id.to_string())
+                        .unwrap_or_else(|| key.clone())
+                });
+                (key, name)
+            })
+            .collect()
     }
 
     pub(crate) fn official_view_scope_allows(&self, official_extension_id: &str) -> bool {

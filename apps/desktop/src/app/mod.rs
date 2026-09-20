@@ -97,6 +97,8 @@ mod view_pane_state;
 mod view_panel;
 pub(crate) mod view_scopes;
 pub(crate) mod view_skeletons;
+mod view_tab_actions;
+pub(crate) mod view_tab_menus;
 pub(crate) mod workarea;
 pub(crate) mod workspace_events;
 pub(crate) mod workspace_reconcile;

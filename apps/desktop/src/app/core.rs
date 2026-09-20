@@ -322,6 +322,16 @@ pub struct GhostexGpuiApp {
     // CDXC:Navigation 2026-08-07: last workarea + split ratio per canonical
     // workspace project key. See GpuiProjectViewState.
     pub(crate) project_view_states_by_project: HashMap<String, GpuiProjectViewState>,
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// The active project's tab strip, in the user's order. `active_mode` names which of these tabs
+    /// the panel shows; an empty list and `TitlebarMode::Agents` are the same statement, that the
+    /// panel is closed. Swapped with the rest of the project's view state on a project switch.
+    pub(crate) open_views: Vec<TitlebarMode>,
+    /// Whether the open view has the whole workarea, with the sessions column folded away. Only ever
+    /// true while a view is open; `agents_workspace_visible()` is the one reader that matters.
+    pub(crate) view_panel_maximized: bool,
+    /// The tab being dragged in the view panel's strip, and the index it would land at.
+    pub(crate) view_tab_drag: Option<GpuiViewTabDrag>,
     /// The view the active project last had open, so closing the panel and reopening it comes back
     /// to the same view. Swapped with the rest of the project's view state on a project switch.
     pub(crate) last_open_view_mode: Option<TitlebarMode>,
@@ -778,6 +788,8 @@ pub struct GhostexGpuiApp {
     >,
     pub(crate) workspace_tab_scroll_handles: HashMap<WorkspacePaneId, ScrollHandle>,
     pub(crate) browser_tab_scroll_handles: HashMap<BrowserPaneId, ScrollHandle>,
+    /// The view panel has exactly one tab strip, so it needs one handle rather than a map.
+    pub(crate) view_tab_scroll_handle: ScrollHandle,
     pub(crate) command_tab_scroll_handles: HashMap<CommandPaneGroupId, ScrollHandle>,
     pub(crate) command_collapsed_tab_scroll_handle: ScrollHandle,
     pub(crate) workspace_split_layout_metrics: HashMap<WorkspaceSplitId, SplitResizeMetrics>,
@@ -936,8 +948,6 @@ pub struct GhostexGpuiApp {
     /// The trailing ⋯ button's last painted bounds. Its menu rows and the Ghostex
     /// Help hotkey both anchor their panels here.
     pub(crate) titlebar_more_button_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
-    /// Captured mode-tab spans plus the sliding active-fill state; see `titlebar_mode_highlight.rs`.
-    pub(crate) titlebar_mode_highlight: SharedTitlebarModeHighlightState,
     pub(crate) titlebar_extension_popup_generation: u64,
     pub(crate) titlebar_extension_popup: Option<GpuiTitlebarExtensionPopupState>,
     pub(crate) titlebar_tips_panel_open: bool,

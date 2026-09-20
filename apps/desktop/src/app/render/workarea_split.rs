@@ -52,6 +52,9 @@ impl GhostexGpuiApp {
         let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
         let metrics_view = cx.entity().clone();
         let surface_view = cx.entity().clone();
+        if self.view_panel_maximized() {
+            return self.render_maximized_view_panel(mode, window, cx);
+        }
         h_flex()
             .on_children_prepainted(move |child_bounds, _window, cx| {
                 let _ = metrics_view.update(cx, |this, _cx| {
@@ -99,6 +102,7 @@ impl GhostexGpuiApp {
                     .min_w(px(WORKAREA_VIEW_PANEL_MIN_WIDTH))
                     .min_h_0()
                     .overflow_hidden()
+                    .child(self.render_view_tab_strip(mode, cx))
                     .child(
                         div()
                             .on_children_prepainted(move |child_bounds, _window, cx| {
@@ -135,6 +139,64 @@ impl GhostexGpuiApp {
                             .child(self.render_project_editor_surface(mode, window, cx))
                             .window_corner_pane(),
                     ),
+            )
+            .into_any_element()
+    }
+
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// Expanded, the view panel is the workarea: no sessions column, no rail, nothing left behind,
+    /// which is the whole point of screen 09. The Agents workspace is not rendered here and
+    /// `agents_workspace_visible()` says so in the same frame, so its terminals and chat pages hide
+    /// their native child views instead of painting over the maximised page; they are not torn down,
+    /// and restoring the column brings every one of them back exactly as a view switch does.
+    fn render_maximized_view_panel(
+        &mut self,
+        mode: TitlebarMode,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let mode_slug = mode.element_slug();
+        let surface_border_state = self.project_editor_surface_border_state(mode, window);
+        let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
+        let surface_view = cx.entity().clone();
+        v_flex()
+            .id(format!("ghostex-gpui-workarea-maximized-{}", mode_slug))
+            .pt(px(WORKAREA_HEADER_HEIGHT))
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .overflow_hidden()
+            .bg(project_editor_shell_background_color())
+            .child(self.render_view_tab_strip(mode, cx))
+            .child(
+                div()
+                    .on_children_prepainted(move |child_bounds, _window, cx| {
+                        let _ = surface_view.update(cx, |this, _cx| {
+                            this.record_project_editor_surface_layout_bounds(mode, &child_bounds);
+                        });
+                    })
+                    .id(format!(
+                        "ghostex-gpui-project-editor-surface-slot-{}",
+                        mode_slug
+                    ))
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .w_full()
+                    .h_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .when(mode != TitlebarMode::Browser, |this| {
+                        rail_aware_pane_border(
+                            this,
+                            outer_rail_edges,
+                            workspace_pane_border_color_for_state(surface_border_state),
+                            workspace_pane_border_color(),
+                        )
+                    })
+                    .child(self.render_project_editor_surface(mode, window, cx))
+                    .window_corner_pane(),
             )
             .into_any_element()
     }

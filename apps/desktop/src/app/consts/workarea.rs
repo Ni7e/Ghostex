@@ -43,7 +43,35 @@ pub(crate) const WORKAREA_AGENTS_COLUMN_MIN_WIDTH: f32 = PANE_RESIZE_MINIMUM_WID
 /// User: main panes in non-agent views, including Docs and Browser, have a minimum width of 455px.
 pub(crate) const WORKAREA_VIEW_PANEL_MIN_WIDTH: f32 = 455.0;
 
+/// CDXC:Workarea 2026-09-20 WHY:
+/// A view panel can hold many tabs, but every awake view is a live CEF child view with its own
+/// renderer process, so the cap is what stops six tabs from meaning six pages. Three is the active
+/// tab plus the two the user most recently came from, which covers "edit, check the board, look at
+/// the diff" without holding a fourth page open; the rest keep their tab, their lifecycle record and
+/// their place in the strip and wake on click through the ordinary sleeping placeholder. The cap
+/// counts every open view, extension views included, because an extension page costs the same.
 pub(crate) const PROJECT_EDITOR_AWAKE_MODE_CAP: usize = 3;
+
+/// The view panel's tab strip, the same height as the work area header so the two read as one band
+/// of chrome.
+pub(crate) const WORKAREA_VIEW_TAB_STRIP_HEIGHT: f32 = 36.0;
+
+pub(crate) const WORKAREA_VIEW_TAB_HEIGHT: f32 = 26.0;
+
+pub(crate) const WORKAREA_VIEW_TAB_RADIUS: f32 = 7.0;
+
+pub(crate) const WORKAREA_VIEW_TAB_HORIZONTAL_PADDING: f32 = 9.0;
+
+pub(crate) const WORKAREA_VIEW_TAB_GAP: f32 = 2.0;
+
+pub(crate) const WORKAREA_VIEW_TAB_ICON_SIZE: f32 = 13.0;
+
+pub(crate) const WORKAREA_VIEW_TAB_CLOSE_SIZE: f32 = 16.0;
+
+/// Past this the strip scrolls instead of squeezing every tab into an unreadable sliver.
+pub(crate) const WORKAREA_VIEW_TAB_MIN_WIDTH: f32 = 78.0;
+
+pub(crate) const WORKAREA_VIEW_TAB_MAX_WIDTH: f32 = 168.0;
 
 pub(crate) const PROJECT_EDITOR_AUTO_SLEEP_POLICY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 

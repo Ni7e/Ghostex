@@ -148,6 +148,7 @@ type ViewScopeControls = {
 
 export function ExtensionsSettingsTab({
   initialCustomViewId,
+  initialViewScopeKey,
   projects = [],
   spaces = [],
   isActive,
@@ -162,6 +163,7 @@ export function ExtensionsSettingsTab({
   vscode,
 }: {
   initialCustomViewId?: string;
+  initialViewScopeKey?: string;
   projects?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewProject[];
   spaces?: import('@/packages/shared/ghostex-settings/project-views').ProjectViewSpace[];
   isActive: boolean;
@@ -181,6 +183,7 @@ export function ExtensionsSettingsTab({
   const [viewOrderOpen, setViewOrderOpen] = useState(false);
   const customViewEditorRef = useRef<HTMLDivElement>(null);
   const targetedCustomViewId = useRef<string | undefined>(undefined);
+  const targetedViewScopeKey = useRef<string | undefined>(undefined);
   const focusCustomViewEditor = useRef(false);
 
   /**
@@ -217,6 +220,38 @@ export function ExtensionsSettingsTab({
     const view = customViewsById.get(item.id);
     return view ? [view] : [];
   });
+  /**
+   * CDXC:Extensions 2026-09-20 WHY:
+   * "Choose where it's shown…" on a view tab names the view it was opened from, so this page opens
+   * that view's scope editor instead of dropping the user on the list to find the row again. The key
+   * is the same `official:` / `extension:` scope key the rows themselves use.
+   * SEE-ALSO: apps/desktop/src/app/view_tab_menus.rs, apps/desktop/views/modal-host.tsx.
+   */
+  const viewScopeEditorTitle = (key: string): string | undefined => {
+    const official = [...OFFICIAL_VIEW_EXTENSIONS, ...OFFICIAL_TITLEBAR_EXTENSIONS].find(
+      (extension) => officialViewScopeKey(extension.id) === key
+    );
+    if (official) return official.title;
+    const customView = settings.customViews.find((view) => extensionViewScopeKey(view.id) === key);
+    if (customView) return customView.name;
+    return browser.installed.find((extension) => extensionViewScopeKey(extension.id) === key)?.manifest.title;
+  };
+  useEffect(() => {
+    if (!isActive || !initialViewScopeKey) {
+      targetedViewScopeKey.current = undefined;
+      return;
+    }
+    if (targetedViewScopeKey.current === initialViewScopeKey) return;
+    const title = viewScopeEditorTitle(initialViewScopeKey);
+    if (!title) return;
+    targetedViewScopeKey.current = initialViewScopeKey;
+    setScopeEditor({
+      draft: ghostexViewScope(settings.viewScopes, initialViewScopeKey),
+      key: initialViewScopeKey,
+      title,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browser.installed, initialViewScopeKey, isActive, settings.customViews, settings.viewScopes]);
   const detailOpen = Boolean(transport) && browser.detailOpen;
   const showOfficial = (key: string) => shouldShowSetting(search.sections.official, key);
 
@@ -379,10 +414,7 @@ export function ExtensionsSettingsTab({
           <>
             {search.tab.isSearching && !hasVisibleSettingsSearchResult(search.tab) ? searchEmptyState : null}
             {shouldShowSettingsSection(search.sections.viewOrder) ? (
-              <SettingsSection
-                title='Titlebar views'
-                description='Choose the order of built-in, extension, and custom views.'
-              >
+              <SettingsSection title='Views' description='Choose the order of built-in, extension, and custom views.'>
                 <SettingsListItem title='View order'>
                   <Button onClick={() => setViewOrderOpen(true)} type='button' variant='outline'>
                     <IconArrowsSort aria-hidden='true' data-icon='inline-start' />

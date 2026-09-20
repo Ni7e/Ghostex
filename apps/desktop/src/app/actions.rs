@@ -313,6 +313,59 @@ pub(crate) struct SleepGpuiTitlebarView {
     pub(crate) mode_index: u64,
 }
 
+/// The view panel's tab strip. Every row identifies its view by `TitlebarMode::switcher_index`, the
+/// same id the older view actions use, so a menu row and a hotkey name the same view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct OpenGpuiViewTab {
+    pub(crate) mode_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct CloseGpuiViewTab {
+    pub(crate) mode_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct PopOutGpuiViewTab {
+    pub(crate) mode_index: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct ToggleGpuiViewPanelMaximized;
+
+/// "Show in <project>" and "Show in space <space>": one override each, ticked when the view is
+/// currently shown there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct ToggleGpuiViewProjectScope {
+    pub(crate) mode_index: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct ToggleGpuiViewSpaceScope {
+    pub(crate) mode_index: u64,
+    pub(crate) space_key: String,
+}
+
+/// `Hidden here ▸`: clear the override that hides this view in this project, so it comes back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct ShowGpuiHiddenViewHere {
+    pub(crate) mode_index: u64,
+}
+
+/// "Choose where it's shown…": Settings, on the Extensions page, with this view's scope editor open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
+#[action(namespace = ghostex_gpui, no_json)]
+pub(crate) struct OpenGpuiViewScopeSettings {
+    pub(crate) mode_index: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
 #[action(namespace = ghostex_gpui, no_json)]
 pub(crate) struct RunGpuiTitlebarAction {

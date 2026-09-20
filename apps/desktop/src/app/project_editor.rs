@@ -19,9 +19,37 @@ impl GhostexGpuiApp {
     ) -> bool {
         let marked = self.project_editor_shell.mark_mode_awake(mode);
         if marked {
+            self.release_capped_view_surfaces(cx);
             self.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
         }
         marked
+    }
+
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// The awake cap is a promise about live pages, not just a flag: `mark_mode_awake` puts the
+    /// oldest view over the cap to sleep, and this is what makes that cost nothing, by handing its
+    /// CEF surface back the way the Sleep menu row does. Without it a tab strip of six views would
+    /// keep six renderer processes alive with only the flag saying otherwise, which is exactly what
+    /// the cap exists to prevent. A sleeping view that owns no surface is left alone, so waking one
+    /// view does not walk every other one through the sleep path on every click.
+    pub(crate) fn release_capped_view_surfaces(&mut self, cx: &mut gpui::Context<Self>) {
+        for mode in self.project_editor_shell.lifecycle_modes() {
+            if mode == self.active_mode || self.project_editor_shell.is_mode_awake(mode) {
+                continue;
+            }
+            let owns_surface = match mode {
+                TitlebarMode::Browser => !self.browser_surfaces.is_empty(),
+                _ => {
+                    ProjectWorkareaCefSurfaceSlotKey::for_titlebar_mode(mode).is_some_and(|slot| {
+                        self.project_workarea_runtime_cef_surfaces
+                            .contains_key(&slot)
+                    })
+                }
+            };
+            if owns_surface {
+                self.sleep_titlebar_view(mode, cx);
+            }
+        }
     }
 
     /// The project the sidebar currently has selected.

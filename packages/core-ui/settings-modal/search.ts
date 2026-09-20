@@ -518,11 +518,11 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
         settings: [
           {
             key: 'titlebarViewOrder',
-            title: 'Arrange titlebar views',
-            subtitle: `Reorder built-in, extension, and custom views. ${formatSidebarHotkeyLabel('alt+1')} through ${formatSidebarHotkeyLabel('alt+9')} follow the visible order.`,
+            title: 'Arrange views',
+            subtitle: `Reorder built-in, extension, and custom views. New tabs open in this order, and ${formatSidebarHotkeyLabel('alt+1')} through ${formatSidebarHotkeyLabel('alt+9')} follow the tabs in the view panel.`,
           },
         ],
-        title: 'Titlebar views',
+        title: 'Views',
       },
       {
         id: 'official',

@@ -532,6 +532,7 @@ impl GhostexGpuiApp {
     pub(crate) fn current_project_view_state(&self) -> GpuiProjectViewState {
         GpuiProjectViewState {
             active_mode: self.available_titlebar_mode_or_agents(self.active_mode),
+            open_views: self.open_views.clone(),
             last_view_mode: self.last_open_view_mode,
             workarea_split_ratio: self.project_editor_shell.workarea_split_ratio,
         }
@@ -578,6 +579,14 @@ impl GhostexGpuiApp {
             .and_then(|project_id| self.project_view_states_by_project.get(project_id))
             .cloned()
         else {
+            /*
+            CDXC:Workarea 2026-09-20 WHY:
+            A project this app has not seen before starts with no tabs at all, not with the previous
+            project's strip: its tabs belong to it, and inheriting them would open pages in a project
+            the user never asked to open them in.
+            */
+            self.open_views.clear();
+            self.view_panel_maximized = false;
             self.last_open_view_mode = self.open_view_mode();
             self.apply_view_pane_state(cx);
             self.focus_default_surface_for_active_mode(cx);
@@ -596,6 +605,17 @@ impl GhostexGpuiApp {
             .or(self.open_view_mode_for(target_mode));
         // The outgoing project was already captured before the workspace swap.
         // Do not record its live pane values under the incoming project here.
+        self.open_views = state
+            .open_views
+            .iter()
+            .copied()
+            .filter(|mode| *mode != TitlebarMode::Agents)
+            .collect();
+        if target_mode != TitlebarMode::Agents && !self.open_views.contains(&target_mode) {
+            self.open_views.push(target_mode);
+        }
+        self.view_panel_maximized =
+            self.view_panel_maximized && target_mode != TitlebarMode::Agents;
         self.active_mode = target_mode;
         self.apply_view_pane_state(cx);
         self.focus_shell_target(
