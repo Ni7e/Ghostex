@@ -198,6 +198,11 @@ impl GhostexGpuiApp {
         */
         self.remote_machine_connect_states
             .insert(remote_machine_id.to_string(), state.to_string());
+        // Every connect transition funnels through here, so this is also where the store learns
+        // whether it still has a daemon to subscribe to on that machine: a client starts on the
+        // connected edge and is retired on every other one, which leaves the machine's rows on
+        // screen as stale rather than dropping them.
+        self.gx_store_sync_remote_clients(true, cx);
         if state == GpuiRemoteGxserverConnectState::Connected.wire_status_state() {
             self.attach_surfaced_remote_workspace_terminals(remote_machine_id, cx);
         }

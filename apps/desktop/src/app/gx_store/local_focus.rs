@@ -330,16 +330,22 @@ impl GxStoreHost {
         let Some(project) = ProjectKey::parse_workspace_project_id(project_id) else {
             return false;
         };
-        if !project.machine.is_local() {
-            // Remote machines are not in the store yet; their lists keep the old rule.
+        let store = self.core.presentation();
+        if store.loaded(&project.machine).is_none() {
+            // A machine the store does not hold cannot dispute anything: its list keeps the old
+            // rule. Before M4d that was every remote machine; now it is only one whose client is
+            // not running.
             return true;
         }
-        let store = self.core.presentation();
+        // The active group is the store's own only while the store owns that machine's focus,
+        // which it does for this computer. A remote project's group is derived instead, from the
+        // project the old runtime named.
         let group = self
             .core
             .focus()
             .active_group
             .clone()
+            .filter(|_| project.machine.is_local())
             .filter(|group| match group {
                 ghostex_gx_core::ActiveGroup::Project(owner) => *owner == project,
                 ghostex_gx_core::ActiveGroup::Subgroup { project: owner, .. } => *owner == project,

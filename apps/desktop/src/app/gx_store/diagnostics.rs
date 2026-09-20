@@ -106,6 +106,35 @@ impl GxStoreDiagnostics {
         );
     }
 
+    /// One line per (re)load of a remote machine: the moment its rows reach the store.
+    pub(super) fn remote_machine_loaded(&mut self, core: &Core, machine: &MachineId) {
+        let Some(loaded) = core.presentation().loaded(machine) else {
+            return;
+        };
+        record(
+            "gxStore.remote.loaded",
+            json!({
+                "machineId": log_text(machine.remote_id().unwrap_or_default()),
+                "revision": loaded.revision,
+                "projects": loaded.projects().len(),
+                "groups": loaded.groups().len(),
+                "sessions": loaded.session_count(),
+            }),
+        );
+    }
+
+    /// A remote client's thread is gone although nobody stopped it; a new one follows while the
+    /// machine is still connected.
+    pub(super) fn remote_client_thread_ended(&mut self, machine_id: &str, restart_in: Duration) {
+        self.warning(
+            "gxStore.remote.clientThreadEnded.warning",
+            json!({
+                "machineId": log_text(machine_id),
+                "restartInMs": restart_in.as_millis() as u64,
+            }),
+        );
+    }
+
     /// The persisted focus seeded the core at startup. Ids only.
     pub(super) fn focus_restored(&mut self, core: &Core) {
         let focus = core.focus();
@@ -380,6 +409,7 @@ impl GxStoreDiagnostics {
 
     /// The running totals of the sidebar list and its comparison, at most once a minute and only
     /// when they moved.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn sidebar_summary(
         &mut self,
         counters: &SidebarShadowCounters,
@@ -390,6 +420,8 @@ impl GxStoreDiagnostics {
         groups: usize,
         rows: usize,
         phases: super::sidebar_snapshot::InstallPhases,
+        remote: &super::remote_clients::RemoteClientCounters,
+        machines: usize,
     ) {
         if *counters == self.sidebar_summary_written
             || self
@@ -427,6 +459,7 @@ impl GxStoreDiagnostics {
                 // drops the rest without saying so, and this record passed 32 as it grew.
                 "skipped": {
                     "remote": counters.skipped_remote,
+                    "machineMismatch": counters.skipped_machine_mismatch,
                     "foreignFocus": counters.skipped_foreign_focus,
                     "notLoaded": counters.skipped_not_loaded,
                     "notLive": counters.skipped_not_live,
@@ -443,6 +476,18 @@ impl GxStoreDiagnostics {
                 "scratch": {
                     "checks": counters.scratch_checks,
                     "mismatches": counters.scratch_mismatches,
+                },
+                // One client per connected remote machine. `machines` is how many tabs the sidebar
+                // offers, `starts` how many clients this run opened, and `unloads` how many
+                // machines lost their rows because the user disabled or removed them.
+                "remote": {
+                    "machines": machines,
+                    "starts": remote.starts,
+                    "stops": remote.stops,
+                    "unloads": remote.unloads,
+                    "threadExits": remote.thread_exits,
+                    "events": remote.events,
+                    "reloads": remote.reloads,
                 },
                 "list": {
                     "updates": list.updates,

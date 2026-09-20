@@ -389,6 +389,7 @@ impl GhostexGpuiApp {
             &self.sidebar_browser_tabs_snapshot,
             &store.sidebar_ui.stored_project_collections,
             unavailable,
+            store.remote.tabs(),
         );
         let settings_moved = self.gx_store.sidebar_list.last_inputs.settings != inputs.settings;
         let last_update = LastUpdate {
@@ -448,6 +449,7 @@ impl GhostexGpuiApp {
                 &self.sidebar_browser_tabs_snapshot,
                 &store.sidebar_ui.stored_project_collections,
                 unavailable,
+                store.remote.tabs(),
             );
             changed |= self.gx_store.sidebar_list.model.update(
                 &self.gx_store.core,

@@ -403,7 +403,13 @@ impl GhostexGpuiApp {
             return;
         };
         let mut intents: Vec<SidebarUiIntent> = Vec::new();
-        // The Space first: it decides which groups the section draws at all, which is what the
+        // The machine before everything else: every other field of the plan is keyed by that
+        // machine's section, so applying the Space or a collapse first would write them under the
+        // section the user is leaving. `rememberNativeSidebarFocus` switches the tab the same way.
+        if let Some(machine_id) = plan.select_machine {
+            intents.push(SidebarUiIntent::SelectMachine { machine_id });
+        }
+        // The Space next: it decides which groups the section draws at all, which is what the
         // TypeScript does by running `rememberNativeSidebarFocus` before everything else.
         if let Some(space_id) = plan.select_space {
             intents.push(SidebarUiIntent::SelectSpace { space_id });

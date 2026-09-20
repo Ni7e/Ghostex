@@ -436,14 +436,34 @@ fn compare_top_level(
                         && old.awake_count as usize == store.awake_count
                 }),
     );
-    let local_machine = snapshot
+    // Every machine tab, not just this computer's: the tabs, their connection state and their
+    // badges are the view model's since M4d, and a badge counted for a machine whose list is not
+    // built is exactly the kind of number that goes wrong quietly. The sanitized failure message
+    // is not compared, because the list still carries it from this publish.
+    note!(
+        mismatch.top_level,
+        "machines",
+        snapshot.machines.len() == view.machines.len()
+            && snapshot
+                .machines
+                .iter()
+                .zip(&view.machines)
+                .all(|(old, store)| {
+                    old.id == store.id
+                        && old.label == store.label
+                        && old.state == store.state
+                        && old.working_count == store.working_count
+                        && old.attention_count == store.attention_count
+                }),
+    );
+    let selected_machine = snapshot
         .machines
         .iter()
-        .find(|machine| machine.id == "local");
+        .find(|machine| machine.id == snapshot.selected_machine_id);
     note!(
         mismatch.top_level,
         "machineCounts",
-        local_machine.is_none_or(|machine| {
+        selected_machine.is_none_or(|machine| {
             machine.working_count == view.machine.working_count
                 && machine.attention_count == view.machine.attention_count
         }),
@@ -502,6 +522,36 @@ fn compare_group(old: &NativeSidebarGroup, store: &GroupView, mismatch: &mut Sid
         old.collection_color == store.collection_color,
         old.collection_color.is_some(),
         store.collection_color.is_some()
+    );
+    note!(fields, "isStale", old.is_stale == core.is_stale);
+    let remote_text = |key: &str| {
+        old.remote_machine_context
+            .as_ref()
+            .and_then(|context| context.get(key))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    note!(
+        fields,
+        "remoteMachineContext",
+        old.remote_machine_context.is_some() == core.remote_machine.is_some()
+            && remote_text("machineId")
+                == core
+                    .remote_machine
+                    .as_ref()
+                    .map(|remote| remote.machine_id.clone())
+            && remote_text("machineName")
+                == core
+                    .remote_machine
+                    .as_ref()
+                    .map(|remote| remote.machine_name.clone())
+            && remote_text("projectId")
+                == core
+                    .remote_machine
+                    .as_ref()
+                    .and_then(|remote| remote.project_id.clone()),
+        old.remote_machine_context.is_some(),
+        core.remote_machine.is_some()
     );
     let summary = |key: &str| old.summary.get(key).and_then(Value::as_u64).unwrap_or(0) as usize;
     note_values!(

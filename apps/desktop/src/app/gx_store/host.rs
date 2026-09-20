@@ -84,6 +84,8 @@ pub(crate) struct GxStoreHost {
     pub(super) diagnostics: GxStoreDiagnostics,
     pub(crate) local_focus: LocalFocus,
     pub(crate) layout_persist: LayoutPersist,
+    /// One client per connected remote machine, and the machine tabs the sidebar draws.
+    pub(crate) remote: super::remote_clients::RemoteClients,
     pub(super) menu_host: super::sidebar_menus::MenuHostCache,
 }
 
@@ -241,7 +243,7 @@ impl GxStoreHost {
         }
     }
 
-    fn settle_shadow_diff(&mut self) {
+    pub(super) fn settle_shadow_diff(&mut self) {
         if let Some(mismatch) = self.shadow.settle(&mut self.core, SHADOW_SETTLE, now_ms()) {
             self.diagnostics.shadow_mismatch(&mismatch, &self.core);
         }
@@ -274,6 +276,9 @@ impl GhostexGpuiApp {
         self.start_gx_store_layout_persist_task(cx);
         // The sidebar's own state is read once, and again later if that read failed.
         self.gx_store_restore_sidebar_ui(cx);
+        // A machine may already have connected before the store came up, and the machine tabs are
+        // built here whether or not one has.
+        self.gx_store_sync_remote_clients(true, cx);
         if self.gx_store.transport == next {
             return;
         }

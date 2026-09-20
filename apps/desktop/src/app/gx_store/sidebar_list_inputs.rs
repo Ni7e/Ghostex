@@ -12,8 +12,9 @@
 //! so there is one list of what is still borrowed.
 
 use ghostex_gx_core::{
-    BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, ProjectDiffStats, SessionSortMode,
-    SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState, UnavailableState,
+    BrowserTabInput, CloseAfterDoneInput, DelayedSendInput, MachineTabInput, ProjectDiffStats,
+    SessionSortMode, SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState,
+    UnavailableState,
 };
 use serde_json::Value;
 
@@ -37,6 +38,8 @@ pub(super) struct InputsCache {
     browser_tabs_hash: Option<u64>,
     /// Address of the snapshot the mirrored values were taken from.
     published: Option<usize>,
+    /// The machine tabs as the last refresh saw them.
+    machines: Option<Vec<MachineTabInput>>,
     stored_collections: Option<Option<Value>>,
     settings: Option<SidebarSettings>,
     unavailable: Option<UnavailableState>,
@@ -56,6 +59,7 @@ pub(super) fn refresh_inputs(
     browser_tabs_json: &str,
     stored_project_collections: &Option<Value>,
     unavailable: UnavailableState,
+    machines: &[MachineTabInput],
 ) {
     if cache.ui_generation != ui_generation || cache.settings.is_none() {
         cache.ui_generation = ui_generation;
@@ -77,6 +81,10 @@ pub(super) fn refresh_inputs(
     if cache.unavailable != Some(unavailable) {
         cache.unavailable = Some(unavailable);
         inputs.host.unavailable = unavailable;
+    }
+    if cache.machines.as_deref() != Some(machines) {
+        cache.machines = Some(machines.to_vec());
+        inputs.host.machines = machines.to_vec();
     }
     let published_identity = published.map_or(0, |snapshot| snapshot as *const _ as usize);
     if cache.published == Some(published_identity) {
@@ -102,6 +110,21 @@ fn refresh_mirrored(host: &mut SidebarHostInputs, published: Option<&NativeSideb
         .filter_map(|project| project.get("projectId").and_then(Value::as_str))
         .map(str::to_string)
         .collect();
+    // A remote machine's parked projects are kept per machine: a project id is unique per daemon
+    // only, so one flat set would hide a local project whose id a remote machine also handed out.
+    host.remote_recent_project_ids.clear();
+    for project in recent_projects {
+        let Some(machine_id) = project.get("remoteMachineId").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(project_id) = project.get("projectId").and_then(Value::as_str) else {
+            continue;
+        };
+        host.remote_recent_project_ids
+            .entry(machine_id.to_string())
+            .or_default()
+            .insert(project_id.to_string());
+    }
     host.recent_project_count = recent_projects.len();
     host.project_diff_stats.clear();
     host.close_after_done.clear();

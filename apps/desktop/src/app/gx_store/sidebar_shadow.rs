@@ -14,7 +14,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use ghostex_gx_core::{LOCAL_MACHINE_ID, SidebarViewModel};
+use ghostex_gx_core::{LOCAL_MACHINE_ID, MachineId, SidebarViewModel};
 
 use super::sidebar_scratch_compare::compare_views;
 use super::sidebar_shadow_compare::compare;
@@ -52,8 +52,11 @@ pub(crate) struct SidebarShadowCounters {
     pub(crate) distinct_mismatches: u64,
     /// Differences that were gone by the time they were judged: one side was a frame ahead.
     pub(crate) transient: u64,
-    /// A remote machine tab is selected; the store holds only the local daemon so far.
+    /// A remote machine tab is selected that the host feeds no client for, so the store holds no
+    /// rows to compare. Zero on a machine that is connected.
     pub(crate) skipped_remote: u64,
+    /// The two sides are on different machine tabs, which is two lists rather than one question.
+    pub(crate) skipped_machine_mismatch: u64,
     /// The old runtime's focus is on something the store cannot hold, so its focus flags would
     /// disagree by design.
     pub(crate) skipped_foreign_focus: u64,
@@ -151,9 +154,10 @@ impl GhostexGpuiApp {
     /// The old projection published a list. Its values the Rust list still borrows moved with it,
     /// so the list is brought up to date, and one coalesced comparison is booked.
     pub(crate) fn gx_store_sidebar_projection_published(&mut self, cx: &mut gpui::Context<Self>) {
-        // Which machines exist is the old projection's answer until M4d, and a stored tab whose
-        // machine is gone has to fall back to this computer, or the list would draw nothing.
-        self.gx_store_correct_sidebar_machine_tab(cx);
+        // The machine tabs are the store's own now: the settings say which machines exist and the
+        // connect states say how they are doing, so a tab the sidebar no longer offers falls back
+        // to this computer here. Answered from a one-second cache unless a connect moved.
+        self.gx_store_sync_remote_clients(false, cx);
         // The mirrored inputs (the HUD's sort mode and Recent Projects, the git numbers, the two
         // armed timers) come from this payload, so the list is rebuilt whether or not anyone is
         // comparing.
@@ -193,40 +197,6 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
-    }
-
-    /// Falls back to this computer when the selected machine tab is not one the sidebar offers,
-    /// which is what `createNativeSidebarSnapshot` does with its own copy.
-    ///
-    /// The machine list is built from the settings, so it holds only this computer until they have
-    /// arrived; the guard is `state.hud.settings` being there, not the list being non-empty, or a
-    /// stored remote tab would be reset in the first moments of every launch.
-    fn gx_store_correct_sidebar_machine_tab(&mut self, cx: &mut gpui::Context<Self>) {
-        let selected = self.gx_store.sidebar_ui.selected_machine_id().to_string();
-        if selected == LOCAL_MACHINE_ID {
-            return;
-        }
-        let Some(snapshot) = self.native_sidebar.projection.as_ref() else {
-            return;
-        };
-        let settings_arrived = snapshot
-            .hud
-            .get("settings")
-            .is_some_and(|settings| settings.is_object());
-        if !settings_arrived
-            || snapshot
-                .machines
-                .iter()
-                .any(|machine| machine.id == selected)
-        {
-            return;
-        }
-        self.gx_store_apply_sidebar_ui_intent(
-            ghostex_gx_core::SidebarUiIntent::SelectMachine {
-                machine_id: LOCAL_MACHINE_ID.to_string(),
-            },
-            cx,
-        );
     }
 
     /// Moves the section into the focused row's Space while `sidebarSpaceFollowActiveSession` is
@@ -281,19 +251,33 @@ impl GhostexGpuiApp {
         let Some(snapshot) = self.native_sidebar.projection.clone() else {
             return;
         };
+        // The compared machine is whichever tab is selected, not this computer: since M4d the
+        // store draws a remote machine's list too, so the gate that protected the local sidebar
+        // protects that one by asking the same questions of the machine it is built for.
+        let selected = self.gx_store.sidebar_ui.selected_machine_id().to_string();
         let machine = self
             .gx_store
             .core
             .presentation()
-            .machine(&ghostex_gx_core::MachineId::Local);
+            .machine(&machine_key(&selected));
         let loaded = machine.is_some_and(|machine| machine.loaded().is_some());
         let live = machine.is_some_and(|machine| {
             machine.connection().phase == ghostex_gx_core::ConnectionPhase::Live
         });
+        // A machine the host feeds a client for. `skippedRemote` is this and nothing else now, so
+        // it reaches zero on a machine that is connected.
+        let fed = self.gx_store.sidebar_list.view().supported;
         {
             let restored = self.gx_store.sidebar_ui.restored();
             let shadow = &mut self.gx_store.sidebar_shadow;
-            if snapshot.selected_machine_id != LOCAL_MACHINE_ID {
+            if snapshot.selected_machine_id != selected {
+                // The two sides are on different machine tabs for a moment, so they are two
+                // different lists rather than two answers to one question.
+                shadow.counters.skipped_machine_mismatch += 1;
+                shadow.pending = None;
+                return;
+            }
+            if !fed {
                 shadow.counters.skipped_remote += 1;
                 shadow.pending = None;
                 return;
@@ -433,6 +417,8 @@ impl GhostexGpuiApp {
         let source = self.gx_store_sidebar_list_source();
         let deadline_kind = self.gx_store.sidebar_list.deadline_kind;
         let phases = self.gx_store.sidebar_list.install_phases();
+        let remote = self.gx_store.remote.counters;
+        let machines = self.gx_store.remote.tabs().len();
         self.gx_store.diagnostics.sidebar_summary(
             &counters,
             &list,
@@ -442,6 +428,8 @@ impl GhostexGpuiApp {
             groups,
             rows,
             phases,
+            &remote,
+            machines,
         );
         let ui = self.gx_store.sidebar_ui.counters;
         self.gx_store.diagnostics.sidebar_ui_summary(&ui);
@@ -502,5 +490,14 @@ impl GhostexGpuiApp {
                 .sidebar_scratch_mismatch(difference, &last_update);
         }
         Some(difference.is_some())
+    }
+}
+
+/// The store's key for a machine tab id.
+fn machine_key(machine_id: &str) -> MachineId {
+    if machine_id == LOCAL_MACHINE_ID {
+        MachineId::Local
+    } else {
+        MachineId::Remote(machine_id.to_string())
     }
 }

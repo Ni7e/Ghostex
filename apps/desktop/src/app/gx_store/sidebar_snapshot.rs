@@ -8,11 +8,16 @@
 //! buttons, the more menu and the agent artwork (`sidebar_menus.rs`).
 //!
 //! What is still taken from the old projection's newest publish is named here and nowhere else:
-//! the HUD, the machine tabs, the reveal and rename requests, the daemon revision, and the
-//! per-group facts only a remote machine has (`isStale`, its machine context) plus the project
-//! facts no milestone has moved (`canRemoveProject`, the editor state, the theme). Each of those
-//! belongs to M4d or M5. Nothing here derives product state: a value is either the view model's
-//! or the old projection's, and this file says which.
+//! the HUD, the reveal and rename requests, the daemon revision, the sanitized failure message a
+//! machine tab carries, and the project facts no milestone has moved (`canRemoveProject`, the
+//! editor state, the theme). Each of those belongs to M5. Nothing here derives product state: a
+//! value is either the view model's or the old projection's, and this file says which.
+//!
+//! M4d moved the machine tabs, their connection state and their counts, a group's `isStale` and
+//! its remote machine context into the view model, so a remote machine's list is drawn from the
+//! store exactly as this computer's is. The one exception is named at `remote_row_focus`: the two
+//! marks a REMOTE row draws from focus, because the store owns this computer's focus and nothing
+//! else until M5.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,14 +60,14 @@ impl CachedRow {
         &self,
         row: &Arc<ghostex_gx_core::SessionRow>,
         session: &SessionView,
+        focus: (bool, bool),
         is_snoozed: bool,
         timer_label: &Option<String>,
         last_interaction_label: &Option<String>,
     ) -> bool {
         Arc::ptr_eq(&self.row, row)
             && self.is_snoozed == is_snoozed
-            && self.is_focused == session.is_focused
-            && self.is_visible == session.is_visible
+            && (self.is_focused, self.is_visible) == focus
             && self.is_multi_selected == session.is_multi_selected
             && self.timer_label == *timer_label
             && self.last_interaction_label == *last_interaction_label
@@ -223,12 +228,10 @@ pub(super) fn carry_fingerprint(published: &NativeSidebarSnapshot) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     hash_json(&published.hud, &mut hasher);
+    // Only the sanitized failure message is still taken from a publish; the tab itself, its state
+    // and its counts are the view model's.
     for machine in &published.machines {
-        machine.working_count.hash(&mut hasher);
-        machine.attention_count.hash(&mut hasher);
         machine.id.hash(&mut hasher);
-        machine.label.hash(&mut hasher);
-        machine.state.hash(&mut hasher);
         machine.message.hash(&mut hasher);
     }
     if let Some(request) = &published.rename_request {
@@ -243,14 +246,20 @@ pub(super) fn carry_fingerprint(published: &NativeSidebarSnapshot) -> u64 {
     published.commands_shortcut.hash(&mut hasher);
     for group in &published.groups {
         group.group_id.hash(&mut hasher);
-        group.is_stale.hash(&mut hasher);
-        match &group.remote_machine_context {
-            Some(context) => hash_json(context, &mut hasher),
-            None => 0u8.hash(&mut hasher),
-        }
         match &group.project_context {
             Some(context) => hash_json(context, &mut hasher),
             None => 0u8.hash(&mut hasher),
+        }
+        // The focus marks of a remote machine's rows, which the list still carries (see
+        // `remote_row_focus`). Nothing is hashed while this computer's tab is selected, because a
+        // publish then carries no remote group at all.
+        if group.remote_machine_context.is_none() {
+            continue;
+        }
+        for session in &group.sessions {
+            session.session_id.hash(&mut hasher);
+            session.is_focused.hash(&mut hasher);
+            session.is_visible.hash(&mut hasher);
         }
     }
     hasher.finish()
@@ -366,7 +375,8 @@ pub(super) fn snapshot_from_view(
                 .iter()
                 .map(|session| {
                     used.insert(session.row.sidebar_session_id.clone());
-                    session_element(group, session, menus, cache, now_ms)
+                    let focus = remote_row_focus(group, session, published);
+                    session_element(group, session, focus, menus, cache, now_ms)
                 })
                 .collect();
             native_group(group, menus, published, sessions, cache)
@@ -424,9 +434,7 @@ pub(super) fn snapshot_from_view(
         hud: published.hud.clone(),
         groups,
         selected_machine_id: view.selected_machine_id.clone(),
-        // Remote machines are not in the store yet (M4d), so the machine tabs, their connection
-        // state and their counts stay the old projection's.
-        machines: published
+        machines: view
             .machines
             .iter()
             .map(|machine| NativeSidebarMachine {
@@ -435,7 +443,13 @@ pub(super) fn snapshot_from_view(
                 id: machine.id.clone(),
                 label: machine.label.clone(),
                 state: machine.state.clone(),
-                message: machine.message.clone(),
+                // The sanitized failure summary the header shows under a machine that could not
+                // connect is still the old projection's (M5, with the rest of the connect state).
+                message: published
+                    .machines
+                    .iter()
+                    .find(|published| published.id == machine.id)
+                    .and_then(|published| published.message.clone()),
             })
             .collect(),
         spaces: view
@@ -557,11 +571,18 @@ fn native_group(
         title: core.title.clone(),
         is_active: core.is_active,
         is_chat_collection: core.group_id == ghostex_gx_core::CHATS_GROUP_ID,
-        // `isStale` marks a remote machine's rows while its stream is down, which the store does
-        // not hold yet (M4d).
-        is_stale: published.is_some_and(|group| group.is_stale),
+        is_stale: core.is_stale,
         project_context: project_context(group, published),
-        remote_machine_context: published.and_then(|group| group.remote_machine_context.clone()),
+        remote_machine_context: core.remote_machine.as_ref().map(|remote| {
+            let mut context = json!({
+                "machineId": remote.machine_id,
+                "machineName": remote.machine_name,
+            });
+            if let Some(project_id) = &remote.project_id {
+                context["projectId"] = Value::String(project_id.clone());
+            }
+            context
+        }),
         sessions,
     }
 }
@@ -725,13 +746,43 @@ fn collection_menu(
     menu
 }
 
+/// Which row of a remote machine is focused, and which are on screen.
+///
+/// CDXC:FocusRouting 2026-09-20 WHY:
+/// The store owns this computer's focus and nothing else: a focus payload naming a remote session
+/// is deliberately not mirrored into the core, because the core's active group is what the
+/// workspace reads for its own tabs and it has no remote counterpart until the session lifecycle
+/// milestone. So the two marks a row draws from focus are the only values of a REMOTE row still
+/// carried from the old projection's newest publish, by row id, and a remote row the projection
+/// has not published draws unfocused for the one frame it takes. Every other value of that row,
+/// and every value of a local row, is the store's.
+fn remote_row_focus(
+    group: &GroupView,
+    session: &SessionView,
+    published: Option<&NativeSidebarGroup>,
+) -> (bool, bool) {
+    if group.core.remote_machine.is_none() {
+        return (session.is_focused, session.is_visible);
+    }
+    published
+        .and_then(|group| {
+            group
+                .sessions
+                .iter()
+                .find(|old| old.session_id == session.row.sidebar_session_id)
+        })
+        .map_or((false, false), |old| (old.is_focused, old.is_visible))
+}
+
 fn session_element(
     group: &GroupView,
     session: &SessionView,
+    focus: (bool, bool),
     menus: &SidebarMenus<'_>,
     cache: &mut SnapshotCache,
     now_ms: u64,
 ) -> Arc<NativeSidebarSession> {
+    let (is_focused, is_visible) = focus;
     let row = &session.row;
     let timer_label = row.timer_label(now_ms);
     let last_interaction_label = row.last_interaction_label(now_ms);
@@ -743,6 +794,7 @@ fn session_element(
         if cached.matches(
             row,
             session,
+            focus,
             is_snoozed,
             &timer_label,
             &last_interaction_label,
@@ -755,6 +807,7 @@ fn session_element(
     let element = Arc::new(build_session(
         group,
         session,
+        focus,
         menus,
         timer_label.clone(),
         last_interaction_label.clone(),
@@ -763,8 +816,8 @@ fn session_element(
         row.sidebar_session_id.clone(),
         CachedRow {
             row: row.clone(),
-            is_focused: session.is_focused,
-            is_visible: session.is_visible,
+            is_focused,
+            is_visible,
             is_multi_selected: session.is_multi_selected,
             is_snoozed,
             timer_label,
@@ -780,10 +833,12 @@ fn session_element(
 fn build_session(
     group: &GroupView,
     session: &SessionView,
+    focus: (bool, bool),
     menus: &SidebarMenus<'_>,
     timer_label: Option<String>,
     last_interaction_label: Option<String>,
 ) -> NativeSidebarSession {
+    let (is_focused, is_visible) = focus;
     let row = &session.row;
     let mut details = Map::new();
     let actions = menus.row_actions(group, session);
@@ -896,8 +951,8 @@ fn build_session(
         agent_icon: row.agent_icon.clone(),
         kind: row.is_browser.then(|| "browser".to_string()),
         session_kind: row.session_kind.clone(),
-        is_focused: session.is_focused,
-        is_visible: session.is_visible,
+        is_focused,
+        is_visible,
         is_pinned: row.is_pinned,
         is_parked: row.is_parked,
         is_draft: row.is_draft,

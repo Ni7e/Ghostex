@@ -106,7 +106,15 @@ impl GhostexGpuiApp {
     ) -> MenuHost {
         self.gx_store_menu_host_generation();
         let hud = published.map(|snapshot| &snapshot.hud);
-        let selected = published.map(|snapshot| snapshot.selected_machine_id.as_str());
+        // The selected tab and the connect states are the store's own since M4d, so Add Project on
+        // a remote machine is decided by the same list the tabs are drawn from.
+        let selected = self.gx_store.sidebar_ui.selected_machine_id().to_string();
+        let machine_connected = self
+            .gx_store
+            .remote
+            .tabs()
+            .iter()
+            .any(|machine| machine.machine_id == selected && machine.is_connected());
         MenuHost {
             // The sidebar page always has the workspace focus bridge; the web app is what does
             // not, and it never reaches this host.
@@ -120,11 +128,7 @@ impl GhostexGpuiApp {
                 .map(|hud| commands_by_project(&hud["commandsByProject"]))
                 .unwrap_or_default(),
             keep_awake_minutes: self.gx_store.menu_host.keep_awake_minutes,
-            machine_connected: published.is_some_and(|snapshot| {
-                snapshot.machines.iter().any(|machine| {
-                    Some(machine.id.as_str()) == selected && machine.state == "connected"
-                })
-            }),
+            machine_connected,
         }
     }
 
