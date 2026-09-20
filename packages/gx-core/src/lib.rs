@@ -97,7 +97,8 @@ pub use crate::sidebar_view::{
     WorktreeView, LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
 };
 pub use crate::workspace_groups::{
-    workspace_groups_hand_back_script, AdoptOutcome, ProjectWorkspaceGroups,
+    workspace_groups_hand_back_script, workspace_groups_request_script, AdoptOutcome,
+    ProjectWorkspaceGroups,
     WorkspaceGroupsDocument, WorkspaceGroupsEffect, WorkspaceGroupsSync, WorkspaceSubgroup,
     WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE, WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER,
     WORKSPACE_GROUPS_SYNC_DELAY_MS, WORKSPACE_GROUPS_SYNC_RETRY_DELAY_MS,

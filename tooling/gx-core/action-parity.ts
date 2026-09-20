@@ -1390,7 +1390,7 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
   const trip = await runWorkspaceGroupsRoundTrips(dump.handOff as Json, mutationName);
   differences.push(...trip.differences);
   console.log(
-    `workspace groups round trip: ${trip.scripts} scripts roundTripPosts ${trip.posts} roundTripHandBacks ${trip.handBacks} roundTripParked ${trip.parked} roundTripCarried ${trip.carried} differences ${trip.differences.length}`
+    `workspace groups round trip: ${trip.scripts} scripts roundTripPosts ${trip.posts} roundTripHandBacks ${trip.handBacks} roundTripParked ${trip.parked} roundTripCarried ${trip.carried} roundTripAppEdits ${trip.appEdits} roundTripCrossings ${trip.crossingsLost} differences ${trip.differences.length}`
   );
   for (const difference of trip.differences.slice(0, 10)) console.log(`  ${difference}`);
   const prune = compareWorkspaceGroupPrune((dump.pruneCases ?? []) as Json[], mutationName);
@@ -1414,6 +1414,8 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
     ['roundTripHandBacks', trip.handBacks],
     ['roundTripParked', trip.parked],
     ['roundTripCarried', trip.carried],
+    ['roundTripAppEdits', trip.appEdits],
+    ['roundTripCrossings', trip.crossingsLost],
   ];
   const collapsed = measured.filter(([, count]) => count === 0);
   if (mutationName) {
@@ -1459,6 +1461,9 @@ function normalizeDocument(document: unknown): Json {
 /** The member the app's side prunes and the page's does not, which is what makes a hand-back visible. */
 const PRUNED_SESSION_ID = 'S9';
 
+/** The project the app's own edit touches, which the page never edits. */
+const APP_EDITED_PROJECT_ID = 'P2';
+
 /**
  * Two projects, so the app's sorted map and the page's insertion order are not the same object, and
  * a member the app prunes on every pass.
@@ -1494,7 +1499,11 @@ async function runWorkspaceGroupsRoundTrips(
   let handBacks = 0;
   let parked = 0;
   let carried = 0;
+  let appEdits = 0;
+  let crossingsLost = 0;
   const held: Json[] = [];
+  /** What the app holds, so an edit it makes on its own has something to build on. */
+  let appDocument: Json = roundTripStart();
   const bridge = {
     messageType:
       mutationName === 'hand-off-uses-the-wrong-type' ? 'notTheMessageTheHostRoutes' : String(handOff.messageType),
@@ -1505,7 +1514,22 @@ async function runWorkspaceGroupsRoundTrips(
           ? String(handOff.scriptTemplate).replace('else bridge.pendingWorkspaceGroups = state;', '')
           : String(handOff.scriptTemplate),
     placeholder: String(handOff.placeholder),
+    // The app edits and never tells the page, which is what a host that handed back only in
+    // response to a post would do and what no script without an app-side edit can reach.
+    skipAppHandBack: mutationName === 'app-edit-is-never-handed-back',
     edit: (state: Json) => {
+      // `the-crossing-keeps-the-app-edit`: the app MERGES the page's document into its own instead
+      // of taking it whole, which is the tempting improvement declared difference 30 refuses.
+      if (mutationName === 'the-crossing-keeps-the-app-edit') {
+        const merged = parseGpuiWorkspaceSessionGroupsState(state) as Json;
+        const projects: Json = { ...merged.projects };
+        if (appDocument.projects?.[APP_EDITED_PROJECT_ID])
+          projects[APP_EDITED_PROJECT_ID] = appDocument.projects[APP_EDITED_PROJECT_ID];
+        const document = { ...merged, projects };
+        held.push(document);
+        appDocument = document;
+        return document;
+      }
       const parsed = parseGpuiWorkspaceSessionGroupsState(state) as Json;
       // The app's map is sorted; the page's is not. A round trip that only ever saw one order
       // would not notice a comparison that is really a key-order test (`applyWorkspaceGroupsFromHost`).
@@ -1526,7 +1550,29 @@ async function runWorkspaceGroupsRoundTrips(
       }
       const document = { ...parsed, projects };
       held.push(document);
+      appDocument = document;
       return document;
+    },
+    // The app's own edit, with no post behind it: the prune's pass on a pump, or a drop the app
+    // answered itself. It drops the LAST member of the first project, which is a change the page
+    // cannot make and therefore one the crossing can be seen to destroy.
+    appEdit: () => {
+      const projects: Json = {};
+      for (const [key, entry] of Object.entries((appDocument.projects ?? {}) as Json)) {
+        projects[key] =
+          key === APP_EDITED_PROJECT_ID
+            ? {
+                ...(entry as Json),
+                groups: (((entry as Json).groups ?? []) as Json[]).map((group) => ({
+                  ...group,
+                  sessionIds: ((group.sessionIds ?? []) as string[]).slice(0, -1),
+                })),
+              }
+            : entry;
+      }
+      // NOT pushed into `held`, which is indexed by posts: the step carries this document itself.
+      appDocument = { ...appDocument, projects };
+      return appDocument;
     },
   };
   // A rename computed from what came back, a move then a rename (the shape declared difference 29
@@ -1538,9 +1584,17 @@ async function runWorkspaceGroupsRoundTrips(
     { name: 'move then rename', script: ['move', 'rename'] },
     { name: 'create then reorder', script: ['create', 'reorder'] },
     { name: 'parked until the hook is installed', script: ['rename', 'installHook', 'rename'], installLate: true },
+    // TWO edits before the drain, so a second document crosses a hand-back that is still parked.
+    // The one-edit script above could not produce that: its only pre-drain edit is step 0.
+    { name: 'two edits before the drain', script: ['rename', 'reorder', 'installHook'], installLate: true },
+    // The app moving first: its own edit lands, then the page's, and then a page edit built on what
+    // came back. `appEditCrossing` is the app editing BETWEEN the page's post and its receipt.
+    { name: 'an app edit of its own', script: ['appEdit', 'rename'] },
+    { name: 'an app edit crossing a hand-off', script: ['appEditCrossing', 'rename'] },
   ];
   for (const entry of scripts) {
     held.length = 0;
+    appDocument = roundTripStart();
     let result;
     try {
       result = runWorkspaceGroupsRoundTrip(roundTripStart(), entry.script, bridge, {
@@ -1553,7 +1607,32 @@ async function runWorkspaceGroupsRoundTrips(
     posts += result.steps.filter((step) => step.posted).length;
     handBacks += result.handBacks;
     parked += result.parked;
+    appEdits += result.appEdits;
     for (const [index, step] of result.steps.entries()) {
+      if (step.app && !step.posted) {
+        // An edit the app made on its own has to reach the page with no post to carry it back.
+        if (canonical(normalizeDocument(step.page)) !== canonical(normalizeDocument(step.app)))
+          differences.push(
+            `round trip ${entry.name} step ${index}: the app's own edit did not reach the page, page ${canonical(normalizeDocument(step.page))}`
+          );
+      }
+      if (step.step === 'appEditCrossing' && step.posted) {
+        // Declared difference 30, made constructible: the app edited between the page's post and
+        // its receipt, and the post is taken WHOLE, so the app's own edit is destroyed. Asserted as
+        // the RECORDED outcome rather than left to be discovered in a bug report; if this ever
+        // stops being true the gate says so and the declared difference is wrong.
+        const dropped = ((step.posted.state as Json).projects ?? {})[APP_EDITED_PROJECT_ID];
+        const ids = (((dropped?.groups ?? []) as Json[])[0]?.sessionIds ?? []) as string[];
+        const survived = (((step.page.projects ?? {})[APP_EDITED_PROJECT_ID]?.groups ?? []) as Json[])[0];
+        const pageIds = ((survived?.sessionIds ?? []) as string[]).filter((id) => id !== PRUNED_SESSION_ID);
+        if (pageIds.length !== ids.filter((id) => id !== PRUNED_SESSION_ID).length) {
+          differences.push(
+            `round trip ${entry.name} step ${index}: the crossing did not take the page's document whole`
+          );
+        } else {
+          crossingsLost += 1;
+        }
+      }
       const handedSoFar = result.steps.slice(0, index + 1).filter((earlier) => earlier.posted).length;
       if (step.step === 'installHook' && handedSoFar > 0) {
         // The drain: a document parked before the hook existed has to reach the page when it does.
@@ -1587,6 +1666,9 @@ async function runWorkspaceGroupsRoundTrips(
           const ids = ((value as Json).groups ?? []).flatMap((group: Json) => group.sessionIds ?? []);
           const nextIds = ((groups[projectId]?.groups ?? []) as Json[]).flatMap((group) => group.sessionIds ?? []);
           for (const sessionId of ids) {
+            // The app prunes this one on every pass, so its absence in a later post is the app's
+            // own doing rather than the page dropping something it was handed.
+            if (sessionId === PRUNED_SESSION_ID) continue;
             if (!nextIds.includes(sessionId))
               differences.push(
                 `round trip ${entry.name} step ${index}: ${String(sessionId)} was handed back and the next edit dropped it`
@@ -1596,7 +1678,7 @@ async function runWorkspaceGroupsRoundTrips(
       }
     }
   }
-  return { scripts: scripts.length, posts, handBacks, parked, carried, differences };
+  return { scripts: scripts.length, posts, handBacks, parked, carried, appEdits, crossingsLost, differences };
 }
 
 /**
@@ -1761,6 +1843,8 @@ let ECHO_DOCUMENTS: Json[] = [];
 
 const GROUPS_MUTATIONS = [
   'hand-back-never-arrives',
+  'app-edit-is-never-handed-back',
+  'the-crossing-keeps-the-app-edit',
   'hand-off-uses-the-wrong-type',
   'hand-back-loses-the-parking-branch',
   'adopt-while-pending',

@@ -14,12 +14,16 @@
  * `persistWorkspaceGroups`, the real `applyWorkspaceGroupsFromHost`, the real edit methods
  * (`renameWorkspaceGroup`, `createWorkspaceGroup`, `moveSessionToWorkspaceGroup`,
  * `syncWorkspaceSubgroupSessionOrder`) and the real controller wiring of the bridge hook and its
- * parking drain. The app half is the real `WorkspaceGroupsSync` through the Rust probe's dump,
- * which carries the two edges a TypeScript process cannot reach: the message type the host's
- * routing arm matches on, and the script text the host evaluates, as a template this file
- * substitutes a document into (the probe asserts the substitution rebuilds the script byte for
- * byte). The script is EVALUATED, not parsed, so the function name, the parking branch and the
- * guard on a bridge that is not installed yet are all exercised rather than described.
+ * parking drain. **The app half is NOT the real `WorkspaceGroupsSync`**, and it cannot be: this is
+ * a Bun process. What comes from the Rust probe's dump is the two edges a TypeScript process cannot
+ * reach, and only those: the message type the host's routing arm matches on, and the script text
+ * the host evaluates, as a template this file substitutes a document into (the probe asserts the
+ * substitution rebuilds the script byte for byte). `bridge.edit` is the caller's, and in the gate
+ * it is a TypeScript normalizer plus the one app-side change that makes a hand-back observable.
+ * That is enough because the guard's own behaviour is gated over 22,572 steps next door; what is
+ * gated HERE is the bridge. The script is EVALUATED, not parsed, so the function name, the parking
+ * branch and the guard on a bridge that is not installed yet are all exercised rather than
+ * described.
  *
  * Three edges are replaced, and each one is an edge rather than a decision: the window bridge
  * (`window.webkit.messageHandlers.ghostexNativeHost`) is a recorder, the page's publish and toast
@@ -43,6 +47,8 @@ export type RoundTripStep = {
   page: Json;
   /** The hand-back was PARKED because the bridge hook was not installed yet. */
   parkedHere?: boolean;
+  /** What the app held after an edit it made on its own, with no post behind it. */
+  app?: Json;
 };
 
 /**
@@ -55,6 +61,18 @@ export type AppBridge = {
   placeholder: string;
   /** What the guard holds after taking this document as a local edit. */
   edit: (state: Json) => Json;
+  /**
+   * An edit the APP makes on its own, with no post behind it: the prune's pass on a pump, or a drop
+   * the app answered itself. Returns what it holds afterwards. Without this the gate can only ever
+   * see the app react to the page, and the crossing declared difference 30 is about is the one
+   * where the app moved first.
+   */
+  appEdit: () => Json;
+  /**
+   * Suppresses the hand-back for an APP-side edit only, which is the shape of a host that told the
+   * page only when the page had spoken first. Nothing in the app does this; the gate injects it.
+   */
+  skipAppHandBack?: boolean;
 };
 
 /**
@@ -69,7 +87,7 @@ export function runWorkspaceGroupsRoundTrip(
   script: string[],
   bridge: AppBridge,
   options: { installLate?: boolean } = {}
-): { steps: RoundTripStep[]; handBacks: number; parked: number } {
+): { steps: RoundTripStep[]; handBacks: number; parked: number; appEdits: number } {
   resetBrowserStorage();
   const posts: Json[] = [];
   const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
@@ -108,11 +126,23 @@ export function runWorkspaceGroupsRoundTrip(
 
   let handBacks = 0;
   let parked = 0;
+  let appEdits = 0;
   const steps: RoundTripStep[] = [];
+  /** The host's own hand-back, evaluated as the real script text. */
+  const evaluateHandBack = (held: Json) => {
+    const source = bridge.scriptTemplate.replace(bridge.placeholder, JSON.stringify(held));
+    // eslint-disable-next-line no-new-func
+    new Function(source)();
+    handBacks += 1;
+  };
   try {
     for (const [index, event] of script.entries()) {
       posts.length = 0;
       switch (event) {
+        case 'appEditCrossing':
+          // The page's edit happens FIRST and its post waits while the app edits its own copy.
+          runtime.renameWorkspaceGroup(createGpuiWorkspaceSessionSubgroupId('P1', 'group-2'), 'Crossed');
+          break;
         case 'rename':
           runtime.renameWorkspaceGroup(createGpuiWorkspaceSessionSubgroupId('P1', 'group-2'), 'Renamed');
           break;
@@ -136,6 +166,18 @@ export function runWorkspaceGroupsRoundTrip(
           installHook();
           break;
       }
+      // An app-side edit with no post behind it, and the crossing: the page posts, the app edits
+      // its own copy BEFORE the post is taken, and the post then replaces it. That is declared
+      // difference 30 made constructible rather than argued.
+      if (event === 'appEdit' || event === 'appEditCrossing') {
+        const held = bridge.appEdit();
+        appEdits += 1;
+        if (!bridge.skipAppHandBack) evaluateHandBack(held);
+        if (event === 'appEdit') {
+          steps.push({ step: event, page: runtime.workspaceGroups, app: held });
+          continue;
+        }
+      }
       const posted = posts[0];
       let parkedHere = false;
       if (posted) {
@@ -146,11 +188,7 @@ export function runWorkspaceGroupsRoundTrip(
         if (!posted.state || typeof posted.state !== 'object' || Array.isArray(posted.state))
           throw new Error(`step ${index} posted no state object, which the host drops`);
         // The app takes it, and hands its held document back through the REAL script.
-        const held = bridge.edit(posted.state as Json);
-        const source = bridge.scriptTemplate.replace(bridge.placeholder, JSON.stringify(held));
-        // eslint-disable-next-line no-new-func
-        new Function(source)();
-        handBacks += 1;
+        evaluateHandBack(bridge.edit(posted.state as Json));
         if (gpuiBridge.pendingWorkspaceGroups !== undefined) {
           parked += 1;
           parkedHere = true;
@@ -167,5 +205,5 @@ export function runWorkspaceGroupsRoundTrip(
     (globalThis.window as any).webkit = previousWebkit;
     (globalThis.window as any).ghostexGpui = previousGpui;
   }
-  return { steps, handBacks, parked };
+  return { steps, handBacks, parked, appEdits };
 }

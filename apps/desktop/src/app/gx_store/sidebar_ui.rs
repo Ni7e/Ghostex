@@ -28,9 +28,14 @@ const WRITE_DEBOUNCE: Duration = Duration::from_millis(400);
 /// How often a write that failed books its own retry before it waits for the next click instead.
 /// Nothing is lost when it stops: the change stays owed and the next intent carries it.
 const MAX_WRITE_RETRIES: u32 = 3;
-/// How long a failed read waits before it is tried again, and how many times. Nothing the user
-/// does is lost while it fails: the state still moves and the clicks are queued, only the write is
-/// refused until the state is known.
+/// How long a failed read waits before it is tried again.
+///
+/// CDXC:Sidebar 2026-09-21 WHY:
+/// The note here used to say nothing the user does is lost while the read fails. That was true
+/// while the sidebar page was the other writer of these keys and is false since M5 piece 7c: the
+/// state still moves and the clicks still land, but nothing reaches storage until a read does, so
+/// a run that never read loses every collapse, Space and hidden item at the next restart. Which is
+/// why the ladder below does not end in giving up. Supersedes the 2026-09-20 note.
 const READ_RETRY: Duration = Duration::from_secs(5);
 /// How many fast attempts before the standing slow one takes over. It never gives up.
 const MAX_READ_RETRIES: u32 = 6;
@@ -291,11 +296,10 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    /// Books another read after a failure. The first `MAX_READ_RETRIES` come quickly; after that it
-    /// keeps trying on a slow standing timer, because giving up means this app writes none of the
-    /// three keys for the rest of the run and the user loses every collapse and hidden item at the
-    /// next restart. The moment it gives up would be the moment nothing says so, which is why the
-    /// last fast attempt warns.
+    /// Books another read after a failure: `MAX_READ_RETRIES` fast attempts, then a standing slow
+    /// one for the life of the run (see `READ_RETRY` for why it never gives up). The moment it
+    /// stopped trying would be the moment nothing said so, which is why the last fast attempt
+    /// warns.
     fn gx_store_schedule_sidebar_ui_read_retry(&mut self, cx: &mut gpui::Context<Self>) {
         let ui = &mut self.gx_store.sidebar_ui;
         if ui.retry_scheduled {

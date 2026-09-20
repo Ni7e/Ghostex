@@ -62,7 +62,10 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_ui_summary_considered_at: Option<Instant>,
     sidebar_ui_summary_written: SidebarUiCounters,
     sidebar_refusal_warnings: u32,
-    workspace_groups_warnings: u32,
+    workspace_groups_records: u32,
+    workspace_groups_read_warnings: u32,
+    workspace_groups_write_warnings: u32,
+    workspace_groups_refusal_warnings: u32,
     sidebar_never_settled_records: u32,
     sidebar_scratch_records: u32,
     sidebar_slow_update_records: u32,
@@ -807,14 +810,18 @@ impl GxStoreDiagnostics {
         self.warning("gxStore.sidebarUi.read.unavailable", json!({}));
     }
 
-    /// A bound refused the workspace session groups document. Its own warning budget, because a
-    /// refusal here means that document is not reaching disk at all and it is nothing like a
-    /// refused collapse entry.
+    /// A bound refused the workspace session groups document.
+    ///
+    /// CDXC:Sessions 2026-09-21 WHY:
+    /// One budget per condition, not one for all three. They shared `workspace_groups_warnings`
+    /// until 2026-09-21, and since the read retries every five seconds a run whose database is
+    /// briefly locked burns the whole budget on read failures inside fifteen seconds and then says
+    /// nothing at all about a write that is being refused for the rest of the run.
     pub(super) fn workspace_groups_write_refused(&mut self, bound: &'static str) {
-        if self.workspace_groups_warnings >= 3 {
+        if self.workspace_groups_refusal_warnings >= 3 {
             return;
         }
-        self.workspace_groups_warnings += 1;
+        self.workspace_groups_refusal_warnings += 1;
         self.warning(
             "gxStore.workspaceGroups.write.refused",
             json!({ "bound": bound }),
@@ -824,22 +831,28 @@ impl GxStoreDiagnostics {
     /// A read of the stored document that did not land. Retried; until it does, nothing is adopted
     /// and nothing is edited.
     pub(super) fn workspace_groups_read_failed(&mut self, error: &'static str) {
-        if self.workspace_groups_warnings >= 3 {
+        if self.workspace_groups_read_warnings >= 3 {
             return;
         }
-        self.workspace_groups_warnings += 1;
+        self.workspace_groups_read_warnings += 1;
         self.warning(
             "gxStore.workspaceGroups.read.failed",
             json!({ "error": error }),
         );
     }
 
+    /// The stored document could not be read after every fast attempt. Said once, because from here
+    /// every edit of the user's groups is refused until a read lands.
+    pub(super) fn workspace_groups_read_unavailable(&mut self) {
+        self.warning("gxStore.workspaceGroups.read.unavailable", json!({}));
+    }
+
     /// A storage write of that document that did not land. Retried; the warning says it happened.
     pub(super) fn workspace_groups_write_failed(&mut self, error: &'static str) {
-        if self.workspace_groups_warnings >= 3 {
+        if self.workspace_groups_write_warnings >= 3 {
             return;
         }
-        self.workspace_groups_warnings += 1;
+        self.workspace_groups_write_warnings += 1;
         self.warning(
             "gxStore.workspaceGroups.write.failed",
             json!({ "error": error }),
@@ -1023,10 +1036,34 @@ impl GxStoreDiagnostics {
         ok: bool,
         counters: super::workspace_groups::WorkspaceGroupsCounters,
     ) {
-        if self.sidebar_drag_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled() {
+        self.workspace_groups_record(Some(ok), counters);
+    }
+
+    /// The same counters without a push behind them.
+    ///
+    /// CDXC:Sessions 2026-09-21 WHY:
+    /// The record used to be emitted only from a push, so a run in which the user edited no group
+    /// produced no line at all and the counters that say whether the bridge is alive (`handOffs`,
+    /// `handBacks`, `hostMessagesDropped`) could not be read. It is emitted from the reconcile too,
+    /// which runs on the daemon's first `workspaceGroups` frame, so every run with a daemon behind
+    /// it has at least one.
+    pub(super) fn workspace_groups_reconciled(
+        &mut self,
+        counters: super::workspace_groups::WorkspaceGroupsCounters,
+    ) {
+        self.workspace_groups_record(None, counters);
+    }
+
+    fn workspace_groups_record(
+        &mut self,
+        ok: Option<bool>,
+        counters: super::workspace_groups::WorkspaceGroupsCounters,
+    ) {
+        if self.workspace_groups_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled()
+        {
             return;
         }
-        self.sidebar_drag_records += 1;
+        self.workspace_groups_records += 1;
         record(
             "gxStore.workspaceGroups",
             json!({
@@ -1034,6 +1071,7 @@ impl GxStoreDiagnostics {
                 "edits": counters.edits,
                 "storageWrites": counters.storage_writes,
                 "storageRemoves": counters.storage_removes,
+                "storageAttempts": counters.storage_attempts,
                 "storageFailures": counters.storage_failures,
                 "pushes": counters.pushes,
                 "pushFailures": counters.push_failures,
@@ -1050,6 +1088,7 @@ impl GxStoreDiagnostics {
                 "storageRefusals": counters.storage_refusals,
                 "readFailures": counters.read_failures,
                 "handOffsRefused": counters.hand_offs_refused,
+                "handOffsRequested": counters.hand_offs_requested,
                 "echoesDeferred": counters.echoes_deferred,
             }),
         );

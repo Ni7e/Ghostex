@@ -46,6 +46,16 @@ pub const WORKSPACE_GROUPS_HAND_OFF_MESSAGE_TYPE: &str = "persistWorkspaceGroups
 /// [`workspace_groups_hand_back_script`] serializes it with quotes and the substitution is exact.
 pub const WORKSPACE_GROUPS_SCRIPT_PLACEHOLDER: &str = "__GX_WORKSPACE_GROUPS_STATE__";
 
+/// The script the host runs in the sidebar page to ask it to post its own document.
+///
+/// Used once, after a read of the stored key that failed while the page was editing: the page's
+/// copy is then the only one carrying that edit, and handing the stored document back would replace
+/// it. The page answers with an ordinary `persistWorkspaceGroups`, so the recovery and every other
+/// edit take the same path.
+pub fn workspace_groups_request_script() -> String {
+    "(function(bridge) { if (bridge && bridge.requestWorkspaceGroups) bridge.requestWorkspaceGroups(); })(window.ghostexGpui); undefined;".to_string()
+}
+
 /// The script the host runs in the sidebar page to hand the held document back.
 ///
 /// Here rather than in the desktop crate so a harness can evaluate the REAL text against the real

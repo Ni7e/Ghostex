@@ -230,6 +230,7 @@ Generated Chat folders must not render as individual GPUI project groups, and cl
 */
 export function createGpuiSidebarRuntime(): {
   applyWorkspaceGroupsFromHost: (state: unknown) => void;
+  persistWorkspaceGroups: () => void;
   messageSource: GpuiSidebarLocalMessageSource;
   start: () => void;
   startLocalGxserver: () => void;
@@ -238,6 +239,7 @@ export function createGpuiSidebarRuntime(): {
   const runtime = new GpuiSidebarRuntime();
   return {
     applyWorkspaceGroupsFromHost: (state: unknown) => runtime.applyWorkspaceGroupsFromHost(state),
+    persistWorkspaceGroups: () => runtime.persistWorkspaceGroups(),
     messageSource: runtime.messageSource,
     start: () => runtime.start(),
     startLocalGxserver: () => runtime.startLocalGxserver(),

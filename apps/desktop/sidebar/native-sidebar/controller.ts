@@ -126,6 +126,9 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
   bridge.applyWorkspaceGroups = (state) => {
     runtime.applyWorkspaceGroupsFromHost(state);
   };
+  bridge.requestWorkspaceGroups = () => {
+    runtime.persistWorkspaceGroups();
+  };
   if (bridge.pendingWorkspaceGroups !== undefined) {
     const parked = bridge.pendingWorkspaceGroups;
     delete bridge.pendingWorkspaceGroups;
@@ -192,5 +195,6 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     runtime.messageSource.removeEventListener('message', receive);
     delete bridge.onNativeSidebarCommand;
     delete bridge.applyWorkspaceGroups;
+    delete bridge.requestWorkspaceGroups;
   };
 }

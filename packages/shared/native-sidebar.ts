@@ -197,6 +197,11 @@ export type NativeSidebarBridge = {
   applyWorkspaceGroups?: (state: unknown) => void;
   /** A document handed over before `applyWorkspaceGroups` was installed; drained when it is. */
   pendingWorkspaceGroups?: unknown;
+  /**
+   * Post the document this page holds. Called once by the app after a read of the stored key that
+   * failed while this page was editing, where the page's copy is the only one carrying that edit.
+   */
+  requestWorkspaceGroups?: () => void;
 };
 
 export type NativeSidebarMenuItem = {

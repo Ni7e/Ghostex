@@ -60,11 +60,14 @@ const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 /// times. Nothing is lost while it fails: the owed write stays owed and the quit path flushes it.
 const STORAGE_RETRY: Duration = Duration::from_millis(400);
 const MAX_STORAGE_RETRIES: u32 = 3;
-/// How long a failed read of the stored key waits before it is tried again, and how many times.
-/// The same ladder the sidebar's own state uses, for the same reason: a lock race clears in
-/// milliseconds and a missing database never will.
+/// How long a failed read of the stored key waits before it is tried again. The same ladder the
+/// sidebar's own state uses, for the same reason: a lock race clears in milliseconds and a missing
+/// database never will, and giving up entirely would refuse every edit of the user's groups for the
+/// rest of the run.
 const READ_RETRY: Duration = Duration::from_secs(5);
+/// How many fast attempts before the standing slow one takes over. It never gives up.
 const MAX_READ_RETRIES: u32 = 6;
+const READ_RETRY_SLOW: Duration = Duration::from_secs(30);
 
 /// Native-host messages dropped because no window was active when they arrived.
 ///
@@ -89,8 +92,14 @@ pub(super) fn native_host_messages_dropped() -> u64 {
 pub(crate) struct WorkspaceGroupsCounters {
     /// Local edits, which is one per move that writes.
     pub(crate) edits: u64,
+    /// Documents this run STORED, and keys it REMOVED: one per payload that reached the database,
+    /// not one per try. An attempt that failed, was retried and then succeeded is one store and
+    /// three attempts, and conflating the two made `storageWrites` unable to answer the question
+    /// the module doc asks it, which is whether the path fires.
     pub(crate) storage_writes: u64,
     pub(crate) storage_removes: u64,
+    /// Every call into the storage door, including the retries and the quit flush.
+    pub(crate) storage_attempts: u64,
     pub(crate) storage_failures: u64,
     pub(crate) pushes: u64,
     pub(crate) push_failures: u64,
@@ -119,9 +128,13 @@ pub(crate) struct WorkspaceGroupsCounters {
     /// Reads of the stored key that failed. Until one succeeds nothing is adopted and nothing is
     /// edited, so a non-zero value here beside a zero `edits` is this app refusing to guess.
     pub(crate) read_failures: u64,
-    /// Hand-offs refused because the stored key had not been read yet. The page still holds the
-    /// document and its next edit carries it.
+    /// Hand-offs refused because the stored key had not been read yet. The page keeps the document
+    /// it edited; this app has nothing to put it on top of, so when the read lands it ASKS the page
+    /// to hand it over again rather than handing the stored one back, which would replace the
+    /// user's edit and show them the rename reverting.
     pub(crate) hand_offs_refused: u64,
+    /// Times the page was asked to hand its document over again after a refusal.
+    pub(crate) hand_offs_requested: u64,
     /// Daemon echoes left unjudged for the same reason.
     pub(crate) echoes_deferred: u64,
     /// Hand-backs whose script the service refused to evaluate. The page's copy is then the stale
@@ -146,22 +159,28 @@ pub(crate) struct WorkspaceGroupsHost {
     /// the attempt that was carrying it.
     owed_write: Option<Option<String>>,
     write_retries: u32,
+    /// A read is on the background executor right now, so the pump must not book a second one.
+    restoring: bool,
     read_retries: u32,
     read_retry_scheduled: bool,
 }
 
 impl GhostexGpuiApp {
-    /// Seeds the document from the stored key, once. Not an edit: nothing has changed that the
-    /// server does not have, so no push is booked. Returns whether the stored key is in hand.
+    /// Whether the stored key is in hand, booking the read that puts it there.
     ///
     /// CDXC:Sessions 2026-09-21 WHY:
-    /// **A failed read is not a read.** The first cut set `restored` BEFORE the read and swallowed
-    /// the error, so a read that lost the lock race left the held document EMPTY, the first daemon
-    /// echo was adopted with nothing pending, and the write that follows an adopt overwrote the
-    /// stored key: the exact thing the comment on the echo path says must not happen, done by that
-    /// path. The flag is set only on a successful read now, the failure is retried on its own timer
-    /// the way the sidebar's own state is, and until it lands nothing may adopt an echo or edit the
-    /// document, because both would be computed against a document this app does not have.
+    /// **A failed read is not a read, and the read is not on the render thread.** The first cut set
+    /// `restored` BEFORE reading and swallowed the error, so a read that lost the lock race left the
+    /// held document EMPTY, the first daemon echo was adopted with nothing pending, and the write
+    /// that follows an adopt overwrote the stored key: the exact thing the comment on the echo path
+    /// says must not happen, done by that path. The fix for that made a second one: the caller on
+    /// the pump asks this on EVERY burst of daemon frames, so a read that kept failing re-opened
+    /// the database and took the connection mutex synchronously on the main thread for the life of
+    /// the run, and that mutex is held across `BEGIN IMMEDIATE` by the write paths. The read runs on
+    /// the background executor now, behind one `restoring` flag, exactly as the sidebar's own state
+    /// does; this function only ever books it and answers what is known. Until it lands nothing may
+    /// adopt an echo, take a hand-off or answer a drop, because all three would be computed against
+    /// a document this app does not have.
     pub(super) fn gx_store_restore_workspace_groups(
         &mut self,
         cx: &mut gpui::Context<Self>,
@@ -169,45 +188,86 @@ impl GhostexGpuiApp {
         if self.gx_store.workspace_groups.restored {
             return true;
         }
-        let stored = match sidebar_ui_storage::read_preference_value(WORKSPACE_GROUPS_STORAGE_KEY) {
-            Ok(stored) => stored,
-            Err(code) => {
-                self.gx_store.workspace_groups.counters.read_failures += 1;
-                self.gx_store.diagnostics.workspace_groups_read_failed(code);
-                self.gx_store_schedule_workspace_groups_read_retry(cx);
-                return false;
-            }
-        };
-        self.gx_store.workspace_groups.restored = true;
-        let document = stored
-            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-            .map(|value| WorkspaceGroupsDocument::parse(&value));
-        // A key that is absent, or holds something that is not JSON, is an EMPTY document and not a
-        // failure: that is a first launch, and `parse` answers the same way for a damaged payload.
-        let Some(document) = document else {
-            self.gx_store_tell_old_runtime_workspace_groups(cx);
-            return true;
-        };
-        self.gx_store
-            .workspace_groups
-            .sync
-            .restore(document.clone());
-        self.gx_store_apply_workspace_groups_to_store(&document, cx);
-        self.gx_store_tell_old_runtime_workspace_groups(cx);
-        true
+        let groups = &mut self.gx_store.workspace_groups;
+        if groups.restoring || groups.read_retry_scheduled {
+            return false;
+        }
+        groups.restoring = true;
+        cx.spawn(async move |this, cx| {
+            let stored = cx
+                .background_executor()
+                .spawn(async move {
+                    sidebar_ui_storage::read_preference_value(WORKSPACE_GROUPS_STORAGE_KEY)
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.gx_store.workspace_groups.restoring = false;
+                match stored {
+                    Ok(stored) => this.gx_store_adopt_stored_workspace_groups(stored, cx),
+                    Err(code) => {
+                        this.gx_store.workspace_groups.counters.read_failures += 1;
+                        this.gx_store.diagnostics.workspace_groups_read_failed(code);
+                        this.gx_store_schedule_workspace_groups_read_retry(cx);
+                    }
+                }
+            });
+        })
+        .detach();
+        false
     }
 
-    /// Books another read after a failure, a bounded number of times. Nothing is lost while it
-    /// fails: the page keeps its own copy, and no edit or echo is applied until this lands.
-    fn gx_store_schedule_workspace_groups_read_retry(&mut self, cx: &mut gpui::Context<Self>) {
-        let groups = &mut self.gx_store.workspace_groups;
-        if groups.read_retry_scheduled || groups.read_retries >= MAX_READ_RETRIES {
+    /// The stored key, once it has been read.
+    fn gx_store_adopt_stored_workspace_groups(
+        &mut self,
+        stored: Option<String>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.gx_store.workspace_groups.restored = true;
+        // A key that is absent, or holding something that is not JSON, is an EMPTY document and not
+        // a failure: that is a first launch, and `parse` answers the same way for a damaged payload.
+        if let Some(document) = stored
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .map(|value| WorkspaceGroupsDocument::parse(&value))
+        {
+            self.gx_store
+                .workspace_groups
+                .sync
+                .restore(document.clone());
+            self.gx_store_apply_workspace_groups_to_store(&document, cx);
+        }
+        // An edit the page made while the read was on its way is only in the page's copy, and
+        // handing the stored document back would replace it: the user would watch the rename they
+        // just made revert. So the page is asked to hand its own document over again instead, which
+        // is one `persistWorkspaceGroups` and therefore the same path every other edit takes.
+        if self.gx_store.workspace_groups.counters.hand_offs_refused > 0 {
+            self.gx_store_ask_old_runtime_for_workspace_groups(cx);
             return;
         }
+        self.gx_store_tell_old_runtime_workspace_groups(cx);
+    }
+
+    /// Books another read after a failure. The first `MAX_READ_RETRIES` come quickly; after that it
+    /// keeps trying on a standing slow timer, because giving up means this app never learns the
+    /// user's groups and every edit of them is refused for the rest of the run.
+    fn gx_store_schedule_workspace_groups_read_retry(&mut self, cx: &mut gpui::Context<Self>) {
+        let groups = &mut self.gx_store.workspace_groups;
+        if groups.read_retry_scheduled {
+            return;
+        }
+        let exhausted = groups.read_retries >= MAX_READ_RETRIES;
         groups.read_retries += 1;
         groups.read_retry_scheduled = true;
+        if exhausted && groups.read_retries == MAX_READ_RETRIES + 1 {
+            self.gx_store
+                .diagnostics
+                .workspace_groups_read_unavailable();
+        }
+        let delay = match exhausted {
+            true => READ_RETRY_SLOW,
+            false => READ_RETRY,
+        };
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(READ_RETRY).await;
+            cx.background_executor().timer(delay).await;
             let _ = this.update(cx, |this, cx| {
                 this.gx_store.workspace_groups.read_retry_scheduled = false;
                 this.gx_store_restore_workspace_groups(cx);
@@ -371,6 +431,11 @@ impl GhostexGpuiApp {
             self.gx_store_apply_workspace_groups_to_store(&held, cx);
         }
         self.gx_store_tell_old_runtime_workspace_groups(cx);
+        // The counters ride out here as well as on a push, so a run in which the user edited no
+        // group still says whether the bridge is alive.
+        self.gx_store
+            .diagnostics
+            .workspace_groups_reconciled(self.gx_store.workspace_groups.counters);
     }
 
     /// Hands the held document to the old runtime, which no longer reads the daemon's copy itself.
@@ -381,6 +446,21 @@ impl GhostexGpuiApp {
     /// difference 29 in a second shape. Told only when the document really moved, and the record of
     /// what it was told is updated only when the script was dispatched, so a page that was not
     /// there yet is told on the next change rather than never.
+    /// Asks the page to post its own document, which arrives as an ordinary hand-off.
+    ///
+    /// One `persistWorkspaceGroups`, so the recovery path and every other edit are the same path
+    /// and there is no second way for a document to cross. Dropped rather than retried when the
+    /// page is not there: it has not edited anything in that state either.
+    fn gx_store_ask_old_runtime_for_workspace_groups(&mut self, cx: &mut gpui::Context<Self>) {
+        let Some(service) = self.sidebar.clone() else {
+            return;
+        };
+        let script = ghostex_gx_core::workspace_groups_request_script();
+        if service.update(cx, |surface, _| surface.execute_app_owned_script(&script)) {
+            self.gx_store.workspace_groups.counters.hand_offs_requested += 1;
+        }
+    }
+
     fn gx_store_tell_old_runtime_workspace_groups(&mut self, cx: &mut gpui::Context<Self>) {
         let held = self.gx_store.workspace_groups.sync.document();
         if self.gx_store.workspace_groups.handed_back.as_ref() == Some(held) {
@@ -462,6 +542,7 @@ impl GhostexGpuiApp {
         } else {
             self.gx_store.workspace_groups.counters.storage_writes += 1;
         }
+        self.gx_store.workspace_groups.counters.storage_attempts += 1;
         let attempted = raw.clone();
         let background = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
@@ -496,6 +577,12 @@ impl GhostexGpuiApp {
                 if current {
                     groups.owed_write = None;
                     groups.write_retries = 0;
+                }
+                match (refusal, attempted.is_none()) {
+                    // A refusal stored nothing, so it is neither a write nor a remove.
+                    (Some(_), _) => {}
+                    (None, true) => groups.counters.storage_removes += 1,
+                    (None, false) => groups.counters.storage_writes += 1,
                 }
                 if let Some(bound) = refusal {
                     groups.counters.storage_refusals += 1;
@@ -544,15 +631,16 @@ impl GhostexGpuiApp {
         let Some(raw) = self.gx_store.workspace_groups.owed_write.take() else {
             return;
         };
+        self.gx_store.workspace_groups.counters.storage_attempts += 1;
         match sidebar_ui_storage::write_workspace_groups_value(
             WORKSPACE_GROUPS_STORAGE_KEY,
             raw.as_deref(),
         ) {
             Ok(refusal) => {
-                if raw.is_none() {
-                    self.gx_store.workspace_groups.counters.storage_removes += 1;
-                } else {
-                    self.gx_store.workspace_groups.counters.storage_writes += 1;
+                match (refusal, raw.is_none()) {
+                    (Some(_), _) => {}
+                    (None, true) => self.gx_store.workspace_groups.counters.storage_removes += 1,
+                    (None, false) => self.gx_store.workspace_groups.counters.storage_writes += 1,
                 }
                 if let Some(bound) = refusal {
                     self.gx_store.workspace_groups.counters.storage_refusals += 1;
