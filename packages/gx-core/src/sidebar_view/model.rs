@@ -840,10 +840,12 @@ fn storage_id(machine: &MachineId, raw: &str) -> String {
     }
 }
 
-/// The badge counts of every machine tab the host offers, plus this computer's.
+/// The badge counts of every machine tab the host offers EXCEPT the selected one, whose counts
+/// come out of the groups the list just built.
 ///
-/// A machine whose rows the burst did not touch keeps the count it had: the walk is over sessions
-/// and a tab strip is redrawn far more often than a remote machine's rows move.
+/// A machine whose rows the burst did not touch keeps the count it had: the walk is over every
+/// session of that machine and a tab strip is redrawn far more often than a machine's rows move.
+/// Leaving the selected machine out is what keeps a one-machine sidebar paying nothing for this.
 fn machine_summaries(
     store: &PresentationStore,
     selected: &MachineId,
@@ -857,10 +859,9 @@ fn machine_summaries(
         .machines
         .iter()
         .map(|machine| machine_id(&machine.machine_id))
-        .chain(std::iter::once(MachineId::Local))
-        .chain(std::iter::once(selected.clone()));
+        .chain(std::iter::once(MachineId::Local));
     for machine in wanted {
-        if summaries.contains_key(&machine) {
+        if machine == *selected || summaries.contains_key(&machine) {
             continue;
         }
         let touched = changes.machines_reloaded.contains(&machine)
