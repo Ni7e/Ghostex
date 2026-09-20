@@ -313,12 +313,13 @@ impl GhostexGpuiApp {
     ///
     /// CDXC:Sidebar 2026-09-20 WHY:
     /// Until M4c every accepted publish forced an install, because the list carried that publish's
-    /// menus, hover buttons and header buttons by id. The menus are the store's now, so only the
-    /// fields `sidebar_snapshot.rs` names are left, and they move far less often than the rows do:
-    /// the HUD, the machine tabs, the two requests, the two hotkey labels, and the per-group facts
-    /// of a remote machine or of a project's editor state. The two client-storage values the menus
-    /// read (the last-used agent and the armed keep-awake duration) are in the same gate, because
-    /// the view model cannot see them and nothing else would ever install for them.
+    /// menus, hover buttons and header buttons by id. The menus are the store's now, and so are the
+    /// machine tabs since M4d, so only the fields `sidebar_snapshot.rs` names are left, and they
+    /// move far less often than the rows do: the HUD, the two requests, the two hotkey labels, a
+    /// machine tab's sanitized failure message, a project's editor state, and the focus marks of a
+    /// remote machine's rows. The two client-storage values the menus read (the last-used agent
+    /// and the armed keep-awake duration) are in the same gate, because the view model cannot see
+    /// them and nothing else would ever install for them.
     pub(crate) fn gx_store_sidebar_carry_changed(
         &mut self,
         published: &crate::app::native_sidebar::model::NativeSidebarSnapshot,
@@ -328,7 +329,8 @@ impl GhostexGpuiApp {
     }
 
     /// Whether the renderer draws the store's list right now. A machine tab the view model cannot
-    /// build (a remote machine, until M4d) keeps the old projection even with the switch on.
+    /// build keeps the old projection even with the switch on, which since M4d is a remote machine
+    /// the host has no client for and no rows from.
     pub(crate) fn gx_store_sidebar_draws_store_list(&self) -> bool {
         self.gx_store_sidebar_list_source() == SidebarListSource::Store
             && self.gx_store.sidebar_list.view().supported

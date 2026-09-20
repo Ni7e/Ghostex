@@ -112,9 +112,10 @@ impl GhostexGpuiApp {
                     .clone()
                     .expect("assigned above");
                 if self.gx_store_sidebar_draws_store_list() {
-                    // The store's list owns its menus since M4c; only the HUD, the machine tabs,
-                    // the two requests and a few per-group facts still ride on a publish, so a
-                    // publish is installed when one of THOSE moved and skipped otherwise.
+                    // The store's list owns its menus since M4c and its machine tabs since M4d;
+                    // only the HUD, the two requests, a few per-group facts and the focus marks of
+                    // a remote row still ride on a publish, so a publish is installed when one of
+                    // THOSE moved and skipped otherwise.
                     self.gx_store_note_sidebar_publish_seen();
                     if self.gx_store_sidebar_carry_changed(&published) {
                         self.gx_store_note_sidebar_install_from_carry();

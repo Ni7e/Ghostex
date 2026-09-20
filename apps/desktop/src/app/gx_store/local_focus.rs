@@ -100,9 +100,10 @@ pub(crate) struct LocalFocus {
     pub(super) restored: bool,
     /// Newest stamp the old runtime echoed in a focus payload.
     pub(super) confirmed_stamp: u64,
-    /// The old runtime's newest accepted focus names something that is not a local session of the
-    /// store (a remote session, the quick automations row). Local rows then draw unfocused and
-    /// the sidebar snapshot's own flag owns the highlight. Cleared by every local selection.
+    /// The old runtime's newest accepted focus names something the store does not own the focus of
+    /// (a remote session, the quick automations row). Local rows then draw unfocused and the
+    /// sidebar snapshot's own flag owns the highlight, which for a remote row is the mark the list
+    /// carries from the publish (`remote_row_focus`). Cleared by every local selection.
     pub(super) foreign_focus: bool,
     /// Row id of the store's focused session, and of its visible sessions, so a row compares two
     /// strings per frame instead of decoding its id.
@@ -668,7 +669,8 @@ impl GhostexGpuiApp {
             );
         }
         if local_focus.foreign_focus {
-            // The store holds no remote machine, so its visible set is the last local one.
+            // The store does not own the focus of whatever this is (a remote session, the quick
+            // automations row), so its visible set is the last local one.
             return (false, snapshot_visible);
         }
         let focused = local_focus.focused_row_id.as_deref() == Some(row_id);

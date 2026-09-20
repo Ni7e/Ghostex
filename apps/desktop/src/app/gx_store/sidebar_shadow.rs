@@ -57,13 +57,14 @@ pub(crate) struct SidebarShadowCounters {
     pub(crate) skipped_remote: u64,
     /// The two sides are on different machine tabs, which is two lists rather than one question.
     pub(crate) skipped_machine_mismatch: u64,
-    /// The old runtime's focus is on something the store cannot hold, so its focus flags would
-    /// disagree by design.
+    /// The old runtime's focus is on something the store does not own the focus for (a remote
+    /// session, the quick automations row), so the two sides' focus flags are not one question.
     pub(crate) skipped_foreign_focus: u64,
     pub(crate) skipped_not_loaded: u64,
     /// The store still holds the rows of a daemon whose stream dropped, while the old runtime has
-    /// already published its unavailable placeholder. The two disagree about availability by
-    /// design until remote machines and the unavailable state move into the store.
+    /// already published its unavailable placeholder (this computer) or its last-seen copy (a
+    /// remote machine). The two disagree about availability by design until the unavailable state
+    /// moves into the store.
     pub(crate) skipped_not_live: u64,
     /// The sidebar's own state has not been read from client storage yet, so the two sides are
     /// built from different collapse and hidden-item state by definition.
