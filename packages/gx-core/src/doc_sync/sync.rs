@@ -88,6 +88,13 @@ pub struct DocumentSync<D: SyncedDocument> {
     booked: bool,
     /// Whether any echo of this run has been parsed yet, which is `adoptedCollections.has(id)`.
     seen_echo: bool,
+    /// Whether this document has a VALUE rather than the default it starts as.
+    ///
+    /// `ui.metadata.spaces[machineId]` is `undefined` until an echo or a local edit sets it, and
+    /// `runNativeProjectDrop` branches on that: a drop onto the built-in Other view proceeds
+    /// against an EMPTY document and returns against a MISSING one. A `Default` document cannot
+    /// tell those apart, so the guard remembers which it is holding.
+    has_document: bool,
 }
 
 impl<D: SyncedDocument> Default for DocumentSync<D> {
@@ -107,6 +114,7 @@ impl<D: SyncedDocument> DocumentSync<D> {
             pending: false,
             booked: false,
             seen_echo: false,
+            has_document: false,
         }
     }
 
@@ -133,10 +141,16 @@ impl<D: SyncedDocument> DocumentSync<D> {
         self.booked
     }
 
+    /// Whether the document held is a real one rather than the default it starts as.
+    pub fn has_document(&self) -> bool {
+        self.has_document
+    }
+
     /// The state read from the stored key at startup. Not an edit: it neither bumps the revision
     /// nor schedules a push, because nothing has changed that the server does not have.
     pub fn restore(&mut self, document: D) {
         self.document = document;
+        self.has_document = true;
     }
 
     /// A local edit: write the key, then book the debounced push.
@@ -145,6 +159,7 @@ impl<D: SyncedDocument> DocumentSync<D> {
     /// `delay_ms` after the last move rather than five times.
     pub fn edit(&mut self, document: D) -> Vec<SyncEffect> {
         self.document = document;
+        self.has_document = true;
         self.revision = self.revision.saturating_add(1);
         self.pending = true;
         self.booked = true;
@@ -200,6 +215,7 @@ impl<D: SyncedDocument> DocumentSync<D> {
         // then decides, so the push-back itself counts as the first echo and the next one adopts.
         let first_echo = !self.seen_echo;
         self.seen_echo = true;
+        self.has_document = true;
         if parsed.is_empty() && !self.document.is_empty() {
             let push_back = match self.policy.empty_echo {
                 EmptyEchoRule::AlwaysPushBack => true,

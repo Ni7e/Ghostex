@@ -49,11 +49,12 @@ const TOTALS_MAX_AGE: Duration = Duration::from_secs(10);
 /// this side stored would be one the other side cannot write: `admission` would throw, the
 /// TypeScript sidebar swallows that, and it would stop persisting while this side kept writing.
 const MAX_ENTRY_BYTES: usize = 64 * 1024;
-/// The `workspaceGroups` store's own row: `{ maxEntryBytes: 256 * KiB, maxBytes: 256 * KiB }` on
-/// top of the singleton defaults. Its own constants because the document is the one key here that
-/// is allowed to be larger than the 64 KiB the other three share.
-const MAX_ENTRY_BYTES_WORKSPACE_GROUPS: usize = 256 * 1024;
-const MAX_STORE_BYTES_WORKSPACE_GROUPS: usize = 256 * 1024;
+/// The `workspaceGroups` and `collections` rows, which carry the SAME numbers
+/// (`{ maxEntryBytes: 256 * KiB, maxBytes: 256 * KiB }` on top of the singleton defaults). Their
+/// own constants because those two documents are the keys here allowed to be larger than the
+/// 64 KiB the sidebar's own three share.
+const MAX_ENTRY_BYTES_CLIENT_DOCUMENT: usize = 256 * 1024;
+const MAX_STORE_BYTES_CLIENT_DOCUMENT: usize = 256 * 1024;
 /// `maxBytes` of the collapse store; the other two keep the 128 KiB default.
 const MAX_STORE_BYTES_COLLAPSE: usize = 256 * 1024;
 const MAX_STORE_BYTES_DEFAULT: usize = 128 * 1024;
@@ -408,11 +409,13 @@ impl StoreBounds {
         }
     }
 
-    /// The `workspaceGroups` row.
-    const fn workspace_groups() -> Self {
+    /// The `workspaceGroups` and `collections` rows, which are the same numbers. One function
+    /// rather than two identical ones: if the catalog ever gives them different budgets this has
+    /// to split, and a copy would let one of them drift silently.
+    const fn client_document() -> Self {
         Self {
-            max_entry_bytes: MAX_ENTRY_BYTES_WORKSPACE_GROUPS,
-            max_bytes: MAX_STORE_BYTES_WORKSPACE_GROUPS,
+            max_entry_bytes: MAX_ENTRY_BYTES_CLIENT_DOCUMENT,
+            max_bytes: MAX_STORE_BYTES_CLIENT_DOCUMENT,
             max_entries: MAX_ENTRIES_SINGLETON,
         }
     }
@@ -525,8 +528,9 @@ pub(super) fn read_preference_value(key: &str) -> Result<Option<String>, &'stati
     result
 }
 
-/// Writes the workspace session groups document, or REMOVES the key when the document is empty,
-/// which is what `writeStoredGpuiWorkspaceSessionGroupsState` does. `Ok(Some(bound))` is a refusal.
+/// Writes a client-owned document's key, or REMOVES it when the caller asks (which is what
+/// `writeStoredGpuiWorkspaceSessionGroupsState` does with an empty document; the collections key is
+/// never removed). `Ok(Some(bound))` is a refusal.
 ///
 /// CDXC:Sessions 2026-09-21 WHY:
 /// This goes through the same door the other three keys do, and that is the point rather than
@@ -535,7 +539,7 @@ pub(super) fn read_preference_value(key: &str) -> Result<Option<String>, &'stati
 /// prevent; the first cut of K4's write was a bare `INSERT ... ON CONFLICT` with none of
 /// `admission`'s four refusals, inside no transaction. The bounds are the `workspaceGroups`
 /// catalog row's own, which are four times the entry size the other three share.
-pub(super) fn write_workspace_groups_value(
+pub(super) fn write_client_document_value(
     key: &str,
     raw: Option<&str>,
 ) -> Result<Option<&'static str>, &'static str> {
@@ -560,7 +564,7 @@ pub(super) fn write_workspace_groups_value(
         Some(totals) => totals,
         None => Totals::read(connection)?,
     };
-    let result = write_workspace_groups_in_transaction(connection, key, raw, &mut totals);
+    let result = write_client_document_in_transaction(connection, key, raw, &mut totals);
     match &result {
         Ok(_) => held.totals = Some((Instant::now(), totals)),
         Err(_) => {
@@ -571,7 +575,7 @@ pub(super) fn write_workspace_groups_value(
     result
 }
 
-fn write_workspace_groups_in_transaction(
+fn write_client_document_in_transaction(
     connection: &Connection,
     key: &str,
     raw: Option<&str>,
@@ -589,7 +593,7 @@ fn write_workspace_groups_in_transaction(
             totals.forget(key);
             return Ok(None);
         };
-        if let Some(bound) = totals.admits(key, raw, StoreBounds::workspace_groups(), key) {
+        if let Some(bound) = totals.admits(key, raw, StoreBounds::client_document(), key) {
             return Ok(Some(bound));
         }
         write_preference(connection, key, raw)?;

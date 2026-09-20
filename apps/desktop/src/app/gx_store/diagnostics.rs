@@ -64,6 +64,18 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_refusal_warnings: u32,
     workspace_groups_records: u32,
     workspace_groups_summary_at: Option<Instant>,
+    client_document_records: u32,
+    client_document_read_warnings: u32,
+    client_document_write_warnings: u32,
+    client_document_refusal_warnings: u32,
+    client_document_unparsable_warnings: u32,
+    client_document_summary_at: Option<Instant>,
+    #[allow(clippy::type_complexity)]
+    client_document_summary_written: Option<(
+        super::client_document::ClientDocumentCounters,
+        super::client_document::ClientDocumentCounters,
+        super::project_docs::ProjectMoveCounters,
+    )>,
     workspace_groups_summary_written:
         Option<(super::workspace_groups::WorkspaceGroupsCounters, bool)>,
     workspace_groups_read_warnings: u32,
@@ -859,6 +871,200 @@ impl GxStoreDiagnostics {
         self.warning(
             "gxStore.workspaceGroups.write.failed",
             json!({ "error": error }),
+        );
+    }
+
+    /// A read of a client-owned document's stored key that did not land. Retried; until it does,
+    /// nothing is adopted and nothing is edited.
+    pub(super) fn client_document_read_failed(&mut self, name: &'static str, error: &'static str) {
+        if self.client_document_read_warnings >= 3 {
+            return;
+        }
+        self.client_document_read_warnings += 1;
+        self.warning(
+            "gxStore.clientDocument.read.failed",
+            json!({ "document": name, "error": error }),
+        );
+    }
+
+    /// The stored key could not be read after every fast attempt. Said once per document.
+    pub(super) fn client_document_read_unavailable(&mut self, name: &'static str) {
+        self.warning(
+            "gxStore.clientDocument.read.unavailable",
+            json!({ "document": name }),
+        );
+    }
+
+    /// A storage write of a client-owned document that did not land. Retried; the warning says so.
+    pub(super) fn client_document_write_failed(&mut self, name: &'static str, error: &'static str) {
+        if self.client_document_write_warnings >= 3 {
+            return;
+        }
+        self.client_document_write_warnings += 1;
+        self.warning(
+            "gxStore.clientDocument.write.failed",
+            json!({ "document": name, "error": error }),
+        );
+    }
+
+    /// A storage bound refused a client-owned document. Its OWN warning budget, because a shared
+    /// one let three read failures inside fifteen seconds silence every later refusal.
+    pub(super) fn client_document_write_refused(
+        &mut self,
+        name: &'static str,
+        bound: &'static str,
+    ) {
+        if self.client_document_refusal_warnings >= 3 {
+            return;
+        }
+        self.client_document_refusal_warnings += 1;
+        self.warning(
+            "gxStore.clientDocument.write.refused",
+            json!({ "document": name, "bound": bound }),
+        );
+    }
+
+    /// An echo that was not a document at all.
+    ///
+    /// CDXC:Projects 2026-09-21 WHY:
+    /// LOUD on purpose. The collections and Spaces documents parse an echo through the wire types
+    /// so the guard and the store's own side state cannot disagree about what the daemon said, and
+    /// the price is that ONE malformed entry takes the whole echo with it where the TypeScript kept
+    /// the others. A user whose collections quietly stopped following the daemon would never find
+    /// that cause from the outside, so it is warned as well as counted and carried in every record.
+    pub(super) fn client_document_echo_unparsable(&mut self, name: &'static str) {
+        if self.client_document_unparsable_warnings >= 3 {
+            return;
+        }
+        self.client_document_unparsable_warnings += 1;
+        self.warning(
+            "gxStore.clientDocument.echo.unparsable",
+            json!({ "document": name }),
+        );
+    }
+
+    /// One line per client-owned document: what it has done this run, and whether the last push
+    /// landed. `ok` is `None` on the periodic path.
+    pub(super) fn client_document_record(
+        &mut self,
+        name: &'static str,
+        ok: Option<bool>,
+        counters: super::client_document::ClientDocumentCounters,
+    ) {
+        if self.client_document_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.client_document_records += 1;
+        record(
+            "gxStore.clientDocument",
+            json!({
+                "document": name,
+                "ok": ok,
+                "edits": counters.edits,
+                "storageWrites": counters.storage_writes,
+                "storageRemoves": counters.storage_removes,
+                "storageAttempts": counters.storage_attempts,
+                "storageFailures": counters.storage_failures,
+                "storageRefusals": counters.storage_refusals,
+                "pushes": counters.pushes,
+                "pushFailures": counters.push_failures,
+                "echoesRefused": counters.echoes_refused,
+                "echoesAdopted": counters.echoes_adopted,
+                "echoesEqual": counters.echoes_equal,
+                "echoesAbsent": counters.echoes_absent,
+                "echoesUnparsable": counters.echoes_unparsable,
+                "echoesPushedBack": counters.echoes_pushed_back,
+                "echoesDeferred": counters.echoes_deferred,
+                "deferredRecovered": counters.deferred_recovered,
+                "handBacks": counters.hand_backs,
+                "handBacksDropped": counters.hand_backs_dropped,
+                "readFailures": counters.read_failures,
+            }),
+        );
+    }
+
+    /// The same counters on the periodic path, so a run in which the user moved no project still
+    /// says whether the two documents reached the app at all. The first line is emitted with every
+    /// counter at zero on purpose: "the path never ran" is the answer that was missing twice.
+    pub(super) fn client_document_summary(
+        &mut self,
+        collections: super::client_document::ClientDocumentCounters,
+        spaces: super::client_document::ClientDocumentCounters,
+        moves: super::project_docs::ProjectMoveCounters,
+    ) {
+        if self
+            .client_document_summary_written
+            .is_some_and(|written| written == (collections, spaces, moves))
+            || self
+                .client_document_summary_at
+                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+        {
+            return;
+        }
+        self.client_document_summary_at = Some(Instant::now());
+        if !routine_logging_enabled() {
+            return;
+        }
+        self.client_document_summary_written = Some((collections, spaces, moves));
+        self.client_document_record("collections", None, collections);
+        self.client_document_record("spaces", None, spaces);
+        self.project_move_summary(moves);
+    }
+
+    /// What the project moves did this run. Separate from the documents' own line because it is
+    /// about the GESTURE, and a run with moves but no document edit is the shape that says the
+    /// planner refused every one of them.
+    fn project_move_summary(&mut self, counters: super::project_docs::ProjectMoveCounters) {
+        if self.client_document_records >= MAX_SIDEBAR_ACTION_RECORDS {
+            return;
+        }
+        self.client_document_records += 1;
+        record(
+            "gxStore.projectMove",
+            json!({
+                "moves": counters.moves,
+                "refusals": counters.refusals,
+                "handOffs": counters.hand_offs,
+                "declinedSource": counters.declined_source,
+                "collectionEdits": counters.collection_edits,
+                "spaceEdits": counters.space_edits,
+                "groupOrders": counters.group_orders,
+                "renameRequests": counters.rename_requests,
+                "hiddenToggles": counters.hidden_toggles,
+                "spaceEditors": counters.space_editors,
+                "collectionHandOffs": counters.collection_hand_offs,
+                "spaceHandOffs": counters.space_hand_offs,
+                "handOffsRefused": counters.hand_offs_refused,
+                "handOffsUnparsable": counters.hand_offs_unparsable,
+            }),
+        );
+    }
+
+    /// One line per project move the store answered: what it wrote, and the run's totals.
+    pub(super) fn project_move_ran(
+        &mut self,
+        plan: &ghostex_gx_core::ProjectMovePlan,
+        counters: super::project_docs::ProjectMoveCounters,
+    ) {
+        if self.client_document_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.client_document_records += 1;
+        record(
+            "gxStore.projectMove",
+            json!({
+                "writes": plan.writes.len() as u64,
+                "refusal": plan.refusal.unwrap_or("none"),
+                "moves": counters.moves,
+                "refusals": counters.refusals,
+                "handOffs": counters.hand_offs,
+                "declinedSource": counters.declined_source,
+                "collectionEdits": counters.collection_edits,
+                "spaceEdits": counters.space_edits,
+                "groupOrders": counters.group_orders,
+            }),
         );
     }
 

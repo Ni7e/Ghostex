@@ -25,8 +25,10 @@ pub struct SideState {
     pub custom_session_tags: Option<CustomSessionTagsState>,
 }
 
-/// One side-state replacement, from a change frame.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One side-state replacement, from a change frame or from a local edit of a client-owned
+/// document. `Serialize`/`Deserialize` because `Intent` carries it and `Intent` crosses the
+/// boundary.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SideStateUpdate {
     WorkspaceGroups(WorkspaceSessionGroupsState),
     ProjectCollections(SidebarProjectCollectionsState),

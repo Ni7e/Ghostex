@@ -16,6 +16,9 @@ use crate::selectors::is_chat_project_path;
 
 use super::text::js_trim;
 use super::view::WorktreeView;
+use crate::project_docs::{
+    order_projects_with_worktrees as order_items_with_worktrees, ProjectOrderItem,
+};
 
 /// What the projection knows about one project beside its daemon row.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -403,76 +406,34 @@ fn order_sidebar_projects<'a>(
     order_projects_with_worktrees(&ids, meta)
 }
 
-/// `orderProjectsWithWorktrees` over ids, using the overlay's worktree metadata: the chat
-/// projects keep their order untouched and lead, then the code projects with their worktrees
-/// nested under their parents.
+/// `orderProjectsWithWorktrees` over ids, built into the items the shared rule takes.
+///
+/// CDXC:Worktrees 2026-09-21 WHY:
+/// The rule itself is `crate::project_docs::order_projects_with_worktrees`, shared with the project
+/// drag. It used to be written twice, once here over ids and once (from M5 piece 7d) over the
+/// items a drag needs, and the two must agree exactly: the list nests a worktree under its parent
+/// and a drop has to land it in the same place. One row per project here, so `order_id` is the
+/// project id.
 fn order_projects_with_worktrees(ids: &[String], meta: &ProjectMeta) -> Vec<String> {
-    let is_chat = |project_id: &String| {
-        meta.overlay(project_id)
-            .is_some_and(|overlay| overlay.is_chat_project || overlay.is_quick_project)
-    };
-    let (chat_ids, code_ids): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(is_chat);
-    let mut ordered = chat_ids;
-    ordered.extend(order_code_projects_with_worktrees(&code_ids, meta));
-    ordered
-}
-
-/// `orderCodeProjectsWithWorktrees`.
-fn order_code_projects_with_worktrees(ids: &[String], meta: &ProjectMeta) -> Vec<String> {
-    let parent_of = |project_id: &str| -> Option<String> {
-        meta.overlay(project_id)
-            .and_then(|overlay| overlay.worktree.as_ref())
-            .map(|worktree| js_trim(&worktree.parent_project_id).to_string())
-            .filter(|parent| !parent.is_empty())
-    };
-    let family_parent = |project_id: &str| -> Option<String> {
-        let direct = parent_of(project_id)?;
-        let mut family = direct.clone();
-        let mut seen: BTreeSet<String> = BTreeSet::from([project_id.to_string()]);
-        while !seen.contains(&family) {
-            seen.insert(family.clone());
-            match ids
-                .iter()
-                .find(|candidate| **candidate == family)
-                .and_then(|candidate| parent_of(candidate))
-            {
-                Some(next) => family = next,
-                None => return Some(family),
+    let items: Vec<ProjectOrderItem> = ids
+        .iter()
+        .map(|project_id| {
+            let overlay = meta.overlay(project_id);
+            ProjectOrderItem {
+                order_id: project_id.clone(),
+                project_id: project_id.clone(),
+                parent_project_id: overlay
+                    .and_then(|overlay| overlay.worktree.as_ref())
+                    .map(|worktree| worktree.parent_project_id.clone()),
+                is_chat: overlay
+                    .is_some_and(|overlay| overlay.is_chat_project || overlay.is_quick_project),
             }
-        }
-        Some(direct)
-    };
-    let mut worktree_ids: BTreeSet<String> = BTreeSet::new();
-    let mut worktrees_by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for project_id in ids {
-        let Some(parent) = family_parent(project_id) else {
-            continue;
-        };
-        if !ids.iter().any(|candidate| *candidate == parent) {
-            continue;
-        }
-        worktree_ids.insert(project_id.clone());
-        worktrees_by_parent
-            .entry(parent)
-            .or_default()
-            .push(project_id.clone());
-    }
-    let mut ordered: Vec<String> = Vec::with_capacity(ids.len());
-    for project_id in ids {
-        if worktree_ids.contains(project_id) {
-            continue;
-        }
-        ordered.push(project_id.clone());
-        if parent_of(project_id).is_none() {
-            ordered.extend(
-                worktrees_by_parent
-                    .get(project_id)
-                    .cloned()
-                    .unwrap_or_default(),
-            );
-        }
-    }
-    ordered
+        })
+        .collect();
+    order_items_with_worktrees(&items)
+        .into_iter()
+        .map(|item| item.project_id)
+        .collect()
 }
 
 /// `createGpuiProjectSettingsProjects(...).length`.

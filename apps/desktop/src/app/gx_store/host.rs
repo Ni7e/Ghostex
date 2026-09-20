@@ -61,6 +61,20 @@ pub(super) struct PumpOutcome {
     /// The daemon's copy of the workspace session groups document landed. The guard decides what
     /// that means, one level up, where there is a `cx` to write storage and book a push with.
     pub(super) workspace_groups_changed: bool,
+    /// The daemon's copy of the project collections document landed.
+    pub(super) project_collections_changed: bool,
+    /// The daemon's copy of the Spaces document landed.
+    pub(super) spaces_changed: bool,
+    /// A full snapshot replaced this computer's machine.
+    ///
+    /// CDXC:Sessions 2026-09-21 WHY:
+    /// Every client-owned document has to be judged against the daemon's copy on a reload, whatever
+    /// the three flags above say. A host that SEEDS the store with a document (all three of these
+    /// do: the stored key is read and put into the side state) makes those flags mean "the daemon's
+    /// copy differs from what this host last wrote there", so on an ordinary launch, where they
+    /// agree, the guard is never asked at all. That cost two live rounds to find, because it is
+    /// invisible except as a counter that stays at zero.
+    pub(super) local_reloaded: bool,
 }
 
 /// CDXC:StateSync 2026-09-19 DECISION:
@@ -100,6 +114,16 @@ pub(crate) struct GxStoreHost {
     /// The client-owned workspace session groups document, its stored key and its pending-push
     /// guard.
     pub(crate) workspace_groups: super::workspace_groups::WorkspaceGroupsHost,
+    /// K5, the project collections document, on the generic client-document host.
+    pub(crate) collections:
+        super::client_document::ClientDocumentHost<ghostex_gx_core::CollectionsDocument>,
+    /// K6, the Spaces document. Same host, no stored key.
+    pub(crate) spaces: super::client_document::ClientDocumentHost<ghostex_gx_core::SpacesDocument>,
+    pub(super) project_moves: super::project_docs::ProjectMoveCounters,
+    /// The collection a project move just created, which the renderer opens its Rename on. Held
+    /// here rather than carried from the old projection's publish, because the create is the
+    /// store's now and the publish would not know about it.
+    pub(super) pending_collection_rename: Option<(String, u64)>,
 }
 
 impl GxStoreHost {
@@ -163,6 +187,13 @@ impl GxStoreHost {
             thread_ended,
             tab_lists_changed: output.changes.tab_lists_changed(),
             workspace_groups_changed: output.changes.side_state.workspace_groups,
+            project_collections_changed: output.changes.side_state.project_collections,
+            spaces_changed: output.changes.side_state.spaces,
+            local_reloaded: output
+                .changes
+                .machines_reloaded
+                .iter()
+                .any(MachineId::is_local),
         };
         self.run_effects(output.effects);
         // New frames may be exactly what a pending tab list difference was waiting for.
@@ -395,10 +426,33 @@ impl GhostexGpuiApp {
     /// Returns `true` when the client's thread is gone.
     fn gx_store_pump(&mut self, cx: &mut gpui::Context<Self>) -> bool {
         let outcome = self.gx_store.pump();
-        if outcome.workspace_groups_changed {
+        // NOT `workspace_groups_changed` alone. This host seeds the core's side state with the
+        // stored document itself, so on an ordinary launch the reducer compares the daemon's copy
+        // against what this host just put there, agrees, and reports no change: the guard was then
+        // never asked anything for a whole run. A reload asks it regardless
+        // (gx-core `doc_sync::document_reconcile_wanted`). K5 and K6 need the same treatment on
+        // their own flags below; `local_reloaded` is here for all three.
+        if ghostex_gx_core::document_reconcile_wanted(
+            outcome.workspace_groups_changed,
+            outcome.local_reloaded,
+        ) {
             self.gx_store.workspace_groups.counters.reconcile_seen += 1;
             // The daemon's copy is already in the store by now; the guard says whether it may stay.
             self.gx_store_reconcile_workspace_groups(cx);
+        }
+        // The same funnel for K5 and K6: the daemon's copy is already in the store by now, and the
+        // guard says whether it may stay. One place, off the change summary, rather than an
+        // interception on the frame path.
+        let collections_wanted = ghostex_gx_core::document_reconcile_wanted(
+            outcome.project_collections_changed,
+            outcome.local_reloaded,
+        );
+        let spaces_wanted = ghostex_gx_core::document_reconcile_wanted(
+            outcome.spaces_changed,
+            outcome.local_reloaded,
+        );
+        if collections_wanted || spaces_wanted {
+            self.gx_store_reconcile_project_docs(collections_wanted, spaces_wanted, cx);
         }
         // A session the daemon stopped listing is a member no group may keep, which the old runtime
         // asked on every `createSidebarGroups`. Asked here on the same cadence, and free for the

@@ -95,7 +95,15 @@ pub struct OrderWritePlan {
 }
 
 impl OrderWritePlan {
-    fn refused(reason: &'static str) -> Self {
+    /// A plan with one document edit, which is what the project order write also produces.
+    pub(super) fn edit(document: WorkspaceGroupsDocument) -> Self {
+        Self {
+            writes: vec![OrderWrite::EditDocument { document }],
+            refusal: None,
+        }
+    }
+
+    pub(super) fn refused(reason: &'static str) -> Self {
         Self {
             writes: Vec::new(),
             refusal: Some(reason),

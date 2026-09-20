@@ -24,6 +24,10 @@ impl GhostexGpuiApp {
         // rename or a move whose write lost a lock race is still owed, and its debounced push has
         // not gone out either (gx_store/workspace_groups.rs).
         self.gx_store_flush_workspace_groups_write();
+        // The project collections document is the fifth key, written the same way and for the same
+        // reason; the Spaces document has no stored key at all and answers at once
+        // (gx_store/project_docs.rs).
+        self.gx_store_flush_project_docs();
     }
 
     pub(crate) fn project_scoped_workarea_availability(&self) -> ProjectScopedWorkareaAvailability {

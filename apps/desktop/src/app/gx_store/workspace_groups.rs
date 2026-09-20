@@ -42,7 +42,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use ghostex_gx_core::{
-    AdoptOutcome, Event, Intent, MachineId, ProjectKey, WorkspaceGroupsDocument,
+    AdoptOutcome, Event, Intent, MachineId, ProjectKey, SideStateUpdate, WorkspaceGroupsDocument,
     WorkspaceGroupsEffect, WorkspaceGroupsSync,
 };
 use serde_json::Value;
@@ -597,7 +597,7 @@ impl GhostexGpuiApp {
         cx.spawn(async move |this, cx| {
             let result = background
                 .spawn(async move {
-                    sidebar_ui_storage::write_workspace_groups_value(
+                    sidebar_ui_storage::write_client_document_value(
                         WORKSPACE_GROUPS_STORAGE_KEY,
                         raw.as_deref(),
                     )
@@ -681,7 +681,7 @@ impl GhostexGpuiApp {
             return;
         };
         self.gx_store.workspace_groups.counters.storage_attempts += 1;
-        match sidebar_ui_storage::write_workspace_groups_value(
+        match sidebar_ui_storage::write_client_document_value(
             WORKSPACE_GROUPS_STORAGE_KEY,
             raw.as_deref(),
         ) {
@@ -767,10 +767,23 @@ impl GhostexGpuiApp {
         document: &WorkspaceGroupsDocument,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.gx_store_apply_side_state(
+            SideStateUpdate::WorkspaceGroups(document.to_side_state()),
+            cx,
+        );
+    }
+
+    /// The one place a client-owned document reaches the store's side state, shared by all three:
+    /// a second copy of this is a second place for a document to arrive without the list noticing.
+    pub(crate) fn gx_store_apply_side_state(
+        &mut self,
+        update: SideStateUpdate,
+        cx: &mut gpui::Context<Self>,
+    ) {
         let output = self.gx_store.core.handle(
-            Event::Intent(Intent::SetWorkspaceGroups {
+            Event::Intent(Intent::SetSideState {
                 machine: MachineId::Local,
-                state: Box::new(document.to_side_state()),
+                update: Box::new(update),
             }),
             super::host::now_ms(),
         );

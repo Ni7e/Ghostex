@@ -2,7 +2,6 @@ import {
   createSidebarProjectCollection,
   moveProjectsToSidebarCollection,
   serializeSidebarProjectCollectionsForGxserver,
-  writeSidebarProjectCollections,
   type SidebarProjectCollectionsState,
 } from '@/packages/core-ui/project-collections';
 import {
@@ -23,17 +22,40 @@ import type { NativeSidebarUiState } from './ui-state';
 import type { SidebarPostMessage } from './metadata';
 import { describeNativeSidebarMachine } from './space-navigation';
 
+/*
+CDXC:Projects 2026-09-21 WHY:
+This page is no longer a writer of `ghostex.sidebar.projectCollections.v1` and no longer pushes it
+to gxserver for THIS COMPUTER. It still EDITS the document for the paths the Rust store does not own
+(the collection menus: rename, colour, ungroup, hide, and the Add to Group items reached from
+anywhere but a drag), and every one of those edits arrives here and is handed to the app, which is
+the single writer and the single synchroniser (apps/desktop/src/app/gx_store/project_docs.rs).
+`applyProjectCollections` is the other half: the app hands the held document back after every
+change, so the next edit is computed from it rather than from a copy that is already behind.
+A REMOTE machine is unchanged and still goes out as a command, because
+`updateRemoteSidebarProjectCollections` is a direct call down that machine's tunnel and the app
+cannot reach one.
+Supersedes the 2026-07-18 decision's "localStorage stays the instant-edit overlay" only in WHERE the
+write happens: it is still the instant-edit overlay, still a debounced write-through with an
+indefinite retry, and still guarded against a stale echo, all of it now in Rust.
+SEE-ALSO: packages/gx-core/src/project_docs/collections.rs.
+*/
 export function saveNativeCollections(
   ui: NativeSidebarUiState,
   next: SidebarProjectCollectionsState,
   post: SidebarPostMessage
 ) {
   ui.metadata.collections[ui.selectedMachineId] = next;
-  if (ui.selectedMachineId === 'local') writeSidebarProjectCollections(next);
-  post({
-    type: 'updateSidebarProjectCollections',
+  if (ui.selectedMachineId !== 'local') {
+    post({
+      type: 'updateSidebarProjectCollections',
+      state: serializeSidebarProjectCollectionsForGxserver(next),
+      remoteMachineId: ui.selectedMachineId,
+    });
+    return;
+  }
+  window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
     state: serializeSidebarProjectCollectionsForGxserver(next),
-    ...(ui.selectedMachineId === 'local' ? {} : { remoteMachineId: ui.selectedMachineId }),
+    type: 'persistProjectCollections',
   });
 }
 

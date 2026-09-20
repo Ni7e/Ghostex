@@ -108,11 +108,22 @@ impl GhostexGpuiApp {
                                 view.update(cx, |app, cx| {
                                     app.update_native_sidebar_scroll(window, cx);
                                     app.update_native_space_transition(window, cx);
-                                    if let Some(request) = app
-                                        .native_sidebar
-                                        .snapshot
-                                        .as_ref()
-                                        .and_then(|snapshot| snapshot.rename_request.clone())
+                                    // The store's own request wins over the publish's.
+                                    //
+                                    // CDXC:Projects 2026-09-21 WHY:
+                                    // `ui.renameRequest` used to be the sidebar page's, carried
+                                    // here on every snapshot. Since M5 piece 7d the CREATE is the
+                                    // store's (a project dropped onto New Project Group mints the
+                                    // collection in Rust), so the page never learns that collection
+                                    // exists and its snapshot carries nothing. Both are read, newest
+                                    // first, because the page still creates collections from its own
+                                    // menus until that path moves too.
+                                    if let Some(request) =
+                                        app.gx_store_pending_collection_rename().or_else(|| {
+                                            app.native_sidebar.snapshot.as_ref().and_then(
+                                                |snapshot| snapshot.rename_request.clone(),
+                                            )
+                                        })
                                     {
                                         if app.native_sidebar.handled_rename
                                             != Some(request.request_id)

@@ -157,6 +157,15 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_order_write(&command, cx) {
             return;
         }
+        // A PROJECT drag is one gesture across three documents: the project order, the collection
+        // the row landed in, and a Space it was dropped on. All three are answered here, because
+        // `moveGroup` joins the target's collection in the same gesture and a port that wrote only
+        // the order would reorder the row and drop it out of its folder
+        // (gx_store/project_docs.rs). Every payload in the family is a RENDERER command and
+        // arrives at the top level, the membership menus included.
+        if self.gx_store_run_project_move(&command, cx) {
+            return;
+        }
         // The bulk menu, a collection's lifecycle items and a project's Sleep, Wake and Close
         // resolve their set here and fan out into the per-session actions above, paced when the
         // action is a sleep (gx_store/sidebar_bulk.rs).

@@ -18,16 +18,21 @@
 //! batch envelope, `sidebar_drag.rs` the session moves and what their order messages write, and
 //! `workspace_groups.rs` the client-owned groups document those writes land in, with its stored
 //! key, its debounced push and the guard that refuses the daemon's echo while one is outstanding;
+//! `project_docs.rs` the PROJECT moves (reorder, into and out of a collection, Space membership)
+//! and the two documents they write, on the generic `client_document.rs` host that owns the stored
+//! key, the debounced push and the echo funnel for any client-owned document;
 //! `sidebar_ui_paths.rs` holds the three routes into the sidebar's own state that are NOT
 //! sidebar commands (the per-Space session memory, the Space-editor delete, and the project slot
 //! hotkey); `diagnostics.rs` writes the log lines.
 
 mod burst;
+mod client_document;
 mod diagnostics;
 mod effects;
 mod host;
 mod layout_persist;
 mod local_focus;
+mod project_docs;
 mod remote_clients;
 mod session_walk;
 mod shadow_diff;

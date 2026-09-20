@@ -202,6 +202,21 @@ export type NativeSidebarBridge = {
    * failed while this page was editing, where the page's copy is the only one carrying that edit.
    */
   requestWorkspaceGroups?: () => void;
+  /**
+   * The project collections document the app holds, handed to this page after every change.
+   *
+   * Same shape and same reason as `applyWorkspaceGroups`: since M5 piece 7d the app is the only
+   * writer of `ghostex.sidebar.projectCollections.v1` and the only thing that pushes it to gxserver
+   * for this computer (apps/desktop/src/app/gx_store/project_docs.rs). A REMOTE machine's copy is
+   * unchanged and still goes out as a command.
+   */
+  applyProjectCollections?: (state: unknown) => void;
+  /** A document handed over before `applyProjectCollections` was installed; drained when it is. */
+  pendingProjectCollections?: unknown;
+  /** The Spaces document the app holds. gxserver owns it outright, so there is no stored key. */
+  applySidebarSpaces?: (state: unknown) => void;
+  /** A document handed over before `applySidebarSpaces` was installed; drained when it is. */
+  pendingSidebarSpaces?: unknown;
 };
 
 export type NativeSidebarMenuItem = {

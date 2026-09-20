@@ -495,6 +495,16 @@ impl GhostexGpuiApp {
         self.gx_store
             .diagnostics
             .workspace_groups_summary(groups, side_state_held);
+        // K5, K6 and the project moves ride the SAME periodic path, for the reason that one cost
+        // two live rounds: a record emitted only from a push has no line at all in a run where the
+        // user moved no project, and the counters it carries are exactly what says whether the
+        // path is alive. The first line goes out with every counter at zero on purpose.
+        let collections = self.gx_store.collections.counters;
+        let spaces = self.gx_store.spaces.counters;
+        let moves = self.gx_store.project_moves;
+        self.gx_store
+            .diagnostics
+            .client_document_summary(collections, spaces, moves);
         // A difference that no later publish resolves still has to be judged, so it books one
         // judgement of its own. A stable difference is settled by the first of them; a shape that
         // keeps changing would book for ever, so the bookings are bounded and it then waits for

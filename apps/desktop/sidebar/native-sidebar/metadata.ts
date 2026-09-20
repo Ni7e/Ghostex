@@ -7,7 +7,6 @@ import {
 } from '@/packages/core-ui/spaces';
 import {
   readSidebarProjectCollections,
-  writeSidebarProjectCollections,
   parseSidebarProjectCollectionsFromGxserver,
   serializeSidebarProjectCollectionsForGxserver,
   type SidebarProjectCollectionsState,
@@ -57,13 +56,44 @@ export class NativeSidebarMetadata {
     }
   }
 
+  /*
+  CDXC:Spaces 2026-09-21 WHY:
+  This page no longer pushes the Spaces document for THIS COMPUTER. It still edits it (the Space
+  editor's result, and the membership items the Rust store does not own) and hands the result to the
+  app, which is the single synchroniser and the one place the pending-push guard lives
+  (apps/desktop/src/app/gx_store/project_docs.rs). `applySidebarSpaces` is the other half. A REMOTE
+  machine is unchanged: `updateRemoteSidebarSpaces` is a direct call down that machine's tunnel,
+  which the app cannot reach. The document still has no local key at all; gxserver owns it.
+  SEE-ALSO: packages/gx-core/src/project_docs/spaces.rs.
+  */
   updateSpaces(machineId: string, spaces: SidebarSpacesState, post: SidebarPostMessage): void {
     this.spaces[machineId] = spaces;
-    post({
-      type: 'updateSidebarSpaces',
+    if (machineId !== 'local') {
+      post({
+        type: 'updateSidebarSpaces',
+        state: serializeSidebarSpacesForGxserver(spaces),
+        remoteMachineId: machineId,
+      });
+      return;
+    }
+    window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
       state: serializeSidebarSpacesForGxserver(spaces),
-      ...(machineId !== 'local' ? { remoteMachineId: machineId } : {}),
+      type: 'persistSidebarSpaces',
     });
+  }
+
+  /** The held document, handed back by the app after every change. */
+  applySpacesFromHost(state: unknown): void {
+    const parsed = parseSidebarSpacesFromGxserver(state);
+    if (parsed) this.spaces.local = parsed;
+  }
+
+  /** The held collections document, handed back by the app after every change. */
+  applyCollectionsFromHost(state: unknown): void {
+    const parsed = parseSidebarProjectCollectionsFromGxserver(state);
+    if (!parsed) return;
+    this.adoptedCollections.add('local');
+    this.collections.local = parsed;
   }
 
   private adoptSpaces(id: string, value: unknown): void {
@@ -85,6 +115,7 @@ export class NativeSidebarMetadata {
       ...parsed,
       nextCollectionNumber: Math.max(parsed.nextCollectionNumber, previous?.nextCollectionNumber ?? 1),
     };
-    if (id === 'local') writeSidebarProjectCollections(this.collections[id]);
+    // NOT written to client storage: since 2026-09-21 the app is the only writer of that key, and
+    // this copy exists only to feed the projection and the menus this page still draws.
   }
 }

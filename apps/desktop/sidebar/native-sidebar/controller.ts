@@ -134,6 +134,27 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     delete bridge.pendingWorkspaceGroups;
     runtime.applyWorkspaceGroupsFromHost(parked);
   }
+  // The same hand-back for the project collections document and the Spaces document, which the app
+  // has owned since M5 piece 7d. Both are parked on the bridge when they arrive before this runs
+  // and drained here, so a document is delivered late rather than lost.
+  bridge.applyProjectCollections = (state) => {
+    ui.metadata.applyCollectionsFromHost(state);
+    publish();
+  };
+  bridge.applySidebarSpaces = (state) => {
+    ui.metadata.applySpacesFromHost(state);
+    publish();
+  };
+  if (bridge.pendingProjectCollections !== undefined) {
+    const parked = bridge.pendingProjectCollections;
+    delete bridge.pendingProjectCollections;
+    ui.metadata.applyCollectionsFromHost(parked);
+  }
+  if (bridge.pendingSidebarSpaces !== undefined) {
+    const parked = bridge.pendingSidebarSpaces;
+    delete bridge.pendingSidebarSpaces;
+    ui.metadata.applySpacesFromHost(parked);
+  }
   bridge.onNativeSidebarCommand = (command) => {
     if (command.type === 'sessionMenu') {
       const items = resolveNativeSessionMenu(ui, publisher.snapshot, command);
@@ -196,5 +217,7 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     delete bridge.onNativeSidebarCommand;
     delete bridge.applyWorkspaceGroups;
     delete bridge.requestWorkspaceGroups;
+    delete bridge.applyProjectCollections;
+    delete bridge.applySidebarSpaces;
   };
 }

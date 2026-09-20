@@ -246,7 +246,7 @@ fn move_row(core: &Core, project: &ProjectKey, session_id: &str) -> Option<MoveR
 }
 
 /// The manual project order the projection reads, which is the local document's `projectOrder`.
-fn workspace_project_order<'a>(core: &'a Core, machine: &MachineId) -> &'a [String] {
+pub(super) fn workspace_project_order<'a>(core: &'a Core, machine: &MachineId) -> &'a [String] {
     core.presentation()
         .machine(machine)
         .and_then(|entry| entry.side_state().workspace_groups.as_ref())
@@ -254,7 +254,7 @@ fn workspace_project_order<'a>(core: &'a Core, machine: &MachineId) -> &'a [Stri
         .unwrap_or_default()
 }
 
-fn chats_group_id(machine: &MachineId) -> String {
+pub(super) fn chats_group_id(machine: &MachineId) -> String {
     match machine {
         MachineId::Local => CHATS_GROUP_ID.to_string(),
         MachineId::Remote(machine_id) => {

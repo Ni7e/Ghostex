@@ -1,8 +1,7 @@
 //! The top-level state machine: events in, state plus effects out.
 
 use ghostex_gx_protocol::{
-    EventParseError, PresentationSnapshot, ServerEvent, WorkspaceSessionGroupsState,
-    GXSERVER_PROTOCOL_VERSION,
+    EventParseError, PresentationSnapshot, ServerEvent, GXSERVER_PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,13 +38,17 @@ pub enum Intent {
         project: ProjectKey,
         group_id: String,
     },
-    /// The client-owned workspace session groups document, after a LOCAL edit or after an echo the
-    /// guard let through. The list draws its user-made groups and its project order from the
-    /// store's side state, so the only way an edit reaches the screen is to put it there; it
-    /// carries no revision, because the client owns this document and the daemon keeps a copy.
-    SetWorkspaceGroups {
+    /// A client-owned document, after a LOCAL edit or after an echo its guard let through: the
+    /// workspace session groups document, the project collections document, or the Spaces
+    /// document. The list draws all three from the store's side state, so the only way an edit
+    /// reaches the screen is to put it there; it carries no revision, because the client owns these
+    /// documents and the daemon keeps a copy.
+    ///
+    /// ONE variant for all three rather than one each: the three differ only in which field of the
+    /// side state they land in, and `SideStateUpdate` already says that.
+    SetSideState {
         machine: MachineId,
-        state: Box<WorkspaceSessionGroupsState>,
+        update: Box<SideStateUpdate>,
     },
     /// The host reports the exact set of sessions that own a pane.
     SetVisibleSessions {
@@ -507,13 +510,10 @@ impl Core {
                         .focus_subgroup(&self.presentation, project, group_id, now_ms);
                 self.note_focus(focus, output);
             }
-            Intent::SetWorkspaceGroups { machine, state } => {
-                output.changes = self.presentation.apply_side_state(
-                    &machine,
-                    "",
-                    None,
-                    SideStateUpdate::WorkspaceGroups(*state),
-                );
+            Intent::SetSideState { machine, update } => {
+                output.changes = self
+                    .presentation
+                    .apply_side_state(&machine, "", None, *update);
             }
             Intent::SetVisibleSessions { sessions } => {
                 let focus = self.focus.set_visible_sessions(sessions, now_ms);

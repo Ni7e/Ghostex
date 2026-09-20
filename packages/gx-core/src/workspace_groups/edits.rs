@@ -193,6 +193,66 @@ impl WorkspaceGroupsDocument {
         Some(self.with_project_groups(project_id, ProjectWorkspaceGroups { groups, ..current }))
     }
 
+    /// `syncGpuiWorkspaceProjectOrder`: the manual project order, de-duplicated.
+    ///
+    /// `None` is its identity return, and it is the ONLY edit in this family that has one on a
+    /// value comparison rather than on a missing entry: an order equal to the one already held
+    /// changes nothing, so a project reorder that put every row back where it was writes no key and
+    /// books no push. The de-duplication happens BEFORE the comparison, so an order naming a
+    /// project twice is equal to the same order naming it once.
+    pub fn sync_project_order(&self, ordered_project_ids: &[String]) -> Option<Self> {
+        let mut deduped: Vec<String> = Vec::with_capacity(ordered_project_ids.len());
+        for project_id in ordered_project_ids {
+            if !deduped.contains(project_id) {
+                deduped.push(project_id.clone());
+            }
+        }
+        if deduped == self.project_order {
+            return None;
+        }
+        Some(Self {
+            project_order: deduped,
+            projects: self.projects.clone(),
+        })
+    }
+
+    /// `syncGpuiWorkspaceSessionSubgroupOrder`: a project's user-made groups in the order the
+    /// sidebar now draws them, then whatever the order did not name.
+    ///
+    /// `None` is its identity return: the project has no groups at all. A project WITH groups
+    /// always comes back as a new object, even when the order did not move, which is what makes a
+    /// project reorder write the key for a document that did not change.
+    pub fn sync_subgroup_order(
+        &self,
+        project_id: &str,
+        ordered_group_ids: &[String],
+    ) -> Option<Self> {
+        let current = self.project_groups(project_id);
+        if current.groups.is_empty() {
+            return None;
+        }
+        // `orderedGroupIds.map(byId.get).filter(defined)`, with NO de-duplication: an order naming
+        // one group twice really does put it in twice there. Unreachable from the caller, whose
+        // ids come from the sidebar's own group order, and written the same way rather than
+        // "fixed", because a guard that cannot fire is a guard nobody can check.
+        let mut groups: Vec<WorkspaceSubgroup> = Vec::with_capacity(current.groups.len());
+        for group_id in ordered_group_ids {
+            if let Some(group) = current
+                .groups
+                .iter()
+                .find(|candidate| candidate.group_id == *group_id)
+            {
+                groups.push(group.clone());
+            }
+        }
+        for group in &current.groups {
+            if !groups.iter().any(|kept| kept.group_id == group.group_id) {
+                groups.push(group.clone());
+            }
+        }
+        Some(self.with_project_groups(project_id, ProjectWorkspaceGroups { groups, ..current }))
+    }
+
     /// `pruneGpuiWorkspaceSessionSubgroups`: drop every member of this project's groups whose
     /// session the presentation no longer lists.
     ///

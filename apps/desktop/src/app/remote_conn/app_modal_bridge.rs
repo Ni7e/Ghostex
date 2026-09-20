@@ -622,6 +622,24 @@ impl GhostexGpuiApp {
                 let state = state.clone();
                 self.gx_store_receive_workspace_groups_hand_off(&state, cx);
             }
+            // The same hand-off for the two project documents. The page still EDITS them for the
+            // paths the store does not own (the collection menus, the Space editor's result) and
+            // hands the result over; this is the only writer of the collections key and the only
+            // thing that pushes either of them for this computer (gx_store/project_docs.rs).
+            ghostex_gx_core::COLLECTIONS_HAND_OFF_MESSAGE_TYPE => {
+                let Some(state) = message.get("state").filter(|state| state.is_object()) else {
+                    return;
+                };
+                let state = state.clone();
+                self.gx_store_receive_project_doc_hand_off(true, &state, cx);
+            }
+            ghostex_gx_core::SPACES_HAND_OFF_MESSAGE_TYPE => {
+                let Some(state) = message.get("state").filter(|state| state.is_object()) else {
+                    return;
+                };
+                let state = state.clone();
+                self.gx_store_receive_project_doc_hand_off(false, &state, cx);
+            }
             "primaryAgentLauncherChanged" => {
                 self.sidebar_primary_agent_launcher_id = message["agentId"]
                     .as_str()

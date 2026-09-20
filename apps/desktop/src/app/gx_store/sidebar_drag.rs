@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use ghostex_gx_core::{
     Event, Intent, OrderWrite, ProjectKey, owns_order_write_message, owns_session_move_command,
-    plan_order_write, plan_session_move,
+    plan_order_write, plan_project_order_write, plan_session_move,
 };
 use serde_json::{Value, json};
 
@@ -179,6 +179,45 @@ impl GhostexGpuiApp {
                         cx,
                     );
                 }
+            }
+        }
+        true
+    }
+
+    /// Answers the `syncGroupOrder` a project move posts, which writes the project order and each
+    /// project's user-made group order into the workspace session groups document.
+    ///
+    /// A DIFFERENT writer from `syncSessionOrder` above, and kept apart for that reason: this one
+    /// needs the projection's worktree metadata, and it is the one place in the project moves where
+    /// an unchanged order really does write nothing, because `syncWorkspaceGroupOrder` returns on
+    /// `this.workspaceGroups === before`.
+    pub(crate) fn gx_store_run_project_order_message(
+        &mut self,
+        message: &Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let plan = {
+            let store = &self.gx_store;
+            plan_project_order_write(
+                &store.core,
+                &store.sidebar_list.last_inputs,
+                store.workspace_groups.sync.document(),
+                message,
+            )
+        };
+        let Some(plan) = plan else {
+            return false;
+        };
+        self.gx_store.sidebar_drag.order_writes += 1;
+        self.gx_store.diagnostics.sidebar_order_write_ran(
+            message,
+            &plan,
+            self.gx_store.sidebar_drag,
+        );
+        for write in plan.writes {
+            if let OrderWrite::EditDocument { document } = write {
+                self.gx_store.sidebar_drag.document_edits += 1;
+                self.gx_store_edit_workspace_groups(document, cx);
             }
         }
         true

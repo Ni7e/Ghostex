@@ -21,6 +21,7 @@ mod focus;
 mod keys;
 mod overlay;
 mod presentation_store;
+mod project_docs;
 mod selectors;
 mod sidebar_actions;
 mod sidebar_drag;
@@ -44,6 +45,15 @@ pub use crate::keys::{
     parse_workspace_subgroup_id, MachineId, ProjectKey, SessionKey, CHATS_GROUP_ID,
 };
 pub use crate::overlay::SessionPatch;
+pub use crate::project_docs::{
+    apply_space_row_reorder, can_drop_project_with_worktrees, create_collection,
+    move_members_to_space, move_projects_to_collection, move_projects_with_worktrees,
+    order_projects_with_worktrees, reorder_collection_projects, reorder_spaces,
+    toggle_space_member, CollectionsDocument, DropPosition, ProjectOrderItem, SpaceMemberKind,
+    SpacesDocument, COLLECTIONS_HAND_OFF_MESSAGE_TYPE, COLLECTIONS_SYNC_DELAY_MS,
+    COLLECTIONS_SYNC_RETRY_DELAY_MS, SPACES_HAND_OFF_MESSAGE_TYPE, SPACES_SYNC_DELAY_MS,
+    SPACES_SYNC_RETRY_DELAY_MS,
+};
 pub use crate::presentation_store::{
     LoadedPresentation, MachinePresentation, PresentationState, PresentationStore, SideState,
     SideStateUpdate, SnapshotOrigin,
@@ -71,9 +81,11 @@ pub use crate::sidebar_actions::{
     SESSION_SNOOZE_PRESETS, SNOOZE_MESSAGE_TYPES,
 };
 pub use crate::sidebar_drag::{
-    owns_order_write_message, owns_session_move_command, plan_order_write, plan_session_move,
-    sidebar_group_membership, OrderWrite, OrderWritePlan, SessionMovePlan,
-    ORDER_WRITE_MESSAGE_TYPES,
+    owns_order_write_message, owns_project_move_command, owns_project_order_message,
+    owns_session_move_command, plan_order_write, plan_project_move, plan_project_order_write,
+    plan_session_move, sidebar_group_membership, OrderWrite, OrderWritePlan, ProjectMovePlan,
+    ProjectWrite, SessionMovePlan, ORDER_WRITE_MESSAGE_TYPES, PROJECT_MOVE_COMMAND_TYPES,
+    PROJECT_ORDER_MESSAGE_TYPE,
 };
 pub use crate::sidebar_menu::{
     agent_launcher_items, agent_logo_icons, colored_agent_logo, hover_strip, menu_to_json,
