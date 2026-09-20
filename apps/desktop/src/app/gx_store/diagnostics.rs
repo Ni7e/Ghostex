@@ -846,6 +846,64 @@ impl GxStoreDiagnostics {
         );
     }
 
+    /// One line per snooze menu row answered: how many commands it posted, and nothing about the
+    /// row. The wake time is NOT recorded; it is a timestamp the user chose for a session of
+    /// theirs, and the counters below say everything a support log needs.
+    pub(super) fn sidebar_snooze_action_ran(
+        &mut self,
+        messages: usize,
+        counters: super::sidebar_snooze::SidebarSnoozeCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarSnoozeAction",
+            json!({
+                "messages": messages as u64,
+                "actions": counters.actions,
+                "actionsWithTag": counters.actions_with_tag,
+                "actionsEmpty": counters.actions_empty,
+                "declinedSource": counters.declined_source,
+                "declinedRow": counters.declined_row,
+            }),
+        );
+    }
+
+    /// One line per snooze or unsnooze call: which one, whether the daemon took it, and how long
+    /// it took. No session id and no wake time.
+    pub(super) fn sidebar_snooze_ran(
+        &mut self,
+        call: &str,
+        accepted: bool,
+        round_trip_ms: u64,
+        counters: super::sidebar_snooze::SidebarSnoozeCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarSnooze",
+            json!({
+                "call": log_text(call),
+                "accepted": accepted,
+                "roundTripMs": round_trip_ms,
+                "snoozes": counters.snoozes,
+                "unsnoozes": counters.unsnoozes,
+                "acceptedTotal": counters.accepted,
+                "failed": counters.failed,
+                "sleeps": counters.sleeps,
+                "declinedSource": counters.declined_source,
+            }),
+        );
+    }
+
     /// One line per dialog the sidebar opened. Which dialog, and whether it was seeded, and
     /// nothing else: the seed IS the user's own title or note.
     pub(super) fn sidebar_modal_opened(

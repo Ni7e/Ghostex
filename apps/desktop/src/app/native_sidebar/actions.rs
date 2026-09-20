@@ -130,6 +130,14 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_modal(&command, cx) {
             return;
         }
+        // Snooze reads the clock and the local calendar here and posts the same two commands the
+        // renderer posts; the call it sends back arrives at the arm below (gx_store/sidebar_snooze.rs).
+        if self.gx_store_run_sidebar_snooze_action(&command, cx) {
+            return;
+        }
+        if self.gx_store_run_sidebar_snooze(&command, cx) {
+            return;
+        }
         // Two of the menus' inputs live in client storage and are written by the handler this
         // command is on its way to; the cached copy is dropped so the redraw that follows reads
         // the new value instead of waiting out its second.

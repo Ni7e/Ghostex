@@ -11,8 +11,9 @@
 //! `sidebar_menus.rs` builds the menus, hover buttons and header buttons the drawn list carries;
 //! `sidebar_actions.rs` performs what a menu row, hover button or header button does, and
 //! `sidebar_lifecycle.rs` the ones with a daemon round trip in the middle (sleep, wake, close
-//! and fork), `sidebar_flags.rs` the four that are one call with different fields;
-//! `diagnostics.rs` writes the log lines.
+//! and fork), `sidebar_flags.rs` the four that are one call with different fields,
+//! `sidebar_modals.rs` the two that only open a dialog and `sidebar_snooze.rs` the two that read
+//! the clock and the local calendar; `diagnostics.rs` writes the log lines.
 
 mod burst;
 mod diagnostics;
@@ -34,6 +35,7 @@ mod sidebar_scratch_compare;
 mod sidebar_shadow;
 mod sidebar_shadow_compare;
 mod sidebar_snapshot;
+mod sidebar_snooze;
 mod sidebar_ui;
 mod sidebar_ui_commands;
 mod sidebar_ui_storage;
