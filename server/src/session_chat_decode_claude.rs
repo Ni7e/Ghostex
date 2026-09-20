@@ -292,7 +292,7 @@ fn decode_claude_queued_command(
     if attachment.get("type").and_then(Value::as_str) != Some(CLAUDE_QUEUED_COMMAND_ATTACHMENT) {
         return None;
     }
-    let prompt = extract_string(attachment.get("prompt"))?;
+    let prompt = strip_claude_pasted_content_envelopes(&extract_string(attachment.get("prompt"))?);
     if prompt.trim().is_empty() {
         return None;
     }
@@ -399,7 +399,13 @@ pub fn decode_claude_transcript_line(line: &str, fallback_id: &str) -> Option<Se
 
     let message = record.get("message").and_then(Value::as_object);
     let content = message.and_then(|inner| inner.get("content"));
-    let decoded_blocks = claude_content_blocks(content);
+    let mut decoded_blocks = claude_content_blocks(content);
+    if role == "user" {
+        decoded_blocks = decoded_blocks
+            .into_iter()
+            .map(unwrap_claude_pasted_content_block)
+            .collect();
+    }
     if decoded_blocks.is_empty() {
         return None;
     }
@@ -681,6 +687,87 @@ pub fn decode_claude_turn_lifecycle(
         turn_id: decoded.id,
         timestamp,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code's pasted-content envelope
+// ---------------------------------------------------------------------------
+
+const CLAUDE_PASTED_CONTENT_OPEN: &str = "<pasted_content id=\"";
+const CLAUDE_PASTED_CONTENT_CLOSE: &str = "</pasted_content";
+
+/*
+CDXC:SessionChat 2026-09-20 WHY:
+Chat delivers every multi-line send as a bracketed paste (`build_session_chat_paste_bytes`), and Claude Code records the submitted prompt with each pasted span wrapped in `<pasted_content id="ab12">` … `</pasted_content id="ab12">`, escaping a literal tag spelling inside the body by slipping a backslash in behind the `<`.
+Those tags exist only to tell the model where the clipboard text began: Claude Code's own TUI shows the collapsed `[Pasted text #1 …]` placeholder and never prints them, so a transcript that renders the row verbatim put markup the user never typed into their own chat bubble and left the optimistic echo unmatched against the row it belongs to.
+Unwrap the envelope for user rows only; assistant text is never wrapped.
+*/
+pub(crate) fn strip_claude_pasted_content_envelopes(text: &str) -> String {
+    if !text.contains(CLAUDE_PASTED_CONTENT_OPEN) {
+        return text.to_string();
+    }
+    let mut unwrapped = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut envelopes = 0usize;
+    while let Some(open_at) = rest.find(CLAUDE_PASTED_CONTENT_OPEN) {
+        let after_open = &rest[open_at + CLAUDE_PASTED_CONTENT_OPEN.len()..];
+        let Some(id_end) = after_open.find("\">") else {
+            break;
+        };
+        let id = &after_open[..id_end];
+        let body = &after_open[id_end + "\">".len()..];
+        let Some((pasted, after_close)) = split_claude_pasted_content_body(body, id) else {
+            break;
+        };
+        unwrapped.push_str(&rest[..open_at]);
+        unwrapped.push_str(&unescape_claude_pasted_content(pasted));
+        rest = after_close;
+        envelopes += 1;
+    }
+    if envelopes == 0 {
+        return text.to_string();
+    }
+    unwrapped.push_str(rest);
+    // The envelope carries its own padding newlines around the prompt.
+    unwrapped.trim().to_string()
+}
+
+/// Splits `body` at the close tag that matches `id`, returning the pasted text
+/// and everything after the tag. A body carrying the tag spelling has it
+/// escaped, so the first well-formed close is the real one.
+fn split_claude_pasted_content_body<'a>(body: &'a str, id: &str) -> Option<(&'a str, &'a str)> {
+    let close_with_id = format!(" id=\"{id}\">");
+    let mut searched = 0usize;
+    while let Some(relative) = body[searched..].find(CLAUDE_PASTED_CONTENT_CLOSE) {
+        let close_at = searched + relative;
+        let tail = &body[close_at + CLAUDE_PASTED_CONTENT_CLOSE.len()..];
+        if let Some(after_close) = tail
+            .strip_prefix('>')
+            .or_else(|| tail.strip_prefix(close_with_id.as_str()))
+        {
+            let pasted = &body[..close_at];
+            let pasted = pasted.strip_prefix('\n').unwrap_or(pasted);
+            let pasted = pasted.strip_suffix('\n').unwrap_or(pasted);
+            return Some((pasted, after_close));
+        }
+        searched = close_at + CLAUDE_PASTED_CONTENT_CLOSE.len();
+    }
+    None
+}
+
+/// Claude Code escapes a literal tag spelling inside a pasted body by slipping
+/// a backslash in behind the `<`, so `<\pasted_content` is text the user typed.
+fn unescape_claude_pasted_content(pasted: &str) -> String {
+    pasted
+        .replace("<\\/pasted_content", "</pasted_content")
+        .replace("<\\pasted_content", "<pasted_content")
+}
+
+fn unwrap_claude_pasted_content_block(block: SessionChatBlock) -> SessionChatBlock {
+    match block {
+        SessionChatBlock::Text { text } => text_block(strip_claude_pasted_content_envelopes(&text)),
+        other => other,
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -247,6 +247,8 @@ fn push_visible_user_prompt(prompts: &mut Vec<String>, message: Option<&Value>) 
     let text = text_from_message(Some(message));
     // Cursor records the real typed prompt wrapped in <user_query> tags.
     let text = tagged_text(&text, "user_query").unwrap_or(text);
+    // Claude Code wraps each pasted span of a submitted prompt the same way.
+    let text = crate::session_chat_decode_claude::strip_claude_pasted_content_envelopes(&text);
     let trimmed = text.trim();
     if trimmed.is_empty() || !is_visible_user_prompt(trimmed) {
         return;
