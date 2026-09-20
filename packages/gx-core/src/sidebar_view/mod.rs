@@ -17,7 +17,7 @@ mod machines;
 mod membership;
 mod model;
 mod ordering;
-mod projects;
+pub(crate) mod projects;
 mod reveal;
 mod rows;
 mod sections;

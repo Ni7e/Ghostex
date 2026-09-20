@@ -21,6 +21,7 @@ mod keys;
 mod overlay;
 mod presentation_store;
 mod selectors;
+mod sidebar_actions;
 mod sidebar_menu;
 mod sidebar_ui;
 mod sidebar_view;
@@ -44,6 +45,11 @@ pub use crate::presentation_store::{
 pub use crate::selectors::{
     is_chat_project_path, Loadable, TabDirection, TabSession, DEFAULT_TERMINAL_SESSION_TITLE,
     QUICK_AUTOMATIONS_PROJECT_ID, TAB_SESSION_TITLE_MAX_UTF16,
+};
+pub use crate::sidebar_actions::{
+    local_project_group_project_id, plan_read_only_action, ActionEffect, SidebarActionPlan,
+    ToastLevel, NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE,
+    NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION, READ_ONLY_MESSAGE_TYPES,
 };
 pub use crate::sidebar_menu::{
     agent_launcher_items, agent_logo_icons, colored_agent_logo, hover_strip, menu_to_json,
