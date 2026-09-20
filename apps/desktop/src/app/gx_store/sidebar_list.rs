@@ -157,8 +157,14 @@ impl SidebarList {
 }
 
 impl GhostexGpuiApp {
-    /// Which list the renderer draws. Read from the saved settings, so it can be moved in a
-    /// running app: the file is re-read whenever it changes on disk.
+    /// Which list the renderer draws.
+    ///
+    /// `GHOSTEX_SIDEBAR_LIST_SOURCE` decides it for the whole run when it is set. Otherwise the
+    /// saved settings do, and moving the value there moves the list in a running app, because the
+    /// settings file is re-read whenever it changes on disk. The setting has no row in Settings and
+    /// is not a product choice: the two lists exist side by side only until the old projection is
+    /// deleted. The normalizer drops keys it does not know, so a settings write by the app takes
+    /// the key with it; the environment variable is the one that survives that.
     pub(crate) fn gx_store_sidebar_list_source(&self) -> SidebarListSource {
         // The store's list is only drawn once the sidebar's own state has been read; before that
         // it would show every project expanded and no hidden item hidden.
@@ -171,12 +177,17 @@ impl GhostexGpuiApp {
                 return source;
             }
         }
-        let source = match crate::shared_settings::shared_sidebar_settings_snapshot()
-            .object()
-            .get("sidebarListSource")
-            .and_then(Value::as_str)
-        {
-            Some("store") => SidebarListSource::Store,
+        let chosen = match std::env::var("GHOSTEX_SIDEBAR_LIST_SOURCE") {
+            Ok(value) if !value.trim().is_empty() => value.trim().to_lowercase(),
+            _ => crate::shared_settings::shared_sidebar_settings_snapshot()
+                .object()
+                .get("sidebarListSource")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_lowercase(),
+        };
+        let source = match chosen.as_str() {
+            "store" => SidebarListSource::Store,
             _ => SidebarListSource::Projection,
         };
         self.gx_store
