@@ -1118,25 +1118,19 @@ impl Render for GhostexGpuiApp {
                     this.finish_browser_tab_drag(cx);
                 }),
             )
-            .child(self.render_titlebar(window, cx))
             .child(
                 /*
-                Every top-row pane draws its own 1px frame and the titlebar
-                draws a 1px bottom border, so stacked they showed a 2px line
-                above the workspace. Pull the body row up by that 1px so a
-                pane's top edge paints over the titlebar hairline: neutral
-                panes leave one line, and a focused or attention pane shows
-                its outline color on the top edge too. flex_1 absorbs the
-                negative margin, so the row is 1px taller rather than leaving
-                a gap at the bottom. The sidebar column and its divider draw
-                the hairline themselves so it stays continuous across the
-                window.
+                CDXC:Titlebar 2026-09-20 WHY:
+                The body row used to start one pixel above its own origin so a pane's top edge
+                could paint over the titlebar's bottom hairline, and the sidebar column drew that
+                hairline itself to keep it continuous. With the titlebar row deleted there is no
+                hairline above the body, so both are gone: the row starts at the window's top edge
+                and nothing is drawn across it.
                 */
                 h_flex()
                     .flex_1()
                     .w_full()
                     .min_h_0()
-                    .mt(px(-1.0))
                     .items_start()
                     .overflow_hidden()
                     .bg(sidebar_divider_background_color())
@@ -1149,8 +1143,6 @@ impl Render for GhostexGpuiApp {
                             div()
                                 .w(px(self.sidebar_width))
                                 .h_full()
-                                .border_t_1()
-                                .border_color(titlebar_button_border_color())
                                 .child(self.render_native_sidebar(window, cx)),
                         )
                     })
@@ -1166,6 +1158,7 @@ impl Render for GhostexGpuiApp {
                             .min_h_0()
                             .overflow_hidden()
                             .bg(workspace_background_color())
+                            .child(self.render_workarea_header(window, cx))
                             .child(self.render_workspace_with_command_pane(window, cx)),
                     ),
             )

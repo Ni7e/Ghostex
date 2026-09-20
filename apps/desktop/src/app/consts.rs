@@ -174,15 +174,40 @@ pub(crate) const ACCOUNT_INDICATOR_FONT_FAMILY: &str = ".AppleSystemUIFontMonosp
 #[cfg(not(target_os = "macos"))]
 pub(crate) const ACCOUNT_INDICATOR_FONT_FAMILY: &str = "monospace";
 
-pub(crate) const TITLEBAR_HEIGHT: f32 = 28.0;
+/*
+CDXC:Titlebar 2026-09-20 DECISION:
+User: the window has no titlebar row any more. A header inside the workspace column takes over its
+job, with no line under it: it paints the workspace background and the content fades out beneath it.
+This supersedes every rule that positioned something "below the titlebar"; the header's measured
+bottom edge (`workarea_header_bottom_y`) is the only anchor now, and `TITLEBAR_HEIGHT` is gone.
+SEE-ALSO: apps/desktop/src/app/render/workarea_header/, apps/desktop/src/app/render/root.rs.
+*/
+pub(crate) const WORKAREA_HEADER_HEIGHT: f32 = 36.0;
 
-pub(crate) const TITLEBAR_CONTROL_HEIGHT: f32 = TITLEBAR_HEIGHT - 1.0;
+/// Below this workspace-column width the header drops its labels and the project half of the
+/// breadcrumb, the way the mockup's narrow chat column does.
+pub(crate) const WORKAREA_HEADER_COMPACT_WIDTH: f32 = 720.0;
 
+/// The header's own left and right edge padding, matching the old titlebar inset.
+pub(crate) const WORKAREA_HEADER_EDGE_PADDING: f32 = 9.0;
+
+/*
+CDXC:Titlebar 2026-09-20 WHY:
+The macOS traffic lights are a window option (`traffic_light_position` in main.rs), not a child of
+any row, so whatever occupies the window's top-left has to leave them room: the sidebar's Search row
+while the sidebar is expanded, the workarea header while it is collapsed. The three 12px lights run
+from x=11 to x=63, and 79 is where the old titlebar put its first control, so both reserves use it.
+Windows and Linux draw their caption buttons as trailing header children instead, so they reserve
+nothing on the left.
+*/
 #[cfg(target_os = "macos")]
-pub(crate) const TITLEBAR_PROJECT_LEFT: f32 = 88.0;
+pub(crate) const WINDOW_CONTROLS_LEADING_RESERVE: f32 = 79.0;
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) const TITLEBAR_PROJECT_LEFT: f32 = 9.0;
+pub(crate) const WINDOW_CONTROLS_LEADING_RESERVE: f32 = 0.0;
+
+/// Height of the header's own controls (buttons, split buttons, mode tabs).
+pub(crate) const TITLEBAR_CONTROL_HEIGHT: f32 = 27.0;
 
 pub(crate) const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str =
     "Switch to a project to access this view";

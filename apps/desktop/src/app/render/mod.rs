@@ -24,3 +24,4 @@ pub(crate) mod terminal_agent_action_bar;
 pub(crate) mod terminal_body_slot;
 pub(crate) mod terminal_content_layout;
 pub(crate) mod terminal_placeholders_and_editor_shell;
+pub(crate) mod workarea_header;

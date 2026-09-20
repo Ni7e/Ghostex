@@ -1,3 +1,4 @@
+use crate::app::render::workarea_header::workarea_header_bottom_y;
 use crate::*;
 use gpui::{MouseMoveEvent, WindowHandle};
 use std::ffi::c_void;
@@ -131,10 +132,9 @@ impl GhostexGpuiApp {
                     this.main_window_bounds.origin,
                     size(
                         px(this.floating_companion_width()),
-                        px(
-                            (this.main_window_bounds.size.height.as_f32() - TITLEBAR_HEIGHT)
-                                .max(1.0),
-                        ),
+                        px((this.main_window_bounds.size.height.as_f32()
+                            - workarea_header_bottom_y())
+                        .max(1.0)),
                     ),
                 );
                 gpui::WindowOptions {
@@ -229,7 +229,7 @@ impl GhostexGpuiApp {
                 reveal.native_view,
                 enabled,
                 self.floating_companion_width() as f64,
-                TITLEBAR_HEIGHT as f64,
+                workarea_header_bottom_y() as f64,
             )
         };
         if !visible {

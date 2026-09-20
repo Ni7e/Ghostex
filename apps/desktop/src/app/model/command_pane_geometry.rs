@@ -3,6 +3,7 @@
 // C1) into this descriptively named module per its FOLLOW-UPS.md note (pure
 // move, no logic changes).
 
+use crate::app::render::workarea_header::workarea_header_bottom_y;
 use crate::*;
 
 pub(crate) fn command_pane_height_ratio(ratio: f32) -> f32 {
@@ -520,8 +521,10 @@ pub(crate) fn command_pane_default_height_ratio_for_default_height_px(
     command_pane_height_ratio(default_height_px / content_height.max(1.0))
 }
 
+/// The height the command pane's ratio is measured against: everything the workspace column owns
+/// below the workarea header.
 pub(crate) fn command_pane_content_height(window: &Window) -> f32 {
-    (window.bounds().size.height.as_f32() - TITLEBAR_HEIGHT).max(1.0)
+    (window.bounds().size.height.as_f32() - workarea_header_bottom_y()).max(1.0)
 }
 
 pub(crate) fn command_pane_workspace_width(

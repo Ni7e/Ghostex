@@ -27,21 +27,18 @@ use gpui::MouseButton;
 use gpui::MouseDownEvent;
 use gpui::ParentElement as _;
 use gpui::Styled as _;
-use gpui::Window;
 use gpui::canvas;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
 use gpui::rgb;
 use gpui::svg;
-use gpui_component::ElementExt;
 use gpui_component::tooltip::ManagedTooltipExt as _;
 use gpui_component::tooltip::ManagedTooltipPlacement;
 
 use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
-use crate::app::window::*;
 use crate::*;
 
 impl GhostexGpuiApp {
@@ -224,132 +221,6 @@ impl GhostexGpuiApp {
                 }),
             )
             .child(signature.label)
-            .into_any_element()
-    }
-
-    pub(crate) fn render_titlebar_git_button(
-        &self,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        let state = self.titlebar_git_menu_state.as_ref();
-        let icon_path = state
-            .map(|state| titlebar_git_action_icon_path(state.primary_action))
-            .unwrap_or(TITLEBAR_ICON_GIT_COMMIT);
-        let is_busy = state.is_some_and(|state| state.is_busy);
-        let open = self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Git);
-        let icon_color = if open {
-            titlebar_icon_hover_color()
-        } else {
-            titlebar_icon_color()
-        };
-        let anchor_state =
-            window.use_keyed_state("ghostex-gpui-titlebar-git-popup-anchor", cx, |_, _| {
-                GpuiTitlebarPopupAnchorState::default()
-            });
-        let anchor_bounds = anchor_state.read(cx).bounds;
-        let trigger_bounds_captured = anchor_state.read(cx).trigger_bounds_captured;
-        let trigger_bounds = trigger_bounds_captured.then_some(anchor_bounds);
-
-        div()
-            .id("ghostex-gpui-titlebar-button-git")
-            .relative()
-            .flex()
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
-            .items_center()
-            .justify_center()
-            .when(cfg!(target_os = "windows"), |this| this.occlude())
-            .text_color(icon_color)
-            .cursor_default()
-            .when(open, |this| this.bg(titlebar_active_segment_color()))
-            .hover(move |this| {
-                if open {
-                    this.bg(titlebar_active_segment_color())
-                        .text_color(titlebar_icon_hover_color())
-                } else {
-                    this.bg(titlebar_button_hover_color())
-                        .text_color(titlebar_icon_hover_color())
-                }
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    log_gpui_titlebar_popup_mouse_down(
-                        GpuiTitlebarPopupKind::Git,
-                        "left",
-                        "togglePopup",
-                        open,
-                        trigger_bounds,
-                        event,
-                        window,
-                    );
-                    this.show_gpui_titlebar_git_menu(trigger_bounds, window, cx);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    log_gpui_titlebar_popup_mouse_down(
-                        GpuiTitlebarPopupKind::Git,
-                        "right",
-                        "togglePopup",
-                        open,
-                        trigger_bounds,
-                        event,
-                        window,
-                    );
-                    this.show_gpui_titlebar_git_menu(trigger_bounds, window, cx);
-                }),
-            )
-            .when(!open, |this| {
-                this.managed_discrete_tooltip_with_placement(
-                    ManagedTooltipPlacement::Left,
-                    Duration::from_millis(300),
-                    |window, cx| titlebar_tooltip(TITLEBAR_GIT_TOOLTIP, window, cx),
-                )
-            })
-            .on_prepaint({
-                let anchor_state = anchor_state.clone();
-                move |bounds, window, cx| {
-                    let (first_capture, moved) = anchor_state.update(cx, |state, _| {
-                        let first_capture = !state.trigger_bounds_captured;
-                        let moved = state.bounds != bounds;
-                        state.bounds = bounds;
-                        state.trigger_bounds_captured = true;
-                        (first_capture, moved)
-                    });
-                    if first_capture || moved {
-                        log_gpui_titlebar_popup_anchor(
-                            GpuiTitlebarPopupKind::Git,
-                            bounds,
-                            first_capture,
-                            moved,
-                            window,
-                        );
-                        window.request_animation_frame();
-                    }
-                }
-            })
-            .map(|this| {
-                if is_busy {
-                    this.child(
-                        canvas(
-                            move |_bounds, _window, _cx| {},
-                            move |bounds, _state: (), window, _cx| {
-                                paint_titlebar_git_busy_spinner(bounds, window);
-                            },
-                        )
-                        .size(px(15.0)),
-                    )
-                } else {
-                    this.child(titlebar_svg_icon(icon_path, 15.0, icon_color))
-                }
-            })
             .into_any_element()
     }
 }

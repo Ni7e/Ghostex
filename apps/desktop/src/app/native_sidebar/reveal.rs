@@ -1,3 +1,4 @@
+use crate::app::render::workarea_header::workarea_header_bottom_y;
 use crate::*;
 use gpui::{Subscription, WeakEntity, WindowHandle};
 use std::ffi::c_void;
@@ -105,7 +106,7 @@ impl GhostexGpuiApp {
                     reveal.native_view,
                     true,
                     self.sidebar_width as f64,
-                    TITLEBAR_HEIGHT as f64,
+                    workarea_header_bottom_y() as f64,
                     requested,
                     false,
                 )
@@ -119,7 +120,7 @@ impl GhostexGpuiApp {
             GhostexGpuiNativeSidebarRevealRequest(
                 self.parent_ns_view,
                 self.sidebar_width as f64,
-                TITLEBAR_HEIGHT as f64,
+                workarea_header_bottom_y() as f64,
                 self.active_mode.is_project_editor_mode()
                     && !self.project_editor_shell.left_companion_visible,
                 requested,
@@ -154,10 +155,9 @@ impl GhostexGpuiApp {
                         this.main_window_bounds.origin,
                         size(
                             px(this.sidebar_width),
-                            px(
-                                (this.main_window_bounds.size.height.as_f32() - TITLEBAR_HEIGHT)
-                                    .max(1.0),
-                            ),
+                            px((this.main_window_bounds.size.height.as_f32()
+                                - workarea_header_bottom_y())
+                            .max(1.0)),
                         ),
                     ))),
                     display_id: this.main_window_display_id,
@@ -212,7 +212,7 @@ impl GhostexGpuiApp {
                         native_view,
                         app.sidebar_collapsed,
                         app.sidebar_width as f64,
-                        TITLEBAR_HEIGHT as f64,
+                        workarea_header_bottom_y() as f64,
                         requested,
                         sticky,
                     )

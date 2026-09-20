@@ -8,21 +8,28 @@ automation and remote-access layers around those sessions.
 
 Run `ghostex guide <chapter>` for the details:
 
-  features    Views, sidebar, sessions, chat, agents and orchestration, browser,
-              editor, board, docs, automations, remote and mobile, notifications
-  settings    Every setting with its key, type, allowed values, default, and
-              the page it lives on (use with `ghostex settings`)
-  hotkeys     Every shortcut and its default binding
+features Views, sidebar, sessions, chat, agents and orchestration, browser,
+editor, board, docs, automations, remote and mobile, notifications
+settings Every setting with its key, type, allowed values, default, and
+the page it lives on (use with `ghostex settings`)
+hotkeys Every shortcut and its default binding
 
 ## The window
 
-- **Titlebar**: the project name and icon, Back/Forward, the view tabs
-  (Agents, Code, Browser, Kanban, Automate, Docs), and on the right the Git,
-  Actions and Open In buttons plus a **⋯** menu holding Ask Ghostex,
-  Tips & Tricks, Resources, Dev servers and Extensions. Views other than Agents
-  are extensions that load on demand and sleep when unused.
-  View tabs stay centered; in compact mode their dropdown moves to the left,
-  immediately after the Next (Forward) button.
+- **Work area header**: the window has no separate title bar. The first row of
+  the work area shows Hide sidebar, the companion toggle, Back/Forward, and the
+  project icon, project name and current session title as one breadcrumb. In the
+  middle are the view tabs (Agents, Code, Browser, Kanban, Automate, Docs), and
+  on the right the **Start**, **Open** and **Commit** buttons (Quick Actions,
+  Open In and Git actions, each with a caret for its menu), a **⋯** menu holding
+  Ask Ghostex, Tips & Tricks, Resources, Dev servers and Extensions, and the
+  command terminal and view panel toggles. Views other than Agents are
+  extensions that load on demand and sleep when unused. View tabs stay centered;
+  in compact mode their dropdown moves to the left, immediately after the Next
+  (Forward) button. Narrow the work area and the buttons drop their labels and
+  the breadcrumb drops the project name. There is no line under the header: your
+  chat fades out beneath it. Drag the header, or the sidebar's Search row, to
+  move the window.
 - **Sidebar** (left by default): projects, their sessions, tags and filters,
   remote machines, Quick chats, and the More Options menu (Settings, Search by
   Prompt, Previous Sessions, Mobile & Remote, Extensions). The Notifications

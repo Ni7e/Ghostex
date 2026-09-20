@@ -14,25 +14,27 @@ close it; it stays open as you move the pointer across other rows. Long menus
 scroll vertically to keep every action reachable, without a horizontal
 scrollbar.
 
-## Views (titlebar tabs)
+## Views (header tabs)
 
-Every project has the same six built-in views, switched from the titlebar tabs
-or with Option/Alt+1 through 9 in the visible order. Direct built-in view
+Every project has the same six built-in views, switched from the view tabs in
+the work area header or with Option/Alt+1 through 9 in the visible order. Direct built-in view
 shortcuts can be assigned in Settings > Hotkeys. Views other than Agents are extensions:
 they load on demand, sleep when idle (Auto Sleep), and can be hidden or
 reordered in Settings > Extensions > Titlebar views.
-The full view tabs stay centered in the titlebar. When space is tight, they
+The full view tabs stay centered in the header. When space is tight, they
 become a dropdown on the left right after Next (Forward), before the project
 name. Ask Ghostex, Tips & Tricks, Resources, Dev servers and Extensions are all
-reached from the **⋯** button at the right end of the titlebar. Hovering a view shows its positional shortcut.
+reached from the **⋯** button at the right end of the header. Hovering a view shows its positional shortcut.
 **Hide sidebar** toggles the sidebar. The matching **Hide companion** / **Show companion**
 button sits immediately beside it in every view (greyed out in Agents, which has no
 companion pane), so Back and Forward stay in the same place, and it uses the same
 outlined chat bubble with text lines whether the companion is visible or hidden.
 When an update is available, a download button appears just before the project name.
+The header's right end also has two panel toggles: the command terminal, and the
+view panel (not available yet).
 
 Right-click Code, Browser, Kanban, Automate, Docs, or another web-based view's
-titlebar button for **Reload** and **Sleep** (or **Wake** when sleeping), followed by **Extensions**. Reload
+header tab for **Reload** and **Sleep** (or **Wake** when sleeping), followed by **Extensions**. Reload
 refreshes the clicked view (the focused tab in Browser); a sleeping view opens
 again. Sleep unloads the view while keeping its place, and Code also stops its
 editor server. Choose Wake or select the view again to wake it. Resources can stop Code too,
@@ -177,7 +179,7 @@ leaves the other pane in place.
 
 - Width: the sidebar sits on the left; drag the divider to resize,
   double-click it to restore `sidebarDefaultWidthPx`. Cmd+B collapses it.
-- Reveal active session: the hollow-circle titlebar button expands its section and scrolls
+- Reveal active session: the hollow-circle header button expands its section and scrolls
   the active session into view with 50px of space from the top or bottom edge
   (below any pinned headers, where scrolling allows), then blinks its outline
   twice: pale blue in light mode and white in dark mode. Active sessions also have a slightly
@@ -352,7 +354,7 @@ forked away from, and switches to the one you pick; a stopped branch is resumed
 when you open it.
 
 - Sleeping frees RAM; Auto Sleep does it after idle minutes; Resources in the
-  titlebar's ⋯ menu sleeps many at once and shows CPU and RAM per session. Clean RAM
+  header's ⋯ menu sleeps many at once and shows CPU and RAM per session. Clean RAM
   copies a diagnosis prompt; paste it into an agent session to reduce RAM use.
   Sleeping sidebar sessions keep their normal title color and show a dimmer
   last-active time on the right; awake sessions show a stronger timestamp. Use `ghostex sleep|wake <selector>` to
@@ -775,7 +777,7 @@ conversations stay on disk instead of being deleted after 30 days; a value you
 set yourself is left unchanged. Agent approvals ("accept all") is a
 per-machine default with per-project overrides. Actions (Settings > Actions)
 are saved terminal commands or browser URLs shown on project headers and in
-the titlebar Actions menu; Global Actions apply to every project.
+the header’s Start (Quick Actions) menu; Global Actions apply to every project.
 
 Agents Hub lets you browse and edit agent files in Skills, MDs, Hooks,
 Configs & MCPs, and Agent Sync. In MDs, expand Shared agent markdown to see the
@@ -976,7 +978,7 @@ also prefill the branch. Registered paths offer Open existing project, and
 files inside a Git repository offer its root. Press Enter to continue,
 choose a destination, and review before Clone & Add.
 
-Project headers show the branch and diff stats; the titlebar Git menu offers
+Project headers show the branch and diff stats; the header’s Commit (Git) menu offers
 commit, sync with main, PR review by a prompt agent, and related actions with
 persistent running toasts. Add Worktree on a project header creates a git
 worktree as its own project so a second agent works on a branch without
@@ -1013,11 +1015,11 @@ docs directory), `hideProjectHeaderDiffStats`,
   Ghostex remembers the choice.
   Claude meters show the two tightest of the weekly, five-hour, and Fable
   limits, so the Fable limit is never hidden when it is running out; launcher
-  and picker rows and the Accounts figures use the same two numbers.   Each
+  and picker rows and the Accounts figures use the same two numbers. Each
   meter opens that login's live limits, reset times, and extra usage or rate
   limit resets, with the Fable limit as a main bar for Claude. Right-click a
   usage meter for Extensions and Accounts. Click the same
-  usage meter again to close its dropdown. Click another titlebar dropdown's
+  usage meter again to close its dropdown. Click another dropdown's
   button to close the current dropdown and open that one in a single click.
   Clicking outside, including in
   Session Chat, closes usage dropdowns and Tips. More model
@@ -1042,7 +1044,7 @@ docs directory), `hideProjectHeaderDiffStats`,
   online they are downloaded from the Ghostex GitHub repository, so skill fixes
   arrive between releases, and installed skills are refreshed automatically
   each time Ghostex starts. Offline installs use the copy inside the app.
-- The titlebar's ⋯ menu holds Ask Ghostex, Tips & Tricks, Resources, Dev
+- The header's ⋯ menu holds Ask Ghostex, Tips & Tricks, Resources, Dev
   servers and Extensions. Tips & Tricks teaches features one card at a time;
   Resources lists dev servers, ports, docs, project links, and per-session CPU
   and RAM; Ask Ghostex opens sample questions, and picking one opens a
@@ -1067,7 +1069,7 @@ App theme offers Dark Gray, Light, and System. Chat and terminal default to
 Follow app, with optional Light, Dark, or System overrides in the same section.
 System is the app default and follows the operating system appearance. Existing
 saved app themes are preserved; dark contrast and tint return unchanged when switching back from Light.
-In light mode, the sidebar and titlebar have solid light-gray (#f4f4f5) backgrounds. Enable Show
+In light mode, the sidebar and the window chrome have solid light-gray (#f4f4f5) backgrounds. Enable Show
 Advanced to find Dark theme background contrast, Dark theme background tint, and
 Dark theme accent color; these controls do not recolor light-mode chrome.
 Keep Awake (Power)

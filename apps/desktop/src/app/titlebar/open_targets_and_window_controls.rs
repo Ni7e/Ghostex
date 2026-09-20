@@ -14,15 +14,8 @@
 
 use std::path::PathBuf;
 
-use gpui::InteractiveElement as _;
-use gpui::IntoElement;
-use gpui::ParentElement as _;
-use gpui::Styled as _;
 use gpui::Window;
-use gpui::prelude::FluentBuilder as _;
-use gpui::px;
 use gpui_component::WindowExt;
-use gpui_component::h_flex;
 use gpui_component::notification::Notification;
 
 use crate::app::consts::*;
@@ -156,118 +149,6 @@ impl GhostexGpuiApp {
         self.persist_shell_layout_state();
         cx.notify();
         true
-    }
-
-    pub(crate) fn render_right_titlebar_controls(
-        &self,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> impl IntoElement {
-        /*
-        CDXC:PlatformSupport 2026-07-26:
-        These controls are exact normal-layout children of the draggable
-        titlebar. On Windows each interactive frame must occlude the ancestor
-        Drag hitbox so WM_NCHITTEST leaves that rectangle in the client area
-        and GPUI delivers its normal mouse handlers. This is button-local
-        ownership, not an overlay or synthetic event route.
-        */
-        let active_action = self.active_gpui_titlebar_action();
-        let actions_icon_path = titlebar_action_icon_path(active_action.as_ref());
-        /*
-        Quick Actions is a discoverable titlebar control on desktop, including
-        before the first Action has been configured. Keep it visible on Windows
-        as it is on macOS so its empty-state click can open Settings > Actions;
-        Linux retains its existing configured-action-only behavior.
-        */
-        let show_actions_button =
-            cfg!(any(target_os = "macos", target_os = "windows")) || active_action.is_some();
-        let pinned_extension_buttons = self.render_titlebar_pinned_extension_buttons(window, cx);
-        let buttons = h_flex()
-            .flex_shrink_0()
-            .mt(px(1.0))
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .items_center()
-            .children(pinned_extension_buttons)
-            .map(|this| {
-                // Prompt Editor and Exit Focus share the same titlebar slot;
-                // when both are eligible only Prompt Editor renders.
-                if self.prompt_editor_daemon_open {
-                    return this.child(self.render_titlebar_prompt_editor_button(cx));
-                }
-                if let Some(signature) = self.titlebar_exit_focus_control_signature() {
-                    return this.child(self.render_titlebar_exit_focus_button(signature, cx));
-                }
-                this
-            })
-            .when(
-                !self.titlebar_button_hidden(
-                    GIT_ACTIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
-                    "gitActions",
-                ),
-                |this| this.child(self.render_titlebar_git_button(window, cx)),
-            )
-            .when(
-                show_actions_button
-                    && !self.titlebar_button_hidden(
-                        QUICK_ACTIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
-                        "quickActions",
-                    ),
-                |this| {
-                    this.child(self.render_titlebar_actions_button(actions_icon_path, window, cx))
-                },
-            )
-            .when(
-                !self.titlebar_button_hidden(OPEN_IN_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "openIn"),
-                |this| this.child(self.render_titlebar_open_targets_button(window, cx)),
-            )
-            // Everything occasional lives behind the trailing ⋯ menu, which is the last
-            // control in the strip.
-            .when(self.titlebar_more_menu_visible(), |this| {
-                this.child(self.render_titlebar_more_button(cx))
-            })
-            .child(self.render_titlebar_extension_popup_panel(window, cx));
-        let controls = h_flex()
-            .flex_shrink(1.0)
-            .min_w_0()
-            .max_w_full()
-            .h_full()
-            .child(
-                h_flex()
-                    .id("ghostex-gpui-titlebar-controls-scroll")
-                    .flex_shrink(1.0)
-                    .min_w_0()
-                    .h_full()
-                    .overflow_x_scroll()
-                    .child(buttons),
-            );
-        #[cfg(target_os = "windows")]
-        let controls = controls
-            .child(
-                div()
-                    .id("ghostex-gpui-titlebar-window-controls-gap")
-                    .h_full()
-                    .w(px(TITLEBAR_BUTTON_WIDTH))
-                    .window_control_area(WindowControlArea::Drag),
-            )
-            .child(self.render_titlebar_window_controls(window, cx));
-        #[cfg(target_os = "linux")]
-        let controls = controls.when(
-            matches!(
-                window.window_decorations(),
-                gpui::Decorations::Client { .. }
-            ),
-            |this| {
-                this.child(
-                    div()
-                        .id("ghostex-gpui-titlebar-window-controls-gap")
-                        .h_full()
-                        .w(px(TITLEBAR_BUTTON_WIDTH))
-                        .window_control_area(WindowControlArea::Drag),
-                )
-                .child(self.render_titlebar_window_controls(window, cx))
-            },
-        );
-        controls
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux"))]

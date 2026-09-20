@@ -566,7 +566,7 @@ impl GhostexGpuiApp {
     ) {
         /*
         CDXC:Onboarding 2026-06-24-23:17:
-        The GPUI info glyph opens the shared React `titlebar-host.html?ghostexTitlebarPanel=tips` document inside an app-owned anchored overlay whose top edge is TITLEBAR_HEIGHT. Because the rendered child is a native CEF view, dropdown state changes must explicitly show/hide the CEF surface instead of relying on GPUI paint removal.
+        The GPUI info glyph opens the shared React `titlebar-host.html?ghostexTitlebarPanel=tips` document inside an app-owned anchored overlay whose top edge is the workarea header's measured bottom edge. Because the rendered child is a native CEF view, dropdown state changes must explicitly show/hide the CEF surface instead of relying on GPUI paint removal.
         */
         if open {
             self.close_gpui_titlebar_popup(None, window, cx);

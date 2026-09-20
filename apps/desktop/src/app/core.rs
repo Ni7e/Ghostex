@@ -978,7 +978,7 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_delayed_send_persistence_ticker_active: bool,
     /*
     CDXC:Onboarding 2026-06-24-23:17:
-    The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside an app-owned anchored GPUI overlay positioned directly below TITLEBAR_HEIGHT. Store only the panel entity, open boolean, and transient focus handoff state so closing the overlay can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
+    The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside an app-owned anchored GPUI overlay positioned directly below the workarea header's measured bottom edge. Store only the panel entity, open boolean, and transient focus handoff state so closing the overlay can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
     */
     pub(crate) titlebar_dropdown_focus_handle: FocusHandle,
     pub(crate) titlebar_dropdown_previous_focus_handle: Option<FocusHandle>,

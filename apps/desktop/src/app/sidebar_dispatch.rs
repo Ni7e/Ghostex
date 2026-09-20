@@ -2127,32 +2127,27 @@ impl GhostexGpuiApp {
     ) {
         self.handle_sidebar_drag_move(event, window, cx);
 
-        let hovering = self.sidebar_drag.is_some()
-            || self.sidebar_divider_contains_mouse_position(event, window);
+        let hovering =
+            self.sidebar_drag.is_some() || self.sidebar_divider_contains_mouse_position(event);
         self.set_sidebar_divider_hovering(hovering, cx);
     }
 
-    pub(crate) fn sidebar_divider_contains_mouse_position(
-        &self,
-        event: &MouseMoveEvent,
-        window: &Window,
-    ) -> bool {
-        self.sidebar_divider_contains_position(event.position, window)
+    pub(crate) fn sidebar_divider_contains_mouse_position(&self, event: &MouseMoveEvent) -> bool {
+        self.sidebar_divider_contains_position(event.position)
     }
 
-    pub(crate) fn sidebar_divider_contains_position(
-        &self,
-        position: gpui::Point<Pixels>,
-        window: &Window,
-    ) -> bool {
+    pub(crate) fn sidebar_divider_contains_position(&self, position: gpui::Point<Pixels>) -> bool {
         if !gpui_sidebar_chrome_visible(self.sidebar_collapsed) {
             return false;
         }
         let x = position.x.as_f32();
-        let y = position.y.as_f32();
         let (start_x, end_x) = gpui_sidebar_divider_x_bounds(self.sidebar_width);
 
-        y >= TITLEBAR_HEIGHT && x >= start_x && x <= end_x
+        // CDXC:Sidebar 2026-09-20 WHY:
+        // The divider used to start below the titlebar row. That row is gone, so the body row and
+        // its divider own the window from its top edge down; the header is a child of the
+        // workspace column to the divider's right and never overlaps this band.
+        x >= start_x && x <= end_x
     }
 
     pub(crate) fn handle_sidebar_divider_mouse_down(

@@ -1467,15 +1467,11 @@ pub(crate) fn titlebar_background() -> Hsla {
 
 /*
 CDXC:Theming 2026-07-22:
-The titlebar strip paints the sidebar's shared gradient stops horizontally
-(left = darker sidebar top stop, right = lighter sidebar bottom stop) so the
-chrome reads as one continuous surface. Solid consumers (popup borders, modal
-host fills) keep `titlebar_background()`.
+The sidebar paints its shared gradient stops (darker top stop, lighter bottom stop) so the chrome
+reads as one continuous surface. Solid consumers (popup borders, modal host fills) keep
+`titlebar_background()`. The horizontal variant the titlebar strip painted went with the strip; the
+workarea header that replaced it paints the workspace background so it has no edge against content.
 */
-pub(crate) fn titlebar_gradient_fill() -> gpui::Background {
-    sidebar_chrome_gradient_fill(90.0)
-}
-
 pub(crate) fn sidebar_chrome_gradient_fill(angle: f32) -> gpui::Background {
     gpui::linear_gradient(
         angle,

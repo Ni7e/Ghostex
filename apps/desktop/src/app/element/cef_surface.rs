@@ -2,6 +2,7 @@
 // move, no logic changes; items made pub(crate) so main.rs and sibling
 // modules can still reach them). See docs/2026-08-22/repo-restructure/SPLITS.md C1.
 
+use crate::app::render::workarea_header::workarea_header_bottom_y;
 use crate::*;
 
 pub(crate) struct CefSurface {
@@ -414,7 +415,7 @@ impl CefSurface {
             root,
             collapsed,
             width as f64,
-            TITLEBAR_HEIGHT as f64,
+            workarea_header_bottom_y() as f64,
             sidebar_cef_prepaint_background_color(),
             companion_hidden,
             requested,

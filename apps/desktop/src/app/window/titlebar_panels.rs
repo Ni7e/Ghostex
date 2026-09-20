@@ -19,7 +19,7 @@ pub(crate) struct GpuiTitlebarAnchoredDropdownState {
 impl Default for GpuiTitlebarAnchoredDropdownState {
     fn default() -> Self {
         Self {
-            position: point(px(0.0), px(TITLEBAR_HEIGHT)),
+            position: point(px(0.0), px(WORKAREA_HEADER_HEIGHT)),
             trigger_bounds: Bounds::default(),
             trigger_bounds_captured: false,
         }

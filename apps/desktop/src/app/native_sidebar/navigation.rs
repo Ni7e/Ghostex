@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled,
-    div, px,
+    WindowControlArea, div, px,
 };
 use gpui_component::h_flex;
 use gpui_component::tooltip::ManagedTooltipExt as _;
@@ -38,12 +38,29 @@ impl GhostexGpuiApp {
             &snapshot.search_shortcut
         };
         let more_menu = snapshot.more_menu.clone();
+        /*
+        CDXC:Sidebar 2026-09-20 DECISION:
+        User: with the titlebar row deleted, the sidebar's Search row is what sits in the window's
+        top-left corner, so it reserves the macOS traffic lights and is the window's drag handle
+        there. It does so only while the sidebar is docked: the hover-reveal panel renders this same
+        row below the workarea header, where there are no lights to clear.
+        CDXC:Sidebar 2026-09-20 WHY:
+        macOS only. Windows and Linux keep their caption buttons as trailing children of the
+        workarea header, and a Drag region here would swallow this row's own clicks there, because
+        WM_NCHITTEST needs every interactive child to occlude it and the sidebar's rows do not.
+        */
+        let reserves_window_controls =
+            cfg!(target_os = "macos") && !footer && !self.sidebar_collapsed;
         h_flex()
             .w_full()
             .h(px((if footer { 36.0 } else { 35.0 }) * scale))
             .pt(px((if footer { 4.0 } else { 5.0 }) * scale))
             .pb(px((if footer { 3.0 } else { 2.0 }) * scale))
             .when(!footer, |row| row.px(px(5.0 * scale)).gap(px(4.0 * scale)))
+            .when(reserves_window_controls, |row| {
+                row.pl(px(WINDOW_CONTROLS_LEADING_RESERVE - 7.0 * scale))
+                    .window_control_area(WindowControlArea::Drag)
+            })
             // The Search row's bottom hairline and the Commands row's top
             // hairline share one color so the list is framed evenly.
             .when(footer, |row| row.border_t_1())
