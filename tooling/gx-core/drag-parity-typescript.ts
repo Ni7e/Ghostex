@@ -138,9 +138,10 @@ async function runOrderWrite(
   runtime.presentation = snapshot;
   runtime.activeProjectId = undefined;
   runtime.activeGroupId = undefined;
-  // `persistWorkspaceGroups` is the storage write and the booked push; both are edges, and the
-  // guard that owns them is gated separately by `workspace_groups_guard`. What this gate is about
-  // is the DOCUMENT each message leaves behind.
+  // `persistWorkspaceGroups` is where an edit leaves this page. Since M5 piece 7c it posts the
+  // document to the app rather than writing client storage and pushing it, and either way it is an
+  // edge; the guard that owns the write and the push is gated separately by
+  // `workspace_groups_guard`. What this gate is about is the DOCUMENT each message leaves behind.
   // The identity semantics, captured at the shipped decision point: `persistWorkspaceGroups` runs
   // exactly when the TypeScript decided to write, including when the document it writes is equal to
   // the one it replaced. Comparing the documents instead would hide a write.

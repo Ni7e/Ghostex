@@ -994,6 +994,9 @@ impl GxStoreDiagnostics {
                 "echoesAdopted": counters.echoes_adopted,
                 "echoesEqual": counters.echoes_equal,
                 "echoesPushedBack": counters.echoes_pushed_back,
+                "handOffs": counters.hand_offs,
+                "handBacks": counters.hand_backs,
+                "prunes": counters.prunes,
             }),
         );
     }

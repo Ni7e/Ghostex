@@ -1130,6 +1130,15 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     });
   },
 
+  /*
+  CDXC:Sessions 2026-09-21 WHY:
+  This prune no longer persists. It ran on EVERY build and wrote whatever this page held, so in the
+  window between an edit made in the app and the daemon echoing it back here, a session vanishing
+  was enough to write this page's older document over the key and push it, undoing the user's move
+  (declared difference 29). The app prunes the document it holds and hands the result back
+  (apps/desktop/src/app/gx_store/workspace_groups.rs); this keeps pruning its own copy so the
+  projection built in this very frame lists no member whose session is gone.
+  */
   pruneWorkspaceGroupAssignments(this: GpuiSidebarRuntime, presentation: GxserverPresentationSnapshot): void {
     let next = this.workspaceGroups;
     for (const project of presentation.projects) {
@@ -1145,7 +1154,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     }
     if (next !== this.workspaceGroups) {
       this.workspaceGroups = next;
-      this.persistWorkspaceGroups();
     }
   },
 
@@ -1169,7 +1177,6 @@ export const gpuiSidebarRuntimeSidebarGroupMethods = {
     }
     if (next !== this.workspaceGroups) {
       this.workspaceGroups = next;
-      this.persistWorkspaceGroups();
     }
   },
 

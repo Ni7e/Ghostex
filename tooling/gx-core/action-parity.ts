@@ -29,6 +29,7 @@
  */
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { pruneGpuiWorkspaceSessionSubgroups } from '@/apps/desktop/sidebar/workspace-session-groups';
 
 type Json = Record<string, any>;
 
@@ -1384,12 +1385,22 @@ async function compareWorkspaceGroups([outDir, ...flags]: string[]) {
   );
   for (const difference of differences.slice(0, 20)) console.log(`  ${difference}`);
   if (differences.length > 20) console.log(`  … and ${differences.length - 20} more`);
+  const prune = compareWorkspaceGroupPrune((dump.pruneCases ?? []) as Json[], mutationName);
+  differences.push(...prune.differences);
+  console.log(
+    `workspace groups prune: ${prune.cases} cases pruneEdits ${prune.edits} pruneIdentities ${prune.identities} pruneDropped ${prune.dropped} pruneUntouchedProjects ${prune.untouched} differences ${prune.differences.length}`
+  );
+  for (const difference of prune.differences.slice(0, 10)) console.log(`  ${difference}`);
   const measured: [string, number][] = [
     ['steps', steps],
     ['ignoredPending', ignoredPending],
     ['adopted', adopted],
     ['scheduledPushes', scheduledPushes],
     ['retries', retries],
+    ['pruneEdits', prune.edits],
+    ['pruneIdentities', prune.identities],
+    ['pruneDropped', prune.dropped],
+    ['pruneUntouchedProjects', prune.untouched],
   ];
   const collapsed = measured.filter(([, count]) => count === 0);
   if (mutationName) {
@@ -1420,6 +1431,105 @@ function normalizeDocument(document: unknown): Json {
   const sorted: Json = {};
   for (const key of Object.keys(projects).sort()) sorted[key] = projects[key];
   return { projectOrder: record.projectOrder ?? [], projects: sorted };
+}
+
+/**
+ * The prune, compared against the SHIPPED `pruneGpuiWorkspaceSessionSubgroups` driven in the loop
+ * shape `pruneWorkspaceGroupAssignments` drives it in.
+ *
+ * Unlike the guard above, the TypeScript here is still the app's own code, because piece 7c took the
+ * prune's WRITE away and left the prune itself in place for the old runtime's own projection. So
+ * this half is a live comparison and not a frozen one.
+ *
+ * `edited` is compared as well as the document, because it is what decides a client-storage write
+ * and a push, and the TypeScript expresses it as `next !== this.workspaceGroups`. A port that
+ * returned a fresh, equal object for every pass would look identical in the documents and would
+ * write the key and push on every sidebar build.
+ *
+ * NOT covered here, and named rather than left to look covered: WHICH projects the app names. That
+ * loop is `gx_store_prune_workspace_groups` in the desktop crate, it reads the store's loaded
+ * presentations, and it has no TypeScript twin to compare against; the `unlisted-project-untouched`
+ * cases pin the RULE (a project nobody named keeps every member) but not the host's reading of it.
+ */
+function compareWorkspaceGroupPrune(
+  cases: Json[],
+  mutationName: string | undefined
+): { cases: number; edits: number; identities: number; dropped: number; untouched: number; differences: string[] } {
+  const differences: string[] = [];
+  let edits = 0;
+  let identities = 0;
+  let dropped = 0;
+  let untouched = 0;
+  for (const entry of cases) {
+    const document = entry.document as Json;
+    const projects = (entry.projects ?? []) as Json[];
+    const named = new Set(projects.map((project) => String(project.projectId)));
+    for (const projectId of Object.keys((document.projects ?? {}) as Json)) {
+      if (!named.has(projectId)) untouched += 1;
+    }
+    // The shipped loop, verbatim in shape: walk the projects the presentation lists, thread one
+    // document through, and treat "the same object came back" as no edit at all.
+    let next = document;
+    for (const project of projects) {
+      const existing = new Set((project.sessionIds ?? []) as string[]);
+      next = pruneGpuiWorkspaceSessionSubgroups(next as any, String(project.projectId), existing) as Json;
+    }
+    const theirEdited = next !== document;
+    for (const [projectId, groups] of Object.entries((document.projects ?? {}) as Json)) {
+      const after = ((next.projects ?? {}) as Json)[projectId];
+      for (const [index, group] of (((groups as Json).groups ?? []) as Json[]).entries()) {
+        const before = ((group.sessionIds ?? []) as string[]).length;
+        const now = ((((after?.groups ?? []) as Json[])[index]?.sessionIds ?? []) as string[]).length;
+        dropped += before - now;
+      }
+    }
+    const mine = mutatePrune(mutationName, entry);
+    if (mine.edited) edits += 1;
+    else identities += 1;
+    if (canonical(normalizeDocument(mine.result)) !== canonical(normalizeDocument(next)))
+      differences.push(
+        `prune ${String(entry.name)}: rust ${canonical(normalizeDocument(mine.result))} ts ${canonical(normalizeDocument(next))}`
+      );
+    if (mine.edited !== theirEdited)
+      differences.push(`prune ${String(entry.name)} edited: rust ${mine.edited} ts ${theirEdited}`);
+  }
+  return { cases: cases.length, edits, identities, dropped, untouched, differences };
+}
+
+/**
+ * The prune's mutations. Each one is a shortcut a port would plausibly take, and the third is the
+ * one that loses data: a machine whose rows have not arrived names no projects, so pruning every
+ * project of the document against the sets it was given deletes every group on it.
+ */
+function mutatePrune(name: string | undefined, entry: Json): { edited: boolean; result: Json } {
+  const document = entry.document as Json;
+  const edited = entry.edited === true;
+  const result = entry.result as Json;
+  switch (name) {
+    case 'prune-keeps-dead-members':
+      return { edited: false, result: document };
+    case 'prune-writes-when-nothing-moved':
+      return { edited: true, result };
+    case 'prune-drops-unlisted-projects': {
+      const named = new Map<string, Set<string>>();
+      for (const project of (entry.projects ?? []) as Json[])
+        named.set(String(project.projectId), new Set((project.sessionIds ?? []) as string[]));
+      const projects: Json = {};
+      let moved = false;
+      for (const [projectId, groups] of Object.entries((document.projects ?? {}) as Json)) {
+        const existing = named.get(projectId) ?? new Set<string>();
+        const next = (((groups as Json).groups ?? []) as Json[]).map((group) => {
+          const sessionIds = ((group.sessionIds ?? []) as string[]).filter((id) => existing.has(id));
+          if (sessionIds.length !== ((group.sessionIds ?? []) as string[]).length) moved = true;
+          return { ...group, sessionIds };
+        });
+        projects[projectId] = { ...(groups as Json), groups: next };
+      }
+      return { edited: moved, result: { ...document, projects } };
+    }
+    default:
+      return { edited, result };
+  }
 }
 
 /**
@@ -1488,6 +1598,9 @@ const GROUPS_MUTATIONS = [
   'clear-pending-on-any-success',
   'give-up-after-a-failed-push',
   'adopt-an-empty-server-document',
+  'prune-keeps-dead-members',
+  'prune-writes-when-nothing-moved',
+  'prune-drops-unlisted-projects',
 ];
 
 function pacedPayload(payload: Json): boolean {

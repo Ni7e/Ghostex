@@ -1,10 +1,23 @@
 /**
  * The TypeScript half of the workspace-groups guard gate.
  *
- * Drives the SHIPPED `persistWorkspaceGroups`, `scheduleWorkspaceGroupsServerSync`,
- * `pushWorkspaceGroupsToGxserver` and `adoptWorkspaceGroupsFromGxserver` through the same event
- * scripts the Rust probe wrote, and records what is held after EVERY event. Nothing about the guard
- * is reimplemented here; three edges are replaced and each one is an edge rather than a decision:
+ * **This is now a FROZEN REFERENCE, and saying so is the point.** Until M5 piece 7c it drove the
+ * shipped `persistWorkspaceGroups`, `scheduleWorkspaceGroupsServerSync`,
+ * `pushWorkspaceGroupsToGxserver` and `adoptWorkspaceGroupsFromGxserver` on
+ * `GpuiSidebarRuntime.prototype`. Piece 7c deleted all four: the app is the only writer of
+ * `ghostex-gpui-workspace-session-groups` and the only thing that pushes it to gxserver, and the
+ * old runtime hands its edits over instead. A gate whose reference implementation no longer exists
+ * either stops running or keeps a copy; a gate that stopped running is the failure mode this port
+ * has hit repeatedly, so the four functions are copied here VERBATIM as they shipped on
+ * 2026-09-21, with only the field names shortened to this file's local object.
+ *
+ * What that costs is real and is not hidden: from here the gate no longer proves that Rust matches
+ * the app's TypeScript, because there is none. It proves that Rust still matches the behaviour that
+ * was in the app when the port was made, which is what a regression test is. Changing the Rust
+ * guard without changing this file still fails the gate; changing both to agree on something wrong
+ * no longer fails it.
+ *
+ * Three edges are replaced and each one is an edge rather than a decision:
  *
  * - `window.setTimeout` is a manual queue, so "the booked push runs now" is an event in the script
  *   instead of a 400 ms wait. The bulk pacing probe learned this the hard way: driving the real
@@ -12,17 +25,104 @@
  * - `client.updateWorkspaceSessionGroups` returns a promise the script resolves or rejects, which
  *   is what makes an echo DURING a push expressible at all.
  * - client storage is the harness's shim, so a write is counted rather than persisted.
+ *
+ * SEE-ALSO: packages/gx-core/src/workspace_groups/sync.rs,
+ * apps/desktop/sidebar/gxserver-runtime/workspace-groups-sync.ts.
  */
 import { resetBrowserStorage } from './browser-shim';
-import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
 import {
+  isEmptyGpuiWorkspaceSessionGroupsState,
   parseGpuiWorkspaceSessionGroupsState,
-  readStoredGpuiWorkspaceSessionGroupsState,
+  writeStoredGpuiWorkspaceSessionGroupsState,
 } from '@/apps/desktop/sidebar/workspace-session-groups';
+import {
+  GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS,
+  GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS,
+} from '@/apps/desktop/sidebar/gxserver-runtime/constants';
 
 type Json = Record<string, any>;
 
-/** One script, run against the shipped guard. */
+/**
+ * The four functions as they shipped, on a plain object with the same field names. Copied, not
+ * rewritten: every branch, every identity test and the `catch` that retries for ever are the
+ * originals.
+ */
+function createFrozenRuntime(start: Json, settleHolder: { settle?: (ok: boolean) => void }): Json {
+  const runtime: Json = {
+    workspaceGroups: parseGpuiWorkspaceSessionGroupsState(start),
+    workspaceGroupsServerSyncPending: false,
+    workspaceGroupsServerSyncTimeoutId: undefined as number | undefined,
+    client: {
+      updateWorkspaceSessionGroups: () =>
+        new Promise<void>((resolve, reject) => {
+          settleHolder.settle = (ok: boolean) => (ok ? resolve() : reject(new Error('offline')));
+        }),
+    },
+  };
+
+  runtime.persistWorkspaceGroups = (): void => {
+    writeStoredGpuiWorkspaceSessionGroupsState(runtime.workspaceGroups);
+    runtime.scheduleWorkspaceGroupsServerSync();
+  };
+
+  runtime.scheduleWorkspaceGroupsServerSync = (): void => {
+    runtime.workspaceGroupsServerSyncPending = true;
+    if (runtime.workspaceGroupsServerSyncTimeoutId !== undefined) {
+      window.clearTimeout(runtime.workspaceGroupsServerSyncTimeoutId);
+    }
+    runtime.workspaceGroupsServerSyncTimeoutId = window.setTimeout(() => {
+      runtime.workspaceGroupsServerSyncTimeoutId = undefined;
+      void runtime.pushWorkspaceGroupsToGxserver();
+    }, GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS);
+  };
+
+  runtime.pushWorkspaceGroupsToGxserver = async (): Promise<void> => {
+    const client = runtime.client;
+    if (!client) {
+      return;
+    }
+    const pushed = runtime.workspaceGroups;
+    try {
+      await client.updateWorkspaceSessionGroups(pushed);
+      if (runtime.workspaceGroups === pushed) {
+        runtime.workspaceGroupsServerSyncPending = false;
+      }
+    } catch {
+      if (
+        runtime.client === client &&
+        runtime.workspaceGroupsServerSyncTimeoutId === undefined &&
+        runtime.workspaceGroupsServerSyncPending
+      ) {
+        runtime.workspaceGroupsServerSyncTimeoutId = window.setTimeout(() => {
+          runtime.workspaceGroupsServerSyncTimeoutId = undefined;
+          void runtime.pushWorkspaceGroupsToGxserver();
+        }, GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS);
+      }
+    }
+  };
+
+  runtime.adoptWorkspaceGroupsFromGxserver = (serverState: unknown): void => {
+    if (serverState === undefined || runtime.workspaceGroupsServerSyncPending) {
+      return;
+    }
+    const parsed = parseGpuiWorkspaceSessionGroupsState(serverState);
+    if (isEmptyGpuiWorkspaceSessionGroupsState(parsed)) {
+      if (!isEmptyGpuiWorkspaceSessionGroupsState(runtime.workspaceGroups)) {
+        runtime.scheduleWorkspaceGroupsServerSync();
+      }
+      return;
+    }
+    if (JSON.stringify(parsed) === JSON.stringify(runtime.workspaceGroups)) {
+      return;
+    }
+    runtime.workspaceGroups = parsed;
+    writeStoredGpuiWorkspaceSessionGroupsState(parsed);
+  };
+
+  return runtime;
+}
+
+/** One script, run against the frozen guard. */
 export async function runTypeScriptWorkspaceGroupsCase(
   start: Json,
   script: string[],
@@ -41,18 +141,8 @@ export async function runTypeScriptWorkspaceGroupsCase(
   (globalThis.window as any).clearTimeout = (id: number) => {
     if (typeof id === 'number' && id >= 1 && id <= timers.length) timers[id - 1] = () => {};
   };
-  let writes = 0;
-  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
-  runtime.workspaceGroups = parseGpuiWorkspaceSessionGroupsState(start);
-  runtime.workspaceGroupsServerSyncPending = false;
-  runtime.workspaceGroupsServerSyncTimeoutId = undefined;
-  let settle: ((ok: boolean) => void) | undefined;
-  runtime.client = {
-    updateWorkspaceSessionGroups: () =>
-      new Promise<void>((resolve, reject) => {
-        settle = (ok: boolean) => (ok ? resolve() : reject(new Error('offline')));
-      }),
-  };
+  const settleHolder: { settle?: (ok: boolean) => void } = {};
+  const runtime = createFrozenRuntime(start, settleHolder);
   const steps: Json[] = [];
   try {
     for (const event of script) {
@@ -60,7 +150,6 @@ export async function runTypeScriptWorkspaceGroupsCase(
         case 'editA':
         case 'editB': {
           runtime.workspaceGroups = parseGpuiWorkspaceSessionGroupsState(documents[event === 'editA' ? 1 : 2]);
-          writes += 1;
           runtime.persistWorkspaceGroups();
           break;
         }
@@ -89,8 +178,8 @@ export async function runTypeScriptWorkspaceGroupsCase(
         }
         case 'pushOk':
         case 'pushFail': {
-          settle?.(event === 'pushOk');
-          settle = undefined;
+          settleHolder.settle?.(event === 'pushOk');
+          settleHolder.settle = undefined;
           await flush();
           break;
         }
@@ -105,8 +194,6 @@ export async function runTypeScriptWorkspaceGroupsCase(
     (globalThis.window as any).setTimeout = realSetTimeout;
     (globalThis.window as any).clearTimeout = realClearTimeout;
   }
-  void writes;
-  void readStoredGpuiWorkspaceSessionGroupsState;
   return steps;
 }
 

@@ -8,7 +8,6 @@ import {
   createGpuiWorkspaceSessionSubgroupId,
   findGpuiWorkspaceSessionSubgroupForSession,
   getGpuiWorkspaceSessionSubgroups,
-  isEmptyGpuiWorkspaceSessionGroupsState,
   moveGpuiWorkspaceSessionToSubgroup,
   parseGpuiWorkspaceSessionGroupsState,
   parseGpuiWorkspaceSessionSubgroupId,
@@ -17,7 +16,6 @@ import {
   syncGpuiWorkspaceProjectOrder,
   syncGpuiWorkspaceSessionOrderInSubgroup,
   syncGpuiWorkspaceSessionSubgroupOrder,
-  writeStoredGpuiWorkspaceSessionGroupsState,
 } from '../workspace-session-groups';
 import {
   GPUI_PROJECT_COLLECTIONS_SERVER_SYNC_DELAY_MS,
@@ -26,8 +24,6 @@ import {
   GPUI_CUSTOM_SESSION_TAGS_SERVER_SYNC_RETRY_DELAY_MS,
   GPUI_SIDEBAR_SPACES_SERVER_SYNC_DELAY_MS,
   GPUI_SIDEBAR_SPACES_SERVER_SYNC_RETRY_DELAY_MS,
-  GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS,
-  GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS,
 } from './constants';
 import type { GpuiSidebarRuntime } from './core';
 import { createGpuiPresentationProjectProjectionMetadata } from './helpers/presentation-projection';
@@ -69,9 +65,7 @@ at the bottom of this file is what keeps the two in step.
 */
 export interface GpuiSidebarRuntimeWorkspaceGroupMethods {
   persistWorkspaceGroups(): void;
-  scheduleWorkspaceGroupsServerSync(): void;
-  pushWorkspaceGroupsToGxserver(): Promise<void>;
-  adoptWorkspaceGroupsFromGxserver(serverState: unknown): void;
+  applyWorkspaceGroupsFromHost(state: unknown): void;
   queueSidebarProjectCollectionsServerSync(state: GxserverSidebarProjectCollectionsState): void;
   pushSidebarProjectCollectionsToGxserver(): Promise<void>;
   forwardSidebarProjectCollectionsFromGxserver(state: GxserverSidebarProjectCollectionsState): void;
@@ -112,71 +106,46 @@ export const gpuiSidebarRuntimeWorkspaceGroupMethods = {
   GPUI sidebar named groups are a client-owned project overlay until gxserver exposes durable grouped workspace state.
   Route only local project/session ids through create, rename, close, move, and reorder operations; remote groups stay out of this path and localStorage mirrors macOS grouped workspace semantics.
   */
-  persistWorkspaceGroups(this: GpuiSidebarRuntime): void {
-    writeStoredGpuiWorkspaceSessionGroupsState(this.workspaceGroups);
-    this.scheduleWorkspaceGroupsServerSync();
-  },
-
   /*
-  CDXC:Sessions 2026-07-12-00:00:
-  gxserver now keeps a durable copy of this overlay so iOS/Android render the
-  same named groups and ordering. localStorage stays the instant-edit source;
-  the server copy is a debounced write-through so group editing never waits on
-  an RPC. While a push is pending or failed, hydration must not clobber the
-  newer local state.
+  CDXC:Sessions 2026-09-21 WHY:
+  This runtime is no longer a writer of `ghostex-gpui-workspace-session-groups` and no longer
+  pushes it to gxserver. It still EDITS the document for the paths the Rust store does not own
+  yet (create, rename, close, the project order, and placing a session it has just created or
+  forked into a group), and every one of those edits arrives here and is handed to the app, which
+  is the single writer and the single synchroniser (apps/desktop/src/app/gx_store/workspace_groups.rs).
+  Two writers of one key was the shape; the one that hurt is that the app's edits reach this page
+  only when the daemon echoes them back, so anything written from here in between was written from
+  a document that was already behind. `applyWorkspaceGroupsFromHost` is the other half: the app
+  hands the held document back after every change, so the next edit is computed from it.
+  Supersedes the 2026-07-12 decision's "localStorage stays the instant-edit source" only in WHERE
+  the write happens: it is still the instant-edit source, still a debounced write-through with an
+  indefinite retry, and still guarded against a stale echo, all of it now in Rust.
+  SEE-ALSO: packages/gx-core/src/workspace_groups/sync.rs.
   */
-  scheduleWorkspaceGroupsServerSync(this: GpuiSidebarRuntime): void {
-    this.workspaceGroupsServerSyncPending = true;
-    if (this.workspaceGroupsServerSyncTimeoutId !== undefined) {
-      window.clearTimeout(this.workspaceGroupsServerSyncTimeoutId);
-    }
-    this.workspaceGroupsServerSyncTimeoutId = window.setTimeout(() => {
-      this.workspaceGroupsServerSyncTimeoutId = undefined;
-      void this.pushWorkspaceGroupsToGxserver();
-    }, GPUI_WORKSPACE_GROUPS_SERVER_SYNC_DELAY_MS);
+  persistWorkspaceGroups(this: GpuiSidebarRuntime): void {
+    window.webkit?.messageHandlers?.ghostexNativeHost?.postMessage({
+      state: this.workspaceGroups,
+      type: 'persistWorkspaceGroups',
+    });
   },
 
-  async pushWorkspaceGroupsToGxserver(this: GpuiSidebarRuntime): Promise<void> {
-    const client = this.client;
-    if (!client) {
-      return;
-    }
-    const pushed = this.workspaceGroups;
-    try {
-      await client.updateWorkspaceSessionGroups(pushed);
-      if (this.workspaceGroups === pushed) {
-        this.workspaceGroupsServerSyncPending = false;
-      }
-    } catch {
-      if (
-        this.client === client &&
-        this.workspaceGroupsServerSyncTimeoutId === undefined &&
-        this.workspaceGroupsServerSyncPending
-      ) {
-        this.workspaceGroupsServerSyncTimeoutId = window.setTimeout(() => {
-          this.workspaceGroupsServerSyncTimeoutId = undefined;
-          void this.pushWorkspaceGroupsToGxserver();
-        }, GPUI_WORKSPACE_GROUPS_SERVER_SYNC_RETRY_DELAY_MS);
-      }
-    }
-  },
-
-  adoptWorkspaceGroupsFromGxserver(this: GpuiSidebarRuntime, serverState: unknown): void {
-    if (serverState === undefined || this.workspaceGroupsServerSyncPending) {
-      return;
-    }
-    const parsed = parseGpuiWorkspaceSessionGroupsState(serverState);
-    if (isEmptyGpuiWorkspaceSessionGroupsState(parsed)) {
-      if (!isEmptyGpuiWorkspaceSessionGroupsState(this.workspaceGroups)) {
-        this.scheduleWorkspaceGroupsServerSync();
-      }
-      return;
-    }
+  /**
+   * The document the app holds, which is the daemon's copy once the guard has judged it and the
+   * newest local edit while a push is outstanding. This page no longer reads the daemon's copy
+   * itself: it has no way to know whether a push is in flight, so adopting an echo here would be
+   * the oscillation the guard exists to prevent, one process over.
+   */
+  applyWorkspaceGroupsFromHost(this: GpuiSidebarRuntime, state: unknown): void {
+    const parsed = parseGpuiWorkspaceSessionGroupsState(state);
     if (JSON.stringify(parsed) === JSON.stringify(this.workspaceGroups)) {
       return;
     }
     this.workspaceGroups = parsed;
-    writeStoredGpuiWorkspaceSessionGroupsState(parsed);
+    if (this.presentation) {
+      this.publishPresentation('patch');
+    } else {
+      this.publishRemotePresentationPatch();
+    }
   },
 
   /*

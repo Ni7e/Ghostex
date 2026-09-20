@@ -229,6 +229,7 @@ CDXC:Projects 2026-06-24-22:51:
 Generated Chat folders must not render as individual GPUI project groups, and clicking a chat session must not publish that chat folder as the active project to Rust. Treat host Ghostex-home chat roots, including dev `.active/chats` homes, as projectless Chats containers before building active-project context, Settings project rows, or Git HUD state.
 */
 export function createGpuiSidebarRuntime(): {
+  applyWorkspaceGroupsFromHost: (state: unknown) => void;
   messageSource: GpuiSidebarLocalMessageSource;
   start: () => void;
   startLocalGxserver: () => void;
@@ -236,6 +237,7 @@ export function createGpuiSidebarRuntime(): {
 } {
   const runtime = new GpuiSidebarRuntime();
   return {
+    applyWorkspaceGroupsFromHost: (state: unknown) => runtime.applyWorkspaceGroupsFromHost(state),
     messageSource: runtime.messageSource,
     start: () => runtime.start(),
     startLocalGxserver: () => runtime.startLocalGxserver(),
@@ -551,8 +553,6 @@ export class GpuiSidebarRuntime {
   didConnectSavedRemoteMachinesOnStartup = false;
   enabledRemoteMachineIdsForReconnect = new Set<string>();
   workspaceGroups: GpuiWorkspaceSessionGroupsState = createEmptyGpuiWorkspaceSessionGroupsState();
-  workspaceGroupsServerSyncTimeoutId: number | undefined;
-  workspaceGroupsServerSyncPending = false;
   latestSidebarProjectCollectionsUpdate: GxserverSidebarProjectCollectionsState | undefined;
   sidebarProjectCollectionsServerSyncTimeoutId: number | undefined;
   sidebarProjectCollectionsServerSyncPending = false;

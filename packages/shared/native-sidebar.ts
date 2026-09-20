@@ -186,6 +186,17 @@ export type NativeSidebarCommand =
 export type NativeSidebarBridge = {
   postNativeSidebarSnapshot?: (snapshot: string) => void;
   onNativeSidebarCommand?: (command: NativeSidebarCommand) => void;
+  /**
+   * The workspace session groups document the app holds, handed to this page after every change.
+   *
+   * Its own named function rather than a `NativeSidebarCommand`, because a sidebar command arrives
+   * in one of two envelopes and picking the wrong one is how a whole port once shipped dead; this
+   * one has no envelope to get wrong. The app is the only writer of the stored key and the only
+   * thing that pushes it to gxserver (apps/desktop/src/app/gx_store/workspace_groups.rs).
+   */
+  applyWorkspaceGroups?: (state: unknown) => void;
+  /** A document handed over before `applyWorkspaceGroups` was installed; drained when it is. */
+  pendingWorkspaceGroups?: unknown;
 };
 
 export type NativeSidebarMenuItem = {

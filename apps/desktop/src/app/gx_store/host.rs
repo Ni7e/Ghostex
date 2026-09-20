@@ -399,6 +399,10 @@ impl GhostexGpuiApp {
             // The daemon's copy is already in the store by now; the guard says whether it may stay.
             self.gx_store_reconcile_workspace_groups(cx);
         }
+        // A session the daemon stopped listing is a member no group may keep, which the old runtime
+        // asked on every `createSidebarGroups`. Asked here on the same cadence, and free for the
+        // users who have no user-made groups at all: the document's project map is empty.
+        self.gx_store_prune_workspace_groups(cx);
         if self.gx_store_after_pump(outcome.tab_lists_changed, cx) {
             cx.notify();
         }

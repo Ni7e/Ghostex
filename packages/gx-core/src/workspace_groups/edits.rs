@@ -14,6 +14,8 @@
 //! (`createGpuiWorkspaceSessionSubgroup`, `moveGpuiWorkspaceSessionToSubgroup`,
 //! `syncGpuiWorkspaceSessionOrderInSubgroup`), packages/gx-core/src/sidebar_drag/order_write.rs.
 
+use std::collections::BTreeSet;
+
 use ghostex_gx_protocol::WorkspaceSessionGroupsState;
 
 use super::document::{ProjectWorkspaceGroups, WorkspaceGroupsDocument, WorkspaceSubgroup};
@@ -189,6 +191,73 @@ impl WorkspaceGroupsDocument {
             })
             .collect();
         Some(self.with_project_groups(project_id, ProjectWorkspaceGroups { groups, ..current }))
+    }
+
+    /// `pruneGpuiWorkspaceSessionSubgroups`: drop every member of this project's groups whose
+    /// session the presentation no longer lists.
+    ///
+    /// `None` is its identity return and it has TWO shapes, both of which the TypeScript expresses
+    /// as "the same object came back": the project has no entry at all, and no group lost a member.
+    /// A caller that treated either as an edit would write the key and push a document that did not
+    /// move.
+    pub fn prune_project_sessions(
+        &self,
+        project_id: &str,
+        existing_session_ids: &BTreeSet<String>,
+    ) -> Option<Self> {
+        let current = self.projects.get(project_id)?;
+        let mut changed = false;
+        let groups: Vec<WorkspaceSubgroup> = current
+            .groups
+            .iter()
+            .map(|group| {
+                let session_ids: Vec<String> = group
+                    .session_ids
+                    .iter()
+                    .filter(|session_id| existing_session_ids.contains(*session_id))
+                    .cloned()
+                    .collect();
+                if session_ids.len() == group.session_ids.len() {
+                    return group.clone();
+                }
+                changed = true;
+                WorkspaceSubgroup {
+                    session_ids,
+                    ..group.clone()
+                }
+            })
+            .collect();
+        if !changed {
+            return None;
+        }
+        Some(self.with_project_groups(
+            project_id,
+            ProjectWorkspaceGroups {
+                groups,
+                ..current.clone()
+            },
+        ))
+    }
+
+    /// `pruneWorkspaceGroupAssignments`: the same prune over every project the presentation lists,
+    /// threaded through one document so a pass that drops members from three projects is ONE edit.
+    ///
+    /// A project the caller does not name is left exactly as it is. That is the whole reason this
+    /// takes the presentation's projects rather than walking the document: a machine whose rows have
+    /// not arrived lists no projects, and pruning its entries against the nothing it has would
+    /// delete every group the user made on it.
+    pub fn prune_projects<'a>(
+        &self,
+        projects: impl IntoIterator<Item = (&'a str, &'a BTreeSet<String>)>,
+    ) -> Option<Self> {
+        let mut next: Option<Self> = None;
+        for (project_id, existing_session_ids) in projects {
+            let current = next.as_ref().unwrap_or(self);
+            if let Some(pruned) = current.prune_project_sessions(project_id, existing_session_ids) {
+                next = Some(pruned);
+            }
+        }
+        next
     }
 
     /// The user-made group a session belongs to, or `None` for one in the project's own list.

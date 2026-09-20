@@ -120,6 +120,17 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     previousFocusedSessionId = focused;
     publish();
   };
+  // The app owns the stored workspace session groups document and hands the held one back after
+  // every change, so this page's copy is never the stale base its next edit is computed from. A
+  // document that arrived before this ran is parked on the bridge and taken here.
+  bridge.applyWorkspaceGroups = (state) => {
+    runtime.applyWorkspaceGroupsFromHost(state);
+  };
+  if (bridge.pendingWorkspaceGroups !== undefined) {
+    const parked = bridge.pendingWorkspaceGroups;
+    delete bridge.pendingWorkspaceGroups;
+    runtime.applyWorkspaceGroupsFromHost(parked);
+  }
   bridge.onNativeSidebarCommand = (command) => {
     if (command.type === 'sessionMenu') {
       const items = resolveNativeSessionMenu(ui, publisher.snapshot, command);
@@ -180,5 +191,6 @@ export function connectNativeSidebar(runtime: ReturnType<typeof createGpuiSideba
     unsubscribe();
     runtime.messageSource.removeEventListener('message', receive);
     delete bridge.onNativeSidebarCommand;
+    delete bridge.applyWorkspaceGroups;
   };
 }

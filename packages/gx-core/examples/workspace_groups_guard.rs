@@ -12,10 +12,17 @@
 //! sequence is well-formed when a push answer follows a push that started, and when a push starts
 //! only while one is booked, because firing a timer nobody booked is not something the app can do.
 //!
+//! The second half of this probe is the PRUNE, which is a delete path over the user's own data and
+//! therefore gets its own cases rather than riding on the guard's. `pruneWorkspaceGroupAssignments`
+//! used to run on every sidebar build and write whatever the old runtime held; it is Rust's now, and
+//! the case that matters most is the one that must NOT happen: a project the presentation does not
+//! list keeps every member, because a machine whose rows have not arrived lists nothing and pruning
+//! against nothing would delete every group the user made on it.
+//!
 //!   bun tooling/gx-core/action-parity.ts workspace-groups <out-dir>   # the TypeScript half
 //!   cargo run --release --example workspace_groups_guard -- <out-dir>
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ghostex_gx_core::{
     AdoptOutcome, ProjectWorkspaceGroups, WorkspaceGroupsDocument, WorkspaceGroupsEffect,
@@ -62,21 +69,168 @@ fn main() {
         .iter()
         .map(|case| case["steps"].as_array().map(Vec::len).unwrap_or(0))
         .sum();
+    let prune_cases = prune_cases();
     let path = std::path::Path::new(&out_dir).join("rust-groups.json");
     std::fs::write(
         &path,
         serde_json::to_string(&json!({
             "documents": documents.iter().map(WorkspaceGroupsDocument::to_json).collect::<Vec<_>>(),
             "cases": cases,
+            "pruneCases": prune_cases,
         }))
         .expect("serialize"),
     )
     .expect("write");
     println!(
-        "workspace groups guard: {} cases, {steps} steps, written to {}",
+        "workspace groups guard: {} cases, {steps} steps, {} prune cases, written to {}",
         cases.len(),
+        prune_cases.len(),
         path.display()
     );
+}
+
+/// The prune, case by case. Each entry carries the document, the projects the presentation lists
+/// with the sessions it holds for each, and what `prune_projects` answered: the document, and
+/// whether it answered at all, which is what decides a storage write and a push.
+///
+/// The cases are written by hand rather than taken from a recording because a recording has no
+/// user-made groups in it at all, and because the two answers worth being sure about are the two a
+/// recording could never contain: a project the presentation does not list, and a project it lists
+/// with nothing in it.
+fn prune_cases() -> Vec<Value> {
+    let group = |group_id: &str, ids: &[&str]| WorkspaceSubgroup {
+        group_id: group_id.to_string(),
+        session_ids: ids.iter().map(|id| id.to_string()).collect(),
+        title: format!("Group {group_id}"),
+    };
+    let project = |groups: Vec<WorkspaceSubgroup>| ProjectWorkspaceGroups {
+        groups,
+        next_group_number: 4,
+    };
+    let document = |entries: Vec<(&str, ProjectWorkspaceGroups)>| {
+        let mut projects = BTreeMap::new();
+        let mut order = Vec::new();
+        for (project_id, groups) in entries {
+            order.push(project_id.to_string());
+            projects.insert(project_id.to_string(), groups);
+        }
+        WorkspaceGroupsDocument {
+            project_order: order,
+            projects,
+        }
+    };
+    let listed = |entries: Vec<(&str, Vec<&str>)>| -> Vec<(String, BTreeSet<String>)> {
+        entries
+            .into_iter()
+            .map(|(project_id, ids)| {
+                (
+                    project_id.to_string(),
+                    ids.iter().map(|id| id.to_string()).collect(),
+                )
+            })
+            .collect()
+    };
+
+    let two_groups = || {
+        project(vec![
+            group("group-2", &["S1", "S2"]),
+            group("group-3", &["S3"]),
+        ])
+    };
+    let cases: Vec<(
+        &str,
+        WorkspaceGroupsDocument,
+        Vec<(String, BTreeSet<String>)>,
+    )> = vec![
+        (
+            "nothing-dropped",
+            document(vec![("P1", two_groups())]),
+            listed(vec![("P1", vec!["S1", "S2", "S3", "S4"])]),
+        ),
+        (
+            "one-dropped",
+            document(vec![("P1", two_groups())]),
+            listed(vec![("P1", vec!["S1", "S3"])]),
+        ),
+        (
+            // A group whose every member is gone stays, empty. The sidebar still draws its heading
+            // and the user can still drop a row into it, which is why the entry is not removed.
+            "a-group-emptied",
+            document(vec![("P1", two_groups())]),
+            listed(vec![("P1", vec!["S3"])]),
+        ),
+        (
+            // The presentation lists the project and has no sessions for it at all, which is what a
+            // project whose last session was closed looks like.
+            "listed-with-nothing",
+            document(vec![("P1", two_groups())]),
+            listed(vec![("P1", vec![])]),
+        ),
+        (
+            // THE ONE THAT MUST NOT PRUNE. P2 is in the document and the presentation does not list
+            // it, which is every project of a machine that has not connected.
+            "unlisted-project-untouched",
+            document(vec![("P1", two_groups()), ("P2", two_groups())]),
+            listed(vec![("P1", vec!["S1", "S2", "S3"])]),
+        ),
+        (
+            "unlisted-project-untouched-while-another-prunes",
+            document(vec![("P1", two_groups()), ("P2", two_groups())]),
+            listed(vec![("P1", vec!["S1"])]),
+        ),
+        (
+            // Two projects losing a member each is ONE edit, not two writes and two pushes.
+            "two-projects-one-pass",
+            document(vec![("P1", two_groups()), ("P2", two_groups())]),
+            listed(vec![("P1", vec!["S1", "S3"]), ("P2", vec!["S2", "S3"])]),
+        ),
+        (
+            // A project the presentation lists that the document has no entry for: the identity
+            // return that must not count as an edit.
+            "listed-project-with-no-entry",
+            document(vec![("P1", two_groups())]),
+            listed(vec![("P1", vec!["S1", "S2", "S3"]), ("P9", vec!["S8"])]),
+        ),
+        (
+            // A remote project, whose document key carries the machine. The prune reads the key as
+            // an opaque string, and this is the case that says so.
+            "remote-project",
+            document(vec![("remote:m1:project:P1", two_groups())]),
+            listed(vec![("remote:m1:project:P1", vec!["S2"])]),
+        ),
+        (
+            "empty-document",
+            WorkspaceGroupsDocument::default(),
+            listed(vec![("P1", vec!["S1"])]),
+        ),
+    ];
+
+    cases
+        .into_iter()
+        .map(|(name, document, projects)| {
+            let pruned = document.prune_projects(
+                projects
+                    .iter()
+                    .map(|(project_id, ids)| (project_id.as_str(), ids)),
+            );
+            json!({
+                "name": name,
+                "document": document.to_json(),
+                "projects": projects
+                    .iter()
+                    .map(|(project_id, ids)| json!({
+                        "projectId": project_id,
+                        "sessionIds": ids.iter().collect::<Vec<_>>(),
+                    }))
+                    .collect::<Vec<_>>(),
+                // `edited` is the whole reason this is compared rather than assumed: it is what
+                // decides a client-storage write and a push, and the TypeScript expresses it as
+                // "the same object came back".
+                "edited": pruned.is_some(),
+                "result": pruned.unwrap_or(document).to_json(),
+            })
+        })
+        .collect()
 }
 
 /// Three documents: empty, and two that differ in the one place a move changes, which is the order

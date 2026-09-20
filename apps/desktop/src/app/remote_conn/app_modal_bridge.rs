@@ -610,6 +610,18 @@ impl GhostexGpuiApp {
             "quitResourcesFromTitlebar" => {
                 self.receive_gpui_titlebar_resources_quit_message(&message, window, cx);
             }
+            // The old runtime edited the workspace session groups document. Since M5 piece 7c it
+            // writes neither client storage nor the daemon: this is the one writer, behind the
+            // pending-push guard (gx_store/workspace_groups.rs). A payload whose `state` is not an
+            // object is dropped rather than parsed, because an empty document REMOVES the key and a
+            // malformed message must never be the thing that deletes the user's groups.
+            "persistWorkspaceGroups" => {
+                let Some(state) = message.get("state").filter(|state| state.is_object()) else {
+                    return;
+                };
+                let state = state.clone();
+                self.gx_store_receive_workspace_groups_hand_off(&state, cx);
+            }
             "primaryAgentLauncherChanged" => {
                 self.sidebar_primary_agent_launcher_id = message["agentId"]
                     .as_str()

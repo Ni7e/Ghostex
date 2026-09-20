@@ -146,9 +146,8 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
       client.fetchProjectList().catch(() => undefined),
       client.fetchRecentProjects().catch(() => undefined),
       client.fetchSidebarHud(validated.initialActiveProjectId),
-      client.fetchWorkspaceSessionGroups().catch(() => undefined),
     ])
-      .then(([snapshot, appUserData, domainProjects, recentProjects, sidebarHud, workspaceGroups]) => {
+      .then(([snapshot, appUserData, domainProjects, recentProjects, sidebarHud]) => {
         if (this.client !== client) {
           return;
         }
@@ -156,7 +155,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
         this.domainProjects = domainProjects ? [...domainProjects] : [];
         this.recentProjects = recentProjects ? [...recentProjects] : [];
         this.sidebarHud = sidebarHud;
-        this.adoptWorkspaceGroupsFromGxserver(workspaceGroups);
         this.applyPresentationSnapshot(snapshot, 'hydrate');
         this.openPresentationSubscription(validated.clientId, snapshot.revision);
       })
@@ -259,13 +257,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
       onSnapshotCurrent: () => {
         this.notePresentationStreamAcknowledged();
       },
-      onWorkspaceGroups: (state) => {
-        const previous = this.workspaceGroups;
-        this.adoptWorkspaceGroupsFromGxserver(state);
-        if (this.workspaceGroups !== previous) {
-          this.publishPresentation('patch');
-        }
-      },
     });
   },
 
@@ -363,7 +354,6 @@ export const gpuiSidebarRuntimePresentationStreamMethods = {
     if (isCustomSessionTagsState(snapshot.customSessionTags)) {
       this.forwardCustomSessionTagsFromGxserver(snapshot.customSessionTags);
     }
-    this.adoptWorkspaceGroupsFromGxserver(snapshot.workspaceGroups);
     this.publishPresentation(kind);
     this.notifyNativeGxserverPresentationReady();
     if (kind === 'hydrate') {
