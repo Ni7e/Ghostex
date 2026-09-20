@@ -21,6 +21,7 @@
 // First, so the client-storage adapter finds a `Storage` before any module reads one.
 import { resetBrowserStorage } from './browser-shim';
 import { reduceGxserverPresentationDelta } from '@/packages/shared/gxserver-presentation-cache';
+import { createGxserverPresentationSidebarSessionKey } from '@/packages/shared/gxserver-presentation-sidebar-projection';
 import { GpuiSidebarRuntime } from '@/apps/desktop/sidebar/gxserver-runtime/core';
 import { buildLatestGroups } from './action-parity-typescript';
 
@@ -165,4 +166,123 @@ export async function runTypeScriptLifecycle(scenario: Json, rustActions: Json):
     out.push({ owned: true, rpc: acceptedRpc, answers, echo });
   }
   return out;
+}
+
+/**
+ * The close half. Drives the shipped `transitionSession(sessionId, 'close')` through the four
+ * answers and then through the three things the daemon can say about a row the client has already
+ * taken away.
+ *
+ * `neverAnswered` is the case the original cannot resolve at all: its `rpc` is a bare `fetch` with
+ * no timeout and no abort, so the promise `transitionSession` awaits simply never settles. The
+ * harness therefore races it against a tick and reads the state at that point, which IS the
+ * TypeScript's permanent answer: the row is gone and nothing will ever put it back.
+ */
+export async function runTypeScriptClose(scenario: Json, rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const latestGroups = buildLatestGroups(scenario, undefined) as unknown[];
+  const rows = (scenario.snapshot?.sessions ?? []) as Json[];
+  const firstProjectId = rows[0] ? String(rows[0].projectId) : undefined;
+  const elsewhereRow = [...rows].reverse().find((row) => String(row.projectId) !== firstProjectId) ?? rows.at(-1);
+  const elsewhere = elsewhereRow
+    ? { projectId: String(elsewhereRow.projectId), sessionId: String(elsewhereRow.sessionId) }
+    : undefined;
+  const out: Json[] = [];
+  for (const entry of (rustActions.close ?? []) as Json[]) {
+    if (entry.owned !== true) {
+      out.push({ owned: false });
+      continue;
+    }
+    const reference = parseSidebarSessionId(String(entry.sessionId));
+    const answers: Json = {};
+    let acceptedRuntime: Json | undefined;
+    let rpc: Json | null = null;
+    let optimisticFocus: Json[] = [];
+    let optimisticDrawn = true;
+    for (const answer of ['accepted', 'failed', 'neverAnswered'] as const) {
+      const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+      runtime.browserTabs = [];
+      runtime.latestGroups = latestGroups;
+      runtime.presentation = scenario.snapshot;
+      runtime.localFirstHiddenPresentationSessionKeys = new Set<string>();
+      runtime.focusedSessionId =
+        entry.focus === 'self' ? reference?.sessionId : entry.focus === 'other' ? elsewhere?.sessionId : undefined;
+      const focuses: Json[] = [];
+      runtime.focusLocalWorkspaceSession = (projectId: string, sessionId: string) => {
+        focuses.push({
+          follow: 'focus',
+          session: `${SIDEBAR_SESSION_PREFIX}${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}`,
+        });
+      };
+      runtime.publishPresentation = () => {};
+      runtime.client = {
+        rpc(path: string, params: Json) {
+          rpc = { path, params };
+          if (answer === 'accepted') return Promise.resolve({ action: 'close', session: {} });
+          if (answer === 'failed') return Promise.reject(new Error('transport'));
+          return new Promise(() => {});
+        },
+      };
+      // The optimistic half runs synchronously inside `transitionSession` before its await, so the
+      // state a tick later is the state for every answer that has not arrived.
+      const run = runtime.transitionSession(String(entry.sessionId), 'close');
+      await Promise.race([run, new Promise((resolve) => setTimeout(resolve, 0))]);
+      if (answer === 'accepted') {
+        await run;
+        acceptedRuntime = runtime;
+        optimisticFocus = focuses;
+        optimisticDrawn = closeRowIsDrawn(runtime, reference);
+      }
+      answers[answer] = { drawn: closeRowIsDrawn(runtime, reference) };
+    }
+    const echo: Json = {};
+    const row = rows.find(
+      (candidate) =>
+        reference !== undefined &&
+        String(candidate.projectId) === reference.projectId &&
+        String(candidate.sessionId) === reference.sessionId
+    );
+    if (acceptedRuntime && reference && row) {
+      for (const [name, delta] of [
+        ['removed', { projectId: reference.projectId, sessionId: reference.sessionId, type: 'sessionRemoved' }],
+        ['stillRunning', { session: { ...row, lifecycleState: 'running' }, type: 'sessionUpdated' }],
+        ['stopped', { session: { ...row, lifecycleState: 'stopped' }, type: 'sessionUpdated' }],
+      ] as const) {
+        const echoed = Object.create(GpuiSidebarRuntime.prototype) as Json;
+        echoed.localFirstHiddenPresentationSessionKeys = acceptedRuntime.localFirstHiddenPresentationSessionKeys;
+        echoed.presentation = reduceGxserverPresentationDelta(
+          acceptedRuntime.presentation as any,
+          delta as any,
+          Number(acceptedRuntime.presentation.revision ?? 0) + 1
+        );
+        echo[name] = { drawn: closeRowIsDrawn(echoed, reference) };
+      }
+    }
+    out.push({
+      owned: true,
+      rpc,
+      optimistic: { drawn: optimisticDrawn, focus: optimisticFocus },
+      answers,
+      echo,
+    });
+  }
+  return out;
+}
+
+/**
+ * Whether the sidebar would draw the row: `this.presentation` still holds it and the runtime's
+ * own local-first hidden set does not name it. Those are the two things
+ * `removePresentationSession` changes, and the second is the one nothing ever clears.
+ */
+function closeRowIsDrawn(runtime: Json, reference: { projectId: string; sessionId: string } | undefined): boolean {
+  if (!reference) return false;
+  const present = ((runtime.presentation?.sessions ?? []) as Json[]).some(
+    (session) => session.projectId === reference.projectId && session.sessionId === reference.sessionId
+  );
+  // The shipped key builder, not a hand-rolled one: it joins with a NUL, and guessing a colon
+  // here would have made every hidden row read as drawn and the whole close gate as passing.
+  const hidden = (runtime.localFirstHiddenPresentationSessionKeys as Set<string> | undefined)?.has(
+    createGxserverPresentationSidebarSessionKey(reference.projectId, reference.sessionId)
+  );
+  return present && !hidden;
 }

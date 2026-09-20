@@ -89,6 +89,51 @@ const MUTATIONS: Record<string, (calls: Json[], entry: Json, dump: Json) => Json
  * The transition half's mutations. They act on a whole dump entry rather than on a call list,
  * because what they have to be able to break is a STATE the daemon then contradicts.
  */
+/**
+ * The close half's mutations. The first is the port's own deliberate difference removed, which
+ * must show up as the gate's classification going to zero rather than as agreement.
+ */
+function mutateClose(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  switch (name) {
+    // The row left missing after a call that never came home, which is what the TypeScript does
+    // and what this port deliberately does not.
+    case 'never-restore-the-row':
+      if (clone.answers?.failed) clone.answers.failed.drawn = false;
+      if (clone.answers?.neverAnswered) clone.answers.neverAnswered.drawn = false;
+      return clone;
+    // The row not taken away at all, so the click does nothing until the daemon answers.
+    case 'close-is-not-optimistic':
+      if (clone.optimistic) clone.optimistic.drawn = true;
+      if (clone.answers?.accepted) clone.answers.accepted.drawn = true;
+      return clone;
+    // The row put back even when the daemon DID take the close, which would make every close
+    // flicker and then depend on the removal delta to finish.
+    case 'restore-after-an-accepted-close':
+      if (clone.answers?.accepted) clone.answers.accepted.drawn = true;
+      return clone;
+    // The focus left on the row that is going away.
+    case 'drop-the-close-focus':
+      if (clone.optimistic) clone.optimistic.focus = [];
+      return clone;
+    // A daemon removal that does not retire the local hide, which is the leak that would make a
+    // re-created session with the same id invisible for the rest of the run.
+    case 'keep-the-hide-after-removal':
+      if (clone.echo?.removed) clone.echo.removed.drawn = true;
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+const CLOSE_MUTATIONS = [
+  'never-restore-the-row',
+  'close-is-not-optimistic',
+  'restore-after-an-accepted-close',
+  'drop-the-close-focus',
+  'keep-the-hide-after-removal',
+];
+
 const LIFECYCLE_MUTATIONS = [
   'patch-a-declined-sleep',
   'overlay-outlives-the-daemon',
@@ -148,14 +193,13 @@ async function compare([outDir, ...flags]: string[]) {
   const injectAt = flags.indexOf('--inject');
   const mutationName = injectAt >= 0 ? flags[injectAt + 1] : undefined;
   const mutate = mutationName ? (MUTATIONS[mutationName] ?? ((calls: Json[]) => calls)) : undefined;
-  if (mutationName && !MUTATIONS[mutationName] && !LIFECYCLE_MUTATIONS.includes(mutationName)) {
-    console.error(
-      `unknown mutation ${mutationName}; one of ${[...Object.keys(MUTATIONS), ...LIFECYCLE_MUTATIONS].join(', ')}`
-    );
+  const known = [...Object.keys(MUTATIONS), ...LIFECYCLE_MUTATIONS, ...CLOSE_MUTATIONS];
+  if (mutationName && !known.includes(mutationName)) {
+    console.error(`unknown mutation ${mutationName}; one of ${known.join(', ')}`);
     process.exit(2);
   }
   const { runTypeScriptActions } = await import('./action-parity-typescript.ts');
-  const { runTypeScriptLifecycle } = await import('./lifecycle-parity-typescript.ts');
+  const { runTypeScriptLifecycle, runTypeScriptClose } = await import('./lifecycle-parity-typescript.ts');
   const names = readdirSync(outDir)
     .filter((name) => name.startsWith('scenario-') && name.endsWith('.json'))
     .sort();
@@ -163,7 +207,10 @@ async function compare([outDir, ...flags]: string[]) {
   let rustCalls = 0;
   let tsCalls = 0;
   let transitions = 0;
+  let closes = 0;
   let overlayKept = 0;
+  let closesRestored = 0;
+  let stoppedUnhidden = 0;
   const differences: string[] = [];
   for (const name of names) {
     const rustPath = join(outDir, name.replace('scenario-', 'rust-actions-'));
@@ -181,6 +228,48 @@ async function compare([outDir, ...flags]: string[]) {
     if (entries.length !== ours.length) {
       differences.push(`${name}: ${entries.length} payloads against ${ours.length} answers`);
       continue;
+    }
+    const theirClose = await runTypeScriptClose(scenario, rust);
+    for (const [index, entry] of ((rust.close ?? []) as Json[]).entries()) {
+      if (entry.owned !== true) continue;
+      closes += 1;
+      const theirs = theirClose[index];
+      if (!theirs) {
+        differences.push(`${name} close #${index}: the TypeScript side produced no answer`);
+        continue;
+      }
+      const where = `${name} close #${index} focus=${entry.focus}`;
+      const mine = mutate ? mutateClose(mutationName, entry) : entry;
+      const myRpc = mine.request?.rpc ?? null;
+      if (canonical(myRpc) !== canonical(theirs.rpc))
+        differences.push(`${where} rpc: rust ${canonical(myRpc)} ts ${canonical(theirs.rpc)}`);
+      if (canonical(mine.optimistic) !== canonical(theirs.optimistic))
+        differences.push(`${where} optimistic: rust ${canonical(mine.optimistic)} ts ${canonical(theirs.optimistic)}`);
+      for (const answer of ['accepted', 'failed', 'neverAnswered']) {
+        const left = mine.answers?.[answer] ?? null;
+        const right = theirs.answers?.[answer] ?? null;
+        if (canonical(left) === canonical(right)) continue;
+        // Declared difference 25: a close the daemon never confirmed puts the row back here and
+        // leaves it missing there. Allowed in exactly that shape and for those two answers only.
+        if ((answer === 'failed' || answer === 'neverAnswered') && left?.drawn === true && right?.drawn === false) {
+          closesRestored += 1;
+          continue;
+        }
+        differences.push(`${where} ${answer}: rust ${canonical(left)} ts ${canonical(right)}`);
+      }
+      for (const key of ['removed', 'stillRunning', 'stopped']) {
+        const left = mine.echo?.[key] ?? null;
+        const right = theirs.echo?.[key] ?? null;
+        if (canonical(left) === canonical(right)) continue;
+        // Declared difference 26: a daemon that still lists the row as STOPPED retires the local
+        // hide here, because a stopped row the daemon keeps is one the user pinned, starred or
+        // tagged and must be able to see. The TypeScript's hidden set is never cleared at all.
+        if (key === 'stopped' && left?.drawn === true && right?.drawn === false) {
+          stoppedUnhidden += 1;
+          continue;
+        }
+        differences.push(`${where} echo.${key}: rust ${canonical(left)} ts ${canonical(right)}`);
+      }
     }
     const theirLifecycle = await runTypeScriptLifecycle(scenario, rust);
     for (const [index, entry] of ((rust.lifecycle ?? []) as Json[]).entries()) {
@@ -233,16 +322,28 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} overlayKept ${overlayKept} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
   for (const difference of differences.slice(0, 40)) console.log(`  ${difference}`);
   if (differences.length > 40) console.log(`  … and ${differences.length - 40} more`);
-  // With a mutation injected the gate is being tested, and no difference means it cannot fail.
+  // With a mutation injected the gate is being tested. A mutation passes when it either creates a
+  // difference OR collapses one of the classifications: undoing a difference this port makes on
+  // purpose (`never-restore-the-row` is exactly that) makes the two sides AGREE, and a criterion
+  // that only looked at the difference count would read that as the gate failing to notice.
   if (mutate) {
-    process.exitCode = differences.length ? 0 : 1;
-    if (!differences.length) console.log(`  the injected mutation ${mutationName} produced NO difference`);
+    const noticed = differences.length > 0 || overlayKept === 0 || closesRestored === 0 || stoppedUnhidden === 0;
+    process.exitCode = noticed ? 0 : 1;
+    if (!noticed)
+      console.log(`  the injected mutation ${mutationName} produced NO difference and collapsed no classification`);
+    return;
+  }
+  // A clean run whose classifications are all zero is a gate that stopped measuring: every one of
+  // them counts a difference this port makes deliberately and on every row of a real recording.
+  if (!differences.length && (overlayKept === 0 || closesRestored === 0 || stoppedUnhidden === 0)) {
+    console.log('  a classification counted nothing, so the gate is not exercising what it claims');
+    process.exitCode = 1;
     return;
   }
   process.exitCode = differences.length ? 1 : 0;

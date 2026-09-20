@@ -25,7 +25,8 @@ use std::time::Instant;
 
 use ghostex_gx_core::protocol::ServerEvent;
 use ghostex_gx_core::{
-    apply_lifecycle_answer, encode_uri_component, plan_lifecycle_request, plan_read_only_action,
+    apply_close_answer, apply_lifecycle_answer, close_optimistic_follow_ups, encode_uri_component,
+    plan_close_request, plan_lifecycle_request, plan_read_only_action, CloseAnswer, CloseFollowUp,
     Core, Event, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, SessionKey, SidebarInputs,
     QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES,
 };
@@ -85,6 +86,7 @@ fn main() -> ExitCode {
     let mut total_calls = 0usize;
     let mut from_menus = 0usize;
     let mut total_lifecycle = 0usize;
+    let mut total_close = 0usize;
     let mut resolve_micros: Vec<u128> = Vec::new();
     for path in &scenarios {
         let scenario: Value = match std::fs::read_to_string(path)
@@ -106,6 +108,7 @@ fn main() -> ExitCode {
         total_calls += dump.calls;
         from_menus += dump.from_menus;
         total_lifecycle += dump.lifecycle;
+        total_close += dump.close;
         let out = path.with_file_name(
             path.file_name()
                 .and_then(|name| name.to_str())
@@ -119,14 +122,15 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
         println!(
-            "{}: {} payloads, {} calls ({} from menus), {} lifecycle transitions",
+            "{}: {} payloads, {} calls ({} from menus), {} lifecycle transitions, {} closes",
             path.file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or(""),
             dump.payloads,
             dump.calls,
             dump.from_menus,
-            dump.lifecycle
+            dump.lifecycle,
+            dump.close
         );
     }
     resolve_micros.sort_unstable();
@@ -138,7 +142,7 @@ fn main() -> ExitCode {
         .copied()
         .unwrap_or(0);
     println!(
-        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} resolveUs median {median} max {}",
+        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} resolveUs median {median} max {}",
         scenarios.len(),
         resolve_micros.last().copied().unwrap_or(0)
     );
@@ -158,6 +162,7 @@ struct Dump {
     calls: usize,
     from_menus: usize,
     lifecycle: usize,
+    close: usize,
 }
 
 /// The menu dump `sidebar_menu_parity` writes for the same scenario, when it has been run.
@@ -300,15 +305,19 @@ fn build(
     }
     let lifecycle = lifecycle_entries(&core, scenario, now_ms);
     let lifecycle_count = lifecycle.len();
+    let closes = close_entries(&core, scenario, now_ms);
+    let close_count = closes.len();
     Some(Dump {
         payloads: entries.len(),
         calls,
         from_menus,
         lifecycle: lifecycle_count,
+        close: close_count,
         value: json!({
             "parkedProjectId": parked,
             "entries": Value::Array(entries),
             "lifecycle": Value::Array(lifecycle),
+            "close": Value::Array(closes),
         }),
     })
 }
@@ -630,4 +639,222 @@ fn collect_menu_commands(value: &Value, found: &mut Vec<Value>) {
         }
         _ => {}
     }
+}
+
+/// The close half of the gate.
+///
+/// Close is the only action whose optimistic update takes a row AWAY, so it gets a fourth answer
+/// the other actions do not have: the call that never comes home. That is the case where an
+/// optimistic removal and a never-arriving echo leave the client's story permanently ahead of the
+/// daemon's, and it is the one the original cannot even reach, because its `rpc` is a bare `fetch`
+/// with no timeout.
+///
+/// Every entry carries what the user sees at three moments: the instant they click, once the
+/// answer is in (for each of the four answers), and after the daemon says one of three things
+/// about the row afterwards.
+fn close_entries(core: &Core, scenario: &Value, now_ms: u64) -> Vec<Value> {
+    let rows: Vec<Value> = scenario
+        .pointer("/snapshot/sessions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut targets: Vec<(String, String, Option<Value>)> = rows
+        .iter()
+        .filter_map(|row| {
+            Some((
+                row.get("projectId")?.as_str()?.to_string(),
+                row.get("sessionId")?.as_str()?.to_string(),
+                Some(row.clone()),
+            ))
+        })
+        .collect();
+    targets.push((
+        "unknown-project".to_string(),
+        "unknown-session".to_string(),
+        None,
+    ));
+    let first_project = targets.first().map(|(project_id, _, _)| project_id.clone());
+    let elsewhere = targets
+        .iter()
+        .rev()
+        .find(|(project_id, _, row)| row.is_some() && Some(project_id) != first_project.as_ref())
+        .map(|(project_id, session_id, _)| SessionKey::local(project_id, session_id));
+    let mut entries = Vec::new();
+    for (project_id, session_id, row) in &targets {
+        let session = SessionKey::local(project_id, session_id);
+        for focus in ["self", "other", "none"] {
+            let focused = match focus {
+                "self" => Some(session.clone()),
+                "other" => elsewhere.clone(),
+                _ => None,
+            };
+            entries.push(close_entry(
+                core,
+                &session,
+                focus,
+                focused,
+                row.as_ref(),
+                now_ms,
+            ));
+        }
+    }
+    entries
+}
+
+fn close_entry(
+    core: &Core,
+    session: &SessionKey,
+    focus: &str,
+    focused: Option<SessionKey>,
+    row: Option<&Value>,
+    now_ms: u64,
+) -> Value {
+    let mut base = core.clone();
+    if let Some(focused) = &focused {
+        base.handle(
+            Event::Intent(Intent::FocusSession {
+                session: focused.clone(),
+                visible: None,
+            }),
+            now_ms,
+        );
+    }
+    let payload = json!({
+        "type": "closeSession",
+        "sessionId": session.to_sidebar_session_id(),
+    });
+    let Some(request) = plan_close_request(&base, &payload) else {
+        return json!({
+            "sessionId": session.to_sidebar_session_id(),
+            "focus": focus,
+            "owned": false,
+        });
+    };
+    // The click itself.
+    let optimistic = close_optimistic_follow_ups(&request);
+    let mut after_click = base.clone();
+    run_close_follow_ups(&mut after_click, &optimistic, now_ms);
+    let mut answers = Map::new();
+    let mut accepted_store = after_click.clone();
+    for answer in [
+        CloseAnswer::Accepted,
+        CloseAnswer::Failed,
+        CloseAnswer::NeverAnswered,
+    ] {
+        let follow_ups = apply_close_answer(&request, answer);
+        let mut store = after_click.clone();
+        run_close_follow_ups(&mut store, &follow_ups, now_ms);
+        answers.insert(
+            answer.as_str().to_string(),
+            json!({ "drawn": row_is_drawn(&store, session) }),
+        );
+        if answer == CloseAnswer::Accepted {
+            accepted_store = store;
+        }
+    }
+    let mut echo = Map::new();
+    if let Some(row) = row {
+        // What the daemon can say next about a row the client has already taken away.
+        for (name, frame) in [
+            (
+                "removed",
+                json!({
+                    "type": "sessionRemoved",
+                    "projectId": session.project_id,
+                    "sessionId": session.session_id,
+                }),
+            ),
+            (
+                "stillRunning",
+                json!({
+                    "type": "sessionUpdated",
+                    "session": with_lifecycle(row, "running"),
+                }),
+            ),
+            (
+                "stopped",
+                json!({
+                    "type": "sessionUpdated",
+                    "session": with_lifecycle(row, "stopped"),
+                }),
+            ),
+        ] {
+            let mut echoed = accepted_store.clone();
+            let envelope = json!({
+                "type": "presentationDelta",
+                "protocolVersion": 1,
+                "serverId": "parity",
+                "clientId": "parity",
+                "revision": now_revision(&echoed, session),
+                "delta": frame,
+            });
+            let parsed = ServerEvent::parse(&envelope.to_string())
+                .unwrap_or_else(|error| panic!("the close echo frame does not parse: {error:?}"));
+            let output = echoed.handle(
+                Event::Frame {
+                    machine: MachineId::Local,
+                    frame: Box::new(parsed),
+                },
+                now_ms,
+            );
+            assert!(
+                output.changes.ignored.is_none(),
+                "the close echo frame was ignored: {:?}",
+                output.changes.ignored
+            );
+            echo.insert(
+                name.to_string(),
+                json!({ "drawn": row_is_drawn(&echoed, session) }),
+            );
+        }
+    }
+    json!({
+        "sessionId": session.to_sidebar_session_id(),
+        "focus": focus,
+        "owned": true,
+        "request": request.to_json(),
+        "optimistic": {
+            "drawn": row_is_drawn(&after_click, session),
+            "focus": Value::Array(
+                optimistic
+                    .iter()
+                    .filter(|follow_up| matches!(follow_up, CloseFollowUp::Focus { .. }))
+                    .map(CloseFollowUp::to_json)
+                    .collect(),
+            ),
+        },
+        "answers": Value::Object(answers),
+        "echo": Value::Object(echo),
+    })
+}
+
+fn with_lifecycle(row: &Value, state: &str) -> Value {
+    let mut row = row.clone();
+    row["lifecycleState"] = Value::String(state.to_string());
+    row
+}
+
+fn run_close_follow_ups(core: &mut Core, follow_ups: &[CloseFollowUp], now_ms: u64) {
+    for follow_up in follow_ups {
+        let intent = match follow_up {
+            CloseFollowUp::Hide { session } => Intent::HideSession {
+                session: session.clone(),
+            },
+            CloseFollowUp::Unhide { session } => Intent::UnhideSession {
+                session: session.clone(),
+            },
+            CloseFollowUp::Focus { .. } => continue,
+        };
+        core.handle(Event::Intent(intent), now_ms);
+    }
+}
+
+/// Whether the sidebar would draw the row at all: the daemon holds it and no local overlay hides
+/// it. This is the only thing a close can be judged by, because a close does not change a value,
+/// it changes whether there is a row.
+fn row_is_drawn(core: &Core, session: &SessionKey) -> bool {
+    core.presentation()
+        .machine(&session.machine)
+        .and_then(|entry| entry.effective_session(&session.project_id, &session.session_id))
+        .is_some()
 }
