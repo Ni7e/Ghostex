@@ -88,6 +88,7 @@ pub(crate) struct GxStoreHost {
     pub(crate) remote: super::remote_clients::RemoteClients,
     pub(super) menu_host: super::sidebar_menus::MenuHostCache,
     pub(super) sidebar_actions: super::sidebar_actions::SidebarActionCounters,
+    pub(super) sidebar_lifecycle: super::sidebar_lifecycle::SidebarLifecycleCounters,
 }
 
 impl GxStoreHost {

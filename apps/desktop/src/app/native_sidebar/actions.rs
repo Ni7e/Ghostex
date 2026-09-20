@@ -113,6 +113,11 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_action(&command, cx) {
             return;
         }
+        // Sleep and wake call the daemon from here, so the command must not also reach the old
+        // runtime: it would make the same call a second time (gx_store/sidebar_lifecycle.rs).
+        if self.gx_store_run_sidebar_lifecycle(&command, cx) {
+            return;
+        }
         // Two of the menus' inputs live in client storage and are written by the handler this
         // command is on its way to; the cached copy is dropped so the redraw that follows reads
         // the new value instead of waiting out its second.

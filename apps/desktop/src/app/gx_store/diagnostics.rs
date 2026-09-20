@@ -67,6 +67,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_slow_update_records: u32,
     sidebar_storage_warnings: u32,
     sidebar_action_records: u32,
+    sidebar_lifecycle_records: u32,
 }
 
 /// A count as a whole percent of a total, which is what tells a skip that fires now and then apart
@@ -803,6 +804,46 @@ impl GxStoreDiagnostics {
         }
         self.sidebar_storage_warnings += 1;
         self.warning(event, json!({ "error": error }));
+    }
+
+    /// One line per sleep or wake the store performed: which call it made, what the daemon said,
+    /// how long the round trip took, and the run's totals.
+    ///
+    /// No id and no title: the call name and the answer are a fixed vocabulary, and everything
+    /// else a lifecycle payload carries is a project id or a session id. `roundTripMs` is the
+    /// daemon's, not ours, and it is the number that says whether the optimistic value was ever
+    /// on screen: a round trip under a frame means the daemon answered before the user could see
+    /// anything, and a long one is the window the overlay exists for.
+    pub(super) fn sidebar_lifecycle_ran(
+        &mut self,
+        request: &ghostex_gx_core::LifecycleRequest,
+        answer: &str,
+        round_trip_ms: u64,
+        counters: super::sidebar_lifecycle::SidebarLifecycleCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarLifecycle",
+            json!({
+                "call": log_text(request.call.as_str()),
+                "answer": log_text(answer),
+                "roundTripMs": round_trip_ms,
+                "hadReplacementFocus": request.replacement_focus.is_some(),
+                "sleeps": counters.sleeps,
+                "wakes": counters.wakes,
+                "accepted": counters.accepted,
+                "declined": counters.declined,
+                "failed": counters.failed,
+                "alreadyAgreed": counters.already_agreed,
+                "focusFollowUps": counters.focus_follow_ups,
+                "declinedSource": counters.declined_source,
+            }),
+        );
     }
 
     /// One line per sidebar action the store answered: the message type, which calls it made, how
