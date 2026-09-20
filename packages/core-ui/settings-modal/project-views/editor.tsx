@@ -45,7 +45,7 @@ export function CustomViewEditor({
   const updateSource = (patch: Partial<ProjectViewSource>) => update({ source: { ...source, ...patch } });
   return (
     <div className='settings-list-panel py-3' ref={editorRef}>
-      <TextField label='Name' value={view.name} onChange={(name) => update({ name })} placeholder='Titlebar name' />
+      <TextField label='Name' value={view.name} onChange={(name) => update({ name })} placeholder='Tab name' />
       <SettingRow label='Source' htmlFor={`${id}-source`}>
         <SegmentedControl
           id={`${id}-source`}

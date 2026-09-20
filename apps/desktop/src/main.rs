@@ -164,7 +164,7 @@ pub(crate) use crate::app::model::*;
 // the sibling modules that hold `Entity<GhostexGpuiApp>`, and the FFI bridge.
 pub(crate) use crate::app::core::*;
 // CDXC:Extensions 2026-09-18 SEE-ALSO:
-// The per-view "Available in" scope keys are read from workarea.rs and the titlebar modules.
+// The per-view scope keys are read from workarea.rs and the titlebar modules.
 pub(crate) use crate::app::view_scopes::*;
 
 fn main() {
@@ -313,7 +313,7 @@ fn main() {
             ),
             gpui_key_binding_from_shared_hotkey("cmd+w", CloseFocusedSurface, None),
             gpui_key_binding_from_shared_hotkey("cmd+b", ToggleGpuiSidebarCollapsed, None),
-            gpui_key_binding_from_shared_hotkey("cmd+alt+b", ToggleProjectEditorCompanion, None),
+            gpui_key_binding_from_shared_hotkey("cmd+alt+b", ToggleViewPanel, None),
             KeyBinding::new(SLEEP_FOCUSED_SESSION_DEFAULT_KEY, SleepFocusedSession, None),
             gpui_key_binding_from_shared_hotkey("cmd+t", NewTerminalTab, None),
             gpui_key_binding_from_shared_hotkey("cmd+d", SplitFocusedTerminalRight, None),
@@ -377,10 +377,19 @@ fn main() {
             */
             #[cfg(target_os = "linux")]
             window_decorations: Some(gpui::WindowDecorations::Client),
+            /*
+            CDXC:Titlebar 2026-09-20 WHY:
+            The lights are placed against whatever row owns the window's top-left corner, and that
+            row is no longer the 28px titlebar this offset was measured for. It is the sidebar's
+            35px Search row while the sidebar is docked and the 36px work area header while it is
+            collapsed, and both centre their own contents near y = 18. At the old y = 8 the lights
+            sat three and a half pixels above everything beside them in both states; 11.5 puts a
+            12px light on that same centreline.
+            */
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Ghostex".into()),
                 appears_transparent: true,
-                traffic_light_position: Some(gpui::point(px(11.0), px(8.0))),
+                traffic_light_position: Some(gpui::point(px(11.0), px(11.5))),
             }),
             ..Default::default()
         };

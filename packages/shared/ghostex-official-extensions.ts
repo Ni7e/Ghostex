@@ -60,6 +60,13 @@ export type GhostexOfficialExtensionId =
   | 'tips';
 
 export type GhostexOfficialExtension = {
+  /**
+   * CDXC:Workarea 2026-09-20 DECISION:
+   * User: Ask Ghostex, Tips & Tricks and Resources are app-wide pages, so they are available in every project
+   * regardless of scope. An app-wide entry has an on/off switch and nothing else: no "where it appears" editor,
+   * because there is no project it could be narrowed to.
+   */
+  appWide?: true;
   description: string;
   id: GhostexOfficialExtensionId;
   placement: GhostexOfficialExtensionPlacement;
@@ -105,64 +112,67 @@ export const GHOSTEX_OFFICIAL_EXTENSIONS: readonly GhostexOfficialExtension[] = 
     title: 'Docs',
   },
   {
-    description: 'Title bar button that opens short tips for getting more out of Ghostex.',
+    appWide: true,
+    description: 'A page of short tips for getting more out of Ghostex, opened from the ⋯ menu.',
     id: 'tips',
-    placement: 'titlebar-button',
+    placement: 'view',
     settingsKey: 'tipsAndTricksTitlebarButtonHidden',
     title: 'Tips & Tricks',
   },
   {
-    description: 'Title bar bell that lists what your agents finished or need from you.',
+    description: "A bell in the sidebar's top row that lists what your agents finished or need from you.",
     id: 'notifications',
     placement: 'titlebar-button',
     settingsKey: 'notificationsTitlebarButtonHidden',
     title: 'Notifications',
   },
   {
+    appWide: true,
     description:
-      'Title bar button with sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.',
+      'A page of sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.',
     id: 'help',
-    placement: 'titlebar-button',
+    placement: 'view',
     settingsKey: 'helpTitlebarButtonHidden',
     title: 'Ghostex Help',
   },
   {
-    description: 'Title bar button that lists development servers running on this computer.',
+    description: 'The Browser view\u2019s start page, listing development servers running on this computer.',
     id: 'devServers',
     placement: 'titlebar-button',
     settingsKey: 'devServersTitlebarButtonHidden',
     title: 'Dev servers',
   },
   {
-    description: 'Title bar button that opens Ghostex docs, guides, and community links.',
+    appWide: true,
+    description: 'A page listing what Ghostex is running right now, with the CPU and memory each part is using.',
     id: 'resources',
-    placement: 'titlebar-button',
+    placement: 'view',
     settingsKey: 'resourcesTitlebarButtonHidden',
     title: 'Resources',
   },
   {
-    description: 'Title bar button for commit, branch, and worktree helpers on the active project.',
+    description: 'A work area header button for commit, branch, and worktree helpers on the active project.',
     id: 'gitActions',
     placement: 'titlebar-button',
     settingsKey: 'gitActionsTitlebarButtonHidden',
     title: 'Git actions',
   },
   {
-    description: 'Title bar button that runs your saved terminal and browser actions in one click.',
+    description: 'A work area header button that runs your saved terminal and browser actions in one click.',
     id: 'quickActions',
     placement: 'titlebar-button',
     settingsKey: 'quickActionsTitlebarButtonHidden',
     title: 'Quick Actions',
   },
   {
-    description: 'Title bar button that opens the active project in another app.',
+    description: 'A work area header button that opens the active project in another app.',
     id: 'openIn',
     placement: 'titlebar-button',
     settingsKey: 'openInTitlebarButtonHidden',
     title: 'Open In',
   },
   {
-    description: 'Title bar button that opens this Extensions page.',
+    description: 'An entry in the work area header’s ⋯ menu that opens this Extensions page.',
     id: 'extensionsButton',
     placement: 'titlebar-button',
     settingsKey: 'extensionsTitlebarButtonHidden',

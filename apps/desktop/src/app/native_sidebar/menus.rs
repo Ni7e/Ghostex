@@ -29,7 +29,9 @@ impl GhostexGpuiApp {
                 .downcast::<GhostexGpuiApp>()
                 .ok()
         });
-        #[cfg(target_os = "macos")]
+        // A menu opened from the floating panel belongs to the same app entity; the panel's own
+        // window root is what the lookup above cannot see. Every platform floats now, so this is
+        // no longer a macOS-only branch.
         let app = app.or_else(|| {
             window
                 .root::<Root>()
@@ -38,7 +40,7 @@ impl GhostexGpuiApp {
                     root.read(cx)
                         .view()
                         .clone()
-                        .downcast::<super::reveal::FloatingSidebarWindow>()
+                        .downcast::<crate::app::floating_reveal::window::FloatingRevealWindow>()
                         .ok()
                 })
                 .and_then(|view| view.read(cx).app.upgrade())

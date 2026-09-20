@@ -36,6 +36,7 @@ impl MachineGroup {
 }
 
 pub(crate) struct RemoteSitesPanel {
+    host: GpuiTitlebarPanelHost,
     main_app: gpui::WeakEntity<GhostexGpuiApp>,
     groups: Vec<MachineGroup>,
     scroll: ScrollHandle,
@@ -49,6 +50,7 @@ pub(crate) struct RemoteSitesPanel {
 
 impl RemoteSitesPanel {
     pub(crate) fn new(
+        host: GpuiTitlebarPanelHost,
         main_app: gpui::WeakEntity<GhostexGpuiApp>,
         cx: &mut gpui::Context<Self>,
     ) -> Self {
@@ -78,6 +80,7 @@ impl RemoteSitesPanel {
         })
         .detach();
         Self {
+            host,
             main_app,
             groups: vec![MachineGroup::local()],
             scroll: ScrollHandle::new(),
@@ -349,10 +352,12 @@ impl RemoteSitesPanel {
         cx.notify();
     }
 
-    fn close(&self, window: &mut Window, cx: &mut gpui::Context<Self>) {
-        let _ = self.main_app.update(cx, |app, cx| {
-            app.clear_gpui_titlebar_popup_from_window(GpuiTitlebarPopupKind::RemoteSites, cx)
-        });
+    /// "…and close the dropdown", for the rows that open a site. As a Browser start page there is
+    /// nothing to close: the click navigates the very pane the list is drawn in.
+    fn close(&self, window: &mut Window, _cx: &mut gpui::Context<Self>) {
+        if self.host == GpuiTitlebarPanelHost::ViewPanel {
+            return;
+        }
         window.remove_window();
     }
 

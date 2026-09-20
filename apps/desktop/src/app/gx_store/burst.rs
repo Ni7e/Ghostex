@@ -475,10 +475,6 @@ impl GhostexGpuiApp {
             .any(|pane_id| {
                 self.agents_workspace.active_session_in_pane(pane_id) == Some(shell_session_id)
             })
-            || self
-                .current_project_editor_companion_terminal_body_mount_slots()
-                .iter()
-                .any(|slot_id| slot_id.session_id == shell_session_id)
     }
 
     /// One line per next or previous tab step while the `native.terminal.focus` scenario is on:

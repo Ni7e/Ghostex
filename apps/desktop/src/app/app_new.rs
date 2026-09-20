@@ -71,9 +71,6 @@ impl GhostexGpuiApp {
         shell_layout_state
             .project_editor_shell
             .sleep_all_modes_for_launch(shell_layout_state.active_mode);
-        shell_layout_state
-            .project_editor_shell
-            .left_companion_visible = restored_panes.companion_visible;
         shell_layout_state.command_pane.mode = restored_panes.command_mode;
         shell_layout_state.command_pane.last_expanded_mode =
             restored_panes.command_last_expanded_mode;
@@ -233,6 +230,15 @@ impl GhostexGpuiApp {
                 startup_restore_wake_pending,
                 remote_workspace_attach_pending: HashSet::new(),
                 project_view_states_by_project: shell_layout_state.project_view_states_by_project,
+                open_views: shell_layout_state.open_views,
+                view_panel_maximized: shell_layout_state.view_panel_maximized,
+                view_panel_picker_open: shell_layout_state.view_panel_picker_open,
+                ghostex_page_panels: HashMap::new(),
+                view_picker_scroll: ScrollHandle::new(),
+                ghostex_ask_page_scroll: ScrollHandle::new(),
+                browser_start_pages: HashMap::new(),
+                view_tab_drag: None,
+                last_open_view_mode: shell_layout_state.last_open_view_mode,
                 view_pane_layouts: shell_layout_state.view_pane_layouts,
                 sidebar_visibility_memory,
                 remote_attach_sessions: shell_layout_state.remote_attach_sessions,
@@ -258,7 +264,6 @@ impl GhostexGpuiApp {
                 agents_chat_mode_sessions: shell_layout_state.agents_chat_mode_sessions,
                 agents_terminal_action_bar_menu_session: None,
                 agents_terminal_action_bar_account_submenu_open: false,
-                terminal_agent_bar_companion_focus_return: None,
                 agents_chat_auto_switch_observed_sessions: HashMap::new(),
                 pending_agents_chat_launch_intents: HashSet::new(),
                 pending_keep_view_remote_focus: HashSet::new(),
@@ -343,14 +348,8 @@ impl GhostexGpuiApp {
                 command_group_minimize_tooltip_visible: HashMap::new(),
                 command_pane_layout_bounds: None,
                 project_editor_surface_layout_bounds: None,
-                project_editor_companion_layout_bounds: None,
                 agents_terminal_mount_slot_bounds: HashMap::new(),
                 command_terminal_mount_slot_bounds: HashMap::new(),
-                project_editor_companion_terminal_session_id: None,
-                project_editor_companion_secondary_terminal_session_id: None,
-                project_editor_companion_focused_terminal_slot:
-                    ProjectEditorCompanionTerminalSlot::Top,
-                project_editor_companion_terminal_mount_slot_bounds: HashMap::new(),
                 zmx_persistence_resize_refresh_generation: 0,
                 zmx_persistence_last_focused_terminal_slot: None,
                 cef_sidebar_creation_retried: false,
@@ -359,7 +358,6 @@ impl GhostexGpuiApp {
                 app_modal_open_deferred_for_cef: None,
                 agents_terminal_zmx_refresh_recorded_bounds: HashMap::new(),
                 command_terminal_zmx_refresh_recorded_bounds: HashMap::new(),
-                project_editor_companion_zmx_refresh_recorded_bounds: HashMap::new(),
                 terminal_text_focus_handle: cx.focus_handle().tab_stop(false),
                 terminal_text_marked_range: None,
                 pending_keyboard_handoff: None,
@@ -374,25 +372,16 @@ impl GhostexGpuiApp {
                 ),
                 command_terminal_launch_payload_source:
                     CommandTerminalLaunchPayloadSource::new_empty(),
-                project_editor_companion_terminal_launch_payload_source:
-                    ProjectEditorCompanionTerminalLaunchPayloadSource::new_empty(),
-                project_editor_companion_terminal_attach_plan_pending: HashSet::new(),
-                project_editor_companion_remote_attach_states: HashMap::new(),
                 agents_terminal_surface_host: NativeTerminalSurfaceHost::new(),
                 agents_terminal_surface_lifecycle: NativeTerminalSurfaceLifecycleState::new(),
                 command_terminal_surface_host: NativeTerminalSurfaceHost::new(),
                 command_terminal_surface_lifecycle: NativeTerminalSurfaceLifecycleState::new(),
-                project_editor_companion_terminal_surface_host: NativeTerminalSurfaceHost::new(),
-                project_editor_companion_terminal_surface_lifecycle:
-                    NativeTerminalSurfaceLifecycleState::new(),
                 #[cfg(target_os = "macos")]
                 agents_terminal_ghostty_surfaces: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 agents_terminal_parked_runtime_owners: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 command_terminal_ghostty_surfaces: HashMap::new(),
-                #[cfg(target_os = "macos")]
-                project_editor_companion_terminal_ghostty_surfaces: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 command_terminal_parked_runtime_owners: HashMap::new(),
                 #[cfg(target_os = "macos")]
@@ -412,46 +401,36 @@ impl GhostexGpuiApp {
                 #[cfg(target_os = "macos")]
                 command_terminal_host_native_views: HashMap::new(),
                 #[cfg(target_os = "macos")]
-                project_editor_companion_terminal_host_native_views: HashMap::new(),
-                #[cfg(target_os = "macos")]
                 agents_terminal_startup_host_native_views: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 agents_terminal_appkit_focused_host: None,
                 #[cfg(target_os = "macos")]
                 command_terminal_appkit_focused_host: None,
                 #[cfg(target_os = "macos")]
-                project_editor_companion_terminal_appkit_focused_host: None,
-                #[cfg(target_os = "macos")]
                 agents_terminal_ghostty_surface_config_requests: HashMap::new(),
                 #[cfg(target_os = "macos")]
                 command_terminal_ghostty_surface_config_requests: HashMap::new(),
                 #[cfg(target_os = "macos")]
-                project_editor_companion_terminal_ghostty_surface_config_requests: HashMap::new(),
-                #[cfg(target_os = "macos")]
                 agents_terminal_startup_ghostty_surface_config_requests: HashMap::new(),
                 workspace_tab_scroll_handles: HashMap::new(),
                 browser_tab_scroll_handles: HashMap::new(),
+                view_tab_scroll_handle: ScrollHandle::new(),
                 command_tab_scroll_handles: HashMap::new(),
                 command_collapsed_tab_scroll_handle: ScrollHandle::new(),
                 workspace_split_layout_metrics: HashMap::new(),
                 command_split_layout_metrics: HashMap::new(),
                 browser_split_layout_metrics: HashMap::new(),
-                project_editor_companion_layout_metrics: None,
-                project_editor_companion_split_layout_metrics: None,
+                workarea_split_layout_metrics: None,
                 workspace_split_drag: None,
                 workspace_split_hovering: None,
                 workspace_split_hover_visible: None,
                 workspace_split_hover_epoch: 0,
                 command_split_drag: None,
                 browser_split_drag: None,
-                project_editor_companion_drag: None,
-                project_editor_companion_split_drag: None,
-                project_editor_companion_divider_hovering: None,
-                project_editor_companion_divider_hover_visible: None,
-                project_editor_companion_divider_hover_epoch: 0,
-                project_editor_companion_split_divider_hovering: None,
-                project_editor_companion_split_divider_hover_visible: None,
-                project_editor_companion_split_divider_hover_epoch: 0,
+                workarea_split_drag: None,
+                workarea_split_divider_hovering: false,
+                workarea_split_divider_hover_visible: false,
+                workarea_split_divider_hover_epoch: 0,
                 hovered_workspace_tab: None,
                 hovered_command_tab: None,
                 hovered_browser_tab: None,
@@ -460,6 +439,7 @@ impl GhostexGpuiApp {
                 command_resize_hover_epoch: 0,
                 gpui_pet_overlay_activities_visible: shell_layout_state
                     .pet_overlay_activities_visible,
+                sidebar_usage_expanded: shell_layout_state.sidebar_usage_expanded,
                 gpui_pet_overlay_avatar_hovered: false,
                 gpui_pet_overlay_animation_state: GpuiPetOverlayAnimationState::Idle,
                 gpui_pet_overlay_animation_started_at: Instant::now(),
@@ -468,8 +448,6 @@ impl GhostexGpuiApp {
                 command_pane_side,
                 sidebar_width,
                 sidebar_collapsed: restored_sidebar_collapsed,
-                #[cfg(target_os = "macos")]
-                companion_reveal: None,
                 sidebar_drag: None,
                 sidebar_divider_hovering: false,
                 sidebar_divider_hover_visible: false,
@@ -523,8 +501,7 @@ impl GhostexGpuiApp {
                 titlebar_popup_menu: None,
                 context_menu: None,
                 titlebar_popup_window: None,
-                titlebar_help_button_bounds: Rc::new(std::cell::Cell::new(None)),
-                titlebar_mode_highlight: Rc::new(std::cell::RefCell::new(Default::default())),
+                titlebar_more_button_bounds: Rc::new(std::cell::Cell::new(None)),
                 titlebar_extension_popup_generation: 0,
                 titlebar_extension_popup: None,
                 titlebar_tips_panel_open: false,
@@ -540,6 +517,7 @@ impl GhostexGpuiApp {
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
                 native_sidebar: Default::default(),
+                floating_reveal: Default::default(),
                 gx_store: Default::default(),
                 browser_surfaces: HashMap::new(),
                 browser_address_inputs: HashMap::new(),
@@ -634,8 +612,7 @@ impl GhostexGpuiApp {
             }
             this.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
             this.start_project_editor_auto_sleep_policy_polling(cx);
-            #[cfg(target_os = "macos")]
-            this.start_sidebar_hover_reveal_polling(cx);
+            this.start_sidebar_hover_reveal_polling(window, cx);
             this.start_command_action_status_polling(cx);
             this.start_command_pane_auto_minimize_polling(window, cx);
             this.start_session_chat_queued_count_polling(cx);

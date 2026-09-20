@@ -19,8 +19,8 @@ export function TitlebarAccountUsageSection({ active, hideEmails }: { active: bo
   return (
     <AccountPrivacyContext value={hideEmails}>
       <SettingsSection
-        title='Titlebar account usage'
-        description='Star the accounts whose usage you want to see in the desktop titlebar. These are the same stars as in Settings > Accounts.'
+        title='Account usage in the sidebar'
+        description='Star the accounts whose usage you want to see at the bottom of the desktop sidebar. These are the same stars as in Settings > Accounts.'
       >
         {connections.length === 0 ? (
           <SettingsListItem title='No computer connected' detail='Connect to a computer to choose its accounts.' />

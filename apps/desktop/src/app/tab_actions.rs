@@ -286,11 +286,11 @@ impl GhostexGpuiApp {
         CDXC:FocusMode 2026-06-26-06:47:
         Command-pane Cmd+T requires an expanded visible command pane with a live focused source tab before allocating a placeholder. Collapsed or stale command focus must no-op like native `commandsPanel.isVisible` gating instead of expanding the hidden strip or using model-level stale-focus recovery.
 
-        CDXC:FocusMode 2026-07-29-05:03:
-        A focused project-editor companion owns Cmd+T as New Terminal for the active project; the existing gxserver-backed creation path keeps the editor open, retargets the companion to the created session, and focuses it. A focused Browser main pane owns the same chord as New Browser Tab in its current project Browser pane. Source CEF focus still propagates Cmd+T to code-server.
-
-        CDXC:FocusMode 2026-07-29-05:24:
-        Kanban, Automate, and Docs main surfaces own Cmd+T as New Companion Terminal even when the companion is not focused. Restore a collapsed companion first (preserving its width), focus it, then use the same project-scoped gxserver creation path so completion retargets the companion to the new terminal. Source and Browser retain their distinct passthrough/new-browser-tab behavior.
+        CDXC:Workarea 2026-09-20 WHY:
+        Cmd+T from a focused Kanban, Automate or Docs surface adds its tab to the Agents column beside
+        the view, which is where the companion's tab used to go. This supersedes the 2026-07-29 rules
+        that restored and retargeted a companion first; a focused Browser main pane still owns the
+        chord as New Browser Tab, and Source CEF focus still propagates it to code-server.
         */
         match self.shell_focus {
             ShellFocusTarget::CommandPane => {
@@ -323,15 +323,8 @@ impl GhostexGpuiApp {
                 self.persist_shell_layout_state();
                 cx.notify();
             }
-            ShellFocusTarget::AgentsPane(pane_id) if self.active_mode == TitlebarMode::Agents => {
+            ShellFocusTarget::AgentsPane(pane_id) => {
                 self.add_agents_registered_terminal_tab(pane_id, cx);
-            }
-            ShellFocusTarget::ProjectEditorCompanion(mode)
-                if self.active_mode == mode
-                    && mode.is_project_editor_mode()
-                    && self.project_editor_companion_is_visible() =>
-            {
-                self.add_agents_registered_terminal_tab(self.agents_workspace.focused_pane, cx);
             }
             ShellFocusTarget::BrowserSurface | ShellFocusTarget::BrowserPane(_)
                 if self.active_mode == TitlebarMode::Browser =>
@@ -345,21 +338,15 @@ impl GhostexGpuiApp {
                         TitlebarMode::Kanban | TitlebarMode::Automate | TitlebarMode::Manage
                     ) =>
             {
-                let companion_focused = if self.project_editor_companion_is_visible() {
-                    self.focus_project_editor_companion(mode, window, cx);
-                    self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode)
-                } else {
-                    self.restore_project_editor_companion(mode, window, cx)
-                };
-                if companion_focused {
-                    self.add_agents_registered_terminal_tab(self.agents_workspace.focused_pane, cx);
-                }
+                // A view with no tabs of its own adds one to the Agents column beside it, which is
+                // where the companion's tab used to go.
+                let pane_id = self.agents_workspace.focused_pane;
+                self.focus_agents_pane(pane_id, cx);
+                self.add_agents_registered_terminal_tab(pane_id, cx);
             }
             ShellFocusTarget::BrowserSurface
             | ShellFocusTarget::BrowserPane(_)
-            | ShellFocusTarget::ProjectEditorSurface(_)
-            | ShellFocusTarget::ProjectEditorCompanion(_)
-            | ShellFocusTarget::AgentsPane(_) => {}
+            | ShellFocusTarget::ProjectEditorSurface(_) => {}
         }
     }
 
@@ -379,21 +366,17 @@ impl GhostexGpuiApp {
             ShellFocusTarget::CommandPane => {
                 self.split_command_placeholder_terminal_from_hotkey(direction, cx);
             }
-            ShellFocusTarget::AgentsPane(pane_id) if self.active_mode == TitlebarMode::Agents => {
-                match direction {
-                    FocusedTerminalSplitDirection::Right => {
-                        self.split_agents_registered_terminal_right(pane_id, cx);
-                    }
-                    FocusedTerminalSplitDirection::Down => {
-                        self.split_agents_registered_terminal_below(pane_id, cx);
-                    }
+            ShellFocusTarget::AgentsPane(pane_id) => match direction {
+                FocusedTerminalSplitDirection::Right => {
+                    self.split_agents_registered_terminal_right(pane_id, cx);
                 }
-            }
+                FocusedTerminalSplitDirection::Down => {
+                    self.split_agents_registered_terminal_below(pane_id, cx);
+                }
+            },
             ShellFocusTarget::BrowserSurface
             | ShellFocusTarget::BrowserPane(_)
-            | ShellFocusTarget::ProjectEditorSurface(_)
-            | ShellFocusTarget::ProjectEditorCompanion(_)
-            | ShellFocusTarget::AgentsPane(_) => {}
+            | ShellFocusTarget::ProjectEditorSurface(_) => {}
         }
     }
 
@@ -502,10 +485,6 @@ impl GhostexGpuiApp {
         pane_id: WorkspacePaneId,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self.active_mode != TitlebarMode::Agents {
-            return;
-        }
-
         if self.agents_workspace.merge_all_tabs_into_pane(pane_id) {
             self.focus_shell_target(
                 ShellFocusTarget::AgentsPane(self.agents_workspace.focused_pane),
@@ -525,9 +504,6 @@ impl GhostexGpuiApp {
         CDXC:CommandPane 2026-06-22-13:17:
         Ctrl+Shift+M is scoped to an active Agents pane focus. Command-pane, Browser, Source, Kanban, Manage, and project-editor focus no-op so their tabs, placeholders, and command sessions cannot be folded into the Agents workspace merge path.
         */
-        if self.active_mode != TitlebarMode::Agents {
-            return;
-        }
         let ShellFocusTarget::AgentsPane(pane_id) = self.shell_focus else {
             return;
         };
@@ -560,9 +536,6 @@ impl GhostexGpuiApp {
         pane_id: WorkspacePaneId,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self.active_mode != TitlebarMode::Agents {
-            return;
-        }
         let Some(pane_id) = self.agents_workspace.resolve_action_pane_id(pane_id) else {
             return;
         };
@@ -1282,10 +1255,6 @@ impl GhostexGpuiApp {
         &self,
         pane_id: WorkspacePaneId,
     ) -> Option<&'static str> {
-        if self.active_mode != TitlebarMode::Agents {
-            return None;
-        }
-
         if self.agents_workspace.focus_mode_pane.is_some() {
             return Some("Exit Focus Mode");
         }
@@ -1383,7 +1352,8 @@ impl GhostexGpuiApp {
                 | TitlebarMode::Kanban
                 | TitlebarMode::Automate
                 | TitlebarMode::Manage
-                | TitlebarMode::Extension(_) => ShellFocusTarget::ProjectEditorSurface(mode),
+                | TitlebarMode::Extension(_)
+                | TitlebarMode::Ghostex(_) => ShellFocusTarget::ProjectEditorSurface(mode),
             };
             self.focus_shell_target(focus, cx);
             if mode == TitlebarMode::Browser {
@@ -1406,13 +1376,15 @@ impl GhostexGpuiApp {
             return false;
         }
 
-        if !mode.is_project_editor_mode() {
+        // A Ghostex page has no lifecycle, so it falls straight through to the focus-only branch
+        // below: there is no CEF surface to wake, only shell focus to move onto the GPUI page.
+        if !mode.is_project_editor_mode() && !matches!(mode, TitlebarMode::Ghostex(_)) {
             return false;
         }
         if self.project_editor_shell.is_mode_awake(mode) {
             /*
             CDXC:FocusRouting 2026-07-29-05:03:
-            Left/right focus and companion collapse must transfer real keyboard ownership to the main pane, not only update shell border state. Browser focuses the current page surface; Source, Kanban, Automate, and Docs focus their exact project-workarea CEF surface after the ordinary shell/lifecycle transition.
+            Left/right focus must transfer real keyboard ownership to the view, not only update shell border state. Browser focuses the current page surface; Source, Kanban, Automate, and Docs focus their exact project-workarea CEF surface after the ordinary shell/lifecycle transition.
             */
             if mode == TitlebarMode::Browser {
                 let pane_id = self.browser_tabs.focused_pane;
@@ -1434,455 +1406,14 @@ impl GhostexGpuiApp {
             | TitlebarMode::Kanban
             | TitlebarMode::Automate
             | TitlebarMode::Manage
-            | TitlebarMode::Extension(_) => ShellFocusTarget::ProjectEditorSurface(mode),
+            | TitlebarMode::Extension(_)
+            | TitlebarMode::Ghostex(_) => ShellFocusTarget::ProjectEditorSurface(mode),
             TitlebarMode::Agents => return false,
         };
         self.focus_shell_target(focus, cx);
         self.update_active_mode_cef_child_visibility(cx);
         self.persist_shell_layout_state();
         self.shell_focus == focus
-    }
-
-    pub(crate) fn focus_project_editor_companion(
-        &mut self,
-        mode: TitlebarMode,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if self.active_mode == mode && self.project_editor_companion_is_visible() {
-            self.mark_project_editor_mode_awake(mode, cx);
-            self.agents_terminal_runtime_sessions
-                .reconcile_with_workspace(&self.agents_workspace);
-            self.sync_project_editor_companion_terminal_selection();
-            let terminal_slot_id = self.project_editor_companion_terminal_slot_for_mode(mode);
-            let gpui_engine_view = terminal_slot_id.and_then(|slot_id| {
-                self.agents_gpui_engine_terminals
-                    .get(&slot_id.session_id)
-                    .map(|record| record.view.clone())
-            });
-            if let (Some(view), Some(slot_id)) = (gpui_engine_view.as_ref(), terminal_slot_id) {
-                self.focus_gpui_engine_terminal_view(
-                    GpuiEngineTerminalEventTarget::Agents(slot_id.session_id),
-                    view,
-                    window,
-                    cx,
-                );
-            }
-            self.focus_shell_target_now(ShellFocusTarget::ProjectEditorCompanion(mode), window, cx);
-            self.update_active_mode_cef_child_visibility(cx);
-            self.persist_shell_layout_state();
-        }
-    }
-
-    pub(crate) fn focus_project_editor_companion_terminal_session(
-        &mut self,
-        mode: TitlebarMode,
-        session_id: TerminalSessionId,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if self.project_editor_companion_terminal_session_id == Some(session_id) {
-            self.project_editor_companion_focused_terminal_slot =
-                ProjectEditorCompanionTerminalSlot::Top;
-        } else if self.project_editor_companion_secondary_terminal_session_id == Some(session_id) {
-            self.project_editor_companion_focused_terminal_slot =
-                ProjectEditorCompanionTerminalSlot::Bottom;
-        } else {
-            return;
-        }
-
-        if let Some(pane_id) = self.agents_workspace.pane_id_for_session(session_id) {
-            self.agents_workspace.select_tab(pane_id, session_id);
-            if let Some(key) = self.workspace_terminal_key_for_shell_session(session_id) {
-                match key {
-                    GpuiWorkspaceTerminalSessionKey::Local(key) => {
-                        self.local_workspace_latest_focus_key = Some(key.clone());
-                        self.dispatch_gpui_workspace_tab_session_selected(
-                            key.project_id.as_str(),
-                            key.session_id.as_str(),
-                            false,
-                            false,
-                            cx,
-                        );
-                    }
-                    GpuiWorkspaceTerminalSessionKey::Remote(key) => {
-                        self.set_sidebar_gxserver_remote_attach_focus_state(&key, cx);
-                    }
-                }
-            }
-        }
-        self.focus_project_editor_companion(mode, window, cx);
-    }
-
-    pub(crate) fn split_project_editor_companion(
-        &mut self,
-        mode: TitlebarMode,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if self.active_mode != mode
-            || !mode.is_project_editor_mode()
-            || !self.project_editor_companion_is_visible()
-        {
-            return;
-        }
-        self.project_editor_shell.left_companion_split_enabled = true;
-        self.agents_terminal_runtime_sessions
-            .reconcile_with_workspace(&self.agents_workspace);
-        self.sync_project_editor_companion_terminal_selection();
-        if let Some(session_id) = self.project_editor_companion_secondary_terminal_session_id {
-            self.focus_project_editor_companion_terminal_session(mode, session_id, window, cx);
-            return;
-        }
-
-        if let Some(session_id) = self
-            .project_editor_companion_recent_terminal_sessions()
-            .into_iter()
-            .find(|session_id| {
-                Some(*session_id) != self.project_editor_companion_terminal_session_id
-            })
-        {
-            self.project_editor_companion_secondary_terminal_session_id = Some(session_id);
-            self.project_editor_companion_focused_terminal_slot =
-                ProjectEditorCompanionTerminalSlot::Bottom;
-            self.focus_project_editor_companion_terminal_session(mode, session_id, window, cx);
-            cx.notify();
-            return;
-        }
-
-        let Some(project_id) = self.project_editor_companion_active_project_id() else {
-            return;
-        };
-        let requested_pane_id = self.agents_workspace.focused_pane;
-        let background = cx.background_executor().clone();
-        cx.spawn(async move |this, cx| {
-            let result =
-                background
-                    .spawn(async move {
-                        gpui_create_local_project_workspace_terminal(project_id.as_str())
-                    })
-                    .await;
-            let _ = this.update(cx, |this, cx| match result {
-                Ok((key, plan)) => {
-                    #[cfg(target_os = "windows")]
-                    {
-                        let companion_context_is_current = this.active_mode == mode
-                            && this.project_editor_companion_is_visible()
-                            && this.project_editor_shell.left_companion_split_enabled
-                            && this.project_editor_companion_active_project_id().as_deref()
-                                == Some(key.project_id.as_str());
-                        if companion_context_is_current {
-                            this.project_editor_companion_focused_terminal_slot =
-                                ProjectEditorCompanionTerminalSlot::Bottom;
-                            this.local_workspace_latest_focus_key = Some(key.clone());
-                            this.dispatch_gpui_workspace_tab_session_selected(
-                                key.project_id.as_str(),
-                                key.session_id.as_str(),
-                                false,
-                                false,
-                                cx,
-                            );
-                        }
-                        let cleanup_key = key.clone();
-                        let captured_pane_is_valid = this
-                            .agents_workspace
-                            .pane_can_accept_workspace_action(requested_pane_id);
-                        let already_mapped =
-                            this.local_workspace_session_mappings.contains_key(&key);
-                        let materialized = (captured_pane_is_valid || already_mapped)
-                            && this.open_gpui_local_workspace_terminal(
-                                key,
-                                plan,
-                                requested_pane_id,
-                                false,
-                                cx,
-                            );
-                        if !materialized {
-                            this.compensate_unmaterialized_created_workspace_terminal(&cleanup_key);
-                        }
-                    }
-                    #[cfg(not(target_os = "windows"))]
-                    {
-                        if this.active_mode == mode
-                            && this.project_editor_companion_is_visible()
-                            && this.project_editor_shell.left_companion_split_enabled
-                            && this.project_editor_companion_active_project_id().as_deref()
-                                == Some(key.project_id.as_str())
-                        {
-                            this.project_editor_companion_focused_terminal_slot =
-                                ProjectEditorCompanionTerminalSlot::Bottom;
-                            this.local_workspace_latest_focus_key = Some(key.clone());
-                            this.dispatch_gpui_workspace_tab_session_selected(
-                                key.project_id.as_str(),
-                                key.session_id.as_str(),
-                                false,
-                                false,
-                                cx,
-                            );
-                            let _ = this.open_gpui_local_workspace_terminal(
-                                key,
-                                plan,
-                                requested_pane_id,
-                                false,
-                                cx,
-                            );
-                        }
-                    }
-                }
-                Err(message) => {
-                    // No second sidepane arrived, so the width reserved for the
-                    // pair goes back before the user sees why.
-                    this.restore_project_editor_companion_width_before_columns();
-                    this.dispatch_gpui_app_modal_toast(
-                        "warning",
-                        "Companion split unavailable",
-                        message.as_str(),
-                        cx,
-                    );
-                }
-            });
-        })
-        .detach();
-    }
-
-    /// `keep_slot` is the sidepane whose own control asked for this, so a
-    /// side-by-side pair collapses onto the session the user clicked rather than
-    /// onto whichever one happens to hold focus.
-    pub(crate) fn collapse_project_editor_companion_split(
-        &mut self,
-        mode: TitlebarMode,
-        keep_slot: Option<ProjectEditorCompanionTerminalSlot>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let focused_session_id = keep_slot
-            .and_then(|slot| self.project_editor_companion_terminal_session_for_slot(slot))
-            .or_else(|| self.project_editor_companion_focused_terminal_session_id());
-        if focused_session_id.is_some() {
-            self.project_editor_companion_terminal_session_id = focused_session_id;
-        }
-        self.project_editor_companion_secondary_terminal_session_id = None;
-        self.project_editor_companion_focused_terminal_slot =
-            ProjectEditorCompanionTerminalSlot::Top;
-        self.project_editor_shell.left_companion_split_enabled = false;
-        // Splitting to the right widened the companion for two sidepanes, so one
-        // sidepane gets that width back rather than keeping the pair's.
-        self.restore_project_editor_companion_width_before_columns();
-        self.project_editor_companion_split_drag = None;
-        self.clear_project_editor_companion_split_divider_hover_state();
-        // The dropped bottom slot may have been rendering a chat CEF child.
-        self.reconcile_agents_pane_surfaces(cx);
-        self.persist_shell_layout_state();
-
-        if let Some(session_id) = focused_session_id {
-            self.focus_project_editor_companion_terminal_session(mode, session_id, window, cx);
-        } else {
-            self.focus_project_editor_companion(mode, window, cx);
-        }
-        cx.notify();
-    }
-
-    /// Undo the widening that creating a side-by-side pair applied, while that
-    /// widening is still the last word on the companion's width. Any manual
-    /// resize clears the remembered ratio, so this cannot overrule the user.
-    pub(crate) fn restore_project_editor_companion_width_before_columns(&mut self) -> bool {
-        let Some(ratio) = self
-            .project_editor_shell
-            .left_companion_width_ratio_before_columns
-            .take()
-        else {
-            return false;
-        };
-        let content_span = self
-            .project_editor_companion_layout_metrics
-            .map(|metrics| metrics.content_span);
-        self.project_editor_shell
-            .restore_left_companion_width_ratio(ratio, content_span)
-    }
-
-    /// CDXC:Workarea 2026-09-19 DECISION:
-    /// User: the companion sidepane splits to the right as well as vertically, and a fresh pair of
-    /// side-by-side sidepanes starts at 440px each, still resizable.
-    /// One control per axis toggles that axis: clicking the other axis while split rearranges the
-    /// existing pair instead of creating a third session.
-    pub(crate) fn toggle_project_editor_companion_split(
-        &mut self,
-        mode: TitlebarMode,
-        axis: WorkspaceSplitAxis,
-        keep_slot: Option<ProjectEditorCompanionTerminalSlot>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let has_second_session = self
-            .project_editor_companion_secondary_terminal_session_id
-            .is_some();
-        let is_split = self.project_editor_shell.left_companion_split_enabled && has_second_session;
-        if is_split && self.project_editor_shell.left_companion_split_axis == axis {
-            self.collapse_project_editor_companion_split(mode, keep_slot, window, cx);
-            return;
-        }
-
-        self.project_editor_shell.left_companion_split_axis = axis;
-        // Only the docked companion has a width ratio to set: the floating reveal
-        // sizes itself from its own window, so re-deriving the docked ratio from
-        // its stale span would leave that window's content misplaced.
-        if axis == WorkspaceSplitAxis::Horizontal
-            && self.project_editor_shell.left_companion_visible
-        {
-            let content_span = self
-                .project_editor_companion_layout_metrics
-                .map(|metrics| metrics.content_span);
-            if let Some(previous_ratio) = self
-                .project_editor_shell
-                .apply_left_companion_columns_default_widths(content_span)
-            {
-                self.project_editor_shell
-                    .left_companion_width_ratio_before_columns = Some(previous_ratio);
-            }
-        }
-        self.project_editor_companion_split_drag = None;
-        self.clear_project_editor_companion_split_divider_hover_state();
-        self.split_project_editor_companion(mode, window, cx);
-        self.persist_shell_layout_state();
-        cx.notify();
-    }
-
-    pub(crate) fn restore_project_editor_companion_shell_state(
-        active_mode: TitlebarMode,
-        mode: TitlebarMode,
-        project_editor_shell: &mut ProjectEditorShellModel,
-    ) -> Option<ShellFocusTarget> {
-        /*
-        CDXC:CodeEditor 2026-06-27-02:58:
-        native/sidebar/project-editor-companion-retarget-source.test.ts requires companion expansion to focus the rendered companion session, including after the Commands panel was focused and collapsed without switching back to Agents. Restore only the matching active project-editor mode, wake that mode, and return ProjectEditorCompanion(mode) directly so command-pane state stays outside the transition and focus cannot fall back to Agents or the main editor surface.
-        */
-        if active_mode != mode || !mode.is_project_editor_mode() {
-            return None;
-        }
-        if !project_editor_shell.restore_left_companion() {
-            return None;
-        }
-
-        project_editor_shell.mark_mode_awake(mode);
-        Some(ShellFocusTarget::ProjectEditorCompanion(mode))
-    }
-
-    pub(crate) fn hide_project_editor_companion(
-        &mut self,
-        mode: TitlebarMode,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        /*
-        CDXC:CodeEditor 2026-06-22-08:15:
-        Companion hide is a shell-layout action, not surface teardown. The active project-editor mode stays awake, focus returns to that mode's main surface, Browser CEF visibility is recalculated through the normal gate, and the stored companion width ratio remains unchanged for later restore.
-        */
-        if self.active_mode != mode || !mode.is_project_editor_mode() {
-            return false;
-        }
-        if !self.project_editor_shell.hide_left_companion() {
-            return false;
-        }
-
-        self.project_editor_companion_drag = None;
-        self.clear_project_editor_companion_divider_hover_state();
-        self.project_editor_companion_split_drag = None;
-        self.clear_project_editor_companion_split_divider_hover_state();
-        self.mark_project_editor_mode_awake(mode, cx);
-        self.focus_project_editor_surface_for_keyboard(mode, window, cx);
-        // Session Chat is a native CEF child view, not GPUI paint, so a
-        // collapsed companion leaves it on screen until this gate runs.
-        self.update_active_mode_cef_child_visibility(cx);
-        self.persist_shell_layout_state();
-        cx.notify();
-        true
-    }
-
-    pub(crate) fn close_project_editor_companion_session(
-        &mut self,
-        mode: TitlebarMode,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        /*
-        CDXC:FocusMode 2026-07-29-04:29:
-        Cmd-W in a focused companion closes the exact terminal rendered there,
-        then reuses the ordinary Agents tab lifecycle so provider cleanup and
-        local model removal remain owned by one path.
-        */
-        if self.active_mode != mode
-            || !mode.is_project_editor_mode()
-            || !self.project_editor_companion_is_visible()
-        {
-            return false;
-        }
-
-        let shell_session_id = self.project_editor_companion_focused_terminal_session_id();
-        let Some(shell_session_id) = shell_session_id else {
-            return false;
-        };
-        let Some(pane_id) = self.agents_workspace.pane_id_for_session(shell_session_id) else {
-            return false;
-        };
-        if !self.close_agents_tab(pane_id, shell_session_id, cx) {
-            return false;
-        }
-
-        self.agents_terminal_runtime_sessions
-            .reconcile_with_workspace(&self.agents_workspace);
-        self.sync_project_editor_companion_terminal_selection();
-        self.focus_project_editor_companion(mode, window, cx);
-        true
-    }
-
-    pub(crate) fn restore_project_editor_companion(
-        &mut self,
-        mode: TitlebarMode,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        /*
-        CDXC:CodeEditor 2026-06-22-08:15:
-        Companion restore uses the previous persisted width ratio and focuses the restored companion as a real layout pane. It wakes only the active project-editor mode and leaves Browser tabs, placeholder identities, command-pane state, and terminal placeholder state intact.
-        */
-        let Some(focus) = Self::restore_project_editor_companion_shell_state(
-            self.active_mode,
-            mode,
-            &mut self.project_editor_shell,
-        ) else {
-            return false;
-        };
-
-        #[cfg(target_os = "macos")]
-        self.close_floating_companion(cx);
-
-        self.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
-        self.focus_shell_target(focus, cx);
-        self.focus_project_editor_companion(mode, window, cx);
-        self.update_active_mode_cef_child_visibility(cx);
-        self.persist_shell_layout_state();
-        cx.notify();
-        true
-    }
-
-    pub(crate) fn toggle_project_editor_companion_from_hotkey(
-        &mut self,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        /*
-        CDXC:CodeEditor 2026-07-29-05:03:
-        The configurable companion hotkey owns the same visible layout state as the titlebar control. Collapse focuses the active main project pane; expand restores and focuses the companion without changing its saved width, split state, or selected session.
-        */
-        let mode = self.active_mode;
-        if !mode.is_project_editor_mode() {
-            return false;
-        }
-        if self.project_editor_shell.left_companion_visible {
-            self.hide_project_editor_companion(mode, window, cx)
-        } else {
-            self.restore_project_editor_companion(mode, window, cx)
-        }
     }
 
     pub(crate) fn focused_command_pane_tab_cycle_target(
@@ -1942,7 +1473,9 @@ impl GhostexGpuiApp {
             } else {
                 false
             }
-        } else if self.active_mode == TitlebarMode::Agents {
+        } else if matches!(self.shell_focus, ShellFocusTarget::AgentsPane(_))
+            || self.open_view_mode().is_none()
+        {
             let pane_id = match self.shell_focus {
                 ShellFocusTarget::AgentsPane(pane_id) => pane_id,
                 _ => self.agents_workspace.focused_pane,
@@ -2018,17 +1551,14 @@ impl GhostexGpuiApp {
         CDXC:Terminal 2026-06-23-05:21:
         Cmd-W with command-pane focus must match command tab close parity: an exact current mounted command surface gets a Ghostty close request and stays in the command model until a confirmed close callback is consumed. Non-mounted command placeholders continue to close through the existing command shell model.
 
-        CDXC:CodeEditor 2026-06-22-08:15:
-        The focused project-editor companion owns Cmd-W before mode-specific close behavior runs, while Browser surface focus still closes Browser tabs.
-
         CDXC:CommandPane 2026-06-25-17:37:
         Cmd-W over command-pane focus must use the same clicked command-tab close path as hover, middle-click, scoped menus, and Close After Done. That shared helper owns mounted close requests, timer cleanup, final-panel focus restore, shell persistence, and sidebar refresh.
 
         CDXC:FocusMode 2026-06-27-02:58:
         Keep the executable Cmd-W route aligned with the pure focused-close decision helper so native parity stays testable without a GPUI window: command focus wins first, BrowserSurface or exact BrowserPane focus closes Browser tabs, and main project-editor surface focus no-ops.
 
-        CDXC:FocusMode 2026-07-29-04:29:
-        Companion focus closes the exact rendered companion session. Hiding the companion is a separate layout action owned only by its titlebar collapse button.
+        CDXC:Workarea 2026-09-20 WHY:
+        An Agents pane owns Cmd-W whatever the view panel shows, because it is on screen either way. This supersedes the 2026-07-29 rule that gave the chord to a focused companion session.
         */
         match focused_surface_close_decision(self.shell_focus, self.active_mode, &self.command_pane)
         {
@@ -2039,9 +1569,6 @@ impl GhostexGpuiApp {
                 self.close_command_pane_tab(group_id, session_id, cx);
             }
             FocusedSurfaceCloseDecision::InterceptNoOp | FocusedSurfaceCloseDecision::NoOp => {}
-            FocusedSurfaceCloseDecision::CloseProjectEditorCompanionSession(mode) => {
-                self.close_project_editor_companion_session(mode, window, cx);
-            }
             FocusedSurfaceCloseDecision::CloseAgentsActiveTab => {
                 let pane_id = self.agents_workspace.focused_pane;
                 if let Some(session_id) = self
@@ -2078,7 +1605,7 @@ impl GhostexGpuiApp {
         };
         self.agents_workspace.focus_pane(pane_id);
 
-        if self.active_mode == TitlebarMode::Agents && self.agents_workspace.toggle_focus_mode() {
+        if self.agents_workspace.toggle_focus_mode() {
             self.focus_shell_target(
                 ShellFocusTarget::AgentsPane(self.agents_workspace.focused_pane),
                 cx,
@@ -2088,6 +1615,11 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// CDXC:FocusRouting 2026-09-20 WHY:
+    /// One candidate set covers the whole workarea now that the Agents column and an open view are on
+    /// screen together, so Cmd+Alt+Left and Right cross the split divider by geometry like any other
+    /// pane boundary. This supersedes the 2026-07-29 rule that Left from a view restored a hidden
+    /// companion: the sessions column is always there to move into.
     pub(crate) fn focus_workspace_direction(
         &mut self,
         direction: WorkspaceFocusDirection,
@@ -2095,59 +1627,15 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         /*
-        CDXC:FocusRouting 2026-06-22-08:47:
-        Cmd-Alt directional focus in the GPUI placeholder shell follows the rendered native layout instead of a flat tab order. Use recorded normal-layout bounds for visible Agents leaf panes and expanded command-pane groups, include sleeping/restored/mounting/failed-startup/popped-out Agents placeholders because their panes still render, and fall back to the previous rendered-order traversal only before first-frame bounds are available. Geometry is runtime-only; focus persistence still goes through the existing shell focus helpers.
-
-        CDXC:FocusRouting 2026-06-22-09:24:
-        Browser split panes use the same Cmd-Alt directional intent while Browser mode owns shell focus. Rank only rendered Browser leaf panes by runtime normal-layout bounds, keep inactive Browser placeholders focusable, and fall back to Browser-pane render order before first-frame geometry exists without crossing into Agents or command-pane focus.
-
-        CDXC:FocusRouting 2026-06-22-09:32:
-        Project-editor Cmd-Alt focus must use runtime normal-layout geometry for visible companions, Source/Kanban/Automate/Docs placeholder surfaces, Browser split panes, selected sleeping project-editor placeholders, and the expanded command pane. No raw geometry is persisted, and focus changes still route through the shell focus helpers that own Browser visibility and project-editor wake behavior.
-
-        CDXC:FocusRouting 2026-06-22-09:44:
+        CDXC:FocusRouting 2026-07-05:
         Keyboard directional focus and placeholder body activation are separate intents. Cmd-Alt focus may select a sleeping project-editor main placeholder without waking Source, Browser, Kanban, Automate, or Docs, while explicit body activation remains the path that wakes the selected surface.
-
-        CDXC:FocusRouting 2026-07-29-05:03:
-        Left focus from a project-editor main pane restores a hidden companion as a navigation target: restore the companion in normal layout and focus its selected session. Visible companions continue through geometry-based left/right focus, while collapsing explicitly transfers focus back to the main pane.
         */
-        let active_mode = self.active_mode;
-        let focus_is_project_editor_main = match self.shell_focus {
-            ShellFocusTarget::ProjectEditorSurface(mode) => mode == active_mode,
-            ShellFocusTarget::BrowserSurface | ShellFocusTarget::BrowserPane(_) => {
-                active_mode == TitlebarMode::Browser
+        let changed = match self.focus_workspace_direction_spatial(direction, window, cx) {
+            SpatialFocusOutcome::Focused => true,
+            SpatialFocusOutcome::NoTarget => false,
+            SpatialFocusOutcome::BoundsUnavailable => {
+                self.focus_workspace_direction_by_render_order(direction, window, cx)
             }
-            _ => false,
-        };
-        if direction == WorkspaceFocusDirection::Left
-            && active_mode.is_project_editor_mode()
-            && !self.project_editor_companion_is_visible()
-            && focus_is_project_editor_main
-            && self.restore_project_editor_companion(active_mode, window, cx)
-        {
-            return;
-        }
-
-        let changed = match self.active_mode {
-            TitlebarMode::Agents => {
-                match self.focus_workspace_direction_spatial(direction, window, cx) {
-                    SpatialFocusOutcome::Focused => true,
-                    SpatialFocusOutcome::NoTarget => false,
-                    SpatialFocusOutcome::BoundsUnavailable => {
-                        self.focus_workspace_direction_by_render_order(direction, cx)
-                    }
-                }
-            }
-            mode if mode.is_project_editor_mode() => {
-                match self.focus_project_editor_direction_spatial(mode, direction, window, cx) {
-                    SpatialFocusOutcome::Focused => true,
-                    SpatialFocusOutcome::NoTarget => false,
-                    SpatialFocusOutcome::BoundsUnavailable => self
-                        .focus_project_editor_direction_by_render_order(
-                            mode, direction, window, cx,
-                        ),
-                }
-            }
-            _ => false,
         };
 
         if changed {
@@ -2182,6 +1670,8 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// Every pane the pointer-free directional focus can land on has to have reported bounds for this
+    /// frame, or the caller falls back to render order.
     pub(crate) fn spatial_focus_bounds_ready(&self) -> bool {
         let pane_ids = self.agents_workspace.rendered_leaf_order();
         if pane_ids.is_empty()
@@ -2190,6 +1680,25 @@ impl GhostexGpuiApp {
                 .all(|pane_id| self.workspace_leaf_layout_bounds.contains_key(pane_id))
         {
             return false;
+        }
+
+        if let Some(mode) = self.open_view_mode() {
+            let view_bounds_ready =
+                if mode == TitlebarMode::Browser && self.project_editor_shell.is_mode_awake(mode) {
+                    let pane_ids = self.browser_tabs.rendered_leaf_order();
+                    if pane_ids.is_empty() {
+                        self.project_editor_surface_bounds_for_mode(mode).is_some()
+                    } else {
+                        pane_ids
+                            .iter()
+                            .all(|pane_id| self.browser_leaf_layout_bounds.contains_key(pane_id))
+                    }
+                } else {
+                    self.project_editor_surface_bounds_for_mode(mode).is_some()
+                };
+            if !view_bounds_ready {
+                return false;
+            }
         }
 
         self.command_spatial_focus_bounds_ready()
@@ -2201,6 +1710,26 @@ impl GhostexGpuiApp {
             if let Some(bounds) = self.workspace_leaf_layout_bounds.get(&pane_id).copied() {
                 candidates.push(FocusCandidate {
                     target: SpatialFocusTarget::AgentsPane(pane_id),
+                    bounds,
+                    order: candidates.len(),
+                });
+            }
+        }
+
+        if let Some(mode) = self.open_view_mode() {
+            if mode == TitlebarMode::Browser && self.project_editor_shell.is_mode_awake(mode) {
+                for pane_id in self.browser_tabs.rendered_leaf_order() {
+                    if let Some(bounds) = self.browser_leaf_layout_bounds.get(&pane_id).copied() {
+                        candidates.push(FocusCandidate {
+                            target: SpatialFocusTarget::BrowserPane(pane_id),
+                            bounds,
+                            order: candidates.len(),
+                        });
+                    }
+                }
+            } else if let Some(bounds) = self.project_editor_surface_bounds_for_mode(mode) {
+                candidates.push(FocusCandidate {
+                    target: SpatialFocusTarget::ProjectEditorSurface(mode),
                     bounds,
                     order: candidates.len(),
                 });
@@ -2276,8 +1805,34 @@ impl GhostexGpuiApp {
             {
                 self.current_command_spatial_focus_bounds()
             }
+            ShellFocusTarget::ProjectEditorSurface(mode) if self.active_mode == mode => self
+                .project_editor_surface_bounds_for_mode(mode)
+                .map(|bounds| (SpatialFocusTarget::ProjectEditorSurface(mode), bounds)),
+            ShellFocusTarget::BrowserPane(pane_id) if self.active_mode == TitlebarMode::Browser => {
+                self.browser_leaf_layout_bounds
+                    .get(&pane_id)
+                    .copied()
+                    .map(|bounds| (SpatialFocusTarget::BrowserPane(pane_id), bounds))
+                    .or_else(|| self.browser_surface_spatial_focus_bounds())
+            }
+            ShellFocusTarget::BrowserSurface if self.active_mode == TitlebarMode::Browser => {
+                self.browser_surface_spatial_focus_bounds()
+            }
             _ => None,
         }
+    }
+
+    /// The Browser view's own bounds: its focused leaf while it is awake, else the surface slot.
+    fn browser_surface_spatial_focus_bounds(&self) -> Option<(SpatialFocusTarget, Bounds<Pixels>)> {
+        let mode = TitlebarMode::Browser;
+        if self.project_editor_shell.is_mode_awake(mode) {
+            let pane_id = self.browser_tabs.focused_pane;
+            if let Some(bounds) = self.browser_leaf_layout_bounds.get(&pane_id).copied() {
+                return Some((SpatialFocusTarget::BrowserPane(pane_id), bounds));
+            }
+        }
+        self.project_editor_surface_bounds_for_mode(mode)
+            .map(|bounds| (SpatialFocusTarget::ProjectEditorSurface(mode), bounds))
     }
 
     pub(crate) fn current_command_spatial_focus_bounds(
@@ -2315,230 +1870,95 @@ impl GhostexGpuiApp {
             SpatialFocusTarget::ProjectEditorSurface(mode) => {
                 self.focus_project_editor_surface_for_keyboard(mode, window, cx)
             }
-            SpatialFocusTarget::ProjectEditorCompanion(mode) => {
-                self.focus_project_editor_companion(mode, window, cx);
-                self.shell_focus == ShellFocusTarget::ProjectEditorCompanion(mode)
-            }
             SpatialFocusTarget::CommandPane => self.focus_command_pane_directional_target(None, cx),
             SpatialFocusTarget::CommandPaneGroup(group_id) => {
                 self.focus_command_pane_directional_target(Some(group_id), cx)
             }
-        }
-    }
-
-    pub(crate) fn focus_workspace_render_order_target(
-        &mut self,
-        target: SpatialFocusTarget,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        match target {
-            SpatialFocusTarget::AgentsPane(pane_id) => {
-                self.focus_agents_pane(pane_id, cx);
-                true
-            }
-            SpatialFocusTarget::CommandPane => self.focus_command_pane_directional_target(None, cx),
-            SpatialFocusTarget::CommandPaneGroup(group_id) => {
-                self.focus_command_pane_directional_target(Some(group_id), cx)
-            }
-            _ => false,
         }
     }
 
     pub(crate) fn focus_workspace_direction_by_render_order(
         &mut self,
         direction: WorkspaceFocusDirection,
+        window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
-        let pane_ids = self.agents_workspace.rendered_leaf_order();
-        let targets = workspace_render_order_focus_targets(
-            pane_ids,
-            self.command_pane.is_expanded(),
-            self.command_pane.has_sessions(),
-            self.command_pane.group_order(),
-        );
+        let targets = self.workspace_render_order_focus_targets();
         if targets.is_empty() {
             return false;
         }
 
-        match self.shell_focus {
+        let current_target = match self.shell_focus {
             ShellFocusTarget::CommandPane => {
                 let focused_group_target =
                     SpatialFocusTarget::CommandPaneGroup(self.command_pane.focused_group);
-                let current_target = if targets.contains(&focused_group_target) {
+                if targets.contains(&focused_group_target) {
                     Some(focused_group_target)
                 } else if targets.contains(&SpatialFocusTarget::CommandPane) {
                     Some(SpatialFocusTarget::CommandPane)
                 } else {
                     None
-                };
-                let Some(current_target) = current_target else {
-                    return false;
-                };
-                render_order_focus_target(&targets, Some(current_target), direction)
-                    .map(|target| self.focus_workspace_render_order_target(target, cx))
-                    .unwrap_or(false)
+                }
             }
-            ShellFocusTarget::AgentsPane(current_pane_id) => {
-                let current_target = SpatialFocusTarget::AgentsPane(current_pane_id);
-                render_order_focus_target(&targets, Some(current_target), direction)
-                    .map(|target| self.focus_workspace_render_order_target(target, cx))
-                    .unwrap_or(false)
+            ShellFocusTarget::AgentsPane(pane_id) => Some(SpatialFocusTarget::AgentsPane(pane_id)),
+            ShellFocusTarget::ProjectEditorSurface(mode) if self.active_mode == mode => targets
+                .contains(&SpatialFocusTarget::ProjectEditorSurface(mode))
+                .then_some(SpatialFocusTarget::ProjectEditorSurface(mode)),
+            ShellFocusTarget::BrowserPane(pane_id) if self.active_mode == TitlebarMode::Browser => {
+                let browser_target = SpatialFocusTarget::BrowserPane(pane_id);
+                if targets.contains(&browser_target) {
+                    Some(browser_target)
+                } else {
+                    targets
+                        .contains(&SpatialFocusTarget::ProjectEditorSurface(
+                            TitlebarMode::Browser,
+                        ))
+                        .then_some(SpatialFocusTarget::ProjectEditorSurface(
+                            TitlebarMode::Browser,
+                        ))
+                }
+            }
+            ShellFocusTarget::BrowserSurface if self.active_mode == TitlebarMode::Browser => {
+                let browser_target =
+                    SpatialFocusTarget::BrowserPane(self.browser_tabs.focused_pane);
+                if targets.contains(&browser_target) {
+                    Some(browser_target)
+                } else {
+                    targets
+                        .contains(&SpatialFocusTarget::ProjectEditorSurface(
+                            TitlebarMode::Browser,
+                        ))
+                        .then_some(SpatialFocusTarget::ProjectEditorSurface(
+                            TitlebarMode::Browser,
+                        ))
+                }
             }
             _ => {
                 self.focus_agents_pane(self.agents_workspace.focused_pane, cx);
-                true
+                return true;
             }
-        }
-    }
-
-    pub(crate) fn focus_project_editor_direction_spatial(
-        &mut self,
-        mode: TitlebarMode,
-        direction: WorkspaceFocusDirection,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> SpatialFocusOutcome {
-        if !self.project_editor_spatial_focus_bounds_ready(mode) {
-            return SpatialFocusOutcome::BoundsUnavailable;
-        }
-
-        let Some((current_target, current_bounds)) =
-            self.current_project_editor_spatial_focus_bounds(mode)
-        else {
-            return SpatialFocusOutcome::BoundsUnavailable;
-        };
-        let candidates = self.project_editor_spatial_focus_candidates(mode);
-        let Some(target) =
-            nearest_spatial_focus_target(current_bounds, current_target, direction, &candidates)
-        else {
-            return SpatialFocusOutcome::NoTarget;
         };
 
-        if self.focus_spatial_target(target, window, cx) {
-            SpatialFocusOutcome::Focused
-        } else {
-            SpatialFocusOutcome::NoTarget
-        }
-    }
-
-    pub(crate) fn project_editor_spatial_focus_bounds_ready(&self, mode: TitlebarMode) -> bool {
-        if !mode.is_project_editor_mode() {
-            return false;
-        }
-
-        if self.project_editor_companion_is_visible()
-            && self
-                .project_editor_companion_bounds_for_mode(mode)
-                .is_none()
-        {
-            return false;
-        }
-
-        let main_bounds_ready = match mode {
-            TitlebarMode::Browser if self.project_editor_shell.is_mode_awake(mode) => {
-                let pane_ids = self.browser_tabs.rendered_leaf_order();
-                if pane_ids.is_empty() {
-                    self.project_editor_surface_bounds_for_mode(mode).is_some()
-                } else {
-                    pane_ids
-                        .iter()
-                        .all(|pane_id| self.browser_leaf_layout_bounds.contains_key(pane_id))
-                }
-            }
-            TitlebarMode::Source
-            | TitlebarMode::Browser
-            | TitlebarMode::Kanban
-            | TitlebarMode::Automate
-            | TitlebarMode::Manage
-            | TitlebarMode::Extension(_) => {
-                self.project_editor_surface_bounds_for_mode(mode).is_some()
-            }
-            TitlebarMode::Agents => false,
+        let Some(current_target) = current_target else {
+            self.focus_agents_pane(self.agents_workspace.focused_pane, cx);
+            return true;
         };
-
-        main_bounds_ready && self.command_spatial_focus_bounds_ready()
+        render_order_focus_target(&targets, Some(current_target), direction)
+            .map(|target| self.focus_spatial_target(target, window, cx))
+            .unwrap_or(false)
     }
 
-    pub(crate) fn project_editor_spatial_focus_candidates(
-        &self,
-        mode: TitlebarMode,
-    ) -> Vec<FocusCandidate> {
-        let mut candidates = Vec::new();
-
-        if self.project_editor_companion_is_visible() {
-            if let Some(bounds) = self.project_editor_companion_bounds_for_mode(mode) {
-                candidates.push(FocusCandidate {
-                    target: SpatialFocusTarget::ProjectEditorCompanion(mode),
-                    bounds,
-                    order: candidates.len(),
-                });
-            }
-        }
-
-        if mode == TitlebarMode::Browser && self.project_editor_shell.is_mode_awake(mode) {
-            for pane_id in self.browser_tabs.rendered_leaf_order() {
-                if let Some(bounds) = self.browser_leaf_layout_bounds.get(&pane_id).copied() {
-                    candidates.push(FocusCandidate {
-                        target: SpatialFocusTarget::BrowserPane(pane_id),
-                        bounds,
-                        order: candidates.len(),
-                    });
-                }
-            }
-        } else if let Some(bounds) = self.project_editor_surface_bounds_for_mode(mode) {
-            candidates.push(FocusCandidate {
-                target: SpatialFocusTarget::ProjectEditorSurface(mode),
-                bounds,
-                order: candidates.len(),
-            });
-        }
-
-        self.append_command_spatial_focus_candidates(&mut candidates);
-
-        candidates
-    }
-
-    pub(crate) fn current_project_editor_spatial_focus_bounds(
-        &self,
-        mode: TitlebarMode,
-    ) -> Option<(SpatialFocusTarget, Bounds<Pixels>)> {
-        match self.shell_focus {
-            ShellFocusTarget::CommandPane => self.current_command_spatial_focus_bounds(),
-            ShellFocusTarget::ProjectEditorCompanion(focus_mode) if focus_mode == mode => self
-                .project_editor_companion_bounds_for_mode(mode)
-                .map(|bounds| (SpatialFocusTarget::ProjectEditorCompanion(mode), bounds)),
-            ShellFocusTarget::ProjectEditorSurface(focus_mode) if focus_mode == mode => self
-                .project_editor_surface_bounds_for_mode(mode)
-                .map(|bounds| (SpatialFocusTarget::ProjectEditorSurface(mode), bounds)),
-            ShellFocusTarget::BrowserPane(pane_id) if mode == TitlebarMode::Browser => self
-                .browser_leaf_layout_bounds
-                .get(&pane_id)
-                .copied()
-                .map(|bounds| (SpatialFocusTarget::BrowserPane(pane_id), bounds))
-                .or_else(|| {
-                    self.project_editor_surface_bounds_for_mode(mode)
-                        .map(|bounds| (SpatialFocusTarget::ProjectEditorSurface(mode), bounds))
-                }),
-            ShellFocusTarget::BrowserSurface if mode == TitlebarMode::Browser => {
-                if self.project_editor_shell.is_mode_awake(mode) {
-                    let pane_id = self.browser_tabs.focused_pane;
-                    self.browser_leaf_layout_bounds
-                        .get(&pane_id)
-                        .copied()
-                        .map(|bounds| (SpatialFocusTarget::BrowserPane(pane_id), bounds))
-                        .or_else(|| {
-                            self.project_editor_surface_bounds_for_mode(mode)
-                                .map(|bounds| {
-                                    (SpatialFocusTarget::ProjectEditorSurface(mode), bounds)
-                                })
-                        })
-                } else {
-                    self.project_editor_surface_bounds_for_mode(mode)
-                        .map(|bounds| (SpatialFocusTarget::ProjectEditorSurface(mode), bounds))
-                }
-            }
-            _ => None,
-        }
+    pub(crate) fn workspace_render_order_focus_targets(&self) -> Vec<SpatialFocusTarget> {
+        let open_view = self.open_view_mode();
+        workspace_render_order_focus_targets(
+            self.agents_workspace.rendered_leaf_order(),
+            open_view,
+            open_view.is_some_and(|mode| self.project_editor_shell.is_mode_awake(mode)),
+            self.browser_tabs.rendered_leaf_order(),
+            self.command_pane.is_expanded(),
+            self.command_pane.has_sessions(),
+            self.command_pane.group_order(),
+        )
     }
 
     pub(crate) fn project_editor_surface_bounds_for_mode(
@@ -2548,104 +1968,6 @@ impl GhostexGpuiApp {
         self.project_editor_surface_layout_bounds
             .filter(|focus_bounds| focus_bounds.mode == mode)
             .map(|focus_bounds| focus_bounds.bounds)
-    }
-
-    pub(crate) fn project_editor_companion_bounds_for_mode(
-        &self,
-        mode: TitlebarMode,
-    ) -> Option<Bounds<Pixels>> {
-        self.project_editor_companion_layout_bounds
-            .filter(|focus_bounds| focus_bounds.mode == mode)
-            .map(|focus_bounds| focus_bounds.bounds)
-    }
-
-    pub(crate) fn focus_project_editor_direction_by_render_order(
-        &mut self,
-        mode: TitlebarMode,
-        direction: WorkspaceFocusDirection,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> bool {
-        let targets = self.project_editor_render_order_focus_targets(mode);
-        if targets.is_empty() {
-            return false;
-        }
-
-        let current_target = self.current_project_editor_render_order_target(mode, &targets);
-        let target = render_order_focus_target(&targets, current_target, direction);
-
-        target
-            .map(|target| self.focus_spatial_target(target, window, cx))
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn project_editor_render_order_focus_targets(
-        &self,
-        mode: TitlebarMode,
-    ) -> Vec<SpatialFocusTarget> {
-        project_editor_render_order_focus_targets_for_state(
-            mode,
-            self.project_editor_companion_is_visible(),
-            self.project_editor_shell.is_mode_awake(mode),
-            self.browser_tabs.rendered_leaf_order(),
-            self.command_pane.is_expanded(),
-            self.command_pane.has_sessions(),
-            self.command_pane.group_order(),
-        )
-    }
-
-    pub(crate) fn current_project_editor_render_order_target(
-        &self,
-        mode: TitlebarMode,
-        targets: &[SpatialFocusTarget],
-    ) -> Option<SpatialFocusTarget> {
-        match self.shell_focus {
-            ShellFocusTarget::CommandPane => {
-                let group_target =
-                    SpatialFocusTarget::CommandPaneGroup(self.command_pane.focused_group);
-                if targets.contains(&group_target) {
-                    Some(group_target)
-                } else if targets.contains(&SpatialFocusTarget::CommandPane) {
-                    Some(SpatialFocusTarget::CommandPane)
-                } else {
-                    None
-                }
-            }
-            ShellFocusTarget::ProjectEditorCompanion(focus_mode)
-                if focus_mode == mode
-                    && targets.contains(&SpatialFocusTarget::ProjectEditorCompanion(mode)) =>
-            {
-                Some(SpatialFocusTarget::ProjectEditorCompanion(mode))
-            }
-            ShellFocusTarget::ProjectEditorSurface(focus_mode)
-                if focus_mode == mode
-                    && targets.contains(&SpatialFocusTarget::ProjectEditorSurface(mode)) =>
-            {
-                Some(SpatialFocusTarget::ProjectEditorSurface(mode))
-            }
-            ShellFocusTarget::BrowserPane(pane_id) if mode == TitlebarMode::Browser => {
-                let browser_target = SpatialFocusTarget::BrowserPane(pane_id);
-                if targets.contains(&browser_target) {
-                    Some(browser_target)
-                } else if targets.contains(&SpatialFocusTarget::ProjectEditorSurface(mode)) {
-                    Some(SpatialFocusTarget::ProjectEditorSurface(mode))
-                } else {
-                    None
-                }
-            }
-            ShellFocusTarget::BrowserSurface if mode == TitlebarMode::Browser => {
-                let browser_target =
-                    SpatialFocusTarget::BrowserPane(self.browser_tabs.focused_pane);
-                if targets.contains(&browser_target) {
-                    Some(browser_target)
-                } else if targets.contains(&SpatialFocusTarget::ProjectEditorSurface(mode)) {
-                    Some(SpatialFocusTarget::ProjectEditorSurface(mode))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
     }
 
     pub(crate) fn prepare_focus_bounds_for_render(
@@ -2664,15 +1986,6 @@ impl GhostexGpuiApp {
         self.browser_leaf_layout_bounds.clear();
         self.command_group_layout_bounds.clear();
         self.command_terminal_mount_slot_bounds.clear();
-        #[cfg(target_os = "macos")]
-        let companion_floating = self.companion_reveal.is_some();
-        #[cfg(not(target_os = "macos"))]
-        let companion_floating = false;
-        if !companion_floating {
-            self.project_editor_companion_terminal_mount_slot_bounds
-                .clear();
-            self.project_editor_companion_layout_bounds = None;
-        }
         self.command_pane_layout_bounds = None;
         self.project_editor_surface_layout_bounds = None;
         self.agents_terminal_mount_slot_bounds.clear();
@@ -2684,7 +1997,7 @@ impl GhostexGpuiApp {
         // record counts as a fresh surfacing and triggers the conditional
         // refresh; a continuously rendered slot keeps its entry, so per-frame
         // records stay refresh-free (CDXC:Zmx 2026-07-11).
-        if self.active_mode == TitlebarMode::Agents {
+        if self.agents_workspace_visible() {
             let rendered = self.agents_workspace.rendered_terminal_body_mount_slots();
             self.agents_terminal_zmx_refresh_recorded_bounds
                 .retain(|slot_id, _| rendered.contains(slot_id));
@@ -2696,14 +2009,8 @@ impl GhostexGpuiApp {
             self.command_terminal_zmx_refresh_recorded_bounds
                 .retain(|slot_id, _| rendered.contains(slot_id));
         }
-        {
-            let current = self.current_project_editor_companion_terminal_body_mount_slots();
-            self.project_editor_companion_zmx_refresh_recorded_bounds
-                .retain(|slot_id, _| current.contains(slot_id));
-        }
         self.sync_agents_terminal_surface_host(scale_factor, cx);
         self.sync_command_terminal_surface_host(scale_factor, cx);
-        self.sync_project_editor_companion_terminal_surface_host(scale_factor, cx);
         self.sync_gpui_engine_agents_chat_eligibility(cx);
     }
 }

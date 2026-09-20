@@ -412,10 +412,6 @@ impl GhostexGpuiApp {
             ) => slot_id.session_id == request.shell_session_id,
             #[cfg(target_os = "macos")]
             RemotePromptEditorDeliveryTarget::NativeTerminal(
-                FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id),
-            ) => slot_id.session_id == request.shell_session_id,
-            #[cfg(target_os = "macos")]
-            RemotePromptEditorDeliveryTarget::NativeTerminal(
                 FocusedTerminalTextMountTarget::Command(_),
             ) => false,
             RemotePromptEditorDeliveryTarget::GpuiEngineTerminal {
@@ -436,12 +432,7 @@ impl GhostexGpuiApp {
             RemotePromptEditorDeliveryTarget::NativeView(native_view) => {
                 self.agents_terminal_session_id_containing_responder(
                     native_view as *mut std::ffi::c_void,
-                )
-                .or_else(|| {
-                    self.project_editor_companion_terminal_session_id_containing_responder(
-                        native_view as *mut std::ffi::c_void,
-                    )
-                }) == Some(request.shell_session_id)
+                ) == Some(request.shell_session_id)
             }
         };
         if !authoritative_session_is_current

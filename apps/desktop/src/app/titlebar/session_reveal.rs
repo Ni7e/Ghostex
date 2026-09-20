@@ -12,11 +12,12 @@ impl GhostexGpuiApp {
         session_id: &str,
         cx: &mut gpui::Context<Self>,
     ) {
+        // CDXC:Sidebar 2026-09-20 DECISION:
+        // User (ruling 7B): the floating reveal is on all three platforms, so Reveal Active Session
+        // floats the sidebar everywhere and never changes its saved collapsed state. This
+        // supersedes the Windows and Linux behaviour of expanding the docked sidebar instead.
         if self.sidebar_collapsed {
-            #[cfg(target_os = "macos")]
             self.update_sidebar_reveal(true, false, cx);
-            #[cfg(not(target_os = "macos"))]
-            self.toggle_gpui_sidebar_collapsed(cx);
         }
         self.dispatch_gpui_sidebar_host_message(
             serde_json::json!({

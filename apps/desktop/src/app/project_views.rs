@@ -25,7 +25,7 @@ pub(crate) struct ProjectViewCommand {
     pub id: String,
     pub operation: String,
 }
-/// The HUD fields the app-modal Settings window needs to render the "Available in" pickers.
+/// The HUD fields the app-modal Settings window needs to render the view scope editors.
 pub(crate) const PROJECT_VIEW_SCOPE_OPTION_HUD_KEYS: [&str; 2] =
     ["projectViewSpaces", "projectViewProjects"];
 
@@ -37,7 +37,7 @@ impl GhostexGpuiApp {
     /// CDXC:Spaces 2026-09-18 WHY:
     /// Settings builds its own hydrate, which omitted the sidebar's spaces and showed an empty picker despite existing spaces.
     /// Reuse the shared runtime's complete local/remote options, including their computer-scoped identities.
-    /// The project list rides along for the same reason: the "Available in" picker lists the sidebar's own
+    /// The project list rides along for the same reason: the scope editor lists the sidebar's own
     /// rows, which only the sidebar runtime can enumerate.
     pub(crate) fn with_project_view_scope_options(&self, mut message: Value) -> Value {
         let Some(hud) = self
@@ -82,35 +82,6 @@ impl GhostexGpuiApp {
             .parked
             .take()?;
         owned.matches_runtime_url(url).then_some(owned)
-    }
-    /// CDXC:Extensions 2026-09-16 DECISION:
-    /// User: keep Start / Restart and Stop removed, but restore Configure view and make it open the clicked view's editor.
-    /// This supersedes the earlier removal of Configure view.
-    pub(crate) fn show_project_view_menu(
-        &self,
-        id: ExtensionId,
-        position: gpui::Point<gpui::Pixels>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        self.titlebar_view_lifecycle_menu(TitlebarMode::Extension(id))
-            .menu(
-                "Command output",
-                Box::new(ProjectViewCommand {
-                    id: id.as_str().into(),
-                    operation: "output".into(),
-                }),
-            )
-            .menu(
-                "Configure view",
-                Box::new(ProjectViewCommand {
-                    id: id.as_str().into(),
-                    operation: "configure".into(),
-                }),
-            )
-            .separator()
-            .menu("Extensions", Box::new(OpenGpuiExtensionsModal))
-            .show(position, window, cx);
     }
     fn project_view_key(&self, id: ExtensionId) -> Option<String> {
         let project = self

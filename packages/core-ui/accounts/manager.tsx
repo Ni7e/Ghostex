@@ -131,8 +131,8 @@ export function AccountsSettingsSection({
             </SettingButton>
           ) : null
         }
-        /* CDXC:Settings 2026-09-09 DECISION: User: recommend adding even a single account so usage stats are easy to find in the titlebar and status lines. */
-        description='Add your account to see usage and reset times in Ghostex, even if you only use one account. Star an account to show its stats in the titlebar; in chat context details, star Account limits to show usage in the status line.'
+        /* CDXC:Settings 2026-09-20 DECISION: User: recommend adding even a single account so usage stats are easy to find in the sidebar usage strip and the status lines. This is the 2026-09-09 decision with the meters' new home named; the titlebar row they used to sit in is gone. */
+        description='Add your account to see usage and reset times in Ghostex, even if you only use one account. Star an account to show its stats in the sidebar; in chat context details, star Account limits to show usage in the status line.'
         sectionRef={sectionRef}
         title='Accounts'
       >
@@ -476,7 +476,7 @@ function AccountManager({
               </div>
             ) : (
               <SettingsListItem
-                detail='Optionally add your account to see usage and reset times in the titlebar and chat status lines.'
+                detail='Optionally add your account to see usage and reset times in the sidebar and chat status lines.'
                 title='Current CLI login'
               />
             )}

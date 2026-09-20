@@ -273,8 +273,21 @@ impl AccountUsagePanel {
                     .rounded_full()
                     .overflow_hidden()
                     .bg(mix(p.accent, 0.07, chrome_color(0x2c2b2a, 0xe7e5e4).into()))
+                    // A hard black inset on a light track reads as a dent rather than depth.
                     .shadow(vec![
-                        shadow(0.0, 1.0, 1.0, rgb(0).opacity(0.35).into()).inset(),
+                        shadow(
+                            0.0,
+                            1.0,
+                            1.0,
+                            rgb(0)
+                                .opacity(if chrome_uses_light_appearance() {
+                                    0.10
+                                } else {
+                                    0.35
+                                })
+                                .into(),
+                        )
+                        .inset(),
                     ])
                     .child(
                         div()

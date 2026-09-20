@@ -155,14 +155,19 @@ pub(crate) fn workspace_tab_agent_icon_text_color(
     agent_icon: &str,
     visual_tone: WorkspaceTabLifecycleVisualTone,
 ) -> Hsla {
-    let accent = workspace_tab_agent_icon_accent_color(agent_icon);
-    let color = match accent {
-        0xffffff | 0xedecec => chrome_color(accent, 0x262626),
-        _ => rgb(accent),
-    };
-    color
+    chrome_agent_icon_color(agent_icon)
         .opacity(workspace_tab_agent_icon_opacity(visual_tone))
         .into()
+}
+
+/// The same agent glyph on a chrome surface rather than a workspace tab: several agents' accent is
+/// white or near-white, which is invisible on a light popup or page, so those two turn to ink.
+pub(crate) fn chrome_agent_icon_color(agent_icon: &str) -> gpui::Rgba {
+    let accent = workspace_tab_agent_icon_accent_color(agent_icon);
+    match accent {
+        0xffffff | 0xedecec => chrome_color(accent, 0x262626),
+        _ => rgb(accent),
+    }
 }
 
 pub(crate) fn agent_terminal_tab_status_color(tab_status: AgentTerminalTabStatus) -> u32 {

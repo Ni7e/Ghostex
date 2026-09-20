@@ -15,13 +15,38 @@ struct ContextMenuRow {
     action: Box<dyn gpui::Action>,
 }
 
+impl ContextMenuRow {
+    fn cloned(&self) -> Self {
+        Self {
+            label: self.label.clone(),
+            checked: self.checked,
+            disabled: self.disabled,
+            action: self.action.boxed_clone(),
+        }
+    }
+}
+
+/// CDXC:ContextMenus 2026-09-20 WHY:
+/// The view panel's `+` menu and a view tab's right-click menu both end in a `Hidden here` submenu
+/// (ruling 2A), which is the first nested row this shared menu has had to draw. It is a row kind
+/// rather than a second menu type so sizing, dispatch and dismissal stay in one place.
+enum ContextMenuEntry {
+    Row(ContextMenuRow),
+    Separator,
+    Submenu {
+        label: SharedString,
+        disabled: bool,
+        rows: Vec<ContextMenuRow>,
+    },
+}
+
 /// CDXC:ContextMenus 2026-09-11 DECISION:
 /// User: convert titlebar, Agents-tab, command-tab, and other shell context menus to the shared GPUI popup so they stay above CEF on Linux, using the same menu across desktop platforms.
 /// Size each menu to its labels so short menus such as Copy/Paste stay compact.
 /// Menu contents and typed actions stay with their callers; the existing titlebar popup window owns layout, input, and dismissal.
 #[derive(Default)]
 pub(crate) struct GpuiContextMenu {
-    rows: Vec<Option<ContextMenuRow>>,
+    entries: Vec<ContextMenuEntry>,
     source_window: Option<AnyWindowHandle>,
     source_focus: Option<FocusHandle>,
 }
@@ -45,7 +70,7 @@ impl GpuiContextMenu {
         disabled: bool,
         action: Box<dyn gpui::Action>,
     ) -> Self {
-        self.rows.push(Some(ContextMenuRow {
+        self.entries.push(ContextMenuEntry::Row(ContextMenuRow {
             label: label.into(),
             checked: false,
             disabled,
@@ -60,7 +85,7 @@ impl GpuiContextMenu {
         checked: bool,
         action: Box<dyn gpui::Action>,
     ) -> Self {
-        self.rows.push(Some(ContextMenuRow {
+        self.entries.push(ContextMenuEntry::Row(ContextMenuRow {
             label: label.into(),
             checked,
             disabled: false,
@@ -69,18 +94,50 @@ impl GpuiContextMenu {
         self
     }
 
+    /// A nested menu. An empty `rows` draws the parent row disabled rather than a submenu that opens
+    /// onto nothing.
+    pub(crate) fn submenu(
+        mut self,
+        label: impl Into<SharedString>,
+        rows: Vec<(SharedString, Box<dyn gpui::Action>)>,
+    ) -> Self {
+        let disabled = rows.is_empty();
+        self.entries.push(ContextMenuEntry::Submenu {
+            label: label.into(),
+            disabled,
+            rows: rows
+                .into_iter()
+                .map(|(label, action)| ContextMenuRow {
+                    label,
+                    checked: false,
+                    disabled: false,
+                    action,
+                })
+                .collect(),
+        });
+        self
+    }
+
     pub(crate) fn separator(mut self) -> Self {
-        if self.rows.last().is_some_and(Option::is_some) {
-            self.rows.push(None);
+        if self
+            .entries
+            .last()
+            .is_some_and(|entry| !matches!(entry, ContextMenuEntry::Separator))
+        {
+            self.entries.push(ContextMenuEntry::Separator);
         }
         self
     }
 
     pub(crate) fn show(mut self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
-        while self.rows.last().is_some_and(Option::is_none) {
-            self.rows.pop();
+        while self
+            .entries
+            .last()
+            .is_some_and(|entry| matches!(entry, ContextMenuEntry::Separator))
+        {
+            self.entries.pop();
         }
-        if self.rows.is_empty() {
+        if self.entries.is_empty() {
             return;
         }
         let Some(root) = window.root::<Root>().flatten() else {
@@ -123,22 +180,37 @@ impl GpuiContextMenu {
         });
     }
 
-    pub(crate) fn content_width(&self, window: &Window) -> f32 {
+    fn row_width(row: &ContextMenuRow, window: &Window, extra: f32) -> f32 {
         let style = window.text_style();
+        let line = window.text_system().shape_line(
+            row.label.clone(),
+            px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE),
+            &[style.to_run(row.label.len())],
+            None,
+        );
+        // Shared menu geometry: 10px row insets, 6px outer padding, and a 1px border.
+        let check_width = if row.checked { 28.0 } else { 0.0 };
+        line.width.as_f32() + 34.0 + check_width + extra
+    }
+
+    pub(crate) fn content_width(&self, window: &Window) -> f32 {
         let label_width = self
-            .rows
+            .entries
             .iter()
-            .flatten()
-            .map(|row| {
-                let line = window.text_system().shape_line(
-                    row.label.clone(),
-                    px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE),
-                    &[style.to_run(row.label.len())],
-                    None,
-                );
-                // Shared menu geometry: 10px row insets, 6px outer padding, and a 1px border.
-                let check_width = if row.checked { 28.0 } else { 0.0 };
-                line.width.as_f32() + 34.0 + check_width
+            .map(|entry| match entry {
+                ContextMenuEntry::Separator => 0.0,
+                ContextMenuEntry::Row(row) => Self::row_width(row, window, 0.0),
+                // A submenu row keeps room for its own chevron.
+                ContextMenuEntry::Submenu { label, .. } => Self::row_width(
+                    &ContextMenuRow {
+                        label: label.clone(),
+                        checked: false,
+                        disabled: false,
+                        action: Box::new(gpui::NoAction {}),
+                    },
+                    window,
+                    18.0,
+                ),
             })
             .fold(0.0_f32, f32::max);
         label_width
@@ -150,17 +222,53 @@ impl GpuiContextMenu {
     pub(crate) fn content_height(&self) -> f32 {
         titlebar_popup_menu_height_for_rows(
             &self
-                .rows
+                .entries
                 .iter()
-                .map(|row| {
-                    if row.is_some() {
-                        TITLEBAR_POPUP_MENU_ROW_HEIGHT
-                    } else {
-                        TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT
-                    }
+                .map(|entry| match entry {
+                    ContextMenuEntry::Separator => TITLEBAR_POPUP_MENU_SEPARATOR_HEIGHT,
+                    _ => TITLEBAR_POPUP_MENU_ROW_HEIGHT,
                 })
                 .collect::<Vec<_>>(),
         )
+    }
+
+    fn popup_menu_item(&self, row: &ContextMenuRow) -> PopupMenuItem {
+        let label = row.label.clone();
+        let disabled = row.disabled;
+        let action = row.action.boxed_clone();
+        let source_window = self.source_window;
+        let source_focus = self.source_focus.clone();
+        PopupMenuItem::element(move |_, _| {
+            div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .text_ellipsis()
+                .items_center()
+                .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
+                .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
+                .text_color(titlebar_popup_menu_foreground())
+                .when(disabled, |row| row.opacity(0.42))
+                .child(label.clone())
+        })
+        .disabled(row.disabled)
+        .checked(row.checked)
+        .on_click(move |_, _, cx| {
+            let action = action.boxed_clone();
+            let source_focus = source_focus.clone();
+            // PopupMenu dismisses after this callback; dispatch afterward so an action
+            // that opens another popup cannot have it closed by this menu's dismissal.
+            cx.defer(move |cx| {
+                if let Some(source_window) = source_window {
+                    let _ = source_window.update(cx, |_, window, cx| {
+                        if let Some(focus) = source_focus {
+                            focus.focus(window, cx);
+                        }
+                        window.dispatch_action(action, cx);
+                    });
+                }
+            });
+        })
     }
 
     pub(crate) fn build(
@@ -169,53 +277,43 @@ impl GpuiContextMenu {
         width: f32,
         max_height: f32,
         scrollable: bool,
+        window: &mut Window,
+        cx: &mut gpui::Context<PopupMenu>,
     ) -> PopupMenu {
         let mut menu =
             titlebar_popup_menu_with_scroll_behavior(menu, width, max_height, scrollable)
                 .check_side(Side::Right);
-        for row in &self.rows {
-            let Some(row) = row else {
-                menu = menu.separator();
-                continue;
-            };
-            let label = row.label.clone();
-            let disabled = row.disabled;
-            let action = row.action.boxed_clone();
-            let source_window = self.source_window;
-            let source_focus = self.source_focus.clone();
-            menu = menu.item(
-                PopupMenuItem::element(move |_, _| {
-                    div()
-                        .flex()
-                        .flex_1()
-                        .min_w_0()
-                        .text_ellipsis()
-                        .items_center()
-                        .min_h(px(TITLEBAR_POPUP_MENU_ROW_HEIGHT))
-                        .text_size(px(TITLEBAR_POPUP_MENU_ROW_TEXT_SIZE))
-                        .text_color(titlebar_popup_menu_foreground())
-                        .when(disabled, |row| row.opacity(0.42))
-                        .child(label.clone())
-                })
-                .disabled(row.disabled)
-                .checked(row.checked)
-                .on_click(move |_, _, cx| {
-                    let action = action.boxed_clone();
-                    let source_focus = source_focus.clone();
-                    // PopupMenu dismisses after this callback; dispatch afterward so an action
-                    // that opens another popup cannot have it closed by this menu's dismissal.
-                    cx.defer(move |cx| {
-                        if let Some(source_window) = source_window {
-                            let _ = source_window.update(cx, |_, window, cx| {
-                                if let Some(focus) = source_focus {
-                                    focus.focus(window, cx);
-                                }
-                                window.dispatch_action(action, cx);
-                            });
-                        }
+        for entry in &self.entries {
+            match entry {
+                ContextMenuEntry::Separator => menu = menu.separator(),
+                ContextMenuEntry::Row(row) => menu = menu.item(self.popup_menu_item(row)),
+                ContextMenuEntry::Submenu {
+                    label,
+                    disabled,
+                    rows,
+                } => {
+                    if *disabled {
+                        menu = menu.item(self.popup_menu_item(&ContextMenuRow {
+                            label: label.clone(),
+                            checked: false,
+                            disabled: true,
+                            action: Box::new(gpui::NoAction {}),
+                        }));
+                        continue;
+                    }
+                    let nested = GpuiContextMenu {
+                        entries: rows
+                            .iter()
+                            .map(|row| ContextMenuEntry::Row(row.cloned()))
+                            .collect(),
+                        source_window: self.source_window,
+                        source_focus: self.source_focus.clone(),
+                    };
+                    menu = menu.submenu(label.clone(), window, cx, move |menu, window, cx| {
+                        nested.build(menu, width, max_height, scrollable, window, cx)
                     });
-                }),
-            );
+                }
+            }
         }
         menu
     }

@@ -84,17 +84,17 @@ export const DIAGNOSTIC_LOGGING_SCENARIOS = [
     logFiles: ['native-layout-layering-debug.log'],
   },
   {
-    description: 'Titlebar mode switching, route handoff, project-surface wake, and AppKit settle timings.',
+    description: 'View switching, route handoff, project-surface wake, and AppKit settle timings.',
     group: 'macOS',
     id: 'native.mode.switcher',
-    label: 'Mode switcher and titlebar routing',
+    label: 'View switching and header routing',
     logFiles: ['native-mode-switcher-debug.log'],
   },
   {
-    description: 'Sidebar and titlebar WebKit lifecycle, titlebar event-loop stalls, and Resources sampler timing.',
+    description: 'Sidebar and header WebKit lifecycle, chrome event-loop stalls, and Resources sampler timing.',
     group: 'macOS',
     id: 'native.chrome.responsiveness',
-    label: 'Sidebar and titlebar responsiveness',
+    label: 'Sidebar and header responsiveness',
     logFiles: ['native-chrome-responsiveness-debug.log', 'sidebar-refresh-debug.log'],
   },
   {

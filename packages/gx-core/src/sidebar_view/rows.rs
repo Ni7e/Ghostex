@@ -13,7 +13,7 @@ use super::inputs::{BrowserTabInput, CloseAfterDoneInput, DelayedSendInput};
 use super::session_text::{session_heading, session_tooltip, TitleInput};
 use super::tags::{effective_tag, tag_presentation, TagCatalog};
 use super::text::{encode_uri_component, js_trim, parse_iso_ms};
-use super::view::{DelayedSendView, SessionRow, SessionTiming};
+use super::view::{DelayedSendView, SessionMenuFacts, SessionRow, SessionTiming};
 
 const GENERATING_TITLE_LABEL: &str = "Generating title...";
 
@@ -21,15 +21,10 @@ const GENERATING_TITLE_LABEL: &str = "Generating title...";
 pub(crate) struct RowContext<'a> {
     pub(crate) catalog: &'a TagCatalog,
     pub(crate) debugging_mode: bool,
-}
-
-/// `combined-session:<project>:<session>`.
-pub(crate) fn sidebar_session_id(project_id: &str, session_id: &str) -> String {
-    format!(
-        "combined-session:{}:{}",
-        encode_uri_component(project_id),
-        encode_uri_component(session_id)
-    )
+    /// `alwaysShowStateTooltip`, which `projectNativeSidebarSession` sets for every row of a remote
+    /// machine's group: a row whose terminal is on another computer says what state it is in even
+    /// when a local row would not.
+    pub(crate) always_show_state_tooltip: bool,
 }
 
 /// `gpui-browser:<project>:<tab>`.
@@ -123,6 +118,15 @@ pub(crate) fn session_row(
             .or(session.agent_name.as_deref())
             .or(session.agent_id.as_deref()),
     );
+    // `createGpuiRemotePresentationSessionRoutingId` puts the machine in front for a remote row;
+    // a local row is `<project>:<session>` as it always was.
+    let routing_id = match key.machine.remote_id() {
+        None => format!("{}:{}", key.project_id, key.session_id),
+        Some(machine_id) => format!("{machine_id}:{}:{}", key.project_id, key.session_id),
+    };
+    // A remote machine publishes both only for a terminal row; the local daemon's rows always can.
+    let is_terminal = session_kind(&session.kind) == "terminal";
+    let remote_capable = key.machine.is_local() || is_terminal;
     let delayed = delayed_send(session, local_delayed_send);
     let session_note = session
         .session_note
@@ -130,7 +134,6 @@ pub(crate) fn session_row(
         .filter(|note| !js_trim(note).is_empty())
         .map(str::to_string);
     let effective = effective_tag(session.session_tag.as_deref(), session.is_favorite);
-    let routing_id = format!("{}:{}", key.project_id, key.session_id);
     let alias = session.title.clone();
     let primary_title = Some(
         session
@@ -172,7 +175,12 @@ pub(crate) fn session_row(
         agent_session_id: session.agent_session_id.as_deref(),
     };
     let heading = session_heading(&title_input, false);
-    let tooltip = session_tooltip(&title_input, context.catalog, context.debugging_mode, false);
+    let tooltip = session_tooltip(
+        &title_input,
+        context.catalog,
+        context.debugging_mode,
+        context.always_show_state_tooltip,
+    );
     let last_interaction_at = session
         .meaningful_activity_at
         .clone()
@@ -181,7 +189,9 @@ pub(crate) fn session_row(
 
     let session_kind = session_kind(&session.kind);
     SessionRow {
-        sidebar_session_id: sidebar_session_id(&key.project_id, &key.session_id),
+        // `combined-session:<project>:<session>` locally, `remote:<machine>:session:<project>:
+        // <session>` on a remote machine: the two id spaces must not collide in one list.
+        sidebar_session_id: key.to_sidebar_session_id(),
         // `kind === 'browser' || sessionKind === 'browser'` everywhere in the TypeScript; a
         // daemon row of that kind is a browser row wherever the sidebar asks.
         is_browser: session_kind == "browser",
@@ -224,6 +234,28 @@ pub(crate) fn session_row(
         delayed_send: delayed,
         close_after_done: close_after_done.cloned(),
         is_generating_first_prompt_title: session.is_generating_first_prompt_title,
+        menu_facts: SessionMenuFacts {
+            agent_name: session
+                .agent_name
+                .clone()
+                .or_else(|| session.agent_id.clone()),
+            agent_session_id: session.agent_session_id.clone(),
+            session_persistence_provider: session
+                .session_persistence_provider
+                .as_ref()
+                .map(|provider| provider.as_str().to_string()),
+            // `sessionPersistenceName` is the zmx or wmx session name, which the projection
+            // carries even when it is empty; Copy Attach Command tests it for truthiness.
+            session_persistence_name: Some(session.zmx_name.clone()),
+            session_routing_id: Some(routing_id),
+            raw_display_title: session.display_title.clone(),
+            primary_title,
+            terminal_title: session.terminal_title.clone(),
+            detail: session.subtitle.clone(),
+            first_user_message: None,
+            can_schedule_delayed_send: remote_capable,
+            can_toggle_close_after_done: remote_capable,
+        },
         key: Some(key),
     }
 }
@@ -265,7 +297,7 @@ pub(crate) fn browser_row(tab: &BrowserTabInput, context: &RowContext<'_>) -> Se
             &title_input,
             context.catalog,
             context.debugging_mode,
-            false,
+            context.always_show_state_tooltip,
         ),
         activity: "idle".to_string(),
         agent_icon: Some(BROWSER_AGENT_ICON.to_string()),

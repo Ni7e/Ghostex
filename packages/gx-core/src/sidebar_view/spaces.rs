@@ -27,7 +27,7 @@ const SPACE_COLOR_PRESETS: &[&str] = &[
     "#8c9b45", "#c95353", "#c4a23d", "#2f9b95", "#596fd1",
 ];
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Space {
     pub(crate) space_id: String,
     pub(crate) name: String,
@@ -38,7 +38,7 @@ pub(crate) struct Space {
 }
 
 /// One machine's Spaces after client normalization.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct SpacesState {
     pub(crate) order: Vec<String>,
     pub(crate) spaces: BTreeMap<String, Space>,

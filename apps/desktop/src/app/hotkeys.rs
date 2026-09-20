@@ -266,7 +266,7 @@ pub(crate) const GPUI_DEFAULT_GHOSTEX_HOTKEYS: &[(&str, &str)] = &[
     ("openGhostexHelp", ""),
     ("openHotkeys", "cmd+."),
     ("toggleSidebarCollapsed", "cmd+b"),
-    ("toggleCompanionPane", "cmd+alt+b"),
+    ("toggleViewPanel", "cmd+alt+b"),
     ("renameActiveSession", "cmd+r"),
     ("openBrowserPane", "cmd+n"),
     ("switchAgentsView", ""),
@@ -608,8 +608,7 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
                 session,
             ))
             | GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::TerminalSurface(
-                FirstResponderTerminalSurface::Agents(session)
-                | FirstResponderTerminalSurface::ProjectEditorCompanion(session),
+                FirstResponderTerminalSurface::Agents(session),
             )) => return terminal_model_picker_session == Some(session),
             GpuiKeyboardOwner::CompositedTerminal(_)
             | GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::TerminalSurface(_)) => {
@@ -654,7 +653,7 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
                 | "openNotifications"
-                | "toggleCompanionPane"
+                | "toggleViewPanel"
                 | "toggleSidebarCollapsed"
         ),
         GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
@@ -670,22 +669,8 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
                 | "openNotifications"
-                | "toggleCompanionPane"
+                | "toggleViewPanel"
                 | "toggleSidebarCollapsed"
-        ),
-        GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
-            FirstResponderCefSurface::ProjectEditorCompanion,
-        )) => matches!(
-            action_id,
-            "createSession"
-                | "deferNotificationAndJumpNext"
-                | "focusLeft"
-                | "focusRight"
-                | "jumpToLatestUnreadNotification"
-                | "navigateHistoryBack"
-                | "navigateHistoryForward"
-                | "openNotifications"
-                | "toggleCompanionPane"
         ),
         GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
             FirstResponderCefSurface::ProjectWorkarea(_),
@@ -699,7 +684,7 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
                 | "openNotifications"
-                | "toggleCompanionPane"
+                | "toggleViewPanel"
         ),
         GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(
             FirstResponderCefSurface::SessionChat(_),
@@ -713,7 +698,7 @@ pub(crate) fn gpui_keyboard_owner_allows_hotkey(
                 | "focusPreviousPaneTab"
                 | "navigateHistoryBack"
                 | "navigateHistoryForward"
-                | "toggleCompanionPane"
+                | "toggleViewPanel"
                 | "toggleSidebarCollapsed"
         ),
         GpuiKeyboardOwner::FirstResponder(FirstResponderTarget::CefSurface(_))

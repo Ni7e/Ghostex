@@ -275,7 +275,7 @@ impl SharedTerminalConfirmCloseSurface {
 /*
 CDXC:Terminal 2026-07-04:
 The GPUI-composited terminal engine (libghostty-vt + TerminalElement) is the
-single terminal pipeline on every OS for Agents, command-pane, companion,
+single terminal pipeline on every OS for Agents, command-pane,
 restored, and newly launched terminals. The macOS GhosttyKit implementation
 remains compiled for now but is not selected at runtime. The composited engine
 consumes the shared terminal typography/scrollback/close-confirm settings on

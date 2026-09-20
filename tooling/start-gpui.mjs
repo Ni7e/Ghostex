@@ -25,7 +25,12 @@ import {
   withoutColorDisablingEnvironment,
   withoutPowerShell7ModulePaths,
 } from './local-start-utils.mjs';
-import { isolatedGpuiConfiguration, prepareIsolatedGpui } from './isolated-gpui.mjs';
+import {
+  isolatedGpuiConfiguration,
+  isolatedGpuiStartCommand,
+  parseIsolatedGpuiArgument,
+  prepareIsolatedGpui,
+} from './isolated-gpui.mjs';
 
 import {
   codeServerComponentIdentity,
@@ -36,7 +41,9 @@ const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), '..');
 const appVersion = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version;
 const gpuiDir = path.join(repoRoot, 'apps', 'desktop');
-const isolatedInstance = process.argv.slice(2).includes('--isolated') ? isolatedGpuiConfiguration() : undefined;
+const isolatedVariant = resolveIsolatedStartVariant(process.argv.slice(2));
+const isolatedInstance = isolatedVariant ? isolatedGpuiConfiguration(isolatedVariant) : undefined;
+const startCommandHint = isolatedInstance ? isolatedGpuiStartCommand(isolatedInstance.variant) : 'bun run start';
 const appName = isolatedInstance?.appName ?? 'Ghostex';
 const bundleId = isolatedInstance?.bundleId ?? 'com.madda.ghostex.gpui';
 const isDarwin = process.platform === 'darwin';
@@ -400,6 +407,23 @@ function resolveWindowsProgramFilesPaths() {
   return { hostPath, windowsPath };
 }
 
+/**
+ * The isolated instance is selected before the arguments are validated, because the app name, the
+ * install directory and the gxserver port all derive from the variant.
+ */
+function resolveIsolatedStartVariant(args) {
+  let variant;
+  for (const arg of args) {
+    const selected = arg === '--' ? undefined : parseIsolatedGpuiArgument(arg);
+    if (!selected) continue;
+    if (variant && variant !== selected) {
+      throw new Error(`Start one isolated variant at a time: --isolated=${variant} or --isolated=${selected}.`);
+    }
+    variant = selected;
+  }
+  return variant;
+}
+
 function validateStartArguments(args) {
   let verbose =
     truthyStartFlag(process.env.GHOSTEX_GPUI_START_VERBOSE) || truthyStartFlag(process.env.GHOSTEX_START_VERBOSE);
@@ -408,7 +432,7 @@ function validateStartArguments(args) {
     if (arg === '--') {
       continue;
     }
-    if (arg === '--isolated') {
+    if (parseIsolatedGpuiArgument(arg)) {
       continue;
     }
     if (arg === '--profile') {
@@ -420,7 +444,7 @@ function validateStartArguments(args) {
       continue;
     }
     throw new Error(
-      `Unknown GPUI start argument: ${arg}. Use "bun run start" with optional --verbose, --profile, and --isolated flags.`
+      `Unknown GPUI start argument: ${arg}. Use "bun run start" with optional --verbose, --profile, and --isolated[=<variant>] flags.`
     );
   }
   return { verbose, profile };
@@ -1526,9 +1550,7 @@ function reportQuietCommandFailure(label, status, logPath) {
   const relativeLogPath = path.relative(repoRoot, logPath);
   console.error(`${label} failed with exit code ${status}.`);
   console.error(`Full log: ${relativeLogPath}`);
-  console.error(
-    `Rerun with ${isolatedInstance ? 'bun run start:isolated' : 'bun run start'} --verbose for live output.`
-  );
+  console.error(`Rerun with ${startCommandHint} --verbose for live output.`);
   const tail = readQuietLogTail(logPath);
   if (tail) {
     console.error(

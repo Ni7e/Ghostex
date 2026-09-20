@@ -8,26 +8,43 @@ automation and remote-access layers around those sessions.
 
 Run `ghostex guide <chapter>` for the details:
 
-  features    Views, sidebar, sessions, chat, agents and orchestration, browser,
-              editor, board, docs, automations, remote and mobile, notifications
-  settings    Every setting with its key, type, allowed values, default, and
-              the page it lives on (use with `ghostex settings`)
-  hotkeys     Every shortcut and its default binding
+features Views, sidebar, sessions, chat, agents and orchestration, browser,
+editor, board, docs, automations, remote and mobile, notifications
+settings Every setting with its key, type, allowed values, default, and
+the page it lives on (use with `ghostex settings`)
+hotkeys Every shortcut and its default binding
 
 ## The window
 
-- **Titlebar**: the project name and icon, Back/Forward, the view tabs
-  (Agents, Code, Browser, Kanban, Automate, Docs), and on the right the Help,
-  Tips, Resources, Git, Actions, and Open In buttons. Views other than Agents
-  are extensions that load on demand and sleep when unused.
-  View tabs stay centered; in compact mode their dropdown moves to the left,
-  immediately after the Next (Forward) button.
+- **Work area header**: the window has no separate title bar. The first row of
+  the work area shows Hide sidebar, Back/Forward, and the project icon, project
+  name and current session title as one breadcrumb. On the right are the
+  **Start**, **Open** and **Commit** buttons (Quick Actions, Open In and Git
+  actions, each with a caret for its menu), a **⋯** menu holding Ask Ghostex,
+  Tips & Tricks, Resources, Dev servers and Extensions, and the command terminal
+  and view panel toggles. The header covers your sessions only: when a view panel
+  is open, the panel's own tabs take the rest of that same row, so the tabs sit
+  over the view and the header's buttons over your sessions. Narrow the sessions
+  column and the buttons drop their labels and the breadcrumb drops the project
+  name. There is no line under the header: your chat fades out beneath it. Drag
+  the header, or the sidebar's Search row, to move the window.
 - **Sidebar** (left by default): projects, their sessions, tags and filters,
   remote machines, Quick chats, and the More Options menu (Settings, Search by
-  Prompt, Previous Sessions, Mobile & Remote, Extensions).
-- **Work area**: the current project's view. In Agents it is a grid of
-  terminal panes and tabs; each pane can show the raw terminal or the Session
-  Chat rendering of the same agent conversation.
+  Prompt, Previous Sessions, Mobile & Remote, Extensions). The Notifications
+  bell is in its top row; account usage meters sit at the bottom above the
+  Commands row, with a Settings gear beside it.
+- **Work area**: your sessions, and the views open beside them. The sessions are
+  a grid of terminal panes and tabs; each pane can show the raw terminal or the
+  Session Chat rendering of the same agent conversation. Opening Code, Browser,
+  Kanban, Automate or Docs puts it in a panel on the right with a divider you can
+  drag, and your agents keep running on the left. The panel's tab strip shares
+  the header's row: several views can be open at once, the **+** opens another,
+  and the two buttons at its end pop the view out into its own window or expand
+  it over the sessions column. With nothing open it shows **Open a view**, a picker of
+  everything this project can open, including Ghostex's own Ask Ghostex, Tips &
+  Tricks and Resources pages. Project views load on demand and sleep when unused.
+  The view panel toggle at the right end of the header, or Cmd+Option+B, opens
+  and closes the whole panel.
 - **Quick Access** (Cmd+Shift+P): search every command, pane action, settings
   shortcut, and recent session. Cmd+P opens it on Recent Sessions.
 - **Settings** (Cmd+,): pages for General, Integrations, Extensions, Remote,

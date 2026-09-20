@@ -212,12 +212,13 @@ impl GhostexGpuiApp {
         .detach();
     }
 
-    /// Consumes the keep-view intent parked for this remote session by the
-    /// native open action. True only when the remembered view is not Agents,
-    /// so the caller skips the mode switch and the focus handoff; on Agents the
-    /// ordinary path runs, which is a no-op mode change plus the usual focus.
+    /// Consumes the keep-view intent parked for this remote session by the native open action.
+    ///
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// A remote attach armed to keep the view must not pull the keyboard out of it. The view panel
+    /// itself no longer goes anywhere when a session opens, so this only decides focus now.
     fn take_remote_keep_view_focus(&mut self, key: &GpuiRemoteAttachSessionKey) -> bool {
-        self.pending_keep_view_remote_focus.remove(key) && self.active_mode != TitlebarMode::Agents
+        self.pending_keep_view_remote_focus.remove(key)
     }
 
     pub(crate) fn focus_existing_gpui_remote_attach_terminal(
@@ -267,30 +268,11 @@ impl GhostexGpuiApp {
             */
             return false;
         }
-        let workspace_key = GpuiWorkspaceTerminalSessionKey::Remote(key.clone());
-        let keep_editor_mode =
-            self.should_keep_project_editor_open_for_workspace_terminal_focus(&workspace_key);
-        let project_editor_mode = self.active_mode;
         self.agents_workspace.select_tab(pane_id, session_id);
         self.activate_preferred_agents_chat_launch_intent(session_id, cx);
-        if keep_editor_mode {
-            self.seed_project_editor_companion_terminal_attach_payload_from_agents_slot(
-                project_editor_mode,
-                pane_id,
-                session_id,
-                &workspace_key,
-            );
-            self.retarget_project_editor_companion_to_workspace_terminal(
-                project_editor_mode,
-                session_id,
-                &workspace_key,
-                true,
-                cx,
-            );
-        } else if self.take_remote_keep_view_focus(key) {
-            // Keep-view focus: the tab is selected, the remembered view stays.
+        if self.take_remote_keep_view_focus(key) {
+            // Keep-view focus: the tab is selected, but the keyboard stays where it is.
         } else {
-            self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
             self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
             self.request_agents_session_text_focus_handoff(
                 AgentsTerminalBodyMountSlotId {
@@ -487,28 +469,10 @@ impl GhostexGpuiApp {
                 }
                 self.agents_workspace
                     .select_tab(placed_pane_id, existing_session_id);
-                let workspace_key = GpuiWorkspaceTerminalSessionKey::Remote(key.clone());
                 self.activate_preferred_agents_chat_launch_intent(existing_session_id, cx);
-                if self.should_keep_project_editor_open_for_workspace_terminal_focus(&workspace_key)
-                {
-                    let project_editor_mode = self.active_mode;
-                    self.seed_project_editor_companion_terminal_attach_payload_from_agents_slot(
-                        project_editor_mode,
-                        placed_pane_id,
-                        existing_session_id,
-                        &workspace_key,
-                    );
-                    self.retarget_project_editor_companion_to_workspace_terminal(
-                        project_editor_mode,
-                        existing_session_id,
-                        &workspace_key,
-                        true,
-                        cx,
-                    );
-                } else if self.take_remote_keep_view_focus(&key) {
-                    // Keep-view focus: the tab is re-armed, the remembered view stays.
+                if self.take_remote_keep_view_focus(&key) {
+                    // Keep-view focus: the tab is re-armed, but the keyboard stays where it is.
                 } else {
-                    self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
                     self.focus_shell_target(ShellFocusTarget::AgentsPane(placed_pane_id), cx);
                     self.request_agents_session_text_focus_handoff(mount_slot_id, cx);
                 }
@@ -588,27 +552,10 @@ impl GhostexGpuiApp {
                 .insert(key.clone(), askpass);
         }
         self.remote_attach_sessions.insert(key.clone(), session_id);
-        let workspace_key = GpuiWorkspaceTerminalSessionKey::Remote(key.clone());
         self.activate_preferred_agents_chat_launch_intent(session_id, cx);
-        if self.should_keep_project_editor_open_for_workspace_terminal_focus(&workspace_key) {
-            let project_editor_mode = self.active_mode;
-            self.seed_project_editor_companion_terminal_attach_payload_from_agents_slot(
-                project_editor_mode,
-                pane_id,
-                session_id,
-                &workspace_key,
-            );
-            self.retarget_project_editor_companion_to_workspace_terminal(
-                project_editor_mode,
-                session_id,
-                &workspace_key,
-                true,
-                cx,
-            );
-        } else if self.take_remote_keep_view_focus(&key) {
-            // Keep-view focus: the tab is created, the remembered view stays.
+        if self.take_remote_keep_view_focus(&key) {
+            // Keep-view focus: the tab is created, but the keyboard stays where it is.
         } else {
-            self.change_active_mode_with_pane_state(TitlebarMode::Agents, cx);
             self.focus_shell_target(ShellFocusTarget::AgentsPane(pane_id), cx);
             self.request_agents_session_text_focus_handoff(mount_slot_id, cx);
         }

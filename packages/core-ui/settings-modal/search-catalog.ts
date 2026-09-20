@@ -192,8 +192,8 @@ export function getSettingsSearchSectionDefinitions() {
       settings: [
         {
           key: 'hideKeepAwakeTitlebarControl',
-          subtitle: 'Hide the keep-awake control from the title bar.',
-          title: 'Hide title-bar keep-awake control',
+          subtitle: 'Hide the Keep Awake entry from the sidebar menu.',
+          title: 'Hide Keep Awake',
         },
         {
           key: 'keepAwakeDefaultDurationMinutes',
@@ -201,7 +201,7 @@ export function getSettingsSearchSectionDefinitions() {
             label: option.label,
             value: String(option.value),
           })),
-          subtitle: 'Choose the duration used by the title-bar keep-awake button.',
+          subtitle: 'Choose the duration Keep Awake uses by default.',
           title: 'Default keep-awake duration',
         },
         {
@@ -519,13 +519,14 @@ export function getSettingsSearchSectionDefinitions() {
         },
         {
           key: 'customSidebarTitlebarBackgroundDarknessPercent',
-          subtitle: 'Contrast level for the sidebar and titlebar background in dark mode. Light mode stays light gray.',
+          subtitle:
+            'Contrast level for the sidebar and window chrome background in dark mode. Light mode stays light gray.',
           title: 'Dark theme background contrast',
         },
         {
           key: 'customSidebarTitlebarBackgroundTintColor',
           subtitle:
-            'Subtle tint color for the sidebar and titlebar background in dark mode. Light mode stays light gray.',
+            'Subtle tint color for the sidebar and window chrome background in dark mode. Light mode stays light gray.',
           title: 'Dark theme background tint',
         },
         {
@@ -550,7 +551,8 @@ export function getSettingsSearchSectionDefinitions() {
       settings: [
         {
           key: 'sessionChatUseGpui',
-          subtitle: 'Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.',
+          subtitle:
+            'Use native GPUI chat on desktop. Turn off to use React chat. Restart the desktop app to apply; mobile and web are unchanged.',
           title: 'Use GPUI chat',
         },
         {

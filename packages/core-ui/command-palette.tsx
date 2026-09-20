@@ -1011,7 +1011,7 @@ function BuiltInCommandIcon({ command }: { command: BuiltInPaletteCommand }) {
   if (action.kind === 'toggleSidebarCollapsed') {
     return <IconLayoutSidebar aria-hidden='true' />;
   }
-  if (action.kind === 'toggleCompanionPane') {
+  if (action.kind === 'toggleViewPanel') {
     return <IconLayoutSidebarRightExpand aria-hidden='true' />;
   }
   if (action.kind === 'renameActiveSession') {

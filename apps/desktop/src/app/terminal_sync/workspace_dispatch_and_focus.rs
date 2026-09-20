@@ -306,7 +306,7 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn focused_agents_workspace_shell_session_id(&self) -> Option<TerminalSessionId> {
-        if self.active_mode != TitlebarMode::Agents {
+        if !self.agents_workspace_visible() {
             return None;
         }
         let ShellFocusTarget::AgentsPane(pane_id) = self.shell_focus else {
@@ -317,22 +317,10 @@ impl GhostexGpuiApp {
             .map(|leaf| leaf.tab_group.active_tab)
     }
 
-    /// The Agents workspace session behind the focused terminal, whether it is
-    /// focused in the Agents view or in a project-editor companion pane (top
-    /// or bottom split). Companion panes display Agents workspace sessions, so
-    /// both resolve into the same shell-session id space; session-scoped
-    /// agent actions (Rename, Delayed Send, Close After Done, Prompts, the
-    /// overlay cluster) treat the two focus surfaces identically.
+    /// The Agents workspace session behind the focused terminal. Session-scoped agent actions
+    /// (Rename, Delayed Send, Close After Done, Prompts, the overlay cluster) all resolve through it.
     pub(crate) fn focused_agents_or_companion_shell_session_id(&self) -> Option<TerminalSessionId> {
-        if let Some(session_id) = self.focused_agents_workspace_shell_session_id() {
-            return Some(session_id);
-        }
-        match self.focused_terminal_text_mount_target() {
-            Some(FocusedTerminalTextMountTarget::ProjectEditorCompanion(slot_id)) => {
-                Some(slot_id.session_id)
-            }
-            _ => None,
-        }
+        self.focused_agents_workspace_shell_session_id()
     }
 
     /// The sidebar projection is the title authority for Agents tabs. It owns

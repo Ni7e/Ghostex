@@ -2943,7 +2943,7 @@ export function SidebarApp({
       action.kind === 'switchWorkareaView' ||
       action.kind === 'switchTitlebarView' ||
       action.kind === 'terminalToolbarAction' ||
-      action.kind === 'toggleCompanionPane'
+      action.kind === 'toggleViewPanel'
     ) {
       vscode.postMessage({ actionId: action.id, type: 'runGhostexHotkeyAction' });
     }

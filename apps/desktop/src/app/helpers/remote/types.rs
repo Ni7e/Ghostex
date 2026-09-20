@@ -181,29 +181,6 @@ pub(crate) struct GpuiRemoteAttachSessionKey {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct GpuiProjectEditorCompanionRemoteAttachAttempt {
-    pub(crate) connection_generation: u64,
-    pub(crate) remote_key: GpuiRemoteAttachSessionKey,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum GpuiProjectEditorCompanionRemoteAttachState {
-    Preparing(GpuiProjectEditorCompanionRemoteAttachAttempt),
-    Unavailable {
-        attempt: GpuiProjectEditorCompanionRemoteAttachAttempt,
-        message: String,
-    },
-}
-
-impl GpuiProjectEditorCompanionRemoteAttachState {
-    pub(crate) fn attempt(&self) -> &GpuiProjectEditorCompanionRemoteAttachAttempt {
-        match self {
-            Self::Preparing(attempt) | Self::Unavailable { attempt, .. } => attempt,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GpuiRemoteAttachSessionReference {
     pub(crate) remote_machine_id: String,
     pub(crate) project_id: String,

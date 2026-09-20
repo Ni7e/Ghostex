@@ -839,18 +839,12 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn gpui_sidebar_visible_local_session_ids(&self) -> Vec<String> {
-        let shell_session_ids = if self.active_mode == TitlebarMode::Agents {
-            self.agents_workspace
-                .rendered_leaf_order()
-                .into_iter()
-                .filter_map(|pane_id| self.agents_workspace.active_session_in_pane(pane_id))
-                .collect::<Vec<_>>()
-        } else {
-            self.current_project_editor_companion_terminal_body_mount_slots()
-                .into_iter()
-                .map(|slot_id| slot_id.session_id)
-                .collect::<Vec<_>>()
-        };
+        let shell_session_ids = self
+            .agents_workspace
+            .rendered_leaf_order()
+            .into_iter()
+            .filter_map(|pane_id| self.agents_workspace.active_session_in_pane(pane_id))
+            .collect::<Vec<_>>();
 
         let mut seen = HashSet::new();
         shell_session_ids

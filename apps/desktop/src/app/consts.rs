@@ -78,6 +78,20 @@ pub(crate) const SIDEBAR_MAX_WIDTH: f32 = 520.0;
 
 pub(crate) const SIDEBAR_RESET_WIDTH: f32 = 235.0;
 
+/*
+CDXC:Sidebar 2026-09-20 DECISION:
+User, reviewing the 2026-09-19 screens: the session list fades out at both ends the way the chat
+transcript does under the work area header. There is no rule under the Search row and none above the
+usage strip or the Commands row, so these two ramps are the only edges the list has. The heights are
+screen 01's own mask (`linear-gradient(transparent, #000 22px, #000 calc(100% - 28px), transparent)`
+in docs/2026-09-19/titlebarless-workspace/shared.css). This supersedes the 2026-09-19 rule that
+framed the list with a hairline at each end.
+SEE-ALSO: apps/desktop/src/app/native_sidebar/scroll_fade.rs, apps/desktop/src/app/native_sidebar/navigation.rs.
+*/
+pub(crate) const SIDEBAR_LIST_TOP_FADE_HEIGHT: f32 = 22.0;
+
+pub(crate) const SIDEBAR_LIST_BOTTOM_FADE_HEIGHT: f32 = 28.0;
+
 /// CDXC:Workarea 2026-09-19 DECISION:
 /// User: resize rails between areas (sidebar, main area, companion sidepanes, command pane, pane splits) should look like Waku's instead of 5px black gaps: one 1px line between sections, with as few double border lines as possible.
 /// Every rail is therefore a 1px reserved layout sibling in its neighbours' neutral border colour, panes leave their own border off the sides that touch a rail, and hovering or dragging shows a 2px accent line. The grab area is the wider invisible strip in `render/resize_rail.rs`. This supersedes the 5px gap rails with a centred 3px hover line.
@@ -174,15 +188,49 @@ pub(crate) const ACCOUNT_INDICATOR_FONT_FAMILY: &str = ".AppleSystemUIFontMonosp
 #[cfg(not(target_os = "macos"))]
 pub(crate) const ACCOUNT_INDICATOR_FONT_FAMILY: &str = "monospace";
 
-pub(crate) const TITLEBAR_HEIGHT: f32 = 28.0;
+/*
+CDXC:Titlebar 2026-09-20 DECISION:
+User: the window has no titlebar row any more. A header inside the workspace column takes over its
+job, with no line under it: it paints the workspace background and the content fades out beneath it.
+This supersedes every rule that positioned something "below the titlebar"; the header's measured
+bottom edge (`workarea_header_bottom_y`) is the only anchor now, and `TITLEBAR_HEIGHT` is gone.
+SEE-ALSO: apps/desktop/src/app/render/workarea_header/, apps/desktop/src/app/render/root.rs.
+*/
+pub(crate) const WORKAREA_HEADER_HEIGHT: f32 = 36.0;
 
-pub(crate) const TITLEBAR_CONTROL_HEIGHT: f32 = TITLEBAR_HEIGHT - 1.0;
+/*
+CDXC:Titlebar 2026-09-20 WHY:
+How far below the floating header's bottom edge the content passing under it finishes fading out.
+The ramp lives in the column that owns that content, so it is only ever painted over scrolling
+content, never over a pane outline or a tab bar; the decision it serves is on the header itself in
+render/workarea_header/shell.rs.
+*/
+pub(crate) const WORKAREA_HEADER_FADE_HEIGHT: f32 = 28.0;
 
+/// Below this workspace-column width the header drops its labels and the project half of the
+/// breadcrumb, the way the mockup's narrow chat column does.
+pub(crate) const WORKAREA_HEADER_COMPACT_WIDTH: f32 = 720.0;
+
+/// The header's own left and right edge padding, matching the old titlebar inset.
+pub(crate) const WORKAREA_HEADER_EDGE_PADDING: f32 = 9.0;
+
+/*
+CDXC:Titlebar 2026-09-20 WHY:
+The macOS traffic lights are a window option (`traffic_light_position` in main.rs), not a child of
+any row, so whatever occupies the window's top-left has to leave them room: the sidebar's Search row
+while the sidebar is expanded, the workarea header while it is collapsed. The three 12px lights run
+from x=11 to x=63, and 79 is where the old titlebar put its first control, so both reserves use it.
+Windows and Linux draw their caption buttons as trailing header children instead, so they reserve
+nothing on the left.
+*/
 #[cfg(target_os = "macos")]
-pub(crate) const TITLEBAR_PROJECT_LEFT: f32 = 88.0;
+pub(crate) const WINDOW_CONTROLS_LEADING_RESERVE: f32 = 79.0;
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) const TITLEBAR_PROJECT_LEFT: f32 = 9.0;
+pub(crate) const WINDOW_CONTROLS_LEADING_RESERVE: f32 = 0.0;
+
+/// Height of the header's own controls (buttons, split buttons, mode tabs).
+pub(crate) const TITLEBAR_CONTROL_HEIGHT: f32 = 27.0;
 
 pub(crate) const TITLEBAR_PROJECT_CONTEXT_DISABLED_REASON: &str =
     "Switch to a project to access this view";
@@ -198,12 +246,6 @@ menu, hotkeys, and restored-mode coercion all refuse it in one place.
 pub(crate) const TITLEBAR_REMOTE_SOURCE_DISABLED_REASON: &str =
     "Code is currently disabled for remote projects";
 
-#[cfg(target_os = "macos")]
-pub(crate) const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1050.0;
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) const TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD: f32 = 1330.0;
-
 /// Fixed square width kept only for the non-macOS leading toggle and the
 /// Windows/Linux caption-control gap; trailing buttons size to their icon now.
 #[cfg(not(target_os = "macos"))]
@@ -213,7 +255,7 @@ pub(crate) const TITLEBAR_BUTTON_WIDTH: f32 = 42.0;
 CDXC:Titlebar 2026-09-19 DECISION:
 User: the trailing titlebar icon buttons and the browser address bar buttons have no border lines
 between them and no gap; each button is its icon plus 7px of padding on each side, so two
-neighbouring icons sit 14px apart. The leading buttons (sidebar collapse, companion toggle,
+neighbouring icons sit 14px apart. The leading buttons (sidebar collapse,
 update, Back, reveal session, Forward, Notifications) use the same padding so their gaps match
 the right side; this supersedes the 2026-09-06 fixed 29px leading width.
 */
@@ -233,11 +275,7 @@ pub(crate) const TITLEBAR_MODE_TAB_TOP_INSET: f32 = 1.0;
 
 pub(crate) const TITLEBAR_MODE_TAB_RADIUS: f32 = 6.0;
 
-pub(crate) const TITLEBAR_MODE_TAB_GAP: f32 = 2.0;
-
 pub(crate) const TITLEBAR_MODE_TAB_HORIZONTAL_PADDING: f32 = 12.0;
-
-pub(crate) const TITLEBAR_MODE_TAB_SLIDE_DURATION: Duration = Duration::from_millis(180);
 
 /*
 CDXC:Titlebar 2026-09-06 DECISION:
@@ -586,6 +624,8 @@ pub(crate) const TITLEBAR_ICON_DEVICE_DESKTOP: &str = "titlebar/device-desktop.s
 
 pub(crate) const TITLEBAR_ICON_EXTENSIONS: &str = "titlebar/puzzle.svg";
 
+pub(crate) const TITLEBAR_ICON_DOTS: &str = "titlebar/dots.svg";
+
 pub(crate) const TITLEBAR_ICON_GIT_COMMIT: &str = "titlebar/git-commit.svg";
 
 pub(crate) const TITLEBAR_ICON_PLAYER_PLAY: &str = "titlebar/player-play.svg";
@@ -599,10 +639,6 @@ pub(crate) const TITLEBAR_ICON_CHEVRON_LEFT: &str = "titlebar/chevron-left.svg";
 pub(crate) const TITLEBAR_ICON_CHEVRON_DOWN: &str = "titlebar/chevron-down.svg";
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR: &str = "titlebar/layout-sidebar.svg";
-
-pub(crate) const TITLEBAR_ICON_COMPANION_HIDE: &str = "titlebar/companion-hide.svg";
-
-pub(crate) const TITLEBAR_ICON_COMPANION_SHOW: &str = "titlebar/companion-show.svg";
 
 pub(crate) const TITLEBAR_ICON_LAYOUT_SIDEBAR_LEFT_EXPAND: &str =
     "titlebar/layout-sidebar-left-expand.svg";
@@ -644,6 +680,23 @@ pub(crate) const TITLEBAR_ICON_ROCKET: &str = "titlebar/rocket.svg";
 pub(crate) const TITLEBAR_ICON_GIT_PULL_REQUEST: &str = "titlebar/git-pull-request.svg";
 
 pub(crate) const TITLEBAR_ICON_DOWNLOAD: &str = "titlebar/download.svg";
+
+pub(crate) const TITLEBAR_ICON_WORLD: &str = "titlebar/world.svg";
+
+pub(crate) const TITLEBAR_ICON_BOLT: &str = "titlebar/bolt.svg";
+
+pub(crate) const TITLEBAR_ICON_FILE_TEXT: &str = "titlebar/file-text.svg";
+
+pub(crate) const TITLEBAR_ICON_PLUS: &str = "titlebar/plus.svg";
+
+pub(crate) const TITLEBAR_ICON_X: &str = "titlebar/x.svg";
+
+pub(crate) const TITLEBAR_ICON_EXTERNAL_LINK: &str = "titlebar/external-link.svg";
+
+pub(crate) const TITLEBAR_ICON_ARROWS_DIAGONAL: &str = "titlebar/arrows-diagonal.svg";
+
+pub(crate) const TITLEBAR_ICON_ARROWS_DIAGONAL_MINIMIZE: &str =
+    "titlebar/arrows-diagonal-minimize.svg";
 
 pub(crate) const TITLEBAR_TIPS_READ_STORAGE_KEY: &str = "ghostex.titlebar.tips.readIds";
 
@@ -941,8 +994,6 @@ pub(crate) const TITLEBAR_POPUP_EXTENSIONS_WIDTH: f32 = 340.0;
 
 pub(crate) const TITLEBAR_POPUP_TIPS_WIDTH: f32 = 556.0;
 
-pub(crate) const TITLEBAR_POPUP_HELP_WIDTH: f32 = 380.0;
-
 pub(crate) const TITLEBAR_POPUP_RESOURCES_WIDTH: f32 = 656.0;
 
 /// CDXC:Notifications 2026-09-13 DECISION:
@@ -1006,11 +1057,9 @@ pub(crate) const TITLEBAR_ACTION_UNCONFIGURED_PREVIEW: &str = "Set the command";
 
 pub(crate) const TITLEBAR_TIPS_TOOLTIP: &str = "Tips";
 
-pub(crate) const TITLEBAR_HELP_TOOLTIP: &str = "Ghostex Help";
-
 pub(crate) const TITLEBAR_RESOURCES_TOOLTIP: &str = "Resources Monitor";
 
-pub(crate) const TITLEBAR_EXTENSIONS_TOOLTIP: &str = "Extensions";
+pub(crate) const TITLEBAR_MORE_TOOLTIP: &str = "More";
 
 pub(crate) const TITLEBAR_GIT_TOOLTIP: &str = "Git actions";
 
@@ -1104,7 +1153,7 @@ CDXC:Workarea 2026-06-22-06:24:
 GPUI workspace chrome should match the macOS workspace shell constants: terminal tab bars are 36px high, workspace tabs stay in the 170-175px macOS width band, command titlebars and collapsed strips are 26px high, and divider/resize rails remain real layout siblings around 5px with 1px visual separators.
 
 CDXC:Workarea 2026-06-22-06:24:
-The command panel stores an in-memory height ratio, but its default and double-click reset derive from the shared command-pane default-height setting when that fits within the 5%-90% available-content clamp. Project-editor companions default to roughly 32% of the editor area with a practical minimum and persist resize/reset mutations through the GPUI shell state.
+The command panel stores an in-memory height ratio, but its default and double-click reset derive from the shared command-pane default-height setting when that fits within the 5%-90% available-content clamp. The workarea split stores its own ratio the same way, per project, with a practical minimum on each side.
 
 CDXC:CommandPane 2026-06-25-11:29:
 GPUI command-pane initial height, missing persisted height, and double-click reset must honor the same Settings.commandsPanelDefaultHeightPx value as the macOS app. Keep the Rust side on the shared 125px default and 40px-600px setting clamp so changing the Workspace setting affects future opens/resets without rewriting explicit persisted ratios.
@@ -1210,7 +1259,7 @@ pub(crate) const WORKSPACE_SPLIT_HANDLE_THICKNESS: f32 = 1.0;
 pub(crate) const WORKSPACE_BOTTOM_ROW_TOP_RATIO: f32 = 0.72;
 
 /// CDXC:CommandPane 2026-09-14 DECISION:
-/// User: chat view companion sidepanes and agent panes in general have a minimum width of 388px.
+/// User: chat view sidepanes and agent panes in general have a minimum width of 388px.
 pub(crate) const PANE_RESIZE_MINIMUM_WIDTH: f32 = 388.0;
 
 pub(crate) const PANE_RESIZE_MINIMUM_HEIGHT: f32 = 160.0;

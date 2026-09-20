@@ -237,7 +237,7 @@ export function ExtensionsBrowserList({
 }: {
   /**
    * CDXC:Extensions 2026-09-18 DECISION:
-   * User: an installed extension gets the same Edit button and "Available in" picker as a built-in view.
+   * User: an installed extension gets the same Edit button and the same scope editor as a built-in view.
    * The Settings page owns the `viewScopes` setting, so it supplies these; the standalone browser omits them.
    */
   onEditScope?: (extension: GhostexInstalledExtension) => void;

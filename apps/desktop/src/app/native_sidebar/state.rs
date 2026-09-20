@@ -14,12 +14,14 @@ pub(crate) struct NativeSidebarState {
     pub(crate) bounds: gpui::Bounds<gpui::Pixels>,
     pub(crate) menu: Option<super::menu_state::SidebarMenuState>,
     pub(crate) next_menu_request: u64,
-    #[cfg(target_os = "macos")]
-    pub(crate) reveal: Option<super::reveal::NativeSidebarReveal>,
     /// CDXC:Sidebar 2026-09-17 WHY:
     /// A frame profile found snapshot and session deep copies dominating the UI thread during redraws.
     /// Share immutable snapshots with row callbacks; incoming patches and clock updates use copy-on-write mutation.
     pub(crate) snapshot: Option<Arc<NativeSidebarSnapshot>>,
+    /// The newest list the TypeScript projection published. The same value as `snapshot` while the
+    /// renderer draws that projection; the source of the menus, the HUD and the machine tabs while
+    /// it draws the store's list instead (gx_store/sidebar_snapshot.rs).
+    pub(crate) projection: Option<Arc<NativeSidebarSnapshot>>,
     pub(crate) scroll: ScrollHandle,
     pub(crate) scroll_offsets: std::collections::HashMap<String, gpui::Point<gpui::Pixels>>,
     pub(crate) pending_scroll_offset: Option<gpui::Point<gpui::Pixels>>,
@@ -69,7 +71,7 @@ impl GhostexGpuiApp {
         };
         let update = match update {
             NativeSidebarUpdate::Patch(patch) if patch.version == 1 => {
-                let Some(previous) = self.native_sidebar.snapshot.as_ref() else {
+                let Some(previous) = self.native_sidebar.projection.as_ref() else {
                     return;
                 };
                 match patch.apply(previous) {
@@ -88,61 +90,38 @@ impl GhostexGpuiApp {
         };
         match update {
             NativeSidebarUpdate::Snapshot(snapshot) if snapshot.version == 1 => {
-                if let Some(previous) = &self.native_sidebar.snapshot
-                    && previous.scroll_scope != snapshot.scroll_scope
+                self.native_sidebar.projection = Some(Arc::new(snapshot));
+                // A reveal is a command the sidebar's own state answers, and the request reaches
+                // this app on the publish that carries it (gx_store/sidebar_ui_commands.rs).
+                if let Some(request) = self
+                    .native_sidebar
+                    .projection
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.reveal_request.clone())
                 {
-                    self.native_sidebar.scroll_offsets.insert(
-                        previous.scroll_scope.clone(),
-                        self.native_sidebar.scroll.offset(),
-                    );
-                    self.native_sidebar.pending_scroll_offset = Some(
-                        self.native_sidebar
-                            .scroll_offsets
-                            .get(&snapshot.scroll_scope)
-                            .copied()
-                            .unwrap_or_default(),
-                    );
-                    self.native_sidebar.scroll_animation = None;
-                    self.native_sidebar.group_bounds.clear();
+                    self.gx_store_note_sidebar_reveal(&request.session_id, request.request_id, cx);
                 }
-                if let Some(request) = &snapshot.reveal_request
-                    && self.native_sidebar.handled_reveal != Some(request.request_id)
-                {
-                    self.native_sidebar.pending_reveal = Some(request.clone());
-                    self.native_sidebar.handled_reveal = Some(request.request_id);
-                }
-                self.native_sidebar
-                    .disclosures
-                    .sync(&snapshot, self.gpui_pet_overlay_reduce_motion_enabled);
-                if let Some(menu) = self.native_sidebar.menu.as_mut() {
-                    menu.refresh(&snapshot);
-                }
-                if let Some(handle) = self.app_modal_window {
-                    let previous = self.native_sidebar.snapshot.as_ref().map(|s| &s.hud);
-                    let changed = PROJECT_VIEW_SCOPE_OPTION_HUD_KEYS
-                        .iter()
-                        .filter_map(|key| {
-                            let value = snapshot.hud.get(*key)?;
-                            (previous.and_then(|hud| hud.get(*key)) != Some(value))
-                                .then(|| (*key, value.clone()))
-                        })
-                        .collect::<Vec<_>>();
-                    if !changed.is_empty() {
-                        let _ = handle.update(cx, |host, _, cx| {
-                            host.refresh_project_view_scope_options(&changed, cx);
-                        });
+                // The values the store's list still borrows moved with this publish, and the
+                // comparison reads it; both run whichever list is drawn.
+                self.gx_store_sidebar_projection_published(cx);
+                let published = self
+                    .native_sidebar
+                    .projection
+                    .clone()
+                    .expect("assigned above");
+                if self.gx_store_sidebar_draws_store_list() {
+                    // The store's list owns its menus since M4c and its machine tabs since M4d;
+                    // only the HUD, the two requests, a few per-group facts and the focus marks of
+                    // a remote row still ride on a publish, so a publish is installed when one of
+                    // THOSE moved and skipped otherwise.
+                    self.gx_store_note_sidebar_publish_seen();
+                    if self.gx_store_sidebar_carry_changed(&published) {
+                        self.gx_store_note_sidebar_install_from_carry();
+                        self.gx_store_install_sidebar_list(cx);
                     }
+                } else {
+                    self.install_native_sidebar_snapshot(published, cx);
                 }
-                // The old runtime draws no session row focused while a browser tab of the active group owns focus; rows read that per frame, so it is derived here, once per snapshot (gx_store/local_focus.rs).
-                let browser_focus = snapshot.groups.iter().any(|group| {
-                    group.is_active
-                        && group
-                            .sessions
-                            .iter()
-                            .any(|session| session.is_focused && session.is_browser())
-                });
-                self.gx_store_note_sidebar_snapshot_browser_focus(browser_focus);
-                self.native_sidebar.snapshot = Some(Arc::new(snapshot));
             }
             NativeSidebarUpdate::Flash {
                 version: 1,
@@ -187,7 +166,11 @@ impl GhostexGpuiApp {
                     };
                 }
                 self.sync_session_chat_armed_actions(cx);
-                let Some(snapshot) = self.native_sidebar.snapshot.as_mut() else {
+                // The clock rows carry the labels the old projection formats. The store's list
+                // formats its own against the host clock and books its own wake, so they are
+                // applied to the projection and reach the screen only while it is what is drawn.
+                let drawn_is_projection = !self.gx_store_sidebar_draws_store_list();
+                let Some(snapshot) = self.native_sidebar.projection.as_mut() else {
                     return;
                 };
                 let snapshot = Arc::make_mut(snapshot);
@@ -218,9 +201,83 @@ impl GhostexGpuiApp {
                         );
                     }
                 }
+                if drawn_is_projection {
+                    self.native_sidebar.snapshot = self.native_sidebar.projection.clone();
+                } else {
+                    // The sidebar's own one-second tick, and the only cadence that notices a
+                    // Keep Awake armed from the titlebar or an agent launched from another
+                    // surface (gx_store/sidebar_menus.rs).
+                    self.gx_store_poll_menu_host(cx);
+                }
             }
             _ => return,
         }
+        cx.notify();
+    }
+
+    /// Installs the list the renderer draws, whichever side built it: the scroll scope it belongs
+    /// to, the reveal it carries, the disclosure animations, the open menu, the project view scope
+    /// options, and the browser focus the row highlight reads.
+    pub(crate) fn install_native_sidebar_snapshot(
+        &mut self,
+        snapshot: Arc<NativeSidebarSnapshot>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if let Some(previous) = &self.native_sidebar.snapshot
+            && previous.scroll_scope != snapshot.scroll_scope
+        {
+            self.native_sidebar.scroll_offsets.insert(
+                previous.scroll_scope.clone(),
+                self.native_sidebar.scroll.offset(),
+            );
+            self.native_sidebar.pending_scroll_offset = Some(
+                self.native_sidebar
+                    .scroll_offsets
+                    .get(&snapshot.scroll_scope)
+                    .copied()
+                    .unwrap_or_default(),
+            );
+            self.native_sidebar.scroll_animation = None;
+            self.native_sidebar.group_bounds.clear();
+        }
+        if let Some(request) = &snapshot.reveal_request
+            && self.native_sidebar.handled_reveal != Some(request.request_id)
+        {
+            self.native_sidebar.pending_reveal = Some(request.clone());
+            self.native_sidebar.handled_reveal = Some(request.request_id);
+        }
+        self.native_sidebar
+            .disclosures
+            .sync(&snapshot, self.gpui_pet_overlay_reduce_motion_enabled);
+        if let Some(menu) = self.native_sidebar.menu.as_mut() {
+            menu.refresh(&snapshot);
+        }
+        if let Some(handle) = self.app_modal_window {
+            let previous = self.native_sidebar.snapshot.as_ref().map(|s| &s.hud);
+            let changed = PROJECT_VIEW_SCOPE_OPTION_HUD_KEYS
+                .iter()
+                .filter_map(|key| {
+                    let value = snapshot.hud.get(*key)?;
+                    (previous.and_then(|hud| hud.get(*key)) != Some(value))
+                        .then(|| (*key, value.clone()))
+                })
+                .collect::<Vec<_>>();
+            if !changed.is_empty() {
+                let _ = handle.update(cx, |host, _, cx| {
+                    host.refresh_project_view_scope_options(&changed, cx);
+                });
+            }
+        }
+        // The old runtime draws no session row focused while a browser tab of the active group owns focus; rows read that per frame, so it is derived here, once per snapshot (gx_store/local_focus.rs).
+        let browser_focus = snapshot.groups.iter().any(|group| {
+            group.is_active
+                && group
+                    .sessions
+                    .iter()
+                    .any(|session| session.is_focused && session.is_browser())
+        });
+        self.gx_store_note_sidebar_snapshot_browser_focus(browser_focus);
+        self.native_sidebar.snapshot = Some(snapshot);
         cx.notify();
     }
 }

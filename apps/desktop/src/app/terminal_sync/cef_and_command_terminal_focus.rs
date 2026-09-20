@@ -8,7 +8,6 @@ use std::time::Duration;
 use gpui::Bounds;
 use gpui::Pixels;
 
-use crate::app::element::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
 use crate::*;
@@ -212,17 +211,6 @@ impl GhostexGpuiApp {
         }
     }
 
-    pub(crate) fn record_project_editor_companion_layout_bounds(
-        &mut self,
-        mode: TitlebarMode,
-        child_bounds: &[Bounds<Pixels>],
-    ) {
-        if let Some(bounds) = pane_focus_bounds_from_child_bounds(child_bounds) {
-            self.project_editor_companion_layout_bounds =
-                Some(ProjectEditorFocusBounds { mode, bounds });
-        }
-    }
-
     /// The sidebar and chat service runs in QuickJS and needs no CEF page, so launch starts it on its own while CEF stays deferred (CDXC:CefRuntime 2026-09-19).
     pub(crate) fn ensure_native_service(&mut self, cx: &mut gpui::Context<Self>) -> bool {
         if self.sidebar.is_some() {
@@ -342,15 +330,16 @@ impl GhostexGpuiApp {
         self.update_project_workarea_runtime_cef_surface_visibility(cx);
         /*
         CDXC:SessionChat 2026-08-19:
-        Session Chat is a CEF child view gated on exactly the same inputs as
-        the Browser and project-workarea surfaces: active mode, mode
-        wakefulness, companion visibility, and the tab-drag flags. Every mode
-        switch, drag, sleep, and companion mutation already re-runs this pass,
-        so the chat gate belongs here rather than being re-added by hand at
-        each call site. Sites that set `active_mode` and then only synced
-        Browser surfaces (terminal link opens through
-        `open_browser_url_from_renderer_command`, for example) used to leave
-        the Agents chat child painted over the new workarea.
+        Session Chat is a CEF child view reconciled at the same boundary as the Browser and
+        project-workarea surfaces, so every mode switch, drag and sleep re-runs one pass rather than
+        each call site re-adding the chat gate by hand. Sites that set `active_mode` and then only
+        synced Browser surfaces (terminal link opens through
+        `open_browser_url_from_renderer_command`, for example) used to leave the Agents chat child
+        painted over the new workarea.
+
+        CDXC:SessionChat 2026-09-20 WHY:
+        Its own gate no longer reads the active mode at all: the Agents column is on screen in every
+        view, so a chat page is visible exactly while its pane is rendered.
         */
         self.reconcile_agents_pane_surfaces(cx);
     }

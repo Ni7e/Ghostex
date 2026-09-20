@@ -572,6 +572,12 @@ export type ghostexSettings = {
    * The companion and the Commands pane always follow the kind of view (Agents versus the wide views: Browser, Code, Docs, Kanban, Automate, extensions).
    * Whether the sessions sidebar also follows the view is this advanced dropdown; the default keeps one sidebar state everywhere while the per-view model is evaluated.
    * This supersedes the 2026-09-09 decision to remember the sidebar, companion and Commands pane per project and view.
+   *
+   * CDXC:Workarea 2026-09-20 WHY:
+   * The companion clause has no object any more: the sessions column replaced it and is never
+   * hidden. The two layouts survive with their meaning re-read rather than changed — "Agents" is a
+   * window with no view open, "wide" a window with a view panel beside the sessions — which keeps
+   * the decision's own rule intact, because a project switch still cannot move the sidebar.
    */
   sidebarVisibilityMemory: SidebarVisibilityMemory;
   /**
@@ -743,10 +749,11 @@ export type ghostexSettings = {
   customViews: GhostexCustomView[];
   customViewTemplates: ProjectViewTemplate[];
   /**
-   * CDXC:Extensions 2026-09-18 DECISION:
-   * User: built-in views and extensions get the same "Available in" picker as custom views, so each one can be
-   * limited to selected projects or selected spaces. Keyed by `officialViewScopeKey` / `extensionViewScopeKey`;
-   * a view with no entry is available everywhere.
+   * CDXC:Extensions 2026-09-20 DECISION:
+   * User (ruling 3A): each built-in view and extension carries a default of shown or hidden plus per-project and
+   * per-space overrides, resolved project then space then default, so a view can be hidden in one project without
+   * listing every other one. Supersedes the 2026-09-18 "Available in" allow-list. Keyed by `officialViewScopeKey` /
+   * `extensionViewScopeKey`; a view with no entry is shown everywhere.
    */
   viewScopes: GhostexViewScopes;
   titlebarViewOrder: string[];

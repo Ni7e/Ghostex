@@ -123,6 +123,8 @@ impl GhostexGpuiApp {
             ))
             .size_full()
             .bg(chrome_color(0x000000, 0xffffff))
+            // A tab with no address yet is the start page, which is the Dev servers list.
+            .child(self.render_browser_start_page(pane_id))
             .into_any_element()
     }
 

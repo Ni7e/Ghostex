@@ -37,6 +37,7 @@ impl GhostexGpuiApp {
     ) -> AnyElement {
         self.sync_browser_address_inputs(window, cx);
         self.sync_browser_find_inputs(window, cx);
+        self.sync_browser_start_pages(cx);
         v_flex()
             .flex_1()
             .w_full()

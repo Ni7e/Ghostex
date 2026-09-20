@@ -20,6 +20,14 @@ use serde::{Deserialize, Serialize};
 pub struct SessionPatch {
     pub lifecycle_state: Option<LifecycleState>,
     pub activity: Option<SessionActivity>,
+    pub is_pinned: Option<bool>,
+    pub is_parked: Option<bool>,
+    pub is_favorite: Option<bool>,
+    /// Three states, not two. `None` is "this patch says nothing about the tag"; `Some(None)` is
+    /// "the tag is cleared", which is what `/api/updateSession` is told with an explicit `null`
+    /// and what a presentation row then models as an ABSENT field. Collapsing the two made a
+    /// clear look like a no-op.
+    pub session_tag: Option<Option<String>>,
     /// Host time after which the patch is dropped, checked on every tick against `now_ms`.
     pub expires_at_ms: u64,
 }
@@ -30,7 +38,19 @@ impl SessionPatch {
     pub fn lifecycle(lifecycle_state: LifecycleState, expires_at_ms: u64) -> Self {
         Self {
             lifecycle_state: Some(lifecycle_state),
+            ..Self::empty(expires_at_ms)
+        }
+    }
+
+    /// A patch that says nothing yet. Build on it with the `with_` methods.
+    pub fn empty(expires_at_ms: u64) -> Self {
+        Self {
+            lifecycle_state: None,
             activity: None,
+            is_pinned: None,
+            is_parked: None,
+            is_favorite: None,
+            session_tag: None,
             expires_at_ms,
         }
     }
@@ -38,9 +58,8 @@ impl SessionPatch {
     /// Shows `activity` until the daemon reports it, reports something newer, or the patch expires.
     pub fn activity(activity: SessionActivity, expires_at_ms: u64) -> Self {
         Self {
-            lifecycle_state: None,
             activity: Some(activity),
-            expires_at_ms,
+            ..Self::empty(expires_at_ms)
         }
     }
 
@@ -54,8 +73,34 @@ impl SessionPatch {
         self
     }
 
+    pub fn with_pinned(mut self, is_pinned: bool) -> Self {
+        self.is_pinned = Some(is_pinned);
+        self
+    }
+
+    pub fn with_parked(mut self, is_parked: bool) -> Self {
+        self.is_parked = Some(is_parked);
+        self
+    }
+
+    pub fn with_favorite(mut self, is_favorite: bool) -> Self {
+        self.is_favorite = Some(is_favorite);
+        self
+    }
+
+    /// `None` clears the tag, which is the `null` `/api/updateSession` takes.
+    pub fn with_session_tag(mut self, session_tag: Option<String>) -> Self {
+        self.session_tag = Some(session_tag);
+        self
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.lifecycle_state.is_none() && self.activity.is_none()
+        self.lifecycle_state.is_none()
+            && self.activity.is_none()
+            && self.is_pinned.is_none()
+            && self.is_parked.is_none()
+            && self.is_favorite.is_none()
+            && self.session_tag.is_none()
     }
 
     /// The session as the UI should show it.
@@ -71,6 +116,18 @@ impl SessionPatch {
             if *activity != SessionActivity::Attention {
                 session.attention = None;
             }
+        }
+        if let Some(is_pinned) = self.is_pinned {
+            session.is_pinned = is_pinned;
+        }
+        if let Some(is_parked) = self.is_parked {
+            session.is_parked = is_parked;
+        }
+        if let Some(is_favorite) = self.is_favorite {
+            session.is_favorite = is_favorite;
+        }
+        if let Some(session_tag) = &self.session_tag {
+            session.session_tag = session_tag.clone();
         }
         session
     }
@@ -98,6 +155,10 @@ pub(crate) struct StoredPatch {
     base_lifecycle_state: LifecycleState,
     base_activity: SessionActivity,
     base_attention_event_id: Option<String>,
+    base_is_pinned: bool,
+    base_is_parked: bool,
+    base_is_favorite: bool,
+    base_session_tag: Option<String>,
 }
 
 fn attention_event_id(session: &PresentationSession) -> Option<&str> {
@@ -114,6 +175,10 @@ impl StoredPatch {
             base_lifecycle_state: server.lifecycle_state.clone(),
             base_activity: server.activity.clone(),
             base_attention_event_id: attention_event_id(server).map(str::to_string),
+            base_is_pinned: server.is_pinned,
+            base_is_parked: server.is_parked,
+            base_is_favorite: server.is_favorite,
+            base_session_tag: server.session_tag.clone(),
         }
     }
 
@@ -132,6 +197,37 @@ impl StoredPatch {
                 let same_base = server.activity == self.base_activity
                     && attention_event_id(server) == self.base_attention_event_id.as_deref();
                 if !same_base {
+                    return PatchVerdict::ServerMovedOn;
+                }
+                pending = true;
+            }
+        }
+        // Every field the patch names asks the same two questions, in the same order: does the
+        // row already say it, and if not, has the row left the value this patch predicted FROM.
+        // A field added here without its base is a field whose overlay can never be dropped by a
+        // daemon that moved on, so the bases are recorded together with the patch and read
+        // together here.
+        for (named, server_value, base) in [
+            (self.patch.is_pinned, server.is_pinned, self.base_is_pinned),
+            (self.patch.is_parked, server.is_parked, self.base_is_parked),
+            (
+                self.patch.is_favorite,
+                server.is_favorite,
+                self.base_is_favorite,
+            ),
+        ] {
+            if let Some(value) = named {
+                if value != server_value {
+                    if server_value != base {
+                        return PatchVerdict::ServerMovedOn;
+                    }
+                    pending = true;
+                }
+            }
+        }
+        if let Some(session_tag) = &self.patch.session_tag {
+            if *session_tag != server.session_tag {
+                if server.session_tag != self.base_session_tag {
                     return PatchVerdict::ServerMovedOn;
                 }
                 pending = true;

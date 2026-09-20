@@ -319,9 +319,37 @@ pub struct GhostexGpuiApp {
     remote round trips for the same tab.
     */
     pub(crate) remote_workspace_attach_pending: HashSet<GpuiRemoteAttachSessionKey>,
-    // CDXC:Navigation 2026-08-07: last workarea + companion
-    // arrangement per canonical workspace project key. See GpuiProjectViewState.
+    // CDXC:Navigation 2026-08-07: last workarea + split ratio per canonical
+    // workspace project key. See GpuiProjectViewState.
     pub(crate) project_view_states_by_project: HashMap<String, GpuiProjectViewState>,
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// The active project's tab strip, in the user's order. `active_mode` names which of these tabs
+    /// the panel shows; an empty list and `TitlebarMode::Agents` are the same statement, that the
+    /// panel is closed. Swapped with the rest of the project's view state on a project switch.
+    pub(crate) open_views: Vec<TitlebarMode>,
+    /// Whether the open view has the whole workarea, with the sessions column folded away. Only ever
+    /// true while a view is open; `agents_workspace_visible()` is the one reader that matters.
+    pub(crate) view_panel_maximized: bool,
+    /// CDXC:Workarea 2026-09-20 DECISION:
+    /// User (screen 02): the panel toggle on a project with no tabs opens the panel onto a picker of
+    /// every view it could show, instead of guessing one. The panel is open and `active_mode` is
+    /// still `Agents`, which is the one state where those two disagree.
+    pub(crate) view_panel_picker_open: bool,
+    /// The GPUI pages the open Ghostex tabs are showing. Built when the tab opens, dropped when it
+    /// closes, so a Resources page stops holding its process snapshot the moment it is gone.
+    pub(crate) ghostex_page_panels: HashMap<GhostexPage, Entity<GpuiTitlebarReadingPanel>>,
+    /// The picker's scroll position, and the Ask Ghostex page's, so a long list is reachable in a
+    /// short panel.
+    pub(crate) view_picker_scroll: ScrollHandle,
+    pub(crate) ghostex_ask_page_scroll: ScrollHandle,
+    /// The Dev servers start page of each Browser pane that is showing a blank tab.
+    pub(crate) browser_start_pages:
+        HashMap<BrowserPaneId, Entity<crate::app::window::remote_sites::RemoteSitesPanel>>,
+    /// The tab being dragged in the view panel's strip, and the index it would land at.
+    pub(crate) view_tab_drag: Option<GpuiViewTabDrag>,
+    /// The view the active project last had open, so closing the panel and reopening it comes back
+    /// to the same view. Swapped with the rest of the project's view state on a project switch.
+    pub(crate) last_open_view_mode: Option<TitlebarMode>,
     // CDXC:Workarea 2026-09-12: app-wide Agents and Wide pane layouts. See GpuiViewPaneLayouts.
     pub(crate) view_pane_layouts: GpuiViewPaneLayouts,
     pub(crate) sidebar_visibility_memory: GpuiSidebarVisibilityMemory,
@@ -416,10 +444,6 @@ pub struct GhostexGpuiApp {
     /// The open ⋯ menu's "Switch Account" flyout is showing. Reset whenever
     /// the menu itself closes or moves to another session.
     pub(crate) agents_terminal_action_bar_account_submenu_open: bool,
-    /// A companion-pane maximize route waiting for the matching Agents bar's
-    /// minimize action to restore its exact project view and companion slot.
-    pub(crate) terminal_agent_bar_companion_focus_return:
-        Option<TerminalAgentBarCompanionFocusReturn>,
     /// Sessions whose current compatibility state has already been considered
     /// for the saved automatic Chat preference, together with the effective
     /// Default Agent View each one was considered under. These observations
@@ -647,16 +671,10 @@ pub struct GhostexGpuiApp {
     pub(crate) command_group_minimize_tooltip_visible: HashMap<CommandPaneGroupId, bool>,
     pub(crate) command_pane_layout_bounds: Option<Bounds<Pixels>>,
     pub(crate) project_editor_surface_layout_bounds: Option<ProjectEditorFocusBounds>,
-    pub(crate) project_editor_companion_layout_bounds: Option<ProjectEditorFocusBounds>,
     pub(crate) agents_terminal_mount_slot_bounds:
         HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
     pub(crate) command_terminal_mount_slot_bounds:
         HashMap<CommandTerminalBodyMountSlotId, Bounds<Pixels>>,
-    pub(crate) project_editor_companion_terminal_session_id: Option<TerminalSessionId>,
-    pub(crate) project_editor_companion_secondary_terminal_session_id: Option<TerminalSessionId>,
-    pub(crate) project_editor_companion_focused_terminal_slot: ProjectEditorCompanionTerminalSlot,
-    pub(crate) project_editor_companion_terminal_mount_slot_bounds:
-        HashMap<ProjectEditorCompanionTerminalBodyMountSlotId, Bounds<Pixels>>,
     /*
     CDXC:Zmx 2026-07-06:
     Runtime-only zmx conditional-refresh triggers mirroring macOS
@@ -690,8 +708,6 @@ pub struct GhostexGpuiApp {
         HashMap<AgentsTerminalBodyMountSlotId, Bounds<Pixels>>,
     pub(crate) command_terminal_zmx_refresh_recorded_bounds:
         HashMap<CommandTerminalBodyMountSlotId, Bounds<Pixels>>,
-    pub(crate) project_editor_companion_zmx_refresh_recorded_bounds:
-        HashMap<ProjectEditorCompanionTerminalBodyMountSlotId, Bounds<Pixels>>,
     /*
     CDXC:Terminal 2026-06-23-10:45:
     Terminal IME/preedit ownership uses one app-level GPUI focus handle that is focused only through mounted terminal body focus paths. The text-service state may remember only runtime slot identity and sanitized UTF-16 marked ranges, never raw typed text, preedit text, terminal content, paths, commands, output, URLs, titles, tokens, cookies, or secrets.
@@ -713,24 +729,12 @@ pub struct GhostexGpuiApp {
         AgentsTerminalStartupLaunchPayloadSource,
     pub(crate) agents_terminal_launch_payload_source: AgentsTerminalLaunchPayloadSource,
     pub(crate) command_terminal_launch_payload_source: CommandTerminalLaunchPayloadSource,
-    pub(crate) project_editor_companion_terminal_launch_payload_source:
-        ProjectEditorCompanionTerminalLaunchPayloadSource,
-    pub(crate) project_editor_companion_terminal_attach_plan_pending:
-        HashSet<ProjectEditorCompanionTerminalBodyMountSlotId>,
-    pub(crate) project_editor_companion_remote_attach_states: HashMap<
-        ProjectEditorCompanionTerminalBodyMountSlotId,
-        GpuiProjectEditorCompanionRemoteAttachState,
-    >,
     pub(crate) agents_terminal_surface_host: NativeTerminalSurfaceHost,
     pub(crate) agents_terminal_surface_lifecycle: NativeTerminalSurfaceLifecycleState,
     pub(crate) command_terminal_surface_host:
         NativeTerminalSurfaceHost<CommandTerminalBodyMountSlotId>,
     pub(crate) command_terminal_surface_lifecycle:
         NativeTerminalSurfaceLifecycleState<CommandTerminalBodyMountSlotId>,
-    pub(crate) project_editor_companion_terminal_surface_host:
-        NativeTerminalSurfaceHost<ProjectEditorCompanionTerminalBodyMountSlotId>,
-    pub(crate) project_editor_companion_terminal_surface_lifecycle:
-        NativeTerminalSurfaceLifecycleState<ProjectEditorCompanionTerminalBodyMountSlotId>,
     #[cfg(target_os = "macos")]
     pub(crate) agents_terminal_ghostty_surfaces:
         HashMap<AgentsTerminalBodyMountSlotId, terminal_ghostty_surface::GhosttySurfaceOwner>,
@@ -741,13 +745,6 @@ pub struct GhostexGpuiApp {
     pub(crate) command_terminal_ghostty_surfaces: HashMap<
         CommandTerminalBodyMountSlotId,
         terminal_ghostty_surface::GhosttySurfaceOwner<CommandTerminalBodyMountSlotId>,
-    >,
-    #[cfg(target_os = "macos")]
-    pub(crate) project_editor_companion_terminal_ghostty_surfaces: HashMap<
-        ProjectEditorCompanionTerminalBodyMountSlotId,
-        terminal_ghostty_surface::GhosttySurfaceOwner<
-            ProjectEditorCompanionTerminalBodyMountSlotId,
-        >,
     >,
     #[cfg(target_os = "macos")]
     pub(crate) command_terminal_parked_runtime_owners:
@@ -778,13 +775,6 @@ pub struct GhostexGpuiApp {
         terminal_native_view::AppOwnedTerminalHostNativeView<CommandTerminalBodyMountSlotId>,
     >,
     #[cfg(target_os = "macos")]
-    pub(crate) project_editor_companion_terminal_host_native_views: HashMap<
-        ProjectEditorCompanionTerminalBodyMountSlotId,
-        terminal_native_view::AppOwnedTerminalHostNativeView<
-            ProjectEditorCompanionTerminalBodyMountSlotId,
-        >,
-    >,
-    #[cfg(target_os = "macos")]
     pub(crate) agents_terminal_startup_host_native_views: HashMap<
         AgentsTerminalStartupBodySlotId,
         terminal_native_view::AppOwnedTerminalStartupHostNativeView,
@@ -797,12 +787,6 @@ pub struct GhostexGpuiApp {
         terminal_native_view::AppOwnedTerminalHostFocusIdentity<CommandTerminalBodyMountSlotId>,
     >,
     #[cfg(target_os = "macos")]
-    pub(crate) project_editor_companion_terminal_appkit_focused_host: Option<
-        terminal_native_view::AppOwnedTerminalHostFocusIdentity<
-            ProjectEditorCompanionTerminalBodyMountSlotId,
-        >,
-    >,
-    #[cfg(target_os = "macos")]
     pub(crate) agents_terminal_ghostty_surface_config_requests: HashMap<
         AgentsTerminalBodyMountSlotId,
         terminal_ghostty_surface::GhosttySurfaceConfigRequest,
@@ -813,39 +797,30 @@ pub struct GhostexGpuiApp {
         terminal_ghostty_surface::GhosttySurfaceConfigRequest,
     >,
     #[cfg(target_os = "macos")]
-    pub(crate) project_editor_companion_terminal_ghostty_surface_config_requests: HashMap<
-        ProjectEditorCompanionTerminalBodyMountSlotId,
-        terminal_ghostty_surface::GhosttySurfaceConfigRequest,
-    >,
-    #[cfg(target_os = "macos")]
     pub(crate) agents_terminal_startup_ghostty_surface_config_requests: HashMap<
         AgentsTerminalStartupBodySlotId,
         terminal_ghostty_surface::GhosttySurfaceConfigRequest,
     >,
     pub(crate) workspace_tab_scroll_handles: HashMap<WorkspacePaneId, ScrollHandle>,
     pub(crate) browser_tab_scroll_handles: HashMap<BrowserPaneId, ScrollHandle>,
+    /// The view panel has exactly one tab strip, so it needs one handle rather than a map.
+    pub(crate) view_tab_scroll_handle: ScrollHandle,
     pub(crate) command_tab_scroll_handles: HashMap<CommandPaneGroupId, ScrollHandle>,
     pub(crate) command_collapsed_tab_scroll_handle: ScrollHandle,
     pub(crate) workspace_split_layout_metrics: HashMap<WorkspaceSplitId, SplitResizeMetrics>,
     pub(crate) command_split_layout_metrics: HashMap<CommandPaneSplitId, SplitResizeMetrics>,
     pub(crate) browser_split_layout_metrics: HashMap<BrowserSplitId, SplitResizeMetrics>,
-    pub(crate) project_editor_companion_layout_metrics: Option<SplitResizeMetrics>,
-    pub(crate) project_editor_companion_split_layout_metrics: Option<SplitResizeMetrics>,
+    pub(crate) workarea_split_layout_metrics: Option<SplitResizeMetrics>,
     pub(crate) workspace_split_drag: Option<WorkspaceSplitResizeDragState>,
     pub(crate) workspace_split_hovering: Option<WorkspaceSplitId>,
     pub(crate) workspace_split_hover_visible: Option<WorkspaceSplitId>,
     pub(crate) workspace_split_hover_epoch: u64,
     pub(crate) command_split_drag: Option<CommandPaneSplitResizeDragState>,
     pub(crate) browser_split_drag: Option<BrowserSplitResizeDragState>,
-    pub(crate) project_editor_companion_drag: Option<ProjectEditorCompanionResizeDragState>,
-    pub(crate) project_editor_companion_split_drag:
-        Option<ProjectEditorCompanionSplitResizeDragState>,
-    pub(crate) project_editor_companion_divider_hovering: Option<TitlebarMode>,
-    pub(crate) project_editor_companion_divider_hover_visible: Option<TitlebarMode>,
-    pub(crate) project_editor_companion_divider_hover_epoch: u64,
-    pub(crate) project_editor_companion_split_divider_hovering: Option<TitlebarMode>,
-    pub(crate) project_editor_companion_split_divider_hover_visible: Option<TitlebarMode>,
-    pub(crate) project_editor_companion_split_divider_hover_epoch: u64,
+    pub(crate) workarea_split_drag: Option<WorkareaSplitResizeDragState>,
+    pub(crate) workarea_split_divider_hovering: bool,
+    pub(crate) workarea_split_divider_hover_visible: bool,
+    pub(crate) workarea_split_divider_hover_epoch: u64,
     pub(crate) hovered_workspace_tab: Option<WorkspaceHoverTab>,
     pub(crate) hovered_command_tab: Option<CommandPaneHoverTab>,
     pub(crate) hovered_browser_tab: Option<BrowserHoverTab>,
@@ -868,8 +843,8 @@ pub struct GhostexGpuiApp {
     pub(crate) command_pane_side: GpuiCommandPaneSide,
     pub(crate) sidebar_width: f32,
     pub(crate) sidebar_collapsed: bool,
-    #[cfg(target_os = "macos")]
-    pub(crate) companion_reveal: Option<crate::app::companion_reveal::CompanionReveal>,
+    /// Whether the sidebar's account usage strip shows every account instead of the single collapsed row.
+    pub(crate) sidebar_usage_expanded: bool,
     pub(crate) sidebar_drag: Option<SidebarDragState>,
     pub(crate) sidebar_divider_hovering: bool,
     pub(crate) sidebar_divider_hover_visible: bool,
@@ -917,7 +892,7 @@ pub struct GhostexGpuiApp {
     CDXC:Terminal 2026-07-04:
     Runtime-only GPUI-engine terminal views keyed by shell session identity.
     On every OS, sessions are claimed exactly when their queued launch payload
-    is consumed. Agents, command-pane, companion, restored, and newly launched
+    is consumed. Agents, command-pane, restored, and newly launched
     terminals render the composited TerminalElement in the same body slot.
     GhosttyKit owners remain available in the macOS build but are never selected
     while this engine is enabled. Records are never persisted.
@@ -976,7 +951,7 @@ pub struct GhostexGpuiApp {
     pub(crate) agents_delayed_send_persistence_ticker_active: bool,
     /*
     CDXC:Onboarding 2026-06-24-23:17:
-    The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside an app-owned anchored GPUI overlay positioned directly below TITLEBAR_HEIGHT. Store only the panel entity, open boolean, and transient focus handoff state so closing the overlay can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
+    The titlebar Tips dropdown owns a runtime-only React titlebar-host CEF panel inside an app-owned anchored GPUI overlay positioned directly below the workarea header's measured bottom edge. Store only the panel entity, open boolean, and transient focus handoff state so closing the overlay can hide the native CEF child view; do not duplicate tips data, persist dropdown state, create AppKit child windows, or rely on invisible overlays.
     */
     pub(crate) titlebar_dropdown_focus_handle: FocusHandle,
     pub(crate) titlebar_dropdown_previous_focus_handle: Option<FocusHandle>,
@@ -985,9 +960,9 @@ pub struct GhostexGpuiApp {
     pub(crate) titlebar_popup_window: Option<WindowHandle<GpuiTitlebarPopupWindow>>,
     /// Last painted bounds of the titlebar Help button, so the `openGhostexHelp`
     /// hotkey can anchor the Help popup without a click.
-    pub(crate) titlebar_help_button_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
-    /// Captured mode-tab spans plus the sliding active-fill state; see `titlebar_mode_highlight.rs`.
-    pub(crate) titlebar_mode_highlight: SharedTitlebarModeHighlightState,
+    /// The trailing ⋯ button's last painted bounds. Its menu rows and the Ghostex
+    /// Help hotkey both anchor their panels here.
+    pub(crate) titlebar_more_button_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     pub(crate) titlebar_extension_popup_generation: u64,
     pub(crate) titlebar_extension_popup: Option<GpuiTitlebarExtensionPopupState>,
     pub(crate) titlebar_tips_panel_open: bool,
@@ -1014,6 +989,7 @@ pub struct GhostexGpuiApp {
     pub(crate) agent_hook_status_request_in_flight: bool,
     pub(crate) sidebar: Option<Entity<crate::app::native_service::NativeService>>,
     pub(crate) native_sidebar: crate::app::native_sidebar::state::NativeSidebarState,
+    pub(crate) floating_reveal: crate::app::floating_reveal::model::FloatingRevealState,
     pub(crate) gx_store: crate::app::gx_store::GxStoreHost,
     pub(crate) browser_surfaces: HashMap<BrowserTabId, Entity<CefSurface>>,
     pub(crate) browser_address_inputs: HashMap<BrowserPaneId, Entity<InputState>>,
@@ -1031,10 +1007,6 @@ pub struct GhostexGpuiApp {
 
 impl Drop for GhostexGpuiApp {
     fn drop(&mut self) {
-        #[cfg(target_os = "macos")]
-        if let Some(reveal) = self.companion_reveal.as_ref() {
-            reveal.dispose_native_host();
-        }
         #[cfg(target_os = "macos")]
         unregister_gpui_app_shots_callback_target();
         #[cfg(target_os = "macos")]

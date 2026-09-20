@@ -106,7 +106,7 @@ impl GhostexGpuiApp {
                 })
                 .into_any_element()
         };
-        let mut actions = group.header_actions.clone();
+        let mut actions = (*group.header_actions).clone();
         if group.show_list_toggle {
             actions.insert(0, json!({ "label": if group.expanded { "Compact" } else { "Full" }, "icon": if group.expanded { "chevron-up" } else { "chevron-down" }, "command": { "type": "toggleList", "groupId": group.storage_id } }));
         }

@@ -18,6 +18,7 @@ pub(crate) mod extension_buttons;
 pub(crate) mod help_menu;
 pub(crate) mod icon_button_and_browser_toolbar;
 pub(crate) mod menu_triggers;
+pub(crate) mod more_menu;
 pub(crate) mod open_targets_and_window_controls;
 pub(crate) mod popup_lifecycle;
 pub(crate) mod popup_menu_builders;

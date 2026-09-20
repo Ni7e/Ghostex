@@ -380,7 +380,7 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
             key: 'accounts',
             title: 'Accounts, usage stats and automatic continuation',
             subtitle:
-              'Current CLI login, Claude cswap, Codex xswap, titlebar, status lines, usage limits and resets, account indicators, switching, hide emails, privacy, error recovery and retry settings.',
+              'Current CLI login, Claude cswap, Codex xswap, sidebar usage strip, status lines, usage limits and resets, account indicators, switching, hide emails, privacy, error recovery and retry settings.',
           },
         ],
       },
@@ -518,11 +518,11 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
         settings: [
           {
             key: 'titlebarViewOrder',
-            title: 'Arrange titlebar views',
-            subtitle: `Reorder built-in, extension, and custom views. ${formatSidebarHotkeyLabel('alt+1')} through ${formatSidebarHotkeyLabel('alt+9')} follow the visible order.`,
+            title: 'Arrange views',
+            subtitle: `Reorder built-in, extension, and custom views. New tabs open in this order, and ${formatSidebarHotkeyLabel('alt+1')} through ${formatSidebarHotkeyLabel('alt+9')} follow the tabs in the view panel.`,
           },
         ],
-        title: 'Titlebar views',
+        title: 'Views',
       },
       {
         id: 'official',
@@ -545,12 +545,12 @@ export const EXTRA_SETTINGS_TAB_SEARCH_SECTIONS: Record<
         settings: [
           {
             key: 'accountTitlebarUsage',
-            title: 'Titlebar account usage',
+            title: 'Account usage in the sidebar',
             subtitle:
-              'Show or hide usage stats for saved Claude and Codex accounts in the desktop titlebar. Star accounts to pin their usage.',
+              'Show or hide usage stats for saved Claude and Codex accounts at the bottom of the desktop sidebar. Star accounts to pin their usage.',
           },
         ],
-        title: 'Titlebar account usage',
+        title: 'Account usage in the sidebar',
       },
       {
         id: 'store',

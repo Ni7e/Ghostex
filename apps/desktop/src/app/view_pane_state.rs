@@ -1,16 +1,6 @@
 use crate::*;
 
 impl GhostexGpuiApp {
-    pub(crate) fn project_editor_companion_is_visible(&self) -> bool {
-        #[cfg(target_os = "macos")]
-        if self.companion_reveal.as_ref().is_some_and(|reveal| {
-            reveal.mode == self.active_mode && reveal.project_id == self.agents_workspace_project_id
-        }) {
-            return true;
-        }
-        self.project_editor_shell.left_companion_visible
-    }
-
     pub(crate) fn saved_view_pane_state(&self, mode: TitlebarMode) -> GpuiViewPaneState {
         self.view_pane_layouts
             .get(GpuiViewPaneLayoutKind::for_mode(mode))
@@ -31,9 +21,6 @@ impl GhostexGpuiApp {
             }
         }
         let panes = layouts.get_mut(kind);
-        if self.active_mode.is_project_editor_mode() {
-            panes.companion_visible = self.project_editor_shell.left_companion_visible;
-        }
         // Project selection swaps Agents and Commands independently. Read Commands
         // only while its model belongs to the active project.
         if self.command_pane_project_id == self.agents_workspace_project_id {
@@ -50,6 +37,11 @@ impl GhostexGpuiApp {
     }
 
     /// All mode entry routes capture the outgoing layout before restoring the incoming one.
+    ///
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// Nothing here touches the Agents workspace, its sessions, or its surfaces, and that is the
+    /// reason opening, changing or closing a view cannot unmount a terminal or a chat: the only
+    /// things a view switch moves are the sidebar, the Commands pane, and which view the panel shows.
     pub(crate) fn change_active_mode_with_pane_state(
         &mut self,
         mode: TitlebarMode,
@@ -58,10 +50,25 @@ impl GhostexGpuiApp {
         if mode == self.active_mode {
             return;
         }
-        #[cfg(target_os = "macos")]
-        self.close_floating_companion(cx);
         self.capture_view_pane_layout();
         self.active_mode = mode;
+        /*
+        CDXC:Workarea 2026-09-20 WHY:
+        Every route that opens a view ends here, so the tab strip is maintained here too rather than
+        at each entry point: a file opened from chat, a hotkey, the command palette, an extension's
+        own launch and the `+` menu all leave a tab behind, and none of them has to remember to.
+        Closing the panel leaves the strip alone, and it stops being maximised because there is
+        nothing left to maximise.
+        */
+        match self.open_view_mode() {
+            Some(view) => {
+                self.record_open_view_tab(view);
+                self.last_open_view_mode = Some(view);
+                self.view_panel_picker_open = false;
+                self.ensure_ghostex_page_panel(view, cx);
+            }
+            None => self.view_panel_maximized = false,
+        }
         self.apply_view_pane_state(cx);
     }
 
@@ -72,10 +79,9 @@ impl GhostexGpuiApp {
             GpuiSidebarVisibilityMemory::Shared => self.view_pane_layouts.shared_sidebar_collapsed,
             GpuiSidebarVisibilityMemory::PerView => panes.sidebar_collapsed,
         };
-        self.project_editor_shell.left_companion_visible = panes.companion_visible;
         self.cancel_sidebar_divider_interaction_state();
-        self.project_editor_companion_drag = None;
-        self.clear_project_editor_companion_divider_hover_state();
+        self.workarea_split_drag = None;
+        self.clear_workarea_split_divider_hover_state();
         /*
         CDXC:Sidebar 2026-09-12 DECISION:
         User: with per-view sidebar memory, hopping between projects with the sidebar must not pull it out from under the pointer.

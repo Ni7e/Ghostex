@@ -17,7 +17,7 @@ const COLLECTION_COLORS: &[&str] = &[
     "#8c9b45", "#c95353", "#c4a23d", "#2f9b95", "#596fd1",
 ];
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Collection {
     pub(crate) collection_id: String,
     pub(crate) title: String,
@@ -26,7 +26,7 @@ pub(crate) struct Collection {
 }
 
 /// One machine's collections after client normalization.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct CollectionsState {
     pub(crate) collections: Vec<Collection>,
 }

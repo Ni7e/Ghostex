@@ -493,9 +493,9 @@ impl GhostexGpuiApp {
                 self.receive_sidebar_native_app_shot_prompt_payload(&payload, cx);
             }
             cef::SidebarBridgeEvent::NativeSidebarSnapshot(payload) => {
+                // An accepted payload also brings the store's own list up to date and compares the
+                // two, from inside the receiver (gx_store/sidebar_shadow.rs).
                 self.receive_native_sidebar_snapshot(&payload, cx);
-                // The store builds the same list beside it and compares the two (gx_store/sidebar_shadow.rs).
-                self.gx_store_sidebar_snapshot_received(cx);
             }
             cef::SidebarBridgeEvent::ResourcesSnapshotRequest(payload) => {
                 self.receive_sidebar_resources_snapshot_request_payload(&payload, cx);
@@ -938,12 +938,16 @@ impl GhostexGpuiApp {
         /*
         CDXC:Navigation 2026-09-04 DECISION:
         User: restart must restore the last active project, the last active view, and the last visible sessions.
-        The restored shell state already put this session on its pane as the active tab, `attach_surfaced_local_workspace_terminals` attaches it there, and in a project-editor mode with the companion open the focus-state handler retargets the companion to it.
-        When the user quit on Code, Browser, Kanban, Automate, or Docs with no companion, the ordinary focus path below would switch the app to Agents and move keyboard focus to the pane, replacing the restored view with a different one.
-        The replay therefore stops here in that case; `local_workspace_latest_focus_key` stays untouched so the pending surfaced-restore attach completes as a silent restore rather than being promoted to a click.
+        The restored shell state already put this session on its pane as the active tab, and `attach_surfaced_local_workspace_terminals` attaches it there.
+        The replay stops here while a view panel is open; `local_workspace_latest_focus_key` stays untouched so the pending surfaced-restore attach completes as a silent restore rather than being promoted to a click.
+
+        CDXC:Workarea 2026-09-20 WHY:
+        The clause about the ordinary focus path switching the app to Agents no longer applies: opening
+        a session cannot close the view panel any more. The early return is kept for the other half of
+        the rule, which is that a restore must not be promoted to a click.
         */
         if message.startup_restore
-            && self.active_mode != TitlebarMode::Agents
+            && self.view_panel_open()
             && !self.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key)
         {
             support_logs::append(
@@ -964,10 +968,16 @@ impl GhostexGpuiApp {
         CDXC:Navigation 2026-09-11 DECISION:
         User: landing on another project keeps that project's remembered view; only a session click inside the active project still opens Agents.
         The project swap that preceded this focus already restored the destination's view, so a keep-view focus must not overwrite it: the tab is selected in the background and attached silently when it has no live terminal yet.
-        A remembered Agents view, or a Code/Docs companion that can show the session, takes the ordinary path below.
+        A project with no view panel open takes the ordinary path below.
+
+        CDXC:Workarea 2026-09-20 WHY:
+        The decision's second clause has no object any more: a session click inside the active project
+        never opens or closes the view panel, because the sessions are on screen beside it. What
+        survives is its first clause, which this branch still implements — landing on another project
+        selects the session in the background and leaves that project's remembered view alone.
         */
         if message.keep_view
-            && self.active_mode != TitlebarMode::Agents
+            && self.view_panel_open()
             && !self.should_keep_project_editor_open_for_local_workspace_terminal_focus(&key)
         {
             self.select_local_workspace_terminal_keeping_view(&key, cx);
@@ -1182,26 +1192,16 @@ impl GhostexGpuiApp {
                             this.pending_agents_chat_launch_intents
                                 .insert(workspace_key.clone());
                         }
-                        let opened = if this.active_mode == TitlebarMode::Agents
-                            || this
-                                .should_keep_project_editor_open_for_local_workspace_terminal_focus(
-                                    &key,
-                                ) {
-                            this.open_gpui_local_workspace_terminal(
-                                key,
-                                plan,
-                                requested_pane_id,
-                                false,
-                                cx,
-                            )
-                        } else {
-                            this.open_gpui_local_workspace_terminal_keeping_view(
-                                key,
-                                plan,
-                                requested_pane_id,
-                                cx,
-                            )
-                        };
+                        // CDXC:Workarea 2026-09-20 WHY:
+                        // A newly created agent lands in the Agents column, which is beside whatever
+                        // the view panel shows, so there is no longer a keep-view variant to choose.
+                        let opened = this.open_gpui_local_workspace_terminal(
+                            key,
+                            plan,
+                            requested_pane_id,
+                            false,
+                            cx,
+                        );
                         if !opened {
                             this.pending_agents_chat_launch_intents
                                 .remove(&workspace_key);

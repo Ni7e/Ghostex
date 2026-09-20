@@ -6,21 +6,27 @@ use std::sync::Arc;
 use crate::keys::SessionKey;
 
 use super::inputs::{CloseAfterDoneInput, ProjectDiffStats, SectionId};
-use super::session_text::{last_interaction_label, timer_trailing_label};
+use super::session_text::{last_interaction_label, next_label_deadline, timer_trailing_label};
 use super::tags::TagPresentation;
 
 /// The whole list for one machine tab.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarView {
-    /// A first snapshot of the machine has been applied, or the host has seen it unavailable.
+    /// A first snapshot of THIS COMPUTER's daemon has been applied, or the host has seen it
+    /// unavailable. It is the local machine's fact on every tab, exactly as the old projection's
+    /// `state.hasReceivedSnapshot` is.
     pub ready: bool,
-    /// The selected machine is one this view model can build (the local daemon, for now). A host
-    /// that selects a machine tab this says `false` for must keep drawing whatever it had.
+    /// The selected machine is one this view model can build: this computer, or a remote machine
+    /// the host feeds into the store. A host that selects a machine tab this says `false` for must
+    /// keep drawing whatever it had.
     pub supported: bool,
     pub selected_machine_id: String,
     /// `<machine>|<space or all>`: the scope a scroll position belongs to.
     pub scroll_scope: String,
+    /// The selected machine's counts.
     pub machine: MachineSummary,
+    /// Every machine tab, this computer first, with the counts its badge draws.
+    pub machines: Vec<MachineTabView>,
     pub spaces_enabled: bool,
     pub spaces: Vec<SpaceView>,
     /// Every group of the machine that is drawn, in order.
@@ -46,12 +52,37 @@ pub struct MachineSummary {
     pub attention_count: usize,
 }
 
+/// One machine tab: what the host said about it, plus the counts its badge draws.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineTabView {
+    pub id: String,
+    pub label: String,
+    /// The host's connection state word; always `connected` for this computer.
+    pub state: String,
+    pub message: Option<String>,
+    pub working_count: usize,
+    pub attention_count: usize,
+}
+
+/// The machine a drawn group belongs to; absent for this computer's groups.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RemoteMachineView {
+    pub machine_id: String,
+    pub machine_name: String,
+    /// The raw project id in that machine's daemon; absent for its Chats group.
+    pub project_id: Option<String>,
+}
+
 /// A drawn group: a project, or a user-made session group inside one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroupView {
     pub core: Arc<GroupCore>,
     /// The colour of the collection the group is in, when it is drawn inside one.
     pub collection_color: Option<String>,
+    /// The collection the group belongs to, from the collections document rather than from the
+    /// drawn list: a collection the user hid still owns its projects, and the Space rules are
+    /// written against ownership, not against what is on screen.
+    pub collection_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,6 +106,11 @@ pub struct GroupCore {
     pub sections: Vec<SectionView>,
     /// Every row of the group that passes the tag filter, in display order.
     pub sessions: Vec<SessionView>,
+    /// The machine this group belongs to; absent for this computer's groups.
+    pub remote_machine: Option<RemoteMachineView>,
+    /// The machine's stream is down while its rows are still held, so the group draws faded and
+    /// its terminal rows are not interactive. Never set for this computer's groups.
+    pub is_stale: bool,
 }
 
 /// What a project row draws besides its sessions.
@@ -86,6 +122,10 @@ pub struct ProjectContextView {
     pub discovered_icon_data_url: Option<String>,
     pub diff_stats: ProjectDiffStats,
     pub worktree: Option<WorktreeView>,
+    /// The project's git origin, when the daemon has probed one. Absent and an explicit `null`
+    /// read the same here, because the one reader (the project menu's Copy Remote URL) tests it
+    /// for truthiness.
+    pub git_remote_origin_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -171,6 +211,39 @@ pub struct SessionRow {
     pub is_generating_first_prompt_title: bool,
     /// Inputs of the time-based values, which the renderer formats against its own clock.
     pub timing: SessionTiming,
+    /// The session facts only the row's menus and its Copy Details text read.
+    pub menu_facts: SessionMenuFacts,
+}
+
+/// What a row's context menu, hover actions and Copy Details need beyond what it draws.
+///
+/// CDXC:ContextMenus 2026-09-20 WHY:
+/// These are on the row rather than looked up per menu because a menu is built for a row the list
+/// is already holding, and reaching back into the store for the session would make the menu
+/// answer from a different moment than the row it belongs to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionMenuFacts {
+    /// `agentName ?? agentId`, which is what the transcript-agent lookup reads.
+    pub agent_name: Option<String>,
+    pub agent_session_id: Option<String>,
+    pub session_persistence_provider: Option<String>,
+    pub session_persistence_name: Option<String>,
+    /// `<project>:<session>`, the id a pane is routed by.
+    pub session_routing_id: Option<String>,
+    /// The daemon's own `displayTitle`, before the heading rules. Copy Details quotes this rather
+    /// than the heading the row draws.
+    pub raw_display_title: Option<String>,
+    pub primary_title: Option<String>,
+    pub terminal_title: Option<String>,
+    /// The session's subtitle.
+    pub detail: Option<String>,
+    /// The saved first prompt, which Generate Title and View 1st Message need. The presentation
+    /// stream does not carry it, so on this client it is always absent and both items are hidden,
+    /// exactly as they are in the TypeScript projection.
+    pub first_user_message: Option<String>,
+    /// A remote row publishes whether its machine can do these; a local daemon row always can.
+    pub can_schedule_delayed_send: bool,
+    pub can_toggle_close_after_done: bool,
 }
 
 /// The daemon's or the host's Delayed Send, as the row shows it.
@@ -204,6 +277,37 @@ impl SessionRow {
         self.last_interaction_at
             .as_deref()
             .map(|at| last_interaction_label(at, now_ms))
+    }
+
+    /// The next host time at which the time this row draws reads differently, or `None` when it
+    /// draws none or draws one that never moves. `show_relative_time` is the card setting: with it
+    /// off, only a countdown is drawn. A host that draws these wakes then and no more often;
+    /// nothing in the store reports it, because they are formatted against the host's clock.
+    pub fn next_label_deadline(
+        &self,
+        now_ms: u64,
+        show_relative_time: bool,
+    ) -> Option<LabelDeadline> {
+        next_label_deadline(self, now_ms, show_relative_time)
+    }
+}
+
+/// The next moment a row's time reads differently, and which of the two times it is. The kind is
+/// what tells a host whether a wake once a second is a countdown doing its job or a relative time
+/// booked for a row that does not draw one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LabelDeadline {
+    /// A Delayed Send or Close After Done counting down; it moves every second until it ends.
+    Countdown(u64),
+    /// The relative time of the last interaction; it moves by the second only in the first minute.
+    Relative(u64),
+}
+
+impl LabelDeadline {
+    pub fn at_ms(self) -> u64 {
+        match self {
+            LabelDeadline::Countdown(at) | LabelDeadline::Relative(at) => at,
+        }
     }
 }
 

@@ -14,32 +14,92 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+export const DEFAULT_ISOLATED_GPUI_VARIANT = 'ghostex-3';
+
 /**
- * CDXC:Build 2026-09-13 DECISION:
- * User: ghostex-3 must start separately from the main Ghostex with separate configuration, sharing only the existing hooks via a symlink.
- * The bundle retains this environment so reopening it from Finder uses the same isolated instance.
+ * CDXC:Build 2026-09-20 WHY:
+ * A variant is one complete alternative app identity: its own app name, bundle id, storage root and
+ * the three ports a running instance owns (gxserver, code-server, CEF remote debugging). Keeping
+ * them in one table is what lets a second checkout build and run its own copy next to the user's
+ * normal Ghostex without sharing state or fighting over a port, and every value here must stay
+ * clear of the main instance (58744, 3777) and of every other row. Add a row to introduce a
+ * variant; never branch the launcher on which one is selected.
  */
-export function isolatedGpuiConfiguration() {
-  if (process.platform !== 'darwin') throw new Error('The isolated Ghostex-3 launcher currently supports macOS.');
-  const home = path.join(homedir(), '.local', 'share', 'ghostex-3');
-  return {
+const ISOLATED_GPUI_VARIANTS = {
+  /**
+   * CDXC:Build 2026-09-13 DECISION:
+   * User: ghostex-3 must start separately from the main Ghostex with separate configuration, sharing only the existing hooks via a symlink.
+   * The bundle retains this environment so reopening it from Finder uses the same isolated instance.
+   */
+  'ghostex-3': {
     appName: 'Ghostex-3',
     bundleId: 'com.madda.ghostex.gpui.ghostex-3',
-    installDir: path.join(homedir(), 'Applications'),
+    storageDirectoryName: 'ghostex-3',
+    gxserverDevPort: '58747',
+    codeServerPort: '3778',
+    cefRemoteDebuggingPort: '9337',
+  },
+  /**
+   * CDXC:Build 2026-09-20 DECISION:
+   * User: the UI revamp clone must launch its own app instance alongside the normal Ghostex.
+   */
+  'ui-revamp': {
+    appName: 'Ghostex-UI-Revamp',
+    bundleId: 'com.madda.ghostex.gpui.ui-revamp',
+    storageDirectoryName: 'ghostex-ui-revamp',
+    gxserverDevPort: '58751',
+    codeServerPort: '3781',
+    cefRemoteDebuggingPort: '9341',
+  },
+};
+
+export function isolatedGpuiVariantNames() {
+  return Object.keys(ISOLATED_GPUI_VARIANTS);
+}
+
+/**
+ * Reads the `--isolated` / `--isolated=<variant>` argument shared by start-gpui.mjs and this
+ * file's own entry point, so both select a variant the same way. Returns undefined for any other
+ * argument.
+ */
+export function parseIsolatedGpuiArgument(argument) {
+  if (argument === '--isolated') return DEFAULT_ISOLATED_GPUI_VARIANT;
+  if (!argument.startsWith('--isolated=')) return undefined;
+  const variant = argument.slice('--isolated='.length).trim();
+  if (!variant) throw new Error(`Name the variant: --isolated=<${isolatedGpuiVariantNames().join('|')}>.`);
+  return variant;
+}
+
+export function isolatedGpuiStartCommand(variant) {
+  return variant === DEFAULT_ISOLATED_GPUI_VARIANT
+    ? 'bun run start:isolated'
+    : `bun tooling/start-gpui.mjs --isolated=${variant}`;
+}
+
+export function isolatedGpuiConfiguration(variantName = DEFAULT_ISOLATED_GPUI_VARIANT) {
+  if (process.platform !== 'darwin') throw new Error('The isolated Ghostex launcher currently supports macOS.');
+  const variant = Object.hasOwn(ISOLATED_GPUI_VARIANTS, variantName) ? ISOLATED_GPUI_VARIANTS[variantName] : undefined;
+  if (!variant) {
+    throw new Error(
+      `Unknown isolated Ghostex variant: ${variantName}. Known variants: ${isolatedGpuiVariantNames().join(', ')}.`
+    );
+  }
+  const home = path.join(homedir(), '.local', 'share', variant.storageDirectoryName);
+  const installDir = path.join(homedir(), 'Applications');
+  const gxserver = path.join(installDir, `${variant.appName}.app`, 'Contents/Resources/Web/gxserver/bin/gxserver');
+  return {
+    variant: variantName,
+    appName: variant.appName,
+    bundleId: variant.bundleId,
+    installDir,
     environment: {
       GHOSTEX_HOME: home,
-      GHOSTEX_GXSERVER_DEV_PORT: '58747',
-      GHOSTEX_CODE_SERVER_PORT: '3778',
+      GHOSTEX_GXSERVER_DEV_PORT: variant.gxserverDevPort,
+      GHOSTEX_CODE_SERVER_PORT: variant.codeServerPort,
       CODE_SERVER_CONFIG: path.join(home, 'code-server-runtime-gpui/config.yaml'),
-      GHOSTEX_GPUI_CEF_REMOTE_DEBUGGING_PORT: '9337',
-      GHOSTEX_GXSERVER_CLI: path.join(
-        homedir(),
-        'Applications/Ghostex-3.app/Contents/Resources/Web/gxserver/bin/gxserver'
-      ),
-      GHOSTEX_GXSERVER_BIN: path.join(
-        homedir(),
-        'Applications/Ghostex-3.app/Contents/Resources/Web/gxserver/bin/gxserver'
-      ),
+      GHOSTEX_GPUI_CEF_REMOTE_DEBUGGING_PORT: variant.cefRemoteDebuggingPort,
+      GHOSTEX_GXSERVER_CLI: gxserver,
+      GHOSTEX_GXSERVER_BIN: gxserver,
     },
   };
 }
@@ -92,14 +152,23 @@ function detachIsolatedVSCodeSettings(home) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const configuration = isolatedGpuiConfiguration();
-  if (process.argv[2] === '--print') {
+  let variant = DEFAULT_ISOLATED_GPUI_VARIANT;
+  const forwarded = [];
+  for (const argument of process.argv.slice(2)) {
+    const selected = parseIsolatedGpuiArgument(argument);
+    if (selected) variant = selected;
+    else forwarded.push(argument);
+  }
+  const configuration = isolatedGpuiConfiguration(variant);
+  if (forwarded[0] === '--print') {
     process.stdout.write(`${JSON.stringify(configuration, null, 2)}\n`);
   } else {
     prepareIsolatedGpui(configuration);
     const cli = path.join(configuration.installDir, `${configuration.appName}.app`, 'Contents/Resources/CLI/ghostex');
-    if (!existsSync(cli)) throw new Error('Build Ghostex-3 first with bun run start:isolated.');
-    const result = spawnSync(cli, process.argv.slice(2), {
+    if (!existsSync(cli)) {
+      throw new Error(`Build ${configuration.appName} first with ${isolatedGpuiStartCommand(variant)}.`);
+    }
+    const result = spawnSync(cli, forwarded, {
       env: { ...process.env, ...configuration.environment },
       stdio: 'inherit',
     });

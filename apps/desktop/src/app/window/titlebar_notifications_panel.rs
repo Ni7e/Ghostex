@@ -23,6 +23,7 @@ impl GpuiTitlebarReadingPanel {
         feed: GpuiNotificationFeedState,
     ) -> Self {
         Self {
+            host: GpuiTitlebarPanelHost::Popup,
             main_app,
             scroll_handle: ScrollHandle::new(),
             state: GpuiTitlebarReadingPanelState::Notifications {

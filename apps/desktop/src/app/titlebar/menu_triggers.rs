@@ -23,7 +23,6 @@ use gpui::Window;
 use crate::app::actions::*;
 use crate::app::consts::*;
 use crate::app::helpers::*;
-use crate::app::model::*;
 use crate::app::window::*;
 use crate::*;
 
@@ -122,36 +121,6 @@ impl GhostexGpuiApp {
             .menu("Previous Sessions", Box::new(OpenGpuiPreviousSessionsModal))
             .menu("Agents Hub", Box::new(OpenGpuiAgentsHubModal))
             .show(position, window, cx);
-    }
-
-    pub(crate) fn show_gpui_titlebar_mode_menu(
-        &self,
-        position: gpui::Point<Pixels>,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        /*
-        CDXC:Titlebar 2026-07-04-01:00:
-        The compact titlebar mode picker is an owned GPUI popup window for narrow windows. Rows are projected from the same titlebar_mode_switcher_items list as the center tabs, disabled states stay disabled in Quick/projectless contexts, and selections dispatch through set_active_mode rather than mutating active_mode directly.
-        */
-        let mut menu = GpuiContextMenu::new();
-        for item in self.titlebar_mode_switcher_items() {
-            let action = Box::new(SelectGpuiTitlebarMode {
-                mode_index: item.mode.switcher_index(),
-            });
-            let label = match item.mode {
-                TitlebarMode::Extension(id) => gpui_extension_view_presentation(id)
-                    .map(|presentation| presentation.title)
-                    .unwrap_or_else(|| id.as_str().to_string()),
-                mode => mode.display_label().to_string(),
-            };
-            if item.is_available {
-                menu = menu.menu_with_check(label, self.active_mode == item.mode, action);
-            } else {
-                menu = menu.menu_with_disabled(label, true, action);
-            }
-        }
-        menu.show(position, window, cx);
     }
 
     pub(crate) fn show_gpui_titlebar_customize_menu(

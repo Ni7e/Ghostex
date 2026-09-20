@@ -100,9 +100,10 @@ pub(crate) struct LocalFocus {
     pub(super) restored: bool,
     /// Newest stamp the old runtime echoed in a focus payload.
     pub(super) confirmed_stamp: u64,
-    /// The old runtime's newest accepted focus names something that is not a local session of the
-    /// store (a remote session, the quick automations row). Local rows then draw unfocused and
-    /// the sidebar snapshot's own flag owns the highlight. Cleared by every local selection.
+    /// The old runtime's newest accepted focus names something the store does not own the focus of
+    /// (a remote session, the quick automations row). Local rows then draw unfocused and the
+    /// sidebar snapshot's own flag owns the highlight, which for a remote row is the mark the list
+    /// carries from the publish (`remote_row_focus`). Cleared by every local selection.
     pub(super) foreign_focus: bool,
     /// Row id of the store's focused session, and of its visible sessions, so a row compares two
     /// strings per frame instead of decoding its id.
@@ -330,16 +331,22 @@ impl GxStoreHost {
         let Some(project) = ProjectKey::parse_workspace_project_id(project_id) else {
             return false;
         };
-        if !project.machine.is_local() {
-            // Remote machines are not in the store yet; their lists keep the old rule.
+        let store = self.core.presentation();
+        if store.loaded(&project.machine).is_none() {
+            // A machine the store does not hold cannot dispute anything: its list keeps the old
+            // rule. Before M4d that was every remote machine; now it is only one whose client is
+            // not running.
             return true;
         }
-        let store = self.core.presentation();
+        // The active group is the store's own only while the store owns that machine's focus,
+        // which it does for this computer. A remote project's group is derived instead, from the
+        // project the old runtime named.
         let group = self
             .core
             .focus()
             .active_group
             .clone()
+            .filter(|_| project.machine.is_local())
             .filter(|group| match group {
                 ghostex_gx_core::ActiveGroup::Project(owner) => *owner == project,
                 ghostex_gx_core::ActiveGroup::Subgroup { project: owner, .. } => *owner == project,
@@ -557,18 +564,12 @@ impl GhostexGpuiApp {
         &self,
         selected: &GpuiLocalWorkspaceSessionKey,
     ) -> Vec<SessionKey> {
-        let shell_session_ids = if self.active_mode == TitlebarMode::Agents {
-            self.agents_workspace
-                .rendered_leaf_order()
-                .into_iter()
-                .filter_map(|pane_id| self.agents_workspace.active_session_in_pane(pane_id))
-                .collect::<Vec<_>>()
-        } else {
-            self.current_project_editor_companion_terminal_body_mount_slots()
-                .into_iter()
-                .map(|slot_id| slot_id.session_id)
-                .collect::<Vec<_>>()
-        };
+        let shell_session_ids = self
+            .agents_workspace
+            .rendered_leaf_order()
+            .into_iter()
+            .filter_map(|pane_id| self.agents_workspace.active_session_in_pane(pane_id))
+            .collect::<Vec<_>>();
         let mut keys = Vec::with_capacity(shell_session_ids.len() + 1);
         for shell_session_id in shell_session_ids {
             let Some(key) = self
@@ -662,7 +663,8 @@ impl GhostexGpuiApp {
             );
         }
         if local_focus.foreign_focus {
-            // The store holds no remote machine, so its visible set is the last local one.
+            // The store does not own the focus of whatever this is (a remote session, the quick
+            // automations row), so its visible set is the last local one.
             return (false, snapshot_visible);
         }
         let focused = local_focus.focused_row_id.as_deref() == Some(row_id);
