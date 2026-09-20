@@ -211,7 +211,7 @@ pub fn plan_lifecycle_request(core: &Core, message: &Value) -> Option<LifecycleR
         // Only a sleep moves the focus off the row, and only when that row holds it.
         replacement_focus: match quick || !sleeping {
             true => None,
-            false => replacement_focus(core, &session, focused_before.as_ref()),
+            false => replacement_focus_for_transition(core, &session, focused_before.as_ref()),
         },
         focused_before,
         session,
@@ -266,9 +266,12 @@ pub fn apply_lifecycle_answer(
 }
 
 /// `resolveLocalProjectListTransitionFocusTarget`: the next RUNNING row of the same project, in
-/// the order the list draws it, wrapping past the end, and only when the row being slept is the
-/// focused one.
-fn replacement_focus(
+/// the order the list draws it, wrapping past the end, and only when the row being slept or closed
+/// is the focused one.
+///
+/// Shared with `close.rs` because the TypeScript shares it: `transitionSession` resolves it the
+/// same way for both actions and from the same place, before the row leaves the list.
+pub(super) fn replacement_focus_for_transition(
     core: &Core,
     session: &SessionKey,
     focused: Option<&SessionKey>,
