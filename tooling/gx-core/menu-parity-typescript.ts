@@ -185,11 +185,13 @@ function setUpStore(scenario: Json, rust: Json): NativeSidebarUiState {
     });
     const { sessions, ...record } = built;
     groupOrder.push(groupId);
+    // `spliceWorkspaceSubgroups` sets the flag on every project group and every user-made group
+    // and leaves a chat project's group alone, so it is derived from the projection's own chat
+    // project ids rather than assumed. A user-made group also loses its project context and title.
+    const isChatGroup = metadata.chatProjectIds.has(projectId);
     groupsById[groupId] = {
       ...record,
-      // Every project group and every user-made group is created with this flag by
-      // `spliceWorkspaceSubgroups`; a user-made group also loses its project context and title.
-      canCreateSessionGroup: true,
+      ...(isChatGroup ? {} : { canCreateSessionGroup: true }),
       ...(group.projectId ? {} : { projectContext: undefined, title: String(group.title) }),
     } as Omit<SidebarSessionGroup, 'sessions'>;
     sessionIdsByGroup[groupId] = sessions.map((session) => session.sessionId);

@@ -95,7 +95,7 @@ pub struct TagPresentation {
 }
 
 /// One custom tag after client normalization.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct CustomTag {
     pub(crate) name: String,
     pub(crate) icon: String,
@@ -104,7 +104,7 @@ pub(crate) struct CustomTag {
 
 /// The custom tag catalogs a row resolves ids against (the local daemon's; remote catalogs join
 /// with the remote machines).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct TagCatalog {
     /// In catalog order.
     pub(crate) order: Vec<String>,

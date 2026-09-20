@@ -19,7 +19,9 @@ use serde_json::Value;
 
 use super::host::now_ms;
 use super::sidebar_list_inputs::{InputsCache, refresh_inputs, sort_mode};
-use super::sidebar_snapshot::{SnapshotCache, snapshot_from_view};
+use super::sidebar_snapshot::{
+    SnapshotCache, SnapshotInput, carry_fingerprint, snapshot_from_view,
+};
 use crate::GhostexGpuiApp;
 
 /// How long the settings verdict is reused. Asking stats the settings file and clones its map
@@ -115,11 +117,10 @@ pub(crate) struct SidebarList {
     /// second can be read as a countdown doing its job or as something booking a time nobody draws.
     deadline_booked: Option<u64>,
     pub(super) deadline_kind: &'static str,
-    /// The publish the installed list took its carried fields from, so a publish that moved one of
-    /// them is installed and a publish that moved none is not. Held rather than compared by
-    /// address: the carried fields are what matters, not which object they arrived in.
-    installed_carry:
-        Option<std::sync::Arc<crate::app::native_sidebar::model::NativeSidebarSnapshot>>,
+    /// The carried fields of the publish the installed list was built from, and the generation of
+    /// the client-storage values its menus read. A publish or a storage change that moved one of
+    /// them is installed; one that moved none is not.
+    installed_carry: Option<(u64, u64)>,
     snapshot_cache: SnapshotCache,
     inputs_cache: InputsCache,
     /// The inputs the newest view was built from, so the shadow compares the same moment. Kept
@@ -309,42 +310,23 @@ impl GhostexGpuiApp {
         self.gx_store.sidebar_list.counters.installs_from_carry += 1;
     }
 
-    /// Whether a publish moved one of the values the installed list still takes from it.
+    /// Whether a publish, or the client storage the menus read, moved a value the installed list
+    /// still takes from outside the store.
     ///
     /// CDXC:Sidebar 2026-09-20 WHY:
     /// Until M4c every accepted publish forced an install, because the list carried that publish's
     /// menus, hover buttons and header buttons by id. The menus are the store's now, so only the
-    /// fields named in `sidebar_snapshot.rs` are left, and they move far less often than the rows
-    /// do: the HUD, the machine tabs, the two requests, and the per-group facts of a remote
-    /// machine or of a project's editor state. The daemon revision is deliberately not compared:
-    /// nothing the renderer draws reads it, and it changes on nearly every publish.
+    /// fields `sidebar_snapshot.rs` names are left, and they move far less often than the rows do:
+    /// the HUD, the machine tabs, the two requests, the two hotkey labels, and the per-group facts
+    /// of a remote machine or of a project's editor state. The two client-storage values the menus
+    /// read (the last-used agent and the armed keep-awake duration) are in the same gate, because
+    /// the view model cannot see them and nothing else would ever install for them.
     pub(crate) fn gx_store_sidebar_carry_changed(
-        &self,
+        &mut self,
         published: &crate::app::native_sidebar::model::NativeSidebarSnapshot,
     ) -> bool {
-        let Some(installed) = self.gx_store.sidebar_list.installed_carry.as_deref() else {
-            return true;
-        };
-        if installed.hud != published.hud
-            || installed.machines != published.machines
-            || installed.rename_request != published.rename_request
-            || installed.reveal_request != published.reveal_request
-            || installed.search_shortcut != published.search_shortcut
-            || installed.commands_shortcut != published.commands_shortcut
-            || installed.groups.len() != published.groups.len()
-        {
-            return true;
-        }
-        installed
-            .groups
-            .iter()
-            .zip(&published.groups)
-            .any(|(installed, published)| {
-                installed.group_id != published.group_id
-                    || installed.is_stale != published.is_stale
-                    || installed.remote_machine_context != published.remote_machine_context
-                    || installed.project_context != published.project_context
-            })
+        let host = self.gx_store_menu_host_generation();
+        self.gx_store.sidebar_list.installed_carry != Some((carry_fingerprint(published), host))
     }
 
     /// Whether the renderer draws the store's list right now. A machine tab the view model cannot
@@ -553,6 +535,10 @@ impl GhostexGpuiApp {
         // The labels are formatted against the clock of the moment they are drawn, not the moment
         // the list was last built: a wake that only ticks a countdown does not rebuild the list.
         let now_ms = now_ms();
+        let carry = (
+            carry_fingerprint(&published),
+            self.gx_store.menu_host.generation(),
+        );
         let snapshot = {
             // Borrowed rather than cloned: the model, the inputs and the cache are separate
             // fields, so the whole list does not have to be copied to build the one the renderer
@@ -563,16 +549,20 @@ impl GhostexGpuiApp {
                 SidebarMenus::new(core, list.model.view(), &list.last_inputs, &host, now_ms);
             snapshot_from_view(
                 list.model.view(),
-                &menus,
-                &published,
+                &SnapshotInput {
+                    menus: &menus,
+                    published: &published,
+                    settings: &list.last_inputs.settings,
+                    hidden_items: &list.last_inputs.ui.hidden_items,
+                    host: &host,
+                    now_ms,
+                },
                 &mut list.snapshot_cache,
-                &list.last_inputs.settings,
-                now_ms,
             )
         };
         let install_us = started.elapsed().as_micros() as u64;
         let list = &mut self.gx_store.sidebar_list;
-        list.installed_carry = Some(published.clone());
+        list.installed_carry = Some(carry);
         list.counters.installs += 1;
         list.counters.last_install_us = install_us;
         list.counters.install_max_us = list.counters.install_max_us.max(install_us);
@@ -657,5 +647,10 @@ impl GhostexGpuiApp {
 impl SidebarList {
     fn next_deadline_ms(&self) -> Option<u64> {
         self.model.next_deadline_ms()
+    }
+
+    /// The menu-host generation the installed list was built with, if one is installed.
+    pub(super) fn installed_menu_host_generation(&self) -> Option<u64> {
+        self.installed_carry.map(|(_, generation)| generation)
     }
 }

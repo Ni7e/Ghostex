@@ -204,6 +204,11 @@ impl GhostexGpuiApp {
                 }
                 if drawn_is_projection {
                     self.native_sidebar.snapshot = self.native_sidebar.projection.clone();
+                } else {
+                    // The sidebar's own one-second tick, and the only cadence that notices a
+                    // Keep Awake armed from the titlebar or an agent launched from another
+                    // surface (gx_store/sidebar_menus.rs).
+                    self.gx_store_poll_menu_host(cx);
                 }
             }
             _ => return,

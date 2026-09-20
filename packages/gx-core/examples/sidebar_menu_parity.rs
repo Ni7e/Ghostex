@@ -25,8 +25,10 @@ use ghostex_gx_core::{
 };
 use serde_json::{json, Map, Value};
 
-/// The clock the menus are built against. Snooze is the one rule that reads it.
-const NOW_MS: u64 = 1_790_000_000_000;
+/// The clock the menus are built against when a scenario carries none. Snooze is the one rule
+/// that reads it, and the harness writes the same `nowMs` into every scenario so both sides answer
+/// it from the same instant.
+const FALLBACK_NOW_MS: u64 = 1_790_000_000_000;
 
 fn main() -> ExitCode {
     let Some(directory) = std::env::args().nth(1) else {
@@ -84,7 +86,9 @@ fn main() -> ExitCode {
                 .unwrap_or_default()
                 .replace("scenario-", "rust-"),
         );
-        if let Err(error) = std::fs::write(&out, serde_json::to_string(&dump.value).unwrap()) {
+        // The dumps carry session titles, project paths, worktree branches, agent session ids and
+        // the whole Copy Details text; they are written as privately as the scenarios are.
+        if let Err(error) = write_private(&out, &serde_json::to_string(&dump.value).unwrap()) {
             eprintln!("cannot write {}: {error}", out.display());
             return ExitCode::FAILURE;
         }
@@ -108,7 +112,33 @@ struct Dump {
     menus: usize,
 }
 
+/// Owner-only, like the scenarios the harness writes beside these.
+fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(body.as_bytes())?;
+    // `mode` applies to a file this call CREATES; a dump left behind by an earlier run would keep
+    // whatever it had.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
 fn build(scenario: &Value) -> Option<Dump> {
+    let now_ms = scenario
+        .get("nowMs")
+        .and_then(Value::as_u64)
+        .unwrap_or(FALLBACK_NOW_MS);
     let mut core = Core::new();
     let frame = json!({
         "type": "presentationSnapshot",
@@ -124,7 +154,7 @@ fn build(scenario: &Value) -> Option<Dump> {
             machine: MachineId::Local,
             frame: Box::new(frame),
         },
-        NOW_MS,
+        now_ms,
     );
     let changes = output.changes;
     let inputs = SidebarInputs {
@@ -133,10 +163,10 @@ fn build(scenario: &Value) -> Option<Dump> {
         host: Default::default(),
     };
     let mut model = SidebarViewModel::new();
-    model.update(&core, &inputs, &changes, NOW_MS);
+    model.update(&core, &inputs, &changes, now_ms);
     let view = model.view();
     let host = menu_host(scenario.get("host")?);
-    let menus = SidebarMenus::new(&core, view, &inputs, &host, NOW_MS);
+    let menus = SidebarMenus::new(&core, view, &inputs, &host, now_ms);
 
     let mut rows_out = Map::new();
     let mut count = 0usize;
@@ -229,7 +259,23 @@ fn build(scenario: &Value) -> Option<Dump> {
     let bulk = menus
         .bulk_menu()
         .map_or(Value::Null, |items| menu_to_json(&items));
+    let more_menu = menu_to_json(&menus.more_menu());
     count += 2;
+    // An open panel is refreshed in place by copying only the keys the newly built item HAS, so a
+    // row that leaves `checked` or `disabled` out can never turn either back off. The enumeration
+    // diff normalizes both sides' missing booleans, so the invariant is asserted here instead.
+    let mut missing: Vec<String> = Vec::new();
+    for (where_, menu) in every_menu(&rows_out, &groups_out, &collections_out, &bulk, &more_menu) {
+        check_flags(&where_, &menu, &mut missing);
+    }
+    if !missing.is_empty() {
+        eprintln!(
+            "{} menu items are missing checked or disabled: {}",
+            missing.len(),
+            missing[..missing.len().min(5)].join(", ")
+        );
+        return None;
+    }
     let logos: Map<String, Value> = agent_logo_icons()
         .into_iter()
         .map(|icon| {
@@ -247,7 +293,7 @@ fn build(scenario: &Value) -> Option<Dump> {
             "groups": Value::Object(groups_out),
             "collections": Value::Object(collections_out),
             "bulk": bulk,
-            "moreMenu": menu_to_json(&menus.more_menu()),
+            "moreMenu": more_menu,
             "logos": Value::Object(logos),
             "order": order(view),
         }),
@@ -405,4 +451,53 @@ fn text(value: &Value, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+/// Every built menu of one scenario, with a name for the report.
+fn every_menu(
+    rows: &Map<String, Value>,
+    groups: &Map<String, Value>,
+    collections: &Map<String, Value>,
+    bulk: &Value,
+    more_menu: &Value,
+) -> Vec<(String, Value)> {
+    let mut menus: Vec<(String, Value)> = Vec::new();
+    for (id, row) in rows {
+        for key in ["menu", "fullMenu", "hoverBefore", "hoverAfter"] {
+            menus.push((format!("row {id} {key}"), row[key].clone()));
+        }
+        if let Some(submenus) = row["hoverSubmenus"].as_object() {
+            for (action, items) in submenus {
+                menus.push((format!("row {id} hover:{action}"), items.clone()));
+            }
+        }
+    }
+    for (id, group) in groups {
+        menus.push((format!("group {id} menu"), group["menu"].clone()));
+        menus.push((
+            format!("group {id} headerActions"),
+            group["headerActions"].clone(),
+        ));
+    }
+    for (id, collection) in collections {
+        menus.push((format!("collection {id}"), collection["menu"].clone()));
+    }
+    menus.push(("bulk".to_string(), bulk.clone()));
+    menus.push(("moreMenu".to_string(), more_menu.clone()));
+    menus
+}
+
+/// Every item, recursively, must carry `checked` and `disabled`.
+fn check_flags(where_: &str, menu: &Value, missing: &mut Vec<String>) {
+    let Some(items) = menu.as_array() else {
+        return;
+    };
+    for (index, item) in items.iter().enumerate() {
+        for key in ["checked", "disabled"] {
+            if !item.get(key).is_some_and(Value::is_boolean) {
+                missing.push(format!("{where_}[{index}] {key}"));
+            }
+        }
+        check_flags(&format!("{where_}[{index}]"), &item["children"], missing);
+    }
 }

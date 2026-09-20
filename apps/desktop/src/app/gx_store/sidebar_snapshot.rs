@@ -18,8 +18,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use ghostex_gx_core::{
-    CollectionView, GroupView, SessionView, SidebarMenus, SidebarSettings, SidebarView,
-    TagPresentation, colored_agent_logo, menu_to_json,
+    CollectionView, GroupCore, GroupView, MenuHost, SessionView, SidebarHiddenItems, SidebarMenus,
+    SidebarSettings, SidebarView, TagPresentation, colored_agent_logo, menu_to_json,
 };
 use serde_json::{Map, Value, json};
 
@@ -69,13 +69,43 @@ impl CachedRow {
     }
 }
 
-/// Keeps the built rows between publishes.
+/// A group's menu and header buttons, kept until one of their inputs moves.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// A project menu is about fifteen rows and its header buttons carry the agent launcher, whose
+/// items each hold a logo data URL of up to eight kilobytes. Rebuilding both for thirty-five
+/// groups on every install was more than half the install's time and a few hundred kilobytes of
+/// JSON, for groups whose inputs had not moved. The `GroupCore` is held rather than compared by
+/// address, for the same reason `CachedRow` holds its row: an entry outlives the group it was
+/// built from, and a freed allocation's address handed to the next group would compare equal.
+struct CachedGroupMenus {
+    core: Arc<GroupCore>,
+    /// The collection a project belongs to decides its Add to Group ticks, and it is not part of
+    /// `GroupCore`.
+    collection_id: Option<String>,
+    menu: Value,
+    header_actions: Vec<Value>,
+}
+
+/// What every cached menu was built from besides the group or row it belongs to. A difference in
+/// any of it drops the whole cache, which is right: all of them are user actions, not traffic.
+#[derive(Clone, PartialEq)]
+struct MenuKey {
+    settings: SidebarSettings,
+    hidden_items: SidebarHiddenItems,
+    host: MenuHost,
+    /// The tag catalog, the Spaces and the collections, as `SidebarMenus` derived them.
+    context: u64,
+}
+
+/// Keeps the built rows and group menus between publishes.
 #[derive(Default)]
 pub(super) struct SnapshotCache {
     rows: HashMap<String, CachedRow>,
-    /// The settings the cached rows' hover buttons were built from. A settings change does not
-    /// touch a row in the view model, so nothing else would invalidate them.
-    settings: Option<SidebarSettings>,
+    groups: HashMap<String, CachedGroupMenus>,
+    /// What the cached menus were built from. A settings change does not touch a row or a group
+    /// in the view model, so nothing else would invalidate them.
+    key: Option<MenuKey>,
 }
 
 impl SnapshotCache {
@@ -106,26 +136,134 @@ impl SnapshotCache {
     }
 }
 
-/// Builds the list the renderer draws from the view model and the menus. `published` is the old
-/// projection's newest snapshot, which the fields named in the module comment still come from;
-/// `now_ms` is the clock the time labels are formatted against.
+/// One number over every value the installed list still takes from a publish.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// Kept as a fingerprint rather than as the publish itself. Holding the `Arc` made the clock
+/// branch's `Arc::make_mut` deep-copy the whole published snapshot once a second and after every
+/// publish, because this was a second owner; holding clones of the values instead would copy the
+/// settings object out of the HUD on every install. Hashing walks them without allocating. A
+/// collision would skip one install of a value the renderer draws, and it would be picked up by
+/// the next change to any of them.
+///
+/// The set is exactly what `snapshot_from_view` reads from `published`, minus the revision, which
+/// nothing the renderer draws reads.
+pub(super) fn carry_fingerprint(published: &NativeSidebarSnapshot) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hash_json(&published.hud, &mut hasher);
+    for machine in &published.machines {
+        machine.working_count.hash(&mut hasher);
+        machine.attention_count.hash(&mut hasher);
+        machine.id.hash(&mut hasher);
+        machine.label.hash(&mut hasher);
+        machine.state.hash(&mut hasher);
+        machine.message.hash(&mut hasher);
+    }
+    if let Some(request) = &published.rename_request {
+        request.collection_id.hash(&mut hasher);
+        request.request_id.hash(&mut hasher);
+    }
+    if let Some(request) = &published.reveal_request {
+        request.session_id.hash(&mut hasher);
+        request.request_id.hash(&mut hasher);
+    }
+    published.search_shortcut.hash(&mut hasher);
+    published.commands_shortcut.hash(&mut hasher);
+    for group in &published.groups {
+        group.group_id.hash(&mut hasher);
+        group.is_stale.hash(&mut hasher);
+        match &group.remote_machine_context {
+            Some(context) => hash_json(context, &mut hasher),
+            None => 0u8.hash(&mut hasher),
+        }
+        match &group.project_context {
+            Some(context) => hash_json(context, &mut hasher),
+            None => 0u8.hash(&mut hasher),
+        }
+    }
+    hasher.finish()
+}
+
+/// `serde_json::Value` has no `Hash`: a float has none, and the map is ordered so its entries can
+/// be walked in one order.
+fn hash_json(value: &Value, hasher: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    match value {
+        Value::Null => 0u8.hash(hasher),
+        Value::Bool(value) => {
+            1u8.hash(hasher);
+            value.hash(hasher);
+        }
+        Value::Number(number) => {
+            2u8.hash(hasher);
+            match number.as_f64() {
+                Some(number) => number.to_bits().hash(hasher),
+                None => number.to_string().hash(hasher),
+            }
+        }
+        Value::String(value) => {
+            3u8.hash(hasher);
+            value.hash(hasher);
+        }
+        Value::Array(items) => {
+            4u8.hash(hasher);
+            items.len().hash(hasher);
+            for item in items {
+                hash_json(item, hasher);
+            }
+        }
+        Value::Object(object) => {
+            5u8.hash(hasher);
+            object.len().hash(hasher);
+            for (key, item) in object {
+                key.hash(hasher);
+                hash_json(item, hasher);
+            }
+        }
+    }
+}
+
+/// Everything one install needs besides the view and the cache.
+pub(super) struct SnapshotInput<'a> {
+    pub(super) menus: &'a SidebarMenus<'a>,
+    /// The old projection's newest snapshot; the fields named in the module comment come from it.
+    pub(super) published: &'a NativeSidebarSnapshot,
+    pub(super) settings: &'a SidebarSettings,
+    pub(super) hidden_items: &'a SidebarHiddenItems,
+    pub(super) host: &'a MenuHost,
+    /// The clock the time labels are formatted against.
+    pub(super) now_ms: u64,
+}
+
+/// Builds the list the renderer draws from the view model and the menus.
 pub(super) fn snapshot_from_view(
     view: &SidebarView,
-    menus: &SidebarMenus<'_>,
-    published: &NativeSidebarSnapshot,
+    input: &SnapshotInput<'_>,
     cache: &mut SnapshotCache,
-    settings: &SidebarSettings,
-    now_ms: u64,
 ) -> NativeSidebarSnapshot {
+    let SnapshotInput {
+        menus,
+        published,
+        now_ms,
+        ..
+    } = *input;
     let published_groups: HashMap<&str, &NativeSidebarGroup> = published
         .groups
         .iter()
         .map(|group| (group.group_id.as_str(), group))
         .collect();
 
-    if cache.settings.as_ref() != Some(settings) {
-        cache.settings = Some(settings.clone());
+    let key = MenuKey {
+        settings: input.settings.clone(),
+        hidden_items: input.hidden_items.clone(),
+        host: input.host.clone(),
+        context: menus.context_fingerprint(),
+    };
+    if cache.key.as_ref() != Some(&key) {
+        cache.key = Some(key);
         cache.rows.clear();
+        cache.groups.clear();
     }
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     let groups: Vec<NativeSidebarGroup> = view
@@ -142,17 +280,27 @@ pub(super) fn snapshot_from_view(
                     session_element(group, session, menus, cache, now_ms)
                 })
                 .collect();
-            native_group(group, menus, published, sessions)
+            native_group(group, menus, published, sessions, cache)
         })
         .collect();
     cache
         .rows
         .retain(|session_id, _| used.contains(session_id.as_str()));
+    let drawn: std::collections::HashSet<&str> = view
+        .groups
+        .iter()
+        .map(|group| group.core.group_id.as_str())
+        .collect();
+    cache
+        .groups
+        .retain(|group_id, _| drawn.contains(group_id.as_str()));
 
     NativeSidebarSnapshot {
         version: 1,
-        // The revision names the daemon document the old projection published, which is what the
-        // settings patches built from this snapshot quote as their base.
+        // The daemon document the old projection published. Carried rather than derived, and
+        // deliberately not part of what decides an install: nothing the renderer draws reads it
+        // (the settings patches quote the zustand store's own revision, controller.ts:138), and it
+        // moves on nearly every publish.
         revision: published.revision,
         scroll_scope: view.scroll_scope.clone(),
         rename_request: published.rename_request.clone(),
@@ -227,8 +375,10 @@ fn native_group(
     menus: &SidebarMenus<'_>,
     published: Option<&NativeSidebarGroup>,
     sessions: Vec<Arc<NativeSidebarSession>>,
+    cache: &mut SnapshotCache,
 ) -> NativeSidebarGroup {
     let core = &group.core;
+    let (menu, header_actions) = group_menus(group, menus, cache);
     NativeSidebarGroup {
         collection_color: group.collection_color.clone(),
         title_tooltip: core.title_tooltip.clone(),
@@ -244,12 +394,8 @@ fn native_group(
         hidden_session_count: core.hidden_session_count,
         show_list_toggle: core.show_list_toggle,
         hover_actions_expanded: core.hover_actions_expanded,
-        menu: menu_to_json(&menus.project_menu(group)),
-        header_actions: menus
-            .header_actions(group)
-            .iter()
-            .map(ghostex_gx_core::MenuItem::to_json)
-            .collect(),
+        menu,
+        header_actions,
         sections: core
             .sections
             .iter()
@@ -274,6 +420,36 @@ fn native_group(
         remote_machine_context: published.and_then(|group| group.remote_machine_context.clone()),
         sessions,
     }
+}
+
+/// One group's menu and header buttons, kept until the group or one of the menu inputs moves.
+fn group_menus(
+    group: &GroupView,
+    menus: &SidebarMenus<'_>,
+    cache: &mut SnapshotCache,
+) -> (Value, Vec<Value>) {
+    let core = &group.core;
+    if let Some(cached) = cache.groups.get(&core.group_id) {
+        if Arc::ptr_eq(&cached.core, core) && cached.collection_id == group.collection_id {
+            return (cached.menu.clone(), cached.header_actions.clone());
+        }
+    }
+    let menu = menu_to_json(&menus.project_menu(group));
+    let header_actions: Vec<Value> = menus
+        .header_actions(group)
+        .iter()
+        .map(ghostex_gx_core::MenuItem::to_json)
+        .collect();
+    cache.groups.insert(
+        core.group_id.clone(),
+        CachedGroupMenus {
+            core: core.clone(),
+            collection_id: group.collection_id.clone(),
+            menu: menu.clone(),
+            header_actions: header_actions.clone(),
+        },
+    );
+    (menu, header_actions)
 }
 
 /// The project facts a header draws: the view model's values, over whatever else the old

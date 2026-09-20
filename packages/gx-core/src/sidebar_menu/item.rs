@@ -35,11 +35,15 @@ pub struct MenuSecondary {
 
 /// One menu row: a label with an action, a submenu, a heading, or a separator.
 ///
-/// The booleans are written to JSON only when they are true, because every reader tests them
-/// against `true` and an absent key reads the same as `false`. The TypeScript builders are not
-/// consistent about it either (the project menu writes `disabled: false`, the session menu leaves
-/// it out), so the enumeration gate compares the two after filling both sides' missing booleans
-/// with `false`.
+/// CDXC:ContextMenus 2026-09-20 WHY:
+/// `checked` and `disabled` are written on EVERY row, true or false. An open panel is refreshed in
+/// place by `SidebarMenuState::refresh` (apps/desktop/src/app/native_sidebar/menu_state.rs), which
+/// copies a key only when the newly built item HAS it, so a key left out when the value is false
+/// can add a tick and grey a row but can never take either back. Leaving them out made unticking a
+/// tag filter keep its tick, both sort modes read as ticked, and a project menu that was open
+/// while its last session went idle refuse the Close Inactive click it was still showing greyed.
+/// The other flags are written only when true because nothing refreshes them: a row's label,
+/// tick and enabled state are the only three that change under an open panel.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MenuItem {
     pub label: Option<String>,
@@ -169,11 +173,13 @@ impl MenuItem {
         flag("supportsChat", self.supports_chat);
         flag("keepOpen", self.keep_open);
         flag("heading", self.heading);
-        flag("checked", self.checked);
-        flag("disabled", self.disabled);
         flag("danger", self.danger);
         flag("separator", self.separator);
         flag("primary", self.primary);
+        // Always present: see the type's comment. A refresh of an open panel reads these two and
+        // the label, and can only copy a key it finds.
+        object.insert("checked".to_string(), Value::Bool(self.checked));
+        object.insert("disabled".to_string(), Value::Bool(self.disabled));
         if self.page {
             object.insert(
                 "presentation".to_string(),

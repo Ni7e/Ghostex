@@ -34,26 +34,77 @@ pub(super) struct MenuHostCache {
     read_at: Option<Instant>,
     primary_agent_id: Option<String>,
     keep_awake_minutes: Option<i64>,
+    /// Bumped whenever a re-read found a different value, so the install gate can see a change
+    /// that neither the store nor a publish reports.
+    generation: u64,
+}
+
+impl MenuHostCache {
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 impl GhostexGpuiApp {
+    /// Re-reads the two client-storage values at most once a second and returns the generation,
+    /// which moves only when one of them really changed.
+    pub(super) fn gx_store_menu_host_generation(&mut self) -> u64 {
+        let cache = &mut self.gx_store.menu_host;
+        if cache
+            .read_at
+            .is_some_and(|read_at| read_at.elapsed() < HOST_STATE_MAX_AGE)
+        {
+            return cache.generation;
+        }
+        cache.read_at = Some(Instant::now());
+        if let Ok((primary, keep_awake)) = super::sidebar_ui_storage::read_menu_host_state() {
+            if cache.primary_agent_id != primary || cache.keep_awake_minutes != keep_awake {
+                cache.primary_agent_id = primary;
+                cache.keep_awake_minutes = keep_awake;
+                cache.generation += 1;
+            }
+        }
+        cache.generation
+    }
+
+    /// Forces the next read to go to storage. Called on the commands that write either value, so
+    /// the menu that caused the change redraws with it rather than waiting out the cache.
+    pub(crate) fn gx_store_note_menu_host_write(&mut self, command: &Value) {
+        let writes = match command["type"].as_str() {
+            Some("projectAction") => command["action"] == "agent",
+            Some("command") => command["message"]["type"] == "runTitlebarKeepAwakeCommand",
+            _ => false,
+        };
+        if writes {
+            self.gx_store.menu_host.read_at = None;
+        }
+    }
+
+    /// Re-reads the two client-storage values on the sidebar's own one-second tick and installs
+    /// the list when one of them moved.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// Both are written by surfaces outside the sidebar (the titlebar's Keep Awake control and the
+    /// agent launcher), so neither the store nor a publish reports the change, and without this
+    /// the more menu's Keep Awake tick and the project header's agent name would stay wrong until
+    /// something unrelated redrew the list. The read is two indexed rows on an open connection and
+    /// happens at most once a second, only while the store's list is the one on screen.
+    pub(crate) fn gx_store_poll_menu_host(&mut self, cx: &mut gpui::Context<Self>) {
+        if !self.gx_store_sidebar_draws_store_list() {
+            return;
+        }
+        let generation = self.gx_store_menu_host_generation();
+        if self.gx_store.sidebar_list.installed_menu_host_generation() != Some(generation) {
+            self.gx_store_install_sidebar_list(cx);
+        }
+    }
+
     /// The facts the menus read that are neither the store nor the settings.
     pub(super) fn gx_store_menu_host(
         &mut self,
         published: Option<&NativeSidebarSnapshot>,
     ) -> MenuHost {
-        let stale = self
-            .gx_store
-            .menu_host
-            .read_at
-            .is_none_or(|read_at| read_at.elapsed() >= HOST_STATE_MAX_AGE);
-        if stale {
-            self.gx_store.menu_host.read_at = Some(Instant::now());
-            if let Ok((primary, keep_awake)) = super::sidebar_ui_storage::read_menu_host_state() {
-                self.gx_store.menu_host.primary_agent_id = primary;
-                self.gx_store.menu_host.keep_awake_minutes = keep_awake;
-            }
-        }
+        self.gx_store_menu_host_generation();
         let hud = published.map(|snapshot| &snapshot.hud);
         let selected = published.map(|snapshot| snapshot.selected_machine_id.as_str());
         MenuHost {

@@ -21,9 +21,11 @@
  * M4c declared differences 11 and 12 in PROGRESS.md.
  */
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 type Json = Record<string, unknown>;
+type Scenario = { name: string; settings: Json; ui: Json; host: Json; snapshot?: Json };
 
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === 'scenarios') await writeScenarios(rest);
@@ -43,7 +45,7 @@ function readSnapshot(framesPath: string): Json {
 }
 
 /** The settings, UI-state and host variants both sides are run over. */
-function buildScenarios(snapshot: Json, saved: Json | undefined) {
+function buildScenarios(snapshot: Json, saved: Json | undefined): Scenario[] {
   const sessions = (snapshot.sessions ?? []) as Json[];
   const projects = (snapshot.projects ?? []) as Json[];
   const sessionIdOf = (session: Json) =>
@@ -110,7 +112,7 @@ function buildScenarios(snapshot: Json, saved: Json | undefined) {
     selectedSpaceBySection: {} as Record<string, string>,
   };
   const selected = sessions.slice(0, 6).map(sessionIdOf);
-  const scenarios: { name: string; settings: Json; ui: Json; host: Json }[] = [
+  const scenarios: Scenario[] = [
     { name: 'defaults', settings: {}, ui: emptyUi, host },
     { name: 'every-setting-on', settings: everySetting, ui: emptyUi, host },
     { name: 'every-setting-off', settings: noSetting, ui: emptyUi, host },
@@ -208,38 +210,441 @@ function buildScenarios(snapshot: Json, saved: Json | undefined) {
     },
     host,
   });
+  // A tag filter shrinks a group's drawn rows, and several menu items are scoped from them.
+  for (const filters of [['favorite'], ['untagged'], ['favorite', 'untagged']]) {
+    scenarios.push({
+      name: `tag-filter-${filters.join('+')}`,
+      settings: everySetting,
+      ui: { ...emptyUi, selectedTagFilters: filters },
+      host,
+    });
+  }
+  scenarios.push({
+    name: 'tag-filter-and-selection',
+    settings: everySetting,
+    ui: { ...emptyUi, selectedTagFilters: ['favorite'], selectedSessionIds: selected },
+    host,
+  });
+  // The Spaces the user really has, under the settings the user really has.
+  const spaceSettings = saved
+    ? { ...saved, sidebarSpacesEnabled: true }
+    : { ...everySetting, sidebarSpacesEnabled: true };
   const spaces = ((snapshot.sidebarSpaces as Json | undefined)?.order ?? []) as string[];
   for (const spaceId of [...spaces, 'other']) {
     scenarios.push({
       name: `space-${spaceId}`,
-      settings: { ...everySetting, sidebarSpacesEnabled: true },
+      settings: spaceSettings,
       ui: { ...emptyUi, selectedSpaceBySection: { local: spaceId } },
       host,
     });
   }
   if (saved) {
+    // The user's own configuration, which has Spaces on and so draws one Space. The second one
+    // turns Spaces off so the same settings sweep every row of every project.
     scenarios.push({ name: 'saved-settings', settings: saved, ui: emptyUi, host });
     scenarios.push({
+      name: 'saved-settings-all-rows',
+      settings: { ...saved, sidebarSpacesEnabled: false },
+      ui: emptyUi,
+      host,
+    });
+    scenarios.push({
       name: 'saved-settings-selected',
-      settings: saved,
+      settings: { ...saved, sidebarSpacesEnabled: false },
       ui: { ...emptyUi, selectedSessionIds: selected, showHidden: true },
       host: { ...host, keepAwakeMinutes: 0 },
     });
   }
+  for (const scenario of syntheticScenarios(host)) scenarios.push(scenario);
   return scenarios;
+}
+
+/**
+ * A presentation the recording has nothing like, so the branches it never reaches are still
+ * enumerated: a Delayed Send with a deadline (Postpone By, nine rows), a snooze in the future and
+ * one already past (Unsnooze, the only clock-reading rule), a user-made session group and a Chats
+ * collection (the whole projectless branch of the project menu and of the header buttons,
+ * including Create a Terminal), a worktree project, a project with no git origin, every agent that
+ * has a Fork, Full Reload, Copy Resume or Generate Title rule of its own, a browser row, a draft,
+ * a parked row, a pinned row, a tagged row and a sleeping row.
+ */
+function syntheticSnapshot(nowMs: number): Json {
+  const iso = (offsetMs: number) => new Date(nowMs + offsetMs).toISOString();
+  const projects = [
+    {
+      projectId: 'syn-main',
+      title: 'Synthetic Main',
+      path: '/tmp/syn/main',
+      gitRemoteOriginUrl: 'git@github.com:ghostex/syn.git',
+      groupIds: ['syn-main-g'],
+      sortKey: 'a',
+      createdAt: iso(-1e7),
+      updatedAt: iso(0),
+    },
+    {
+      projectId: 'syn-plain',
+      title: 'Synthetic Plain',
+      path: '/tmp/syn/plain',
+      groupIds: ['syn-plain-g'],
+      sortKey: 'b',
+      createdAt: iso(-1e7),
+      updatedAt: iso(0),
+    },
+    {
+      projectId: 'syn-worktree',
+      title: 'Synthetic Worktree',
+      path: '/tmp/syn/main/ghostex/feature',
+      gitRemoteOriginUrl: null,
+      groupIds: ['syn-worktree-g'],
+      sortKey: 'c',
+      createdAt: iso(-1e7),
+      updatedAt: iso(0),
+      worktree: {
+        name: 'feature',
+        branch: 'feature/syn',
+        parentProjectId: 'syn-main',
+        parentProjectName: 'Synthetic Main',
+        parentProjectPath: '/tmp/syn/main',
+      },
+    },
+    {
+      projectId: 'syn-chats',
+      title: 'Chats',
+      path: '/tmp/syn/.ghostex/chats',
+      groupIds: ['syn-chats-g'],
+      sortKey: 'd',
+      createdAt: iso(-1e7),
+      updatedAt: iso(0),
+    },
+  ];
+  const base = (over: Json): Json => ({
+    projectId: 'syn-main',
+    groupId: 'syn-main-g',
+    kind: 'agent',
+    surface: 'workspace',
+    zmxName: 'zmx-syn',
+    sortKey: 'a',
+    visibleInSidebarByDefault: true,
+    createdAt: iso(-3_600_000),
+    updatedAt: iso(-60_000),
+    lifecycleState: 'running',
+    providerSessionState: 'exists',
+    sessionPersistenceProvider: 'zmx',
+    activity: 'idle',
+    pendingQuestionCount: 0,
+    title: 'Synthetic session',
+    primaryTitle: 'Synthetic session',
+    ...over,
+  });
+  const sessions: Json[] = [
+    base({
+      sessionId: 'syn-delayed',
+      title: 'Delayed send',
+      agentIcon: 'claude',
+      agentName: 'claude',
+      agentSessionId: 'agent-1',
+      delayedSendDeadlineAt: iso(600_000),
+      delayedSendRemainingLabel: '10m',
+    }),
+    base({
+      sessionId: 'syn-delayed-flags',
+      title: 'Delayed send by flag',
+      agentIcon: 'codex',
+      agentName: 'codex',
+      sendWhenAgentStopsActive: true,
+    }),
+    base({
+      sessionId: 'syn-snoozed',
+      title: 'Snoozed ahead',
+      agentIcon: 'pi',
+      agentName: 'pi',
+      snoozedUntil: iso(86_400_000),
+      lifecycleState: 'sleeping',
+      providerSessionState: 'missing',
+    }),
+    base({
+      sessionId: 'syn-snooze-past',
+      title: 'Snooze already over',
+      agentIcon: 'pi',
+      agentName: 'pi',
+      snoozedUntil: iso(-86_400_000),
+    }),
+    base({
+      sessionId: 'syn-opencode',
+      title: 'OpenCode',
+      agentIcon: 'opencode',
+      agentName: 'opencode',
+      agentSessionId: 'agent-2',
+    }),
+    base({ sessionId: 'syn-cursor', title: 'Cursor', agentIcon: 'cursor-cli', agentName: 'cursor' }),
+    base({
+      sessionId: 'syn-antigravity',
+      title: 'Antigravity with id',
+      agentIcon: 'antigravity-cli',
+      agentName: 'antigravity',
+      agentSessionId: 'agy-1',
+    }),
+    base({
+      sessionId: 'syn-antigravity-bare',
+      title: 'Antigravity without id',
+      agentIcon: 'antigravity-cli',
+      agentName: 'antigravity',
+    }),
+    base({ sessionId: 'syn-zcode', title: 'ZCode', agentIcon: 'zcode', agentName: 'zcode', agentSessionId: 'z-1' }),
+    base({ sessionId: 'syn-gemini', title: 'Gemini', agentIcon: 'gemini', agentName: 'gemini' }),
+    base({ sessionId: 'syn-plain-terminal', title: 'Plain terminal', kind: 'terminal' }),
+    base({ sessionId: 'syn-draft', title: 'Draft', agentIcon: 'claude', agentName: 'claude', isDraft: true }),
+    base({
+      sessionId: 'syn-parked',
+      title: 'Parked',
+      agentIcon: 'claude',
+      agentName: 'claude',
+      isParked: true,
+      sessionTag: 'blocked',
+    }),
+    base({
+      sessionId: 'syn-pinned',
+      title: 'Pinned favorite',
+      agentIcon: 'codex',
+      agentName: 'codex',
+      isPinned: true,
+      isFavorite: true,
+      sessionTag: 'favorite',
+    }),
+    base({
+      sessionId: 'syn-sleeping',
+      title: 'Sleeping',
+      agentIcon: 'codex',
+      agentName: 'codex',
+      lifecycleState: 'sleeping',
+      providerSessionState: 'missing',
+    }),
+    base({
+      sessionId: 'syn-stopped',
+      title: 'Stopped but pinned',
+      agentIcon: 'codex',
+      agentName: 'codex',
+      lifecycleState: 'stopped',
+      providerSessionState: 'missing',
+      isPinned: true,
+    }),
+    base({
+      sessionId: 'syn-working',
+      title: 'Working',
+      agentIcon: 'claude',
+      agentName: 'claude',
+      activity: 'working',
+      workingStartedAt: iso(-30_000),
+    }),
+    base({
+      sessionId: 'syn-attention',
+      title: 'Needs attention',
+      agentIcon: 'claude',
+      agentName: 'claude',
+      activity: 'attention',
+      pendingQuestionCount: 2,
+    }),
+    base({ sessionId: 'syn-browser', title: 'A browser pane', kind: 'browser', agentIcon: 'browser' }),
+    base({ sessionId: 'syn-grouped-a', title: 'In a user group A', agentIcon: 'claude', agentName: 'claude' }),
+    base({
+      sessionId: 'syn-grouped-b',
+      title: 'In a user group B',
+      agentIcon: 'claude',
+      agentName: 'claude',
+      lifecycleState: 'sleeping',
+      providerSessionState: 'missing',
+    }),
+    base({
+      projectId: 'syn-plain',
+      groupId: 'syn-plain-g',
+      sessionId: 'syn-plain-only',
+      title: 'Only session',
+      agentIcon: 'claude',
+      agentName: 'claude',
+      sortKey: 'a',
+    }),
+    base({
+      projectId: 'syn-worktree',
+      groupId: 'syn-worktree-g',
+      sessionId: 'syn-worktree-only',
+      title: 'Worktree session',
+      agentIcon: 'codex',
+      agentName: 'codex',
+      sortKey: 'a',
+    }),
+    base({
+      projectId: 'syn-chats',
+      groupId: 'syn-chats-g',
+      sessionId: 'syn-chat-one',
+      title: 'A chat',
+      agentIcon: 'claude',
+      agentName: 'claude',
+      sortKey: 'a',
+    }),
+  ];
+  const groups = [
+    {
+      groupId: 'syn-main-g',
+      projectId: 'syn-main',
+      title: 'Synthetic Main',
+      sortKey: 'a',
+      sessionIds: sessions.filter((s) => s.projectId === 'syn-main').map((s) => s.sessionId),
+    },
+    {
+      groupId: 'syn-plain-g',
+      projectId: 'syn-plain',
+      title: 'Synthetic Plain',
+      sortKey: 'b',
+      sessionIds: ['syn-plain-only'],
+    },
+    {
+      groupId: 'syn-worktree-g',
+      projectId: 'syn-worktree',
+      title: 'Synthetic Worktree',
+      sortKey: 'c',
+      sessionIds: ['syn-worktree-only'],
+    },
+    { groupId: 'syn-chats-g', projectId: 'syn-chats', title: 'Chats', sortKey: 'd', sessionIds: ['syn-chat-one'] },
+  ];
+  return {
+    revision: 1,
+    generatedAt: iso(0),
+    projects,
+    groups,
+    sessions,
+    customSessionTags: {
+      order: ['custom-alpha'],
+      tags: { 'custom-alpha': { tagId: 'custom-alpha', name: 'Alpha', icon: 'flag', color: '#112233' } },
+    },
+    sidebarProjectCollections: {
+      order: ['syn-collection'],
+      collections: {
+        'syn-collection': {
+          collectionId: 'syn-collection',
+          title: 'Synthetic Folder',
+          color: '#3aa675',
+          projectIds: ['syn-plain'],
+        },
+      },
+    },
+    sidebarSpaces: { order: [], spaces: {} },
+    workspaceGroups: {
+      projectOrder: ['syn-main', 'syn-plain', 'syn-worktree', 'syn-chats'],
+      projects: {
+        'syn-main': {
+          groups: [
+            { groupId: 'syn-user-group', title: 'A user group', sessionIds: ['syn-grouped-a', 'syn-grouped-b'] },
+          ],
+        },
+      },
+    },
+  };
+}
+
+function syntheticScenarios(host: Json): Scenario[] {
+  const nowMs = Date.now();
+  const snapshot = syntheticSnapshot(nowMs);
+  const ui: Json = {
+    selectedMachineId: 'local',
+    showHidden: false,
+    selectedTagFilters: [],
+    selectedSessionIds: [],
+    hiddenGroupIds: [],
+    hiddenCollectionKeys: [],
+    collapsedGroups: [],
+    collapsedCollections: [],
+    expandedSessionLists: [],
+    expandedHoverActions: [],
+    sectionCollapse: {},
+    selectedSpaceBySection: {},
+  };
+  const every = {
+    enableSessionParking: true,
+    showTagMenuWhenParking: true,
+    showSessionCardHoverButtonsInContextMenu: true,
+    showSessionCommandCopyActions: true,
+    showSessionDetailsCopyAction: true,
+    showBetaFeatures: true,
+    browserViewTabHidden: false,
+    sidebarSpacesEnabled: false,
+    // Every heading expanded, so Parked, Snoozed and Drafts rows are drawn and can be Below.
+    projectSessionListCollapsedCount: 50,
+  };
+  return [
+    { name: 'synthetic-every-setting-on', settings: every, ui, host, snapshot },
+    {
+      name: 'synthetic-every-setting-off',
+      settings: {
+        ...every,
+        enableSessionParking: false,
+        showTagMenuWhenParking: false,
+        showSessionCardHoverButtonsInContextMenu: false,
+        showSessionCommandCopyActions: false,
+        showSessionDetailsCopyAction: false,
+        showBetaFeatures: false,
+        browserViewTabHidden: true,
+      },
+      ui,
+      host,
+      snapshot,
+    },
+    {
+      name: 'synthetic-expanded-lists',
+      settings: every,
+      ui: {
+        ...ui,
+        expandedSessionLists: ['syn-main', 'syn-plain', 'syn-worktree'],
+        sectionCollapse: { 'syn-main': { drafts: false, parked: false, snoozed: false } },
+      },
+      host,
+      snapshot,
+    },
+    {
+      name: 'synthetic-selection',
+      settings: every,
+      ui: {
+        ...ui,
+        selectedSessionIds: [
+          'combined-session:syn-main:syn-pinned',
+          'combined-session:syn-main:syn-parked',
+          'combined-session:syn-main:syn-browser',
+          'combined-session:syn-main:syn-sleeping',
+        ],
+      },
+      host,
+      snapshot,
+    },
+  ];
+}
+
+/**
+ * The settings the app really reads. `~/.local/state/ghostex/native-sidebar-settings.json` is a
+ * stale copy of an earlier layout and running the gate against it covered a configuration nobody
+ * has.
+ */
+function defaultSettingsPath(): string {
+  return join(homedir(), '.config', 'ghostex', 'native-sidebar-settings.json');
 }
 
 async function writeScenarios([framesPath, outDir, settingsPath]: string[]) {
   if (!framesPath || !outDir) throw new Error('scenarios <frames.jsonl> <out-dir> [settings.json]');
   const snapshot = readSnapshot(framesPath);
-  const saved = settingsPath ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as Json) : undefined;
+  const path = settingsPath ?? defaultSettingsPath();
+  let saved: Json | undefined;
+  try {
+    saved = JSON.parse(readFileSync(path, 'utf8')) as Json;
+  } catch {
+    console.log(`no saved settings at ${path}; the saved-settings scenarios are skipped`);
+  }
   const scenarios = buildScenarios(snapshot, saved);
+  // One clock for both sides: snooze is the only rule that reads one, and a Rust example running
+  // at a different instant than the TypeScript could never validate it.
+  const nowMs = Date.now();
   scenarios.forEach((scenario, index) => {
-    writeFileSync(
-      join(outDir, `scenario-${String(index).padStart(2, '0')}.json`),
-      JSON.stringify({ ...scenario, snapshot }),
-      { mode: 0o600 }
-    );
+    const body = scenario.snapshot ? scenario : { ...scenario, snapshot };
+    writeFileSync(join(outDir, `scenario-${String(index).padStart(2, '0')}.json`), JSON.stringify({ ...body, nowMs }), {
+      mode: 0o600,
+    });
   });
   console.log(
     `${scenarios.length} scenarios, ${(snapshot.sessions as Json[]).length} sessions, ${(snapshot.projects as Json[]).length} projects`
@@ -258,6 +663,7 @@ async function compare([outDir]: string[]) {
   const differences: string[] = [];
   for (const name of names) {
     const scenario = JSON.parse(readFileSync(join(outDir, name), 'utf8')) as Json;
+    checkClock(String(scenario.name), scenario, differences);
     const rustPath = join(outDir, name.replace('scenario-', 'rust-'));
     const rust = JSON.parse(readFileSync(rustPath, 'utf8')) as Json;
     const ours = buildTypeScriptMenus(scenario, rust);
@@ -272,6 +678,30 @@ async function compare([outDir]: string[]) {
   for (const difference of differences.slice(0, 80)) console.log(`  ${difference}`);
   if (differences.length > 80) console.log(`  … and ${differences.length - 80} more`);
   process.exitCode = differences.length ? 1 : 0;
+}
+
+/**
+ * Both sides must answer the one clock-reading rule (a snooze is over) from the same instant. The
+ * Rust example is given the scenario's `nowMs`; `isSidebarSessionSnoozed` inside the shipped
+ * TypeScript reads `Date.now()` and cannot be handed one, so the drift between them is measured
+ * and any snooze that falls inside it is reported rather than silently decided by whichever side
+ * ran first.
+ */
+function checkClock(name: string, scenario: Json, out: string[]): void {
+  const nowMs = Number(scenario.nowMs ?? 0);
+  if (!nowMs) {
+    out.push(`${name}: the scenario carries no nowMs, so the two sides do not share a clock`);
+    return;
+  }
+  const drift = Math.abs(Date.now() - nowMs);
+  const sessions = ((scenario.snapshot as Json | undefined)?.sessions ?? []) as Json[];
+  for (const session of sessions) {
+    const until = typeof session.snoozedUntil === 'string' ? Date.parse(session.snoozedUntil) : Number.NaN;
+    if (Number.isFinite(until) && Math.abs(until - nowMs) <= drift)
+      out.push(
+        `${name} session ${String(session.sessionId)}: its snooze ends within the ${drift} ms the two sides' clocks differ by`
+      );
+  }
 }
 
 function diffScenario(

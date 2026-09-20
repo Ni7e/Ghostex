@@ -107,6 +107,10 @@ impl GhostexGpuiApp {
         if self.gx_store_answer_session_menu(&command, cx) {
             return;
         }
+        // Two of the menus' inputs live in client storage and are written by the handler this
+        // command is on its way to; the cached copy is dropped so the redraw that follows reads
+        // the new value instead of waiting out its second.
+        self.gx_store_note_menu_host_write(&command);
         let Some(service) = self.sidebar.clone() else {
             return;
         };
