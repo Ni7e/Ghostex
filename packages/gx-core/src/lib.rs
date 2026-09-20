@@ -49,11 +49,12 @@ pub use crate::selectors::{
 pub use crate::sidebar_actions::{
     apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
     close_optimistic_follow_ups, local_project_group_project_id, owns_close_message,
-    owns_flags_message, owns_fork_message, owns_lifecycle_message, plan_close_request,
-    plan_flags_request, plan_fork_request, plan_lifecycle_request, plan_read_only_action,
-    ActionEffect, CloseAnswer, CloseFollowUp, CloseRequest, FlagsFollowUp, FlagsRequest,
-    ForkFollowUp, ForkRequest, LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest,
-    SessionFlags, SidebarActionPlan, ToastLevel, FLAGS_MESSAGE_TYPES, LIFECYCLE_PATCH_TTL_MS,
+    owns_flags_message, owns_fork_message, owns_lifecycle_message, owns_modal_message,
+    plan_close_request, plan_flags_request, plan_fork_request, plan_lifecycle_request,
+    plan_modal_action, plan_read_only_action, ActionEffect, CloseAnswer, CloseFollowUp,
+    CloseRequest, FlagsFollowUp, FlagsRequest, ForkFollowUp, ForkRequest, LifecycleAnswer,
+    LifecycleCall, LifecycleFollowUp, LifecycleRequest, ModalAction, SessionFlags,
+    SidebarActionPlan, ToastLevel, FLAGS_MESSAGE_TYPES, LIFECYCLE_PATCH_TTL_MS,
     NATIVE_PROJECT_PATH_ACTION_MESSAGE_TYPE, NATIVE_PROJECT_PATH_ACTION_MESSAGE_VERSION,
     READ_ONLY_MESSAGE_TYPES,
 };

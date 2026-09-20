@@ -9,12 +9,14 @@
 //! `close` holds the one whose optimistic update takes a row away before the call and puts it back
 //! when the call does not come home, and `fork` the one where nothing local happens until the
 //! daemon has already made the session. `flags` holds the four that are one call with
-//! different fields: pin, park, tag and favorite.
+//! different fields: pin, park, tag and favorite, and `modals` the two that call nothing and
+//! only open a dialog.
 
 mod close;
 mod flags;
 mod fork;
 mod lifecycle;
+mod modals;
 mod plan;
 mod read_only;
 mod resolve;
@@ -34,6 +36,7 @@ pub use lifecycle::{
     apply_lifecycle_answer, owns_lifecycle_message, plan_lifecycle_request, LifecycleAnswer,
     LifecycleCall, LifecycleFollowUp, LifecycleRequest, LIFECYCLE_PATCH_TTL_MS,
 };
+pub use modals::{owns_modal_message, plan_modal_action, ModalAction};
 pub use plan::{ActionEffect, SidebarActionPlan, ToastLevel};
 pub use read_only::{plan_read_only_action, READ_ONLY_MESSAGE_TYPES};
 pub use resolve::{
