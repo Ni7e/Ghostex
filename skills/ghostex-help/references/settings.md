@@ -299,11 +299,11 @@ How to use this file:
 - **Kanban** `kanban` (Settings UI row without a settings key; use `ghostex settings open`): Plan upcoming work and track task progress at a glance.
 - **Automate** `automate` (Settings UI row without a settings key; use `ghostex settings open`): Turn repeatable project routines into simple workflows you can run whenever you need them.
 - **Docs** `docs` (Settings UI row without a settings key; use `ghostex settings open`): Browse your project’s notes, plans, and reference files together in one focused reading space.
-- **Tips & Tricks** `tips` (Settings UI row without a settings key; use `ghostex settings open`): Title bar button that opens short tips for getting more out of Ghostex.
+- **Tips & Tricks** `tips` (Settings UI row without a settings key; use `ghostex settings open`): A page of short tips for getting more out of Ghostex, opened from the ⋯ menu.
 - **Notifications** `notifications` (Settings UI row without a settings key; use `ghostex settings open`): Title bar bell that lists what your agents finished or need from you.
-- **Ghostex Help** `help` (Settings UI row without a settings key; use `ghostex settings open`): Title bar button with sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.
-- **Dev servers** `devServers` (Settings UI row without a settings key; use `ghostex settings open`): Title bar button that lists development servers running on this computer.
-- **Resources** `resources` (Settings UI row without a settings key; use `ghostex settings open`): Title bar button that opens Ghostex docs, guides, and community links.
+- **Ghostex Help** `help` (Settings UI row without a settings key; use `ghostex settings open`): A page of sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.
+- **Dev servers** `devServers` (Settings UI row without a settings key; use `ghostex settings open`): The Browser view’s start page, listing development servers running on this computer.
+- **Resources** `resources` (Settings UI row without a settings key; use `ghostex settings open`): A page listing what Ghostex is running right now, with the CPU and memory each part is using.
 - **Git actions** `gitActions` (Settings UI row without a settings key; use `ghostex settings open`): Title bar button for commit, branch, and worktree helpers on the active project.
 - **Quick Actions** `quickActions` (Settings UI row without a settings key; use `ghostex settings open`): Title bar button that runs your saved terminal and browser actions in one click.
 - **Open In** `openIn` (Settings UI row without a settings key; use `ghostex settings open`): Title bar button that opens the active project in another app.

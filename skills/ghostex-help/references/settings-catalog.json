@@ -8331,7 +8331,7 @@
     {
       "key": "tips",
       "title": "Tips & Tricks",
-      "subtitle": "Title bar button that opens short tips for getting more out of Ghostex.",
+      "subtitle": "A page of short tips for getting more out of Ghostex, opened from the ⋯ menu.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8353,7 +8353,7 @@
     {
       "key": "help",
       "title": "Ghostex Help",
-      "subtitle": "Title bar button with sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.",
+      "subtitle": "A page of sample questions that start a Ghostex Help chat: an agent explains the app or changes settings for you.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8364,7 +8364,7 @@
     {
       "key": "devServers",
       "title": "Dev servers",
-      "subtitle": "Title bar button that lists development servers running on this computer.",
+      "subtitle": "The Browser view’s start page, listing development servers running on this computer.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8375,7 +8375,7 @@
     {
       "key": "resources",
       "title": "Resources",
-      "subtitle": "Title bar button that opens Ghostex docs, guides, and community links.",
+      "subtitle": "A page listing what Ghostex is running right now, with the CPU and memory each part is using.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",

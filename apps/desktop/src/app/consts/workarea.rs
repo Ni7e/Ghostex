@@ -43,6 +43,14 @@ pub(crate) const WORKAREA_AGENTS_COLUMN_MIN_WIDTH: f32 = PANE_RESIZE_MINIMUM_WID
 /// User: main panes in non-agent views, including Docs and Browser, have a minimum width of 455px.
 pub(crate) const WORKAREA_VIEW_PANEL_MIN_WIDTH: f32 = 455.0;
 
+/// The picker's two card columns at their widest, matching the mockup's `minmax(0, 250px)` grid.
+pub(crate) const VIEW_PICKER_CONTENT_WIDTH: f32 = 508.0;
+
+pub(crate) const VIEW_PICKER_CARD_GAP: f32 = 8.0;
+
+/// How wide a Ghostex page's readable column grows before it stops.
+pub(crate) const GHOSTEX_PAGE_CONTENT_WIDTH: f32 = 640.0;
+
 /// CDXC:Workarea 2026-09-20 WHY:
 /// A view panel can hold many tabs, but every awake view is a live CEF child view with its own
 /// renderer process, so the cap is what stops six tabs from meaning six pages. Three is the active

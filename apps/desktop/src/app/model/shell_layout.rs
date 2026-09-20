@@ -8,6 +8,7 @@ pub(crate) struct GpuiShellLayoutState {
     pub(crate) active_mode: TitlebarMode,
     pub(crate) open_views: Vec<TitlebarMode>,
     pub(crate) view_panel_maximized: bool,
+    pub(crate) view_panel_picker_open: bool,
     pub(crate) shell_focus: ShellFocusTarget,
     pub(crate) previous_non_command_focus: Option<ShellFocusTarget>,
     pub(crate) pet_overlay_activities_visible: bool,
@@ -68,6 +69,7 @@ impl GpuiShellLayoutState {
             active_mode: TitlebarMode::Agents,
             open_views: Vec::new(),
             view_panel_maximized: false,
+            view_panel_picker_open: false,
             shell_focus,
             previous_non_command_focus: Some(shell_focus),
             pet_overlay_activities_visible: true,
@@ -138,7 +140,7 @@ impl GpuiShellLayoutState {
     ) -> Option<Self> {
         /*
         CDXC:Workarea 2026-06-22-06:29:
-        GPUI layout persistence is scoped to placeholder shell state only: titlebar mode, tab/split ids, active selections, focus/Focus mode, bounded canonical gxserver P/G identities, the validated bounded command Action selector used for restart reuse, safe Agents Delayed Send trigger/remaining-time checkpoints, command pane mode/height/tree, Browser tab shell ids with complete sanitized HTTP(S) URLs, project-editor companion sizing, project-editor awake/sleeping recency state, and the `petOverlayActivitiesVisible` and `sidebarUsageExpanded` UI booleans. Do not persist pet activity payloads, titles, paths, raw settings JSON, terminal content, command text, stdout/stderr, user paths, project paths, URL credentials, cookies, secrets, raw page titles, favicon URLs, or unrelated private user content.
+        GPUI layout persistence is scoped to placeholder shell state only: titlebar mode, tab/split ids, active selections, focus/Focus mode, bounded canonical gxserver P/G identities, the validated bounded command Action selector used for restart reuse, safe Agents Delayed Send trigger/remaining-time checkpoints, command pane mode/height/tree, Browser tab shell ids with complete sanitized HTTP(S) URLs, project-editor companion sizing, project-editor awake/sleeping recency state, and the `petOverlayActivitiesVisible`, `sidebarUsageExpanded` and `viewPanelPickerOpen` UI booleans. Do not persist pet activity payloads, titles, paths, raw settings JSON, terminal content, command text, stdout/stderr, user paths, project paths, URL credentials, cookies, secrets, raw page titles, favicon URLs, or unrelated private user content.
 
         CDXC:Workarea 2026-06-22-06:29:
         Restoring corrupted or absent GPUI shell state should use the current placeholder defaults because the persisted file is optional app state. This fallback is limited to invalid state-file input and should not mask runtime errors in live layout mutation code.
@@ -423,6 +425,13 @@ impl GpuiShellLayoutState {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false)
             && active_mode != TitlebarMode::Agents;
+        // The picker is only ever the panel's content while no view is open, so a state written
+        // with a view open can never restore into it.
+        let view_panel_picker_open = object
+            .get("viewPanelPickerOpen")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            && active_mode == TitlebarMode::Agents;
         let last_open_view_mode = object
             .get("lastOpenViewMode")
             .and_then(serde_json::Value::as_str)
@@ -440,6 +449,7 @@ impl GpuiShellLayoutState {
             active_mode,
             open_views,
             view_panel_maximized,
+            view_panel_picker_open,
             shell_focus,
             previous_non_command_focus,
             pet_overlay_activities_visible,

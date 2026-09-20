@@ -39,7 +39,10 @@ pub(crate) fn titlebar_mode_official_extension_id(mode: TitlebarMode) -> Option<
         TitlebarMode::Kanban => Some("kanban"),
         TitlebarMode::Automate => Some("automate"),
         TitlebarMode::Manage => Some("docs"),
-        TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
+        // CDXC:Workarea 2026-09-20 DECISION:
+        // User: the Ghostex pages are app-wide, so they are available in every project regardless of
+        // scope. No scope key means nothing to hide them with, which is exactly that rule.
+        TitlebarMode::Agents | TitlebarMode::Extension(_) | TitlebarMode::Ghostex(_) => None,
     }
 }
 

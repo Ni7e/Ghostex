@@ -20,7 +20,19 @@ impl GhostexGpuiApp {
     }
 
     pub(crate) fn view_panel_open(&self) -> bool {
-        self.active_mode != TitlebarMode::Agents
+        self.active_mode != TitlebarMode::Agents || self.view_panel_picker_open
+    }
+
+    /// Whether the panel's content is a CEF page. The picker and the Ghostex pages are GPUI's own
+    /// drawing, so the rules that exist because a page paints over everything do not apply to them.
+    pub(crate) fn view_panel_shows_cef_page(&self) -> bool {
+        self.open_view_mode()
+            .is_some_and(|mode| !matches!(mode, TitlebarMode::Ghostex(_)))
+    }
+
+    /// The panel is open and showing the picker: no tab is selected, so there is no view to draw.
+    pub(crate) fn view_picker_open(&self) -> bool {
+        self.view_panel_picker_open && self.active_mode == TitlebarMode::Agents
     }
 
     /// CDXC:Workarea 2026-09-20 DECISION:
@@ -34,48 +46,62 @@ impl GhostexGpuiApp {
         !self.view_panel_maximized()
     }
 
-    /// Maximised only counts while a view is really open; closing the panel puts the sessions column
-    /// back by itself rather than leaving the window with nothing in it.
+    /// Maximised only counts while a view is really open; closing the panel, or leaving it on the
+    /// picker, puts the sessions column back rather than leaving the window with nothing in it.
     pub(crate) fn view_panel_maximized(&self) -> bool {
-        self.view_panel_maximized && self.view_panel_open()
+        self.view_panel_maximized && self.open_view_mode().is_some()
     }
 
-    /// The view the panel toggle opens for the active project: the tab it showed last, the view this
-    /// project last had open, or the first view its context makes available.
+    /// CDXC:Workarea 2026-09-20 DECISION:
+    /// User (screen 02): the toggle comes back to the tab this project was last on, and a project
+    /// with no tabs gets the picker instead of a view the app chose for it. This supersedes the
+    /// earlier rule that the toggle opened "the first view its context offers" when the project had
+    /// none: guessing Code for a project that never opened Code is exactly what the picker replaces.
     pub(crate) fn view_panel_toggle_target(&self) -> Option<TitlebarMode> {
-        if let Some(mode) = self
-            .open_view_tabs()
-            .into_iter()
+        let tabs = self.open_view_tabs();
+        tabs.iter()
+            .copied()
             .find(|mode| Some(*mode) == self.last_open_view_mode)
-        {
-            return Some(mode);
-        }
-        if let Some(mode) = self.open_view_tabs().first().copied() {
-            return Some(mode);
-        }
-        if let Some(mode) = self
-            .last_open_view_mode
-            .filter(|mode| self.titlebar_mode_available(*mode))
-        {
-            return Some(mode);
-        }
-        self.titlebar_mode_switcher_items()
-            .into_iter()
-            .find(|item| item.is_available && item.mode != TitlebarMode::Agents)
-            .map(|item| item.mode)
+            .or_else(|| tabs.first().copied())
     }
 
-    /// The header's view-panel toggle: close the panel when a view is open, otherwise reopen the view
-    /// this project last showed.
+    /// The header's view-panel toggle: close the panel when it is open, otherwise come back to this
+    /// project's last tab, or open the picker when it has none.
     pub(crate) fn toggle_view_panel(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
         if self.view_panel_open() {
             self.close_view_panel(window, cx);
             return;
         }
-        let Some(target) = self.view_panel_toggle_target() else {
-            return;
-        };
-        self.open_view_tab(target, window, cx);
+        match self.view_panel_toggle_target() {
+            Some(target) => {
+                self.open_view_tab(target, window, cx);
+            }
+            None => self.open_view_picker(window, cx),
+        }
+    }
+
+    /// Open the panel onto the picker. The picker takes shell focus so its single-letter shortcuts
+    /// reach it rather than the terminal the user was typing in a moment ago.
+    pub(crate) fn open_view_picker(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        if self.active_mode != TitlebarMode::Agents {
+            self.close_view_panel(window, cx);
+        }
+        self.view_panel_picker_open = true;
+        self.focus_view_picker(cx);
+        self.persist_shell_layout_state();
+        cx.notify();
+    }
+
+    /// CDXC:Workarea 2026-09-20 WHY:
+    /// `ProjectEditorSurface(Agents)` is the shell focus of the view panel with no view in it. The
+    /// pairing is impossible any other way round — `Agents` never occupies the panel — so it names
+    /// the picker exactly, and the keyboard owner hands the keys to the GPUI root for it instead of
+    /// looking for a CEF page that does not exist.
+    pub(crate) fn focus_view_picker(&mut self, cx: &mut gpui::Context<Self>) {
+        self.focus_shell_target(
+            ShellFocusTarget::ProjectEditorSurface(TitlebarMode::Agents),
+            cx,
+        );
     }
 
     /// CDXC:Workarea 2026-09-20 WHY:
@@ -166,6 +192,7 @@ impl GhostexGpuiApp {
         // A closed tab is not a sleeping tab: the page it owned has no way back on screen, so it
         // releases its CEF surface here instead of waiting for the idle timer.
         self.sleep_titlebar_view(mode, cx);
+        self.reconcile_ghostex_page_panels();
         match successor {
             Some(next) => {
                 self.set_active_mode(next, window, cx);
@@ -180,7 +207,42 @@ impl GhostexGpuiApp {
     /// Closing the panel leaves the tab strip alone: reopening it comes back to the same tabs.
     pub(crate) fn close_view_panel(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
         self.view_panel_maximized = false;
+        self.view_panel_picker_open = false;
         self.set_active_mode(TitlebarMode::Agents, window, cx);
+    }
+
+    /// The Ghostex page a tab shows, built when the tab opens so its one-shot snapshot is taken then
+    /// rather than mid-render. Opening a tab that is already open keeps the page it has.
+    pub(crate) fn ensure_ghostex_page_panel(
+        &mut self,
+        mode: TitlebarMode,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let TitlebarMode::Ghostex(page) = mode else {
+            return;
+        };
+        if self.ghostex_page_panels.contains_key(&page) {
+            return;
+        }
+        let Some(panel) = self.build_ghostex_page_panel(page, cx) else {
+            return;
+        };
+        self.ghostex_page_panels.insert(page, panel);
+        if page == GhostexPage::Tips {
+            // The notices are the only part of the page that is not a constant, and they come from
+            // probes the page itself asks for when it opens.
+            self.request_gpui_titlebar_tips_runtime_status(cx);
+        }
+    }
+
+    /// Drop the page of every Ghostex tab that is no longer open, so a Resources page stops holding
+    /// its process snapshot and a Tips page its runtime status the moment its tab goes.
+    pub(crate) fn reconcile_ghostex_page_panels(&mut self) {
+        let open = self.open_views.clone();
+        self.ghostex_page_panels.retain(|page, _| {
+            open.iter()
+                .any(|mode| *mode == TitlebarMode::Ghostex(*page))
+        });
     }
 
     pub(crate) fn reorder_view_tab(
@@ -210,7 +272,7 @@ impl GhostexGpuiApp {
 
     /// Expand and restore, the button in the tab strip and the `⋯` row beside it.
     pub(crate) fn toggle_view_panel_maximized(&mut self, cx: &mut gpui::Context<Self>) {
-        if !self.view_panel_open() {
+        if self.open_view_mode().is_none() {
             return;
         }
         self.view_panel_maximized = !self.view_panel_maximized;

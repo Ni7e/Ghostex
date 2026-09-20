@@ -980,8 +980,6 @@ pub(crate) const TITLEBAR_POPUP_EXTENSIONS_WIDTH: f32 = 340.0;
 
 pub(crate) const TITLEBAR_POPUP_TIPS_WIDTH: f32 = 556.0;
 
-pub(crate) const TITLEBAR_POPUP_HELP_WIDTH: f32 = 380.0;
-
 pub(crate) const TITLEBAR_POPUP_RESOURCES_WIDTH: f32 = 656.0;
 
 /// CDXC:Notifications 2026-09-13 DECISION:

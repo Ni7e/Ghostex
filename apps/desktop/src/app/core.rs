@@ -330,6 +330,21 @@ pub struct GhostexGpuiApp {
     /// Whether the open view has the whole workarea, with the sessions column folded away. Only ever
     /// true while a view is open; `agents_workspace_visible()` is the one reader that matters.
     pub(crate) view_panel_maximized: bool,
+    /// CDXC:Workarea 2026-09-20 DECISION:
+    /// User (screen 02): the panel toggle on a project with no tabs opens the panel onto a picker of
+    /// every view it could show, instead of guessing one. The panel is open and `active_mode` is
+    /// still `Agents`, which is the one state where those two disagree.
+    pub(crate) view_panel_picker_open: bool,
+    /// The GPUI pages the open Ghostex tabs are showing. Built when the tab opens, dropped when it
+    /// closes, so a Resources page stops holding its process snapshot the moment it is gone.
+    pub(crate) ghostex_page_panels: HashMap<GhostexPage, Entity<GpuiTitlebarReadingPanel>>,
+    /// The picker's scroll position, and the Ask Ghostex page's, so a long list is reachable in a
+    /// short panel.
+    pub(crate) view_picker_scroll: ScrollHandle,
+    pub(crate) ghostex_ask_page_scroll: ScrollHandle,
+    /// The Dev servers start page of each Browser pane that is showing a blank tab.
+    pub(crate) browser_start_pages:
+        HashMap<BrowserPaneId, Entity<crate::app::window::remote_sites::RemoteSitesPanel>>,
     /// The tab being dragged in the view panel's strip, and the index it would land at.
     pub(crate) view_tab_drag: Option<GpuiViewTabDrag>,
     /// The view the active project last had open, so closing the panel and reopening it comes back

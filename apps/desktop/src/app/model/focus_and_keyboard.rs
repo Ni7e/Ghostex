@@ -56,6 +56,10 @@ pub(crate) enum ShellKeyboardOwner {
     ChatComposer(TerminalSessionId),
     BrowserPage(BrowserPaneId),
     WorkareaPage(TitlebarMode),
+    /// A view panel surface GPUI draws itself: a Ghostex page, or the picker with no view open. The
+    /// keys belong to the GPUI root, which has to be taken back from whatever native surface held
+    /// them, so this is not the same as `Nothing`.
+    GpuiViewPanelSurface,
     /// Sleeping placeholders, empty panes, sleeping workareas: nothing to focus, the GPUI root keeps the keys for wake-on-type.
     Nothing,
 }

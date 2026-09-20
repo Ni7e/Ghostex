@@ -365,6 +365,11 @@ impl Render for GhostexGpuiApp {
                     cx.stop_propagation();
                     return;
                 }
+                if this.open_view_from_view_picker_keystroke(&event.keystroke, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
                 if this.focused_gpui_engine_terminal_view().is_none() {
                     return;
                 }

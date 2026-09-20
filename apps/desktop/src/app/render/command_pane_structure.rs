@@ -38,7 +38,10 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         match self.open_view_mode() {
-            Some(mode) => self.render_workarea_with_open_view(mode, window, cx),
+            Some(mode) => self.render_workarea_with_open_view(Some(mode), window, cx),
+            None if self.view_picker_open() => {
+                self.render_workarea_with_open_view(None, window, cx)
+            }
             None => self.render_agents_workspace(AgentsWorkspaceLayout::FullWidth, window, cx),
         }
     }
@@ -305,7 +308,7 @@ impl GhostexGpuiApp {
     /// open, and in the Agents column whenever a pane shows React chat; the grab strip then lies
     /// wholly over the command pane, which is always GPUI-painted.
     fn command_pane_boundary_grab_side(&self) -> ResizeRailGrabSide {
-        let workspace_is_cef = self.view_panel_open()
+        let workspace_is_cef = self.view_panel_shows_cef_page()
             || self.workspace_node_shows_cef_chat(&self.agents_workspace.root);
         if workspace_is_cef {
             ResizeRailGrabSide::Trailing

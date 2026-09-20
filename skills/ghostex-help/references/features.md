@@ -39,11 +39,21 @@ has the whole work area. The same expand button brings the sessions back.
 
 The **view panel toggle** in the work area header (Cmd+Option+B,
 `toggleViewPanel`) opens and closes the whole panel; opening it comes back to
-the view this project last had open, and closing it leaves your sessions at full
-width. The header itself carries the project breadcrumb, Start, Open and Commit,
-the **⋯** button (Ask Ghostex, Tips & Tricks, Resources, Dev servers and
-Extensions), **Hide sidebar**, and the command terminal toggle. When an update is
-available, a download button appears just before the project name.
+the view this project last had open, and shows **Open a view** when the project
+has no tabs yet. Closing it leaves your sessions at full width. The header itself
+carries the project breadcrumb, Start, Open and Commit, the **⋯** button (Ask
+Ghostex, Tips & Tricks, Resources, Dev servers and Extensions), **Hide sidebar**,
+and the command terminal toggle. When an update is available, a download button
+appears just before the project name.
+
+**Open a view** is the picker the panel shows when nothing is open in it. It
+lists every view you can open here: the built-in views first, then your own views
+and extensions, then Ghostex's own pages (Ask Ghostex, Tips & Tricks and
+Resources). Press a view's letter to open it (C for Code, B for Browser, K for
+Kanban, U for Automate, D for Docs) while the picker is in front. Views you hid
+for this project are not in the list; **Manage views and where they appear…** at
+the bottom opens their settings, and **Hidden here** on the `+` menu brings one
+back.
 
 Right-click a view tab to choose where that view appears and what happens to it.
 **Show in <project>** and **Show in space <space>** are ticks: unticking one
@@ -54,7 +64,8 @@ Extensions. Below that, **Reload** refreshes the clicked view (the focused tab i
 Browser), **Sleep** unloads it while keeping its tab (Code also stops its editor
 server; choose **Wake** or click the tab to bring it back, and Resources can stop
 Code too without closing Ghostex), **Pop out to window** opens its page in its
-own window, and **Close tab** removes it from the strip. **Hidden here** is on
+own window, and **Close tab** removes it from the strip. Ghostex's own pages have
+no Sleep or Pop out: they are part of the app, so Reload is all they need. **Hidden here** is on
 this menu as well. Custom project views also offer **Command output** and
 **Configure view**, which opens that view's editor in Settings > Extensions and
 focuses its name field.
@@ -70,8 +81,11 @@ focuses its name field.
   reuses the local VS Code configuration.
 - **Browser**: embedded Chromium tabs with profiles, splits, annotations,
   DevTools, and agent control through the `$ghostex-embedded-browser-use`
-  skill. Web links from terminals, chat, and detected dev servers open here or
-  in the system browser depending on Open links in. Annotate the current page
+  skill. A tab with no address yet shows the **start page**: the development
+  servers running on this computer, and on each remote computer you have set up,
+  with their page titles and whether they are responding. Click one to open it,
+  or copy its address. Web links from terminals, chat, and detected dev servers
+  open here or in the system browser depending on Open links in. Annotate the current page
   with Agentation in the Browser toolbar; GitHub pages disallow that tool.
   When a page shows its content inside a frame, such as a Storybook story,
   the Annotate toolbar opens inside that frame so the content itself can be
@@ -737,7 +751,7 @@ or your machine default editor for long prompts. The Ghostex editor uses the
 same text editing controls as the chat composer, with F1 commands, find/replace,
 undo/redo, and image previews. Cmd+S/Ctrl+S or Ctrl+G saves and closes it; Cancel
 leaves the original prompt unchanged. Dev Servers detects localhost URLs from output and
-lists them in Resources.
+lists them on the Browser view's start page.
 
 Terminals follow the app theme by default. Settings > General > Theme groups
 App theme, Chat theme, and Terminal theme together at the top of Settings.
@@ -1054,12 +1068,17 @@ docs directory), `hideProjectHeaderDiffStats`,
   arrive between releases, and installed skills are refreshed automatically
   each time Ghostex starts. Offline installs use the copy inside the app.
 - The header's ⋯ menu holds Ask Ghostex, Tips & Tricks, Resources, Dev
-  servers and Extensions. Tips & Tricks teaches features one card at a time;
-  Resources lists dev servers, ports, docs, project links, and per-session CPU
-  and RAM; Ask Ghostex opens sample questions, and picking one opens a
-  Ghostex Help chat with the question staged so the user can edit it and
-  press Enter. An entry switched off in Settings > Extensions, or scoped away
-  from the project you are in, is not listed.
+  servers and Extensions. The first three open as view tabs, so they stay on
+  screen beside the session you are asking about and you can keep reading them
+  while an agent works; they are available in every project. Tips & Tricks
+  teaches features one card at a time; Resources lists what Ghostex is running
+  with per-session CPU and RAM, and can put a session or the editor to sleep;
+  Ask Ghostex is a page of sample questions, and picking one opens a Ghostex
+  Help chat with the question staged so the user can edit it and press Enter.
+  Dev servers opens the Browser view on its start page, which lists the
+  development servers running on this computer and on your remote computers;
+  the same list is what a new Browser tab shows. Extensions is still a menu.
+  An entry switched off in Settings > Extensions is not listed.
 - Welcome to Ghostex is the onboarding that opens the first time Ghostex
   runs. Its five panels cover: the agents found on this computer, with
   Install buttons for Claude Code, Codex and Cursor Agent, an Install guide

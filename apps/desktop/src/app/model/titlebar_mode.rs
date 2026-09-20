@@ -42,6 +42,70 @@ impl ExtensionId {
     }
 }
 
+/// CDXC:Titlebar 2026-09-20 DECISION:
+/// User (screen 07): Ask Ghostex, Tips & Tricks and Resources stop being native dropdown panels and
+/// become pages you open as a view tab, so they can stay open beside the session you are asking
+/// about. They are app-wide rather than project surfaces: every project can open them, they are
+/// never hidden by a view scope, and they are drawn by GPUI instead of owning a CEF page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum GhostexPage {
+    Ask,
+    Tips,
+    Resources,
+}
+
+impl GhostexPage {
+    /// Picker and `+` menu order, and the order the three pages are appended to the view list in.
+    pub(crate) const ALL: [Self; 3] = [Self::Ask, Self::Tips, Self::Resources];
+
+    pub(crate) fn slug(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Tips => "tips",
+            Self::Resources => "resources",
+        }
+    }
+
+    fn from_slug(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|page| page.slug() == value)
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Ask => "Ask Ghostex",
+            Self::Tips => "Tips & Tricks",
+            Self::Resources => "Resources",
+        }
+    }
+
+    /// One line under the page's name in the view picker.
+    pub(crate) fn description(self) -> &'static str {
+        match self {
+            Self::Ask => "Ask how something works or have it set up for you.",
+            Self::Tips => "Short tips for getting more out of Ghostex.",
+            Self::Resources => "What Ghostex is running, and what it costs.",
+        }
+    }
+
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            Self::Ask => TITLEBAR_ICON_HELP,
+            Self::Tips => TITLEBAR_ICON_INFO,
+            Self::Resources => TITLEBAR_ICON_DEVICE_DESKTOP,
+        }
+    }
+
+    /// The Settings switch that turns the page off. These are the keys the titlebar buttons used,
+    /// kept so the existing Settings rows keep meaning what they say.
+    pub(crate) fn hidden_settings_key(self) -> &'static str {
+        match self {
+            Self::Ask => HELP_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
+            Self::Tips => TIPS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
+            Self::Resources => RESOURCES_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum TitlebarMode {
     Agents,
@@ -51,6 +115,7 @@ pub(crate) enum TitlebarMode {
     Automate,
     Manage,
     Extension(ExtensionId),
+    Ghostex(GhostexPage),
 }
 
 impl TitlebarMode {
@@ -65,6 +130,9 @@ impl TitlebarMode {
             value if value.starts_with("extension:") => {
                 ExtensionId::new(value.trim_start_matches("extension:")).map(Self::Extension)
             }
+            value if value.starts_with("ghostex:") => {
+                GhostexPage::from_slug(value.trim_start_matches("ghostex:")).map(Self::Ghostex)
+            }
             _ => None,
         }
     }
@@ -78,6 +146,7 @@ impl TitlebarMode {
             Self::Automate => "automate".to_string(),
             Self::Manage => "manage".to_string(),
             Self::Extension(id) => format!("extension:{}", id.as_str()),
+            Self::Ghostex(page) => format!("ghostex:{}", page.slug()),
         }
     }
 
@@ -90,6 +159,7 @@ impl TitlebarMode {
             Self::Automate => "Automate",
             Self::Manage => "Docs",
             Self::Extension(id) => id.as_str(),
+            Self::Ghostex(page) => page.label(),
         }
     }
 
@@ -104,6 +174,7 @@ impl TitlebarMode {
             Self::Automate => TITLEBAR_ICON_BOLT,
             Self::Manage => TITLEBAR_ICON_FILE_TEXT,
             Self::Extension(_) => TITLEBAR_ICON_EXTENSIONS,
+            Self::Ghostex(page) => page.icon(),
         }
     }
 
@@ -138,7 +209,8 @@ impl TitlebarMode {
             Self::Automate => 3,
             Self::Manage => 4,
             Self::Extension(_) => 5,
-            Self::Agents => 6,
+            Self::Ghostex(_) => 6,
+            Self::Agents => 7,
         }
     }
 
@@ -150,6 +222,9 @@ impl TitlebarMode {
             Self::Kanban => 3,
             Self::Automate => 4,
             Self::Manage => 5,
+            Self::Ghostex(GhostexPage::Ask) => 6,
+            Self::Ghostex(GhostexPage::Tips) => 7,
+            Self::Ghostex(GhostexPage::Resources) => 8,
             Self::Extension(id) => {
                 id.as_str()
                     .bytes()
@@ -173,6 +248,8 @@ impl TitlebarMode {
             Self::Automate => "Automate is unavailable for the current project context.",
             Self::Manage => "Docs is unavailable for the current project context.",
             Self::Extension(_) => "This extension is unavailable for the current project context.",
+            // A Ghostex page is app-wide, so it is never unavailable.
+            Self::Ghostex(_) => "",
         }
     }
 }

@@ -456,7 +456,7 @@ export function ExtensionsSettingsTab({
               >
                 <OfficialExtensionList
                   extensions={OFFICIAL_VIEW_EXTENSIONS}
-                  label='Workareas'
+                  label='Views'
                   onReinstallPlugin={onReinstallPlugin}
                   onUpdateSetting={onUpdateSetting}
                   scopeControls={scopeControls}
@@ -466,7 +466,7 @@ export function ExtensionsSettingsTab({
                 />
                 <OfficialExtensionList
                   extensions={OFFICIAL_TITLEBAR_EXTENSIONS}
-                  label='Title bar buttons'
+                  label='Buttons and menus'
                   onReinstallPlugin={onReinstallPlugin}
                   onUpdateSetting={onUpdateSetting}
                   scopeControls={scopeControls}
@@ -724,21 +724,23 @@ function OfficialExtensionList({
         const runtimeId = OFFICIAL_EXTENSION_RUNTIME_IDS[extension.id];
         const runtime = runtimeId ? statusById.get(runtimeId) : undefined;
         const scopeKey = officialViewScopeKey(extension.id);
+        // An app-wide page has no project to be narrowed to, so it shows the switch alone.
+        const scoped = extension.appWide !== true;
         return (
           <Fragment key={extension.id}>
             <OfficialExtensionRow
               description={extension.description}
               enabled={isOfficialExtensionEnabled(settings, extension)}
               icon={OFFICIAL_EXTENSION_ICONS[extension.id]}
-              onEditScope={() => scopeControls.edit(scopeKey, extension.title)}
+              onEditScope={scoped ? () => scopeControls.edit(scopeKey, extension.title) : undefined}
               onEnabledChange={(enabled) => onUpdateSetting(extension.settingsKey, !enabled)}
               onReinstall={runtimeId && onReinstallPlugin ? () => onReinstallPlugin(runtimeId) : undefined}
               reinstallAvailable={Boolean(onReinstallPlugin && runtime?.canReinstall)}
               runtime={runtime}
-              scopeSummary={scopeControls.describe(scopeKey)}
+              scopeSummary={scoped ? scopeControls.describe(scopeKey) : undefined}
               title={extension.title}
             />
-            {scopeControls.renderEditor(scopeKey)}
+            {scoped ? scopeControls.renderEditor(scopeKey) : null}
           </Fragment>
         );
       })}

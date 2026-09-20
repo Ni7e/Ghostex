@@ -144,17 +144,16 @@ impl GhostexGpuiApp {
     }
 
     /// CDXC:Workarea 2026-09-20 DECISION:
-    /// User: the header's view-panel toggle opens the view this project last had open, or the first
-    /// view its context offers when there is none, and closes the panel while a view is open.
+    /// User (screen 02): the header's view-panel toggle opens the tab this project last had open,
+    /// the picker when it has no tabs, and closes the panel while it is open. It is never disabled,
+    /// because the picker is always something to show. This supersedes the earlier rule that it
+    /// opened "the first view its context offers" and went dead when there was none.
     pub(crate) fn render_workarea_header_view_panel_toggle(
         &self,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let open = self.view_panel_open();
-        let enabled = open || self.view_panel_toggle_target().is_some();
-        let tooltip = if !enabled {
-            "No view is available for this project".into()
-        } else if open {
+        let tooltip = if open {
             titlebar_tooltip_label("Close the view panel", "toggleViewPanel")
         } else {
             titlebar_tooltip_label("Open the view panel", "toggleViewPanel")
@@ -163,19 +162,17 @@ impl GhostexGpuiApp {
             "ghostex-gpui-workarea-header-view-panel-toggle",
             TITLEBAR_ICON_LAYOUT_COLUMNS,
             0.0,
-            enabled,
+            true,
         )
         .when(open, |this| this.bg(titlebar_active_segment_color()))
-        .when(enabled, |this| {
-            this.on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.toggle_view_panel(window, cx);
-                }),
-            )
-        })
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+                this.toggle_view_panel(window, cx);
+            }),
+        )
         .managed_tooltip_with_placement(ManagedTooltipPlacement::Left, move |window, cx| {
             titlebar_tooltip(tooltip.clone(), window, cx)
         })

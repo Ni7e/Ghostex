@@ -694,7 +694,6 @@ impl BrowserTabModel {
         Some(tab_id)
     }
 
-    #[allow(dead_code)] // no live caller: only the superseded native browser tab strip added placeholder tabs
     pub(crate) fn add_address_placeholder_tab(
         &mut self,
         profile_id: BrowserProfileId,

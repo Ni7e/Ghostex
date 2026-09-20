@@ -288,10 +288,19 @@ impl GhostexGpuiApp {
                 }
             }
             ShellFocusTarget::ProjectEditorSurface(mode) => {
-                if self.active_mode == mode {
+                if mode == TitlebarMode::Agents {
+                    // The view panel with no view in it: the picker owns the keys, or nothing does.
+                    if self.view_picker_open() {
+                        ShellKeyboardOwner::GpuiViewPanelSurface
+                    } else {
+                        ShellKeyboardOwner::Nothing
+                    }
+                } else if self.active_mode != mode {
+                    ShellKeyboardOwner::Nothing
+                } else if mode.is_project_editor_mode() {
                     ShellKeyboardOwner::WorkareaPage(mode)
                 } else {
-                    ShellKeyboardOwner::Nothing
+                    ShellKeyboardOwner::GpuiViewPanelSurface
                 }
             }
         }
@@ -451,6 +460,13 @@ impl GhostexGpuiApp {
                 let focus_handle = surface.read(cx).focus_handle.clone();
                 focus_handle.focus(window, cx);
                 surface.update(cx, |surface, _| surface.focus());
+            }
+            ShellKeyboardOwner::GpuiViewPanelSurface => {
+                self.pending_keyboard_handoff = None;
+                // The page is GPUI's own drawing, so the keys come back to the root view; the
+                // terminal surface sync releases a Ghostty first responder in the same pass,
+                // because shell focus no longer names an Agents pane.
+                self.reclaim_gpui_root_for_chrome_input_focus();
             }
             ShellKeyboardOwner::Nothing => {
                 self.pending_keyboard_handoff = None;

@@ -90,7 +90,9 @@ impl GhostexGpuiApp {
         let is_active = mode == active_mode;
         let label = mode.tab_label();
         let slug = mode.element_slug();
-        let sleeping = !self.project_editor_shell.is_mode_awake(mode);
+        // A Ghostex page has no lifecycle, so it is never the dimmed "this is asleep" tab.
+        let sleeping =
+            mode.is_project_editor_mode() && !self.project_editor_shell.is_mode_awake(mode);
         let view = cx.entity().clone();
         let drag_payload = DraggedViewTab { mode };
         let preview_icon = mode.tab_icon();
@@ -364,7 +366,12 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let maximized = self.view_panel_maximized();
-        let tooltip = if maximized {
+        // With the picker on screen there is no view to give the window to, so the control says so
+        // rather than looking live and doing nothing.
+        let enabled = self.open_view_mode().is_some();
+        let tooltip = if !enabled {
+            "Open a view to expand it"
+        } else if maximized {
             "Show the sessions column"
         } else {
             "Expand over the sessions column"
@@ -376,17 +383,19 @@ impl GhostexGpuiApp {
             } else {
                 TITLEBAR_ICON_ARROWS_DIAGONAL
             },
-            true,
+            enabled,
             maximized,
         )
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                window.prevent_default();
-                cx.stop_propagation();
-                this.toggle_view_panel_maximized(cx);
-            }),
-        )
+        .when(enabled, |this| {
+            this.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.toggle_view_panel_maximized(cx);
+                }),
+            )
+        })
         .managed_tooltip_with_placement(ManagedTooltipPlacement::Below, move |window, cx| {
             titlebar_tooltip(tooltip, window, cx)
         })

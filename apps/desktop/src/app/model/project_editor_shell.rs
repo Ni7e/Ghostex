@@ -51,7 +51,7 @@ impl ProjectEditorAutoSleepEpochs {
             TitlebarMode::Kanban => Some(self.kanban),
             TitlebarMode::Automate => Some(self.automate),
             TitlebarMode::Manage => Some(self.manage),
-            TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
+            TitlebarMode::Agents | TitlebarMode::Extension(_) | TitlebarMode::Ghostex(_) => None,
         }
     }
 
@@ -62,7 +62,9 @@ impl ProjectEditorAutoSleepEpochs {
             TitlebarMode::Kanban => &mut self.kanban,
             TitlebarMode::Automate => &mut self.automate,
             TitlebarMode::Manage => &mut self.manage,
-            TitlebarMode::Agents | TitlebarMode::Extension(_) => return None,
+            TitlebarMode::Agents | TitlebarMode::Extension(_) | TitlebarMode::Ghostex(_) => {
+                return None;
+            }
         };
         *epoch = epoch.wrapping_add(1);
         Some(*epoch)
@@ -103,7 +105,7 @@ impl ProjectEditorAutoSleepPolicySnapshot {
             TitlebarMode::Kanban => self.kanban,
             TitlebarMode::Automate => self.automate,
             TitlebarMode::Manage => self.manage,
-            TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
+            TitlebarMode::Agents | TitlebarMode::Extension(_) | TitlebarMode::Ghostex(_) => None,
         }
     }
 }
@@ -206,7 +208,7 @@ impl ProjectEditorShellModel {
                     },
                 ))
             }
-            TitlebarMode::Agents => None,
+            TitlebarMode::Agents | TitlebarMode::Ghostex(_) => None,
         }
     }
 
@@ -226,7 +228,7 @@ impl ProjectEditorShellModel {
                     recency: u64::MAX,
                 },
             )),
-            TitlebarMode::Agents => None,
+            TitlebarMode::Agents | TitlebarMode::Ghostex(_) => None,
         }
     }
 

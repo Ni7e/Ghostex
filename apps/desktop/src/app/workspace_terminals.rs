@@ -587,6 +587,7 @@ impl GhostexGpuiApp {
             */
             self.open_views.clear();
             self.view_panel_maximized = false;
+            self.reconcile_ghostex_page_panels();
             self.last_open_view_mode = self.open_view_mode();
             self.apply_view_pane_state(cx);
             self.focus_default_surface_for_active_mode(cx);
@@ -617,6 +618,14 @@ impl GhostexGpuiApp {
         self.view_panel_maximized =
             self.view_panel_maximized && target_mode != TitlebarMode::Agents;
         self.active_mode = target_mode;
+        // The picker belongs to the panel, not to a project, so it survives a switch only while the
+        // incoming project has no view of its own to show.
+        self.view_panel_picker_open =
+            self.view_panel_picker_open && target_mode == TitlebarMode::Agents;
+        // The incoming project's tabs are not the outgoing project's, so the pages of every Ghostex
+        // tab it does not have go, and the one it is showing is built.
+        self.reconcile_ghostex_page_panels();
+        self.ensure_ghostex_page_panel(target_mode, cx);
         self.apply_view_pane_state(cx);
         self.focus_shell_target(
             default_shell_focus_for_mode(

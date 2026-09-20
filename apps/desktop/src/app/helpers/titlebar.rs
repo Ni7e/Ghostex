@@ -72,18 +72,14 @@ pub(crate) fn titlebar_tooltip(
 pub(crate) fn titlebar_popup_menu_width(kind: GpuiTitlebarPopupKind) -> f32 {
     match kind {
         GpuiTitlebarPopupKind::AccountUsage(_) => 380.0,
-        GpuiTitlebarPopupKind::RemoteSites => TITLEBAR_POPUP_RESOURCES_WIDTH,
         GpuiTitlebarPopupKind::Actions
         | GpuiTitlebarPopupKind::ContextMenu
         | GpuiTitlebarPopupKind::BrowserActions(_)
         | GpuiTitlebarPopupKind::OpenTargets => TITLEBAR_POPUP_COMPACT_WIDTH,
         GpuiTitlebarPopupKind::Extensions => TITLEBAR_POPUP_EXTENSIONS_WIDTH,
         GpuiTitlebarPopupKind::Git => TITLEBAR_POPUP_GIT_WIDTH,
-        GpuiTitlebarPopupKind::Help => TITLEBAR_POPUP_HELP_WIDTH,
         GpuiTitlebarPopupKind::More => TITLEBAR_POPUP_COMPACT_WIDTH,
         GpuiTitlebarPopupKind::Notifications => TITLEBAR_POPUP_NOTIFICATIONS_WIDTH,
-        GpuiTitlebarPopupKind::Resources => TITLEBAR_POPUP_RESOURCES_WIDTH,
-        GpuiTitlebarPopupKind::Tips => TITLEBAR_POPUP_TIPS_WIDTH,
     }
 }
 
@@ -121,9 +117,6 @@ pub(crate) fn titlebar_popup_window_bounds_for_trigger_bounds(
     let max_height = match kind {
         GpuiTitlebarPopupKind::AccountUsage(_) => 640.0,
         GpuiTitlebarPopupKind::Notifications => TITLEBAR_POPUP_NOTIFICATIONS_MAX_HEIGHT,
-        GpuiTitlebarPopupKind::Resources
-        | GpuiTitlebarPopupKind::Tips
-        | GpuiTitlebarPopupKind::RemoteSites => TITLEBAR_POPUP_READING_MENU_MAX_HEIGHT,
         _ => TITLEBAR_POPUP_MENU_MAX_HEIGHT,
     };
     let available_height = (main_window_bounds.size.height.as_f32() - 28.0).max(180.0);
@@ -2851,6 +2844,9 @@ pub(crate) fn titlebar_mode_view_tab_hidden_settings_key(
         TitlebarMode::Kanban => Some(KANBAN_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Automate => Some(AUTOMATE_VIEW_TAB_HIDDEN_SETTINGS_KEY),
         TitlebarMode::Manage => Some(DOCS_VIEW_TAB_HIDDEN_SETTINGS_KEY),
+        // A Ghostex page reuses the Settings switch its titlebar button had, so turning Ghostex
+        // Help, Tips & Tricks or Resources off in Settings still takes the page away everywhere.
+        TitlebarMode::Ghostex(page) => Some(page.hidden_settings_key()),
         TitlebarMode::Agents | TitlebarMode::Extension(_) => None,
     }
 }
@@ -2870,6 +2866,7 @@ pub(crate) fn gpui_titlebar_mode_plugin_display_name(mode: TitlebarMode) -> &'st
         TitlebarMode::Automate => "Automate",
         TitlebarMode::Manage => "Docs",
         TitlebarMode::Extension(id) => id.as_str(),
+        TitlebarMode::Ghostex(page) => page.label(),
     }
 }
 

@@ -39,9 +39,11 @@ hotkeys Every shortcut and its default binding
   drag, and your agents keep running on the left. The panel has a tab strip at
   its top: several views can be open at once, the **+** opens another, and the
   two buttons at its end pop the view out into its own window or expand it over
-  the sessions column. Views other than Agents are extensions that load on demand
-  and sleep when unused. The view panel toggle at the right end of the header, or
-  Cmd+Option+B, opens and closes the whole panel.
+  the sessions column. With nothing open it shows **Open a view**, a picker of
+  everything this project can open, including Ghostex's own Ask Ghostex, Tips &
+  Tricks and Resources pages. Project views load on demand and sleep when unused.
+  The view panel toggle at the right end of the header, or Cmd+Option+B, opens
+  and closes the whole panel.
 - **Quick Access** (Cmd+Shift+P): search every command, pane action, settings
   shortcut, and recent session. Cmd+P opens it on Recent Sessions.
 - **Settings** (Cmd+,): pages for General, Integrations, Extensions, Remote,

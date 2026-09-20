@@ -37,6 +37,14 @@ impl GhostexGpuiApp {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        // A Ghostex page has no page to reload; rebuilding it takes its snapshot again, which is
+        // what Reload means for Resources and for the Tips notices.
+        if let TitlebarMode::Ghostex(page) = mode {
+            self.ghostex_page_panels.remove(&page);
+            self.ensure_ghostex_page_panel(mode, cx);
+            cx.notify();
+            return;
+        }
         if !mode.is_project_editor_mode() || !self.titlebar_mode_available(mode) {
             return;
         }

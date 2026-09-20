@@ -33,9 +33,11 @@ impl GhostexGpuiApp {
     /// mode of its own" and starts meaning "no view is open"; every other mode is the view the right
     /// panel shows. This supersedes the 2026-06-22 rule that project-editor modes replace the main
     /// workspace area while active.
+    /// `None` is the panel with no view in it: the tab strip over the picker (screen 02). The
+    /// column, the rail and the panel's frame are identical either way, so they are described once.
     pub(crate) fn render_workarea_with_open_view(
         &mut self,
-        mode: TitlebarMode,
+        mode: Option<TitlebarMode>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
@@ -46,13 +48,16 @@ impl GhostexGpuiApp {
         full-height so placeholders and Browser CEF bodies fill the available workspace height
         instead of rendering as a centered band with black space above and below.
         */
-        let mode_slug = mode.element_slug();
+        let strip_mode = mode.unwrap_or(TitlebarMode::Agents);
+        let mode_slug = strip_mode.element_slug();
         let split_ratio = workarea_split_ratio(self.project_editor_shell.workarea_split_ratio);
-        let surface_border_state = self.project_editor_surface_border_state(mode, window);
+        // The picker's own focus target is `ProjectEditorSurface(Agents)`, so the same call gives
+        // the panel its focused border while the picker holds the keys.
+        let surface_border_state = self.project_editor_surface_border_state(strip_mode, window);
         let outer_rail_edges = self.main_workspace_outer_rail_edges(window);
         let metrics_view = cx.entity().clone();
         let surface_view = cx.entity().clone();
-        if self.view_panel_maximized() {
+        if let Some(mode) = mode.filter(|_| self.view_panel_maximized()) {
             return self.render_maximized_view_panel(mode, window, cx);
         }
         h_flex()
@@ -102,10 +107,13 @@ impl GhostexGpuiApp {
                     .min_w(px(WORKAREA_VIEW_PANEL_MIN_WIDTH))
                     .min_h_0()
                     .overflow_hidden()
-                    .child(self.render_view_tab_strip(mode, cx))
+                    .child(self.render_view_tab_strip(strip_mode, cx))
                     .child(
                         div()
                             .on_children_prepainted(move |child_bounds, _window, cx| {
+                                let Some(mode) = mode else {
+                                    return;
+                                };
                                 let _ = surface_view.update(cx, |this, _cx| {
                                     this.record_project_editor_surface_layout_bounds(
                                         mode,
@@ -125,7 +133,7 @@ impl GhostexGpuiApp {
                             .min_w_0()
                             .min_h_0()
                             .overflow_hidden()
-                            .when(mode != TitlebarMode::Browser, |this| {
+                            .when(strip_mode != TitlebarMode::Browser, |this| {
                                 rail_aware_pane_border(
                                     this,
                                     RailFacingEdges {
@@ -136,7 +144,10 @@ impl GhostexGpuiApp {
                                     workspace_pane_border_color(),
                                 )
                             })
-                            .child(self.render_project_editor_surface(mode, window, cx))
+                            .child(match mode {
+                                Some(mode) => self.render_project_editor_surface(mode, window, cx),
+                                None => self.render_view_picker(cx),
+                            })
                             .window_corner_pane(),
                     ),
             )

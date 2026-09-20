@@ -304,7 +304,9 @@ impl GhostexGpuiApp {
                     TitlebarMode::Automate => ProjectWorkareaCefSurfaceSlotKey::Automate,
                     TitlebarMode::Manage => ProjectWorkareaCefSurfaceSlotKey::Manage,
                     TitlebarMode::Extension(id) => ProjectWorkareaCefSurfaceSlotKey::Extension(id),
-                    TitlebarMode::Agents | TitlebarMode::Browser => return false,
+                    TitlebarMode::Agents | TitlebarMode::Browser | TitlebarMode::Ghostex(_) => {
+                        return false;
+                    }
                 };
                 self.project_workarea_runtime_cef_surface_for_render(slot_key)
             }

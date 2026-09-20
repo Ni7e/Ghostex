@@ -30,7 +30,8 @@ use crate::*;
 
 /// CDXC:Titlebar 2026-09-20 DECISION:
 /// User: Ask Ghostex, Tips & Tricks, Resources, Dev servers and Extensions leave the titlebar for one trailing "⋯" menu, so the titlebar row holds only the active project's own controls.
-/// Each row opens the panel it always opened, anchored to the ⋯ button, and an item switched off in Settings or scoped away from this project by its view scope is not listed at all.
+/// Per ruling 12 Ask Ghostex stays in this menu once it is a view; so do Tips & Tricks, Resources and Dev servers, and all four now open their tab instead of a dropdown, which is what screen 06 says the menu becomes. Only Extensions is still a popup, because it is a menu of extensions rather than a page.
+/// An item switched off in Settings, or scoped away from this project, is not listed at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GpuiTitlebarMoreMenuItem {
     AskGhostex,
@@ -99,25 +100,36 @@ impl GpuiTitlebarMoreMenuItem {
         }
     }
 
-    pub(crate) fn popup_kind(self) -> GpuiTitlebarPopupKind {
+    /// The Ghostex page this row opens as a view tab, for the three rows that became pages.
+    fn ghostex_page(self) -> Option<GhostexPage> {
         match self {
-            Self::AskGhostex => GpuiTitlebarPopupKind::Help,
-            Self::Tips => GpuiTitlebarPopupKind::Tips,
-            Self::Resources => GpuiTitlebarPopupKind::Resources,
-            Self::DevServers => GpuiTitlebarPopupKind::RemoteSites,
-            Self::Extensions => GpuiTitlebarPopupKind::Extensions,
+            Self::AskGhostex => Some(GhostexPage::Ask),
+            Self::Tips => Some(GhostexPage::Tips),
+            Self::Resources => Some(GhostexPage::Resources),
+            Self::DevServers | Self::Extensions => None,
         }
     }
 }
 
 impl GhostexGpuiApp {
-    /// The rows the ⋯ menu offers right now, after the single titlebar-button gate.
+    /// The rows the ⋯ menu offers right now, after the single titlebar-button gate. A row that is
+    /// now a page asks the page's own availability instead, because an app-wide page is never
+    /// scoped away from a project and the two answers must not disagree.
     pub(crate) fn titlebar_more_menu_items(&self) -> Vec<GpuiTitlebarMoreMenuItem> {
         GpuiTitlebarMoreMenuItem::ALL
             .into_iter()
-            .filter(|item| {
-                let (settings_key, official_extension_id) = item.visibility_gate();
-                !self.titlebar_button_hidden(settings_key, official_extension_id)
+            .filter(|item| match item.ghostex_page() {
+                Some(page) => self.titlebar_mode_available(TitlebarMode::Ghostex(page)),
+                None => {
+                    let (settings_key, official_extension_id) = item.visibility_gate();
+                    if self.titlebar_button_hidden(settings_key, official_extension_id) {
+                        return false;
+                    }
+                    // Dev servers is the Browser view's start page now, so a project that cannot
+                    // open Browser cannot reach the list either.
+                    *item != GpuiTitlebarMoreMenuItem::DevServers
+                        || self.titlebar_mode_available(TitlebarMode::Browser)
+                }
             })
             .collect()
     }
@@ -159,9 +171,9 @@ impl GhostexGpuiApp {
         menu
     }
 
-    /// Opens one row's panel, anchored to the ⋯ button rather than to the button the
-    /// surface used to have. The gate is re-checked because the menu row and the click
-    /// are separated by a frame.
+    /// Opens one row: a tab for the three rows that are pages now, the Browser view's start page for
+    /// Dev servers, and the Extensions popup anchored to the ⋯ button for the one row still a menu.
+    /// The gate is re-checked because the menu row and the click are separated by a frame.
     pub(crate) fn open_titlebar_more_menu_item(
         &mut self,
         item: GpuiTitlebarMoreMenuItem,
@@ -171,8 +183,22 @@ impl GhostexGpuiApp {
         if !self.titlebar_more_menu_items().contains(&item) {
             return;
         }
+        if let Some(page) = item.ghostex_page() {
+            self.open_view_tab(TitlebarMode::Ghostex(page), window, cx);
+            return;
+        }
+        if item == GpuiTitlebarMoreMenuItem::DevServers {
+            self.open_browser_start_page(window, cx);
+            return;
+        }
         let trigger_bounds = self.titlebar_more_button_bounds.get();
-        self.set_gpui_titlebar_popup_open(item.popup_kind(), true, trigger_bounds, window, cx);
+        self.set_gpui_titlebar_popup_open(
+            GpuiTitlebarPopupKind::Extensions,
+            true,
+            trigger_bounds,
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn toggle_gpui_titlebar_more_menu(

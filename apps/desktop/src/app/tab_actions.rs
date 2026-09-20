@@ -1352,7 +1352,8 @@ impl GhostexGpuiApp {
                 | TitlebarMode::Kanban
                 | TitlebarMode::Automate
                 | TitlebarMode::Manage
-                | TitlebarMode::Extension(_) => ShellFocusTarget::ProjectEditorSurface(mode),
+                | TitlebarMode::Extension(_)
+                | TitlebarMode::Ghostex(_) => ShellFocusTarget::ProjectEditorSurface(mode),
             };
             self.focus_shell_target(focus, cx);
             if mode == TitlebarMode::Browser {
@@ -1375,7 +1376,9 @@ impl GhostexGpuiApp {
             return false;
         }
 
-        if !mode.is_project_editor_mode() {
+        // A Ghostex page has no lifecycle, so it falls straight through to the focus-only branch
+        // below: there is no CEF surface to wake, only shell focus to move onto the GPUI page.
+        if !mode.is_project_editor_mode() && !matches!(mode, TitlebarMode::Ghostex(_)) {
             return false;
         }
         if self.project_editor_shell.is_mode_awake(mode) {
@@ -1403,7 +1406,8 @@ impl GhostexGpuiApp {
             | TitlebarMode::Kanban
             | TitlebarMode::Automate
             | TitlebarMode::Manage
-            | TitlebarMode::Extension(_) => ShellFocusTarget::ProjectEditorSurface(mode),
+            | TitlebarMode::Extension(_)
+            | TitlebarMode::Ghostex(_) => ShellFocusTarget::ProjectEditorSurface(mode),
             TitlebarMode::Agents => return false,
         };
         self.focus_shell_target(focus, cx);
@@ -1470,7 +1474,7 @@ impl GhostexGpuiApp {
                 false
             }
         } else if matches!(self.shell_focus, ShellFocusTarget::AgentsPane(_))
-            || !self.view_panel_open()
+            || self.open_view_mode().is_none()
         {
             let pane_id = match self.shell_focus {
                 ShellFocusTarget::AgentsPane(pane_id) => pane_id,

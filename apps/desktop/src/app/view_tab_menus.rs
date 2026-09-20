@@ -56,10 +56,22 @@ impl GhostexGpuiApp {
     ) {
         let open = self.open_view_tabs();
         let mut menu = GpuiContextMenu::new();
+        let mut previous_group: Option<u8> = None;
         for item in self.view_picker_modes() {
             if !self.titlebar_mode_view_scope_allows(item.mode) {
                 continue;
             }
+            // The picker's three groups, as the only thing a compact menu can show of them: a rule
+            // between the built-ins, your views and extensions, and the Ghostex pages.
+            let group = match item.mode {
+                TitlebarMode::Extension(_) => 1,
+                TitlebarMode::Ghostex(_) => 2,
+                _ => 0,
+            };
+            if previous_group.is_some_and(|previous| previous != group) {
+                menu = menu.separator();
+            }
+            previous_group = Some(group);
             let action = Box::new(OpenGpuiViewTab {
                 mode_index: item.mode.switcher_index(),
             });
@@ -124,19 +136,23 @@ impl GhostexGpuiApp {
             unavailable,
             Box::new(ReloadGpuiTitlebarView { mode_index }),
         );
-        menu = if self.project_editor_shell.is_mode_awake(mode) {
-            menu.menu_with_disabled(
-                "Sleep",
-                unavailable,
-                Box::new(SleepGpuiTitlebarView { mode_index }),
-            )
-        } else {
-            menu.menu_with_disabled(
-                "Wake",
-                unavailable,
-                Box::new(OpenGpuiViewTab { mode_index }),
-            )
-        };
+        // A Ghostex page is GPUI's own drawing: there is no page to put to sleep, so the row that
+        // would say so is left out instead of being offered and doing nothing.
+        if !matches!(mode, TitlebarMode::Ghostex(_)) {
+            menu = if self.project_editor_shell.is_mode_awake(mode) {
+                menu.menu_with_disabled(
+                    "Sleep",
+                    unavailable,
+                    Box::new(SleepGpuiTitlebarView { mode_index }),
+                )
+            } else {
+                menu.menu_with_disabled(
+                    "Wake",
+                    unavailable,
+                    Box::new(OpenGpuiViewTab { mode_index }),
+                )
+            };
+        }
         /*
         CDXC:Extensions 2026-09-16 DECISION:
         User: keep Start / Restart and Stop removed, but restore Configure view and make it open the
