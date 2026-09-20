@@ -112,18 +112,32 @@ fn refresh_mirrored(host: &mut SidebarHostInputs, published: Option<&NativeSideb
         .collect();
     // A remote machine's parked projects are kept per machine: a project id is unique per daemon
     // only, so one flat set would hide a local project whose id a remote machine also handed out.
+    //
+    // CDXC:RemoteMachines 2026-09-20 WHY:
+    // The `projectId` of a remote Recent Project is the MACHINE-SCOPED id
+    // (`createGpuiRemotePresentationProjectId`, helpers/recent-projects.ts), and the raw daemon id
+    // the store keys its rows by is nowhere else in the row, so it has to be parsed back out.
+    // Inserting the id as published put strings of the form `remote:<m>:project:<raw>` into a set
+    // that both readers compare against RAW ids (`build_project_meta`, `machine_tab_summary`), so
+    // the set matched nothing and every project the user had parked on a remote machine came back
+    // as a sidebar group the moment that machine connected.
     host.remote_recent_project_ids.clear();
     for project in recent_projects {
         let Some(machine_id) = project.get("remoteMachineId").and_then(Value::as_str) else {
             continue;
         };
-        let Some(project_id) = project.get("projectId").and_then(Value::as_str) else {
+        let parsed = project
+            .get("projectId")
+            .and_then(Value::as_str)
+            .and_then(ghostex_gx_core::ProjectKey::parse_workspace_project_id);
+        // An entry whose id does not name this machine is not this machine's to hide.
+        let Some(project) = parsed.filter(|key| key.machine.remote_id() == Some(machine_id)) else {
             continue;
         };
         host.remote_recent_project_ids
             .entry(machine_id.to_string())
             .or_default()
-            .insert(project_id.to_string());
+            .insert(project.project_id);
     }
     host.recent_project_count = recent_projects.len();
     host.project_diff_stats.clear();

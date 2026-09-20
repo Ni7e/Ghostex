@@ -221,6 +221,9 @@ fn machine_tabs(check: &dyn Fn(&str, bool, String)) {
         format!("{:?}", view.machines.first()),
     );
     // A project the machine parked is out of its list and out of its count.
+    // The RAW daemon id, which is what the host has to parse out of the machine-scoped id the
+    // Recent Projects row publishes. Asserting the raw id here is what the example is for: it is
+    // the contract both readers of this set compare against.
     let mut parked = remote_inputs();
     parked
         .host
@@ -241,6 +244,24 @@ fn machine_tabs(check: &dyn Fn(&str, bool, String)) {
             .map(|machine| (machine.working_count, machine.attention_count))
             == Some((1, 1)),
         format!("{:?}", view.machines.get(1)),
+    );
+    // The other half of that contract, and the one a host gets wrong: the MACHINE-SCOPED id a
+    // Recent Projects row publishes hides nothing here. This set is raw daemon ids, because that
+    // is what every reader of it compares against, so a host that mirrors the published id
+    // unchanged silently stops hiding parked projects. Asserting only the raw case let exactly
+    // that ship (review R1).
+    let mut scoped = remote_inputs();
+    scoped
+        .host
+        .remote_recent_project_ids
+        .entry(MACHINE.to_string())
+        .or_default()
+        .insert(format!("remote:{MACHINE}:project:R1"));
+    let view = remote_view(&core, scoped);
+    check(
+        "the machine-scoped id hides nothing: this set is raw ids",
+        drawn_groups(&view).contains(&format!("remote:{MACHINE}:group:R1")),
+        format!("{:?}", drawn_groups(&view)),
     );
 }
 
@@ -365,6 +386,47 @@ fn staleness(check: &dyn Fn(&str, bool, String)) {
         "this computer's groups are never stale",
         local.groups.iter().all(|group| !group.core.is_stale),
         "a local group was marked stale".to_string(),
+    );
+    // A reconnect attempt emits `Connecting` before the failure emits `Lost`, so a machine that
+    // cannot be reached walks through both once per rung of the ladder. The fade must not follow
+    // it: it is "the rows are held and the stream is not live", not "the last update was Lost".
+    core.handle(
+        Event::Connection {
+            machine: MachineId::Remote(MACHINE.to_string()),
+            update: ConnectionUpdate::Connecting { attempt: 2 },
+        },
+        NOW_MS,
+    );
+    let view = remote_view(&core, remote_inputs());
+    check(
+        "a reconnect attempt does not un-fade the rows",
+        view.groups.iter().all(|group| group.core.is_stale),
+        format!(
+            "{:?}",
+            view.groups
+                .iter()
+                .map(|group| (group.core.group_id.clone(), group.core.is_stale))
+                .collect::<Vec<_>>()
+        ),
+    );
+    core.handle(
+        Event::Connection {
+            machine: MachineId::Remote(MACHINE.to_string()),
+            update: ConnectionUpdate::Live,
+        },
+        NOW_MS,
+    );
+    let view = remote_view(&core, remote_inputs());
+    check(
+        "and a live stream un-fades them",
+        view.groups.iter().all(|group| !group.core.is_stale),
+        format!(
+            "{:?}",
+            view.groups
+                .iter()
+                .map(|group| (group.core.group_id.clone(), group.core.is_stale))
+                .collect::<Vec<_>>()
+        ),
     );
 }
 

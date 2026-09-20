@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use ghostex_gx_core::{LOCAL_MACHINE_ID, MachineId, SidebarViewModel};
 
 use super::sidebar_scratch_compare::compare_views;
-use super::sidebar_shadow_compare::compare;
+use super::sidebar_shadow_compare::{FocusComparable, compare};
 use crate::GhostexGpuiApp;
 
 /// How long several publishes in a row are folded into one comparison.
@@ -57,6 +57,9 @@ pub(crate) struct SidebarShadowCounters {
     pub(crate) skipped_remote: u64,
     /// The two sides are on different machine tabs, which is two lists rather than one question.
     pub(crate) skipped_machine_mismatch: u64,
+    /// Comparisons that ran on a REMOTE machine's tab. The gate reads this beside `unexplained`:
+    /// a skip counter at zero proves nothing unless something was actually compared.
+    pub(crate) comparisons_remote: u64,
     /// The old runtime's focus is on something the store does not own the focus for (a remote
     /// session, the quick automations row), so the two sides' focus flags are not one question.
     pub(crate) skipped_foreign_focus: u64,
@@ -299,21 +302,52 @@ impl GhostexGpuiApp {
                 return;
             }
         }
-        if self.gx_store.local_focus.foreign_focus {
-            // The old runtime's accepted focus is a row the store cannot hold (a remote session,
-            // the quick automations row), so its focus flags are not this list's to match.
+        let is_remote = selected != LOCAL_MACHINE_ID;
+        if self.gx_store.local_focus.foreign_focus && !is_remote {
+            // THIS COMPUTER's tab with the old runtime's focus on something the store does not own
+            // the focus of (a remote session, the quick automations row): the store keeps its last
+            // local focus while the projection has moved off it, so every local row's focus flags
+            // disagree by design and the record is not one question.
+            //
+            // A REMOTE tab is the opposite case and is compared: there the six focus-derived
+            // fields are the ones left out by name (`FocusComparable`), and everything else of
+            // every row is a real comparison. Discarding the whole record there is what made this
+            // gate unable to measure the thing it gates.
             self.gx_store.sidebar_shadow.counters.skipped_foreign_focus += 1;
             self.gx_store.sidebar_shadow.pending = None;
             return;
         }
 
         let compare_started = Instant::now();
-        let difference = compare(&snapshot, self.gx_store.sidebar_list.view());
+        let focus = if is_remote {
+            FocusComparable::No
+        } else {
+            FocusComparable::Yes
+        };
+        let fed_machines: std::collections::HashSet<&str> = self
+            .gx_store
+            .remote
+            .tabs()
+            .iter()
+            .filter(|machine| machine.fed)
+            .map(|machine| machine.machine_id.as_str())
+            .collect();
+        let difference = compare(
+            &snapshot,
+            self.gx_store.sidebar_list.view(),
+            focus,
+            &fed_machines,
+        );
         let compare_us = compare_started.elapsed().as_micros() as u64;
         let scratch = self.gx_store_sidebar_scratch_check();
 
         let shadow = &mut self.gx_store.sidebar_shadow;
         shadow.counters.comparisons += 1;
+        if is_remote {
+            // The milestone's gate: `skippedRemote 0` says nothing on its own, because every
+            // other skip can hold the count of real remote comparisons at zero beside it.
+            shadow.counters.comparisons_remote += 1;
+        }
         shadow.counters.last_compare_us = compare_us;
         shadow.counters.compare_max_us = shadow.counters.compare_max_us.max(compare_us);
         if let Some(scratch) = scratch {

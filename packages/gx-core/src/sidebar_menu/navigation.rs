@@ -22,7 +22,10 @@ const KEEP_AWAKE_OPTIONS: [(&str, i64); 3] =
 pub struct MoreMenuInput<'a> {
     pub ui: &'a SidebarUiState,
     pub settings: &'a SidebarSettings,
+    /// What a tag id resolves to for its label and its icon: every machine's catalog.
     pub catalog: &'a TagCatalog,
+    /// Which filter rows exist at all, and which of them are enabled: this computer's catalog.
+    pub filter_catalog: &'a TagCatalog,
     pub host: &'a MenuHost,
     /// The project group ids the list draws, without the Chats group.
     pub drawn_project_group_ids: &'a [String],
@@ -44,7 +47,8 @@ pub fn more_menu(input: &MoreMenuInput<'_>) -> Vec<MenuItem> {
     let manual = input.settings.sort_mode == SessionSortMode::Manual;
     sort.push(intent("Last Active Sorting", "clock", "sortLastActivity").with_checked(!manual));
     sort.push(intent("Manual Sorting", "arrows-sort", "sortManual").with_checked(manual));
-    for item in normalize_tag_list_items(&input.settings.tag_list_items, Some(input.catalog)) {
+    for item in normalize_tag_list_items(&input.settings.tag_list_items, Some(input.filter_catalog))
+    {
         if !item.visible {
             continue;
         }

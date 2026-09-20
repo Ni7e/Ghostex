@@ -319,15 +319,12 @@ fn space_for_reveal(
             .as_ref()?,
     );
     let section_key = inputs.ui.section_key();
-    let selection = resolve_selected_space(
-        &spaces,
-        inputs
-            .ui
-            .collapse
-            .selected_space_by_section
-            .get(&section_key)
-            .map(String::as_str),
-    );
+    let stored = inputs
+        .ui
+        .collapse
+        .selected_space_by_section
+        .get(&section_key);
+    let selection = resolve_selected_space(&spaces, stored.map(String::as_str));
     let context = group.core.project_context.as_ref();
     let space_id = space_for_group(
         &spaces,
@@ -338,7 +335,12 @@ fn space_for_reveal(
             .and_then(|context| context.worktree.as_ref())
             .map(|worktree| worktree.parent_project_id.as_str()),
     );
-    (space_id != selection.space_id()).then_some(space_id)
+    // `rememberNativeSidebarFocus` writes the section's Space unconditionally, so a section that
+    // has never been written gets its first value here even when the resolved Space is already the
+    // one it falls back to. That matters most for a REMOTE section, which a cross-machine reveal
+    // is usually the first thing ever to touch: leaving it unwritten means the section keeps
+    // resolving to whichever Space happens to be first, and moves on its own when the order does.
+    (stored.is_none() || space_id != selection.space_id()).then_some(space_id)
 }
 
 /// The machine tab a sidebar row belongs to, from its id alone.

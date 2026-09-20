@@ -47,6 +47,15 @@ fn drawn_project_ids<'a>(
 }
 
 /// The working and attention counts of one machine's tab.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// This is the cheap way to ask a cheap question and it is still O(projects x groups): every
+/// project calls `project_members`, which scans the machine's whole group list. At thirty-five
+/// projects that is about 1.2k group scans per recount, and a recount runs whenever that machine's
+/// rows move. It is only ever paid for a machine the list is NOT built for (the selected one's
+/// counts come out of its built groups), and it is cached until that machine's rows move, which is
+/// what keeps it off a one-machine sidebar entirely. Measure it before optimising it: the first
+/// machine anyone enables will say whether a per-machine session index is worth its invalidation.
 pub(crate) fn machine_tab_summary(
     store: &PresentationStore,
     machine_id: &MachineId,

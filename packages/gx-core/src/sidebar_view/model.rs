@@ -96,6 +96,8 @@ struct CacheState {
     inputs: SidebarInputs,
     focus: FocusKey,
     catalog: TagCatalog,
+    /// This computer's catalog alone; see [`TagCatalog`].
+    filter_catalog: TagCatalog,
     meta: Arc<ProjectMeta>,
     membership: BTreeMap<String, Arc<ProjectMembers>>,
     project_contexts: BTreeMap<String, Arc<ProjectContextInput>>,
@@ -193,13 +195,33 @@ impl SidebarViewModel {
         }
 
         let mut previous = self.state.take();
-        let catalog = TagCatalog::from_state(
+        // What a tag id RESOLVES to: every machine's catalog, this computer's first, which is
+        // `getSessionTagCatalogs`. A row's label and its tag icon read this.
+        let catalog = TagCatalog::merged(
+            std::iter::once(MachineId::Local)
+                .chain(
+                    store
+                        .machines()
+                        .map(|(machine, _)| machine.clone())
+                        .filter(|machine| !machine.is_local()),
+                )
+                .map(|machine| {
+                    store
+                        .machine(&machine)
+                        .and_then(|entry| entry.side_state().custom_session_tags.as_ref())
+                })
+                .collect::<Vec<_>>(),
+        );
+        // Which tag FILTERS the sidebar offers, and which ticked ones survive a prune: this
+        // computer's catalog alone, whichever machine tab is selected.
+        let filter_catalog = TagCatalog::from_state(
             store
-                .machine(&machine)
+                .machine(&MachineId::Local)
                 .and_then(|machine| machine.side_state().custom_session_tags.as_ref()),
         );
         let rows_all_dirty = previous.as_ref().is_none_or(|state| {
             state.catalog != catalog
+                || state.filter_catalog != filter_catalog
                 || state.inputs.settings.debugging_mode != inputs.settings.debugging_mode
         });
         let meta_dirty = previous.as_ref().is_none_or(|previous| {
@@ -215,7 +237,7 @@ impl SidebarViewModel {
         // The projection prunes the ticked filters to the ones the Sort & Filter menu still
         // offers before it reads them, so a filter whose tag was turned off in settings (or whose
         // custom tag the daemon dropped) filters nothing.
-        let enabled_filters = inputs.settings.enabled_tag_filters(&catalog);
+        let enabled_filters = inputs.settings.enabled_tag_filters(&filter_catalog);
         let effective_inputs: Cow<'_, SidebarInputs> = if inputs
             .ui
             .selected_tag_filters
@@ -362,6 +384,7 @@ impl SidebarViewModel {
             inputs: inputs.clone(),
             focus,
             catalog: catalog.clone(),
+            filter_catalog,
             meta: meta.clone(),
             membership,
             project_contexts: BTreeMap::new(),
@@ -380,14 +403,21 @@ impl SidebarViewModel {
                 ..SidebarUpdateWork::default()
             },
         };
-        // A machine whose stream dropped while its rows are held draws them faded rather than
+        // A machine whose rows are held while its stream is not live draws them faded rather than
         // dropping them, which is what `createRemoteSidebarGroups` does with its last-seen copy.
         // Never for this computer: the old projection has an unavailable placeholder group for it
         // and marks no group stale.
+        //
+        // CDXC:RemoteMachines 2026-09-20 WHY:
+        // "Not live" rather than `Stale`, which is what this first tested. A client that cannot
+        // reach its daemon walks a reconnect ladder, and every rung emits `Connecting` before the
+        // failure emits `Lost`; the store maps only the second of those to `Stale`, so an
+        // unreachable machine alternated faded and not faded once per rung, and each flip cost a
+        // badge recount and a full install of the list.
         let is_stale = !machine.is_local()
-            && store
-                .machine(&machine)
-                .is_some_and(|entry| entry.connection().phase == crate::ConnectionPhase::Stale);
+            && store.machine(&machine).is_some_and(|entry| {
+                entry.loaded().is_some() && entry.connection().phase != crate::ConnectionPhase::Live
+            });
         let machine_name = machine
             .remote_id()
             .map(|machine_id| {

@@ -65,6 +65,15 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_storage_warnings: u32,
 }
 
+/// A count as a whole percent of a total, which is what tells a skip that fires now and then apart
+/// from one that is eating the gate.
+fn percent(count: u64, total: u64) -> u64 {
+    if total == 0 {
+        return 0;
+    }
+    count.saturating_mul(100) / total
+}
+
 /// What one view-model update was handed, in the shape both records that carry it use.
 fn last_update_details(last_update: &LastUpdate) -> serde_json::Value {
     json!({
@@ -191,17 +200,22 @@ impl GxStoreDiagnostics {
         );
     }
 
-    pub(super) fn connection(&mut self, update: &ConnectionUpdate) {
+    /// A machine's stream changed state. Named, because since M4d several machines share this
+    /// record and a support log that cannot say WHICH one dropped answers nothing.
+    pub(super) fn connection(&mut self, machine: &MachineId, update: &ConnectionUpdate) {
+        let machine_id = machine.remote_id().unwrap_or("local");
         let details = match update {
             ConnectionUpdate::Connecting { attempt } => {
-                json!({ "phase": "connecting", "attempt": attempt })
+                json!({ "machineId": log_text(machine_id), "phase": "connecting", "attempt": attempt })
             }
             // `reason`, not `error`: a daemon restart is routine, and the support log writes any
             // line with an error-named key unconditionally.
-            ConnectionUpdate::Lost { error } => json!({ "phase": "lost", "reason": error }),
+            ConnectionUpdate::Lost { error } => {
+                json!({ "machineId": log_text(machine_id), "phase": "lost", "reason": error })
+            }
             _ => return,
         };
-        append("gxStore.connection", details);
+        record("gxStore.connection", details);
     }
 
     pub(super) fn resubscribe_requested(&mut self, reason: &ResubscribeReason) {
@@ -470,6 +484,9 @@ impl GxStoreDiagnostics {
                 },
                 "publishes": counters.publishes,
                 "comparisons": counters.comparisons,
+                // What was compared ON a remote machine's tab. `skipped.remote` at zero is not the
+                // gate on its own: every other skip below can hold this at zero beside it.
+                "comparisonsRemote": counters.comparisons_remote,
                 "rejudged": counters.rejudged,
                 "matches": counters.matches,
                 "mismatches": counters.mismatches,
@@ -490,6 +507,15 @@ impl GxStoreDiagnostics {
                     "notLoaded": counters.skipped_not_loaded,
                     "notLive": counters.skipped_not_live,
                     "notRestored": counters.skipped_not_restored,
+                    // As a share of the publishes that reached the comparison, so a skip that is
+                    // quietly eating most of them reads as a number rather than as a total nobody
+                    // divides. Whole percent; zero publishes reads as zero.
+                    "foreignFocusPct": percent(counters.skipped_foreign_focus, counters.publishes),
+                    "machineMismatchPct": percent(
+                        counters.skipped_machine_mismatch,
+                        counters.publishes,
+                    ),
+                    "remotePct": percent(counters.skipped_remote, counters.publishes),
                 },
                 "explained": {
                     "explainedOnly": counters.explained_only,

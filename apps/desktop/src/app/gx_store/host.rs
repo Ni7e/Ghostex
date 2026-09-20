@@ -212,7 +212,7 @@ impl GxStoreHost {
             ConnectionUpdate::Lost { .. } => self.counters.connections_lost += 1,
             _ => {}
         }
-        self.diagnostics.connection(update);
+        self.diagnostics.connection(&MachineId::Local, update);
     }
 
     /// Mirrors the old runtime's focus into the core and compares its tab list with the store's.

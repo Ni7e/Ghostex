@@ -28,6 +28,9 @@ use ghostex_gx_core::{
 
 use super::host::{GxStoreHost, now_ms};
 use crate::GhostexGpuiApp;
+use crate::app::helpers::{
+    gpui_remote_machine_config_from_settings, gpui_remote_machine_id_from_value,
+};
 
 /// How long the machine list is reused. Building it stats the settings file and clones its map
 /// under a global lock, and the publish path asks on every publish.
@@ -37,6 +40,8 @@ const TABS_MAX_AGE: Duration = Duration::from_millis(1000);
 const CLIENT_RESTART_BACKOFF_MS: [u64; 5] = [1000, 5000, 15000, 30000, 60000];
 /// A client that lived this long before its thread ended starts the backoff over.
 const CLIENT_HEALTHY_LIFETIME: Duration = Duration::from_secs(60);
+/// `normalizeRemoteMachineSettings` slices a machine's name here.
+const MACHINE_NAME_MAX_CHARS: usize = 80;
 
 /// What happened since the app started. Memory only; the log lines are built from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -49,6 +54,8 @@ pub(crate) struct RemoteClientCounters {
     pub(crate) thread_exits: u64,
     pub(crate) events: u64,
     pub(crate) reloads: u64,
+    /// Times a stored machine tab the sidebar no longer offers was reset to this computer.
+    pub(crate) tab_corrections: u64,
 }
 
 /// One remote machine's client.
@@ -60,8 +67,15 @@ struct RemoteClient {
     /// another port gets a new client.
     port: u16,
     token: String,
-    /// Bumped by every start, so a pump task or a restart timer of an earlier client can tell that
-    /// it is no longer the one in charge.
+    /// The generation this client was started with. Minted by [`RemoteClients::next_generation`],
+    /// which is monotonic for the life of the app so an id is never handed out twice.
+    ///
+    /// CDXC:RemoteMachines 2026-09-20 WHY:
+    /// It was per client and started at 0 for every fresh entry, so a machine that disconnected
+    /// (entry removed) and reconnected (entry re-inserted) handed generation 1 to a brand new
+    /// client while the previous client's pump task was still holding generation 1. That task's
+    /// "my thread ended" then matched the new entry and retired a live client, leaving the machine
+    /// stale until the next reconcile. Monotonic here removes the class rather than the window.
     generation: u64,
     started_at: Option<Instant>,
     restart_attempt: u32,
@@ -75,6 +89,8 @@ struct RemoteClient {
 #[derive(Default)]
 pub(crate) struct RemoteClients {
     clients: BTreeMap<String, RemoteClient>,
+    /// Never reused, never reset: see [`RemoteClient::generation`].
+    next_generation: u64,
     /// The machine tabs, this computer first, as the settings and the connect states describe
     /// them. The sidebar list reads this; nothing else builds it.
     tabs: Vec<MachineTabInput>,
@@ -101,6 +117,11 @@ impl RemoteClients {
             .map(|remote| &remote.held_revision)
     }
 
+    fn next_generation(&mut self) -> u64 {
+        self.next_generation += 1;
+        self.next_generation
+    }
+
     fn next_restart_delay(&mut self, machine_id: &str) -> Duration {
         let Some(remote) = self.clients.get_mut(machine_id) else {
             return Duration::from_millis(CLIENT_RESTART_BACKOFF_MS[0]);
@@ -121,15 +142,16 @@ impl RemoteClients {
 }
 
 impl GxStoreHost {
-    /// Applies what one remote client delivered. Returns whether its thread is gone.
-    pub(super) fn pump_remote(&mut self, machine_id: &str) -> bool {
+    /// Applies what one remote client delivered. Returns whether its thread is gone and whether
+    /// anything was applied, so a wake that found nothing costs no redraw.
+    pub(super) fn pump_remote(&mut self, machine_id: &str) -> (bool, bool) {
         let Some(client) = self.remote.client(machine_id) else {
-            return false;
+            return (false, false);
         };
         let outputs = client.drain();
         let thread_ended = client.thread_ended();
         if outputs.is_empty() {
-            return thread_ended;
+            return (thread_ended, false);
         }
         let machine = MachineId::Remote(machine_id.to_string());
         let mut events = Vec::with_capacity(outputs.len());
@@ -137,7 +159,7 @@ impl GxStoreHost {
             match output {
                 ClientOutput::Event(event) => {
                     if let Event::Connection { update, .. } = &event {
-                        self.diagnostics.connection(update);
+                        self.diagnostics.connection(&machine, update);
                     }
                     events.push(event);
                 }
@@ -164,7 +186,7 @@ impl GxStoreHost {
         self.run_effects(output.effects);
         // A remote frame can be exactly what a pending remote tab-list difference was waiting for.
         self.settle_shadow_diff();
-        thread_ended
+        (thread_ended, true)
     }
 
     /// Drops a machine's client and tells the core its stream is down, so the rows it holds stay on
@@ -196,7 +218,7 @@ impl GxStoreHost {
         let lost = ConnectionUpdate::Lost {
             error: Some(reason.to_string()),
         };
-        self.diagnostics.connection(&lost);
+        self.diagnostics.connection(&machine, &lost);
         let output = self.core.handle(
             Event::Connection {
                 machine,
@@ -230,8 +252,9 @@ impl GhostexGpuiApp {
         }
         self.gx_store.remote.tabs_read_at = Some(Instant::now());
         // One settings read per reconcile: the order is what the tabs are drawn in and the map is
-        // what every membership test below asks.
-        let ordered = enabled_remote_machines();
+        // what every membership test below asks. The revision says whether the file has been read
+        // at all, which is what the machine-tab correction below is gated on.
+        let (ordered, settings_revision) = enabled_remote_machines();
         let enabled: BTreeMap<&str, &str> = ordered
             .iter()
             .map(|(machine_id, label)| (machine_id.as_str(), label.as_str()))
@@ -267,7 +290,9 @@ impl GhostexGpuiApp {
             if same_target {
                 continue;
             }
-            self.gx_store.remote.counters.stops += 1;
+            if self.gx_store.remote.client(&machine_id).is_some() {
+                self.gx_store.remote.counters.stops += 1;
+            }
             self.gx_store
                 .retire_remote_client(&machine_id, "the machine is no longer connected");
             match wanted {
@@ -328,29 +353,51 @@ impl GhostexGpuiApp {
             self.start_gx_store_remote_client(machine_id, *port, token, cx);
         }
 
-        let selected = self.gx_store.sidebar_ui.selected_machine_id().to_string();
         let tabs = self.remote_machine_tabs(&ordered);
         let moved = self.gx_store.remote.tabs != tabs;
         self.gx_store.remote.tabs = tabs;
+        self.gx_store_correct_selected_machine_tab(settings_revision, cx);
         if moved {
-            // A tab the sidebar no longer offers must not stay selected, which is what
-            // `createNativeSidebarSnapshot` does with its own copy.
-            if !self
+            self.gx_store_sidebar_state_changed(cx);
+        }
+    }
+
+    /// Falls back to this computer when the selected machine tab is not one the sidebar offers,
+    /// which is what `createNativeSidebarSnapshot` does with its own copy.
+    ///
+    /// CDXC:RemoteMachines 2026-09-20 WHY:
+    /// Two properties, and the first cut of this had neither. It runs on EVERY reconcile, not only
+    /// when the tab list moved: the sidebar's own state is restored asynchronously, so at the one
+    /// forced reconcile of a launch the selection is still the default and the check passes over a
+    /// stored remote tab that lands a moment later, after which the tab list never moves again. And
+    /// it is gated on the settings having actually been READ, not on the list being non-empty: an
+    /// unreadable settings file offers no machines, and resetting the tab on that would persist the
+    /// loss of a stored remote selection. This is what the deleted `hud.settings` guard was doing.
+    fn gx_store_correct_selected_machine_tab(
+        &mut self,
+        settings_revision: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let selected = self.gx_store.sidebar_ui.selected_machine_id();
+        if settings_revision == 0
+            || selected == ghostex_gx_core::LOCAL_MACHINE_ID
+            || !self.gx_store.sidebar_ui.restored()
+            || self
                 .gx_store
                 .remote
                 .tabs
                 .iter()
                 .any(|machine| machine.machine_id == selected)
-            {
-                self.gx_store_apply_sidebar_ui_intent(
-                    ghostex_gx_core::SidebarUiIntent::SelectMachine {
-                        machine_id: ghostex_gx_core::LOCAL_MACHINE_ID.to_string(),
-                    },
-                    cx,
-                );
-            }
-            self.gx_store_sidebar_state_changed(cx);
+        {
+            return;
         }
+        self.gx_store.remote.counters.tab_corrections += 1;
+        self.gx_store_apply_sidebar_ui_intent(
+            ghostex_gx_core::SidebarUiIntent::SelectMachine {
+                machine_id: ghostex_gx_core::LOCAL_MACHINE_ID.to_string(),
+            },
+            cx,
+        );
     }
 
     /// The machine tabs: this computer, then every machine the user has enabled, in settings order.
@@ -403,8 +450,7 @@ impl GhostexGpuiApp {
         token: &str,
         cx: &mut gpui::Context<Self>,
     ) {
-        let entry = self
-            .gx_store
+        self.gx_store
             .remote
             .clients
             .entry(machine_id.to_string())
@@ -418,13 +464,19 @@ impl GhostexGpuiApp {
                 restart_attempt: 0,
                 restart_due_at: None,
             });
+        let generation = self.gx_store.remote.next_generation();
+        let entry = self
+            .gx_store
+            .remote
+            .clients
+            .get_mut(machine_id)
+            .expect("inserted above");
         // Dropping the client stops its thread; its wake channel closes and ends the old pump.
         entry.client = None;
         entry.port = port;
         entry.token = token.to_string();
         entry.restart_due_at = None;
-        entry.generation += 1;
-        let generation = entry.generation;
+        entry.generation = generation;
         // The revision the store holds for this machine, so a restart resumes rather than asking
         // for a whole snapshot it already has.
         let held_revision = entry.held_revision.clone();
@@ -498,8 +550,12 @@ impl GhostexGpuiApp {
 
     /// Applies what one remote client delivered and redraws what reads it.
     fn gx_store_pump_remote(&mut self, machine_id: &str, cx: &mut gpui::Context<Self>) -> bool {
-        let thread_ended = self.gx_store.pump_remote(machine_id);
-        self.gx_store_update_sidebar_list(cx);
+        let (thread_ended, applied) = self.gx_store.pump_remote(machine_id);
+        // A wake whose drain came back empty (the thread woke the host and the host had already
+        // drained it) has nothing for the list to read.
+        if applied {
+            self.gx_store_update_sidebar_list(cx);
+        }
         thread_ended
     }
 
@@ -562,11 +618,13 @@ impl GhostexGpuiApp {
 }
 
 /// The remote machines the user has enabled in the sidebar, in settings order, with the name each
-/// one carries. `settings.remoteMachines.filter(isRemoteMachineEnabledInSidebar)`: a machine with
-/// `disabled` true stays saved and is kept out of the sidebar.
-fn enabled_remote_machines() -> Vec<(String, String)> {
-    crate::shared_settings::shared_sidebar_settings_snapshot()
-        .object()
+/// one carries, and the settings revision they were read at (0 means the file has never been read).
+/// `settings.remoteMachines.filter(isRemoteMachineEnabledInSidebar)`: a machine with `disabled`
+/// true stays saved and is kept out of the sidebar.
+fn enabled_remote_machines() -> (Vec<(String, String)>, u64) {
+    let settings = crate::shared_settings::shared_sidebar_settings_snapshot();
+    let object = settings.object();
+    let machines = object
         .get("remoteMachines")
         .and_then(serde_json::Value::as_array)
         .map(|machines| {
@@ -576,20 +634,28 @@ fn enabled_remote_machines() -> Vec<(String, String)> {
                     machine.get("disabled").and_then(serde_json::Value::as_bool) != Some(true)
                 })
                 .filter_map(|machine| {
-                    let machine_id = machine
-                        .get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::trim)
-                        .filter(|machine_id| !machine_id.is_empty())?;
+                    // `normalizeRemoteMachineSettings`' own rules, not a looser reading of the
+                    // file: an id that is not a well-formed machine id, a machine with no name,
+                    // and a machine with no reachable endpoint (no `sshHost`, and not a valid Easy
+                    // Connect machine) are all dropped before the sidebar sees them. Reading the
+                    // array raw gave a half-configured machine a tab in the store that the
+                    // projection does not draw.
+                    let machine_id = gpui_remote_machine_id_from_value(machine)?;
                     let label = machine
                         .get("name")
                         .and_then(serde_json::Value::as_str)
                         .map(str::trim)
                         .filter(|name| !name.is_empty())
-                        .unwrap_or(machine_id);
-                    Some((machine_id.to_string(), label.to_string()))
+                        .map(|name| {
+                            name.chars()
+                                .take(MACHINE_NAME_MAX_CHARS)
+                                .collect::<String>()
+                        })?;
+                    gpui_remote_machine_config_from_settings(object, machine_id.as_str())?;
+                    Some((machine_id, label))
                 })
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    (machines, settings.revision())
 }

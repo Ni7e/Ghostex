@@ -29,7 +29,15 @@ pub struct SidebarMenus<'a> {
     view: &'a SidebarView,
     inputs: &'a SidebarInputs,
     host: &'a MenuHost,
+    /// The catalog of the machine whose rows are drawn: what a ROW's own tag submenu offers, which
+    /// is the `customTags` the TypeScript hands `createNativeSessionActions`.
     catalog: TagCatalog,
+    /// Every machine's catalog, this computer's first: what a tag id RESOLVES to for a label or an
+    /// icon (`getSessionTagCatalogs`).
+    label_catalog: TagCatalog,
+    /// This computer's alone: which tag filters the Sort & Filter menu offers at all
+    /// (`normalizeSidebarSessionTagListItems(settings, state.customSessionTags)`).
+    filter_catalog: TagCatalog,
     spaces: Option<SpacesState>,
     collections: CollectionsState,
     now_ms: u64,
@@ -56,6 +64,26 @@ impl<'a> SidebarMenus<'a> {
             host,
             catalog: TagCatalog::from_state(
                 side_state.and_then(|side| side.custom_session_tags.as_ref()),
+            ),
+            label_catalog: TagCatalog::merged(
+                std::iter::once(MachineId::Local)
+                    .chain(
+                        store
+                            .machines()
+                            .map(|(machine, _)| machine.clone())
+                            .filter(|machine| !machine.is_local()),
+                    )
+                    .map(|machine| {
+                        store
+                            .machine(&machine)
+                            .and_then(|entry| entry.side_state().custom_session_tags.as_ref())
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            filter_catalog: TagCatalog::from_state(
+                store
+                    .machine(&MachineId::Local)
+                    .and_then(|entry| entry.side_state().custom_session_tags.as_ref()),
             ),
             // The Spaces submenu follows the same switch the drawn list does: with Spaces off the
             // sidebar has none to offer.
@@ -86,6 +114,8 @@ impl<'a> SidebarMenus<'a> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.catalog.hash(&mut hasher);
+        self.label_catalog.hash(&mut hasher);
+        self.filter_catalog.hash(&mut hasher);
         self.spaces.hash(&mut hasher);
         self.collections.hash(&mut hasher);
         hasher.finish()
@@ -104,9 +134,18 @@ impl<'a> SidebarMenus<'a> {
                 .as_ref()
                 .map(|remote| remote.machine_name.as_str()),
             is_stale: core.is_stale,
-            // Every project group and every user-made group can take a session into a new group;
-            // the Chats collection cannot, on either machine.
-            can_create_session_group: !is_chats_group(core.group_id.as_str()),
+            // A project group and a user-made group can take a session into a new group; a
+            // machine's Chats collection cannot.
+            //
+            // CDXC:ContextMenus 2026-09-20 WHY:
+            // Asked of the project row rather than of the group id, which is what
+            // `createGpuiRemotePresentationSidebarGroups` does (`project !== undefined`). The id
+            // test alone was written for this computer, where a project group always has a row;
+            // a remote group whose project the machine did not publish is the case it was never
+            // asked about, and `!is_chats_group` would offer the item on a group with nothing to
+            // put in it.
+            can_create_session_group: core.project_context.is_some()
+                || is_user_made_group(core.group_id.as_str()),
             // The projection never sets it, so the Focus item never appears.
             can_focus_mode: false,
             workspace_focus_bridge: self.host.workspace_focus_bridge,
@@ -243,7 +282,8 @@ impl<'a> SidebarMenus<'a> {
         navigation::more_menu(&navigation::MoreMenuInput {
             ui: &self.inputs.ui,
             settings: &self.inputs.settings,
-            catalog: &self.catalog,
+            catalog: &self.label_catalog,
+            filter_catalog: &self.filter_catalog,
             host: self.host,
             drawn_project_group_ids: &drawn,
         })
@@ -311,6 +351,12 @@ impl<'a> SidebarMenus<'a> {
 /// so parsing meant percent-decoding a project path out of every local group id for every row of
 /// every install: one allocation and one decode per row for a question that is answered by a
 /// prefix and a suffix. The two forms are the only ones the encoder produces.
+/// Whether a sidebar group id is a user-made session group, which has no project row of its own
+/// and can still take a session into a new group.
+fn is_user_made_group(group_id: &str) -> bool {
+    group_id.starts_with("gpui-wsg:")
+}
+
 fn is_chats_group(group_id: &str) -> bool {
     const REMOTE_PREFIX: &str = "remote:";
     const REMOTE_CHATS_SUFFIX: &str = ":group:combined-chats";

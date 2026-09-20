@@ -102,8 +102,16 @@ pub(crate) struct CustomTag {
     pub(crate) color: String,
 }
 
-/// The custom tag catalogs a row resolves ids against (the local daemon's; remote catalogs join
-/// with the remote machines).
+/// A custom tag catalog: one machine's document, or several merged for a lookup.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// The TypeScript uses three different catalogs and the difference only shows with a second
+/// machine, so this crate used one for all three until M4d made remote catalogs reachable.
+/// `findCustomSessionTag` resolves a tag id against EVERY machine's catalog with this computer's
+/// first (`getSessionTagCatalogs`), which is what a label and a tag icon read;
+/// `normalizeSidebarSessionTagListItems` is handed THIS COMPUTER's alone, which is what decides
+/// which filter rows the Sort & Filter menu offers and which ticked filters survive a prune; and a
+/// row's own tag submenu is handed the catalog of the machine that row is on.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct TagCatalog {
     /// In catalog order.
@@ -112,6 +120,29 @@ pub(crate) struct TagCatalog {
 }
 
 impl TagCatalog {
+    /// Several catalogs as one, for a LOOKUP. A tag id that several machines define resolves to
+    /// the first catalog that has it, which is `findCustomSessionTag`'s rule with this computer's
+    /// catalog passed first.
+    pub(crate) fn merged<'a>(
+        states: impl IntoIterator<Item = Option<&'a CustomSessionTagsState>>,
+    ) -> Self {
+        let mut merged = Self::default();
+        for state in states {
+            let catalog = Self::from_state(state);
+            for id in &catalog.order {
+                if merged.tags.contains_key(id) {
+                    continue;
+                }
+                let Some(tag) = catalog.tags.get(id) else {
+                    continue;
+                };
+                merged.order.push(id.clone());
+                merged.tags.insert(id.clone(), tag.clone());
+            }
+        }
+        merged
+    }
+
     /// `normalizeCustomSessionTagsState`: the order array is authoritative, tags missing from it
     /// follow in map order, and every kept tag has a bounded name, an icon, and a lowercase
     /// `#rrggbb` color.
