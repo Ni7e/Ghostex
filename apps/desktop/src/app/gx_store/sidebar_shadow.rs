@@ -481,6 +481,20 @@ impl GhostexGpuiApp {
         );
         let ui = self.gx_store.sidebar_ui.counters;
         self.gx_store.diagnostics.sidebar_ui_summary(&ui);
+        // The workspace session groups counters ride this path too, because it is the one that is
+        // proved to reach the log in a quiet run: everything through `record()` is silent until the
+        // shared settings snapshot is warm, and the two places this used to be emitted from (a push
+        // and the one reconcile) both fire before that or not at all (gx_store/diagnostics.rs).
+        let groups = self.gx_store.workspace_groups.counters;
+        let side_state_held = self
+            .gx_store
+            .core
+            .presentation()
+            .machine(&MachineId::Local)
+            .is_some_and(|machine| machine.side_state().workspace_groups.is_some());
+        self.gx_store
+            .diagnostics
+            .workspace_groups_summary(groups, side_state_held);
         // A difference that no later publish resolves still has to be judged, so it books one
         // judgement of its own. A stable difference is settled by the first of them; a shape that
         // keeps changing would book for ever, so the bookings are bounded and it then waits for

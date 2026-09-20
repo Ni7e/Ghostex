@@ -396,6 +396,7 @@ impl GhostexGpuiApp {
     fn gx_store_pump(&mut self, cx: &mut gpui::Context<Self>) -> bool {
         let outcome = self.gx_store.pump();
         if outcome.workspace_groups_changed {
+            self.gx_store.workspace_groups.counters.reconcile_seen += 1;
             // The daemon's copy is already in the store by now; the guard says whether it may stay.
             self.gx_store_reconcile_workspace_groups(cx);
         }

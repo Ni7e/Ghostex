@@ -151,6 +151,17 @@ pub(crate) struct WorkspaceGroupsCounters {
     /// base of its next edit, which is declared difference 29 in a second shape, so the record of
     /// what it was told is NOT advanced and the next change tells it again.
     pub(crate) hand_backs_dropped: u64,
+    /// Pumps that reported `side_state.workspace_groups` as moved, which is what schedules the
+    /// reconcile, and reconciles actually entered.
+    ///
+    /// CDXC:Sessions 2026-09-21 WHY:
+    /// These two exist because a record whose counters are all zero cannot say whether the path ran
+    /// and did nothing or never ran at all, and two live rounds were spent on exactly that
+    /// question. `reconcile_seen` at zero means the daemon's copy never reached the side state as a
+    /// CHANGE, which is a wire or a reducer question; `reconcile_seen` ahead of `reconcile_entered`
+    /// means the host saw it and did not act on it.
+    pub(crate) reconcile_seen: u64,
+    pub(crate) reconcile_entered: u64,
 }
 
 #[derive(Default)]
@@ -415,6 +426,7 @@ impl GhostexGpuiApp {
     /// Called from the one place a change summary reports `side_state.workspace_groups`, so there
     /// is no second copy of this decision and no frame path to get wrong.
     pub(crate) fn gx_store_reconcile_workspace_groups(&mut self, cx: &mut gpui::Context<Self>) {
+        self.gx_store.workspace_groups.counters.reconcile_entered += 1;
         // The stored key is the instant-edit source and has to be in hand before the first echo is
         // judged, or a cold start would adopt the daemon's copy over a document the user edited
         // offline.
@@ -429,13 +441,6 @@ impl GhostexGpuiApp {
         // calls this again when the read lands.
         if !self.gx_store_restore_workspace_groups(cx) {
             self.gx_store.workspace_groups.counters.echoes_deferred += 1;
-            // The record goes out on THIS path too. It used to sit only at the end, and since the
-            // read became asynchronous the first call always returns here, so a normal launch
-            // produced no line at all: the record that was added so a run with no group edit could
-            // still be read was unreadable in exactly that run.
-            self.gx_store
-                .diagnostics
-                .workspace_groups_reconciled(self.gx_store.workspace_groups.counters);
             return;
         }
         let server_state = self
@@ -474,11 +479,6 @@ impl GhostexGpuiApp {
             self.gx_store_apply_workspace_groups_to_store(&held, cx);
         }
         self.gx_store_tell_old_runtime_workspace_groups(cx);
-        // The counters ride out here as well as on a push, so a run in which the user edited no
-        // group still says whether the bridge is alive.
-        self.gx_store
-            .diagnostics
-            .workspace_groups_reconciled(self.gx_store.workspace_groups.counters);
     }
 
     /// Hands the held document to the old runtime, which no longer reads the daemon's copy itself.

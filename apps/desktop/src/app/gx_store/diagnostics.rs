@@ -63,6 +63,9 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_ui_summary_written: SidebarUiCounters,
     sidebar_refusal_warnings: u32,
     workspace_groups_records: u32,
+    workspace_groups_summary_at: Option<Instant>,
+    workspace_groups_summary_written:
+        Option<(super::workspace_groups::WorkspaceGroupsCounters, bool)>,
     workspace_groups_read_warnings: u32,
     workspace_groups_write_warnings: u32,
     workspace_groups_refusal_warnings: u32,
@@ -1036,28 +1039,48 @@ impl GxStoreDiagnostics {
         ok: bool,
         counters: super::workspace_groups::WorkspaceGroupsCounters,
     ) {
-        self.workspace_groups_record(Some(ok), counters);
+        self.workspace_groups_record(Some(ok), counters, None);
     }
 
-    /// The same counters without a push behind them.
+    /// The same counters on the periodic path, whether or not anything has happened.
     ///
     /// CDXC:Sessions 2026-09-21 WHY:
-    /// The record used to be emitted only from a push, so a run in which the user edited no group
-    /// produced no line at all and the counters that say whether the bridge is alive (`handOffs`,
-    /// `handBacks`, `hostMessagesDropped`) could not be read. It is emitted from the reconcile too,
-    /// which runs on the daemon's first `workspaceGroups` frame, so every run with a daemon behind
-    /// it has at least one.
-    pub(super) fn workspace_groups_reconciled(
+    /// **A record that is emitted at ONE instant is a record that is not there when it is read.**
+    /// This one was emitted only from a push, so a run with no group edit had no line; it was then
+    /// also emitted from the reconcile, which fires once, at about a second into the run, and two
+    /// live rounds produced no line either, because `routine_logging_enabled()` reads the shared
+    /// settings snapshot and everything through `record()` is silent until that snapshot is warm,
+    /// while `gxStore.loaded` is not (it calls `append` directly, which is why it was always there
+    /// to mislead). So the counters ride the SAME periodic path as `gxStore.sidebarShadow.summary`,
+    /// which is proved to reach the log in a quiet run, and the first line is emitted even when
+    /// every counter is zero, because "the path never ran" is the answer that was missing twice.
+    pub(super) fn workspace_groups_summary(
         &mut self,
         counters: super::workspace_groups::WorkspaceGroupsCounters,
+        side_state_held: bool,
     ) {
-        self.workspace_groups_record(None, counters);
+        if self
+            .workspace_groups_summary_written
+            .is_some_and(|written| written == (counters, side_state_held))
+            || self
+                .workspace_groups_summary_at
+                .is_some_and(|at| at.elapsed() < SHADOW_SUMMARY_INTERVAL)
+        {
+            return;
+        }
+        self.workspace_groups_summary_at = Some(Instant::now());
+        if !routine_logging_enabled() {
+            return;
+        }
+        self.workspace_groups_summary_written = Some((counters, side_state_held));
+        self.workspace_groups_record(None, counters, Some(side_state_held));
     }
 
     fn workspace_groups_record(
         &mut self,
         ok: Option<bool>,
         counters: super::workspace_groups::WorkspaceGroupsCounters,
+        side_state_held: Option<bool>,
     ) {
         if self.workspace_groups_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled()
         {
@@ -1095,6 +1118,14 @@ impl GxStoreDiagnostics {
                 "handOffsRequested": counters.hand_offs_requested,
                 "echoesDeferred": counters.echoes_deferred,
                 "deferredRecovered": counters.deferred_recovered,
+                "reconcileSeen": counters.reconcile_seen,
+                "reconcileEntered": counters.reconcile_entered,
+                // Whether the store holds the daemon's copy at all. With `reconcileSeen` this
+                // separates the three answers the last two rounds could not tell apart: absent
+                // means the document never reached the side state, held with `reconcileSeen` zero
+                // means it arrived without ever being reported as a CHANGE, and held with
+                // `reconcileSeen` non-zero means the host saw it.
+                "sideStateHeld": side_state_held,
             }),
         );
     }
