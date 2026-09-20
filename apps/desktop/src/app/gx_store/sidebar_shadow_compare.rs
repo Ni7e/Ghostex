@@ -89,6 +89,9 @@ pub(super) struct SidebarMismatch {
     /// Every difference in this record is a timestamp that moves on its own, so it is the two
     /// sides reading the same session a publish apart rather than either of them being wrong.
     pub(super) only_timing_fields: bool,
+    /// Every difference in this record is a value only the store holds, in a field the old
+    /// projection can hold a stale absence of for the whole run.
+    pub(super) only_stale_fields: bool,
 }
 
 /// The two compared fields a frozen row can differ in on its own.
@@ -119,6 +122,22 @@ const FROZEN_FIELDS: [&str; 2] = ["pendingQuestionCount", "titleTooltip"];
 /// It is still compared, and its one real consequence still is: the row order it feeds shows up
 /// as a group's `sessionOrder` and `sections`, which are not in this list and are reported.
 const TIMING_FIELDS: [&str; 1] = ["lastInteractionAt"];
+
+/// The compared fields the old projection can hold a stale absence of for the life of a run.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// Both of these reach the two sides from the same source and are never invented here, so a
+/// difference where only the STORE holds a value is the other side standing still, not this list
+/// being wrong. `discoveredIconDataUrl` rides on a daemon project row, and in a recording of 1,928
+/// frames not one project delta re-sent a row: the icon exists in snapshots only, so a client
+/// whose snapshot was taken before the daemon finished probing never learns it, and the two
+/// clients here take theirs about a second apart at launch. `faviconDataUrl` on a browser row
+/// comes from this app's own tab list, which the store reads in the frame the app publishes it and
+/// the projection a publish later.
+///
+/// Only that direction is classified. A field the old side holds and the store does not is
+/// reported, because that is the shape a real loss in this port would take.
+const STALE_PUBLISH_FIELDS: [&str; 2] = ["projectContext.discoveredIconDataUrl", "faviconDataUrl"];
 
 impl SidebarMismatch {
     pub(super) fn signature(&self) -> u64 {
@@ -214,6 +233,27 @@ pub(super) fn compare(
                 .iter()
                 .all(|field| TIMING_FIELDS.contains(&field.name))
         });
+    // Not `rows_only`: one of the two fields belongs to a project header, so this asks the wider
+    // question of whether the record holds any STRUCTURAL difference, and then whether every
+    // differing field of it, group or row, is one the old side goes stale in.
+    let structural = !mismatch.only_old_groups.is_empty()
+        || !mismatch.only_store_groups.is_empty()
+        || mismatch.group_order_differs
+        || !mismatch.only_old_sessions.is_empty()
+        || !mismatch.only_store_sessions.is_empty()
+        || !mismatch.top_level.is_empty();
+    mismatch.only_stale_fields = !structural
+        && (!mismatch.groups.is_empty() || !mismatch.sessions.is_empty())
+        && mismatch
+            .groups
+            .iter()
+            .chain(&mismatch.sessions)
+            .flat_map(|(_, fields)| fields)
+            .all(|field| {
+                STALE_PUBLISH_FIELDS.contains(&field.name)
+                    && field.store_has_value
+                    && !field.old_has_value
+            });
     mismatch.bound();
     mismatch.differs().then_some(mismatch)
 }

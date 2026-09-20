@@ -342,6 +342,7 @@ impl GxStoreDiagnostics {
                 "tooltipOnly": mismatch.tooltip_only,
                 "onlyFrozenFields": mismatch.only_frozen_fields,
                 "onlyTimingFields": mismatch.only_timing_fields,
+                "onlyStaleFields": mismatch.only_stale_fields,
             }),
         );
     }
@@ -377,8 +378,9 @@ impl GxStoreDiagnostics {
                     SidebarListSource::Store => "store",
                     SidebarListSource::Projection => "projection",
                 },
-                "observed": counters.observed,
-                "compared": counters.compared,
+                "publishes": counters.publishes,
+                "comparisons": counters.comparisons,
+                "rejudged": counters.rejudged,
                 "matches": counters.matches,
                 "mismatches": counters.mismatches,
                 "distinctMismatches": counters.distinct_mismatches,
@@ -392,6 +394,7 @@ impl GxStoreDiagnostics {
                 "tooltipOnly": counters.tooltip_only,
                 "frozenFieldsOnly": counters.frozen_fields_only,
                 "timingFieldsOnly": counters.timing_fields_only,
+                "staleFieldsOnly": counters.stale_fields_only,
                 "neverSettled": counters.never_settled,
                 "scratchChecks": counters.scratch_checks,
                 "scratchMismatches": counters.scratch_mismatches,

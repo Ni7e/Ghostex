@@ -39,8 +39,12 @@ const MAX_SETTLE_REBOOKS: u8 = 4;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SidebarShadowCounters {
     /// Publishes of the old projection seen while the comparison was on.
-    pub(crate) observed: u64,
-    pub(crate) compared: u64,
+    pub(crate) publishes: u64,
+    /// Comparisons run. Larger than `publishes` on purpose: a difference that is waiting to settle
+    /// books its own judgement, and each of those is another comparison of the same publish.
+    pub(crate) comparisons: u64,
+    /// Comparisons that came from a difference re-judging itself rather than from a publish.
+    pub(crate) rejudged: u64,
     pub(crate) matches: u64,
     /// Differences that lasted the settle window.
     pub(crate) mismatches: u64,
@@ -76,6 +80,10 @@ pub(crate) struct SidebarShadowCounters {
     /// hold the same value long enough to agree on it; the row order it feeds is compared
     /// separately and is not in this bucket.
     pub(crate) timing_fields_only: u64,
+    /// Confirmed differences made up entirely of a value only the store holds, in a field the old
+    /// projection goes stale in. The store is the newer of the two there; see
+    /// `STALE_PUBLISH_FIELDS`.
+    pub(crate) stale_fields_only: u64,
     /// Differences that were replaced by another shape before they could settle. A number that
     /// keeps climbing while `matches` and `mismatches` stand still means something flapping.
     pub(crate) never_settled: u64,
@@ -163,7 +171,7 @@ impl GhostexGpuiApp {
             return;
         }
         self.gx_store.sidebar_shadow.projection_identity = identity;
-        self.gx_store.sidebar_shadow.counters.observed += 1;
+        self.gx_store.sidebar_shadow.counters.publishes += 1;
         if self.gx_store.sidebar_shadow.scheduled {
             return;
         }
@@ -311,7 +319,7 @@ impl GhostexGpuiApp {
         let scratch = self.gx_store_sidebar_scratch_check();
 
         let shadow = &mut self.gx_store.sidebar_shadow;
-        shadow.counters.compared += 1;
+        shadow.counters.comparisons += 1;
         shadow.counters.last_compare_us = compare_us;
         shadow.counters.compare_max_us = shadow.counters.compare_max_us.max(compare_us);
         if let Some(scratch) = scratch {
@@ -344,6 +352,9 @@ impl GhostexGpuiApp {
                     }
                     if difference.only_timing_fields {
                         shadow.counters.timing_fields_only += 1;
+                    }
+                    if difference.only_stale_fields {
+                        shadow.counters.stale_fields_only += 1;
                     }
                     if shadow.confirmed_signatures.len() < MAX_CONFIRMED_SIGNATURES
                         && shadow.confirmed_signatures.insert(signature)
@@ -441,6 +452,7 @@ impl GhostexGpuiApp {
                 let _ = this.update(cx, |this, cx| {
                     this.gx_store.sidebar_shadow.settle_scheduled = false;
                     if this.gx_store.sidebar_shadow.pending.is_some() {
+                        this.gx_store.sidebar_shadow.counters.rejudged += 1;
                         this.gx_store_compare_sidebar_view(cx);
                     }
                 });
