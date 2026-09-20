@@ -55,6 +55,17 @@ impl MoveGroup {
     }
 }
 
+/// The rows of a group, in the order a move is computed against. Public so a probe can record the
+/// list the planner really used rather than describe one beside it: a record that can drift from
+/// the list that decided is a record that agrees with any answer.
+pub fn sidebar_group_membership(
+    core: &Core,
+    inputs: &SidebarInputs,
+    group_id: &str,
+) -> Option<Vec<String>> {
+    group_by_id(core, inputs, group_id).map(|group| group.session_ids())
+}
+
 /// The group with this id, as the projection built it, or `None` for a group it has no row for.
 ///
 /// `None` is what `state.groupsById[id]` being absent means, and the TypeScript's answer to that is

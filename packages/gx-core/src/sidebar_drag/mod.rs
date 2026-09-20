@@ -20,6 +20,7 @@ mod inventory;
 mod order_write;
 mod session_move;
 
+pub use inventory::sidebar_group_membership;
 pub use order_write::{
     owns_order_write_message, plan_order_write, OrderWrite, OrderWritePlan,
     ORDER_WRITE_MESSAGE_TYPES,

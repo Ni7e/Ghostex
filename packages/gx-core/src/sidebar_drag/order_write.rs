@@ -72,10 +72,12 @@ impl OrderWrite {
                     "params": { "projectId": project.project_id, "sessionIds": session_ids },
                 },
             }),
+            // Named the way the TypeScript names them, because these two fields ARE
+            // `activeProjectId` and `activeGroupId` and the gate compares them by name.
             Self::ActivateSubgroup { project, group_id } => json!({
                 "write": "activateSubgroup",
-                "project": project.to_sidebar_group_id(),
-                "groupId": group_id,
+                "activeProjectId": project.project_id,
+                "activeGroupId": crate::keys::encode_workspace_subgroup_id(project, group_id),
             }),
             Self::Toast { level, title } => {
                 json!({ "write": "toast", "level": level.as_str(), "title": title })

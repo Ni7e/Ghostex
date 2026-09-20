@@ -68,7 +68,8 @@ pub use crate::sidebar_actions::{
 };
 pub use crate::sidebar_drag::{
     owns_order_write_message, owns_session_move_command, plan_order_write, plan_session_move,
-    OrderWrite, OrderWritePlan, SessionMovePlan, ORDER_WRITE_MESSAGE_TYPES,
+    sidebar_group_membership, OrderWrite, OrderWritePlan, SessionMovePlan,
+    ORDER_WRITE_MESSAGE_TYPES,
 };
 pub use crate::sidebar_menu::{
     agent_launcher_items, agent_logo_icons, colored_agent_logo, hover_strip, menu_to_json,

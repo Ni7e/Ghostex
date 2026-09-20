@@ -1546,15 +1546,251 @@ function sortKeys(value: unknown): unknown {
   return value;
 }
 
+/**
+ * The session moves, compared step by step.
+ *
+ * Its own mode for the same reason the guard's is: a drag is not one call, it is a message and then
+ * what that message writes, and the failure is a document that goes somewhere wrong in the middle
+ * of the sequence. It also asks a question no other gate does, which is whether the two sides agree
+ * about WHICH ROWS a group holds and in what order. That list is derived independently on each
+ * side, because handing both the same one would make a port that used the drawn list pass.
+ */
+async function compareDrag([outDir, ...flags]: string[]) {
+  if (!outDir) throw new Error('drag <out-dir>');
+  pinTimeZone();
+  const injectAt = flags.indexOf('--inject');
+  const mutationName = injectAt >= 0 ? flags[injectAt + 1] : undefined;
+  if (mutationName && !DRAG_MUTATIONS.includes(mutationName)) {
+    console.error(`unknown mutation ${mutationName}; one of ${DRAG_MUTATIONS.join(', ')}`);
+    process.exit(2);
+  }
+  const { runTypeScriptDragCases } = await import('./drag-parity-typescript.ts');
+  let dump: Json;
+  try {
+    dump = JSON.parse(readFileSync(join(outDir, 'rust-drag.json'), 'utf8')) as Json;
+  } catch {
+    console.error(`no rust-drag.json in ${outDir}: run the sidebar_drag_parity example first`);
+    process.exit(2);
+  }
+  const theirs = await runTypeScriptDragCases(dump.scenario as Json, dump);
+  const differences: string[] = [];
+
+  // First, the list a move is computed against. A difference here is the "drawn index is not a
+  // stored index" defect, and every case below would be decided on the wrong rows.
+  let membershipGroups = 0;
+  for (const entry of dump.cases as Json[]) {
+    const groupId = String((entry.command as Json).groupId);
+    if (!(groupId in theirs.membershipByGroup)) continue;
+    membershipGroups += 1;
+    const mine = mutateDrag(mutationName, entry).membership ?? [];
+    const other = theirs.membershipByGroup[groupId] ?? [];
+    if (canonical(mine) !== canonical(other))
+      differences.push(`membership ${groupId}: rust ${canonical(mine)} ts ${canonical(other)}`);
+  }
+
+  let cases = 0;
+  let steps = 0;
+  let posts = 0;
+  let silentDrops = 0;
+  let documentEdits = 0;
+  let orderCalls = 0;
+  let handOffs = 0;
+  // A hand-off only means something if the other side does the work. A refusal both sides answer
+  // with nothing is a refusal the gate cannot see, which is how one of this port's earlier ones
+  // shipped unreachable.
+  let handOffsWithWork = 0;
+  let drawnDiffers = 0;
+  for (const [index, entry] of (dump.cases as Json[]).entries()) {
+    const mine = mutateDrag(mutationName, entry);
+    const other = theirs.cases[index] ?? {};
+    cases += 1;
+    if (entry.membershipDiffersFromDrawn === true) drawnDiffers += 1;
+    if (mine.handedOff === true) {
+      handOffs += 1;
+      if (((other.messages ?? []) as Json[]).length) handOffsWithWork += 1;
+      continue;
+    }
+    const mineMessages = (mine.messages ?? []) as Json[];
+    const otherMessages = (other.messages ?? []) as Json[];
+    posts += mineMessages.length;
+    if (!mineMessages.length) silentDrops += 1;
+    const where = `${entry.variant} ${describeMove(entry.command as Json)}`;
+    if (canonical(mineMessages) !== canonical(otherMessages)) {
+      differences.push(`${where}: rust ${canonical(mineMessages)} ts ${canonical(otherMessages)}`);
+      continue;
+    }
+    const mineSteps = (mine.steps ?? []) as Json[];
+    const otherSteps = (other.steps ?? []) as Json[];
+    for (const [step, mineStep] of mineSteps.entries()) {
+      steps += 1;
+      const otherStep = otherSteps[step] ?? {};
+      const writes = (mineStep.writes ?? []) as Json[];
+      documentEdits += writes.filter((write) => write.write === 'editDocument').length;
+      orderCalls += writes.filter((write) => write.write === 'sessionOrderCall').length;
+      if (mineStep.handedOff === true) continue;
+      if (canonical(normalizeWrites(writes)) !== canonical(normalizeWrites((otherStep.writes ?? []) as Json[])))
+        differences.push(
+          `${where} step ${step}: rust ${canonical(normalizeWrites(writes))} ts ${canonical(normalizeWrites((otherStep.writes ?? []) as Json[]))}`
+        );
+      if (canonical(normalizeDocument(mineStep.document)) !== canonical(normalizeDocument(otherStep.document)))
+        differences.push(
+          `${where} step ${step} document: rust ${canonical(normalizeDocument(mineStep.document))} ts ${canonical(normalizeDocument(otherStep.document))}`
+        );
+    }
+  }
+
+  let creates = 0;
+  let limitToasts = 0;
+  for (const [index, entry] of (dump.creates as Json[]).entries()) {
+    const other = theirs.creates[index] ?? {};
+    if (entry.handedOff === true) {
+      handOffs += 1;
+      if (((other.writes ?? []) as Json[]).length) handOffsWithWork += 1;
+      continue;
+    }
+    creates += 1;
+    const writes = ((entry.writes ?? []) as Json[]).slice();
+    limitToasts += writes.filter((write) => write.write === 'toast').length;
+    const where = `create ${entry.label} ${idShape(String(entry.sessionId))}`;
+    if (canonical(normalizeWrites(writes)) !== canonical(normalizeWrites((other.writes ?? []) as Json[])))
+      differences.push(
+        `${where}: rust ${canonical(normalizeWrites(writes))} ts ${canonical(normalizeWrites((other.writes ?? []) as Json[]))}`
+      );
+  }
+
+  console.log(
+    `drag: ${cases} moves ${posts} posts ${steps} steps ${documentEdits} document edits ${orderCalls} order calls ${creates} creates ${limitToasts} limit toasts ${handOffs} hand-offs (${handOffsWithWork} the old runtime performs) ${silentDrops} drops ${membershipGroups} membership checks ${drawnDiffers} cases where the drawn list differs, differences ${differences.length}${
+      mutationName ? ` (injected ${mutationName})` : ''
+    }`
+  );
+  for (const difference of differences.slice(0, 20)) console.log(`  ${difference}`);
+  if (differences.length > 20) console.log(`  … and ${differences.length - 20} more`);
+  const measured: [string, number][] = [
+    ['moves', cases],
+    ['posts', posts],
+    ['steps', steps],
+    ['documentEdits', documentEdits],
+    ['orderCalls', orderCalls],
+    ['creates', creates],
+    ['limitToasts', limitToasts],
+    ['handOffs', handOffs],
+    ['handOffsWithWork', handOffsWithWork],
+    ['silentDrops', silentDrops],
+    ['membershipChecks', membershipGroups],
+    ['drawnDiffers', drawnDiffers],
+  ];
+  const collapsed = measured.filter(([, count]) => count === 0);
+  if (mutationName) {
+    const noticed = differences.length > 0 || collapsed.length > 0;
+    process.exitCode = noticed ? 0 : 1;
+    if (!noticed)
+      console.log(`  the injected mutation ${mutationName} produced NO difference and collapsed no counter`);
+    return;
+  }
+  if (!differences.length && collapsed.length) {
+    console.log(`  ${collapsed.map(([label]) => label).join(', ')} counted nothing`);
+    process.exitCode = 1;
+    return;
+  }
+  process.exitCode = differences.length ? 1 : 0;
+}
+
+const DRAG_MUTATIONS = [
+  'plan-against-the-drawn-list',
+  'skip-the-no-op-write',
+  'drop-the-target-index',
+  'move-into-the-project-group-keeps-the-subgroup',
+  'pinned-rows-always-go-first',
+];
+
+/**
+ * The drag mutations. Each one is a reasonable-looking simplification of a move whose only symptom
+ * is an order the user did not ask for.
+ */
+function mutateDrag(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  switch (name) {
+    // The defect this whole piece is written against: compute the drop against the list the sidebar
+    // DRAWS instead of the one it stores.
+    case 'plan-against-the-drawn-list': {
+      clone.membership = clone.drawn;
+      for (const message of (clone.messages ?? []) as Json[])
+        if (message.type === 'syncSessionOrder') message.sessionIds = clone.drawn;
+      for (const step of (clone.steps ?? []) as Json[])
+        if (step.message?.type === 'syncSessionOrder') step.message.sessionIds = clone.drawn;
+      return clone;
+    }
+    // "It did not move, so do not write." The shipped code writes anyway, and the difference is one
+    // storage write and one booked push per no-op drag.
+    case 'skip-the-no-op-write': {
+      const steps = (clone.steps ?? []) as Json[];
+      for (const step of steps) {
+        const writes = (step.writes ?? []) as Json[];
+        const edit = writes.find((write) => write.write === 'editDocument');
+        if (edit && canonical(normalizeDocument(edit.document)) === canonical(normalizeDocument(clone.startDocument)))
+          step.writes = writes.filter((write) => write.write !== 'editDocument');
+      }
+      return clone;
+    }
+    // Drop the index a cross-group move carries, so every row lands at the end of its new group.
+    case 'drop-the-target-index': {
+      for (const message of (clone.messages ?? []) as Json[])
+        if (message.type === 'moveSessionToGroup') delete message.targetIndex;
+      for (const step of (clone.steps ?? []) as Json[])
+        if (step.message?.type === 'moveSessionToGroup') delete step.message.targetIndex;
+      return clone;
+    }
+    // A drop on the project's own group is what takes a row OUT of a user-made one. Reading it as
+    // "no target group, so nothing to do" leaves the row in the group it was dragged out of.
+    case 'move-into-the-project-group-keeps-the-subgroup': {
+      for (const step of (clone.steps ?? []) as Json[])
+        if (step.message?.type === 'moveSessionToGroup' && !String(step.message.groupId).startsWith('gpui-wsg:'))
+          step.writes = [];
+      return clone;
+    }
+    // "A pinned row sorts first anyway, so put it first." It does sort first as a BLOCK, and where
+    // it sits inside that block is exactly what the drag chose.
+    case 'pinned-rows-always-go-first': {
+      const sessionId = String((clone.command as Json).sessionId);
+      const lead = (message: Json) => {
+        if (message?.type !== 'syncSessionOrder') return;
+        const ids = (message.sessionIds ?? []) as string[];
+        if (!ids.includes(sessionId)) return;
+        message.sessionIds = [sessionId, ...ids.filter((id) => id !== sessionId)];
+      };
+      for (const message of (clone.messages ?? []) as Json[]) lead(message);
+      for (const step of (clone.steps ?? []) as Json[]) lead(step.message);
+      return clone;
+    }
+    default:
+      return clone;
+  }
+}
+
+/** A move named without the ids the report would paste. */
+function describeMove(command: Json): string {
+  return `${idShape(String(command.sessionId))}->${idShape(String(command.groupId))}${
+    command.targetSessionId ? `@${idShape(String(command.targetSessionId))}` : '@group'
+  }:${command.position}`;
+}
+
+/** Writes with the parts that are the same value spelled two ways taken out. */
+function normalizeWrites(writes: Json[]): Json[] {
+  return writes.map((write) =>
+    write.write === 'editDocument' ? { write: 'editDocument', document: normalizeDocument(write.document) } : write
+  );
+}
+
 // Last, not first: `MUTATIONS` is a `const` and a top-level await above it runs in its temporal
 // dead zone, so `--inject` would throw before it could inject anything.
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === 'compare') await compare(rest);
 else if (mode === 'snooze-clock') writeSnoozeClock(rest);
 else if (mode === 'workspace-groups') await compareWorkspaceGroups(rest);
+else if (mode === 'drag') await compareDrag(rest);
 else {
   console.error(
-    'usage: action-parity.ts snooze-clock <out-dir> | compare <out-dir> [--inject <mutation>] | workspace-groups <out-dir> [--inject <mutation>]'
+    'usage: action-parity.ts snooze-clock <out-dir> | compare <out-dir> [--inject <mutation>] | workspace-groups <out-dir> [--inject <mutation>] | drag <out-dir> [--inject <mutation>]'
   );
   process.exit(2);
 }
