@@ -409,6 +409,73 @@ function mutateBatch(name: string | undefined, entry: Json): Json {
   }
 }
 
+/**
+ * The reload half's mutations. What they have to be able to break is an ORDER and a BRANCH, neither
+ * of which is a call: a reload that runs its legs the other way round still makes both calls, and a
+ * split that selects where it should wake still selects the right row.
+ */
+function mutateReload(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  const legs = (clone.plan?.legs ?? []) as Json[];
+  switch (name) {
+    // The wake before the sleep, which is the race that issuing both at once would produce: the
+    // daemon is asked to respawn a provider it has not killed yet and the reload reloads nothing.
+    case 'reload-wakes-before-it-sleeps':
+      if (clone.plan) clone.plan.legs = [...legs].reverse();
+      return clone;
+    // The remount dropped, so the wake focus can re-select the terminal its own sleep killed.
+    case 'reload-without-the-remount':
+      if (clone.plan)
+        clone.plan.legs = legs.map((leg) => {
+          const next = { ...leg };
+          delete next.forceRemount;
+          return next;
+        });
+      return clone;
+    // One leg only, which is a sleep the user asked to be a reload.
+    case 'reload-is-only-a-sleep':
+      if (clone.plan) clone.plan.legs = legs.slice(0, 1);
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+/** The split half's mutations. */
+function mutateSplit(name: string | undefined, entry: Json): Json {
+  const clone = JSON.parse(JSON.stringify(entry)) as Json;
+  switch (name) {
+    // The placement dropped, so Split Right opens the session in the tab it already had.
+    case 'split-without-the-placement':
+      if (clone.plan?.wake?.placement) delete clone.plan.wake.placement;
+      if (clone.plan?.action === 'focus') clone.plan.action = 'focusNoPlacement';
+      return clone;
+    // A sleeping row selected instead of woken, which attaches a pane to a dead provider.
+    case 'split-selects-a-sleeping-row':
+      if (clone.plan?.action === 'wake') {
+        clone.plan.action = 'focus';
+        clone.plan.wake = null;
+      }
+      return clone;
+    // The attention acknowledgement dropped, which leaves a row the user just opened still
+    // marked as waiting on them.
+    case 'split-forgets-the-attention':
+      if (clone.plan) clone.plan.acknowledgeAttention = false;
+      return clone;
+    default:
+      return clone;
+  }
+}
+
+const RELOAD_MUTATIONS = [
+  'reload-wakes-before-it-sleeps',
+  'reload-without-the-remount',
+  'reload-is-only-a-sleep',
+  'split-without-the-placement',
+  'split-selects-a-sleeping-row',
+  'split-forgets-the-attention',
+];
+
 const BULK_MUTATIONS = [
   'pace-everything',
   'pace-nothing',
@@ -660,6 +727,7 @@ async function compare([outDir, ...flags]: string[]) {
     ...MODAL_MUTATIONS,
     ...SNOOZE_MUTATIONS,
     ...BULK_MUTATIONS,
+    ...RELOAD_MUTATIONS,
   ];
   if (mutationName && !known.includes(mutationName)) {
     console.error(`unknown mutation ${mutationName}; one of ${known.join(', ')}`);
@@ -679,6 +747,8 @@ async function compare([outDir, ...flags]: string[]) {
     runTypeScriptSnoozeCalls,
     runTypeScriptBulk,
     runTypeScriptBulkPacing,
+    runTypeScriptReload,
+    runTypeScriptSplit,
   } = await import('./lifecycle-parity-typescript.ts');
   // The instants the snooze half was answered against, by case name, so a mutation can recompute
   // a wake time with the rule got wrong.
@@ -718,6 +788,15 @@ async function compare([outDir, ...flags]: string[]) {
   let bulkBrowserHandOffs = 0;
   let bulkNotLoaded = 0;
   let bulkTabsUnknown = 0;
+  let reloadPlans = 0;
+  let reloadLegs = 0;
+  let reloadHandOffs = 0;
+  let reloadEarlyReturns = 0;
+  let splitHandOffs = 0;
+  let splitEarlyReturns = 0;
+  let splitWakes = 0;
+  let splitFocuses = 0;
+  let splitNothings = 0;
   let bulkMessages = 0;
   let batchPlans = 0;
   const differences: string[] = [];
@@ -852,6 +931,85 @@ async function compare([outDir, ...flags]: string[]) {
       };
       if (canonical(mine.plan) !== canonical(expected))
         differences.push(`${name} batch #${index}: rust ${canonical(mine.plan)} controller ${canonical(expected)}`);
+    }
+    // Full Reload: the sequence, and which leg asked for the remount.
+    const theirReload = await runTypeScriptReload(scenario, rust);
+    for (const [index, entry] of ((rust.reload ?? []) as Json[]).entries()) {
+      const theirs = theirReload[index];
+      const payload = (entry.payload ?? {}) as Json;
+      const where = `${name} reload #${index} ${String(payload.type)}`;
+      const mine = mutate ? mutateReload(mutationName, entry) : entry;
+      const theirLegs = ((theirs?.legs ?? []) as Json[]).map((leg) => ({
+        sleeping: leg.sleeping === true,
+        forceRemount: leg.forceRemount === true,
+      }));
+      if (mine.owned !== true) {
+        // A refusal is not a difference: the old runtime does whatever it does. What matters is
+        // that BOTH refusal shapes are exercised, so they are counted rather than asserted, and
+        // the zero-check is what fails when one of them stops happening. `reloadHandOffs` is the
+        // one that means work moved (a remote row, which the TypeScript really performs);
+        // `reloadEarlyReturns` is the one where neither side does anything.
+        if (theirLegs.length) reloadHandOffs += 1;
+        else reloadEarlyReturns += 1;
+        continue;
+      }
+      reloadPlans += 1;
+      const myLegs = ((mine.plan?.legs ?? []) as Json[]).map((leg) => ({
+        sleeping: leg.sleeping === true,
+        forceRemount: leg.forceRemount === true,
+      }));
+      reloadLegs += myLegs.length;
+      if (canonical(myLegs) !== canonical(theirLegs))
+        differences.push(`${where}: rust ${canonical(myLegs)} ts ${canonical(theirLegs)}`);
+    }
+    // Split Right: which branch, and whether the placement rode on it.
+    const theirSplit = await runTypeScriptSplit(scenario, rust);
+    for (const [index, entry] of ((rust.split ?? []) as Json[]).entries()) {
+      const theirs = theirSplit[index];
+      const payload = (entry.payload ?? {}) as Json;
+      const where = `${name} split #${index}`;
+      const mine = mutate ? mutateSplit(mutationName, entry) : entry;
+      const theirLegs = ((theirs?.legs ?? []) as Json[]).length;
+      const theirFocuses = ((theirs?.focuses ?? []) as Json[]).length;
+      if (mine.owned !== true) {
+        const acted = theirLegs + theirFocuses + ((theirs?.remote ?? []) as Json[]).length;
+        if (acted) splitHandOffs += 1;
+        else splitEarlyReturns += 1;
+        continue;
+      }
+      // What the TypeScript did, reduced to the same three answers the plan carries.
+      const wake = ((theirs?.legs ?? []) as Json[])[0];
+      const focus = ((theirs?.focuses ?? []) as Json[])[0];
+      const theirAnswer = wake
+        ? { action: 'wake', placement: wake.placement ?? null, sleeping: wake.sleeping === true }
+        : focus
+          ? { action: 'focus', placement: focus.placement ?? null }
+          : { action: 'nothing' };
+      const myAction = String(mine.plan?.action ?? '');
+      const myAnswer =
+        myAction === 'wake'
+          ? {
+              action: 'wake',
+              placement: mine.plan?.wake?.placement ?? null,
+              sleeping: mine.plan?.wake?.sleeping === true,
+            }
+          : myAction === 'focus'
+            ? { action: 'focus', placement: 'splitRight' }
+            : myAction === 'nothing'
+              ? { action: 'nothing' }
+              : { action: myAction };
+      if (myAction === 'wake') splitWakes += 1;
+      else if (myAction === 'focus') splitFocuses += 1;
+      else if (myAction === 'nothing') splitNothings += 1;
+      if (canonical(myAnswer) !== canonical(theirAnswer))
+        differences.push(`${where}: rust ${canonical(myAnswer)} ts ${canonical(theirAnswer)}`);
+      // The acknowledgement is the one thing the store hands BACK to the old runtime, so it is
+      // compared as a fact and not as a call.
+      const theirAcknowledged = ((theirs?.acknowledged ?? []) as string[]).length > 0;
+      if ((mine.plan?.acknowledgeAttention === true) !== theirAcknowledged)
+        differences.push(
+          `${where} attention: rust ${mine.plan?.acknowledgeAttention === true} ts ${theirAcknowledged}`
+        );
     }
     // The wake-time rule, at the fixed instants the clock file names.
     const theirClock = runTypeScriptSnoozeClock(rust);
@@ -1099,7 +1257,7 @@ async function compare([outDir, ...flags]: string[]) {
     }
   }
   console.log(
-    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkBrowserHandOffs ${bulkBrowserHandOffs} bulkNotLoaded ${bulkNotLoaded} bulkTabsUnknown ${bulkTabsUnknown} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
+    `scenarios ${names.length} payloads ${payloads} rustCalls ${rustCalls} tsCalls ${tsCalls} transitions ${transitions} closes ${closes} forks ${forks} flagCalls ${flagCalls} modalOpens ${modalOpens} modalRefusals ${modalRefusals} titleCases ${titleCases} snoozeWakes ${snoozeWakes} snoozeBoundaries ${snoozeBoundaries} snoozeActions ${snoozeActions} snoozeCalls ${snoozeCalls} snoozeRefusals ${snoozeRefusals} bulkSets ${bulkSets} bulkMessages ${bulkMessages} bulkRefusals ${bulkRefusals} bulkBrowserHandOffs ${bulkBrowserHandOffs} bulkNotLoaded ${bulkNotLoaded} bulkTabsUnknown ${bulkTabsUnknown} reloadPlans ${reloadPlans} reloadLegs ${reloadLegs} reloadHandOffs ${reloadHandOffs} reloadEarlyReturns ${reloadEarlyReturns} splitHandOffs ${splitHandOffs} splitEarlyReturns ${splitEarlyReturns} splitWakes ${splitWakes} splitFocuses ${splitFocuses} splitNothings ${splitNothings} batchPlans ${batchPlans} overlayKept ${overlayKept} closesRestored ${closesRestored} stoppedUnhidden ${stoppedUnhidden} differences ${differences.length}${
       mutationName ? ` (injected ${mutationName})` : ''
     }`
   );
@@ -1124,6 +1282,15 @@ async function compare([outDir, ...flags]: string[]) {
     ['bulkBrowserHandOffs', bulkBrowserHandOffs],
     ['bulkNotLoaded', bulkNotLoaded],
     ['bulkTabsUnknown', bulkTabsUnknown],
+    ['reloadPlans', reloadPlans],
+    ['reloadLegs', reloadLegs],
+    ['reloadHandOffs', reloadHandOffs],
+    ['reloadEarlyReturns', reloadEarlyReturns],
+    ['splitHandOffs', splitHandOffs],
+    ['splitEarlyReturns', splitEarlyReturns],
+    ['splitWakes', splitWakes],
+    ['splitFocuses', splitFocuses],
+    ['splitNothings', splitNothings],
     ['batchPlans', batchPlans],
   ];
   const collapsed = measured.filter(([, count]) => count === 0);

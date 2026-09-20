@@ -100,10 +100,17 @@ async function runOne(
       return Promise.resolve(answer === 'declined' ? { declined: { reason: 'keepAwake' } } : {});
     },
   };
-  runtime.focusLocalWorkspaceSession = (projectId: string, sessionId: string) => {
+  // The OPTIONS are part of what a focus is, not decoration: Full Reload's second leg asks for the
+  // remount that tears down the terminal its own sleep killed, and Split Right asks for the new
+  // pane, and both reach the workspace through exactly this call.
+  runtime.focusLocalWorkspaceSession = (projectId: string, sessionId: string, options?: Json) => {
     focuses.push({
       follow: 'focus',
       session: `${SIDEBAR_SESSION_PREFIX}${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}`,
+      options: {
+        forceRemount: options?.forceRemount === true,
+        splitRight: options?.placement === 'splitRight',
+      },
     });
   };
   runtime.publishPresentation = () => {};
@@ -583,6 +590,93 @@ export async function runTypeScriptBulk(scenario: Json, rustActions: Json): Prom
     out.push({ calls, focusProject });
   }
   return out;
+}
+
+/**
+ * The Full Reload and Split Right half.
+ *
+ * Drives the shipped `fullReloadSession` and `splitSessionRight` and records the SEQUENCE and the
+ * BRANCH rather than a call: neither payload calls the daemon itself, so what can go wrong is the
+ * order of the two legs, the remount riding on the wrong one, or a split that wakes where it should
+ * select. The seam is `setSessionSleeping` and `focusLocalWorkspaceSession`, which is the same
+ * boundary the port draws, because everything below them is already compared one leg at a time by
+ * the lifecycle half of this gate.
+ *
+ * `isSleepingLocalPresentationSession` is NOT stubbed: it is the predicate that picks the split
+ * branch, so it runs as it ships, over the same presentation the Rust side was given. Its two other
+ * legs are fed empty on purpose and that is a declared difference, not an oversight: they answer
+ * from the LAST PUBLISHED projection rather than from the current presentation, so they can only
+ * add sleeping-ness that the current row has already lost, which is a window the store does not
+ * have and cannot be given without holding a second, older copy of every row.
+ */
+export async function runTypeScriptReload(scenario: Json, rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const out: Json[] = [];
+  for (const entry of (rustActions.reload ?? []) as Json[]) {
+    const runtime = reloadRuntime(scenario);
+    await runtime.fullReloadSession(String((entry.payload as Json).sessionId)).catch(() => undefined);
+    out.push({ legs: runtime.__legs, focuses: runtime.__focuses, remote: runtime.__remote });
+  }
+  return out;
+}
+
+export async function runTypeScriptSplit(scenario: Json, rustActions: Json): Promise<Json[]> {
+  resetBrowserStorage();
+  const out: Json[] = [];
+  for (const entry of (rustActions.split ?? []) as Json[]) {
+    const runtime = reloadRuntime(scenario);
+    await runtime.splitSessionRight(String((entry.payload as Json).sessionId)).catch(() => undefined);
+    out.push({
+      legs: runtime.__legs,
+      focuses: runtime.__focuses,
+      remote: runtime.__remote,
+      acknowledged: runtime.__acknowledged,
+    });
+  }
+  return out;
+}
+
+/** One runtime with the four edges replaced and every decision left as it ships. */
+function reloadRuntime(scenario: Json): Json {
+  const runtime = Object.create(GpuiSidebarRuntime.prototype) as Json;
+  runtime.presentation = orderedPresentation(scenario.snapshot as Json);
+  runtime.browserTabs = [];
+  runtime.remotePresentations = new Map();
+  runtime.client = { rpc: () => Promise.resolve({}) };
+  runtime.latestGroups = [];
+  runtime.sleepingLocalSidebarSessionIds = new Set<string>();
+  runtime.__legs = [] as Json[];
+  runtime.__focuses = [] as Json[];
+  runtime.__remote = [] as Json[];
+  runtime.__acknowledged = [] as string[];
+  runtime.setSessionSleeping = (sessionId: string, sleeping: boolean, options?: Json) => {
+    runtime.__legs.push({
+      session: sessionId,
+      sleeping,
+      forceRemount: options?.forceRemount === true,
+      placement: options?.placement ?? null,
+    });
+    return Promise.resolve();
+  };
+  runtime.focusLocalWorkspaceSession = (projectId: string, sessionId: string, options?: Json) => {
+    runtime.__focuses.push({
+      session: `combined-session:${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}`,
+      forceRemount: options?.forceRemount === true,
+      placement: options?.placement ?? null,
+    });
+  };
+  runtime.acknowledgeSessionAttention = (sessionId: string) => {
+    runtime.__acknowledged.push(sessionId);
+    return true;
+  };
+  runtime.postRemoteSessionNativeAction = (action: string) => {
+    runtime.__remote.push({ action });
+    return true;
+  };
+  runtime.setRemotePresentationSessionFocus = () => {};
+  runtime.publishRemotePresentationPatch = () => {};
+  runtime.publishPresentation = () => {};
+  return runtime;
 }
 
 /**

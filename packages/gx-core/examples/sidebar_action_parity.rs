@@ -28,12 +28,13 @@ use ghostex_gx_core::{
     apply_close_answer, apply_flags_answer, apply_fork_answer, apply_lifecycle_answer,
     apply_snooze_answer, close_optimistic_follow_ups, encode_uri_component, iso_string_from_ms,
     plan_batch, plan_bulk_request, plan_close_request, plan_flags_request, plan_fork_request,
-    plan_lifecycle_request, plan_modal_action, plan_read_only_action, plan_snooze_action,
-    plan_snooze_request, rename_seed_title, session_is_snoozed, snooze_wake_ms, ActiveGroup,
-    BrowserTabInput, BrowserTabsInput, CloseAnswer, CloseFollowUp, Core, Event, FlagsFollowUp,
-    ForkFollowUp, Intent, LifecycleAnswer, LifecycleFollowUp, MachineId, ProjectKey,
-    SectionCollapse, SessionKey, SidebarInputs, SidebarView, SidebarViewModel, SnoozeClock,
-    SnoozeFollowUp, QUICK_AUTOMATIONS_PROJECT_ID, READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
+    plan_full_reload, plan_lifecycle_request, plan_modal_action, plan_read_only_action,
+    plan_snooze_action, plan_snooze_request, plan_split_right, rename_seed_title,
+    session_is_snoozed, snooze_wake_ms, ActiveGroup, BrowserTabInput, BrowserTabsInput,
+    CloseAnswer, CloseFollowUp, Core, Event, FlagsFollowUp, ForkFollowUp, Intent, LifecycleAnswer,
+    LifecycleFollowUp, MachineId, ProjectKey, SectionCollapse, SessionKey, SidebarInputs,
+    SidebarView, SidebarViewModel, SnoozeClock, SnoozeFollowUp, QUICK_AUTOMATIONS_PROJECT_ID,
+    READ_ONLY_MESSAGE_TYPES, SESSION_SNOOZE_PRESETS,
 };
 use serde_json::{json, Map, Value};
 
@@ -100,6 +101,7 @@ fn main() -> ExitCode {
     let mut total_modals = 0usize;
     let mut total_snooze = 0usize;
     let mut total_bulk = 0usize;
+    let mut total_reload = 0usize;
     let mut resolve_micros: Vec<u128> = Vec::new();
     // The clock facts the snooze rule is answered against. The harness writes them under a pinned
     // time zone because this crate reads neither a clock nor a zone; without the file the snooze
@@ -145,6 +147,7 @@ fn main() -> ExitCode {
         total_modals += dump.modals;
         total_snooze += dump.snooze;
         total_bulk += dump.bulk;
+        total_reload += dump.reload;
         let out = path.with_file_name(
             path.file_name()
                 .and_then(|name| name.to_str())
@@ -178,7 +181,7 @@ fn main() -> ExitCode {
         .copied()
         .unwrap_or(0);
     println!(
-        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} flags {total_flags} modals {total_modals} snooze {total_snooze} bulk {total_bulk} resolveUs median {median} max {}",
+        "scenarios {} payloads {total_payloads} calls {total_calls} fromMenus {from_menus} lifecycle {total_lifecycle} close {total_close} fork {total_fork} flags {total_flags} modals {total_modals} snooze {total_snooze} bulk {total_bulk} reload {total_reload} resolveUs median {median} max {}",
         scenarios.len(),
         resolve_micros.last().copied().unwrap_or(0)
     );
@@ -204,6 +207,7 @@ struct Dump {
     modals: usize,
     snooze: usize,
     bulk: usize,
+    reload: usize,
 }
 
 /// The menu dump `sidebar_menu_parity` writes for the same scenario, when it has been run.
@@ -364,6 +368,8 @@ fn build(
     let modal_count = modals.len();
     let bulk = bulk_entries(&core, &view_inputs, scenario);
     let batch = batch_entries();
+    let reload = reload_entries(&core, scenario);
+    let split = split_entries(&core, scenario);
     let snooze_clock = snooze_clock_entries(clock_file);
     let snooze_boundary = snooze_boundary_entries(&core, scenario, model.view());
     let snooze_actions = snooze_action_entries(model.view(), clock_file);
@@ -371,6 +377,7 @@ fn build(
     let snooze_count =
         snooze_clock.len() + snooze_boundary.len() + snooze_actions.len() + snooze_calls.len();
     let bulk_count = bulk.len() + batch.len();
+    let reload_count = reload.len() + split.len();
     Some(Dump {
         payloads: entries.len(),
         calls,
@@ -382,6 +389,7 @@ fn build(
         modals: modal_count,
         snooze: snooze_count,
         bulk: bulk_count,
+        reload: reload_count,
         value: json!({
             "parkedProjectId": parked,
             "entries": Value::Array(entries),
@@ -397,6 +405,8 @@ fn build(
             "snoozeCalls": Value::Array(snooze_calls),
             "bulk": Value::Array(bulk),
             "batch": Value::Array(batch),
+            "reload": Value::Array(reload),
+            "split": Value::Array(split),
         }),
     })
 }
@@ -1234,6 +1244,74 @@ fn modal_entries(view: &SidebarView) -> Vec<Value> {
     }
     entries
 }
+
+/// The Full Reload and Split Right half of the gate.
+///
+/// Neither payload makes a call of its own, so what is compared is the SEQUENCE and the BRANCH: how
+/// many legs a reload runs, in what order, and which of them asks for the remount; and whether a
+/// split wakes the row with the placement or only selects it with the placement. Both of those are
+/// invisible in a list comparison and both are wrong in a way the user feels: a reload whose wake
+/// overtakes its sleep reloads nothing, and a split that forgets the placement opens the session in
+/// the tab it already had instead of a new pane.
+///
+/// Every row of the recording is probed, plus the id shapes no recording holds. The split branch is
+/// chosen by the row's lifecycle, so the counters on both sides have to see both branches; the
+/// gate's zero-check is what enforces that rather than an assumption about the recording.
+fn reload_entries(core: &Core, scenario: &Value) -> Vec<Value> {
+    let mut ids: Vec<String> = session_ids(scenario)
+        .into_iter()
+        .take(RELOAD_SESSIONS_PER_SCENARIO)
+        .collect();
+    for id in SYNTHETIC_SESSION_IDS {
+        ids.push(id.to_string());
+    }
+    // A Quick Automations row, whose whole answer on both sides is that nothing happens, and a row
+    // the store has never heard of.
+    ids.push(format!(
+        "combined-session:{}:quick-1",
+        encode_uri_component(QUICK_AUTOMATIONS_PROJECT_ID)
+    ));
+    ids.push("combined-session:unknown-project:unknown-session".to_string());
+    let mut entries = Vec::new();
+    for id in &ids {
+        for kind in ["fullReloadSession", "restartSession"] {
+            let payload = json!({ "type": kind, "sessionId": id });
+            entries.push(match plan_full_reload(core, &payload) {
+                Some(plan) => json!({ "payload": payload, "owned": true, "plan": plan.to_json() }),
+                None => json!({ "payload": payload, "owned": false }),
+            });
+        }
+    }
+    entries
+}
+
+/// The Split Right half, in the same shape.
+fn split_entries(core: &Core, scenario: &Value) -> Vec<Value> {
+    let mut ids: Vec<String> = session_ids(scenario)
+        .into_iter()
+        .take(RELOAD_SESSIONS_PER_SCENARIO)
+        .collect();
+    for id in SYNTHETIC_SESSION_IDS {
+        ids.push(id.to_string());
+    }
+    ids.push(format!(
+        "combined-session:{}:quick-1",
+        encode_uri_component(QUICK_AUTOMATIONS_PROJECT_ID)
+    ));
+    ids.push("combined-session:unknown-project:unknown-session".to_string());
+    ids.into_iter()
+        .map(|id| {
+            let payload = json!({ "type": "splitSessionRight", "sessionId": id });
+            match plan_split_right(core, &payload) {
+                Some(plan) => json!({ "payload": payload, "owned": true, "plan": plan.to_json() }),
+                None => json!({ "payload": payload, "owned": false }),
+            }
+        })
+        .collect()
+}
+
+/// Enough rows to reach both split branches and every refusal without multiplying the recording.
+const RELOAD_SESSIONS_PER_SCENARIO: usize = 12;
 
 /// The bulk half of the gate.
 ///
