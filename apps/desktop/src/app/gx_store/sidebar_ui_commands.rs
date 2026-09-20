@@ -6,6 +6,15 @@
 //! menus it owns until M4c. Both sides therefore apply the same command to equivalent state, which
 //! is why the comparison between the two lists stays meaningful across a click, and why the write
 //! to client storage carries only what this state changed (gx-core sidebar_ui/diff.rs).
+//!
+//! Four commands are deliberately not identical to the TypeScript, and they are listed together
+//! here because the list belongs beside the code that decides it rather than only in a review:
+//! `collectionAction:select` and `collectionAction:toggleProjects` act on the rows and groups the
+//! list DRAWS, where `nativeCollectionGroups` acts on the collection's membership including its
+//! filtered and hidden projects; `sidebarAction:toggleProjects` likewise leaves hidden projects
+//! alone; and a sidebar slot hotkey clears the TypeScript multi-selection but not this one,
+//! because it arrives as `gpuiProjectSlotHotkey` and never reaches this file. The full list, with
+//! the reveal and the Space differences, is in docs/2026-09-19/rust-core/PROGRESS.md.
 
 use ghostex_gx_core::{SectionId, SidebarUiIntent, ToggleAllProjectsInput};
 use serde_json::Value;
