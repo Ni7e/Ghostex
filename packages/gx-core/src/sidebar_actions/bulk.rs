@@ -31,7 +31,7 @@
 //! apps/desktop/sidebar/bulk-sleep-pacing.ts, apps/desktop/sidebar/native-sidebar/controller.ts
 //! (the `batch` arm), apps/desktop/src/app/gx_store/sidebar_bulk.rs.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::core::Core;
 use crate::keys::{ProjectKey, SessionKey};
@@ -204,6 +204,13 @@ pub fn plan_bulk_request(
             if project_has_browser_tab(inputs, &project.project_id) {
                 return None;
             }
+            // `if (!projectId || !this.presentation) return`. Three of the four payloads would
+            // answer a machine with no presentation with an empty set, which is what the early
+            // return does anyway, but `wakeProjectSleepingSessions` moves the active project FIRST
+            // and the early return happens before it: answering here would jump the user to a
+            // project whose rows nobody has yet. This is the store's not-loaded state, not an empty
+            // one, and it is the refusal PLAN.md asks for rather than a guess at zero rows.
+            core.presentation().loaded(&project.machine)?;
             let (action, rows) = match kind {
                 "setGroupSleeping" => {
                     let sleeping = message.get("sleeping")?.as_bool()?;
@@ -297,6 +304,13 @@ fn local_project_of_group(message: &Value) -> Option<ProjectKey> {
 /// Whether the project has an app tab at all. The TypeScript's sets filter on the tab's own state
 /// (sleeping, visible) per payload, but this is a refusal and not a set: a project with tabs is
 /// handed over whole, so the question is only whether any exist.
+///
+/// The one thing this reads is `SidebarInputs::host.browser_tabs`, and the old runtime's own
+/// `this.browserTabs` is a SEPARATE list that no change here empties. So a host that stops feeding
+/// this one does not stop the old runtime from sleeping a project's app tabs: it stops this side
+/// from knowing they exist, and a Sleep All would then be performed in half, with the sessions
+/// asleep and the app tabs awake, which is the outcome the refusal exists to prevent. If the tabs
+/// move off the sidebar, this predicate needs whatever list replaces them, not a removal.
 fn project_has_browser_tab(inputs: &SidebarInputs, project_id: &str) -> bool {
     inputs
         .host
