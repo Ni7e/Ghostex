@@ -21,6 +21,7 @@ mod keys;
 mod overlay;
 mod presentation_store;
 mod selectors;
+mod sidebar_ui;
 mod sidebar_view;
 
 pub use crate::change::{ChangeSummary, IgnoredReason, SideStateChanges};
@@ -42,6 +43,13 @@ pub use crate::presentation_store::{
 pub use crate::selectors::{
     is_chat_project_path, Loadable, TabDirection, TabSession, DEFAULT_TERMINAL_SESSION_TITLE,
     QUICK_AUTOMATIONS_PROJECT_ID, TAB_SESSION_TITLE_MAX_UTF16,
+};
+pub use crate::sidebar_ui::{
+    collapse_into_storage, collapse_state_from_storage, hidden_items_from_storage,
+    hidden_items_into_storage, machine_tab_from_storage, sidebar_window_storage_key,
+    SidebarPersistSet, SidebarUiIntent, SidebarUiOutcome, SidebarUiStore, ToggleAllProjectsInput,
+    COLLAPSE_STORAGE_KEY, COLLAPSE_STORAGE_VERSION, HIDDEN_ITEMS_STORAGE_KEY,
+    MACHINE_TAB_STORAGE_KEY, PROJECT_COLLECTIONS_STORAGE_KEY, SIDEBAR_WINDOW_SCOPE_ID,
 };
 pub use crate::sidebar_view::{
     BrowserTabInput, CloseAfterDoneInput, CollectionView, DelayedSendInput, DelayedSendView,
