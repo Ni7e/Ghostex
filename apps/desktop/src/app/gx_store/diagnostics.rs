@@ -879,6 +879,59 @@ impl GxStoreDiagnostics {
     /// `rows` is the number to read. A project Wake that resolves zero is a project with nothing
     /// asleep in it, which is correct; a Sleep Selected that resolves zero when rows were selected
     /// is not, and only this line can tell the two apart.
+    /// A Full Reload, named by its legs rather than by a label: the record says how many went out
+    /// and which row they were for, never what the session is.
+    pub(super) fn sidebar_reload_ran(
+        &mut self,
+        plan: &ghostex_gx_core::ReloadPlan,
+        counters: super::sidebar_lifecycle::SidebarLifecycleCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarReload",
+            json!({
+                "legs": plan.legs.len() as u64,
+                "reloads": counters.reloads,
+                "reloadLegs": counters.reload_legs,
+                "remounts": counters.remounts,
+                "declinedSource": counters.declined_source,
+            }),
+        );
+    }
+
+    /// A Split Right, named by which of the two branches the row took.
+    pub(super) fn sidebar_split_ran(
+        &mut self,
+        plan: &ghostex_gx_core::SplitPlan,
+        counters: super::sidebar_lifecycle::SidebarLifecycleCounters,
+    ) {
+        if self.sidebar_lifecycle_records >= MAX_SIDEBAR_ACTION_RECORDS
+            || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_lifecycle_records += 1;
+        record(
+            "gxStore.sidebarSplit",
+            json!({
+                "action": log_text(match plan.action {
+                    ghostex_gx_core::SplitAction::Nothing => "nothing",
+                    ghostex_gx_core::SplitAction::Wake(_) => "wake",
+                    ghostex_gx_core::SplitAction::Focus => "focus",
+                }),
+                "splits": counters.splits,
+                "splitsWoken": counters.splits_woken,
+                "splitsPlaced": counters.splits_placed,
+                "declinedSource": counters.declined_source,
+            }),
+        );
+    }
+
     pub(super) fn sidebar_bulk_ran(
         &mut self,
         request: &ghostex_gx_core::BulkRequest,

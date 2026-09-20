@@ -138,6 +138,15 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_snooze(&command, cx) {
             return;
         }
+        // Full Reload is the sleep and the wake in order, and Split Right is a selection that
+        // carries where the pane goes; both end in the lifecycle path above
+        // (gx_store/sidebar_reload.rs).
+        if self.gx_store_run_sidebar_reload(&command, cx) {
+            return;
+        }
+        if self.gx_store_run_sidebar_split(&command, cx) {
+            return;
+        }
         // The bulk menu, a collection's lifecycle items and a project's Sleep, Wake and Close
         // resolve their set here and fan out into the per-session actions above, paced when the
         // action is a sleep (gx_store/sidebar_bulk.rs).

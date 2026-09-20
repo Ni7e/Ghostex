@@ -22,8 +22,8 @@
 use std::time::Duration;
 
 use ghostex_gx_core::{
-    CloseAnswer, CloseFollowUp, CloseRequest, Event, ForkFollowUp, ForkRequest, Intent,
-    LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, SessionKey,
+    CloseAnswer, CloseFollowUp, CloseRequest, Event, FocusOptions, ForkFollowUp, ForkRequest,
+    Intent, LifecycleAnswer, LifecycleCall, LifecycleFollowUp, LifecycleRequest, SessionKey,
     apply_close_answer, apply_fork_answer, apply_lifecycle_answer, close_optimistic_follow_ups,
     owns_close_message, owns_fork_message, owns_lifecycle_message, plan_close_request,
     plan_fork_request, plan_lifecycle_request,
@@ -71,6 +71,17 @@ pub(crate) struct SidebarLifecycleCounters {
     pub(crate) forks: u64,
     pub(crate) forks_placed: u64,
     pub(crate) forks_failed: u64,
+    /// Full Reloads answered here, and the legs they ran.
+    pub(crate) reloads: u64,
+    pub(crate) reload_legs: u64,
+    /// Wakes that asked the workspace to tear the dead terminal down first, which is the leg that
+    /// makes a Full Reload a reload rather than a sleep and a wake.
+    pub(crate) remounts: u64,
+    /// Split Rights answered here, by what the row needed.
+    pub(crate) splits: u64,
+    pub(crate) splits_woken: u64,
+    /// Selections that really asked for a new pane, whichever of the two branches asked.
+    pub(crate) splits_placed: u64,
 }
 
 impl GhostexGpuiApp {
@@ -95,11 +106,30 @@ impl GhostexGpuiApp {
             self.gx_store.sidebar_lifecycle.declined_source += 1;
             return false;
         }
+        match self.gx_store_start_lifecycle(message, cx) {
+            Some(task) => {
+                task.detach();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The same sleep or wake, as a task the caller can WAIT for.
+    ///
+    /// Full Reload needs the sleep to have come home before the wake goes out, which is what the
+    /// TypeScript's two awaits do and which issuing both at once would race. Rather than a second
+    /// copy of the call, the single-session path hands back its task and the composition awaits it
+    /// (`gx_store/sidebar_reload.rs`). `None` means this path does not own the message, which is
+    /// the same answer the boolean above reports.
+    pub(super) fn gx_store_start_lifecycle(
+        &mut self,
+        message: &Value,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<gpui::Task<()>> {
         // A browser row, a remote row and the bulk payloads are refused inside the planner and
         // stay the old runtime's, each one for a reason written down there.
-        let Some(request) = plan_lifecycle_request(&self.gx_store.core, message) else {
-            return false;
-        };
+        let request = plan_lifecycle_request(&self.gx_store.core, message)?;
         match request.call {
             LifecycleCall::Sleep => self.gx_store.sidebar_lifecycle.sleeps += 1,
             LifecycleCall::Wake => self.gx_store.sidebar_lifecycle.wakes += 1,
@@ -113,12 +143,12 @@ impl GhostexGpuiApp {
                 0,
                 self.gx_store.sidebar_lifecycle,
             );
-            return true;
+            return Some(gpui::Task::ready(()));
         }
         let path = request.rpc_path;
         let params = request.rpc_params.clone();
         let background = cx.background_executor().clone();
-        cx.spawn(async move |this, cx| {
+        Some(cx.spawn(async move |this, cx| {
             let started = std::time::Instant::now();
             let result = background
                 .spawn(
@@ -129,9 +159,7 @@ impl GhostexGpuiApp {
             let _ = this.update(cx, |this, cx| {
                 this.gx_store_apply_lifecycle_answer(&request, result, round_trip_ms, cx);
             });
-        })
-        .detach();
-        true
+        }))
     }
 
     /// Answers a `forkSession` command in Rust when the store owns it.
@@ -371,7 +399,7 @@ impl GhostexGpuiApp {
         let focused_now = self.gx_store.core.focus().focused_session.clone();
         let follow_ups = apply_lifecycle_answer(request, answer, focused_now.as_ref(), now);
         let mut moved = false;
-        let mut focus_target: Option<SessionKey> = None;
+        let mut focus_target: Option<(SessionKey, FocusOptions)> = None;
         for follow_up in follow_ups {
             match follow_up {
                 LifecycleFollowUp::Patch { session, patch } => {
@@ -393,17 +421,23 @@ impl GhostexGpuiApp {
                         self.gx_store.sidebar_list.note_changes(&output.changes);
                     }
                 }
-                LifecycleFollowUp::Focus { session } => {
+                LifecycleFollowUp::Focus { session, options } => {
                     self.gx_store.sidebar_lifecycle.focus_follow_ups += 1;
-                    focus_target = Some(session);
+                    if options.force_remount {
+                        self.gx_store.sidebar_lifecycle.remounts += 1;
+                    }
+                    if options.split_right {
+                        self.gx_store.sidebar_lifecycle.splits_placed += 1;
+                    }
+                    focus_target = Some((session, options));
                 }
             }
         }
         if moved {
             self.gx_store_update_sidebar_list(cx);
         }
-        if let Some(session) = focus_target {
-            self.gx_store_focus_local_workspace_session(&session, cx);
+        if let Some((session, options)) = focus_target {
+            self.gx_store_select_local_workspace_session(&session, None, options, cx);
         }
         self.gx_store.diagnostics.sidebar_lifecycle_ran(
             request,
@@ -413,15 +447,15 @@ impl GhostexGpuiApp {
         );
     }
 
-    /// `focusLocalWorkspaceSession` with no options, which is what the TypeScript sends from every
-    /// one of these paths: the ordinary selection, never a remount and never a wake intent,
-    /// because whatever wake was needed has already happened.
+    /// `focusLocalWorkspaceSession` with no options, which is what most of these paths send: the
+    /// ordinary selection, never a remount and never a wake intent, because whatever wake was
+    /// needed has already happened.
     fn gx_store_focus_local_workspace_session(
         &mut self,
         session: &SessionKey,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.gx_store_place_local_workspace_session(session, None, cx);
+        self.gx_store_select_local_workspace_session(session, None, FocusOptions::default(), cx);
     }
 
     /// The same selection with a placement target, which is what a fork sends: the new pane is
@@ -433,10 +467,34 @@ impl GhostexGpuiApp {
         placement_target: Option<&SessionKey>,
         cx: &mut gpui::Context<Self>,
     ) {
+        self.gx_store_select_local_workspace_session(
+            session,
+            placement_target,
+            FocusOptions::default(),
+            cx,
+        );
+    }
+
+    /// The one workspace selection every sidebar action goes through.
+    ///
+    /// The two options are the caller's, not the row's: Full Reload's second leg asks for the
+    /// remount that tears down the terminal its own sleep killed, and Split Right asks for the new
+    /// pane. They are carried as data from gx-core rather than decided here, so the gate can
+    /// compare which leg asked for what.
+    pub(super) fn gx_store_select_local_workspace_session(
+        &mut self,
+        session: &SessionKey,
+        placement_target: Option<&SessionKey>,
+        options: FocusOptions,
+        cx: &mut gpui::Context<Self>,
+    ) {
         self.focus_local_workspace_terminal_from_message(
             &GpuiSidebarWorkspaceTerminalFocusMessage {
-                force_remount: false,
-                placement: GpuiWorkspaceTerminalFocusPlacement::Tab,
+                force_remount: options.force_remount,
+                placement: match options.split_right {
+                    true => GpuiWorkspaceTerminalFocusPlacement::SplitRight,
+                    false => GpuiWorkspaceTerminalFocusPlacement::Tab,
+                },
                 placement_target_session_id: placement_target
                     .map(|target| target.session_id.clone()),
                 preferred_interface: GpuiPreferredAgentInterface::Terminal,
