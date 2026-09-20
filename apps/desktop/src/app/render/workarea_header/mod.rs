@@ -7,6 +7,7 @@
 //! revamp add to this directory, so keep new header concerns in their own file rather than here.
 pub(crate) mod action_buttons;
 pub(crate) mod anchor;
+pub(crate) mod band;
 pub(crate) mod breadcrumb;
 pub(crate) mod overlap;
 pub(crate) mod shell;

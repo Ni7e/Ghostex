@@ -17,7 +17,10 @@ scrollbar.
 ## Views (tabs in the view panel)
 
 Views open beside your sessions, in a panel with its own tab strip, and a
-project can keep several of them open at once. The tabs belong to the project,
+project can keep several of them open at once. The strip is the top row of the
+panel and shares that row with the work area header, so the tabs sit over the
+view and the header's breadcrumb and buttons over your sessions. Expand a view
+over the sessions column and the strip moves to its own row under the header. The tabs belong to the project,
 so switching sessions leaves them alone and coming back to a project brings the
 same tabs back. Option/Alt+1 through 9 jump to the tabs in the order they appear
 in the strip; direct built-in view shortcuts can be assigned in Settings >
@@ -1017,7 +1020,7 @@ docs directory), `hideProjectHeaderDiffStats`,
   Extension commands use the active local project's folder unless the extension
   supplies a folder; relative folders are resolved inside the active project.
   Every row on this page has an Edit (pencil) button that chooses where that
-  view, title bar button, or extension appears. Pick a Default of Shown
+  view, header button, or extension appears. Pick a Default of Shown
   everywhere or Hidden unless chosen, then turn individual projects and spaces
   on or off to override it, so a view can be hidden in one project without
   listing every other one. A project's own setting wins over its space, and a
@@ -1027,7 +1030,7 @@ docs directory), `hideProjectHeaderDiffStats`,
   wherever it is hidden, so its hotkeys and command palette entries go away with
   it. Custom views under Your views keep their own Available in picker inside
   their own editor.
-  Its Titlebar account usage section lets you star saved Claude and Codex
+  Its Account usage in the sidebar section lets you star saved Claude and Codex
   accounts to show their usage at the bottom of the desktop sidebar, or unstar
   them to hide it. These are the same per-account stars available in
   Settings > Accounts. The usage strip starts collapsed to a single row holding

@@ -42,8 +42,13 @@ impl GhostexGpuiApp {
     /// terminal, chat and focus gate reads it instead of comparing the active mode, so hiding the
     /// column hides its native child views in the same breath instead of leaving them painted over a
     /// maximised page. It supersedes the phase 3 note that this always returns true.
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// The left-edge reveal is the second answer to the same question: while the panel carries the
+    /// sessions column, the column is on screen in a window of its own and every gate that reads
+    /// this must say so, or the terminals and chats it just brought back would be reconciled as
+    /// hidden the moment they appeared.
     pub(crate) fn agents_workspace_visible(&self) -> bool {
-        !self.view_panel_maximized()
+        !self.view_panel_maximized() || self.floating_reveal_hosts_agents_column()
     }
 
     /// Maximised only counts while a view is really open; closing the panel, or leaving it on the

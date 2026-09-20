@@ -14,8 +14,6 @@ pub(crate) struct NativeSidebarState {
     pub(crate) bounds: gpui::Bounds<gpui::Pixels>,
     pub(crate) menu: Option<super::menu_state::SidebarMenuState>,
     pub(crate) next_menu_request: u64,
-    #[cfg(target_os = "macos")]
-    pub(crate) reveal: Option<super::reveal::NativeSidebarReveal>,
     /// CDXC:Sidebar 2026-09-17 WHY:
     /// A frame profile found snapshot and session deep copies dominating the UI thread during redraws.
     /// Share immutable snapshots with row callbacks; incoming patches and clock updates use copy-on-write mutation.

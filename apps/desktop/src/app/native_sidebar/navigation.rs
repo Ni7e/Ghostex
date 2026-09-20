@@ -16,8 +16,8 @@ use crate::*;
 impl GhostexGpuiApp {
     /// CDXC:Sidebar 2026-09-19 DECISION:
     /// User: the Search row and the Commands row are each one pixel taller.
-    /// Each row's height is its border-box, so the Search row's hairline had taken that pixel from its
-    /// content, and the Commands row grows upward through its top padding so its content stays put.
+    /// Both rows keep those heights now that the hairlines are gone; the pixel each border used to
+    /// take out of the border-box went back into the padding, so neither row's content moved.
     pub(crate) fn render_native_sidebar_navigation(
         &self,
         appearance: &SidebarAppearance,
@@ -54,18 +54,20 @@ impl GhostexGpuiApp {
         h_flex()
             .w_full()
             .h(px((if footer { 36.0 } else { 35.0 }) * scale))
-            .pt(px((if footer { 4.0 } else { 5.0 }) * scale))
-            .pb(px((if footer { 3.0 } else { 2.0 }) * scale))
+            .pt(px(5.0 * scale))
+            .pb(px(3.0 * scale))
             .when(!footer, |row| row.px(px(5.0 * scale)).gap(px(4.0 * scale)))
             .when(reserves_window_controls, |row| {
                 row.pl(px(WINDOW_CONTROLS_LEADING_RESERVE - 7.0 * scale))
                     .window_control_area(WindowControlArea::Drag)
             })
-            // The Search row's bottom hairline and the Commands row's top
-            // hairline share one color so the list is framed evenly.
-            .when(footer, |row| row.border_t_1())
-            .when(!footer, |row| row.border_b_1())
-            .border_color(chrome_ink().opacity(0.12))
+            /*
+            CDXC:Sidebar 2026-09-20 DECISION:
+            User, reviewing the 2026-09-19 screens: there is no rule under the Search row and none
+            above the usage strip or the Commands row. The session list fades out at both ends
+            instead (native_sidebar/scroll_fade.rs), so these rows draw no border at all. This
+            supersedes the 2026-09-19 rule that framed the list with a hairline at each end.
+            */
             .flex_shrink_0()
             .text_color(titlebar_active_text_color().opacity(0.52))
             /*

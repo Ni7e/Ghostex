@@ -1197,6 +1197,12 @@ impl Render for GhostexGpuiApp {
                     .when(sidebar_chrome_visible, |this| {
                         this.child(self.render_sidebar_resize_divider(cx))
                     })
+                    // Collapsed, the body row starts with the reveal's own edge strip instead of
+                    // the sidebar and its divider. It is a sibling frame like they were, so the
+                    // workarea beside it keeps every pixel it owns and every click in them.
+                    .when(!sidebar_chrome_visible, |this| {
+                        this.child(self.render_floating_reveal_edge_strip(cx))
+                    })
                     .child(
                         /*
                         CDXC:Titlebar 2026-09-20 WHY:

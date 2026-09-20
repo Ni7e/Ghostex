@@ -31,6 +31,18 @@ use crate::*;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use gpui::WindowControlArea;
 
+/// CDXC:Theming 2026-09-20 WHY:
+/// The 2026-09-19 light screens draw Start, Open and Commit as raised white controls, because a
+/// bordered outline alone disappears into a light header the way it does not into a dark one. In
+/// dark mode they keep the header's own surface, which is what those screens draw there.
+fn workarea_header_split_button_background() -> gpui::Hsla {
+    if chrome_uses_light_appearance() {
+        gpui::rgb(0xffffff).into()
+    } else {
+        gpui::transparent_black()
+    }
+}
+
 /// What a press on one half of a split button runs. A plain `fn` pointer so the two halves and the
 /// diagnostics wrapper can share it without boxing.
 type WorkareaHeaderPress = fn(
@@ -287,6 +299,7 @@ impl GhostexGpuiApp {
             .rounded(px(7.0))
             .border_1()
             .border_color(titlebar_button_border_color())
+            .bg(workarea_header_split_button_background())
             .when(spec.dimmed, |this| this.opacity(0.5))
             .child(main)
             .child(

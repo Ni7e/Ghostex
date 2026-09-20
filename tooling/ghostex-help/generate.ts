@@ -190,7 +190,7 @@ const AGENTS_TAB = { tab: 'agents', tabTitle: 'Agents' } as const;
 const PROJECTS_TAB = { tab: 'projects', tabTitle: 'Projects' } as const;
 const OPEN_TARGETS_TAB = { tab: 'openTargets', tabTitle: 'Open In' } as const;
 const HOTKEYS_TAB = { tab: 'hotkeys', tabTitle: 'Hotkeys' } as const;
-const titlebarViews = { ...EXTENSIONS_TAB, section: 'viewOrder', sectionTitle: 'Titlebar views' };
+const viewRows = { ...EXTENSIONS_TAB, section: 'viewOrder', sectionTitle: 'Views' };
 const agentsConfig = { ...AGENTS_TAB, section: 'config', sectionTitle: 'Config' };
 
 /**
@@ -253,73 +253,78 @@ const SUPPLEMENTAL_SETTING_ROWS: Record<string, SupplementalRow> = {
     title: 'Show Advanced settings',
   },
   codeViewTabHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Code view tab from the titlebar.',
+    ...viewRows,
+    subtitle:
+      'Stop offering the Code view, so it is missing from the view panel tab strip, its + menu and the view picker.',
     title: 'Hide Code view',
   },
   browserViewTabHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Browser view tab from the titlebar.',
+    ...viewRows,
+    subtitle:
+      'Stop offering the Browser view, so it is missing from the view panel tab strip, its + menu and the view picker.',
     title: 'Hide Browser view',
   },
   kanbanViewTabHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Kanban view tab from the titlebar.',
+    ...viewRows,
+    subtitle:
+      'Stop offering the Kanban view, so it is missing from the view panel tab strip, its + menu and the view picker.',
     title: 'Hide Kanban view',
   },
   automateViewTabHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Automate view tab from the titlebar.',
+    ...viewRows,
+    subtitle:
+      'Stop offering the Automate view, so it is missing from the view panel tab strip, its + menu and the view picker.',
     title: 'Hide Automate view',
   },
   docsViewTabHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Docs view tab from the titlebar.',
+    ...viewRows,
+    subtitle:
+      'Stop offering the Docs view, so it is missing from the view panel tab strip, its + menu and the view picker.',
     title: 'Hide Docs view',
   },
   tipsAndTricksTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Tips button from the titlebar.',
+    ...viewRows,
+    subtitle: 'Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Tips button',
   },
   notificationsTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Notifications bell from the titlebar.',
+    ...viewRows,
+    subtitle: "Hide the Notifications bell from the sidebar's top row.",
     title: 'Hide Notifications bell',
   },
   helpTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Ghostex Help button from the titlebar.',
+    ...viewRows,
+    subtitle: 'Stop offering the Ask Ghostex page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Help button',
   },
   resourcesTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Resources button from the titlebar.',
+    ...viewRows,
+    subtitle: 'Stop offering the Resources page, so it is missing from the header ⋯ menu and the view picker.',
     title: 'Hide Resources button',
   },
   devServersTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Dev Servers button from the titlebar.',
+    ...viewRows,
+    subtitle: 'Hide Dev servers from the header ⋯ menu. The Browser view start page still lists them.',
     title: 'Hide Dev Servers button',
   },
   extensionsTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Extensions button from the titlebar.',
+    ...viewRows,
+    subtitle: 'Hide Extensions from the header ⋯ menu.',
     title: 'Hide Extensions button',
   },
   gitActionsTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Git button from the titlebar.',
+    ...viewRows,
+    subtitle: 'Hide the Commit button from the work area header.',
     title: 'Hide Git button',
   },
   quickActionsTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Actions button from the titlebar.',
+    ...viewRows,
+    subtitle: 'Hide the Start button from the work area header.',
     title: 'Hide Actions button',
   },
   openInTitlebarButtonHidden: {
-    ...titlebarViews,
-    subtitle: 'Hide the Open In button from the titlebar.',
+    ...viewRows,
+    subtitle: 'Hide the Open button from the work area header.',
     title: 'Hide Open In button',
   },
   defaultEditorCommand: {

@@ -22,11 +22,10 @@ pub(crate) mod project_hover;
 mod project_status;
 mod rename;
 pub(crate) mod render;
-#[cfg(target_os = "macos")]
-pub(crate) mod reveal;
 mod row_drag;
 pub(crate) mod rows;
 mod scroll;
+mod scroll_fade;
 mod sections;
 pub(crate) mod selectors;
 mod session_hover;

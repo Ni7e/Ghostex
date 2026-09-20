@@ -78,6 +78,20 @@ pub(crate) const SIDEBAR_MAX_WIDTH: f32 = 520.0;
 
 pub(crate) const SIDEBAR_RESET_WIDTH: f32 = 235.0;
 
+/*
+CDXC:Sidebar 2026-09-20 DECISION:
+User, reviewing the 2026-09-19 screens: the session list fades out at both ends the way the chat
+transcript does under the work area header. There is no rule under the Search row and none above the
+usage strip or the Commands row, so these two ramps are the only edges the list has. The heights are
+screen 01's own mask (`linear-gradient(transparent, #000 22px, #000 calc(100% - 28px), transparent)`
+in docs/2026-09-19/titlebarless-workspace/shared.css). This supersedes the 2026-09-19 rule that
+framed the list with a hairline at each end.
+SEE-ALSO: apps/desktop/src/app/native_sidebar/scroll_fade.rs, apps/desktop/src/app/native_sidebar/navigation.rs.
+*/
+pub(crate) const SIDEBAR_LIST_TOP_FADE_HEIGHT: f32 = 22.0;
+
+pub(crate) const SIDEBAR_LIST_BOTTOM_FADE_HEIGHT: f32 = 28.0;
+
 /// CDXC:Workarea 2026-09-19 DECISION:
 /// User: resize rails between areas (sidebar, main area, companion sidepanes, command pane, pane splits) should look like Waku's instead of 5px black gaps: one 1px line between sections, with as few double border lines as possible.
 /// Every rail is therefore a 1px reserved layout sibling in its neighbours' neutral border colour, panes leave their own border off the sides that touch a rail, and hovering or dragging shows a 2px accent line. The grab area is the wider invisible strip in `render/resize_rail.rs`. This supersedes the 5px gap rails with a centred 3px hover line.

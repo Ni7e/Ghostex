@@ -62,7 +62,7 @@ Default bindings are listed for macOS (`cmd`) with the Windows/Linux default whe
 | Next Group | unassigned |  | Focus the next group. | `focusNextGroup` |
 | Back | `cmd+[` | `cmd+alt+shift+[` | Go back to the previously active session or project. | `navigateHistoryBack` |
 | Forward | `cmd+]` | `cmd+alt+shift+]` | Go forward again after going back. | `navigateHistoryForward` |
-| Open Notifications | `cmd+i` |  | Open the Notifications panel under the titlebar bell. | `openNotifications` |
+| Open Notifications | `cmd+i` |  | Open the Notifications panel under the bell in the sidebar's top row. | `openNotifications` |
 | Jump to Latest Unread Notification | `cmd+shift+u` |  | Jump to the session of the latest unread notification and mark it read. | `jumpToLatestUnreadNotification` |
 | Mark as Oldest Unread and Jump to Next | `cmd+ctrl+u` |  | Push the current session to the back of the unread queue and jump to the next unread notification. | `deferNotificationAndJumpNext` |
 | Previous Session | `ctrl+shift+tab` | `cmd+shift+tab` | Select the previous session shown in the sidebar. | `focusPreviousSession` |

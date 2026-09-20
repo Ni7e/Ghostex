@@ -82,10 +82,11 @@ impl GhostexGpuiApp {
                 /*
                 CDXC:Titlebar 2026-09-20 WHY:
                 The rail and the view panel start one header height down because neither may pass
-                under the floating header: the rail is a grab target, and the panel's content is a
-                CEF page, an AppKit child view that paints over everything GPUI draws and would hide
-                the header instead of fading under it. Only the Agents column, and only while it
-                holds the GPUI chat, reaches the window's top edge.
+                under the floating band: the rail is a grab target, and the panel's content is a CEF
+                page, an AppKit child view that paints over everything GPUI draws and would hide the
+                band instead of fading under it. The panel's own tab strip is in the band instead,
+                as the mockup draws it (render/workarea_header/band.rs). Only the Agents column, and
+                only while it holds the GPUI chat, reaches the window's top edge.
                 */
                 v_flex()
                     .flex_shrink_0()
@@ -107,7 +108,6 @@ impl GhostexGpuiApp {
                     .min_w(px(WORKAREA_VIEW_PANEL_MIN_WIDTH))
                     .min_h_0()
                     .overflow_hidden()
-                    .child(self.render_view_tab_strip(strip_mode, cx))
                     .child(
                         div()
                             .on_children_prepainted(move |child_bounds, _window, cx| {

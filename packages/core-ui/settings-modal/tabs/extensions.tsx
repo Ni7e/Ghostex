@@ -325,7 +325,7 @@ export function ExtensionsSettingsTab({
     if (!name || (needsUrl && !url)) {
       setCustomViewEditor({
         ...customViewEditor,
-        error: !name ? 'Enter a name for the titlebar tab.' : 'Enter a complete HTTP or HTTPS URL.',
+        error: !name ? 'Enter a name for the view tab.' : 'Enter a complete HTTP or HTTPS URL.',
       });
       return;
     }

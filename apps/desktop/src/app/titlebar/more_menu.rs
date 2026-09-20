@@ -15,7 +15,6 @@ use gpui::Window;
 use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
-use gpui::rgb;
 use gpui_component::ElementExt as _;
 use gpui_component::Side;
 use gpui_component::menu::PopupMenu;
@@ -325,7 +324,9 @@ impl GhostexGpuiApp {
                         .rounded_full()
                         .border_1()
                         .border_color(titlebar_background())
-                        .bg(rgb(0x95d7f6)),
+                        // Picked for dark chrome, where the header is near-black; on a light header
+                        // the same pale blue reads as a smudge rather than a badge.
+                        .bg(chrome_color(0x95d7f6, 0x1d7fb8)),
                 )
             })
             .into_any_element()

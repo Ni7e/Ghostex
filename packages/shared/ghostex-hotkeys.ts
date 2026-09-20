@@ -692,7 +692,7 @@ export const GHOSTEX_HOTKEY_DEFINITIONS: readonly ghostexHotkeyDefinition[] = [
   {
     action: { command: 'open', id: 'openNotifications', kind: 'notificationFeed' },
     defaultKey: 'cmd+i',
-    description: 'Open the Notifications panel under the titlebar bell.',
+    description: "Open the Notifications panel under the bell in the sidebar's top row.",
     id: 'openNotifications',
     title: 'Open Notifications',
   },

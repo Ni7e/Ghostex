@@ -19,7 +19,6 @@ use gpui_component::h_flex;
 use super::anchor::record_workarea_header_bottom_y;
 use crate::app::consts::*;
 use crate::app::helpers::*;
-use crate::app::model::*;
 use crate::*;
 
 /*
@@ -49,14 +48,14 @@ struct GpuiLinuxHeaderDragState {
 }
 
 impl GhostexGpuiApp {
-    /// True while the workspace column is too narrow for the header's labels, which is what the
-    /// mockup's narrow chat column drops first.
+    /// True while the header's own half of the band is too narrow for its labels, which is what the
+    /// mockup's narrow chat column drops first. With a view open that half is the sessions column,
+    /// so opening a view is usually enough to reach it.
     pub(crate) fn workarea_header_compact(&self, window: &Window) -> bool {
-        command_pane_workspace_width(window, self.sidebar_width, self.sidebar_collapsed)
-            < WORKAREA_HEADER_COMPACT_WIDTH
+        self.workarea_header_row_width(window) < WORKAREA_HEADER_COMPACT_WIDTH
     }
 
-    pub(crate) fn render_workarea_header(
+    pub(crate) fn render_workarea_header_row(
         &self,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
@@ -79,13 +78,14 @@ impl GhostexGpuiApp {
         /*
         CDXC:Titlebar 2026-09-20 DECISION:
         User: "they just do nice fade from bottom mask thingy at the top". The header floats over
-        the workspace column instead of sitting above it, so the transcript scrolls under it and
-        fades out; it paints the workspace background, draws no bottom border, and there is no edge
-        at all where it meets the content. This is the overlap the user approved, and it is scoped
-        to the header over the content beneath it: the row is opaque and occludes the mouse, so the
-        band it covers is the drag area it has always been, and the ramp below it
+        the sessions column instead of sitting above it, so the transcript scrolls under it and
+        fades out; it paints the colour of the surface beneath it, draws no bottom border, and there
+        is no edge at all where it meets the content. This is the overlap the user approved, and it
+        is scoped to the header over the content beneath it: the row is opaque and occludes the
+        mouse, so the band it covers is the drag area it has always been, and the ramp below it
         (`render_workarea_header_content_fade`) carries no hitbox at all, so everything under the
-        faded strip keeps every click, drag and scroll. Nothing here licenses another overlay.
+        faded strip keeps every click, drag and scroll. Nothing here licenses another overlay. How
+        the band is divided between this row and the view panel's tab strip is in band.rs.
 
         CDXC:Titlebar 2026-09-20 WHY:
         `occlude()` is what makes the float honest rather than a second input layer: without it the
@@ -93,18 +93,22 @@ impl GhostexGpuiApp {
         transcript painted underneath, and the same press would both drag the window and land in the
         chat. It blocks the mouse only where the header is actually drawn, and only while no drag is
         in flight (`workarea_header_blocks_mouse`).
+
+        CDXC:Titlebar 2026-09-20 WHY:
+        The row paints the chat's own background, not the workspace's, whenever the transcript
+        passes under it: the fade below it ramps from this colour to transparent, so a colour the
+        content beneath does not use turns that ramp into a crossfade between two surfaces instead
+        of a fade-out of one. In every other state the column under the row starts below it and
+        carries the workspace background, so that is what the row paints there.
         */
-        let header_background = workspace_background_color();
+        let header_background = self.workarea_header_surface_color(cx);
         let header = div()
             .id("ghostex-gpui-workarea-header")
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
             .flex()
             .items_center()
-            .flex_shrink_0()
-            .h(px(WORKAREA_HEADER_HEIGHT))
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .bg(header_background)
             .when(self.workarea_header_blocks_mouse(), |header| {
                 header.occlude()

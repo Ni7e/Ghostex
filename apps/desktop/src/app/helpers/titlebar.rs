@@ -1479,6 +1479,17 @@ pub(crate) fn sidebar_chrome_gradient_fill(angle: f32) -> gpui::Background {
     )
 }
 
+/// The colour the sidebar's chrome gradient reaches at its top edge, for anything that has to fade
+/// into the sidebar there rather than sit on a flat fill.
+pub(crate) fn sidebar_chrome_gradient_top_color() -> Hsla {
+    rgb(GPUI_TITLEBAR_GRADIENT_LEFT_RGB.load(Ordering::Relaxed) as u32).into()
+}
+
+/// The same colour at the sidebar's bottom edge.
+pub(crate) fn sidebar_chrome_gradient_bottom_color() -> Hsla {
+    rgb(GPUI_TITLEBAR_GRADIENT_RIGHT_RGB.load(Ordering::Relaxed) as u32).into()
+}
+
 pub(crate) fn titlebar_button_border_color() -> Hsla {
     rgb(if titlebar_uses_light_theme() {
         0xd4d4d4

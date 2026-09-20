@@ -10,7 +10,7 @@ void GhostexGpuiCEFRefreshSidebarPointerInside(void);
 // CDXC:Sidebar 2026-09-09 DECISION:
 // User: the collapsed sessions sidebar should slide in fluidly from the left edge on hover and use the same animation in reverse when the pointer leaves.
 // User: narrow the reveal region from 30px to 10px at the sidebar edge to avoid triggering it too easily.
-// User: while the companion is hidden, the top half reveals Sessions and the bottom half reveals the companion floating, with the same animation and dismissal; neither hover docks a pane.
+// User: while the companion is hidden, the top half reveals Sessions and the bottom half reveals the companion floating, with the same animation and dismissal; neither hover docks a pane. (Superseded 2026-09-20: the companion is gone and one panel carries the sidebar and the sessions column together; see the decision on GhostexGpuiNativeSidebarRevealRequest below.)
 // User: Reveal Active Session opens the floating sidebar without changing its saved collapsed state; if it is not hovered within five seconds, animate it closed.
 // The existing CEF view moves into a native child panel. Pointer observation does not intercept or reroute page input.
 
@@ -395,9 +395,17 @@ bool GhostexGpuiNativeSidebarRevealUpdate(void *root, void *popup, bool enabled,
   return GhostexGpuiNativeRevealUpdate(root, popup, enabled, width, titlebarHeight, requested, sticky);
 }
 
-// The native sidebar and companion share the existing 10px edge gesture.
-// This observes the pointer; each GPUI child window owns its normal input.
-int GhostexGpuiNativeSidebarRevealRequest(void *rootPtr, double width, double titlebarHeight, bool companionHidden, bool requested, bool keepUnderPointer) {
+// CDXC:Sidebar 2026-09-20 DECISION:
+// User (ruling 7B, screen 10): edge-hover floating works on macOS, Windows and Linux, and its hot
+// zone is a real edge strip rather than an invisible layer over the content. The strip is a GPUI
+// sibling in the main window's body row and it is the only trigger, so this no longer measures the
+// pointer against a 10px rectangle of its own: Wayland cannot answer where the pointer is, and two
+// measurements would have made one gesture mean two things. It supersedes the 2026-09-09 clause at
+// the top of this file that split the edge into a Sessions half and a companion half; phase 3
+// deleted the companion, and one panel carries both columns in its place.
+// The pointer is still read for the sticky case, where a layout change must not pull the sidebar
+// out from under it. This observes the pointer; each GPUI child window owns its normal input.
+int GhostexGpuiNativeSidebarRevealRequest(void *rootPtr, double width, double titlebarHeight, bool edgeHovered, bool requested, bool keepUnderPointer) {
   NSView *root = (__bridge NSView *)rootPtr;
   NSWindow *parent = root.window;
   NSWindow *keyRoot = NSApp.keyWindow;
@@ -408,13 +416,11 @@ int GhostexGpuiNativeSidebarRevealRequest(void *rootPtr, double width, double ti
   if (root.flipped) body.origin.y += titlebarHeight;
   body = [parent convertRectToScreen:[root convertRect:body toView:nil]];
   NSPoint pointer = NSEvent.mouseLocation;
-  NSRect edge = body;
-  edge.size.width = MIN(10, body.size.width);
   NSRect slot = body;
   slot.size.width = MIN(width, body.size.width);
   if (requested || (keepUnderPointer && NSPointInRect(pointer, slot))) return 1;
-  if (!NSPointInRect(pointer, edge) || NSEvent.pressedMouseButtons != 0) return 0;
-  return companionHidden && pointer.y < NSMidY(body) ? 2 : 1;
+  if (!edgeHovered || NSEvent.pressedMouseButtons != 0) return 0;
+  return 1;
 }
 
 bool GhostexGpuiReparentPaneNativeView(void *viewPtr, void *parentPtr, void *fromPtr) {

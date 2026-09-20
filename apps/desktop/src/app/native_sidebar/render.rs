@@ -85,98 +85,123 @@ impl GhostexGpuiApp {
             .font_weight(FontWeight::LIGHT)
             .child(self.render_native_sidebar_navigation(&appearance, false, cx))
             .child(self.render_native_sidebar_selectors(&snapshot, &appearance, cx))
+            /*
+            The list and its two fade ramps are one child on purpose: the
+            `on_children_prepainted` above measures the sidebar from its fourth
+            child, so the ramps must live inside the list's own slot rather than
+            become root children of their own.
+            */
             .child(
-                v_flex()
-                    .on_children_prepainted(move |_, window, cx| {
-                        view.update(cx, |app, cx| {
-                            app.update_native_sidebar_scroll(window, cx);
-                            app.update_native_space_transition(window, cx);
-                            if let Some(request) = app
-                                .native_sidebar
-                                .snapshot
-                                .as_ref()
-                                .and_then(|snapshot| snapshot.rename_request.clone())
-                            {
-                                if app.native_sidebar.handled_rename != Some(request.request_id) {
-                                    app.native_sidebar.handled_rename = Some(request.request_id);
-                                    cx.defer_in(window, move |app, window, cx| {
-                                        app.begin_native_collection_rename(
-                                            &request.collection_id,
-                                            window,
-                                            cx,
-                                        )
-                                    });
-                                }
-                            }
-                        })
-                    })
-                    .id("native-sidebar-scroll")
+                div()
+                    .relative()
                     .w_full()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.native_sidebar.scroll)
-                    .on_scroll_wheel(cx.listener(|app, _, _, _| {
-                        app.native_sidebar.scroll_animation = None;
-                    }))
                     .child(
                         v_flex()
-                            .w_full()
-                            .pl(px(6.0 * appearance.scale))
-                            .pr(px(2.0 * appearance.scale))
-                            .relative()
-                            .left(px(space_offset * appearance.scale))
-                            .opacity(space_opacity)
-                            .when(content.order.is_empty(), |column| {
-                                column.child(self.render_native_sidebar_empty(
-                                    &content,
-                                    &appearance,
-                                    cx,
-                                ))
-                            })
-                            .children(content.order.iter().filter_map(|item| {
-                                if item.kind == "collection" {
-                                    content
-                                        .collections
-                                        .iter()
-                                        .find(|collection| collection.collection_id == item.id)
-                                        .map(|collection| {
-                                            self.render_native_collection(
-                                                collection,
-                                                &content,
-                                                &appearance,
-                                                cx,
-                                            )
-                                        })
-                                } else {
-                                    content
-                                        .groups
-                                        .iter()
-                                        .find(|group| group.group_id == item.id)
-                                        .map(|group| {
-                                            div()
-                                                .ml(px(18.0 * appearance.scale))
-                                                .mr(px(5.0 * appearance.scale))
-                                                .mb(px(10.0 * appearance.scale))
-                                                .child(self.render_native_sidebar_group(
-                                                    group,
-                                                    &content.hud,
-                                                    &appearance,
+                            .on_children_prepainted(move |_, window, cx| {
+                                view.update(cx, |app, cx| {
+                                    app.update_native_sidebar_scroll(window, cx);
+                                    app.update_native_space_transition(window, cx);
+                                    if let Some(request) = app
+                                        .native_sidebar
+                                        .snapshot
+                                        .as_ref()
+                                        .and_then(|snapshot| snapshot.rename_request.clone())
+                                    {
+                                        if app.native_sidebar.handled_rename
+                                            != Some(request.request_id)
+                                        {
+                                            app.native_sidebar.handled_rename =
+                                                Some(request.request_id);
+                                            cx.defer_in(window, move |app, window, cx| {
+                                                app.begin_native_collection_rename(
+                                                    &request.collection_id,
+                                                    window,
                                                     cx,
-                                                ))
-                                                .into_any_element()
-                                        })
-                                }
+                                                )
+                                            });
+                                        }
+                                    }
+                                })
+                            })
+                            .id("native-sidebar-scroll")
+                            .w_full()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.native_sidebar.scroll)
+                            .on_scroll_wheel(cx.listener(|app, _, _, _| {
+                                app.native_sidebar.scroll_animation = None;
                             }))
                             .child(
-                                div()
-                                    .id("native-sidebar-ungroup-drop")
-                                    .h(px(24.0 * appearance.scale))
+                                v_flex()
                                     .w_full()
-                                    .flex_shrink_0()
-                                    .sidebar_drop_target("ungroup", String::new(), None, cx),
+                                    .pl(px(6.0 * appearance.scale))
+                                    .pr(px(2.0 * appearance.scale))
+                                    .relative()
+                                    .left(px(space_offset * appearance.scale))
+                                    .opacity(space_opacity)
+                                    .when(content.order.is_empty(), |column| {
+                                        column.child(self.render_native_sidebar_empty(
+                                            &content,
+                                            &appearance,
+                                            cx,
+                                        ))
+                                    })
+                                    .children(content.order.iter().filter_map(|item| {
+                                        if item.kind == "collection" {
+                                            content
+                                                .collections
+                                                .iter()
+                                                .find(|collection| {
+                                                    collection.collection_id == item.id
+                                                })
+                                                .map(|collection| {
+                                                    self.render_native_collection(
+                                                        collection,
+                                                        &content,
+                                                        &appearance,
+                                                        cx,
+                                                    )
+                                                })
+                                        } else {
+                                            content
+                                                .groups
+                                                .iter()
+                                                .find(|group| group.group_id == item.id)
+                                                .map(|group| {
+                                                    div()
+                                                        .ml(px(18.0 * appearance.scale))
+                                                        .mr(px(5.0 * appearance.scale))
+                                                        .mb(px(10.0 * appearance.scale))
+                                                        .child(self.render_native_sidebar_group(
+                                                            group,
+                                                            &content.hud,
+                                                            &appearance,
+                                                            cx,
+                                                        ))
+                                                        .into_any_element()
+                                                })
+                                        }
+                                    }))
+                                    .child(
+                                        div()
+                                            .id("native-sidebar-ungroup-drop")
+                                            .h(px(24.0 * appearance.scale))
+                                            .w_full()
+                                            .flex_shrink_0()
+                                            .sidebar_drop_target(
+                                                "ungroup",
+                                                String::new(),
+                                                None,
+                                                cx,
+                                            ),
+                                    ),
                             ),
-                    ),
+                    )
+                    .child(self.render_native_sidebar_list_fade(&appearance, true))
+                    .child(self.render_native_sidebar_list_fade(&appearance, false)),
             )
             /*
             The usage strip and the Commands row are one footer child on purpose:

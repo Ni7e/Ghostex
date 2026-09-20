@@ -19,6 +19,13 @@ pub(crate) fn chrome_ink() -> Rgba {
     chrome_color(0xffffff, 0x000000)
 }
 
+/// True while the app's chrome is on its light appearance. For a colour, prefer `chrome_color`;
+/// this is for the places where light mode needs a different alpha, shadow or nothing at all rather
+/// than a different hue.
+pub(crate) fn chrome_uses_light_appearance() -> bool {
+    CHROME_LIGHT_APPEARANCE.load(Ordering::Relaxed)
+}
+
 /// CDXC:Theming 2026-09-13 SEE-ALSO:
 /// apps/desktop/views/workarea-theme.ts consumes this appearance-only event in Docs, Kanban and Automate.
 pub(crate) fn workarea_theme_script(light: bool) -> &'static str {

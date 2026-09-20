@@ -19,8 +19,8 @@ export function AccountTitlebarStar({
   machineId: string;
 }) {
   const label = account.showInTitlebar
-    ? "Hide this account's stats from the titlebar"
-    : "Show this account's stats in the titlebar";
+    ? "Hide this account's stats from the sidebar"
+    : "Show this account's stats in the sidebar";
   const Icon = account.showInTitlebar ? IconStarFilled : IconStar;
   return (
     <AppTooltip content={label}>

@@ -13,6 +13,9 @@ use std::time::SystemTime;
 // RefCell backs cross-platform runtime state (window frame persistence), not
 // just the macOS-only shims that first introduced the import.
 
+use crate::app::floating_reveal::model::SIDEBAR_HOVER_REVEAL_ACTIVE_POLL;
+use crate::app::floating_reveal::model::SIDEBAR_HOVER_REVEAL_IDLE_POLL;
+
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
 use gpui::MouseButton;
@@ -2262,34 +2265,45 @@ impl GhostexGpuiApp {
         self.update_sidebar_reveal(false, false, cx);
     }
 
+    /// CDXC:Sidebar 2026-09-20 DECISION:
+    /// User (ruling 7B, screen 10): edge-hover floating is on all three platforms, not macOS only.
+    /// The gesture, its panel and its dismissal therefore live in `app/floating_reveal/`, which is
+    /// shared; only the host that owns the child window is per platform. This supersedes the
+    /// macOS-only reveal this function used to forward to.
     pub(crate) fn update_sidebar_reveal(
         &mut self,
         requested: bool,
         keep_under_pointer: bool,
         cx: &mut gpui::Context<Self>,
     ) {
-        #[cfg(target_os = "macos")]
-        self.update_native_sidebar_reveal(requested, keep_under_pointer, cx);
-        #[cfg(not(target_os = "macos"))]
-        let _ = (requested, keep_under_pointer, cx);
+        self.update_floating_reveal(requested, keep_under_pointer, cx);
     }
 
-    #[cfg(target_os = "macos")]
-    pub(crate) fn start_sidebar_hover_reveal_polling(&self, cx: &mut gpui::Context<Self>) {
+    /// The gesture's clock. Pointer-leave is the only thing no element can report (the panel covers
+    /// the strip that armed it), so one sweep owns the whole reveal. It tightens to a frame while a
+    /// panel is on screen, because the backends that animate the slide themselves step it here.
+    pub(crate) fn start_sidebar_hover_reveal_polling(
+        &self,
+        window: &gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let window = window.window_handle();
         cx.spawn(async move |this, cx| {
+            let mut interval = SIDEBAR_HOVER_REVEAL_IDLE_POLL;
             loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(60))
-                    .await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.sidebar_collapsed {
-                            this.update_sidebar_cef_surface_visibility(cx);
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
+                cx.background_executor().timer(interval).await;
+                let result = window.update(cx, |_, window, cx| {
+                    this.update(cx, |this, cx| this.poll_floating_reveal(window, cx))
+                });
+                match result {
+                    Ok(Ok(panel_open)) => {
+                        interval = if panel_open {
+                            SIDEBAR_HOVER_REVEAL_ACTIVE_POLL
+                        } else {
+                            SIDEBAR_HOVER_REVEAL_IDLE_POLL
+                        };
+                    }
+                    _ => break,
                 }
             }
         })

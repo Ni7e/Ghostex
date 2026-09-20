@@ -42,6 +42,7 @@ pub(crate) mod delete_worktree_modal_lifecycle;
 pub(crate) mod docs_annotation_feedback;
 pub(crate) mod drag_resize;
 pub(crate) mod export_transcript_modal_lifecycle;
+pub(crate) mod floating_reveal;
 pub(crate) mod focus;
 pub(crate) mod gx_store;
 pub(crate) mod keyboard_owner;

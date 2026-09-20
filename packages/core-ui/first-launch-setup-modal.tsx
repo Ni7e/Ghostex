@@ -1287,8 +1287,8 @@ export function FirstLaunchSetupModal({
                       ? 'Checking setup…'
                       : !cliReady && installableSkillSelection.length > 0
                         ? 'Ghostex will prepare the included tools when you enable your selections.'
-                        : 'You can re-run this tour anytime from the Tips panel in the title bar.'))
-              : (finishError ?? 'You can re-run this tour anytime from the Tips panel in the title bar.')}
+                        : 'You can re-run this tour anytime from the Tips & Tricks view.'))
+              : (finishError ?? 'You can re-run this tour anytime from the Tips & Tricks view.')}
           </span>
           <div className='first-launch-setup-footer-actions' role='group' aria-label='Setup actions'>
             {activePageIndex === 0 ? null : (

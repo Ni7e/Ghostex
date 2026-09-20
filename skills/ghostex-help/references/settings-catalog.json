@@ -4021,7 +4021,7 @@
     {
       "key": "customSidebarTitlebarBackgroundDarknessPercent",
       "title": "Dark theme background contrast",
-      "subtitle": "Contrast level for the sidebar and titlebar background in dark mode. Light mode stays light gray.",
+      "subtitle": "Contrast level for the sidebar and window chrome background in dark mode. Light mode stays light gray.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -4038,7 +4038,7 @@
     {
       "key": "customSidebarTitlebarBackgroundTintColor",
       "title": "Dark theme background tint",
-      "subtitle": "Subtle tint color for the sidebar and titlebar background in dark mode. Light mode stays light gray.",
+      "subtitle": "Subtle tint color for the sidebar and window chrome background in dark mode. Light mode stays light gray.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "appearance",
@@ -6170,8 +6170,8 @@
     },
     {
       "key": "hideKeepAwakeTitlebarControl",
-      "title": "Hide title-bar keep-awake control",
-      "subtitle": "Hide the keep-awake control from the title bar.",
+      "title": "Hide Keep Awake",
+      "subtitle": "Hide the Keep Awake entry from the sidebar menu.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "system",
@@ -6186,7 +6186,7 @@
     {
       "key": "keepAwakeDefaultDurationMinutes",
       "title": "Default keep-awake duration",
-      "subtitle": "Choose the duration used by the title-bar keep-awake button.",
+      "subtitle": "Choose the duration Keep Awake uses by default.",
       "tab": "settings",
       "tabTitle": "General",
       "group": "system",
@@ -7196,7 +7196,7 @@
           "value": "native-layout-layering-debug.log"
         },
         {
-          "label": "Mode switcher and titlebar routing",
+          "label": "View switching and header routing",
           "value": "native.mode.switcher"
         },
         {
@@ -7204,7 +7204,7 @@
           "value": "native-mode-switcher-debug.log"
         },
         {
-          "label": "Sidebar and titlebar responsiveness",
+          "label": "Sidebar and header responsiveness",
           "value": "native.chrome.responsiveness"
         },
         {
@@ -7583,7 +7583,7 @@
     {
       "key": "accounts",
       "title": "Accounts, usage stats and automatic continuation",
-      "subtitle": "Current CLI login, Claude cswap, Codex xswap, titlebar, status lines, usage limits and resets, account indicators, switching, hide emails, privacy, error recovery and retry settings.",
+      "subtitle": "Current CLI login, Claude cswap, Codex xswap, sidebar usage strip, status lines, usage limits and resets, account indicators, switching, hide emails, privacy, error recovery and retry settings.",
       "tab": "accounts",
       "tabTitle": "Accounts",
       "section": "accounts",
@@ -8108,11 +8108,11 @@
     {
       "key": "codeViewTabHidden",
       "title": "Hide Code view",
-      "subtitle": "Hide the Code view tab from the titlebar.",
+      "subtitle": "Stop offering the Code view, so it is missing from the view panel tab strip, its + menu and the view picker.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8120,11 +8120,11 @@
     {
       "key": "browserViewTabHidden",
       "title": "Hide Browser view",
-      "subtitle": "Hide the Browser view tab from the titlebar.",
+      "subtitle": "Stop offering the Browser view, so it is missing from the view panel tab strip, its + menu and the view picker.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8132,11 +8132,11 @@
     {
       "key": "kanbanViewTabHidden",
       "title": "Hide Kanban view",
-      "subtitle": "Hide the Kanban view tab from the titlebar.",
+      "subtitle": "Stop offering the Kanban view, so it is missing from the view panel tab strip, its + menu and the view picker.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8144,11 +8144,11 @@
     {
       "key": "automateViewTabHidden",
       "title": "Hide Automate view",
-      "subtitle": "Hide the Automate view tab from the titlebar.",
+      "subtitle": "Stop offering the Automate view, so it is missing from the view panel tab strip, its + menu and the view picker.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8156,11 +8156,11 @@
     {
       "key": "docsViewTabHidden",
       "title": "Hide Docs view",
-      "subtitle": "Hide the Docs view tab from the titlebar.",
+      "subtitle": "Stop offering the Docs view, so it is missing from the view panel tab strip, its + menu and the view picker.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8168,11 +8168,11 @@
     {
       "key": "tipsAndTricksTitlebarButtonHidden",
       "title": "Hide Tips button",
-      "subtitle": "Hide the Tips button from the titlebar.",
+      "subtitle": "Stop offering the Tips & Tricks page, so it is missing from the header ⋯ menu and the view picker.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8180,11 +8180,11 @@
     {
       "key": "notificationsTitlebarButtonHidden",
       "title": "Hide Notifications bell",
-      "subtitle": "Hide the Notifications bell from the titlebar.",
+      "subtitle": "Hide the Notifications bell from the sidebar's top row.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8192,11 +8192,11 @@
     {
       "key": "helpTitlebarButtonHidden",
       "title": "Hide Help button",
-      "subtitle": "Hide the Ghostex Help button from the titlebar.",
+      "subtitle": "Stop offering the Ask Ghostex page, so it is missing from the header ⋯ menu and the view picker.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8204,11 +8204,11 @@
     {
       "key": "resourcesTitlebarButtonHidden",
       "title": "Hide Resources button",
-      "subtitle": "Hide the Resources button from the titlebar.",
+      "subtitle": "Stop offering the Resources page, so it is missing from the header ⋯ menu and the view picker.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8216,11 +8216,11 @@
     {
       "key": "devServersTitlebarButtonHidden",
       "title": "Hide Dev Servers button",
-      "subtitle": "Hide the Dev Servers button from the titlebar.",
+      "subtitle": "Hide Dev servers from the header ⋯ menu. The Browser view start page still lists them.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8228,11 +8228,11 @@
     {
       "key": "extensionsTitlebarButtonHidden",
       "title": "Hide Extensions button",
-      "subtitle": "Hide the Extensions button from the titlebar.",
+      "subtitle": "Hide Extensions from the header ⋯ menu.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8240,11 +8240,11 @@
     {
       "key": "gitActionsTitlebarButtonHidden",
       "title": "Hide Git button",
-      "subtitle": "Hide the Git button from the titlebar.",
+      "subtitle": "Hide the Commit button from the work area header.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8252,11 +8252,11 @@
     {
       "key": "quickActionsTitlebarButtonHidden",
       "title": "Hide Actions button",
-      "subtitle": "Hide the Actions button from the titlebar.",
+      "subtitle": "Hide the Start button from the work area header.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8264,11 +8264,11 @@
     {
       "key": "openInTitlebarButtonHidden",
       "title": "Hide Open In button",
-      "subtitle": "Hide the Open In button from the titlebar.",
+      "subtitle": "Hide the Open button from the work area header.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "viewOrder",
-      "sectionTitle": "Titlebar views",
+      "sectionTitle": "Views",
       "type": "boolean",
       "default": false,
       "agentWritable": true
@@ -8342,7 +8342,7 @@
     {
       "key": "notifications",
       "title": "Notifications",
-      "subtitle": "Title bar bell that lists what your agents finished or need from you.",
+      "subtitle": "A bell in the sidebar's top row that lists what your agents finished or need from you.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8386,7 +8386,7 @@
     {
       "key": "gitActions",
       "title": "Git actions",
-      "subtitle": "Title bar button for commit, branch, and worktree helpers on the active project.",
+      "subtitle": "A work area header button for commit, branch, and worktree helpers on the active project.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8397,7 +8397,7 @@
     {
       "key": "quickActions",
       "title": "Quick Actions",
-      "subtitle": "Title bar button that runs your saved terminal and browser actions in one click.",
+      "subtitle": "A work area header button that runs your saved terminal and browser actions in one click.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8408,7 +8408,7 @@
     {
       "key": "openIn",
       "title": "Open In",
-      "subtitle": "Title bar button that opens the active project in another app.",
+      "subtitle": "A work area header button that opens the active project in another app.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8419,7 +8419,7 @@
     {
       "key": "extensionsButton",
       "title": "Extensions",
-      "subtitle": "Title bar button that opens this Extensions page.",
+      "subtitle": "An entry in the work area header’s ⋯ menu that opens this Extensions page.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "official",
@@ -8440,12 +8440,12 @@
     },
     {
       "key": "accountTitlebarUsage",
-      "title": "Titlebar account usage",
-      "subtitle": "Show or hide usage stats for saved Claude and Codex accounts in the desktop titlebar. Star accounts to pin their usage.",
+      "title": "Account usage in the sidebar",
+      "subtitle": "Show or hide usage stats for saved Claude and Codex accounts at the bottom of the desktop sidebar. Star accounts to pin their usage.",
       "tab": "extensions",
       "tabTitle": "Extensions",
       "section": "accountUsage",
-      "sectionTitle": "Titlebar account usage",
+      "sectionTitle": "Account usage in the sidebar",
       "type": "ui",
       "agentWritable": false
     },
@@ -9633,7 +9633,7 @@
     {
       "id": "openNotifications",
       "title": "Open Notifications",
-      "description": "Open the Notifications panel under the titlebar bell.",
+      "description": "Open the Notifications panel under the bell in the sidebar's top row.",
       "defaultKey": "cmd+i"
     },
     {

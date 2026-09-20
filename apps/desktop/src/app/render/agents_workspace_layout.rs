@@ -32,6 +32,10 @@ pub(crate) enum AgentsWorkspaceLayout {
     FullWidth,
     /// A view panel is open beside it; `split_ratio` is the Agents column's share of the row.
     Column { split_ratio: f32 },
+    /// The workarea folded the column away and the left-edge reveal is carrying it, so it fills a
+    /// slot in the floating panel instead of a column of the main window. There is no header above
+    /// it there and no command pane beside it, so it neither insets for one nor fades under one.
+    Floating,
 }
 
 impl GhostexGpuiApp {
@@ -62,19 +66,34 @@ impl GhostexGpuiApp {
         exactly as it draws none against a resize rail. The rule is in
         render/workarea_header/overlap.rs and the decision behind it on the header itself.
         */
-        let flows_under_header = self.agents_column_flows_under_workarea_header(cx);
-        let top_inset = self.workarea_header_column_top_inset(flows_under_header);
-        let outer_rail_edges = RailFacingEdges {
-            top: flows_under_header,
-            ..self.main_workspace_outer_rail_edges(window)
+        let floating = layout == AgentsWorkspaceLayout::Floating;
+        let flows_under_header = !floating && self.agents_column_flows_under_workarea_header(cx);
+        let top_inset = if floating {
+            0.0
+        } else {
+            self.workarea_header_column_top_inset(flows_under_header)
         };
-        let rail_edges = match layout {
-            AgentsWorkspaceLayout::FullWidth => outer_rail_edges,
-            // The split divider is the column's right-hand rail, so the panes there own no border.
-            AgentsWorkspaceLayout::Column { .. } => RailFacingEdges {
-                right: true,
-                ..outer_rail_edges
-            },
+        let rail_edges = if floating {
+            // The panel's own rail is the only line on the column's left; nothing else in that
+            // window touches it.
+            RailFacingEdges {
+                left: true,
+                ..RailFacingEdges::default()
+            }
+        } else {
+            let outer_rail_edges = RailFacingEdges {
+                top: flows_under_header,
+                ..self.main_workspace_outer_rail_edges(window)
+            };
+            match layout {
+                // The split divider is the column's right-hand rail, so the panes there own no
+                // border.
+                AgentsWorkspaceLayout::Column { .. } => RailFacingEdges {
+                    right: true,
+                    ..outer_rail_edges
+                },
+                _ => outer_rail_edges,
+            }
         };
         let root = v_flex()
             .id("ghostex-gpui-agents-workspace")
@@ -84,7 +103,9 @@ impl GhostexGpuiApp {
             .overflow_hidden()
             .bg(workspace_background_color());
         let root = match layout {
-            AgentsWorkspaceLayout::FullWidth => root.flex_1().min_w_0(),
+            AgentsWorkspaceLayout::FullWidth | AgentsWorkspaceLayout::Floating => {
+                root.flex_1().min_w_0()
+            }
             AgentsWorkspaceLayout::Column { split_ratio } => root
                 .flex_grow(split_ratio)
                 .flex_shrink_1()

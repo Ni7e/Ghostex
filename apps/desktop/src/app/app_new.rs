@@ -517,6 +517,7 @@ impl GhostexGpuiApp {
                 agent_hook_status_request_in_flight: false,
                 sidebar: None,
                 native_sidebar: Default::default(),
+                floating_reveal: Default::default(),
                 gx_store: Default::default(),
                 browser_surfaces: HashMap::new(),
                 browser_address_inputs: HashMap::new(),
@@ -611,8 +612,7 @@ impl GhostexGpuiApp {
             }
             this.schedule_project_editor_auto_sleep_for_inactive_modes(cx);
             this.start_project_editor_auto_sleep_policy_polling(cx);
-            #[cfg(target_os = "macos")]
-            this.start_sidebar_hover_reveal_polling(cx);
+            this.start_sidebar_hover_reveal_polling(window, cx);
             this.start_command_action_status_polling(cx);
             this.start_command_pane_auto_minimize_polling(window, cx);
             this.start_session_chat_queued_count_polling(cx);
