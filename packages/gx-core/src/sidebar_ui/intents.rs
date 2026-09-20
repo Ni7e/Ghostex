@@ -36,11 +36,6 @@ pub enum SidebarUiIntent {
     SelectSpace {
         space_id: String,
     },
-    /// Forget a Space the user deleted, so the section resolves its selection afresh.
-    ForgetSpace {
-        section_key: String,
-        space_id: String,
-    },
     /// Switch the machine tab.
     SelectMachine {
         machine_id: String,
@@ -70,11 +65,6 @@ pub enum SidebarUiIntent {
     },
     /// Collapse every drawn project of the machine, or put back the ones that were expanded.
     ToggleAllProjects(ToggleAllProjectsInput),
-    /// Make a group visible: switch to its machine and expand it.
-    RevealGroup {
-        machine_id: String,
-        group_id: String,
-    },
 }
 
 /// The drawn project rows of a machine, in the order the list draws them.

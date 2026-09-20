@@ -247,7 +247,6 @@ impl GhostexGpuiApp {
 
         let published = self.native_sidebar.projection.clone();
         let settings = self.gx_store.sidebar_list.settings(published.as_deref());
-        let ui_generation = self.gx_store.sidebar_ui.generation();
         // Nothing the list reads moved: the burst carried no change it draws, no click or publish
         // marked it, focus stands where it did, no row's own clock has run out, and the settings
         // read the same. Returning here is what keeps a pump that changed nothing free, rather
@@ -261,6 +260,10 @@ impl GhostexGpuiApp {
             return;
         }
         self.gx_store.sidebar_list.last_focus = Some(self.gx_store.core.focus().clone());
+        // Before the generation is read: pruning is a change to the sidebar's own state and the
+        // inputs have to carry it.
+        self.gx_store_prune_sidebar_tag_filters(&settings);
+        let ui_generation = self.gx_store.sidebar_ui.generation();
         let changes = std::mem::take(&mut self.gx_store.sidebar_list.changes);
         self.gx_store.sidebar_list.dirty = false;
         let mut inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
@@ -329,6 +332,29 @@ impl GhostexGpuiApp {
         if changed && self.gx_store_sidebar_draws_store_list() {
             self.gx_store_install_sidebar_list(cx);
         }
+    }
+
+    /// Drops ticked tag filters the Sort & Filter menu no longer offers, the way the old
+    /// projection pruned them before every build.
+    fn gx_store_prune_sidebar_tag_filters(&mut self, settings: &SidebarSettings) {
+        if self
+            .gx_store
+            .sidebar_ui
+            .state()
+            .selected_tag_filters
+            .is_empty()
+        {
+            return;
+        }
+        let machine = ghostex_gx_core::MachineId::Local;
+        let offered = settings.offered_tag_filters(
+            self.gx_store
+                .core
+                .presentation()
+                .machine(&machine)
+                .and_then(|machine| machine.side_state().custom_session_tags.as_ref()),
+        );
+        self.gx_store.sidebar_ui.retain_tag_filters(&offered);
     }
 
     /// Drops rows the list no longer draws from the multi-selection, the way the old projection

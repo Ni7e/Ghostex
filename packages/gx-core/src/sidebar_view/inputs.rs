@@ -235,6 +235,15 @@ impl SidebarSettings {
         super::tags::enabled_visible_tag_filters(&self.tag_list_items, catalog)
     }
 
+    /// The filters the Sort & Filter menu offers, for a host that has to prune a ticked one the
+    /// settings or the daemon's catalog took away.
+    pub fn offered_tag_filters(
+        &self,
+        catalog_state: Option<&ghostex_gx_protocol::CustomSessionTagsState>,
+    ) -> Vec<String> {
+        self.enabled_tag_filters(&TagCatalog::from_state(catalog_state))
+    }
+
     /// The tag filter list itself, for a menu builder.
     pub fn tag_list(
         &self,

@@ -88,6 +88,16 @@ impl SidebarUiStore {
         before != self.state.selected_session_ids.len()
     }
 
+    /// Drops ticked tag filters the Sort & Filter menu no longer offers, which is what the
+    /// projection did on every build. Returns whether the list moved. Never persisted.
+    pub fn retain_tag_filters(&mut self, offered: &[String]) -> bool {
+        let before = self.state.selected_tag_filters.len();
+        self.state
+            .selected_tag_filters
+            .retain(|tag| offered.iter().any(|offered| offered == tag));
+        before != self.state.selected_tag_filters.len()
+    }
+
     /// The machine tab the sidebar draws.
     pub fn selected_machine_id(&self) -> &str {
         &self.state.selected_machine_id
@@ -162,24 +172,6 @@ impl SidebarUiStore {
                     SidebarPersistSet::collapse(),
                 )
             }
-            SidebarUiIntent::ForgetSpace {
-                section_key,
-                space_id,
-            } => {
-                let held = self
-                    .state
-                    .collapse
-                    .selected_space_by_section
-                    .get(&section_key)
-                    .is_some_and(|held| *held == space_id);
-                if held {
-                    self.state
-                        .collapse
-                        .selected_space_by_section
-                        .remove(&section_key);
-                }
-                outcome(held, SidebarPersistSet::collapse())
-            }
             SidebarUiIntent::SelectMachine { machine_id } => {
                 let moved = self.state.selected_machine_id != machine_id;
                 self.state.selected_machine_id = machine_id;
@@ -227,22 +219,6 @@ impl SidebarUiStore {
                 outcome(moved, SidebarPersistSet::default())
             }
             SidebarUiIntent::ToggleAllProjects(input) => self.toggle_all_projects(input),
-            SidebarUiIntent::RevealGroup {
-                machine_id,
-                group_id,
-            } => {
-                let mut moved = self.state.selected_machine_id != machine_id;
-                let mut persist = SidebarPersistSet::default();
-                if moved {
-                    self.state.selected_machine_id = machine_id;
-                    persist.machine_tab = true;
-                }
-                if self.state.collapse.collapsed_groups.remove(&group_id) {
-                    moved = true;
-                    persist.collapse = true;
-                }
-                outcome(moved, persist)
-            }
         }
     }
 

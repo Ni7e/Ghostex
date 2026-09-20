@@ -177,6 +177,10 @@ impl GhostexGpuiApp {
 
     /// Falls back to this computer when the selected machine tab is not one the sidebar offers,
     /// which is what `createNativeSidebarSnapshot` does with its own copy.
+    ///
+    /// The machine list is built from the settings, so it holds only this computer until they have
+    /// arrived; the guard is `state.hud.settings` being there, not the list being non-empty, or a
+    /// stored remote tab would be reset in the first moments of every launch.
     fn gx_store_correct_sidebar_machine_tab(&mut self, cx: &mut gpui::Context<Self>) {
         let selected = self.gx_store.sidebar_ui.selected_machine_id().to_string();
         if selected == LOCAL_MACHINE_ID {
@@ -185,7 +189,11 @@ impl GhostexGpuiApp {
         let Some(snapshot) = self.native_sidebar.projection.as_ref() else {
             return;
         };
-        if snapshot.machines.is_empty()
+        let settings_arrived = snapshot
+            .hud
+            .get("settings")
+            .is_some_and(|settings| settings.is_object());
+        if !settings_arrived
             || snapshot
                 .machines
                 .iter()

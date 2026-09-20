@@ -147,6 +147,21 @@ impl SidebarUiHost {
         moved
     }
 
+    /// Drops ticked tag filters the Sort & Filter menu no longer offers, which is what the old
+    /// projection did on every build. A tag turned off in Settings, or a custom tag the daemon
+    /// dropped, stops filtering here as well as in the list, and does not start again if it comes
+    /// back.
+    pub(super) fn retain_tag_filters(&mut self, offered: &[String]) -> bool {
+        if self.store.state().selected_tag_filters.is_empty() {
+            return false;
+        }
+        let moved = self.store.retain_tag_filters(offered);
+        if moved {
+            self.generation += 1;
+        }
+        moved
+    }
+
     /// Takes the stored state as the truth and applies whatever the user did while it was on its
     /// way on top of it.
     fn adopt(&mut self, stored: StoredSidebarUi) {

@@ -184,47 +184,39 @@ impl GhostexGpuiApp {
         }
     }
 
+    /// The `<section key>:<collection id>` a collection's own state is stored under.
+    ///
+    /// The key is built from the section, exactly as `runNativeCollectionAction` builds it, rather
+    /// than looked up in the drawn list: a collection the user hid is in no drawn list, and
+    /// resolving it there would make unhiding it a silent no-op. The collection still has to be
+    /// one the sidebar knows, so an id from a stale menu does nothing, which is what the
+    /// TypeScript's `if (!collection) return` does.
     fn sidebar_collection_storage_id(&self, collection_id: &str) -> Option<String> {
-        match self.gx_store_sidebar_draws_store_list() {
-            true => self
-                .gx_store
-                .sidebar_list
-                .view()
-                .collections
-                .iter()
-                .find(|collection| collection.collection_id == collection_id)
-                .map(|collection| collection.storage_id.clone()),
-            false => self
-                .native_sidebar
-                .snapshot
-                .as_ref()?
-                .collections
-                .iter()
-                .find(|collection| collection.collection_id == collection_id)
-                .map(|collection| collection.storage_id.clone()),
-        }
+        let state = self.gx_store.sidebar_ui.state();
+        let storage_id = format!("{}:{}", state.section_key(), collection_id);
+        let published = self
+            .native_sidebar
+            .projection
+            .iter()
+            .flat_map(|snapshot| snapshot.collections.iter())
+            .any(|collection| collection.collection_id == collection_id);
+        let hidden = state
+            .hidden_items
+            .collection_keys
+            .iter()
+            .any(|key| *key == storage_id);
+        (published || hidden).then_some(storage_id)
     }
 
+    /// The groups of a collection, from the publish the menu that sent the command was built from.
     fn sidebar_collection_group_ids(&self, collection_id: &str) -> Vec<String> {
-        match self.gx_store_sidebar_draws_store_list() {
-            true => self
-                .gx_store
-                .sidebar_list
-                .view()
-                .collections
-                .iter()
-                .find(|collection| collection.collection_id == collection_id)
-                .map(|collection| collection.group_ids.clone())
-                .unwrap_or_default(),
-            false => self
-                .native_sidebar
-                .snapshot
-                .iter()
-                .flat_map(|snapshot| snapshot.collections.iter())
-                .find(|collection| collection.collection_id == collection_id)
-                .map(|collection| collection.group_ids.clone())
-                .unwrap_or_default(),
-        }
+        self.native_sidebar
+            .projection
+            .iter()
+            .flat_map(|snapshot| snapshot.collections.iter())
+            .find(|collection| collection.collection_id == collection_id)
+            .map(|collection| collection.group_ids.clone())
+            .unwrap_or_default()
     }
 
     fn sidebar_collection_session_ids(&self, collection_id: &str) -> Vec<String> {
