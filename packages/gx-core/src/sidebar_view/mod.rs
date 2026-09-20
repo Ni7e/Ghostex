@@ -33,7 +33,7 @@ pub use inputs::{
     SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState, UnavailableState,
     LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED,
 };
-pub use model::SidebarViewModel;
+pub use model::{SidebarUpdateWork, SidebarViewModel};
 pub use reveal::{reveal_plan, space_for_focused_row, SidebarRevealPlan};
 pub use spaces::OTHER_SPACE_ID;
 pub use tags::{TagListItem, TagListItemKind, TagPresentation, UNTAGGED_TAG_FILTER};

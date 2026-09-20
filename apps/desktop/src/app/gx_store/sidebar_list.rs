@@ -30,6 +30,10 @@ const SETTINGS_MAX_AGE: Duration = Duration::from_millis(1000);
 /// The earliest a clock deadline is allowed to wake the list, so a row whose countdown ends in a
 /// millisecond does not book a timer per millisecond.
 const MIN_DEADLINE_WAIT: Duration = Duration::from_millis(50);
+/// An update at or over this many microseconds is recorded with what it rebuilt. Five milliseconds
+/// is well inside a frame at sixty hertz and well above the median, which is tens of microseconds,
+/// so this fires for outliers and not for traffic.
+const SLOW_UPDATE_US: u64 = 5_000;
 
 /// Which list the renderer draws.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -420,6 +424,15 @@ impl GhostexGpuiApp {
                 .model
                 .update(&self.gx_store.core, &inputs, &changes, now_ms);
         let update_us = started.elapsed().as_micros() as u64;
+        // An update this slow is a dropped frame on the thread that draws, and the only thing that
+        // tells one apart from the next is which caches it had to drop. The view model reports
+        // that; the host has the change summary that caused it.
+        if update_us >= SLOW_UPDATE_US {
+            let work = self.gx_store.sidebar_list.model.last_work();
+            self.gx_store
+                .diagnostics
+                .sidebar_slow_update(update_us, &last_update, &work);
+        }
         {
             let list = &mut self.gx_store.sidebar_list;
             list.last_update = last_update;
@@ -537,10 +550,13 @@ impl GhostexGpuiApp {
         // The labels are formatted against the clock of the moment they are drawn, not the moment
         // the list was last built: a wake that only ticks a countdown does not rebuild the list.
         let now_ms = now_ms();
+        // Measured: it walks the whole HUD document and was the only part of an install that no
+        // phase accounted for, so `installUs` minus the phases read as unexplained overhead.
         let carry = (
             carry_fingerprint(&published),
             self.gx_store.menu_host.generation(),
         );
+        let fingerprint_us = started.elapsed().as_micros() as u64;
         let snapshot = {
             // Borrowed rather than cloned: the model, the inputs and the cache are separate
             // fields, so the whole list does not have to be copied to build the one the renderer
@@ -567,6 +583,7 @@ impl GhostexGpuiApp {
         };
         let install_us = started.elapsed().as_micros() as u64;
         let list = &mut self.gx_store.sidebar_list;
+        list.snapshot_cache.phases.fingerprint_us = fingerprint_us;
         list.installed_carry = Some(carry);
         list.counters.installs += 1;
         list.counters.last_install_us = install_us;

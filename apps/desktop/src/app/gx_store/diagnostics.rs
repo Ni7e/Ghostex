@@ -22,6 +22,9 @@ const MAX_NEVER_SETTLED_RECORDS: u32 = 4;
 /// Records of the kept list disagreeing with a fresh one. Each one is a bug, so a handful is
 /// plenty to name it and the counter carries the rate.
 const MAX_SCRATCH_RECORDS: u32 = 4;
+/// Records of an update slow enough to drop a frame. Enough to see whether the spikes are one
+/// shape or several; the max in the summary carries the size.
+const MAX_SLOW_UPDATE_RECORDS: u32 = 8;
 /// Comfortably inside the sanitizer's own 120, so a value is cut here where it can say it was cut
 /// rather than there where it cannot.
 const LOG_TEXT_MAX_CHARS: usize = 110;
@@ -58,7 +61,30 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_refusal_warnings: u32,
     sidebar_never_settled_records: u32,
     sidebar_scratch_records: u32,
+    sidebar_slow_update_records: u32,
     sidebar_storage_warnings: u32,
+}
+
+/// What one view-model update was handed, in the shape both records that carry it use.
+fn last_update_details(last_update: &LastUpdate) -> serde_json::Value {
+    json!({
+        "changesEmpty": last_update.changes_empty,
+        "sessionsChanged": last_update.sessions_changed,
+        "sessionsRemoved": last_update.sessions_removed,
+        "projectsChanged": last_update.projects_changed,
+        "projectsRemoved": last_update.projects_removed,
+        "sessionOrderChanged": last_update.session_order_changed,
+        "projectOrderChanged": last_update.project_order_changed,
+        "machinesReloaded": last_update.machines_reloaded,
+        "focusChanged": last_update.focus_changed,
+        "workspaceGroups": last_update.workspace_groups,
+        "projectCollections": last_update.project_collections,
+        "spaces": last_update.spaces,
+        "customSessionTags": last_update.custom_session_tags,
+        "dirty": last_update.dirty,
+        "uiGenerationMoved": last_update.ui_generation_moved,
+        "settingsMoved": last_update.settings_moved,
+    })
 }
 
 pub(super) fn routine_logging_enabled() -> bool {
@@ -519,6 +545,7 @@ impl GxStoreDiagnostics {
                 // guess: the shared key, the rows, the group menus, the collection menus, the more
                 // menu, or the tail that copies what a publish still owns.
                 "install": {
+                    "fingerprintUs": phases.fingerprint_us,
                     "keyUs": phases.key_us,
                     "rowsUs": phases.rows_us,
                     "groupsUs": phases.groups_us,
@@ -532,7 +559,55 @@ impl GxStoreDiagnostics {
                     "collectionsBuilt": phases.collections_built,
                     "collectionsReused": phases.collections_reused,
                     "moreMenuBuilt": phases.more_menu_built,
+                    // Why the group phase cost what it did: the shared key missing drops every
+                    // cached menu at once, a moved `GroupCore` is the view model having rebuilt
+                    // that group, and a moved collection is only the folder it is drawn in.
+                    "keyReused": phases.key_reused,
+                    "groupsMissing": phases.groups_missing,
+                    "groupsCoreMoved": phases.groups_core_moved,
+                    "groupsCollectionMoved": phases.groups_collection_moved,
                 },
+            }),
+        );
+    }
+
+    /// One record per slow view-model update: what it was handed and what it rebuilt.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// `updateMaxUs` is one number with no story: a twenty-millisecond update and a twenty-
+    /// microsecond one are the same call from outside, and the difference is always which caches
+    /// the update had to drop. Guessing from the median is how a spike gets attributed to whatever
+    /// landed in the same release. The counts here answer it outright: `rowsAllDirty` with a row
+    /// count is the tag catalog or Debugging Mode moving, `reset` is a machine (un)loading,
+    /// `meta` is the project facts, and all three false with a large `rowsBuilt` is the store
+    /// having really changed that many rows.
+    pub(super) fn sidebar_slow_update(
+        &mut self,
+        update_us: u64,
+        last_update: &LastUpdate,
+        work: &ghostex_gx_core::SidebarUpdateWork,
+    ) {
+        if self.sidebar_slow_update_records >= MAX_SLOW_UPDATE_RECORDS || !routine_logging_enabled()
+        {
+            return;
+        }
+        self.sidebar_slow_update_records += 1;
+        record(
+            "gxStore.sidebarList.slowUpdate",
+            json!({
+                "updateUs": update_us,
+                "work": {
+                    "reset": work.reset,
+                    "rowsAllDirty": work.rows_all_dirty,
+                    "metaDirty": work.meta_dirty,
+                    "rowsBuilt": work.rows_built,
+                    "browserRowsBuilt": work.browser_rows_built,
+                    "groupsBuilt": work.groups_built,
+                    "machineSummariesBuilt": work.machine_summaries_built,
+                    "groups": work.group_count,
+                    "rows": work.row_count,
+                },
+                "lastUpdate": last_update_details(last_update),
             }),
         );
     }
@@ -566,24 +641,7 @@ impl GxStoreDiagnostics {
                 "rows": named_fields(&difference.rows),
                 "onlyIncrementalRows": log_texts(&difference.only_incremental_rows),
                 "onlyScratchRows": log_texts(&difference.only_scratch_rows),
-                "lastUpdate": {
-                    "changesEmpty": last_update.changes_empty,
-                    "sessionsChanged": last_update.sessions_changed,
-                    "sessionsRemoved": last_update.sessions_removed,
-                    "projectsChanged": last_update.projects_changed,
-                    "projectsRemoved": last_update.projects_removed,
-                    "sessionOrderChanged": last_update.session_order_changed,
-                    "projectOrderChanged": last_update.project_order_changed,
-                    "machinesReloaded": last_update.machines_reloaded,
-                    "focusChanged": last_update.focus_changed,
-                    "workspaceGroups": last_update.workspace_groups,
-                    "projectCollections": last_update.project_collections,
-                    "spaces": last_update.spaces,
-                    "customSessionTags": last_update.custom_session_tags,
-                    "dirty": last_update.dirty,
-                    "uiGenerationMoved": last_update.ui_generation_moved,
-                    "settingsMoved": last_update.settings_moved,
-                },
+                "lastUpdate": last_update_details(last_update),
             }),
         );
     }

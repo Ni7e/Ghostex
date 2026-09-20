@@ -65,9 +65,9 @@ pub use crate::sidebar_view::{
     ProjectContextView, ProjectDiffStats, RemoteMachineView, SectionCollapse, SectionId,
     SectionView, SessionMenuFacts, SessionRow, SessionSortMode, SessionTiming, SessionView,
     SidebarCollapseState, SidebarHiddenItems, SidebarHostInputs, SidebarInputs, SidebarRevealPlan,
-    SidebarSettings, SidebarUiState, SidebarView, SidebarViewModel, SpaceView, TagListItem,
-    TagListItemKind, TagPresentation, UnavailableState, WorktreeView, LOCAL_MACHINE_ID,
-    MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
+    SidebarSettings, SidebarUiState, SidebarUpdateWork, SidebarView, SidebarViewModel, SpaceView,
+    TagListItem, TagListItemKind, TagPresentation, UnavailableState, WorktreeView,
+    LOCAL_MACHINE_ID, MACHINE_STATE_CONNECTED, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
 };
 
 /// The wire types, re-exported so a host needs one dependency.

@@ -62,6 +62,35 @@ struct CachedGroup {
     build: GroupBuild,
 }
 
+/// What one update actually did.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// An update that takes twenty milliseconds and one that takes twenty microseconds are the same
+/// call with the same arguments from outside, and the difference is always which caches it had to
+/// drop. Counts only, never a clock: this crate reads no clock, and the host times the call it
+/// makes anyway. The flags are the three that invalidate everything at once, which is what a slow
+/// update almost always is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SidebarUpdateWork {
+    /// The whole cache was dropped: another machine, a machine that (un)loaded, or a reload.
+    pub reset: bool,
+    /// Every row was re-derived: the tag catalog or Debugging Mode moved.
+    pub rows_all_dirty: bool,
+    /// Every project fact was rebuilt.
+    pub meta_dirty: bool,
+    /// Rows derived from a session this time; the rest were kept.
+    pub rows_built: usize,
+    /// Rows derived from a browser tab this time.
+    pub browser_rows_built: usize,
+    /// Groups ordered, sectioned and summarised this time.
+    pub groups_built: usize,
+    /// Machines whose badge was counted off the store this time.
+    pub machine_summaries_built: usize,
+    /// What the update ended up holding, so a count is read against a size.
+    pub group_count: usize,
+    pub row_count: usize,
+}
+
 struct CacheState {
     machine: MachineId,
     inputs: SidebarInputs,
@@ -81,6 +110,7 @@ struct CacheState {
     /// The badge counts of every machine tab, kept until that machine's rows move. The selected
     /// machine's come out of its built groups; the others are counted straight off the store.
     machine_summaries: BTreeMap<MachineId, MachineSummary>,
+    work: SidebarUpdateWork,
 }
 
 /// The sidebar list of one machine, kept up to date from the store.
@@ -107,6 +137,16 @@ impl SidebarViewModel {
     /// snooze ends). The host re-runs the update then; nothing else has to.
     pub fn next_deadline_ms(&self) -> Option<u64> {
         self.state.as_ref().and_then(|state| state.next_deadline_ms)
+    }
+
+    /// What the newest [`Self::update`] had to rebuild. An update that returned early because
+    /// nothing moved leaves the previous answer standing, which is why the host only reads this
+    /// for an update it timed.
+    pub fn last_work(&self) -> SidebarUpdateWork {
+        self.state
+            .as_ref()
+            .map(|state| state.work)
+            .unwrap_or_default()
     }
 
     /// Builds the whole list without any cache. The incremental update must give the same result;
@@ -333,6 +373,12 @@ impl SidebarViewModel {
             next_deadline_ms: None,
             machine_loaded,
             machine_summaries: BTreeMap::new(),
+            work: SidebarUpdateWork {
+                reset,
+                rows_all_dirty,
+                meta_dirty,
+                ..SidebarUpdateWork::default()
+            },
         };
         // A machine whose stream dropped while its rows are held draws them faded rather than
         // dropping them, which is what `createRemoteSidebarGroups` does with its last-seen copy.
@@ -509,13 +555,16 @@ impl SidebarViewModel {
                 });
             let build = match reuse {
                 Some(cached) => cached.build,
-                None => build_group(
-                    plan,
-                    &state.focus,
-                    &effective.ui,
-                    &effective.settings,
-                    now_ms,
-                ),
+                None => {
+                    state.work.groups_built += 1;
+                    build_group(
+                        plan,
+                        &state.focus,
+                        &effective.ui,
+                        &effective.settings,
+                        now_ms,
+                    )
+                }
             };
             state.next_deadline_ms = min_deadline(state.next_deadline_ms, build.deadline_ms);
             builds.insert(plan.group_id.clone(), build.clone());
@@ -526,7 +575,7 @@ impl SidebarViewModel {
 
         // 6. The machine tabs. The selected machine's counts come out of the groups just built;
         // every other machine's are counted off the store and kept until its rows move.
-        state.machine_summaries = machine_summaries(
+        let (summaries, summaries_built) = machine_summaries(
             store,
             &machine,
             effective,
@@ -535,6 +584,8 @@ impl SidebarViewModel {
                 .map(|previous| &previous.machine_summaries),
             changes,
         );
+        state.machine_summaries = summaries;
+        state.work.machine_summaries_built = summaries_built;
 
         // 7. The list itself.
         let side_state = store.machine(&machine).map(|entry| entry.side_state());
@@ -570,6 +621,13 @@ impl SidebarViewModel {
             },
             now_ms,
         });
+        state.work.group_count = state.view.groups.len();
+        state.work.row_count = state
+            .view
+            .groups
+            .iter()
+            .map(|group| group.core.sessions.len())
+            .sum();
         let changed = previous
             .as_ref()
             .is_none_or(|previous| previous.view != state.view);
@@ -613,6 +671,7 @@ fn browser_rows_for_project(
     let rows = reuse.unwrap_or_else(|| {
         tabs.iter()
             .map(|tab| {
+                state.work.browser_rows_built += 1;
                 state.next_row_id += 1;
                 RowRef {
                     id: state.next_row_id,
@@ -655,6 +714,7 @@ fn resolve_row(
     };
     let sidebar_id = key.to_sidebar_session_id();
     state.next_row_id += 1;
+    state.work.rows_built += 1;
     let row = RowRef {
         id: state.next_row_id,
         row: Arc::new(session_row(
@@ -852,8 +912,9 @@ fn machine_summaries(
     inputs: &SidebarInputs,
     previous: Option<&BTreeMap<MachineId, MachineSummary>>,
     changes: &ChangeSummary,
-) -> BTreeMap<MachineId, MachineSummary> {
+) -> (BTreeMap<MachineId, MachineSummary>, usize) {
     let mut summaries: BTreeMap<MachineId, MachineSummary> = BTreeMap::new();
+    let mut built = 0usize;
     let wanted = inputs
         .host
         .machines
@@ -889,11 +950,14 @@ fn machine_summaries(
             .and_then(|held| held.get(&machine))
         {
             Some(summary) => *summary,
-            None => machine_tab_summary(store, &machine, inputs.host.parked_project_ids(&machine)),
+            None => {
+                built += 1;
+                machine_tab_summary(store, &machine, inputs.host.parked_project_ids(&machine))
+            }
         };
         summaries.insert(machine, summary);
     }
-    summaries
+    (summaries, built)
 }
 
 fn machine_id(selected_machine_id: &str) -> MachineId {

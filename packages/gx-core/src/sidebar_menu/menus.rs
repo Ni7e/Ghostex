@@ -304,8 +304,16 @@ impl<'a> SidebarMenus<'a> {
 
 /// Whether a sidebar group id is a machine's Chats collection. A remote machine's is
 /// `remote:<machine>:group:combined-chats`, so the id is not comparable as one string.
+///
+/// CDXC:ContextMenus 2026-09-20 WHY:
+/// Written as two string tests rather than through `ProjectKey::parse_sidebar_group_id`, which is
+/// the obvious way and is what this was first. `menu_group` runs once per ROW, not once per group,
+/// so parsing meant percent-decoding a project path out of every local group id for every row of
+/// every install: one allocation and one decode per row for a question that is answered by a
+/// prefix and a suffix. The two forms are the only ones the encoder produces.
 fn is_chats_group(group_id: &str) -> bool {
+    const REMOTE_PREFIX: &str = "remote:";
+    const REMOTE_CHATS_SUFFIX: &str = ":group:combined-chats";
     group_id == CHATS_GROUP_ID
-        || crate::keys::ProjectKey::parse_sidebar_group_id(group_id)
-            .is_some_and(|project| project.project_id == CHATS_GROUP_ID)
+        || (group_id.starts_with(REMOTE_PREFIX) && group_id.ends_with(REMOTE_CHATS_SUFFIX))
 }

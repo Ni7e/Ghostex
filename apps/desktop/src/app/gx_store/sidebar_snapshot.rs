@@ -145,7 +145,20 @@ pub(super) struct SnapshotCache {
 /// of the build it came from rather than inviting a guess.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct InstallPhases {
+    /// Hashing the values the installed list still takes from a publish, which walks the whole HUD
+    /// document. Measured and written by the caller AFTER the build, because it runs before it and
+    /// the build resets these.
+    pub(super) fingerprint_us: u64,
     pub(super) key_us: u64,
+    /// The rows of every group, summed.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// Assigned here rather than left at zero, which is what it was: nothing ever wrote it, and
+    /// `groups_us` is computed by subtracting it, so every install this milestone measured
+    /// reported the whole rows-and-groups phase as the GROUP phase and the row phase as free. A
+    /// rise in `groupsUs` then read as "a group menu was rebuilt" when the rows underneath it were
+    /// the cost. That is the fourth diagnostic in this port to be wrong in the direction of
+    /// looking fine.
     pub(super) rows_us: u64,
     pub(super) groups_us: u64,
     pub(super) collections_us: u64,
@@ -158,6 +171,14 @@ pub(super) struct InstallPhases {
     pub(super) collections_built: u64,
     pub(super) collections_reused: u64,
     pub(super) more_menu_built: bool,
+    /// The shared key every cached menu hangs off was unchanged, so nothing was dropped wholesale.
+    /// False is the expensive case: every row, group and collection menu is rebuilt.
+    pub(super) key_reused: bool,
+    /// Why a group menu was rebuilt: it had no entry, its `GroupCore` moved (the view model
+    /// rebuilt the group), or only the collection it is drawn in moved.
+    pub(super) groups_missing: u64,
+    pub(super) groups_core_moved: u64,
+    pub(super) groups_collection_moved: u64,
 }
 
 impl SnapshotCache {
@@ -349,6 +370,7 @@ pub(super) fn snapshot_from_view(
             && key.hidden_items == *input.hidden_items
             && key.host == *input.host
     });
+    cache.phases.key_reused = same_key;
     if !same_key {
         cache.key = Some(MenuKey {
             settings: input.settings.clone(),
@@ -369,6 +391,7 @@ pub(super) fn snapshot_from_view(
         .iter()
         .map(|group| {
             let published = published_groups.get(group.core.group_id.as_str()).copied();
+            let rows_started = std::time::Instant::now();
             let sessions = group
                 .core
                 .sessions
@@ -379,7 +402,10 @@ pub(super) fn snapshot_from_view(
                     session_element(group, session, focus, menus, cache, now_ms)
                 })
                 .collect();
-            native_group(group, menus, published, sessions, cache)
+            let rows_us = rows_started.elapsed().as_micros() as u64;
+            let built = native_group(group, menus, published, sessions, cache);
+            cache.phases.rows_us += rows_us;
+            built
         })
         .collect();
     cache
@@ -393,7 +419,8 @@ pub(super) fn snapshot_from_view(
     cache
         .groups
         .retain(|group_id, _| drawn.contains(group_id.as_str()));
-    cache.phases.groups_us = phase.elapsed().as_micros() as u64 - cache.phases.rows_us;
+    cache.phases.groups_us =
+        (phase.elapsed().as_micros() as u64).saturating_sub(cache.phases.rows_us);
     let phase = std::time::Instant::now();
     let collections: Vec<NativeSidebarCollection> = view
         .collections
@@ -594,10 +621,18 @@ fn group_menus(
     cache: &mut SnapshotCache,
 ) -> (Arc<Value>, Arc<Vec<Value>>) {
     let core = &group.core;
-    if let Some(cached) = cache.groups.get(&core.group_id) {
-        if Arc::ptr_eq(&cached.core, core) && cached.collection_id == group.collection_id {
-            cache.phases.groups_reused += 1;
-            return (cached.menu.clone(), cached.header_actions.clone());
+    match cache.groups.get(&core.group_id) {
+        None => cache.phases.groups_missing += 1,
+        Some(cached) => {
+            if Arc::ptr_eq(&cached.core, core) && cached.collection_id == group.collection_id {
+                cache.phases.groups_reused += 1;
+                return (cached.menu.clone(), cached.header_actions.clone());
+            }
+            if Arc::ptr_eq(&cached.core, core) {
+                cache.phases.groups_collection_moved += 1;
+            } else {
+                cache.phases.groups_core_moved += 1;
+            }
         }
     }
     cache.phases.groups_built += 1;
