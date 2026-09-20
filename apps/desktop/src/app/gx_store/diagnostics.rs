@@ -27,6 +27,9 @@ const MAX_SCRATCH_RECORDS: u32 = 4;
 const LOG_TEXT_MAX_CHARS: usize = 110;
 /// `MAX_SANITIZED_STRING_CHARS` in support_logs.rs, which this must stay under.
 const SANITIZER_MAX_CHARS: usize = 120;
+/// The sanitizer's `take(32)` on every object and array, and its `depth > 4` cap.
+const SANITIZER_MAX_ENTRIES: usize = 32;
+const SANITIZER_MAX_DEPTH: usize = 4;
 /// Unconditional warning lines one app run may write. A daemon that keeps producing a bad row
 /// must not be able to fill the disk through this path.
 const MAX_WARNING_LINES: u32 = 40;
@@ -243,7 +246,7 @@ impl GxStoreDiagnostics {
             .iter()
             .map(|(tab, names)| json!({ "tab": tab, "names": names }))
             .collect();
-        append(
+        record(
             "gxStore.shadow.mismatch",
             json!({
                 "storeGroup": log_text(mismatch.store_group.as_str()),
@@ -278,7 +281,7 @@ impl GxStoreDiagnostics {
             Loadable::Loaded(tabs) => Some(tabs.len()),
             Loadable::NotLoaded | Loadable::Missing => None,
         };
-        append(
+        record(
             "gxStore.shadow.summary",
             json!({
                 "observed": counters.observed,
@@ -333,7 +336,7 @@ impl GxStoreDiagnostics {
         };
         // Every differing field of the whole record, once, at a depth nothing can cap.
         let distinct = distinct_fields(mismatch);
-        append(
+        record(
             "gxStore.sidebarShadow.mismatch",
             json!({
                 "snapshotRevision": snapshot_revision,
@@ -399,7 +402,7 @@ impl GxStoreDiagnostics {
             return;
         }
         self.sidebar_summary_written = *counters;
-        append(
+        record(
             "gxStore.sidebarShadow.summary",
             json!({
                 "source": match source {
@@ -411,41 +414,53 @@ impl GxStoreDiagnostics {
                 "rejudged": counters.rejudged,
                 "matches": counters.matches,
                 "mismatches": counters.mismatches,
+                "unexplained": counters.mismatches.saturating_sub(counters.explained_only),
                 "distinctMismatches": counters.distinct_mismatches,
                 "transient": counters.transient,
-                "skippedRemote": counters.skipped_remote,
-                "skippedForeignFocus": counters.skipped_foreign_focus,
-                "skippedNotLoaded": counters.skipped_not_loaded,
-                "skippedNotLive": counters.skipped_not_live,
-                "skippedNotRestored": counters.skipped_not_restored,
-                "questionCountOnly": counters.question_count_only,
-                "tooltipOnly": counters.tooltip_only,
-                "frozenFieldsOnly": counters.frozen_fields_only,
-                "timingFieldsOnly": counters.timing_fields_only,
-                "staleFieldsOnly": counters.stale_fields_only,
-                "explainedOnly": counters.explained_only,
-                "unexplained": counters.mismatches.saturating_sub(counters.explained_only),
                 "neverSettled": counters.never_settled,
-                "scratchChecks": counters.scratch_checks,
-                "scratchMismatches": counters.scratch_mismatches,
-                "updates": list.updates,
-                "updatesIdle": list.idle,
-                "viewChanges": list.view_changes,
-                "installs": list.installs,
-                "installsSkipped": list.installs_skipped,
-                "deadlineWakes": list.deadline_wakes,
-                "wakeRowsMoved": list.wake_rows_moved,
-                "wakeRowsMovedMax": list.wake_rows_moved_max,
-                "deadlineKind": deadline_kind,
-                "updateUs": list.last_update_us,
-                "updateMaxUs": list.update_max_us,
-                "installUs": list.last_install_us,
-                "installMaxUs": list.install_max_us,
-                "compareUs": counters.last_compare_us,
-                "compareMaxUs": counters.compare_max_us,
                 "pending": pending,
                 "storeGroups": groups,
                 "storeRows": rows,
+                "deadlineKind": deadline_kind,
+                // Grouped rather than flat: the sanitizer keeps the first 32 keys of an object and
+                // drops the rest without saying so, and this record passed 32 as it grew.
+                "skipped": {
+                    "remote": counters.skipped_remote,
+                    "foreignFocus": counters.skipped_foreign_focus,
+                    "notLoaded": counters.skipped_not_loaded,
+                    "notLive": counters.skipped_not_live,
+                    "notRestored": counters.skipped_not_restored,
+                },
+                "explained": {
+                    "explainedOnly": counters.explained_only,
+                    "questionCountOnly": counters.question_count_only,
+                    "tooltipOnly": counters.tooltip_only,
+                    "frozenFieldsOnly": counters.frozen_fields_only,
+                    "timingFieldsOnly": counters.timing_fields_only,
+                    "staleFieldsOnly": counters.stale_fields_only,
+                },
+                "scratch": {
+                    "checks": counters.scratch_checks,
+                    "mismatches": counters.scratch_mismatches,
+                },
+                "list": {
+                    "updates": list.updates,
+                    "updatesIdle": list.idle,
+                    "viewChanges": list.view_changes,
+                    "installs": list.installs,
+                    "installsSkipped": list.installs_skipped,
+                    "deadlineWakes": list.deadline_wakes,
+                    "wakeRowsMoved": list.wake_rows_moved,
+                    "wakeRowsMovedMax": list.wake_rows_moved_max,
+                },
+                "timings": {
+                    "updateUs": list.last_update_us,
+                    "updateMaxUs": list.update_max_us,
+                    "installUs": list.last_install_us,
+                    "installMaxUs": list.install_max_us,
+                    "compareUs": counters.last_compare_us,
+                    "compareMaxUs": counters.compare_max_us,
+                },
             }),
         );
     }
@@ -468,7 +483,7 @@ impl GxStoreDiagnostics {
             return;
         }
         self.sidebar_scratch_records += 1;
-        append(
+        record(
             "gxStore.sidebarShadow.scratchMismatch",
             json!({
                 "onlyIncrementalGroups": log_texts(&difference.only_incremental_groups),
@@ -520,7 +535,7 @@ impl GxStoreDiagnostics {
         }
         self.sidebar_never_settled_records += 1;
         let next_fields = distinct_fields(mismatch);
-        append(
+        record(
             "gxStore.sidebarShadow.neverSettled",
             json!({
                 // What MOVED between the two judgements, which is the thing a shape that never
@@ -568,7 +583,7 @@ impl GxStoreDiagnostics {
             return;
         }
         self.sidebar_ui_summary_written = *counters;
-        append(
+        record(
             "gxStore.sidebarUi.summary",
             json!({
                 "intents": counters.intents,
@@ -622,6 +637,72 @@ impl GxStoreDiagnostics {
         self.warning(event, json!({ "error": error }));
     }
 }
+
+/// Appends a record after checking it against every rule the log's sanitizer applies.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// `sanitize_json_value` (support_logs.rs:463) has THREE rules, and this milestone shipped a
+/// diagnostic that failed each of them in turn: values below depth 4 become "[depth-capped]",
+/// strings over 120 characters or holding a slash become "[redacted]", and an object or array
+/// keeps only its first 32 entries and drops the rest in silence. The third is the worst of them
+/// because nothing in the output says anything was lost: this summary reached 41 keys over several
+/// rounds and quietly stopped reporting the nine timings at the end of it. Checking a record by
+/// eye is how all three got through, so it is checked here instead, on the way out, in every debug
+/// build.
+fn record(event: &'static str, details: serde_json::Value) {
+    debug_assert_loggable(&details, 0, event);
+    append(event, details);
+}
+
+#[cfg(debug_assertions)]
+fn debug_assert_loggable(value: &serde_json::Value, depth: usize, event: &str) {
+    match value {
+        serde_json::Value::String(text) => {
+            debug_assert!(
+                depth <= SANITIZER_MAX_DEPTH,
+                "{event}: a string at depth {depth} is capped"
+            );
+            debug_assert!(
+                text.chars().count() <= SANITIZER_MAX_CHARS
+                    && !text.contains('/')
+                    && !text.contains('\\')
+                    && !text.chars().any(char::is_control),
+                "{event}: a string would be redacted"
+            );
+        }
+        serde_json::Value::Array(items) => {
+            debug_assert!(
+                items.len() <= SANITIZER_MAX_ENTRIES,
+                "{event}: an array of {} drops entries past {SANITIZER_MAX_ENTRIES}",
+                items.len()
+            );
+            for item in items {
+                debug_assert_loggable(item, depth + 1, event);
+            }
+        }
+        serde_json::Value::Object(entries) => {
+            debug_assert!(
+                entries.len() <= SANITIZER_MAX_ENTRIES,
+                "{event}: an object of {} keys drops the ones past {SANITIZER_MAX_ENTRIES}",
+                entries.len()
+            );
+            for (key, item) in entries {
+                debug_assert!(
+                    key.chars().count() <= SANITIZER_MAX_CHARS,
+                    "{event}: a key would be redacted"
+                );
+                debug_assert_loggable(item, depth + 1, event);
+            }
+        }
+        other => debug_assert!(
+            depth <= SANITIZER_MAX_DEPTH,
+            "{event}: {other} sits at depth {depth}, which is capped"
+        ),
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn debug_assert_loggable(_value: &serde_json::Value, _depth: usize, _event: &str) {}
 
 /// A string the log's sanitizer will print rather than replace.
 ///
@@ -689,6 +770,9 @@ fn log_texts<'a>(values: impl IntoIterator<Item = &'a String>) -> Vec<serde_json
 /// One short string per differing field: the name alone when both sides carry a value, and
 /// `name=old` or `name=store` when only one of them does.
 fn encode_field(field: &FieldDiff) -> String {
+    if let Some((old, store)) = &field.values {
+        return format!("{}: old={old} store={store}", field.name);
+    }
     match (field.old_has_value, field.store_has_value) {
         (true, false) => format!("{}=old", field.name),
         (false, true) => format!("{}=store", field.name),

@@ -26,6 +26,16 @@ pub(super) struct FieldDiff {
     pub(super) name: &'static str,
     pub(super) old_has_value: bool,
     pub(super) store_has_value: bool,
+    /// What each side held, for the few fields whose values are safe to name.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// A field only one side holds says which side is ahead by its presence alone, and that is how
+    /// the stale icon and the stale favicon were traced. A field BOTH sides hold says nothing: a
+    /// lifecycle difference reads as "lifecycleState" and leaves the question of which side thinks
+    /// the session is asleep unanswerable from the log. These fields are a closed vocabulary (four
+    /// lifecycle words, an activity word) or a small count, never a title, a path or anything the
+    /// user typed, so they are named outright.
+    pub(super) values: Option<(String, String)>,
 }
 
 impl FieldDiff {
@@ -35,6 +45,17 @@ impl FieldDiff {
             name,
             old_has_value: true,
             store_has_value: true,
+            values: None,
+        }
+    }
+
+    /// A field both sides carry, named with what each of them held.
+    fn valued(name: &'static str, old: impl ToString, store: impl ToString) -> Self {
+        Self {
+            name,
+            old_has_value: true,
+            store_has_value: true,
+            values: Some((old.to_string(), store.to_string())),
         }
     }
 }
@@ -53,7 +74,17 @@ macro_rules! note {
                 name: $name,
                 old_has_value: $old,
                 store_has_value: $store,
+                values: None,
             });
+        }
+    };
+}
+
+/// Records a differing field and what each side held. Only for a closed vocabulary or a count.
+macro_rules! note_values {
+    ($fields:expr, $name:literal, $old:expr, $store:expr $(,)?) => {
+        if $old != $store {
+            $fields.push(FieldDiff::valued($name, $old, $store));
         }
     };
 }
@@ -168,7 +199,12 @@ const TIMING_FIELDS: [&str; 1] = ["lastInteractionAt"];
 const STALE_PUBLISH_FIELDS: [&str; 2] = ["projectContext.discoveredIconDataUrl", "faviconDataUrl"];
 
 impl SidebarMismatch {
-    /// Every differing field of the record, once, encoded the way the log encodes them.
+    /// Every differing field of the record, once, by NAME and never by value.
+    ///
+    /// The values are deliberately left out here, unlike in the log's own encoding: this feeds the
+    /// gained-and-lost list of a shape that never settles, and a lifecycle that walks through its
+    /// four words would read as four fields gained and lost rather than as one field that keeps
+    /// moving, which is the opposite of what that record is for.
     pub(super) fn field_names(&self) -> Vec<String> {
         let mut names: Vec<String> = Vec::new();
         for field in self
@@ -462,20 +498,23 @@ fn compare_group(old: &NativeSidebarGroup, store: &GroupView, mismatch: &mut Sid
         store.collection_color.is_some()
     );
     let summary = |key: &str| old.summary.get(key).and_then(Value::as_u64).unwrap_or(0) as usize;
-    note!(
+    note_values!(
         fields,
         "summary.workingCount",
-        summary("workingCount") == core.summary.working_count,
+        summary("workingCount"),
+        core.summary.working_count,
     );
-    note!(
+    note_values!(
         fields,
         "summary.attentionCount",
-        summary("attentionCount") == core.summary.attention_count,
+        summary("attentionCount"),
+        core.summary.attention_count,
     );
-    note!(
+    note_values!(
         fields,
         "summary.awakeCount",
-        summary("awakeCount") == core.summary.awake_count,
+        summary("awakeCount"),
+        core.summary.awake_count,
     );
     compare_project_context(old.project_context.as_ref(), store, &mut fields);
     note!(
@@ -639,11 +678,17 @@ fn compare_session(
         "titleTooltip",
         detail_str(old, "titleTooltip").unwrap_or(old.title()) == row.title_tooltip,
     );
-    note!(fields, "activity", old.activity == row.activity);
-    note!(
+    note_values!(
+        fields,
+        "activity",
+        old.activity.as_str(),
+        row.activity.as_str()
+    );
+    note_values!(
         fields,
         "pendingQuestionCount",
-        detail_u64(old, "pendingQuestionCount") == row.pending_question_count,
+        detail_u64(old, "pendingQuestionCount"),
+        row.pending_question_count,
     );
     note!(
         fields,
@@ -665,10 +710,11 @@ fn compare_session(
     note!(fields, "isPinned", old.is_pinned == row.is_pinned);
     note!(fields, "isParked", old.is_parked == row.is_parked);
     note!(fields, "isDraft", old.is_draft == row.is_draft);
-    note!(
+    note_values!(
         fields,
         "lifecycleState",
-        old.lifecycle_state.as_deref() == Some(row.lifecycle_state.as_str()),
+        old.lifecycle_state.as_deref().unwrap_or("-"),
+        row.lifecycle_state.as_str(),
     );
     note!(
         fields,
