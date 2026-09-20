@@ -7,9 +7,11 @@
 //! (the copy actions, Open Folder, Open in Editor), `lifecycle` holds the ones with a round trip
 //! in the middle, whose optimistic value is only applied once the daemon has accepted it, and
 //! `close` holds the one whose optimistic update takes a row away before the call and puts it back
-//! when the call does not come home.
+//! when the call does not come home, and `fork` the one where nothing local happens until the
+//! daemon has already made the session.
 
 mod close;
+mod fork;
 mod lifecycle;
 mod plan;
 mod read_only;
@@ -18,6 +20,9 @@ mod resolve;
 pub use close::{
     apply_close_answer, close_optimistic_follow_ups, owns_close_message, plan_close_request,
     CloseAnswer, CloseFollowUp, CloseRequest,
+};
+pub use fork::{
+    apply_fork_answer, owns_fork_message, plan_fork_request, ForkFollowUp, ForkRequest,
 };
 pub use lifecycle::{
     apply_lifecycle_answer, owns_lifecycle_message, plan_lifecycle_request, LifecycleAnswer,
