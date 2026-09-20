@@ -106,9 +106,7 @@ impl GhostexGpuiApp {
                 // The values the store's list still borrows moved with this publish, and the
                 // comparison reads it; both run whichever list is drawn.
                 self.gx_store_sidebar_projection_published(cx);
-                if self.gx_store_sidebar_list_source()
-                    == crate::app::gx_store::SidebarListSource::Projection
-                {
+                if !self.gx_store_sidebar_draws_store_list() {
                     let published = self
                         .native_sidebar
                         .projection
@@ -163,8 +161,7 @@ impl GhostexGpuiApp {
                 // The clock rows carry the labels the old projection formats. The store's list
                 // formats its own against the host clock and books its own wake, so they are
                 // applied to the projection and reach the screen only while it is what is drawn.
-                let drawn_is_projection = self.gx_store_sidebar_list_source()
-                    == crate::app::gx_store::SidebarListSource::Projection;
+                let drawn_is_projection = !self.gx_store_sidebar_draws_store_list();
                 let Some(snapshot) = self.native_sidebar.projection.as_mut() else {
                     return;
                 };

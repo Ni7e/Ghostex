@@ -186,6 +186,13 @@ impl GhostexGpuiApp {
         source
     }
 
+    /// Whether the renderer draws the store's list right now. A machine tab the view model cannot
+    /// build (a remote machine, until M4d) keeps the old projection even with the switch on.
+    pub(crate) fn gx_store_sidebar_draws_store_list(&self) -> bool {
+        self.gx_store_sidebar_list_source() == SidebarListSource::Store
+            && self.gx_store.sidebar_list.view().supported
+    }
+
     /// The sidebar's own state moved. The list is rebuilt at once, because a click must show in
     /// the same frame.
     pub(crate) fn gx_store_sidebar_state_changed(&mut self, cx: &mut gpui::Context<Self>) {
@@ -258,16 +265,43 @@ impl GhostexGpuiApp {
             list.last_built_at_ms = now_ms;
             list.built = true;
         }
-        self.gx_store_prune_sidebar_selection(cx);
+        // A row the list stopped drawing leaves the multi-selection, which is itself one of the
+        // list's inputs, so the build runs once more when it did.
+        let mut changed = changed;
+        if self.gx_store_prune_sidebar_selection() {
+            let mut inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
+            let ui_generation = self.gx_store.sidebar_ui.generation();
+            let store = &mut self.gx_store;
+            refresh_inputs(
+                &mut inputs,
+                &mut store.sidebar_list.inputs_cache,
+                store.sidebar_ui.state(),
+                ui_generation,
+                store.sidebar_list.last_inputs.settings.clone(),
+                published.as_deref(),
+                &self.sidebar_browser_tabs_snapshot,
+                &store.sidebar_ui.stored_project_collections,
+                unavailable,
+            );
+            changed |= self.gx_store.sidebar_list.model.update(
+                &self.gx_store.core,
+                &inputs,
+                &ghostex_gx_core::ChangeSummary::default(),
+                now_ms,
+            );
+            self.gx_store.sidebar_list.last_inputs = inputs;
+            self.gx_store.sidebar_list.dirty = false;
+            cx.notify();
+        }
         self.gx_store_book_sidebar_deadline(cx);
-        if changed && self.gx_store_sidebar_list_source() == SidebarListSource::Store {
+        if changed && self.gx_store_sidebar_draws_store_list() {
             self.gx_store_install_sidebar_list(cx);
         }
     }
 
     /// Drops rows the list no longer draws from the multi-selection, the way the old projection
     /// prunes its own selection before it builds.
-    fn gx_store_prune_sidebar_selection(&mut self, cx: &mut gpui::Context<Self>) {
+    fn gx_store_prune_sidebar_selection(&mut self) -> bool {
         if self
             .gx_store
             .sidebar_ui
@@ -275,25 +309,21 @@ impl GhostexGpuiApp {
             .selected_session_ids
             .is_empty()
         {
-            return;
+            return false;
         }
-        let drawn: Vec<String> = self
+        let drawn: std::collections::HashSet<&str> = self
             .gx_store
             .sidebar_list
+            .model
             .view()
             .groups
             .iter()
             .flat_map(|group| group.core.sessions.iter())
-            .map(|session| session.row.sidebar_session_id.clone())
+            .map(|session| session.row.sidebar_session_id.as_str())
             .collect();
-        if self
-            .gx_store
+        self.gx_store
             .sidebar_ui
-            .retain_selected_sessions(|session_id| drawn.iter().any(|drawn| drawn == session_id))
-        {
-            self.gx_store.sidebar_list.mark_dirty();
-            cx.notify();
-        }
+            .retain_selected_sessions(|session_id| drawn.contains(session_id))
     }
 
     /// Replaces the list the renderer draws with the one derived from the store.

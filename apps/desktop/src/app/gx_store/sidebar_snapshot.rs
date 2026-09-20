@@ -66,7 +66,7 @@ pub(super) fn snapshot_from_view(
         .map(|session| (session.session_id.as_str(), session))
         .collect();
 
-    let mut used: Vec<String> = Vec::new();
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     let groups: Vec<NativeSidebarGroup> = view
         .groups
         .iter()
@@ -77,14 +77,16 @@ pub(super) fn snapshot_from_view(
                 .sessions
                 .iter()
                 .map(|session| {
-                    used.push(session.row.sidebar_session_id.clone());
+                    used.insert(session.row.sidebar_session_id.clone());
                     session_element(session, &published_rows, cache, now_ms)
                 })
                 .collect();
             native_group(group, published, sessions)
         })
         .collect();
-    cache.rows.retain(|session_id, _| used.contains(session_id));
+    cache
+        .rows
+        .retain(|session_id, _| used.contains(session_id.as_str()));
 
     NativeSidebarSnapshot {
         version: 1,

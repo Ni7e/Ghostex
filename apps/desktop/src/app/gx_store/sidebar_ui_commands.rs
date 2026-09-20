@@ -10,7 +10,6 @@
 use ghostex_gx_core::{SectionId, SidebarUiIntent, ToggleAllProjectsInput};
 use serde_json::Value;
 
-use super::sidebar_list::SidebarListSource;
 use crate::GhostexGpuiApp;
 
 impl GhostexGpuiApp {
@@ -164,8 +163,8 @@ impl GhostexGpuiApp {
 impl GhostexGpuiApp {
     /// Every project group the machine draws, the Chats collection left out.
     fn sidebar_drawn_project_group_ids(&self) -> Vec<String> {
-        match self.gx_store_sidebar_list_source() {
-            SidebarListSource::Store => self
+        match self.gx_store_sidebar_draws_store_list() {
+            true => self
                 .gx_store
                 .sidebar_list
                 .view()
@@ -174,7 +173,7 @@ impl GhostexGpuiApp {
                 .filter(|group| group.core.group_id != ghostex_gx_core::CHATS_GROUP_ID)
                 .map(|group| group.core.group_id.clone())
                 .collect(),
-            SidebarListSource::Projection => self
+            false => self
                 .native_sidebar
                 .snapshot
                 .iter()
@@ -186,8 +185,8 @@ impl GhostexGpuiApp {
     }
 
     fn sidebar_collection_storage_id(&self, collection_id: &str) -> Option<String> {
-        match self.gx_store_sidebar_list_source() {
-            SidebarListSource::Store => self
+        match self.gx_store_sidebar_draws_store_list() {
+            true => self
                 .gx_store
                 .sidebar_list
                 .view()
@@ -195,7 +194,7 @@ impl GhostexGpuiApp {
                 .iter()
                 .find(|collection| collection.collection_id == collection_id)
                 .map(|collection| collection.storage_id.clone()),
-            SidebarListSource::Projection => self
+            false => self
                 .native_sidebar
                 .snapshot
                 .as_ref()?
@@ -207,8 +206,8 @@ impl GhostexGpuiApp {
     }
 
     fn sidebar_collection_group_ids(&self, collection_id: &str) -> Vec<String> {
-        match self.gx_store_sidebar_list_source() {
-            SidebarListSource::Store => self
+        match self.gx_store_sidebar_draws_store_list() {
+            true => self
                 .gx_store
                 .sidebar_list
                 .view()
@@ -217,7 +216,7 @@ impl GhostexGpuiApp {
                 .find(|collection| collection.collection_id == collection_id)
                 .map(|collection| collection.group_ids.clone())
                 .unwrap_or_default(),
-            SidebarListSource::Projection => self
+            false => self
                 .native_sidebar
                 .snapshot
                 .iter()
@@ -230,8 +229,8 @@ impl GhostexGpuiApp {
 
     fn sidebar_collection_session_ids(&self, collection_id: &str) -> Vec<String> {
         let group_ids = self.sidebar_collection_group_ids(collection_id);
-        match self.gx_store_sidebar_list_source() {
-            SidebarListSource::Store => self
+        match self.gx_store_sidebar_draws_store_list() {
+            true => self
                 .gx_store
                 .sidebar_list
                 .view()
@@ -241,7 +240,7 @@ impl GhostexGpuiApp {
                 .flat_map(|group| group.core.sessions.iter())
                 .map(|session| session.row.sidebar_session_id.clone())
                 .collect(),
-            SidebarListSource::Projection => self
+            false => self
                 .native_sidebar
                 .snapshot
                 .iter()
@@ -255,8 +254,8 @@ impl GhostexGpuiApp {
 
     /// The rows the list actually draws, in order: what a shift-click range is measured in.
     fn sidebar_rendered_session_ids(&self) -> Vec<String> {
-        match self.gx_store_sidebar_list_source() {
-            SidebarListSource::Store => {
+        match self.gx_store_sidebar_draws_store_list() {
+            true => {
                 let view = self.gx_store.sidebar_list.view();
                 view.order
                     .iter()
@@ -283,7 +282,7 @@ impl GhostexGpuiApp {
                     })
                     .collect()
             }
-            SidebarListSource::Projection => {
+            false => {
                 let Some(snapshot) = self.native_sidebar.snapshot.as_ref() else {
                     return Vec::new();
                 };

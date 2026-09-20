@@ -134,6 +134,9 @@ impl GhostexGpuiApp {
     /// The old projection published a list. Its values the Rust list still borrows moved with it,
     /// so the list is brought up to date, and one coalesced comparison is booked.
     pub(crate) fn gx_store_sidebar_projection_published(&mut self, cx: &mut gpui::Context<Self>) {
+        // Which machines exist is the old projection's answer until M4d, and a stored tab whose
+        // machine is gone has to fall back to this computer, or the list would draw nothing.
+        self.gx_store_correct_sidebar_machine_tab(cx);
         // The mirrored inputs (the HUD's sort mode and Recent Projects, the git numbers, the two
         // armed timers) come from this payload, so the list is rebuilt whether or not anyone is
         // comparing.
@@ -170,6 +173,32 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
+    }
+
+    /// Falls back to this computer when the selected machine tab is not one the sidebar offers,
+    /// which is what `createNativeSidebarSnapshot` does with its own copy.
+    fn gx_store_correct_sidebar_machine_tab(&mut self, cx: &mut gpui::Context<Self>) {
+        let selected = self.gx_store.sidebar_ui.selected_machine_id().to_string();
+        if selected == LOCAL_MACHINE_ID {
+            return;
+        }
+        let Some(snapshot) = self.native_sidebar.projection.as_ref() else {
+            return;
+        };
+        if snapshot.machines.is_empty()
+            || snapshot
+                .machines
+                .iter()
+                .any(|machine| machine.id == selected)
+        {
+            return;
+        }
+        self.gx_store_apply_sidebar_ui_intent(
+            ghostex_gx_core::SidebarUiIntent::SelectMachine {
+                machine_id: LOCAL_MACHINE_ID.to_string(),
+            },
+            cx,
+        );
     }
 
     /// Compares the old projection's newest list with the Rust one.

@@ -21,8 +21,9 @@ use ghostex_gx_core::protocol::{
     CustomSessionTag, CustomSessionTagsState, ServerEvent, GXSERVER_PROTOCOL_VERSION,
 };
 use ghostex_gx_core::{
-    Core, Event, Intent, MachineId, SectionId, SessionSortMode, SidebarInputs, SidebarView,
-    SidebarViewModel,
+    collapse_into_storage, collapse_state_from_storage, reveal_plan, Core, Event, Intent,
+    MachineId, SectionId, SessionSortMode, SidebarCollapseDiff, SidebarInputs, SidebarUiIntent,
+    SidebarUiStore, SidebarView, SidebarViewModel, ToggleAllProjectsInput,
 };
 use serde_json::Value;
 
@@ -75,6 +76,67 @@ struct PassResult {
     mismatches: u64,
 }
 
+/// The sidebar's own state, its writes, and what they are measured against.
+struct UiState {
+    store: SidebarUiStore,
+    stored: String,
+    base: ghostex_gx_core::SidebarCollapseState,
+    writes: u64,
+    persist_failures: u64,
+    reveals: u64,
+    reveal_failures: u64,
+}
+
+impl UiState {
+    fn new() -> Self {
+        let store = SidebarUiStore::new();
+        let stored = collapse_into_storage(&store.state().collapse, None);
+        let base = store.state().collapse.clone();
+        Self {
+            store,
+            stored,
+            base,
+            writes: 0,
+            persist_failures: 0,
+            reveals: 0,
+            reveal_failures: 0,
+        }
+    }
+
+    /// Applies one intent the way the desktop host does: the state moves, and what it changed is
+    /// written to storage and read back, so the round trip is exercised against real ids.
+    fn apply(&mut self, intent: SidebarUiIntent) {
+        if !self.store.apply(intent).changed {
+            return;
+        }
+        if !self.store.take_pending().collapse {
+            return;
+        }
+        let diff = SidebarCollapseDiff::between(&self.base, &self.store.state().collapse);
+        self.stored = diff.apply(Some(&self.stored), &self.store.state().collapse);
+        self.base = self.store.state().collapse.clone();
+        self.writes += 1;
+        let read_back = collapse_state_from_storage(Some(&self.stored), None, None);
+        if persisted_only(read_back) != persisted_only(self.base.clone()) {
+            self.persist_failures += 1;
+        }
+    }
+}
+
+/// The collapse state as a restart would see it: only Pinned and Sessions are stored.
+fn persisted_only(
+    mut state: ghostex_gx_core::SidebarCollapseState,
+) -> ghostex_gx_core::SidebarCollapseState {
+    for sections in state.section_collapse.values_mut() {
+        *sections = ghostex_gx_core::SectionCollapse {
+            pinned: sections.pinned,
+            sessions: sections.sessions,
+            ..ghostex_gx_core::SectionCollapse::default()
+        };
+    }
+    state
+}
+
 fn run_pass(
     label: &str,
     frames: &str,
@@ -86,6 +148,7 @@ fn run_pass(
     let mut model = SidebarViewModel::new();
     let mut inputs = SidebarInputs::default();
     inputs.settings.sort_mode = SessionSortMode::LastActivity;
+    let mut ui = UiState::new();
     if let Some(projects) = domain_projects {
         core.handle(
             Event::DomainProjectsRead {
@@ -175,7 +238,8 @@ fn run_pass(
         let store_moved = !changes.is_empty();
         let before = inputs.clone();
         if churn {
-            churn_inputs(&mut inputs, model.view(), index);
+            churn_inputs(&mut inputs, &mut ui, model.view(), index);
+            inputs.ui = ui.store.state().clone();
             if inputs != before {
                 churn_steps += 1;
             }
@@ -200,6 +264,12 @@ fn run_pass(
             idle.push(elapsed);
         }
 
+        // Every so often, ask what it would take to put one row on screen and check that doing it
+        // actually draws the row. The plan is worked out against the same store and inputs, so a
+        // rule it gets wrong shows up as a row that is still not drawn.
+        if churn && index % 31 == 30 {
+            check_reveal(&core, &inputs, model.view(), index, now_ms, &mut ui);
+        }
         let scratch_started = Instant::now();
         let fresh = SidebarViewModel::build_from_scratch(&core, &inputs, now_ms);
         scratch.push(scratch_started.elapsed());
@@ -253,16 +323,91 @@ fn run_pass(
         "incremental against from scratch: {} comparisons, {mismatches} differences",
         scratch.len()
     );
+    println!(
+        "sidebar state: {} collapse writes, {} that did not survive a read, {} reveals, {} that did not draw the row",
+        ui.writes, ui.persist_failures, ui.reveals, ui.reveal_failures
+    );
     if let Some(first) = &first_mismatch {
         println!("{first}");
     }
 
-    PassResult { mismatches }
+    PassResult {
+        mismatches: mismatches + ui.persist_failures + ui.reveal_failures,
+    }
+}
+
+/// Takes one row of the list, asks what has to change for it to be drawn, does exactly that, and
+/// checks the row is then in a heading the list draws.
+fn check_reveal(
+    core: &Core,
+    inputs: &SidebarInputs,
+    view: &SidebarView,
+    index: usize,
+    now_ms: u64,
+    ui: &mut UiState,
+) {
+    let Some(session_id) = view
+        .groups
+        .iter()
+        .flat_map(|group| group.core.sessions.iter())
+        .nth(index % 23)
+        .map(|session| session.row.sidebar_session_id.clone())
+    else {
+        return;
+    };
+    let Some(plan) = reveal_plan(core, inputs, &session_id, now_ms) else {
+        return;
+    };
+    ui.reveals += 1;
+    let mut revealed = inputs.clone();
+    if plan.show_hidden {
+        revealed.ui.show_hidden = true;
+    }
+    if plan.clear_tag_filters {
+        revealed.ui.selected_tag_filters.clear();
+    }
+    if let Some(storage_id) = &plan.collapsed_collection_storage_id {
+        revealed
+            .ui
+            .collapse
+            .collapsed_collections
+            .remove(storage_id);
+    }
+    if plan.collapsed_group {
+        revealed.ui.collapse.collapsed_groups.remove(&plan.group_id);
+    }
+    if let Some(section) = plan.collapsed_section {
+        revealed
+            .ui
+            .collapse
+            .section_collapse
+            .entry(plan.storage_id.clone())
+            .or_default()
+            .set(section, false);
+    }
+    if plan.expand_list {
+        revealed
+            .ui
+            .collapse
+            .expanded_session_lists
+            .insert(plan.storage_id.clone());
+    }
+    let after = SidebarViewModel::build_from_scratch(core, &revealed, now_ms);
+    let drawn = after.group(&plan.group_id).is_some_and(|group| {
+        !group.core.collapsed
+            && group.core.sections.iter().any(|section| {
+                !section.collapsed && section.session_ids.iter().any(|drawn| *drawn == session_id)
+            })
+    });
+    if !drawn {
+        ui.reveal_failures += 1;
+    }
 }
 
 /// Moves one piece of the sidebar's own state per frame, so every input the view model reads is
-/// changed and changed back while the store moves underneath it.
-fn churn_inputs(inputs: &mut SidebarInputs, view: &SidebarView, index: usize) {
+/// changed and changed back while the store moves underneath it. The sidebar's own half goes
+/// through its intents and its write, exactly as the desktop host applies them.
+fn churn_inputs(inputs: &mut SidebarInputs, ui: &mut UiState, view: &SidebarView, index: usize) {
     let group_id = view
         .groups
         .get(index % view.groups.len().max(1))
@@ -277,52 +422,42 @@ fn churn_inputs(inputs: &mut SidebarInputs, view: &SidebarView, index: usize) {
         .flat_map(|group| group.core.sessions.iter())
         .nth(index % 17)
         .map(|session| session.row.sidebar_session_id.clone());
-    match index % 12 {
+    match index % 13 {
         0 => {
             if let Some(group_id) = group_id {
-                toggle(&mut inputs.ui.collapse.collapsed_groups, group_id);
+                ui.apply(SidebarUiIntent::ToggleGroupCollapsed { group_id });
             }
         }
         1 => {
             if let Some(storage_id) = storage_id {
-                toggle(&mut inputs.ui.collapse.expanded_session_lists, storage_id);
+                ui.apply(SidebarUiIntent::ToggleSessionListExpanded { storage_id });
             }
         }
         2 => {
             if let Some(storage_id) = storage_id {
-                toggle(&mut inputs.ui.collapse.expanded_hover_actions, storage_id);
+                ui.apply(SidebarUiIntent::ToggleHoverActions { storage_id });
             }
         }
         3 => {
             if let Some(storage_id) = storage_id {
-                let mut sections = inputs
-                    .ui
-                    .collapse
-                    .section_collapse
-                    .get(&storage_id)
-                    .copied()
-                    .unwrap_or_default();
-                let section = SectionId::ORDER[index % 6];
-                sections.set(section, !sections.get(section));
-                inputs
-                    .ui
-                    .collapse
-                    .section_collapse
-                    .insert(storage_id, sections);
+                ui.apply(SidebarUiIntent::ToggleSection {
+                    storage_id,
+                    section: SectionId::ORDER[index % 6],
+                });
             }
         }
         4 => {
             if let Some(session_id) = session_id {
-                if let Some(position) = inputs
-                    .ui
-                    .selected_session_ids
-                    .iter()
-                    .position(|selected| *selected == session_id)
-                {
-                    inputs.ui.selected_session_ids.remove(position);
-                } else {
-                    inputs.ui.selected_session_ids.push(session_id);
+                let mut selected = ui.store.state().selected_session_ids.clone();
+                match selected.iter().position(|held| *held == session_id) {
+                    Some(position) => {
+                        selected.remove(position);
+                    }
+                    None => selected.push(session_id),
                 }
+                ui.apply(SidebarUiIntent::SetSelectedSessions {
+                    session_ids: selected,
+                });
             }
         }
         5 => inputs.settings.enable_session_parking = !inputs.settings.enable_session_parking,
@@ -336,16 +471,24 @@ fn churn_inputs(inputs: &mut SidebarInputs, view: &SidebarView, index: usize) {
             };
         }
         8 => inputs.settings.sidebar_spaces_enabled = !inputs.settings.sidebar_spaces_enabled,
-        9 => inputs.ui.show_hidden = !inputs.ui.show_hidden,
+        9 => ui.apply(SidebarUiIntent::ToggleShowHidden),
         // One of the two inputs that invalidate every row of the machine at once, the other
         // being the tag catalog, which the pass swaps through the store.
         10 => inputs.settings.debugging_mode = !inputs.settings.debugging_mode,
+        11 => ui.apply(SidebarUiIntent::ToggleAllProjects(ToggleAllProjectsInput {
+            machine_id: ui.store.selected_machine_id().to_string(),
+            group_ids: view
+                .groups
+                .iter()
+                .map(|group| group.core.group_id.clone())
+                .collect(),
+        })),
         _ => {
-            inputs.ui.selected_tag_filters = if inputs.ui.selected_tag_filters.is_empty() {
-                vec!["favorite".to_string(), "untagged".to_string()]
-            } else {
-                Vec::new()
-            };
+            for tag in ["favorite", "untagged"] {
+                ui.apply(SidebarUiIntent::ToggleTagFilter {
+                    tag: tag.to_string(),
+                });
+            }
         }
     }
 }
@@ -386,12 +529,6 @@ fn tag_catalog_frame(catalog: &CustomSessionTagsState) -> Option<ServerEvent> {
         "customSessionTags": catalog,
     });
     ServerEvent::parse(&frame.to_string()).ok()
-}
-
-fn toggle(set: &mut std::collections::BTreeSet<String>, value: String) {
-    if !set.remove(&value) {
-        set.insert(value);
-    }
 }
 
 fn report(label: &str, samples: &mut [Duration]) {
