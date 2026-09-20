@@ -1,7 +1,8 @@
 //! The top-level state machine: events in, state plus effects out.
 
 use ghostex_gx_protocol::{
-    EventParseError, PresentationSnapshot, ServerEvent, GXSERVER_PROTOCOL_VERSION,
+    EventParseError, PresentationSnapshot, ServerEvent, WorkspaceSessionGroupsState,
+    GXSERVER_PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -38,6 +39,14 @@ pub enum Intent {
         project: ProjectKey,
         group_id: String,
     },
+    /// The client-owned workspace session groups document, after a LOCAL edit or after an echo the
+    /// guard let through. The list draws its user-made groups and its project order from the
+    /// store's side state, so the only way an edit reaches the screen is to put it there; it
+    /// carries no revision, because the client owns this document and the daemon keeps a copy.
+    SetWorkspaceGroups {
+        machine: MachineId,
+        state: Box<WorkspaceSessionGroupsState>,
+    },
     /// The host reports the exact set of sessions that own a pane.
     SetVisibleSessions {
         sessions: Vec<SessionKey>,
@@ -73,6 +82,12 @@ pub enum Intent {
     /// The request a patch anticipated failed.
     ClearSessionPatch {
         session: SessionKey,
+    },
+    /// The manual order of a project's sessions, written locally before `/api/updateSessionOrder`
+    /// is awaited so the rows move under the user's finger.
+    ReorderProjectSessions {
+        project: ProjectKey,
+        session_ids: Vec<String>,
     },
 }
 
@@ -492,6 +507,14 @@ impl Core {
                         .focus_subgroup(&self.presentation, project, group_id, now_ms);
                 self.note_focus(focus, output);
             }
+            Intent::SetWorkspaceGroups { machine, state } => {
+                output.changes = self.presentation.apply_side_state(
+                    &machine,
+                    "",
+                    None,
+                    SideStateUpdate::WorkspaceGroups(*state),
+                );
+            }
             Intent::SetVisibleSessions { sessions } => {
                 let focus = self.focus.set_visible_sessions(sessions, now_ms);
                 self.note_focus(focus, output);
@@ -521,6 +544,14 @@ impl Core {
             }
             Intent::ClearSessionPatch { session } => {
                 output.changes = self.presentation.clear_session_patch(&session);
+            }
+            Intent::ReorderProjectSessions {
+                project,
+                session_ids,
+            } => {
+                output.changes = self
+                    .presentation
+                    .reorder_project_sessions(&project, &session_ids);
             }
         }
     }

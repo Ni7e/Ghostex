@@ -15,7 +15,10 @@
 //! `sidebar_modals.rs` the two that only open a dialog and `sidebar_snooze.rs` the two that read
 //! the clock and the local calendar, `sidebar_reload.rs` Full Reload and Split Right,
 //! `sidebar_bulk.rs` the plural payloads and the renderer's
-//! batch envelope; `diagnostics.rs` writes the log lines.
+//! batch envelope, `sidebar_drag.rs` the session moves and what their order messages write, and
+//! `workspace_groups.rs` the client-owned groups document those writes land in, with its stored
+//! key, its debounced push and the guard that refuses the daemon's echo while one is outstanding;
+//! `diagnostics.rs` writes the log lines.
 
 mod burst;
 mod diagnostics;
@@ -28,6 +31,7 @@ mod session_walk;
 mod shadow_diff;
 mod sidebar_actions;
 mod sidebar_bulk;
+mod sidebar_drag;
 mod sidebar_reload;
 mod sidebar_flags;
 mod sidebar_lifecycle;
@@ -43,6 +47,7 @@ mod sidebar_snooze;
 mod sidebar_ui;
 mod sidebar_ui_commands;
 mod sidebar_ui_storage;
+mod workspace_groups;
 
 pub(crate) use host::GxStoreHost;
 pub(crate) use sidebar_list::SidebarListSource;

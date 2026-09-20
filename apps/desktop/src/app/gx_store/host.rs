@@ -58,6 +58,9 @@ pub(super) struct PumpOutcome {
     /// The drain found the client's channel closed: its thread is gone and must be replaced.
     pub(super) thread_ended: bool,
     pub(super) tab_lists_changed: bool,
+    /// The daemon's copy of the workspace session groups document landed. The guard decides what
+    /// that means, one level up, where there is a `cx` to write storage and book a push with.
+    pub(super) workspace_groups_changed: bool,
 }
 
 /// CDXC:StateSync 2026-09-19 DECISION:
@@ -93,6 +96,10 @@ pub(crate) struct GxStoreHost {
     pub(super) sidebar_modals: super::sidebar_modals::SidebarModalCounters,
     pub(super) sidebar_snooze: super::sidebar_snooze::SidebarSnoozeCounters,
     pub(super) sidebar_bulk: super::sidebar_bulk::SidebarBulkCounters,
+    pub(super) sidebar_drag: super::sidebar_drag::SidebarDragCounters,
+    /// The client-owned workspace session groups document, its stored key and its pending-push
+    /// guard.
+    pub(crate) workspace_groups: super::workspace_groups::WorkspaceGroupsHost,
 }
 
 impl GxStoreHost {
@@ -155,6 +162,7 @@ impl GxStoreHost {
         let outcome = PumpOutcome {
             thread_ended,
             tab_lists_changed: output.changes.tab_lists_changed(),
+            workspace_groups_changed: output.changes.side_state.workspace_groups,
         };
         self.run_effects(output.effects);
         // New frames may be exactly what a pending tab list difference was waiting for.
@@ -387,6 +395,10 @@ impl GhostexGpuiApp {
     /// Returns `true` when the client's thread is gone.
     fn gx_store_pump(&mut self, cx: &mut gpui::Context<Self>) -> bool {
         let outcome = self.gx_store.pump();
+        if outcome.workspace_groups_changed {
+            // The daemon's copy is already in the store by now; the guard says whether it may stay.
+            self.gx_store_reconcile_workspace_groups(cx);
+        }
         if self.gx_store_after_pump(outcome.tab_lists_changed, cx) {
             cx.notify();
         }

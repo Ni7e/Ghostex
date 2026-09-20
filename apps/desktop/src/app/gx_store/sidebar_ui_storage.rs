@@ -485,6 +485,49 @@ fn open(flags: OpenFlags) -> Result<Connection, &'static str> {
     Ok(connection)
 }
 
+/// One preference by key, for a caller that owns a single key rather than the sidebar's set. The
+/// workspace session groups document (K4) is read and written through here so the connection pool,
+/// the busy timeout and the error vocabulary are the ones every other key already uses.
+pub(super) fn read_preference_value(key: &str) -> Result<Option<String>, &'static str> {
+    let mut held = connections()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.read.is_none() {
+        held.read = Some(open(OpenFlags::SQLITE_OPEN_READ_ONLY)?);
+    }
+    let connection = held.read.as_ref().expect("opened above");
+    let result = read_preference(connection, key);
+    if result.is_err() {
+        held.read = None;
+    }
+    result
+}
+
+/// Writes one preference, or REMOVES it when `raw` is absent, which is what
+/// `writeStoredGpuiWorkspaceSessionGroupsState` does with an empty document.
+pub(super) fn write_preference_value(key: &str, raw: Option<&str>) -> Result<(), &'static str> {
+    let mut held = connections()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.write.is_none() {
+        held.write = Some(open(
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+        )?);
+    }
+    let connection = held.write.as_ref().expect("opened above");
+    let result = match raw {
+        Some(raw) => write_preference(connection, key, raw),
+        None => connection
+            .execute("DELETE FROM preferences WHERE key=?1", [key])
+            .map(|_| ())
+            .map_err(|_| "delete"),
+    };
+    if result.is_err() {
+        held.write = None;
+    }
+    result
+}
+
 fn read_preference(connection: &Connection, key: &str) -> Result<Option<String>, &'static str> {
     connection
         .query_row("SELECT value FROM preferences WHERE key=?1", [key], |row| {

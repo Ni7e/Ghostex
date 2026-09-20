@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use ghostex_gx_client::{ClientDiagnostic, StartError, redact_quoted_values};
 use ghostex_gx_core::{ConnectionUpdate, Core, Loadable, MachineId, ProjectKey, ResubscribeReason};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::host::GxStoreCounters;
 use super::shadow_diff::{ShadowCounters, ShadowDiff, ShadowMismatch};
@@ -68,6 +68,7 @@ pub(crate) struct GxStoreDiagnostics {
     sidebar_storage_warnings: u32,
     sidebar_action_records: u32,
     sidebar_lifecycle_records: u32,
+    sidebar_drag_records: u32,
 }
 
 /// A count as a whole percent of a total, which is what tells a skip that fires now and then apart
@@ -900,6 +901,99 @@ impl GxStoreDiagnostics {
                 "reloadLegs": counters.reload_legs,
                 "remounts": counters.remounts,
                 "declinedSource": counters.declined_source,
+            }),
+        );
+    }
+
+    /// A drag, named by what it posted and never by the row it moved. The refusal reason is a
+    /// fixed word from a closed list, so it can say WHY nothing happened without carrying an id.
+    ///
+    /// CDXC:Sidebar 2026-09-21 WHY:
+    /// Every value here is a count or one of a handful of fixed words, which is what keeps it
+    /// through `sanitize_json_value`: the sanitizer caps depth at 4, redacts a string over 120
+    /// characters or containing a slash, and silently drops an object past 32 entries. An order is
+    /// a list of session ids, each one containing a colon and a project path fragment, so it is
+    /// reported as a LENGTH and never as itself.
+    pub(super) fn sidebar_move_ran(
+        &mut self,
+        plan: &ghostex_gx_core::SessionMovePlan,
+        counters: super::sidebar_drag::SidebarDragCounters,
+    ) {
+        if self.sidebar_drag_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled() {
+            return;
+        }
+        self.sidebar_drag_records += 1;
+        record(
+            "gxStore.sidebarDrag",
+            json!({
+                "posts": plan.messages.len() as u64,
+                "refusal": plan.refusal.unwrap_or("none"),
+                "moves": counters.moves,
+                "movePosts": counters.move_posts,
+                "moveRefusals": counters.move_refusals,
+                "declinedSource": counters.declined_source,
+            }),
+        );
+    }
+
+    /// What one order message wrote. `kind` is the message type, which is one of three fixed
+    /// strings, and `rows` is how long the order was, never the order itself.
+    pub(super) fn sidebar_order_write_ran(
+        &mut self,
+        message: &Value,
+        plan: &ghostex_gx_core::OrderWritePlan,
+        counters: super::sidebar_drag::SidebarDragCounters,
+    ) {
+        if self.sidebar_drag_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled() {
+            return;
+        }
+        self.sidebar_drag_records += 1;
+        record(
+            "gxStore.sidebarOrderWrite",
+            json!({
+                "kind": message.get("type").and_then(Value::as_str).unwrap_or("?"),
+                "rows": message
+                    .get("sessionIds")
+                    .and_then(Value::as_array)
+                    .map(Vec::len)
+                    .unwrap_or(0) as u64,
+                "writes": plan.writes.len() as u64,
+                "refusal": plan.refusal.unwrap_or("none"),
+                "orderWrites": counters.order_writes,
+                "documentEdits": counters.document_edits,
+                "sessionOrderCalls": counters.session_order_calls,
+                "activations": counters.activations,
+                "toasts": counters.toasts,
+            }),
+        );
+    }
+
+    /// A push of the workspace session groups document, and what the guard has seen so far.
+    /// `echoesRefused` is the guard doing its job; a run with edits and a zero there means the
+    /// window between an edit and its push never opened.
+    pub(super) fn workspace_groups_pushed(
+        &mut self,
+        ok: bool,
+        counters: super::workspace_groups::WorkspaceGroupsCounters,
+    ) {
+        if self.sidebar_drag_records >= MAX_SIDEBAR_ACTION_RECORDS || !routine_logging_enabled() {
+            return;
+        }
+        self.sidebar_drag_records += 1;
+        record(
+            "gxStore.workspaceGroups",
+            json!({
+                "ok": ok,
+                "edits": counters.edits,
+                "storageWrites": counters.storage_writes,
+                "storageRemoves": counters.storage_removes,
+                "storageFailures": counters.storage_failures,
+                "pushes": counters.pushes,
+                "pushFailures": counters.push_failures,
+                "echoesRefused": counters.echoes_refused,
+                "echoesAdopted": counters.echoes_adopted,
+                "echoesEqual": counters.echoes_equal,
+                "echoesPushedBack": counters.echoes_pushed_back,
             }),
         );
     }

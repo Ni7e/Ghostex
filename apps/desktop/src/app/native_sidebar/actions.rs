@@ -147,6 +147,16 @@ impl GhostexGpuiApp {
         if self.gx_store_run_sidebar_split(&command, cx) {
             return;
         }
+        // A drag writes an order rather than calling the daemon in the moment: the drop decides the
+        // set and the order, and the message it posts edits the workspace session groups document
+        // or sends the project's manual order (gx_store/sidebar_drag.rs). `moveSession` is a
+        // RENDERER command and arrives at the top level; `createGroupFromSession` is wrapped.
+        if self.gx_store_run_sidebar_session_move(&command, cx) {
+            return;
+        }
+        if self.gx_store_run_sidebar_order_write(&command, cx) {
+            return;
+        }
         // The bulk menu, a collection's lifecycle items and a project's Sleep, Wake and Close
         // resolve their set here and fan out into the per-session actions above, paced when the
         // action is a sleep (gx_store/sidebar_bulk.rs).
