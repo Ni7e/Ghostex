@@ -137,15 +137,12 @@ impl GhostexGpuiApp {
         // the echo path reads it first: a cold start must not write a document built on nothing.
         self.gx_store_restore_workspace_groups(cx);
         self.gx_store.workspace_groups.counters.hand_offs += 1;
-        let document = WorkspaceGroupsDocument::parse(state);
-        if document == *self.gx_store.workspace_groups.sync.document() {
-            // `persistWorkspaceGroups` writes unconditionally, and the no-op write is preserved
-            // for the store's own edits (workspace_groups/edits.rs). Here the two sides hold the
-            // same document by construction, so an equal hand-off is the old runtime echoing back
-            // what this file just told it and must not book a push of its own.
-            return;
-        }
-        self.gx_store_edit_workspace_groups(document, cx);
+        // Taken as an edit even when the document is equal to the held one, because that is what
+        // `persistWorkspaceGroups` did: it wrote the key and booked the push unconditionally, and
+        // `syncGpuiWorkspaceSessionOrderInSubgroup` really does hand back an equal document
+        // (workspace_groups/edits.rs explains why that identity is modelled rather than improved).
+        // Swallowing it here would be the same silent simplification one layer up.
+        self.gx_store_edit_workspace_groups(WorkspaceGroupsDocument::parse(state), cx);
     }
 
     /// Drops members whose sessions the daemon no longer lists, which is what
