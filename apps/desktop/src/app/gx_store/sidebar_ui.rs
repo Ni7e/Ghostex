@@ -63,6 +63,10 @@ pub(crate) struct SidebarUiCounters {
     pub(crate) write_begin_max_us: u64,
     pub(crate) write_stored_max_us: u64,
     pub(crate) write_commit_max_us: u64,
+    /// The whole storage call, measured on the background thread. The difference between this and
+    /// `write_max_us` is the hop onto that thread and back, which is not storage work at all and
+    /// was the missing four milliseconds the first instrumentation could not account for.
+    pub(crate) write_call_max_us: u64,
 }
 
 impl SidebarUiCounters {
@@ -72,6 +76,7 @@ impl SidebarUiCounters {
         self.write_begin_max_us = self.write_begin_max_us.max(report.begin_us);
         self.write_stored_max_us = self.write_stored_max_us.max(report.stored_us);
         self.write_commit_max_us = self.write_commit_max_us.max(report.commit_us);
+        self.write_call_max_us = self.write_call_max_us.max(report.call_us);
     }
 }
 
@@ -382,7 +387,14 @@ impl GhostexGpuiApp {
             let stored = write.collapse.is_some();
             let result = cx
                 .background_executor()
-                .spawn(async move { write_sidebar_ui_state(&write) })
+                .spawn(async move {
+                    let called = Instant::now();
+                    let mut result = write_sidebar_ui_state(&write);
+                    if let Ok(report) = &mut result {
+                        report.call_us = called.elapsed().as_micros() as u64;
+                    }
+                    result
+                })
                 .await;
             let elapsed = started.elapsed().as_micros() as u64;
             let _ = this.update(cx, |this, cx| {

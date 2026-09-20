@@ -50,6 +50,11 @@ pub(crate) struct SidebarListCounters {
     /// Wakes that found no drawn time had moved, so the list was left as it was.
     pub(crate) installs_skipped: u64,
     pub(crate) deadline_wakes: u64,
+    /// Rows whose drawn time had really moved, summed over every wake, and the most any one wake
+    /// moved. A wake per second with one row each is a row in its first minute; a wake per second
+    /// with none is a booking that should not have been made.
+    pub(crate) wake_rows_moved: u64,
+    pub(crate) wake_rows_moved_max: u64,
     pub(crate) update_max_us: u64,
     pub(crate) install_max_us: u64,
     pub(crate) last_update_us: u64,
@@ -177,10 +182,10 @@ impl SidebarList {
             .min_by_key(|deadline| deadline.at_ms())
     }
 
-    /// Whether any drawn time would read differently now than in the installed list.
-    pub(super) fn labels_changed(&self, now_ms: u64) -> bool {
+    /// How many drawn times would read differently now than in the installed list.
+    pub(super) fn moved_label_count(&self, now_ms: u64) -> usize {
         self.snapshot_cache
-            .labels_changed(self.model.view(), now_ms)
+            .moved_label_count(self.model.view(), now_ms)
     }
 
     /// Whether a card draws the relative time at all (`hideLastActiveTimeOnSessionCards`).
@@ -518,7 +523,15 @@ impl GhostexGpuiApp {
                 // list rebuilt, and on a long list the earliest deadline usually belongs to one
                 // row while every other row reads exactly as it did.
                 if this.gx_store_sidebar_draws_store_list() {
-                    if this.gx_store.sidebar_list.labels_changed(now_ms()) {
+                    // How many rows a wake actually moved is what tells a rate of one a second
+                    // apart: one row ticking is a countdown or a fresh row doing its job, and a
+                    // wake that moved none is a booking that should not have been made.
+                    let moved = this.gx_store.sidebar_list.moved_label_count(now_ms());
+                    let list = &mut this.gx_store.sidebar_list;
+                    list.counters.wake_rows_moved += moved as u64;
+                    list.counters.wake_rows_moved_max =
+                        list.counters.wake_rows_moved_max.max(moved as u64);
+                    if moved > 0 {
                         this.gx_store_install_sidebar_list(cx);
                     } else {
                         this.gx_store.sidebar_list.counters.installs_skipped += 1;

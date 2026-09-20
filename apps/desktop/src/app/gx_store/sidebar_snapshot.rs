@@ -85,11 +85,11 @@ impl SnapshotCache {
     /// that row's label moves. Installing on every wake rebuilt the whole list, resynced the
     /// disclosures and repainted the sidebar for nothing. This asks the question the install would
     /// have answered, over the same cached labels, without building anything.
-    pub(super) fn labels_changed(&self, view: &SidebarView, now_ms: u64) -> bool {
+    pub(super) fn moved_label_count(&self, view: &SidebarView, now_ms: u64) -> usize {
         view.groups
             .iter()
             .flat_map(|group| group.core.sessions.iter())
-            .any(|session| {
+            .filter(|session| {
                 let row = &session.row;
                 match self.rows.get(&row.sidebar_session_id) {
                     // A row with no element yet is one the install has to build anyway.
@@ -100,6 +100,7 @@ impl SnapshotCache {
                     }
                 }
             })
+            .count()
     }
 }
 

@@ -96,6 +96,9 @@ pub(crate) struct SidebarShadowCounters {
 struct PendingDifference {
     since: Instant,
     signature: u64,
+    /// The field names this shape had, so the one that replaces it can say what moved rather than
+    /// only what it is. A shape that never settles is only ever seen through that difference.
+    fields: Vec<String>,
     /// How often this difference booked its own judgement; bounded so a flapping one cannot keep
     /// a timer and a comparison running for the rest of the app's life.
     rebooks: u8,
@@ -328,7 +331,8 @@ impl GhostexGpuiApp {
                 shadow.counters.scratch_mismatches += 1;
             }
         }
-        let mut replaced: Option<super::sidebar_shadow_compare::SidebarMismatch> = None;
+        let mut replaced: Option<(Vec<String>, super::sidebar_shadow_compare::SidebarMismatch)> =
+            None;
         let confirmed = match difference {
             None => {
                 shadow.counters.matches += 1;
@@ -368,12 +372,13 @@ impl GhostexGpuiApp {
                         Some(pending) if pending.signature == signature => {}
                         // Another shape before the first one could settle. A difference that keeps
                         // changing shape never counts as anything, so it is counted here.
-                        Some(_) => {
+                        Some(previous) => {
                             shadow.counters.never_settled += 1;
-                            replaced = Some(difference.clone());
+                            replaced = Some((previous.fields.clone(), difference.clone()));
                             shadow.pending = Some(PendingDifference {
                                 since: Instant::now(),
                                 signature,
+                                fields: difference.field_names(),
                                 rebooks: 0,
                             });
                         }
@@ -381,6 +386,7 @@ impl GhostexGpuiApp {
                             shadow.pending = Some(PendingDifference {
                                 since: Instant::now(),
                                 signature,
+                                fields: difference.field_names(),
                                 rebooks: 0,
                             });
                         }
@@ -397,8 +403,10 @@ impl GhostexGpuiApp {
         }
         // A shape that was replaced before it could settle is never confirmed, so this is the only
         // place its field names are ever seen.
-        if let Some(mismatch) = &replaced {
-            self.gx_store.diagnostics.sidebar_never_settled(mismatch);
+        if let Some((previous, mismatch)) = &replaced {
+            self.gx_store
+                .diagnostics
+                .sidebar_never_settled(previous, mismatch);
         }
         let counters = self.gx_store.sidebar_shadow.counters;
         let pending = self.gx_store.sidebar_shadow.is_pending();

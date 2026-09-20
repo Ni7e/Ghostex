@@ -92,6 +92,23 @@ pub(super) struct SidebarMismatch {
     /// Every difference in this record is a value only the store holds, in a field the old
     /// projection can hold a stale absence of for the whole run.
     pub(super) only_stale_fields: bool,
+    /// Where a group's row order first diverges: the group, the index, and the row each side has
+    /// there. A bare "the order differs" cannot be diagnosed, and this is the smallest thing that
+    /// can: a row only one side holds reads as a row that moved unless the ids are named.
+    pub(super) order_divergence: Vec<OrderDivergence>,
+}
+
+/// The first index at which two orders disagree.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct OrderDivergence {
+    pub(super) group_id: String,
+    pub(super) index: usize,
+    pub(super) old_id: Option<String>,
+    pub(super) store_id: Option<String>,
+    /// The two lengths, because an order that only differs in length is a row one side is missing
+    /// rather than a row that moved.
+    pub(super) old_len: usize,
+    pub(super) store_len: usize,
 }
 
 /// The two compared fields a frozen row can differ in on its own.
@@ -140,6 +157,28 @@ const TIMING_FIELDS: [&str; 1] = ["lastInteractionAt"];
 const STALE_PUBLISH_FIELDS: [&str; 2] = ["projectContext.discoveredIconDataUrl", "faviconDataUrl"];
 
 impl SidebarMismatch {
+    /// Every differing field of the record, once, encoded the way the log encodes them.
+    pub(super) fn field_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for field in self
+            .top_level
+            .iter()
+            .chain(self.groups.iter().flat_map(|(_, fields)| fields))
+            .chain(self.sessions.iter().flat_map(|(_, fields)| fields))
+        {
+            let encoded = match (field.old_has_value, field.store_has_value) {
+                (true, false) => format!("{}=old", field.name),
+                (false, true) => format!("{}=store", field.name),
+                _ => field.name.to_string(),
+            };
+            if !names.contains(&encoded) {
+                names.push(encoded);
+            }
+        }
+        names.truncate(MAX_IDS_PER_RECORD);
+        names
+    }
+
     pub(super) fn signature(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
@@ -161,6 +200,7 @@ impl SidebarMismatch {
         self.only_old_groups.truncate(MAX_IDS_PER_RECORD);
         self.only_store_groups.truncate(MAX_IDS_PER_RECORD);
         self.only_old_sessions.truncate(MAX_IDS_PER_RECORD);
+        self.order_divergence.truncate(MAX_IDS_PER_RECORD);
         self.only_store_sessions.truncate(MAX_IDS_PER_RECORD);
         self.groups.truncate(MAX_IDS_PER_RECORD);
         self.sessions.truncate(MAX_IDS_PER_RECORD);
@@ -416,17 +456,30 @@ fn compare_group(old: &NativeSidebarGroup, store: &GroupView, mismatch: &mut Sid
         "sections",
         sections_equal(&old.sections, &core.sections)
     );
-    note!(
-        fields,
-        "sessionOrder",
-        old.sessions
-            .iter()
-            .map(|session| session.session_id.as_str())
-            .eq(core
-                .sessions
-                .iter()
-                .map(|session| session.row.sidebar_session_id.as_str())),
-    );
+    let old_order: Vec<&str> = old
+        .sessions
+        .iter()
+        .map(|session| session.session_id.as_str())
+        .collect();
+    let store_order: Vec<&str> = core
+        .sessions
+        .iter()
+        .map(|session| session.row.sidebar_session_id.as_str())
+        .collect();
+    note!(fields, "sessionOrder", old_order == store_order);
+    if old_order != store_order {
+        let index = (0..old_order.len().max(store_order.len()))
+            .find(|index| old_order.get(*index) != store_order.get(*index))
+            .unwrap_or_default();
+        mismatch.order_divergence.push(OrderDivergence {
+            group_id: old.group_id.clone(),
+            index,
+            old_id: old_order.get(index).map(|id| (*id).to_string()),
+            store_id: store_order.get(index).map(|id| (*id).to_string()),
+            old_len: old_order.len(),
+            store_len: store_order.len(),
+        });
+    }
     if !fields.is_empty() {
         mismatch.groups.push((old.group_id.clone(), fields));
     }

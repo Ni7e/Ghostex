@@ -102,6 +102,8 @@ pub(super) struct SidebarWriteReport {
     /// The reads and writes inside the transaction.
     pub(super) stored_us: u64,
     pub(super) commit_us: u64,
+    /// The whole call, filled in by the caller on the thread that ran it.
+    pub(super) call_us: u64,
 }
 
 /// What one write has to store. A field left empty is not written at all.

@@ -343,6 +343,23 @@ impl GxStoreDiagnostics {
                 "onlyFrozenFields": mismatch.only_frozen_fields,
                 "onlyTimingFields": mismatch.only_timing_fields,
                 "onlyStaleFields": mismatch.only_stale_fields,
+                // One string per group whose order differs: where it first diverges and what each
+                // side has there. Depth 2, so nothing caps it.
+                "orderDivergence": mismatch
+                    .order_divergence
+                    .iter()
+                    .map(|divergence| {
+                        serde_json::Value::String(format!(
+                            "{} at {} old={} store={} lens={}/{}",
+                            divergence.group_id,
+                            divergence.index,
+                            divergence.old_id.as_deref().unwrap_or("-"),
+                            divergence.store_id.as_deref().unwrap_or("-"),
+                            divergence.old_len,
+                            divergence.store_len,
+                        ))
+                    })
+                    .collect::<Vec<_>>(),
             }),
         );
     }
@@ -404,6 +421,8 @@ impl GxStoreDiagnostics {
                 "installs": list.installs,
                 "installsSkipped": list.installs_skipped,
                 "deadlineWakes": list.deadline_wakes,
+                "wakeRowsMoved": list.wake_rows_moved,
+                "wakeRowsMovedMax": list.wake_rows_moved_max,
                 "deadlineKind": deadline_kind,
                 "updateUs": list.last_update_us,
                 "updateMaxUs": list.update_max_us,
@@ -425,17 +444,34 @@ impl GxStoreDiagnostics {
     /// the mismatch record, and `neverSettled` counted them without ever saying what they were.
     /// A list that genuinely churns and a field that flaps look identical from the counter; the
     /// field names are what tells them apart.
-    pub(super) fn sidebar_never_settled(&mut self, mismatch: &SidebarMismatch) {
+    pub(super) fn sidebar_never_settled(
+        &mut self,
+        previous_fields: &[String],
+        mismatch: &SidebarMismatch,
+    ) {
         if self.sidebar_never_settled_records >= MAX_NEVER_SETTLED_RECORDS
             || !routine_logging_enabled()
         {
             return;
         }
         self.sidebar_never_settled_records += 1;
+        let next_fields = distinct_fields(mismatch);
         append(
             "gxStore.sidebarShadow.neverSettled",
             json!({
-                "fields": distinct_fields(mismatch),
+                // What MOVED between the two judgements, which is the thing a shape that never
+                // settles is only ever visible through. The constant fields are in neither list.
+                "gained": next_fields
+                    .iter()
+                    .filter(|field| !previous_fields.contains(field))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                "lost": previous_fields
+                    .iter()
+                    .filter(|field| !next_fields.contains(field))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                "fields": next_fields,
                 "sessions": mismatch
                     .sessions
                     .iter()
@@ -480,6 +516,7 @@ impl GxStoreDiagnostics {
                 "writeBeginMaxUs": counters.write_begin_max_us,
                 "writeStoredMaxUs": counters.write_stored_max_us,
                 "writeCommitMaxUs": counters.write_commit_max_us,
+                "writeCallMaxUs": counters.write_call_max_us,
             }),
         );
     }
