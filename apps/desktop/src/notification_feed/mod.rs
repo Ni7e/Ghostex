@@ -1,9 +1,10 @@
 /*
-CDXC:Notifications 2026-09-11 DECISION:
-User: Ghostex gets a notification feed with a bell in the titlebar immediately to
-the right of the Next button, a count badge on the bell, a dropdown panel that
-lists what each agent said or is waiting for, and hotkeys to open the panel and
-jump through unread items.
+CDXC:Notifications 2026-09-20 DECISION:
+User: Ghostex gets a notification feed with a bell in the sidebar's top row, a
+count badge on the bell, a dropdown panel that lists what each agent said or is
+waiting for, and hotkeys to open the panel and jump through unread items. This
+supersedes the 2026-09-11 wording that put the bell in the titlebar immediately
+to the right of the Next button.
 
 Ownership mirrors the Back/Forward trail on purpose:
 - gxserver owns the feed rows, their read state, and the jump order
@@ -34,9 +35,8 @@ use gpui_component::tooltip::{ManagedTooltipExt as _, ManagedTooltipPlacement};
 
 use crate::{
     GhostexGpuiApp, GpuiTitlebarPopupKind, NOTIFICATIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
-    TITLEBAR_BUTTON_HORIZONTAL_PADDING, TITLEBAR_LEADING_TALL_BUTTON_HEIGHT, shared_settings,
-    titlebar_background, titlebar_button_hover_color, titlebar_icon_color,
-    titlebar_icon_hover_color, titlebar_svg_icon, titlebar_tooltip, titlebar_tooltip_label,
+    shared_settings, titlebar_active_text_color, titlebar_background, titlebar_svg_icon,
+    titlebar_tooltip, titlebar_tooltip_label,
 };
 
 /// Page-side event the sidebar runtime listens for. Must stay identical to
@@ -379,35 +379,40 @@ impl GhostexGpuiApp {
         );
     }
 
-    /// The bell, drawn in the same tall square strip as the Back/Forward arrows
-    /// it follows, with the unread count overlaid at the top right.
-    pub(crate) fn render_titlebar_notification_bell(
+    /// CDXC:Notifications 2026-09-20 DECISION:
+    /// User: the notification bell belongs in the sidebar's top row beside the sidebar's own controls, not in the titlebar after the Next button; this supersedes the 2026-09-11 placement. It keeps its unread badge, its Settings switch, and its per-view scope gate.
+    /// It is drawn as a sidebar row button so it matches the menu button beside it.
+    pub(crate) fn render_sidebar_notification_bell(
         &self,
+        appearance: &crate::app::native_sidebar::appearance::SidebarAppearance,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
+        let scale = appearance.scale;
         let open = self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Notifications);
         let unread_count = self.notification_feed_state.unread_count;
         let icon_color = if open {
-            titlebar_icon_hover_color()
+            titlebar_active_text_color()
         } else {
-            titlebar_icon_color()
+            appearance.muted
         };
         let button_bounds: Rc<Cell<Option<Bounds<Pixels>>>> =
             self.titlebar_notification_bell_bounds.clone();
         let tooltip = titlebar_tooltip_label("Notifications", "openNotifications");
+        let hover = appearance.hover;
 
         div()
-            .id("ghostex-gpui-titlebar-notifications-bell")
+            .id("ghostex-gpui-sidebar-notifications-bell")
             .relative()
             .flex()
-            .h(px(TITLEBAR_LEADING_TALL_BUTTON_HEIGHT))
-            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
+            .h_full()
+            .w(px(34.0 * scale))
+            .rounded(px(5.0 * scale))
             .flex_shrink_0()
             .items_center()
             .justify_center()
             .cursor_default()
-            .when(open, |this| this.bg(titlebar_button_hover_color()))
-            .hover(|this| this.bg(titlebar_button_hover_color()))
+            .when(open, |this| this.bg(hover))
+            .hover(move |this| this.bg(hover))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
@@ -435,27 +440,27 @@ impl GhostexGpuiApp {
             })
             .child(titlebar_svg_icon(
                 NOTIFICATION_BELL_ICON,
-                NOTIFICATION_BELL_ICON_SIZE,
+                NOTIFICATION_BELL_ICON_SIZE * scale,
                 icon_color,
             ))
             .when(unread_count > 0, |this| {
                 this.child(
                     div()
                         .absolute()
-                        .top(px(1.0))
-                        .right(px(1.0))
+                        .top(px(1.0 * scale))
+                        .right(px(1.0 * scale))
                         .flex()
                         .items_center()
                         .justify_center()
-                        .min_w(px(14.0))
-                        .h(px(14.0))
-                        .px(px(3.0))
+                        .min_w(px(14.0 * scale))
+                        .h(px(14.0 * scale))
+                        .px(px(3.0 * scale))
                         .rounded_full()
                         .border_1()
                         .border_color(titlebar_background())
                         .bg(rgb(NOTIFICATION_ATTENTION_BLUE))
-                        .text_size(px(9.0))
-                        .line_height(px(12.0))
+                        .text_size(px(9.0 * scale))
+                        .line_height(px(12.0 * scale))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(titlebar_background())
                         .child(notification_feed_badge_label(unread_count)),

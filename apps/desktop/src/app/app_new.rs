@@ -460,6 +460,7 @@ impl GhostexGpuiApp {
                 command_resize_hover_epoch: 0,
                 gpui_pet_overlay_activities_visible: shell_layout_state
                     .pet_overlay_activities_visible,
+                sidebar_usage_expanded: shell_layout_state.sidebar_usage_expanded,
                 gpui_pet_overlay_avatar_hovered: false,
                 gpui_pet_overlay_animation_state: GpuiPetOverlayAnimationState::Idle,
                 gpui_pet_overlay_animation_started_at: Instant::now(),
@@ -523,7 +524,7 @@ impl GhostexGpuiApp {
                 titlebar_popup_menu: None,
                 context_menu: None,
                 titlebar_popup_window: None,
-                titlebar_help_button_bounds: Rc::new(std::cell::Cell::new(None)),
+                titlebar_more_button_bounds: Rc::new(std::cell::Cell::new(None)),
                 titlebar_mode_highlight: Rc::new(std::cell::RefCell::new(Default::default())),
                 titlebar_extension_popup_generation: 0,
                 titlebar_extension_popup: None,

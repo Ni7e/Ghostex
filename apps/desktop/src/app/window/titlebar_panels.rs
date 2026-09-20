@@ -35,6 +35,7 @@ pub(crate) enum GpuiTitlebarPopupKind {
     Extensions,
     Git,
     Help,
+    More,
     Notifications,
     OpenTargets,
     Resources,
@@ -52,6 +53,7 @@ impl GpuiTitlebarPopupKind {
             Self::Extensions => "extensions",
             Self::Git => "git",
             Self::Help => "help",
+            Self::More => "more",
             Self::Notifications => "notifications",
             Self::OpenTargets => "openTargets",
             Self::Resources => "resources",
@@ -406,6 +408,28 @@ impl Render for GpuiTitlebarPopupWindow {
                     let pinned = action.pinned;
                     this.update_main_window(cx, move |app, _window, cx| {
                         app.update_extension_pin(extension_id, pinned, cx);
+                    });
+                    this.close_from_popup_window(window, cx);
+                }),
+            )
+            /*
+            The ⋯ window closes first and the row's own panel opens on the next
+            effect cycle: opening it inline would make the main app close this
+            window while this window is mid-update.
+            */
+            .on_action(
+                cx.listener(|this, action: &OpenGpuiTitlebarMoreMenuItem, window, cx| {
+                    let Some(item) =
+                        crate::app::titlebar::more_menu::GpuiTitlebarMoreMenuItem::from_index(
+                            action.item_index,
+                        )
+                    else {
+                        return;
+                    };
+                    this.update_main_window(cx, move |_, main_window, cx| {
+                        cx.defer_in(main_window, move |app, window, cx| {
+                            app.open_titlebar_more_menu_item(item, window, cx);
+                        });
                     });
                     this.close_from_popup_window(window, cx);
                 }),

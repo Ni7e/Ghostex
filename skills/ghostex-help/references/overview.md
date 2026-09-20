@@ -17,14 +17,17 @@ Run `ghostex guide <chapter>` for the details:
 ## The window
 
 - **Titlebar**: the project name and icon, Back/Forward, the view tabs
-  (Agents, Code, Browser, Kanban, Automate, Docs), and on the right the Help,
-  Tips, Resources, Git, Actions, and Open In buttons. Views other than Agents
+  (Agents, Code, Browser, Kanban, Automate, Docs), and on the right the Git,
+  Actions and Open In buttons plus a **⋯** menu holding Ask Ghostex,
+  Tips & Tricks, Resources, Dev servers and Extensions. Views other than Agents
   are extensions that load on demand and sleep when unused.
   View tabs stay centered; in compact mode their dropdown moves to the left,
   immediately after the Next (Forward) button.
 - **Sidebar** (left by default): projects, their sessions, tags and filters,
   remote machines, Quick chats, and the More Options menu (Settings, Search by
-  Prompt, Previous Sessions, Mobile & Remote, Extensions).
+  Prompt, Previous Sessions, Mobile & Remote, Extensions). The Notifications
+  bell is in its top row; account usage meters sit at the bottom above the
+  Commands row, with a Settings gear beside it.
 - **Work area**: the current project's view. In Agents it is a grid of
   terminal panes and tabs; each pane can show the raw terminal or the Session
   Chat rendering of the same agent conversation.

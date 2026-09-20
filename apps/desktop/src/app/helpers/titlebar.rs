@@ -80,6 +80,7 @@ pub(crate) fn titlebar_popup_menu_width(kind: GpuiTitlebarPopupKind) -> f32 {
         GpuiTitlebarPopupKind::Extensions => TITLEBAR_POPUP_EXTENSIONS_WIDTH,
         GpuiTitlebarPopupKind::Git => TITLEBAR_POPUP_GIT_WIDTH,
         GpuiTitlebarPopupKind::Help => TITLEBAR_POPUP_HELP_WIDTH,
+        GpuiTitlebarPopupKind::More => TITLEBAR_POPUP_COMPACT_WIDTH,
         GpuiTitlebarPopupKind::Notifications => TITLEBAR_POPUP_NOTIFICATIONS_WIDTH,
         GpuiTitlebarPopupKind::Resources => TITLEBAR_POPUP_RESOURCES_WIDTH,
         GpuiTitlebarPopupKind::Tips => TITLEBAR_POPUP_TIPS_WIDTH,
@@ -110,20 +111,13 @@ pub(crate) fn titlebar_popup_window_bounds_for_trigger_bounds(
     window: &Window,
 ) -> Bounds<Pixels> {
     let main_window_bounds = window.bounds();
-    if matches!(kind, GpuiTitlebarPopupKind::AccountUsage(_)) {
-        let viewport = window.viewport_size();
-        let width = width.min((viewport.width.as_f32() - 16.0).max(1.0));
-        let height =
-            content_height.min((viewport.height.as_f32() - TITLEBAR_HEIGHT - 8.0).max(1.0));
-        let right = trigger_bounds.right().as_f32().clamp(
-            width + 8.0,
-            (viewport.width.as_f32() - 8.0).max(width + 8.0),
-        );
-        return Bounds::new(
-            main_window_bounds.origin + point(px(right - width), px(TITLEBAR_HEIGHT)),
-            size(px(width), px(height)),
-        );
-    }
+    /*
+    CDXC:AgentProviders 2026-09-20 WHY:
+    Account usage used to be pinned to the top of the window under the titlebar
+    because its trigger was a titlebar button. Its meter now lives at the bottom
+    of the sidebar, so it takes the ordinary trigger-relative path: it grows to
+    the right of the meter and flips above it when there is no room below.
+    */
     let max_height = match kind {
         GpuiTitlebarPopupKind::AccountUsage(_) => 640.0,
         GpuiTitlebarPopupKind::Notifications => TITLEBAR_POPUP_NOTIFICATIONS_MAX_HEIGHT,
@@ -139,13 +133,16 @@ pub(crate) fn titlebar_popup_window_bounds_for_trigger_bounds(
     let max_left = main_window_bounds.origin.x.as_f32() + main_window_bounds.size.width.as_f32()
         - width
         - horizontal_margin;
-    // The Notifications bell sits in the left titlebar region, so its dropdown
-    // grows to the right from the trigger like a context menu instead of
-    // hanging off the trigger's right edge like the right-region buttons.
+    // The Notifications bell and the account usage meters sit at the left edge of
+    // the window, in the sidebar, so their dropdowns grow to the right from the
+    // trigger like a context menu instead of hanging off the trigger's right edge
+    // like the titlebar's right-region buttons.
     let desired_left = main_window_bounds.origin.x.as_f32()
         + if matches!(
             kind,
-            GpuiTitlebarPopupKind::ContextMenu | GpuiTitlebarPopupKind::Notifications
+            GpuiTitlebarPopupKind::AccountUsage(_)
+                | GpuiTitlebarPopupKind::ContextMenu
+                | GpuiTitlebarPopupKind::Notifications
         ) {
             trigger_bounds.left().as_f32()
         } else {
@@ -170,7 +167,13 @@ pub(crate) fn titlebar_popup_window_bounds_for_trigger_bounds(
             above_top
         };
 
-    let top = if kind == GpuiTitlebarPopupKind::ContextMenu {
+    // A trigger near the bottom of the window (the sidebar usage strip) leaves no
+    // room either below or fully above it, so the panel is held inside the window
+    // the same way a context menu is.
+    let top = if matches!(
+        kind,
+        GpuiTitlebarPopupKind::AccountUsage(_) | GpuiTitlebarPopupKind::ContextMenu
+    ) {
         let min_top = main_window_bounds.origin.y.as_f32() + horizontal_margin;
         top.clamp(min_top, (bottom_limit - height).max(min_top))
     } else {

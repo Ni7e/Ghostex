@@ -39,3 +39,4 @@ mod status;
 mod sticky;
 mod tooltips;
 mod updates;
+pub(crate) mod usage;

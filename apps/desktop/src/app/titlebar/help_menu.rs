@@ -1,24 +1,15 @@
-// Titlebar Help: the question-mark button, its sample-question popup menu, and
-// the flow that turns a picked question into a Ghostex Help quick chat.
+// Ghostex Help: the "Ask Ghostex" sample-question popup menu reached from the
+// titlebar's ⋯ menu or the Ghostex Help hotkey, and the flow that turns a picked
+// question into a Ghostex Help quick chat.
 
-use std::time::Duration;
-
-use gpui::AnyElement;
 use gpui::FontWeight;
-use gpui::InteractiveElement as _;
 use gpui::IntoElement;
-use gpui::MouseButton;
-use gpui::MouseDownEvent;
 use gpui::ParentElement as _;
 use gpui::Styled as _;
 use gpui::Window;
 use gpui::div;
-use gpui::prelude::FluentBuilder as _;
 use gpui::px;
-use gpui_component::ElementExt as _;
 use gpui_component::menu::PopupMenu;
-use gpui_component::tooltip::ManagedTooltipExt as _;
-use gpui_component::tooltip::ManagedTooltipPlacement;
 
 use super::popup_menu_builders::titlebar_popup_menu_with_scroll_behavior;
 use crate::app::consts::*;
@@ -229,7 +220,9 @@ impl GhostexGpuiApp {
         cx: &mut gpui::Context<Self>,
     ) {
         let open = !self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Help);
-        let trigger_bounds = self.titlebar_help_button_bounds.get();
+        // Ask Ghostex is a row of the titlebar's ⋯ menu now, so the hotkey anchors
+        // its panel to that button.
+        let trigger_bounds = self.titlebar_more_button_bounds.get();
         self.set_gpui_titlebar_popup_open(
             GpuiTitlebarPopupKind::Help,
             open,
@@ -305,84 +298,5 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
-    }
-
-    pub(crate) fn render_titlebar_help_button(
-        &self,
-        _window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        let open = self.titlebar_popup_menu_open(GpuiTitlebarPopupKind::Help);
-        let icon_color = if open {
-            titlebar_icon_hover_color()
-        } else {
-            titlebar_icon_color()
-        };
-        let button_bounds = self.titlebar_help_button_bounds.clone();
-        let trigger_bounds = button_bounds.get();
-
-        div()
-            .id("ghostex-gpui-titlebar-button-help")
-            .relative()
-            .flex()
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
-            .items_center()
-            .justify_center()
-            .when(cfg!(target_os = "windows"), |this| this.occlude())
-            .text_color(icon_color)
-            .cursor_default()
-            .when(open, |this| this.bg(titlebar_active_segment_color()))
-            .hover(move |this| {
-                if open {
-                    this.bg(titlebar_active_segment_color())
-                        .text_color(titlebar_icon_hover_color())
-                } else {
-                    this.bg(titlebar_button_hover_color())
-                        .text_color(titlebar_icon_hover_color())
-                }
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    log_gpui_titlebar_popup_mouse_down(
-                        GpuiTitlebarPopupKind::Help,
-                        "left",
-                        "togglePopup",
-                        open,
-                        trigger_bounds,
-                        event,
-                        window,
-                    );
-                    this.show_gpui_titlebar_help_menu(window, cx);
-                }),
-            )
-            .when(!open, |this| {
-                this.managed_discrete_tooltip_with_placement(
-                    ManagedTooltipPlacement::Left,
-                    Duration::from_millis(300),
-                    |window, cx| titlebar_tooltip(TITLEBAR_HELP_TOOLTIP, window, cx),
-                )
-            })
-            .on_prepaint(move |bounds, window, _cx| {
-                let previous = button_bounds.get();
-                let first_capture = previous.is_none();
-                let moved = previous != Some(bounds);
-                button_bounds.set(Some(bounds));
-                if first_capture || moved {
-                    log_gpui_titlebar_popup_anchor(
-                        GpuiTitlebarPopupKind::Help,
-                        bounds,
-                        first_capture,
-                        moved,
-                        window,
-                    );
-                    window.request_animation_frame();
-                }
-            })
-            .child(titlebar_svg_icon(TITLEBAR_ICON_HELP, 16.0, icon_color))
-            .into_any_element()
     }
 }

@@ -13,40 +13,47 @@
 // Cluster: titlebar menus, popups, actions, and titlebar render_* builders
 
 use std::path::PathBuf;
-use std::time::Duration;
 
-// RefCell backs cross-platform runtime state (window frame persistence), not
-// just the macOS-only shims that first introduced the import.
-
-use gpui::AnyElement;
 use gpui::InteractiveElement as _;
 use gpui::IntoElement;
-use gpui::MouseButton;
-use gpui::MouseDownEvent;
 use gpui::ParentElement as _;
 use gpui::Styled as _;
 use gpui::Window;
-use gpui::div;
 use gpui::prelude::FluentBuilder as _;
 use gpui::px;
-use gpui::rgb;
-use gpui_component::ElementExt;
 use gpui_component::WindowExt;
 use gpui_component::h_flex;
 use gpui_component::notification::Notification;
-use gpui_component::tooltip::ManagedTooltipExt as _;
-use gpui_component::tooltip::ManagedTooltipPlacement;
 
 use crate::app::consts::*;
 use crate::app::helpers::*;
 use crate::app::model::*;
-use crate::app::window::*;
 use crate::*;
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use gpui::WindowControlArea;
 
 impl GhostexGpuiApp {
+    /*
+    CDXC:Extensions 2026-09-18 DECISION:
+    User: a titlebar button is scoped exactly like a workarea, so "hidden" means either the
+    Extensions page switch is off OR the button's "Available in" scope excludes the active project.
+    Every button and every ⋯ menu row asks this one question, so they stay one behaviour.
+    SEE-ALSO: apps/desktop/src/app/view_scopes.rs, apps/desktop/src/app/titlebar/more_menu.rs, packages/core-ui/settings-modal/tabs/extensions.tsx.
+    */
+    pub(crate) fn titlebar_button_hidden(
+        &self,
+        settings_key: &str,
+        official_extension_id: &str,
+    ) -> bool {
+        shared_settings::shared_sidebar_settings_snapshot()
+            .object()
+            .get(settings_key)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            || !self.official_view_scope_allows(official_extension_id)
+    }
+
     pub(crate) fn active_open_target_index(&self, targets: &[GpuiOpenTarget]) -> Option<usize> {
         self.active_open_target_id
             .as_deref()
@@ -174,46 +181,13 @@ impl GhostexGpuiApp {
         */
         let show_actions_button =
             cfg!(any(target_os = "macos", target_os = "windows")) || active_action.is_some();
-        let settings = shared_settings::shared_sidebar_settings_snapshot();
-        /*
-        CDXC:Extensions 2026-09-18 DECISION:
-        User: a titlebar button is scoped exactly like a workarea, so "hidden" now means either the
-        Extensions page switch is off OR the button's "Available in" scope excludes the active project.
-        Both live behind this one closure so every button stays one behaviour.
-        SEE-ALSO: apps/desktop/src/app/view_scopes.rs, packages/core-ui/settings-modal/tabs/extensions.tsx.
-        */
-        let button_hidden = |key: &str, official_extension_id: &str| {
-            settings
-                .object()
-                .get(key)
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-                || !self.official_view_scope_allows(official_extension_id)
-        };
         let pinned_extension_buttons = self.render_titlebar_pinned_extension_buttons(window, cx);
-        let show_extensions_button = !button_hidden(
-            EXTENSIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
-            "extensionsButton",
-        );
         let buttons = h_flex()
             .flex_shrink_0()
             .mt(px(1.0))
             .h(px(TITLEBAR_CONTROL_HEIGHT))
             .items_center()
-            .when(!self.titlebar_accounts.is_empty(), |this| {
-                this.child(
-                    h_flex()
-                        .id("ghostex-titlebar-account-scroll")
-                        .max_w(px((window.bounds().size.width.as_f32() * 0.35).max(58.0)))
-                        .h_full()
-                        .overflow_x_scroll()
-                        .children(self.render_titlebar_account_buttons(window, cx)),
-                )
-            })
             .children(pinned_extension_buttons)
-            .when(show_extensions_button, |this| {
-                this.child(self.render_titlebar_extensions_button(window, cx))
-            })
             .map(|this| {
                 // Prompt Editor and Exit Focus share the same titlebar slot;
                 // when both are eligible only Prompt Editor renders.
@@ -226,53 +200,7 @@ impl GhostexGpuiApp {
                 this
             })
             .when(
-                !button_hidden(HELP_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "help"),
-                |this| this.child(self.render_titlebar_help_button(window, cx)),
-            )
-            .when(
-                !button_hidden(TIPS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "tips"),
-                |this| {
-                    this.child(self.render_titlebar_native_popup_button(
-                        GpuiTitlebarPopupKind::Tips,
-                        TITLEBAR_ICON_INFO,
-                        TITLEBAR_TIPS_TOOLTIP,
-                        self.titlebar_tips_badge_count() > 0,
-                        window,
-                        cx,
-                    ))
-                },
-            )
-            .when(
-                !button_hidden(
-                    DEV_SERVERS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
-                    "devServers",
-                ),
-                |this| {
-                    this.child(self.render_titlebar_native_popup_button(
-                        GpuiTitlebarPopupKind::RemoteSites,
-                        BROWSER_ICON_WORLD,
-                        "Dev servers",
-                        false,
-                        window,
-                        cx,
-                    ))
-                },
-            )
-            .when(
-                !button_hidden(RESOURCES_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "resources"),
-                |this| {
-                    this.child(self.render_titlebar_native_popup_button(
-                        GpuiTitlebarPopupKind::Resources,
-                        TITLEBAR_ICON_DEVICE_DESKTOP,
-                        TITLEBAR_RESOURCES_TOOLTIP,
-                        false,
-                        window,
-                        cx,
-                    ))
-                },
-            )
-            .when(
-                !button_hidden(
+                !self.titlebar_button_hidden(
                     GIT_ACTIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
                     "gitActions",
                 ),
@@ -280,7 +208,7 @@ impl GhostexGpuiApp {
             )
             .when(
                 show_actions_button
-                    && !button_hidden(
+                    && !self.titlebar_button_hidden(
                         QUICK_ACTIONS_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY,
                         "quickActions",
                     ),
@@ -289,9 +217,14 @@ impl GhostexGpuiApp {
                 },
             )
             .when(
-                !button_hidden(OPEN_IN_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "openIn"),
+                !self.titlebar_button_hidden(OPEN_IN_TITLEBAR_BUTTON_HIDDEN_SETTINGS_KEY, "openIn"),
                 |this| this.child(self.render_titlebar_open_targets_button(window, cx)),
             )
+            // Everything occasional lives behind the trailing ⋯ menu, which is the last
+            // control in the strip.
+            .when(self.titlebar_more_menu_visible(), |this| {
+                this.child(self.render_titlebar_more_button(cx))
+            })
             .child(self.render_titlebar_extension_popup_panel(window, cx));
         let controls = h_flex()
             .flex_shrink(1.0)
@@ -415,141 +348,5 @@ impl GhostexGpuiApp {
                 )
                 .into_any_element()
         }
-    }
-
-    pub(crate) fn render_titlebar_native_popup_button(
-        &self,
-        kind: GpuiTitlebarPopupKind,
-        icon_path: &'static str,
-        tooltip: &'static str,
-        show_badge: bool,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        let open = self.titlebar_popup_menu_open(kind);
-        let icon_color = if open {
-            titlebar_icon_hover_color()
-        } else {
-            titlebar_icon_color()
-        };
-        let anchor_key = match kind {
-            GpuiTitlebarPopupKind::Extensions => "ghostex-gpui-titlebar-extensions-popup-anchor",
-            GpuiTitlebarPopupKind::Tips => "ghostex-gpui-titlebar-tips-popup-anchor",
-            GpuiTitlebarPopupKind::Resources => "ghostex-gpui-titlebar-resources-popup-anchor",
-            GpuiTitlebarPopupKind::RemoteSites => "ghostex-gpui-titlebar-remote-sites-popup-anchor",
-            _ => "ghostex-gpui-titlebar-native-popup-anchor",
-        };
-        let anchor_state = window.use_keyed_state(anchor_key, cx, |_, _| {
-            GpuiTitlebarPopupAnchorState::default()
-        });
-        let anchor_bounds = anchor_state.read(cx).bounds;
-        let trigger_bounds = anchor_state
-            .read(cx)
-            .trigger_bounds_captured
-            .then_some(anchor_bounds);
-
-        div()
-            .id(match kind {
-                GpuiTitlebarPopupKind::Extensions => {
-                    "ghostex-gpui-titlebar-button-extensions-native"
-                }
-                GpuiTitlebarPopupKind::Tips => "ghostex-gpui-titlebar-button-tips-native",
-                GpuiTitlebarPopupKind::Resources => "ghostex-gpui-titlebar-button-resources-native",
-                GpuiTitlebarPopupKind::RemoteSites => {
-                    "ghostex-gpui-titlebar-button-remote-sites-native"
-                }
-                _ => "ghostex-gpui-titlebar-button-native-popup",
-            })
-            .relative()
-            .flex()
-            .h(px(TITLEBAR_CONTROL_HEIGHT))
-            .px(px(TITLEBAR_BUTTON_HORIZONTAL_PADDING))
-            .items_center()
-            .justify_center()
-            .when(cfg!(target_os = "windows"), |this| this.occlude())
-            .text_color(icon_color)
-            .cursor_default()
-            .when(open, |this| this.bg(titlebar_active_segment_color()))
-            .hover(move |this| {
-                if open {
-                    this.bg(titlebar_active_segment_color())
-                        .text_color(titlebar_icon_hover_color())
-                } else {
-                    this.bg(titlebar_button_hover_color())
-                        .text_color(titlebar_icon_hover_color())
-                }
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    log_gpui_titlebar_popup_mouse_down(
-                        kind,
-                        "left",
-                        "togglePopup",
-                        open,
-                        trigger_bounds,
-                        event,
-                        window,
-                    );
-                    this.set_gpui_titlebar_popup_open(kind, !open, trigger_bounds, window, cx);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    log_gpui_titlebar_popup_mouse_down(
-                        kind,
-                        "right",
-                        "togglePopup",
-                        open,
-                        trigger_bounds,
-                        event,
-                        window,
-                    );
-                    this.set_gpui_titlebar_popup_open(kind, !open, trigger_bounds, window, cx);
-                }),
-            )
-            .when(!open, |this| {
-                this.managed_discrete_tooltip_with_placement(
-                    ManagedTooltipPlacement::Left,
-                    Duration::from_millis(300),
-                    move |window, cx| titlebar_tooltip(tooltip, window, cx),
-                )
-            })
-            .on_prepaint({
-                let anchor_state = anchor_state.clone();
-                move |bounds, window, cx| {
-                    let (first_capture, moved) = anchor_state.update(cx, |state, _| {
-                        let first_capture = !state.trigger_bounds_captured;
-                        let moved = state.bounds != bounds;
-                        state.bounds = bounds;
-                        state.trigger_bounds_captured = true;
-                        (first_capture, moved)
-                    });
-                    if first_capture || moved {
-                        log_gpui_titlebar_popup_anchor(kind, bounds, first_capture, moved, window);
-                        window.request_animation_frame();
-                    }
-                }
-            })
-            .child(titlebar_svg_icon(icon_path, 16.0, icon_color))
-            .when(show_badge, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .right(px(2.0))
-                        .top(px(5.0))
-                        .size(px(7.5))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(titlebar_background())
-                        .bg(rgb(0x95d7f6)),
-                )
-            })
-            .into_any_element()
     }
 }

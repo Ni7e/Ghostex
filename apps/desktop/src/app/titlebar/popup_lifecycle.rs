@@ -115,6 +115,7 @@ impl GhostexGpuiApp {
                 | GpuiTitlebarPopupKind::Extensions
                 | GpuiTitlebarPopupKind::Git
                 | GpuiTitlebarPopupKind::Help
+                | GpuiTitlebarPopupKind::More
                 | GpuiTitlebarPopupKind::OpenTargets
         ) && content_height > popup_height;
         let content = self.build_gpui_titlebar_popup_content(
@@ -372,6 +373,16 @@ impl GhostexGpuiApp {
             GpuiTitlebarPopupKind::Help => {
                 GpuiTitlebarPopupContent::Menu(PopupMenu::build(window, cx, |menu, _, _| {
                     super::help_menu::build_gpui_titlebar_help_popup_menu(
+                        menu,
+                        menu_width,
+                        menu_max_height,
+                        menu_scrollable,
+                    )
+                }))
+            }
+            GpuiTitlebarPopupKind::More => {
+                GpuiTitlebarPopupContent::Menu(PopupMenu::build(window, cx, |menu, _, _| {
+                    self.build_gpui_titlebar_more_popup_menu(
                         menu,
                         menu_width,
                         menu_max_height,

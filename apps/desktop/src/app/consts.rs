@@ -586,6 +586,8 @@ pub(crate) const TITLEBAR_ICON_DEVICE_DESKTOP: &str = "titlebar/device-desktop.s
 
 pub(crate) const TITLEBAR_ICON_EXTENSIONS: &str = "titlebar/puzzle.svg";
 
+pub(crate) const TITLEBAR_ICON_DOTS: &str = "titlebar/dots.svg";
+
 pub(crate) const TITLEBAR_ICON_GIT_COMMIT: &str = "titlebar/git-commit.svg";
 
 pub(crate) const TITLEBAR_ICON_PLAYER_PLAY: &str = "titlebar/player-play.svg";
@@ -1006,11 +1008,9 @@ pub(crate) const TITLEBAR_ACTION_UNCONFIGURED_PREVIEW: &str = "Set the command";
 
 pub(crate) const TITLEBAR_TIPS_TOOLTIP: &str = "Tips";
 
-pub(crate) const TITLEBAR_HELP_TOOLTIP: &str = "Ghostex Help";
-
 pub(crate) const TITLEBAR_RESOURCES_TOOLTIP: &str = "Resources Monitor";
 
-pub(crate) const TITLEBAR_EXTENSIONS_TOOLTIP: &str = "Extensions";
+pub(crate) const TITLEBAR_MORE_TOOLTIP: &str = "More";
 
 pub(crate) const TITLEBAR_GIT_TOOLTIP: &str = "Git actions";
 

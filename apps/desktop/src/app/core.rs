@@ -868,6 +868,8 @@ pub struct GhostexGpuiApp {
     pub(crate) command_pane_side: GpuiCommandPaneSide,
     pub(crate) sidebar_width: f32,
     pub(crate) sidebar_collapsed: bool,
+    /// Whether the sidebar's account usage strip shows every account instead of the single collapsed row.
+    pub(crate) sidebar_usage_expanded: bool,
     #[cfg(target_os = "macos")]
     pub(crate) companion_reveal: Option<crate::app::companion_reveal::CompanionReveal>,
     pub(crate) sidebar_drag: Option<SidebarDragState>,
@@ -985,7 +987,9 @@ pub struct GhostexGpuiApp {
     pub(crate) titlebar_popup_window: Option<WindowHandle<GpuiTitlebarPopupWindow>>,
     /// Last painted bounds of the titlebar Help button, so the `openGhostexHelp`
     /// hotkey can anchor the Help popup without a click.
-    pub(crate) titlebar_help_button_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// The trailing ⋯ button's last painted bounds. Its menu rows and the Ghostex
+    /// Help hotkey both anchor their panels here.
+    pub(crate) titlebar_more_button_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     /// Captured mode-tab spans plus the sliding active-fill state; see `titlebar_mode_highlight.rs`.
     pub(crate) titlebar_mode_highlight: SharedTitlebarModeHighlightState,
     pub(crate) titlebar_extension_popup_generation: u64,

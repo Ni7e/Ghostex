@@ -22,8 +22,9 @@ shortcuts can be assigned in Settings > Hotkeys. Views other than Agents are ext
 they load on demand, sleep when idle (Auto Sleep), and can be hidden or
 reordered in Settings > Extensions > Titlebar views.
 The full view tabs stay centered in the titlebar. When space is tight, they
-become a dropdown on the left after the Notifications bell that follows Next
-(Forward), before the project name. Hovering a view shows its positional shortcut.
+become a dropdown on the left right after Next (Forward), before the project
+name. Ask Ghostex, Tips & Tricks, Resources, Dev servers and Extensions are all
+reached from the **⋯** button at the right end of the titlebar. Hovering a view shows its positional shortcut.
 **Hide sidebar** toggles the sidebar. The matching **Hide companion** / **Show companion**
 button sits immediately beside it in every view (greyed out in Agents, which has no
 companion pane), so Back and Forward stay in the same place, and it uses the same
@@ -351,7 +352,7 @@ forked away from, and switches to the one you pick; a stopped branch is resumed
 when you open it.
 
 - Sleeping frees RAM; Auto Sleep does it after idle minutes; Resources in the
-  titlebar sleeps many at once and shows CPU and RAM per session. Clean RAM
+  titlebar's ⋯ menu sleeps many at once and shows CPU and RAM per session. Clean RAM
   copies a diagnosis prompt; paste it into an agent session to reduce RAM use.
   Sleeping sidebar sessions keep their normal title color and show a dimmer
   last-active time on the right; awake sessions show a stronger timestamp. Use `ghostex sleep|wake <selector>` to
@@ -362,7 +363,9 @@ when you open it.
 - Recent Sessions (Cmd+P) opens Quick Access to jump between sessions.
   Its four tabs are Commands, Projects, Sessions, and Saved Prompts; Cmd+1
   through Cmd+4 switch between them. Cmd+Shift+P opens Commands directly to
-  search app commands, pane actions, and project actions.
+  search app commands, pane actions, and project actions. The Commands row at
+  the bottom of the sidebar opens the same thing, and the gear beside it opens
+  Settings in one click.
   Previous Sessions in More Options lists past conversations from every agent
   CLI with resume and fork. The History icon immediately to the
   right of Add Worktree on a project header opens Quick Access > Sessions with
@@ -672,7 +675,7 @@ Account sign-in terminals open in the active local project's folder and appear
 under that project. Before a first project is chosen, sign-in uses the home folder.
 When a newer usage reading cannot be fetched for a Claude account, for example
 while the usage service rate limits checks for an hour at a time, Settings >
-Accounts, the titlebar usage popup, and the chat's Switch account rows show the
+Accounts, the account usage popup, and the chat's Switch account rows show the
 last reading with its age ("Usage is from 3 hours ago") and Ghostex keeps
 retrying on its own. Automatic switching and the Account for new sessions rule
 skip that account until its usage refreshes. A login problem shows what to do
@@ -684,7 +687,7 @@ It also masks email addresses in the status
 line below the chat box, the context meter's More details popover, and the
 Context details dialog previews and hover text. It also covers account choices
 and selected dropdown values, account setup and reconnect fields, and account
-errors and recovery messages in Settings, launchers, and the titlebar usage popup.
+errors and recovery messages in Settings, launchers, and the account usage popup.
 
 The context meter above the chat box opens a popover whose More details rows
 are grouped under Usage & cost, Context & cache, and Session. Its pen icon
@@ -937,8 +940,8 @@ to hear a short sound when copying from a terminal, a chat message, the chat
 composer (including its right-click Copy menu), a copy button, or a menu
 (`copySound`).
 
-The Notifications bell sits in the titlebar right after the Next button and
-shows how many notifications are unread. Click it to open the Notifications
+The Notifications bell sits in the sidebar's top row, just before the sidebar
+menu button, and shows how many notifications are unread. Click it to open the Notifications
 panel: one row per session, newest first, saying whether the agent finished a
 turn or needs your input, with the last thing it said. Click a row to jump to
 that session and mark it read; hover a row to dismiss it; the header has Next
@@ -1002,15 +1005,19 @@ docs directory), `hideProjectHeaderDiffStats`,
   hotkeys and command palette entries go away with it. Custom views under Your
   views use the same Available in picker inside their own editor.
   Its Titlebar account usage section lets you star saved Claude and Codex
-  accounts to show their usage in the desktop titlebar, or unstar them to hide
-  it. These are the same per-account stars available in Settings > Accounts.
-  Claude buttons show the two tightest of the weekly, five-hour, and Fable
+  accounts to show their usage at the bottom of the desktop sidebar, or unstar
+  them to hide it. These are the same per-account stars available in
+  Settings > Accounts. The usage strip starts collapsed to a single row holding
+  as many meters as fit, the accounts closest to their limit first; click the
+  strip to show every account four per row, and click it again to collapse it.
+  Ghostex remembers the choice.
+  Claude meters show the two tightest of the weekly, five-hour, and Fable
   limits, so the Fable limit is never hidden when it is running out; launcher
   and picker rows and the Accounts figures use the same two numbers.   Each
-  button opens that login's live limits, reset times, and extra usage or rate
+  meter opens that login's live limits, reset times, and extra usage or rate
   limit resets, with the Fable limit as a main bar for Claude. Right-click a
-  usage button for Extensions and Accounts. Click the same
-  usage button again to close its dropdown. Click another titlebar dropdown's
+  usage meter for Extensions and Accounts. Click the same
+  usage meter again to close its dropdown. Click another titlebar dropdown's
   button to close the current dropdown and open that one in a single click.
   Clicking outside, including in
   Session Chat, closes usage dropdowns and Tips. More model
@@ -1035,11 +1042,13 @@ docs directory), `hideProjectHeaderDiffStats`,
   online they are downloaded from the Ghostex GitHub repository, so skill fixes
   arrive between releases, and installed skills are refreshed automatically
   each time Ghostex starts. Offline installs use the copy inside the app.
-- Tips (titlebar) teaches features one card at a time; Resources lists dev
-  servers, ports, docs, project links, and per-session CPU and RAM; Help
-  (titlebar question mark) opens sample questions; picking one opens a
+- The titlebar's ⋯ menu holds Ask Ghostex, Tips & Tricks, Resources, Dev
+  servers and Extensions. Tips & Tricks teaches features one card at a time;
+  Resources lists dev servers, ports, docs, project links, and per-session CPU
+  and RAM; Ask Ghostex opens sample questions, and picking one opens a
   Ghostex Help chat with the question staged so the user can edit it and
-  press Enter.
+  press Enter. An entry switched off in Settings > Extensions, or scoped away
+  from the project you are in, is not listed.
 - Welcome to Ghostex is the onboarding that opens the first time Ghostex
   runs. Its five panels cover: the agents found on this computer, with
   Install buttons for Claude Code, Codex and Cursor Agent, an Install guide
@@ -1098,6 +1107,6 @@ terminalViewWidthMode match-chat`.
 - "Play a sound and notify me when an agent finishes": `completionSound`
   (any value except `off`), `showMacOSAttentionNotifications true`, the
   menu bar badges via `hideMenuBarSessionStatusIndicators false`, and the
-  titlebar bell (kept visible with `notificationsTitlebarButtonHidden false`)
+  sidebar bell (kept visible with `notificationsTitlebarButtonHidden false`)
   lists every finished turn with what the agent said.
 - "What does the Kanban board do": see Project board (Kanban).

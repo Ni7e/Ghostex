@@ -4,6 +4,8 @@ use gpui::{
     div, px,
 };
 use gpui_component::h_flex;
+use gpui_component::tooltip::ManagedTooltipExt as _;
+use gpui_component::tooltip::ManagedTooltipPlacement;
 use serde_json::json;
 
 use super::appearance::SidebarAppearance;
@@ -85,6 +87,12 @@ impl GhostexGpuiApp {
                         );
                     })),
             )
+            // CDXC:Notifications 2026-09-20 DECISION:
+            // User: the notification bell sits in the sidebar's top row, before the sidebar menu button.
+            .when(
+                !footer && self.titlebar_notification_bell_visible(),
+                |row| row.child(self.render_sidebar_notification_bell(appearance, cx)),
+            )
             .when(!footer, |row| {
                 row.child(
                     div()
@@ -111,6 +119,52 @@ impl GhostexGpuiApp {
                                 cx,
                             );
                         })),
+                )
+            })
+            /*
+            CDXC:Sidebar 2026-09-20 DECISION:
+            User: Settings gets a one-click gear immediately to the right of the Commands
+            row, and the Commands row keeps its full-width shape and its shortcut hint
+            rather than shrinking to an icon. The sidebar menu keeps its own Settings and
+            Hotkeys entries; that duplication is deliberate.
+            */
+            .when(footer, |row| {
+                row.child(
+                    div()
+                        .id("native-sidebar-settings")
+                        .h(px(28.0 * scale))
+                        .w(px(34.0 * scale))
+                        .mr(px(6.0 * scale))
+                        .rounded(px(5.0 * scale))
+                        .flex()
+                        .flex_shrink_0()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .hover(|row| row.bg(appearance.hover))
+                        .child(titlebar_svg_icon(
+                            TITLEBAR_ICON_SETTINGS,
+                            15.0 * scale,
+                            appearance.muted,
+                        ))
+                        .on_click(cx.listener(move |app, _, _, cx| {
+                            cx.stop_propagation();
+                            app.dispatch_native_sidebar_ui(
+                                json!({"type": "sidebarAction", "action": "settings"}),
+                                cx,
+                            );
+                        }))
+                        .managed_discrete_tooltip_with_placement(
+                            ManagedTooltipPlacement::Right,
+                            appearance.tooltip_delay,
+                            |window, cx| {
+                                titlebar_tooltip(
+                                    titlebar_tooltip_label("Settings", "openSettings"),
+                                    window,
+                                    cx,
+                                )
+                            },
+                        ),
                 )
             })
             .into_any_element()

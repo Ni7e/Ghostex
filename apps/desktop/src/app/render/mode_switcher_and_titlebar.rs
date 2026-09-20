@@ -123,8 +123,9 @@ impl GhostexGpuiApp {
         CDXC:Titlebar 2026-07-04-01:00:
         Quick/projectless GPUI contexts keep Agents and Source selectable, keep Browser, Kanban, Automate, and Docs visible but disabled, and use the same availability helper for tabs, the compact dropdown, hotkeys, restore, and persistence.
 
-        CDXC:Titlebar 2026-06-22-19:39:
-        The GPUI titlebar must match the current macOS titlebar chrome: the sidebar toggle is a flat Tabler layout-sidebar glyph instead of the older blue circular chevron, and the right controls are the same project/window actions as macOS: Tips, Resources, Git, Actions, and Open In. Settings and Keep Awake live in sidebar shortcut chrome, not this titlebar strip.
+        CDXC:Titlebar 2026-09-20 DECISION:
+        User: the titlebar keeps only what belongs to the active project. The sidebar toggle stays a flat Tabler layout-sidebar glyph, the right controls are Git, Actions and Open In, and everything occasional (Ask Ghostex, Tips & Tricks, Resources, Dev servers, Extensions) is reached from one trailing menu button.
+        This supersedes the 2026-06-22 rule that listed Tips and Resources as their own titlebar buttons; Settings, Keep Awake, the notification bell and the account usage meters live in sidebar chrome, not this strip.
         */
         let mode_switcher_items = self.titlebar_mode_switcher_items();
         let show_mode_switcher = !mode_switcher_items.is_empty();
@@ -142,10 +143,7 @@ impl GhostexGpuiApp {
             .sum::<f32>();
         let use_compact_mode_dropdown = show_mode_switcher
             && window.bounds().size.width.as_f32()
-                < TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD
-                    + extension_mode_width
-                    + (self.titlebar_accounts.len() as f32 * 58.0)
-                        .min(window.bounds().size.width.as_f32() * 0.35);
+                < TITLEBAR_COMPACT_MODE_WIDTH_THRESHOLD + extension_mode_width;
         let titlebar = div()
             .id("ghostex-gpui-titlebar")
             .relative()
@@ -199,9 +197,9 @@ impl GhostexGpuiApp {
                 }))
         };
 
-        // CDXC:Titlebar 2026-09-11 DECISION:
-        // User: full view buttons stay centered in the window, but the compact dropdown belongs on the left right after the Notifications bell, which follows Next.
-        // This supersedes the 2026-09-10 wording that put the compact dropdown immediately after Next; equal side regions still keep the full tabs centered.
+        // CDXC:Titlebar 2026-09-20 DECISION:
+        // User: full view buttons stay centered in the window, and the compact dropdown belongs on the left immediately after Next.
+        // This restores the 2026-09-10 wording that the 2026-09-11 rule amended, because the Notifications bell it anchored to has moved to the sidebar; equal side regions still keep the full tabs centered.
         titlebar
             .on_click(|event, window, _cx| {
                 if event.click_count() != 2 {
@@ -280,11 +278,6 @@ impl GhostexGpuiApp {
             not be.
             */
             .child(self.render_titlebar_navigation_history_buttons(cx))
-            // CDXC:Notifications 2026-09-11 DECISION:
-            // User: the notification bell sits immediately to the right of the Next button.
-            .when(self.titlebar_notification_bell_visible(), |this| {
-                this.child(self.render_titlebar_notification_bell(cx))
-            })
             .when(show_compact_mode_dropdown, |this| {
                 this.child(self.render_compact_mode_dropdown(cx))
             })

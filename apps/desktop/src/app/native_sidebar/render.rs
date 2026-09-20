@@ -12,7 +12,7 @@ use crate::GhostexGpuiApp;
 impl GhostexGpuiApp {
     pub(crate) fn render_native_sidebar(
         &mut self,
-        window: &gpui::Window,
+        window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         if !cx.has_active_drag() {
@@ -178,7 +178,19 @@ impl GhostexGpuiApp {
                             ),
                     ),
             )
-            .child(self.render_native_sidebar_navigation(&appearance, true, cx))
+            /*
+            The usage strip and the Commands row are one footer child on purpose:
+            `on_children_prepainted` above measures the sidebar from its fourth
+            child, so a strip that appears only when accounts exist must not shift
+            that index.
+            */
+            .child(
+                v_flex()
+                    .w_full()
+                    .flex_shrink_0()
+                    .children(self.render_native_sidebar_usage(&appearance, window, cx))
+                    .child(self.render_native_sidebar_navigation(&appearance, true, cx)),
+            )
             .child(
                 gpui::canvas(
                     |bounds, window, _| window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal),
