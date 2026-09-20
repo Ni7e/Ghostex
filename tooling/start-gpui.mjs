@@ -23,6 +23,7 @@ import {
   resolveLocalStartCodeSignIdentity,
   resolveLocalStartCodeSignTimestampFlag,
   withoutColorDisablingEnvironment,
+  withoutPowerShell7ModulePaths,
 } from './local-start-utils.mjs';
 import { isolatedGpuiConfiguration, prepareIsolatedGpui } from './isolated-gpui.mjs';
 
@@ -91,7 +92,9 @@ const localStartLockFile = path.join(repoRoot, 'build', 'ghostex-gpui-local-star
 const dependenciesRoot = path.join(repoRoot, '.dependencies');
 const startOptions = validateStartArguments(process.argv.slice(2));
 const startVerbose = startOptions.verbose;
-const startEnvironment = withoutColorDisablingEnvironment({ ...process.env, ...isolatedInstance?.environment });
+const startEnvironment = withoutPowerShell7ModulePaths(
+  withoutColorDisablingEnvironment({ ...process.env, ...isolatedInstance?.environment })
+);
 const windowsArch = process.arch === 'arm64' ? 'arm64' : 'x64';
 const explicitWindowsWslArchive = process.env.GHOSTEX_WINDOWS_WSL_GXSERVER_ARCHIVE?.trim();
 const explicitWindowsWslCodeServerArchive = process.env.GHOSTEX_WINDOWS_WSL_CODE_SERVER_ARCHIVE?.trim();
@@ -250,6 +253,16 @@ if (targetsWindows) {
     action: `before installing rebuilt app to ${windowsInstalledAppPath}`,
     includeBundleId: false,
   });
+  /*
+  CDXC:ServerDaemon 2026-09-18 WHY:
+  Closing the app leaves its gxserver running, as on macOS, so live wmx sessions survive the relaunch.
+  Without this stop the previous build's control plane kept the port and went on serving the rebuilt app, so a local start never ran the gxserver it had just compiled.
+  /api/control/stop ends only the control plane (stopAll is the call that kills sessions); the rebuilt app then starts its bundled gxserver.
+  A WSL-driven start is not covered: its state lives on the Windows side, which ghostexStateDir does not resolve from Linux.
+  */
+  if (isWindows) {
+    await stopRunningGxserverControlPlaneBeforeLaunch(appPath);
+  }
   installWindowsGpuiApp(appPath);
   logStartStep(`Opening ${appName}...`);
   launchWindowsGpuiApp();
@@ -807,15 +820,29 @@ function findRunningGpuiPidsByBundleId() {
 function findRunningGpuiPidsByBundlePath(bundlePath) {
   if (targetsWindows) {
     /*
-    CDXC:PlatformSupport 2026-08-02:
+    CDXC:PlatformSupport 2026-09-18:
     Local Windows development can be driven entirely by the WSL bash launcher.
-    Query the two product-specific image names with tasklist instead of using a
-    PowerShell CIM pipeline; no other application ships either executable name,
-    and taskkill below closes the matching main/helper process tree before the
-    staged directory is replaced.
+    Query the product-specific image names with tasklist instead of using a
+    PowerShell CIM pipeline; no other application ships these executable names,
+    and taskkill below closes each matching process before the staged
+    directory is replaced.
+
+    Supersedes the 2026-08-02 two-name list, which omitted
+    ghostex-gpui-runtime.exe. An installed release runs Ghostex.exe only as the
+    CEF-free bootstrap; the long-lived app is the runtime it launches. Killing
+    just the bootstrap and the CEF helpers left the runtime alive, and it
+    respawned its helpers faster than the exit wait polled, so every start
+    failed with "Ghostex did not exit". GhostexEditor.exe is bundled under
+    resources/ and holds open handles inside the install directory, which
+    Windows will not let the installer replace.
     */
     const pids = [];
-    for (const imageName of ['Ghostex.exe', 'ghostex-gpui-cef-helper.exe']) {
+    for (const imageName of [
+      'Ghostex.exe',
+      'ghostex-gpui-runtime.exe',
+      'ghostex-gpui-cef-helper.exe',
+      'GhostexEditor.exe',
+    ]) {
       const result = spawnSync(
         windowsSystemExecutable('tasklist'),
         ['/FI', `IMAGENAME eq ${imageName}`, '/FO', 'CSV', '/NH'],
@@ -853,8 +880,14 @@ function findRunningGpuiPidsByBundlePath(bundlePath) {
 
 function terminateGpuiPids(pids, force) {
   if (targetsWindows) {
+    /*
+    CDXC:PlatformSupport 2026-09-18 WHY:
+    Kill each app process by pid without taskkill /T, the same per-pid close macOS does with process.kill.
+    The runtime is the parent of gxserver.exe, and gxserver parents live wmx.exe terminal sessions, so a tree kill ended every agent running in those sessions.
+    Every app process is already named in findRunningGpuiPidsByBundlePath, so the tree walk was never needed to reach the CEF helpers.
+    */
     for (const pid of pids) {
-      run(windowsSystemExecutable('taskkill'), ['/PID', pid, '/T', ...(force ? ['/F'] : [])], {
+      run(windowsSystemExecutable('taskkill'), ['/PID', pid, ...(force ? ['/F'] : [])], {
         allowFailure: true,
         stdio: 'ignore',
       });
@@ -1147,7 +1180,9 @@ function gxserverControlPlaneStopReason({ actualBuildIdentity, expectedBuildIden
 }
 
 function readBundledGxserverBuildIdentity(stagedAppPath) {
-  const identityPath = path.join(stagedAppPath, 'Contents', 'Resources', 'Web', 'gxserver', 'build-identity.json');
+  const identityPath = isWindows
+    ? path.join(stagedAppPath, 'resources', 'build-identity.json')
+    : path.join(stagedAppPath, 'Contents', 'Resources', 'Web', 'gxserver', 'build-identity.json');
   if (!existsSync(identityPath)) {
     return undefined;
   }
@@ -1156,16 +1191,44 @@ function readBundledGxserverBuildIdentity(stagedAppPath) {
   return buildIdentity || undefined;
 }
 
-function readGxserverToken() {
+/**
+ * CDXC:ServerDaemon 2026-09-18 SEE-ALSO:
+ * Mirrors the state_dir resolution in packages/paths (GhostexStoragePaths): GHOSTEX_HOME wins, native Windows keeps state under %LOCALAPPDATA%\Ghostex\State, and everything else follows XDG.
+ * gxserver's own files sit under <state>/gxserver (server/src/paths.rs), so the token and runtime/server.json are both read from here.
+ */
+function ghostexStateDir() {
   const configuredHome = startEnvironment.GHOSTEX_HOME?.trim();
+  if (configuredHome && path.isAbsolute(configuredHome)) {
+    return path.join(configuredHome, 'state');
+  }
+  if (isWindows) {
+    const localAppData = process.env.LOCALAPPDATA?.trim() || path.join(homedir(), 'AppData', 'Local');
+    return path.join(localAppData, 'Ghostex', 'State');
+  }
   const configuredStateHome = process.env.XDG_STATE_HOME?.trim();
-  const explicitHome = configuredHome && path.isAbsolute(configuredHome) ? configuredHome : undefined;
   const absoluteStateHome =
     configuredStateHome && path.isAbsolute(configuredStateHome) ? configuredStateHome : undefined;
-  const stateDir = explicitHome
-    ? path.join(explicitHome, 'state')
-    : path.join(absoluteStateHome || path.join(homedir(), '.local', 'state'), 'ghostex');
-  const tokenPaths = [path.join(stateDir, 'gxserver', 'auth', 'token')];
+  return path.join(absoluteStateHome || path.join(homedir(), '.local', 'state'), 'ghostex');
+}
+
+/**
+ * CDXC:ServerDaemon 2026-09-18 WHY:
+ * On native Windows the control-plane port follows the terminal backend setting (gpui_local_gxserver_api_port: 58746 for PowerShell, 58744 for WSL), so the fixed macOS port reaches nothing.
+ * Use the port the running gxserver advertises in runtime/server.json rather than re-deriving that setting here; no file means no control plane is running.
+ */
+function windowsGxserverBaseUrl() {
+  const metadataPath = path.join(ghostexStateDir(), 'gxserver', 'runtime', 'server.json');
+  if (!existsSync(metadataPath)) {
+    return undefined;
+  }
+  const port = Number(JSON.parse(readFileSync(metadataPath, 'utf8')).port);
+  return Number.isInteger(port) && port > 0 ? `http://127.0.0.1:${port}` : undefined;
+}
+
+function readGxserverToken() {
+  const configuredHome = startEnvironment.GHOSTEX_HOME?.trim();
+  const explicitHome = configuredHome && path.isAbsolute(configuredHome) ? configuredHome : undefined;
+  const tokenPaths = [path.join(ghostexStateDir(), 'gxserver', 'auth', 'token')];
   if (!explicitHome) {
     // Read-only upgrade compatibility before the app has had a chance to run
     // the storage migration. Current XDG state always wins.
@@ -1195,10 +1258,14 @@ async function waitForGxserverStop(token, timeoutMs) {
 }
 
 async function fetchGxserverJson(pathname, { method, token, timeoutMs = 1000 }) {
+  const baseUrl = isWindows ? windowsGxserverBaseUrl() : gxserverBaseUrl;
+  if (!baseUrl) {
+    return undefined;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${gxserverBaseUrl}${pathname}`, {
+    const response = await fetch(`${baseUrl}${pathname}`, {
       headers: {
         authorization: `Bearer ${token}`,
         'x-gxserver-protocol-version': String(protocolVersion),
