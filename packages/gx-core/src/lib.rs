@@ -53,13 +53,14 @@ pub use crate::sidebar_ui::{
     SIDEBAR_WINDOW_SCOPE_ID,
 };
 pub use crate::sidebar_view::{
-    BrowserTabInput, CloseAfterDoneInput, CollectionView, DelayedSendInput, DelayedSendView,
-    EmptyState, GroupCore, GroupSummary, GroupView, MachineSummary, OrderItem, OrderKind,
-    ProjectContextView, ProjectDiffStats, SectionCollapse, SectionId, SectionView, SessionRow,
-    SessionSortMode, SessionTiming, SessionView, SidebarCollapseState, SidebarHiddenItems,
-    SidebarHostInputs, SidebarInputs, SidebarSettings, SidebarUiState, SidebarView,
-    SidebarViewModel, SpaceView, TagListItem, TagListItemKind, TagPresentation, UnavailableState,
-    WorktreeView, LOCAL_MACHINE_ID, OTHER_SPACE_ID, UNTAGGED_TAG_FILTER,
+    reveal_plan, BrowserTabInput, CloseAfterDoneInput, CollectionView, DelayedSendInput,
+    DelayedSendView, EmptyState, GroupCore, GroupSummary, GroupView, MachineSummary, OrderItem,
+    OrderKind, ProjectContextView, ProjectDiffStats, SectionCollapse, SectionId, SectionView,
+    SessionRow, SessionSortMode, SessionTiming, SessionView, SidebarCollapseState,
+    SidebarHiddenItems, SidebarHostInputs, SidebarInputs, SidebarRevealPlan, SidebarSettings,
+    SidebarUiState, SidebarView, SidebarViewModel, SpaceView, TagListItem, TagListItemKind,
+    TagPresentation, UnavailableState, WorktreeView, LOCAL_MACHINE_ID, OTHER_SPACE_ID,
+    UNTAGGED_TAG_FILTER,
 };
 
 /// The wire types, re-exported so a host needs one dependency.

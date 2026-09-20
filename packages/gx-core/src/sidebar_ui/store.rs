@@ -103,6 +103,12 @@ impl SidebarUiStore {
         self.pending
     }
 
+    /// Owes these writes again. A host calls this when a write it had taken did not reach storage,
+    /// so the next one carries the change rather than dropping it.
+    pub fn mark_pending(&mut self, owed: SidebarPersistSet) {
+        self.pending.merge(owed);
+    }
+
     /// Applies one intent. The state moves at once; the write is owed afterwards.
     pub fn apply(&mut self, intent: SidebarUiIntent) -> SidebarUiOutcome {
         let outcome = self.apply_inner(intent);

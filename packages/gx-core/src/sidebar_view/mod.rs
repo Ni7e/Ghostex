@@ -17,6 +17,7 @@ mod membership;
 mod model;
 mod ordering;
 mod projects;
+mod reveal;
 mod rows;
 mod sections;
 mod session_text;
@@ -31,6 +32,7 @@ pub use inputs::{
     SidebarInputs, SidebarSettings, SidebarUiState, UnavailableState, LOCAL_MACHINE_ID,
 };
 pub use model::SidebarViewModel;
+pub use reveal::{reveal_plan, SidebarRevealPlan};
 pub use spaces::OTHER_SPACE_ID;
 pub use tags::{TagListItem, TagListItemKind, TagPresentation, UNTAGGED_TAG_FILTER};
 pub use view::{

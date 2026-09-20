@@ -93,6 +93,16 @@ impl GhostexGpuiApp {
         match update {
             NativeSidebarUpdate::Snapshot(snapshot) if snapshot.version == 1 => {
                 self.native_sidebar.projection = Some(Arc::new(snapshot));
+                // A reveal is a command the sidebar's own state answers, and the request reaches
+                // this app on the publish that carries it (gx_store/sidebar_ui_commands.rs).
+                if let Some(request) = self
+                    .native_sidebar
+                    .projection
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.reveal_request.clone())
+                {
+                    self.gx_store_note_sidebar_reveal(&request.session_id, request.request_id, cx);
+                }
                 // The values the store's list still borrows moved with this publish, and the
                 // comparison reads it; both run whichever list is drawn.
                 self.gx_store_sidebar_projection_published(cx);

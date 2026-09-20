@@ -364,3 +364,77 @@ fn section_id(value: &str) -> Option<SectionId> {
         _ => return None,
     })
 }
+
+impl GhostexGpuiApp {
+    /// Puts a row on screen: the group, its collection and its heading are opened, Show Hidden and
+    /// the tag filters are lifted where they hide it, and the full list is shown when the compact
+    /// one would still leave it out. The old projection does the same to its own copy, from the
+    /// same request, so the two stay in step.
+    ///
+    /// The Space the row belongs to is not selected here: the Space memory and the follow-active
+    /// rule are still the old projection's (M4c).
+    pub(crate) fn gx_store_note_sidebar_reveal(
+        &mut self,
+        sidebar_session_id: &str,
+        request_id: u64,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.gx_store.sidebar_ui.take_reveal_request(request_id) {
+            return;
+        }
+        let now_ms = super::host::now_ms();
+        let plan = {
+            let store = &self.gx_store;
+            let inputs = &store.sidebar_list.last_inputs;
+            ghostex_gx_core::reveal_plan(&store.core, inputs, sidebar_session_id, now_ms)
+        };
+        let Some(plan) = plan else {
+            return;
+        };
+        let mut intents: Vec<SidebarUiIntent> = Vec::new();
+        if plan.show_hidden {
+            intents.push(SidebarUiIntent::ToggleShowHidden);
+        }
+        if plan.clear_tag_filters {
+            for tag in self
+                .gx_store
+                .sidebar_ui
+                .state()
+                .selected_tag_filters
+                .clone()
+            {
+                intents.push(SidebarUiIntent::ToggleTagFilter { tag });
+            }
+        }
+        if let Some(storage_id) = plan.collapsed_collection_storage_id {
+            intents.push(SidebarUiIntent::ToggleCollectionCollapsed { storage_id });
+        }
+        if plan.collapsed_group {
+            intents.push(SidebarUiIntent::ToggleGroupCollapsed {
+                group_id: plan.group_id.clone(),
+            });
+        }
+        if let Some(section) = plan.collapsed_section {
+            intents.push(SidebarUiIntent::ToggleSection {
+                storage_id: plan.storage_id.clone(),
+                section,
+            });
+        }
+        if plan.expand_list
+            && !self
+                .gx_store
+                .sidebar_ui
+                .state()
+                .collapse
+                .expanded_session_lists
+                .contains(&plan.storage_id)
+        {
+            intents.push(SidebarUiIntent::ToggleSessionListExpanded {
+                storage_id: plan.storage_id.clone(),
+            });
+        }
+        for intent in intents {
+            self.gx_store_apply_sidebar_ui_intent(intent, cx);
+        }
+    }
+}

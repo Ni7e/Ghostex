@@ -55,6 +55,8 @@ pub(crate) struct SidebarUiHost {
     write_retries: u32,
     /// Bumped by every change, so the list can tell whether this state moved without comparing it.
     generation: u64,
+    /// The reveal request this state has already answered.
+    handled_reveal: Option<u64>,
     /// The sidebar's own copy of the project collections, read with the rest of the state.
     pub(super) stored_project_collections: Option<Value>,
     pub(super) counters: SidebarUiCounters,
@@ -72,6 +74,7 @@ impl Default for SidebarUiHost {
             write_scheduled: false,
             write_retries: 0,
             generation: 0,
+            handled_reveal: None,
             stored_project_collections: None,
             counters: SidebarUiCounters::default(),
             last_error: None,
@@ -94,6 +97,15 @@ impl SidebarUiHost {
     /// Moves whenever the state moves.
     pub(super) fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Whether this reveal request is a new one. Answered once, like the renderer's own.
+    pub(super) fn take_reveal_request(&mut self, request_id: u64) -> bool {
+        if self.handled_reveal == Some(request_id) {
+            return false;
+        }
+        self.handled_reveal = Some(request_id);
+        true
     }
 
     pub(crate) fn selected_machine_id(&self) -> &str {

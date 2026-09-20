@@ -12,8 +12,8 @@
 use std::time::{Duration, Instant};
 
 use ghostex_gx_core::{
-    ChangeSummary, ConnectionPhase, MachineId, SidebarInputs, SidebarSettings, SidebarView,
-    SidebarViewModel, UnavailableState,
+    ChangeSummary, ConnectionPhase, FocusState, MachineId, SidebarInputs, SidebarSettings,
+    SidebarView, SidebarViewModel, UnavailableState,
 };
 use serde_json::Value;
 
@@ -66,6 +66,15 @@ pub(crate) struct SidebarList {
     settings: Option<(u64, SidebarSettings)>,
     settings_read_at: Option<Instant>,
     unavailable: UnavailableState,
+    /// Focus as the newest build saw it. The view model compares it too, but only after the whole
+    /// input set has been assembled and compared; this is what the cheap gate reads.
+    last_focus: Option<FocusState>,
+    /// Whether a list has ever been built, so the first update is never skipped.
+    built: bool,
+    /// The newest "which list is drawn" verdict and when it was taken. Asking costs a stat of the
+    /// settings file and a clone of its map under a global lock, and several callers ask per
+    /// publish. Held in a cell because the readers are `&self`.
+    source: std::cell::Cell<Option<(Instant, SidebarListSource)>>,
     /// The clock deadline a timer is already booked for.
     deadline_booked: Option<u64>,
     snapshot_cache: SnapshotCache,
@@ -122,6 +131,20 @@ impl SidebarList {
         settings
     }
 
+    /// Whether an update would find nothing to do. Only the cheap signals are read here; the view
+    /// model still decides what is actually rebuilt.
+    fn nothing_moved(&self, settings: &SidebarSettings, focus: &FocusState, now_ms: u64) -> bool {
+        self.built
+            && !self.dirty
+            && self.changes.is_empty()
+            && self.last_focus.as_ref() == Some(focus)
+            && self.last_inputs.settings == *settings
+            && !self
+                .model
+                .next_deadline_ms()
+                .is_some_and(|deadline| now_ms >= deadline)
+    }
+
     /// Tracks how long the local daemon has been unavailable, which the empty-state copy reads.
     fn note_machine_state(&mut self, loaded: bool, now_ms: u64) {
         if loaded {
@@ -142,14 +165,25 @@ impl GhostexGpuiApp {
         if !self.gx_store.sidebar_ui.restored() {
             return SidebarListSource::Projection;
         }
-        match crate::shared_settings::shared_sidebar_settings_snapshot()
+        let cached = self.gx_store.sidebar_list.source.get();
+        if let Some((taken_at, source)) = cached {
+            if taken_at.elapsed() < SETTINGS_MAX_AGE {
+                return source;
+            }
+        }
+        let source = match crate::shared_settings::shared_sidebar_settings_snapshot()
             .object()
             .get("sidebarListSource")
             .and_then(Value::as_str)
         {
             Some("store") => SidebarListSource::Store,
             _ => SidebarListSource::Projection,
-        }
+        };
+        self.gx_store
+            .sidebar_list
+            .source
+            .set(Some((Instant::now(), source)));
+        source
     }
 
     /// The sidebar's own state moved. The list is rebuilt at once, because a click must show in
@@ -176,6 +210,19 @@ impl GhostexGpuiApp {
         let published = self.native_sidebar.projection.clone();
         let settings = self.gx_store.sidebar_list.settings(published.as_deref());
         let ui_generation = self.gx_store.sidebar_ui.generation();
+        // Nothing the list reads moved: the burst carried no change it draws, no click or publish
+        // marked it, focus stands where it did, no row's own clock has run out, and the settings
+        // read the same. Returning here is what keeps a pump that changed nothing free, rather
+        // than re-assembling the inputs and comparing them field by field inside the view model.
+        if self
+            .gx_store
+            .sidebar_list
+            .nothing_moved(&settings, self.gx_store.core.focus(), now_ms)
+        {
+            self.gx_store.sidebar_list.counters.idle += 1;
+            return;
+        }
+        self.gx_store.sidebar_list.last_focus = Some(self.gx_store.core.focus().clone());
         let changes = std::mem::take(&mut self.gx_store.sidebar_list.changes);
         let dirty = std::mem::take(&mut self.gx_store.sidebar_list.dirty);
         let mut inputs = std::mem::take(&mut self.gx_store.sidebar_list.last_inputs);
@@ -204,14 +251,12 @@ impl GhostexGpuiApp {
             list.counters.updates += 1;
             list.counters.last_update_us = update_us;
             list.counters.update_max_us = list.counters.update_max_us.max(update_us);
-            if !changed && !dirty && changes.is_empty() {
-                list.counters.idle += 1;
-            }
             if changed {
                 list.counters.view_changes += 1;
             }
             list.last_inputs = inputs;
             list.last_built_at_ms = now_ms;
+            list.built = true;
         }
         self.gx_store_prune_sidebar_selection(cx);
         self.gx_store_book_sidebar_deadline(cx);
