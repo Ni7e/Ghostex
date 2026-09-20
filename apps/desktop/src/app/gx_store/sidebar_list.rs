@@ -85,6 +85,10 @@ pub(crate) struct SidebarListCounters {
     /// with none is a booking that should not have been made.
     pub(crate) wake_rows_moved: u64,
     pub(crate) wake_rows_moved_max: u64,
+    /// What servicing a wake costs now that it relabels rows in place instead of rebuilding the
+    /// list. The pair to compare against `installUs`.
+    pub(crate) last_relabel_us: u64,
+    pub(crate) relabel_max_us: u64,
     pub(crate) update_max_us: u64,
     pub(crate) install_max_us: u64,
     pub(crate) last_update_us: u64,
@@ -218,12 +222,6 @@ impl SidebarList {
             .flat_map(|group| group.core.sessions.iter())
             .filter_map(|session| session.row.next_label_deadline(now_ms, show_relative_time))
             .min_by_key(|deadline| deadline.at_ms())
-    }
-
-    /// How many drawn times would read differently now than in the installed list.
-    pub(super) fn moved_label_count(&self, now_ms: u64) -> usize {
-        self.snapshot_cache
-            .moved_label_count(self.model.view(), now_ms)
     }
 
     /// Whether a card draws the relative time at all (`hideLastActiveTimeOnSessionCards`).
@@ -555,6 +553,9 @@ impl GhostexGpuiApp {
                     settings: &list.last_inputs.settings,
                     hidden_items: &list.last_inputs.ui.hidden_items,
                     host: &host,
+                    collapsed_groups: &list.last_inputs.ui.collapse.collapsed_groups,
+                    show_hidden: list.last_inputs.ui.show_hidden,
+                    selected_tag_filters: &list.last_inputs.ui.selected_tag_filters,
                     now_ms,
                 },
                 &mut list.snapshot_cache,
@@ -567,6 +568,51 @@ impl GhostexGpuiApp {
         list.counters.last_install_us = install_us;
         list.counters.install_max_us = list.counters.install_max_us.max(install_us);
         self.install_native_sidebar_snapshot(std::sync::Arc::new(snapshot), cx);
+    }
+
+    /// Replaces the rows whose drawn time reads differently in the installed list, in place, and
+    /// returns how many moved. Nothing else of the list is rebuilt or resynced.
+    ///
+    /// CDXC:Sidebar 2026-09-20 WHY:
+    /// A wake moves one or two label strings and never the order, the sections, a menu or a group,
+    /// so none of what `install_native_sidebar_snapshot` does for a real install (the scroll
+    /// scope, the reveal, the disclosure animations, the open menu, the project view scope
+    /// options) applies to it. The measured cost of servicing a wake through the full build was
+    /// two milliseconds, ninety-three times in four minutes, on a sidebar nobody was touching.
+    fn gx_store_relabel_sidebar_rows(&mut self, cx: &mut gpui::Context<Self>) -> usize {
+        let started = Instant::now();
+        let now = now_ms();
+        let moved = {
+            let list = &mut self.gx_store.sidebar_list;
+            list.snapshot_cache.relabelled_rows(list.model.view(), now)
+        };
+        if moved.is_empty() {
+            return 0;
+        }
+        let Some(installed) = self.native_sidebar.snapshot.as_mut() else {
+            return moved.len();
+        };
+        // Cheap now that a group's menu and its header buttons are behind their own `Arc`s: this
+        // copies the group records and the section lists, not a few hundred kilobytes of menu.
+        let installed = std::sync::Arc::make_mut(installed);
+        for (session_id, element) in &moved {
+            for group in &mut installed.groups {
+                if let Some(row) = group
+                    .sessions
+                    .iter_mut()
+                    .find(|row| row.session_id == *session_id)
+                {
+                    *row = element.clone();
+                    break;
+                }
+            }
+        }
+        cx.notify();
+        let relabel_us = started.elapsed().as_micros() as u64;
+        let list = &mut self.gx_store.sidebar_list;
+        list.counters.last_relabel_us = relabel_us;
+        list.counters.relabel_max_us = list.counters.relabel_max_us.max(relabel_us);
+        moved.len()
     }
 
     /// Books one timer for the next moment a row moves on its own (a new session stops leading the
@@ -626,14 +672,12 @@ impl GhostexGpuiApp {
                     // How many rows a wake actually moved is what tells a rate of one a second
                     // apart: one row ticking is a countdown or a fresh row doing its job, and a
                     // wake that moved none is a booking that should not have been made.
-                    let moved = this.gx_store.sidebar_list.moved_label_count(now_ms());
+                    let moved = this.gx_store_relabel_sidebar_rows(cx);
                     let list = &mut this.gx_store.sidebar_list;
                     list.counters.wake_rows_moved += moved as u64;
                     list.counters.wake_rows_moved_max =
                         list.counters.wake_rows_moved_max.max(moved as u64);
-                    if moved > 0 {
-                        this.gx_store_install_sidebar_list(cx);
-                    } else {
+                    if moved == 0 {
                         this.gx_store.sidebar_list.counters.installs_skipped += 1;
                     }
                     this.gx_store_book_sidebar_deadline(cx);
@@ -647,6 +691,11 @@ impl GhostexGpuiApp {
 impl SidebarList {
     fn next_deadline_ms(&self) -> Option<u64> {
         self.model.next_deadline_ms()
+    }
+
+    /// Where the newest install's time went.
+    pub(super) fn install_phases(&self) -> super::sidebar_snapshot::InstallPhases {
+        self.snapshot_cache.phases
     }
 
     /// The menu-host generation the installed list was built with, if one is installed.

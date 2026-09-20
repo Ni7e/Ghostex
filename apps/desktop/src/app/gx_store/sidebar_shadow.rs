@@ -432,6 +432,7 @@ impl GhostexGpuiApp {
         };
         let source = self.gx_store_sidebar_list_source();
         let deadline_kind = self.gx_store.sidebar_list.deadline_kind;
+        let phases = self.gx_store.sidebar_list.install_phases();
         self.gx_store.diagnostics.sidebar_summary(
             &counters,
             &list,
@@ -440,6 +441,7 @@ impl GhostexGpuiApp {
             pending,
             groups,
             rows,
+            phases,
         );
         let ui = self.gx_store.sidebar_ui.counters;
         self.gx_store.diagnostics.sidebar_ui_summary(&ui);

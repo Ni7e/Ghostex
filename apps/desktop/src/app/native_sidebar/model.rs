@@ -38,8 +38,12 @@ pub(crate) struct NativeSidebarGroup {
     pub(crate) hidden_session_count: usize,
     pub(crate) show_list_toggle: bool,
     pub(crate) hover_actions_expanded: bool,
-    pub(crate) menu: Value,
-    pub(crate) header_actions: Vec<Value>,
+    /// Behind an `Arc` because they are the heavy part of a group and never change on their own:
+    /// the header buttons carry the agent launcher, whose rows each hold a logo data URL of up to
+    /// eight kilobytes. A snapshot is cloned whole on every patch and whenever a clock wake moves
+    /// one row's label, and those two must not copy a few hundred kilobytes of menu JSON.
+    pub(crate) menu: Arc<Value>,
+    pub(crate) header_actions: Arc<Vec<Value>>,
     pub(crate) sections: Vec<NativeSidebarSection>,
     pub(crate) title: String,
     pub(crate) is_active: bool,
@@ -149,7 +153,7 @@ pub(crate) struct NativeSidebarCollection {
     pub(crate) contains_active_session: bool,
     pub(crate) working_count: usize,
     pub(crate) attention_count: usize,
-    pub(crate) menu: Value,
+    pub(crate) menu: Arc<Value>,
 }
 
 #[derive(Deserialize)]

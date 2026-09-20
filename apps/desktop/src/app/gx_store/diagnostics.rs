@@ -389,6 +389,7 @@ impl GxStoreDiagnostics {
         pending: bool,
         groups: usize,
         rows: usize,
+        phases: super::sidebar_snapshot::InstallPhases,
     ) {
         if *counters == self.sidebar_summary_written
             || self
@@ -465,6 +466,27 @@ impl GxStoreDiagnostics {
                     "installMaxUs": list.install_max_us,
                     "compareUs": counters.last_compare_us,
                     "compareMaxUs": counters.compare_max_us,
+                    "relabelUs": list.last_relabel_us,
+                    "relabelMaxUs": list.relabel_max_us,
+                },
+                // Where the newest install's time went, and what the caches saved it. A rise in
+                // installUs says which part of the build it came from rather than inviting a
+                // guess: the shared key, the rows, the group menus, the collection menus, the more
+                // menu, or the tail that copies what a publish still owns.
+                "install": {
+                    "keyUs": phases.key_us,
+                    "rowsUs": phases.rows_us,
+                    "groupsUs": phases.groups_us,
+                    "collectionsUs": phases.collections_us,
+                    "moreMenuUs": phases.more_menu_us,
+                    "tailUs": phases.tail_us,
+                    "rowsBuilt": phases.rows_built,
+                    "rowsReused": phases.rows_reused,
+                    "groupsBuilt": phases.groups_built,
+                    "groupsReused": phases.groups_reused,
+                    "collectionsBuilt": phases.collections_built,
+                    "collectionsReused": phases.collections_reused,
+                    "moreMenuBuilt": phases.more_menu_built,
                 },
             }),
         );

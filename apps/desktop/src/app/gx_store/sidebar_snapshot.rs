@@ -83,8 +83,32 @@ struct CachedGroupMenus {
     /// The collection a project belongs to decides its Add to Group ticks, and it is not part of
     /// `GroupCore`.
     collection_id: Option<String>,
+    menu: Arc<Value>,
+    header_actions: Arc<Vec<Value>>,
+}
+
+/// A collection's menu, kept until the collection or one of its groups moves.
+///
+/// CDXC:Sidebar 2026-09-20 WHY:
+/// The Tag Sessions page builds one batch command per enabled tag over every agent session of the
+/// collection, so a collection of sixty sessions and fourteen tags is over eight hundred command
+/// objects, and Close All Sessions is a list of every id. Rebuilding that per install was the
+/// most expensive thing in the build after the group menus.
+struct CachedCollectionMenu {
+    /// The groups the collection draws, held so `Arc::ptr_eq` stays a real answer.
+    cores: Vec<Arc<GroupCore>>,
+    /// Everything of the collection itself the menu reads.
+    identity: (String, String, Vec<String>, bool),
+    menu: Arc<Value>,
+}
+
+/// The more menu, kept until what it reads moves. It is one panel, but it walks the tag list and
+/// every drawn group.
+struct CachedMoreMenu {
+    /// The drawn project group ids, whether any of them is expanded, Show Hidden, and the ticked
+    /// filters: everything it reads beyond the shared key.
+    identity: (u64, bool, bool, Vec<String>),
     menu: Value,
-    header_actions: Vec<Value>,
 }
 
 /// What every cached menu was built from besides the group or row it belongs to. A difference in
@@ -98,41 +122,88 @@ struct MenuKey {
     context: u64,
 }
 
-/// Keeps the built rows and group menus between publishes.
+/// Keeps the built rows and menus between publishes.
 #[derive(Default)]
 pub(super) struct SnapshotCache {
     rows: HashMap<String, CachedRow>,
     groups: HashMap<String, CachedGroupMenus>,
+    collections: HashMap<String, CachedCollectionMenu>,
+    more_menu: Option<CachedMoreMenu>,
     /// What the cached menus were built from. A settings change does not touch a row or a group
     /// in the view model, so nothing else would invalidate them.
     key: Option<MenuKey>,
+    /// Where the newest install's time went, and how much of it the caches saved.
+    pub(super) phases: InstallPhases,
+}
+
+/// Per-phase microseconds and cache hits of one install, so a rise in `installUs` says which part
+/// of the build it came from rather than inviting a guess.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct InstallPhases {
+    pub(super) key_us: u64,
+    pub(super) rows_us: u64,
+    pub(super) groups_us: u64,
+    pub(super) collections_us: u64,
+    pub(super) more_menu_us: u64,
+    pub(super) tail_us: u64,
+    pub(super) rows_built: u64,
+    pub(super) rows_reused: u64,
+    pub(super) groups_built: u64,
+    pub(super) groups_reused: u64,
+    pub(super) collections_built: u64,
+    pub(super) collections_reused: u64,
+    pub(super) more_menu_built: bool,
 }
 
 impl SnapshotCache {
-    /// Whether any drawn row's time would read differently now than in the list that is installed.
+    /// Rebuilds the rows whose drawn time reads differently now, keeping everything else.
     ///
     /// CDXC:Sidebar 2026-09-20 WHY:
-    /// A clock wake books a rebuild for the moment a label changes, but it books one for the
-    /// EARLIEST of them, and a list of two hundred rows has one coming due most seconds while only
-    /// that row's label moves. Installing on every wake rebuilt the whole list, resynced the
-    /// disclosures and repainted the sidebar for nothing. This asks the question the install would
-    /// have answered, over the same cached labels, without building anything.
-    pub(super) fn moved_label_count(&self, view: &SidebarView, now_ms: u64) -> usize {
-        view.groups
+    /// A clock wake changes at most a handful of label strings on rows the installed list already
+    /// holds; it changes no order, no section, no menu and no group. Servicing one through
+    /// `snapshot_from_view` rebuilt the whole list, and the live run measured ninety-three of a
+    /// hundred and twenty-eight installs coming from a wake, which is a fifth of a second of main
+    /// thread per minute spent on relative times on an idle sidebar. A row is a copy of its
+    /// element with two strings replaced, and the list it sits in is otherwise shared.
+    ///
+    /// Returns nothing when no drawn time moved, which is what tells the caller to install
+    /// nothing at all.
+    pub(super) fn relabelled_rows(
+        &mut self,
+        view: &SidebarView,
+        now_ms: u64,
+    ) -> Vec<(String, Arc<NativeSidebarSession>)> {
+        let mut moved: Vec<(String, Arc<NativeSidebarSession>)> = Vec::new();
+        for session in view
+            .groups
             .iter()
             .flat_map(|group| group.core.sessions.iter())
-            .filter(|session| {
-                let row = &session.row;
-                match self.rows.get(&row.sidebar_session_id) {
-                    // A row with no element yet is one the install has to build anyway.
-                    None => true,
-                    Some(cached) => {
-                        cached.timer_label != row.timer_label(now_ms)
-                            || cached.last_interaction_label != row.last_interaction_label(now_ms)
-                    }
-                }
-            })
-            .count()
+        {
+            let row = &session.row;
+            let timer_label = row.timer_label(now_ms);
+            let last_interaction_label = row.last_interaction_label(now_ms);
+            let Some(cached) = self.rows.get_mut(&row.sidebar_session_id) else {
+                continue;
+            };
+            if cached.timer_label == timer_label
+                && cached.last_interaction_label == last_interaction_label
+            {
+                continue;
+            }
+            let mut next = (*cached.element).clone();
+            insert_optional(&mut next.details, "timerLabel", timer_label.clone());
+            insert_optional(
+                &mut next.details,
+                "lastInteractionLabel",
+                last_interaction_label.clone(),
+            );
+            let next = Arc::new(next);
+            cached.timer_label = timer_label;
+            cached.last_interaction_label = last_interaction_label;
+            cached.element = next.clone();
+            moved.push((row.sidebar_session_id.clone(), next));
+        }
+        moved
     }
 }
 
@@ -232,6 +303,10 @@ pub(super) struct SnapshotInput<'a> {
     pub(super) settings: &'a SidebarSettings,
     pub(super) hidden_items: &'a SidebarHiddenItems,
     pub(super) host: &'a MenuHost,
+    /// What the more menu reads beyond the shared key.
+    pub(super) collapsed_groups: &'a std::collections::BTreeSet<String>,
+    pub(super) show_hidden: bool,
+    pub(super) selected_tag_filters: &'a [String],
     /// The clock the time labels are formatted against.
     pub(super) now_ms: u64,
 }
@@ -254,17 +329,31 @@ pub(super) fn snapshot_from_view(
         .map(|group| (group.group_id.as_str(), group))
         .collect();
 
-    let key = MenuKey {
-        settings: input.settings.clone(),
-        hidden_items: input.hidden_items.clone(),
-        host: input.host.clone(),
-        context: menus.context_fingerprint(),
-    };
-    if cache.key.as_ref() != Some(&key) {
-        cache.key = Some(key);
+    let started = std::time::Instant::now();
+    cache.phases = InstallPhases::default();
+    // Compared before it is built, so a hit does not clone the settings, the hidden items and the
+    // host's agent and command lists on every install just to throw them away.
+    let context = menus.context_fingerprint();
+    let same_key = cache.key.as_ref().is_some_and(|key| {
+        key.context == context
+            && key.settings == *input.settings
+            && key.hidden_items == *input.hidden_items
+            && key.host == *input.host
+    });
+    if !same_key {
+        cache.key = Some(MenuKey {
+            settings: input.settings.clone(),
+            hidden_items: input.hidden_items.clone(),
+            host: input.host.clone(),
+            context,
+        });
         cache.rows.clear();
         cache.groups.clear();
+        cache.collections.clear();
+        cache.more_menu = None;
     }
+    cache.phases.key_us = started.elapsed().as_micros() as u64;
+    let phase = std::time::Instant::now();
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     let groups: Vec<NativeSidebarGroup> = view
         .groups
@@ -294,8 +383,28 @@ pub(super) fn snapshot_from_view(
     cache
         .groups
         .retain(|group_id, _| drawn.contains(group_id.as_str()));
+    cache.phases.groups_us = phase.elapsed().as_micros() as u64 - cache.phases.rows_us;
+    let phase = std::time::Instant::now();
+    let collections: Vec<NativeSidebarCollection> = view
+        .collections
+        .iter()
+        .map(|collection| native_collection(collection, view, menus, cache))
+        .collect();
+    let drawn_collections: std::collections::HashSet<&str> = view
+        .collections
+        .iter()
+        .map(|collection| collection.collection_id.as_str())
+        .collect();
+    cache
+        .collections
+        .retain(|collection_id, _| drawn_collections.contains(collection_id.as_str()));
+    cache.phases.collections_us = phase.elapsed().as_micros() as u64;
+    let phase = std::time::Instant::now();
+    let more_menu = more_menu(view, input, menus, cache);
+    cache.phases.more_menu_us = phase.elapsed().as_micros() as u64;
+    let phase = std::time::Instant::now();
 
-    NativeSidebarSnapshot {
+    let snapshot = NativeSidebarSnapshot {
         version: 1,
         // The daemon document the old projection published. Carried rather than derived, and
         // deliberately not part of what decides an install: nothing the renderer draws reads it
@@ -346,11 +455,7 @@ pub(super) fn snapshot_from_view(
             )
             .collect(),
         spaces_enabled: view.spaces_enabled,
-        collections: view
-            .collections
-            .iter()
-            .map(|collection| native_collection(collection, menus))
-            .collect(),
+        collections,
         order: view
             .order
             .iter()
@@ -362,12 +467,51 @@ pub(super) fn snapshot_from_view(
                 id: item.id.clone(),
             })
             .collect(),
-        more_menu: menu_to_json(&menus.more_menu()),
+        more_menu,
         // The two hotkey labels are the hotkey settings formatted for the current platform, not a
         // menu; they move with the rest of the HUD in M5.
         search_shortcut: published.search_shortcut.clone(),
         commands_shortcut: published.commands_shortcut.clone(),
+    };
+    cache.phases.tail_us = phase.elapsed().as_micros() as u64;
+    snapshot
+}
+
+/// The sidebar's own menu, kept until one of the four things it reads beyond the shared key moves.
+fn more_menu(
+    view: &SidebarView,
+    input: &SnapshotInput<'_>,
+    menus: &SidebarMenus<'_>,
+    cache: &mut SnapshotCache,
+) -> Value {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut any_expanded = false;
+    for group in &view.groups {
+        if group.core.group_id == ghostex_gx_core::CHATS_GROUP_ID {
+            continue;
+        }
+        group.core.group_id.hash(&mut hasher);
+        any_expanded |= !input.collapsed_groups.contains(&group.core.group_id);
     }
+    let identity = (
+        hasher.finish(),
+        any_expanded,
+        input.show_hidden,
+        input.selected_tag_filters.to_vec(),
+    );
+    if let Some(cached) = &cache.more_menu {
+        if cached.identity == identity {
+            return cached.menu.clone();
+        }
+    }
+    let menu = menu_to_json(&menus.more_menu());
+    cache.phases.more_menu_built = true;
+    cache.more_menu = Some(CachedMoreMenu {
+        identity,
+        menu: menu.clone(),
+    });
+    menu
 }
 
 fn native_group(
@@ -427,19 +571,23 @@ fn group_menus(
     group: &GroupView,
     menus: &SidebarMenus<'_>,
     cache: &mut SnapshotCache,
-) -> (Value, Vec<Value>) {
+) -> (Arc<Value>, Arc<Vec<Value>>) {
     let core = &group.core;
     if let Some(cached) = cache.groups.get(&core.group_id) {
         if Arc::ptr_eq(&cached.core, core) && cached.collection_id == group.collection_id {
+            cache.phases.groups_reused += 1;
             return (cached.menu.clone(), cached.header_actions.clone());
         }
     }
-    let menu = menu_to_json(&menus.project_menu(group));
-    let header_actions: Vec<Value> = menus
-        .header_actions(group)
-        .iter()
-        .map(ghostex_gx_core::MenuItem::to_json)
-        .collect();
+    cache.phases.groups_built += 1;
+    let menu = Arc::new(menu_to_json(&menus.project_menu(group)));
+    let header_actions = Arc::new(
+        menus
+            .header_actions(group)
+            .iter()
+            .map(ghostex_gx_core::MenuItem::to_json)
+            .collect::<Vec<Value>>(),
+    );
     cache.groups.insert(
         core.group_id.clone(),
         CachedGroupMenus {
@@ -508,7 +656,9 @@ fn project_context(group: &GroupView, published: Option<&NativeSidebarGroup>) ->
 
 fn native_collection(
     collection: &CollectionView,
+    view: &SidebarView,
     menus: &SidebarMenus<'_>,
+    cache: &mut SnapshotCache,
 ) -> NativeSidebarCollection {
     NativeSidebarCollection {
         awake_count: collection.awake_count as u64,
@@ -521,8 +671,58 @@ fn native_collection(
         contains_active_session: collection.contains_active_session,
         working_count: collection.working_count,
         attention_count: collection.attention_count,
-        menu: menu_to_json(&menus.collection_menu(collection)),
+        menu: collection_menu(collection, view, menus, cache),
     }
+}
+
+/// One collection's menu, kept until the collection itself or any of the groups whose rows it acts
+/// on moves.
+fn collection_menu(
+    collection: &CollectionView,
+    view: &SidebarView,
+    menus: &SidebarMenus<'_>,
+    cache: &mut SnapshotCache,
+) -> Arc<Value> {
+    let cores: Vec<Arc<GroupCore>> = collection
+        .group_ids
+        .iter()
+        .filter_map(|group_id| view.group(group_id))
+        .map(|group| group.core.clone())
+        .collect();
+    let identity = (
+        collection.collection_id.clone(),
+        collection.color.clone(),
+        collection.group_ids.clone(),
+        cache.key.as_ref().is_some_and(|key| {
+            key.hidden_items
+                .collection_keys
+                .contains(&collection.storage_id)
+        }),
+    );
+    if let Some(cached) = cache.collections.get(&collection.collection_id) {
+        if cached.identity == identity
+            && cached.cores.len() == cores.len()
+            && cached
+                .cores
+                .iter()
+                .zip(&cores)
+                .all(|(held, core)| Arc::ptr_eq(held, core))
+        {
+            cache.phases.collections_reused += 1;
+            return cached.menu.clone();
+        }
+    }
+    cache.phases.collections_built += 1;
+    let menu = Arc::new(menu_to_json(&menus.collection_menu(collection)));
+    cache.collections.insert(
+        collection.collection_id.clone(),
+        CachedCollectionMenu {
+            cores,
+            identity,
+            menu: menu.clone(),
+        },
+    );
+    menu
 }
 
 fn session_element(
@@ -547,9 +747,11 @@ fn session_element(
             &timer_label,
             &last_interaction_label,
         ) {
+            cache.phases.rows_reused += 1;
             return cached.element.clone();
         }
     }
+    cache.phases.rows_built += 1;
     let element = Arc::new(build_session(
         group,
         session,
