@@ -5,12 +5,19 @@
 //! The values live in the `preferences` table of the client-storage database, under the keys the
 //! TypeScript sidebar wrote them under, because an installation that upgrades keeps its collapsed
 //! groups, its Space, its hidden items and its filters, and a build from before the port must
-//! still read them. The database is opened here on a background thread with its own connection:
-//! the service thread writes the same file through the QuickJS bridge, and SQLite's WAL journal
-//! plus a busy timeout is what makes two writers safe. Every write is applied inside one immediate
-//! transaction, so a collapse envelope is never read by one writer while the other replaces it.
+//! still read them. This is a second door into that database: the client-storage service in
+//! QuickJS owns the first one. The door is deliberate, because the whole point of the port is that
+//! the sidebar stops needing QuickJS to be alive, but it means the service's admission checks do
+//! not run here, so the entry bound of the catalog is enforced below instead. The database is
+//! opened on a background thread with its own connections, kept between calls, and every write is
+//! applied inside one immediate transaction, so a collapse envelope is never read by one writer
+//! while the other replaces it.
+//!
+//! SEE-ALSO: packages/client-storage/catalog.ts (the entry and store bounds this mirrors),
+//! packages/chat-runtime/src/storage.rs (the service's own door to the same file).
 
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use ghostex_gx_core::{
@@ -24,8 +31,13 @@ use serde_json::Value;
 
 /// How long a read or a write waits for the service thread's own transaction.
 const BUSY_TIMEOUT: Duration = Duration::from_millis(500);
+/// `maxEntryBytes` of the stores these keys belong to (`packages/client-storage/catalog.ts`). The
+/// service in QuickJS refuses a larger entry, and this door has to refuse it too, or a payload
+/// this side stored would be one the other side cannot write and the two would disagree about
+/// what the user has.
+const MAX_ENTRY_BYTES: usize = 64 * 1024;
 
-/// The sidebar state as storage holds it, plus the raw collapse envelope a write is applied to.
+/// The sidebar state as storage holds it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct StoredSidebarUi {
     pub(super) collapse: SidebarCollapseState,
@@ -50,6 +62,19 @@ impl SidebarUiWrite {
     }
 }
 
+/// The two connections, opened once and kept. A connection that errors is dropped, so the next
+/// call opens a fresh one rather than reusing a handle whose file was replaced.
+#[derive(Default)]
+struct Connections {
+    read: Option<Connection>,
+    write: Option<Connection>,
+}
+
+fn connections() -> &'static Mutex<Connections> {
+    static CONNECTIONS: OnceLock<Mutex<Connections>> = OnceLock::new();
+    CONNECTIONS.get_or_init(|| Mutex::new(Connections::default()))
+}
+
 pub(super) fn client_storage_path() -> PathBuf {
     crate::shared_settings::ghostex_storage_paths()
         .state_dir
@@ -67,12 +92,26 @@ fn machine_tab_key() -> String {
 /// Reads everything the sidebar state is seeded from. `Err` is a fixed word saying which step
 /// failed, never the database's own message, which can carry the file's path.
 pub(super) fn read_sidebar_ui_state() -> Result<StoredSidebarUi, &'static str> {
-    let connection = open(OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let scoped = read_preference(&connection, &collapse_key())?;
-    let legacy = read_preference(&connection, COLLAPSE_STORAGE_KEY)?;
-    let collections_raw = read_preference(&connection, PROJECT_COLLECTIONS_STORAGE_KEY)?;
-    let machine_tab = read_preference(&connection, &machine_tab_key())?;
-    let hidden = read_preference(&connection, HIDDEN_ITEMS_STORAGE_KEY)?;
+    let mut held = connections()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.read.is_none() {
+        held.read = Some(open(OpenFlags::SQLITE_OPEN_READ_ONLY)?);
+    }
+    let connection = held.read.as_ref().expect("opened above");
+    let result = read_all(connection);
+    if result.is_err() {
+        held.read = None;
+    }
+    result
+}
+
+fn read_all(connection: &Connection) -> Result<StoredSidebarUi, &'static str> {
+    let scoped = read_preference(connection, &collapse_key())?;
+    let legacy = read_preference(connection, COLLAPSE_STORAGE_KEY)?;
+    let collections_raw = read_preference(connection, PROJECT_COLLECTIONS_STORAGE_KEY)?;
+    let machine_tab = read_preference(connection, &machine_tab_key())?;
+    let hidden = read_preference(connection, HIDDEN_ITEMS_STORAGE_KEY)?;
     Ok(StoredSidebarUi {
         collapse: collapse_state_from_storage(
             scoped.as_deref(),
@@ -93,11 +132,28 @@ pub(super) fn write_sidebar_ui_state(write: &SidebarUiWrite) -> Result<(), &'sta
     if write.is_empty() {
         return Ok(());
     }
-    let connection = open(OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    let mut held = connections()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.write.is_none() {
+        held.write = Some(open(OpenFlags::SQLITE_OPEN_READ_WRITE)?);
+    }
+    let connection = held.write.as_ref().expect("opened above");
+    let result = write_in_transaction(connection, write);
+    if result.is_err() {
+        held.write = None;
+    }
+    result
+}
+
+fn write_in_transaction(
+    connection: &Connection,
+    write: &SidebarUiWrite,
+) -> Result<(), &'static str> {
     connection
         .execute_batch("BEGIN IMMEDIATE")
         .map_err(|_| "begin")?;
-    let result = write_inside_transaction(&connection, write);
+    let result = write_inside_transaction(connection, write);
     if result.is_ok() {
         connection.execute_batch("COMMIT").map_err(|_| "commit")?;
     } else {
@@ -144,6 +200,9 @@ fn read_preference(connection: &Connection, key: &str) -> Result<Option<String>,
 }
 
 fn write_preference(connection: &Connection, key: &str, raw: &str) -> Result<(), &'static str> {
+    if raw.len() > MAX_ENTRY_BYTES {
+        return Err("tooLarge");
+    }
     connection
         .execute(
             "INSERT INTO preferences VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",

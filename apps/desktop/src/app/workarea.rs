@@ -60,11 +60,14 @@ impl GhostexGpuiApp {
     }
 
     /// Synchronous variant for the quit path; see `flush_gpui_workspace_shell_state`. It serializes the current state itself, so it never depends on the dirty mark, and it writes the focus state file a local selection may not have reached yet.
-    pub(crate) fn flush_shell_layout_state(&self) {
+    pub(crate) fn flush_shell_layout_state(&mut self) {
         flush_gpui_workspace_shell_state(self);
         persist_gpui_gxserver_presentation_focus_state(
             &self.sidebar_gxserver_presentation_focus_state,
         );
+        // The sidebar's own state is written on a debounce, so the last clicks before a quit are
+        // still only in memory (gx_store/sidebar_ui.rs).
+        self.gx_store_flush_sidebar_ui_write();
     }
 
     pub(crate) fn project_scoped_workarea_availability(&self) -> ProjectScopedWorkareaAvailability {

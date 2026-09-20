@@ -43,9 +43,13 @@ fn persisted_only(
     state
 }
 
-/// Another writer's change to the two fields the sidebar state does not own.
-fn with_foreign_fields(raw: &str, step: usize) -> String {
-    let mut envelope: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
+/// The other writer, as the TypeScript sidebar actually writes: it serializes its WHOLE in-memory
+/// object, so the envelope is replaced rather than edited. Its copy of the owned fields mirrors the
+/// same commands and is therefore the state as of the last write, which is exactly what the
+/// difference this state carries is measured against.
+fn foreign_whole_object_write(base: &ghostex_gx_core::SidebarCollapseState, step: usize) -> String {
+    let mirrored = collapse_into_storage(base, None);
+    let mut envelope: serde_json::Value = serde_json::from_str(&mirrored).unwrap_or_default();
     if let Some(state) = envelope
         .pointer_mut("/state")
         .and_then(|state| state.as_object_mut())
@@ -187,10 +191,11 @@ fn main() -> ExitCode {
         format!("{legacy:?}"),
     );
 
-    // What a write produces for the state that was just read: the owned fields re-derived, the two
-    // unowned ones carried through untouched apart from the duplicate the memory normalizer drops.
+    // What a write produces for the state that was just read: the owned fields re-derived and the
+    // two unowned ones carried through byte for byte, duplicate entry included, because editing
+    // another writer's value is not this writer's business.
     let written = collapse_into_storage(&read, Some(STORED_COLLAPSE));
-    const EXPECTED: &str = r#"{"state":{"collapsedGroupsById":{"project:alpha":true},"collapsedProjectCollectionsByKey":{"local:c1":true},"collapsedProjectSessionSectionsById":{"alpha":{"pinned":true,"sessions":false}},"expandedProjectSessionListsById":{"alpha":true},"expandedSessionCardHoverActionsById":{"beta":true},"isReferenceChatsCollapsed":true,"recentSessionIdsBySpace":{"local":{"s1":["combined-session:alpha:one","combined-session:alpha:two"]}},"selectedSpaceIdBySectionKey":{"local":"s1"}},"version":3}"#;
+    const EXPECTED: &str = r#"{"state":{"collapsedGroupsById":{"project:alpha":true},"collapsedProjectCollectionsByKey":{"local:c1":true},"collapsedProjectSessionSectionsById":{"alpha":{"pinned":true,"sessions":false}},"expandedProjectSessionListsById":{"alpha":true},"expandedSessionCardHoverActionsById":{"beta":true},"isReferenceChatsCollapsed":true,"recentSessionIdsBySpace":{"local":{"s1":["combined-session:alpha:one","combined-session:alpha:one","combined-session:alpha:two"]}},"selectedSpaceIdBySectionKey":{"local":"s1"}},"version":3}"#;
     check(
         "write keeps the unowned fields and the version",
         written == EXPECTED,
@@ -201,6 +206,51 @@ fn main() -> ExitCode {
         collapse_into_storage(&Default::default(), None)
             == r#"{"state":{"collapsedGroupsById":{},"collapsedProjectCollectionsByKey":{},"collapsedProjectSessionSectionsById":{},"expandedProjectSessionListsById":{},"expandedSessionCardHoverActionsById":{},"isReferenceChatsCollapsed":false,"recentSessionIdsBySpace":{},"selectedSpaceIdBySectionKey":{}},"version":3}"#,
         collapse_into_storage(&Default::default(), None),
+    );
+
+    // A version 2 envelope is readable and undamaged; a write must upgrade it and keep the two
+    // fields this state does not own, exactly as `writeSidebarUiCollapseState` does.
+    const STORED_V2: &str = r#"{"state":{"collapsedGroupsById":{"project:alpha":true},"isReferenceChatsCollapsed":true,"recentSessionIdsBySpace":{"local":{"s1":["combined-session:alpha:one"]}}},"version":2}"#;
+    let from_v2 = collapse_state_from_storage(Some(STORED_V2), None, None);
+    let mut moved_v2 = from_v2.clone();
+    moved_v2.collapsed_groups.insert("project:beta".to_string());
+    let upgraded =
+        SidebarCollapseDiff::between(&from_v2, &moved_v2).apply(Some(STORED_V2), &moved_v2);
+    let upgraded_value: serde_json::Value = serde_json::from_str(&upgraded).unwrap_or_default();
+    check(
+        "a version 2 envelope is upgraded, not replaced",
+        upgraded_value.get("version") == Some(&serde_json::json!(3))
+            && upgraded_value.pointer("/state/isReferenceChatsCollapsed")
+                == Some(&serde_json::Value::Bool(true))
+            && upgraded_value.pointer("/state/recentSessionIdsBySpace/local/s1")
+                == STORED_V2
+                    .parse::<serde_json::Value>()
+                    .ok()
+                    .as_ref()
+                    .and_then(|stored| stored.pointer("/state/recentSessionIdsBySpace/local/s1"))
+            && collapse_state_from_storage(Some(&upgraded), None, None)
+                .collapsed_groups
+                .len()
+                == 2,
+        upgraded.clone(),
+    );
+    // An envelope from a build this one cannot read keeps its own object rather than losing it.
+    const STORED_FUTURE: &str =
+        r#"{"state":{"collapsedGroupsById":{},"somethingNewer":{"kept":1}},"version":9}"#;
+    let future = collapse_state_from_storage(Some(STORED_FUTURE), None, None);
+    let mut moved_future = future.clone();
+    moved_future
+        .collapsed_groups
+        .insert("project:beta".to_string());
+    let carried = SidebarCollapseDiff::between(&future, &moved_future)
+        .apply(Some(STORED_FUTURE), &moved_future);
+    check(
+        "an unknown version keeps the fields it carried",
+        serde_json::from_str::<serde_json::Value>(&carried)
+            .ok()
+            .and_then(|value| value.pointer("/state/somethingNewer/kept").cloned())
+            == Some(serde_json::json!(1)),
+        carried,
     );
 
     let hidden = hidden_items_from_storage(Some(
@@ -280,10 +330,10 @@ fn main() -> ExitCode {
             base = store.state().collapse.clone();
             writes += 1;
         }
-        // Every so often another writer touches the two fields this state does not own, the way
+        // Every so often the other writer replaces the whole envelope with its own object, the way
         // the TypeScript sidebar still does while the port runs.
         if step % 17 == 16 {
-            raw = with_foreign_fields(&raw, step);
+            raw = foreign_whole_object_write(&base, step);
             foreign_writes += 1;
         }
         if outcome.changed && !pending.is_empty() {

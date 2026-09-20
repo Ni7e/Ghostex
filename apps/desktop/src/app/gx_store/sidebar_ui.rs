@@ -7,6 +7,15 @@
 //! state and the list is rebuilt from it in the same frame. The write to client storage happens
 //! afterwards, off the UI thread, and the list never waits for it. The same command is still sent
 //! to the old projection, which keeps its own copy for the menus it still owns (M4c).
+//!
+//! CDXC:Sidebar 2026-09-20 WHY:
+//! The state moves whatever the list source is, because the comparison between the two lists is
+//! only worth anything while both are fed by the same clicks. The WRITE is another matter and runs
+//! only while the store's list is the drawn one. Until M4c the TypeScript sidebar is still a
+//! writer of the same three keys, and it serializes its whole in-memory object with no re-read and
+//! no transaction, on every focus change; two writers with one of them blind is how a value that
+//! exists on only one side disappears. So a build with the switch off keeps exactly one writer,
+//! and turning the switch on is what hands the keys over.
 
 use std::time::{Duration, Instant};
 
@@ -27,9 +36,15 @@ const WRITE_DEBOUNCE: Duration = Duration::from_millis(400);
 /// How often a write that failed books its own retry before it waits for the next click instead.
 /// Nothing is lost when it stops: the change stays owed and the next intent carries it.
 const MAX_WRITE_RETRIES: u32 = 3;
-/// How long a failed read waits before it is tried again. Nothing the user does is lost while it
-/// fails: the state still moves, only the write is refused until the state is known.
-const READ_RETRY: Duration = Duration::from_secs(10);
+/// How long a failed read waits before it is tried again, and how many times. Nothing the user
+/// does is lost while it fails: the state still moves and the clicks are queued, only the write is
+/// refused until the state is known.
+const READ_RETRY: Duration = Duration::from_secs(5);
+/// How often a failed read is retried before the run gives up on the stored state.
+const MAX_READ_RETRIES: u32 = 6;
+/// Most clicks held while the first read is on its way. A burst larger than this is a user holding
+/// a key through a database that will not open, and the list they end up with is the stored one.
+const MAX_QUEUED_INTENTS: usize = 64;
 
 /// What happened since the app started. Memory only; the log lines are built from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -38,6 +53,11 @@ pub(crate) struct SidebarUiCounters {
     pub(crate) writes: u64,
     pub(crate) write_failures: u64,
     pub(crate) read_failures: u64,
+    /// Intents that were applied before the stored state landed and were applied again on top of
+    /// it, so a click in the first moments is not thrown away.
+    pub(crate) replayed_intents: u64,
+    /// Clicks dropped because the queue was full while the read kept failing.
+    pub(crate) dropped_intents: u64,
     pub(crate) write_max_us: u64,
 }
 
@@ -48,7 +68,11 @@ pub(crate) struct SidebarUiHost {
     /// empty collapse state over the user's own.
     restored: bool,
     restoring: bool,
-    retry_after: Option<Instant>,
+    read_retries: u32,
+    retry_scheduled: bool,
+    /// Intents applied before the read landed, in the order they were applied, so they can be
+    /// applied again on top of the stored state rather than being lost under it.
+    queued_intents: Vec<SidebarUiIntent>,
     /// What the last read or write left in storage, so the next write carries only the difference.
     base_collapse: SidebarCollapseState,
     write_scheduled: bool,
@@ -69,7 +93,9 @@ impl Default for SidebarUiHost {
             store: SidebarUiStore::new(),
             restored: false,
             restoring: false,
-            retry_after: None,
+            read_retries: 0,
+            retry_scheduled: false,
+            queued_intents: Vec::new(),
             base_collapse: SidebarCollapseState::default(),
             write_scheduled: false,
             write_retries: 0,
@@ -121,6 +147,8 @@ impl SidebarUiHost {
         moved
     }
 
+    /// Takes the stored state as the truth and applies whatever the user did while it was on its
+    /// way on top of it.
     fn adopt(&mut self, stored: StoredSidebarUi) {
         let state = ghostex_gx_core::SidebarUiState {
             selected_machine_id: stored.selected_machine_id,
@@ -135,6 +163,10 @@ impl SidebarUiHost {
         self.store.restore(state);
         self.restored = true;
         self.generation += 1;
+        for intent in std::mem::take(&mut self.queued_intents) {
+            self.counters.replayed_intents += 1;
+            self.store.apply(intent);
+        }
     }
 
     /// The write the pending changes amount to, what it was computed against, and the set to owe
@@ -160,14 +192,12 @@ impl SidebarUiHost {
 }
 
 impl GhostexGpuiApp {
-    /// Reads the sidebar's own state from client storage. Runs once; a failed read is retried on
-    /// the next call, which the sidebar bootstrap makes whenever its transport is synced.
+    /// Reads the sidebar's own state from client storage. Runs once; a failed read books its own
+    /// retry, because the only other caller runs inside the first second and would otherwise be
+    /// the last attempt the run ever makes.
     pub(crate) fn gx_store_restore_sidebar_ui(&mut self, cx: &mut gpui::Context<Self>) {
         let ui = &mut self.gx_store.sidebar_ui;
-        if ui.restored || ui.restoring {
-            return;
-        }
-        if ui.retry_after.is_some_and(|at| Instant::now() < at) {
+        if ui.restored || ui.restoring || ui.retry_scheduled {
             return;
         }
         ui.restoring = true;
@@ -189,10 +219,28 @@ impl GhostexGpuiApp {
                     Err(code) => {
                         ui.counters.read_failures += 1;
                         ui.last_error = Some(code);
-                        ui.retry_after = Some(Instant::now() + READ_RETRY);
                         this.gx_store.diagnostics.sidebar_ui_read_failed(code);
+                        this.gx_store_schedule_sidebar_ui_read_retry(cx);
                     }
                 }
+            });
+        })
+        .detach();
+    }
+
+    /// Books another read after a failure, a bounded number of times.
+    fn gx_store_schedule_sidebar_ui_read_retry(&mut self, cx: &mut gpui::Context<Self>) {
+        let ui = &mut self.gx_store.sidebar_ui;
+        if ui.retry_scheduled || ui.read_retries >= MAX_READ_RETRIES {
+            return;
+        }
+        ui.read_retries += 1;
+        ui.retry_scheduled = true;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(READ_RETRY).await;
+            let _ = this.update(cx, |this, cx| {
+                this.gx_store.sidebar_ui.retry_scheduled = false;
+                this.gx_store_restore_sidebar_ui(cx);
             });
         })
         .detach();
@@ -206,6 +254,15 @@ impl GhostexGpuiApp {
     ) -> bool {
         let ui = &mut self.gx_store.sidebar_ui;
         ui.counters.intents += 1;
+        if !ui.restored {
+            // The stored state is still on its way, and it replaces this one when it lands, so the
+            // click is kept to be applied again on top of it.
+            if ui.queued_intents.len() < MAX_QUEUED_INTENTS {
+                ui.queued_intents.push(intent.clone());
+            } else {
+                ui.counters.dropped_intents += 1;
+            }
+        }
         let outcome = ui.store.apply(intent);
         if !outcome.changed {
             return false;
@@ -218,8 +275,19 @@ impl GhostexGpuiApp {
         true
     }
 
+    /// Whether this app writes the sidebar's own state at all. Only the drawn list's owner writes:
+    /// the TypeScript sidebar is still a blind whole-object writer of the same keys until M4c.
+    pub(crate) fn gx_store_sidebar_ui_writes(&self) -> bool {
+        self.gx_store_sidebar_list_source() == super::SidebarListSource::Store
+    }
+
     /// Books one write for everything the intents since the last one changed.
     fn gx_store_schedule_sidebar_ui_write(&mut self, cx: &mut gpui::Context<Self>) {
+        // The change stays owed while this is off, so turning the switch on writes everything the
+        // session accumulated rather than only what happens after it.
+        if !self.gx_store_sidebar_ui_writes() {
+            return;
+        }
         let ui = &mut self.gx_store.sidebar_ui;
         // Nothing is written before the read landed: the difference would be measured against an
         // empty state and would erase what the user has.
@@ -230,9 +298,12 @@ impl GhostexGpuiApp {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(WRITE_DEBOUNCE).await;
             let Ok(Some((write, base, owed))) = this.update(cx, |this, _| {
-                let ui = &mut this.gx_store.sidebar_ui;
-                ui.write_scheduled = false;
-                let (write, base, owed) = ui.take_write();
+                this.gx_store.sidebar_ui.write_scheduled = false;
+                // The switch can move inside the debounce; the owed change simply stays owed.
+                if !this.gx_store_sidebar_ui_writes() {
+                    return None;
+                }
+                let (write, base, owed) = this.gx_store.sidebar_ui.take_write();
                 (!write.is_empty()).then_some((write, base, owed))
             }) else {
                 return;
@@ -274,5 +345,35 @@ impl GhostexGpuiApp {
             });
         })
         .detach();
+    }
+}
+
+impl GhostexGpuiApp {
+    /// Stores whatever the debounce still owes, synchronously, on the quit path. Without it the
+    /// last four hundred milliseconds of clicks never reach the database: the task that would have
+    /// written them dies with the app.
+    pub(crate) fn gx_store_flush_sidebar_ui_write(&mut self) {
+        if !self.gx_store_sidebar_ui_writes() || !self.gx_store.sidebar_ui.restored() {
+            return;
+        }
+        let (write, base, owed) = self.gx_store.sidebar_ui.take_write();
+        if write.is_empty() {
+            return;
+        }
+        let ui = &mut self.gx_store.sidebar_ui;
+        match write_sidebar_ui_state(&write) {
+            Ok(()) => {
+                ui.counters.writes += 1;
+                if write.collapse.is_some() {
+                    ui.base_collapse = base;
+                }
+            }
+            Err(code) => {
+                ui.counters.write_failures += 1;
+                ui.last_error = Some(code);
+                ui.store.mark_pending(owed);
+                self.gx_store.diagnostics.sidebar_ui_write_failed(code);
+            }
+        }
     }
 }

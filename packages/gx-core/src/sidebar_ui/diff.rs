@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Map, Value};
 
-use super::persist::{collapse_into_storage, COLLAPSE_STORAGE_VERSION};
+use super::persist::{collapse_into_storage, stored_state_object, COLLAPSE_STORAGE_VERSION};
 use crate::sidebar_view::{SectionCollapse, SidebarCollapseState};
 
 /// The keys one burst added and removed, per collapse field.
@@ -94,23 +94,18 @@ impl SidebarCollapseDiff {
             && self.selected_space_by_section.is_empty()
     }
 
-    /// The envelope to store: the stored one with this difference applied. A stored value that
-    /// cannot be read is replaced by one built from `fallback`, so a damaged payload does not keep
-    /// a user's clicks from being saved.
+    /// The envelope to store: the stored one with this difference applied, stamped with the
+    /// current version.
+    ///
+    /// Every envelope that carries a `state` object is carried forward, whatever version it names.
+    /// A version this build reads (the one before it wrote `selectedSpaceIdBySectionKey`) must
+    /// keep the fields this state does not own, exactly as `writeSidebarUiCollapseState` upgrades
+    /// it; and a version from a newer build, which this one cannot read, is the payload where
+    /// replacing the object would cost the most. Only a value that is not an object, or carries no
+    /// `state` object at all, is replaced by one built from `fallback`, so a damaged payload does
+    /// not keep a user's clicks from being saved.
     pub fn apply(&self, stored: Option<&str>, fallback: &SidebarCollapseState) -> String {
-        let Some(mut object) = stored
-            .and_then(|raw| match serde_json::from_str::<Value>(raw) {
-                Ok(Value::Object(envelope)) => Some(envelope),
-                _ => None,
-            })
-            .filter(|envelope| {
-                envelope.get("version").and_then(Value::as_u64) == Some(COLLAPSE_STORAGE_VERSION)
-            })
-            .and_then(|envelope| match envelope.get("state") {
-                Some(Value::Object(state)) => Some(state.clone()),
-                _ => None,
-            })
-        else {
+        let Some(mut object) = stored.and_then(stored_state_object) else {
             return collapse_into_storage(fallback, None);
         };
         apply_set(&mut object, "collapsedGroupsById", &self.collapsed_groups);

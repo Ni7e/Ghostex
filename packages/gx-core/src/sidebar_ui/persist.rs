@@ -36,8 +36,6 @@ pub const COLLAPSE_STORAGE_VERSION: u64 = 3;
 
 /// Versions a read accepts, as `SUPPORTED_SIDEBAR_UI_COLLAPSE_STORAGE_VERSIONS` does.
 const SUPPORTED_VERSIONS: [u64; 2] = [2, 3];
-/// `MAX_RECENT_SIDEBAR_SPACE_SESSION_IDS`, only so a preserved memory stays inside its own bound.
-const MAX_RECENT_SPACE_SESSION_IDS: usize = 20;
 
 /// `getSidebarUiCollapseStateStorageKey` and `getSidebarMachineTabStorageKey`: the unscoped key,
 /// `:window:`, and the scope id escaped the way `encodeURIComponent` escapes it.
@@ -91,13 +89,7 @@ pub fn collapse_state_from_storage(
 /// The collapse envelope to write: the owned fields from `state`, every other field of a stored
 /// envelope kept as it was, and the current version.
 pub fn collapse_into_storage(state: &SidebarCollapseState, existing: Option<&str>) -> String {
-    let mut object = existing
-        .and_then(parse_object)
-        .and_then(|envelope| match envelope.get("state") {
-            Some(Value::Object(state)) => Some(state.clone()),
-            _ => None,
-        })
-        .unwrap_or_default();
+    let mut object = existing.and_then(stored_state_object).unwrap_or_default();
     object.insert(
         "collapsedGroupsById".to_string(),
         flag_map(&state.collapsed_groups),
@@ -128,17 +120,16 @@ pub fn collapse_into_storage(state: &SidebarCollapseState, existing: Option<&str
                 .collect(),
         ),
     );
-    // The two fields this state does not own. A stored envelope keeps whatever it had; a first
-    // write spells out the defaults a reader would otherwise normalize to, so the object an older
-    // build reads back is the one it would have written itself.
+    // The two fields this state does not own travel untouched: normalizing them here would be
+    // this writer quietly editing another writer's value, and the reader on either side already
+    // normalizes what it finds. A first write spells out the defaults a reader would otherwise
+    // normalize to, so the object an older build reads back is the one it would have written.
     object
         .entry("isReferenceChatsCollapsed".to_string())
         .or_insert(Value::Bool(false));
-    let memory = object
-        .remove("recentSessionIdsBySpace")
-        .map(|memory| normalize_space_memory(&memory))
-        .unwrap_or_else(|| Value::Object(Map::new()));
-    object.insert("recentSessionIdsBySpace".to_string(), memory);
+    object
+        .entry("recentSessionIdsBySpace".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
     json!({ "state": Value::Object(object), "version": COLLAPSE_STORAGE_VERSION }).to_string()
 }
 
@@ -177,6 +168,14 @@ pub fn hidden_items_into_storage(items: &SidebarHiddenItems) -> String {
         "groupIds": items.group_ids,
     })
     .to_string()
+}
+
+/// The `state` object of a stored envelope, whatever version it names.
+pub(super) fn stored_state_object(raw: &str) -> Option<Map<String, Value>> {
+    match parse_object(raw)?.get("state") {
+        Some(Value::Object(state)) => Some(state.clone()),
+        _ => None,
+    }
 }
 
 fn parse_object(raw: &str) -> Option<Map<String, Value>> {
@@ -276,44 +275,6 @@ fn normalize_selected_spaces(value: Option<&Value>) -> BTreeMap<String, String> 
             Some((section_key.clone(), space_id.to_string()))
         })
         .collect()
-}
-
-/// `normalizeStoredRecentSessionIdsBySpace`, applied to a value this state only carries through,
-/// so a damaged memory is dropped here rather than handed back to a reader that would drop it.
-fn normalize_space_memory(value: &Value) -> Value {
-    let Value::Object(sections) = value else {
-        return Value::Object(Map::new());
-    };
-    let mut normalized = Map::new();
-    for (section_key, spaces) in sections {
-        let (Some(spaces), false) = (spaces.as_object(), section_key.is_empty()) else {
-            continue;
-        };
-        let mut by_space = Map::new();
-        for (space_id, session_ids) in spaces {
-            let (Some(session_ids), false) = (session_ids.as_array(), space_id.is_empty()) else {
-                continue;
-            };
-            let mut unique: Vec<Value> = Vec::new();
-            for session_id in session_ids {
-                let Some(session_id) = session_id.as_str().filter(|id| !id.is_empty()) else {
-                    continue;
-                };
-                if unique.iter().any(|seen| seen.as_str() == Some(session_id)) {
-                    continue;
-                }
-                unique.push(Value::String(session_id.to_string()));
-            }
-            unique.truncate(MAX_RECENT_SPACE_SESSION_IDS);
-            if !unique.is_empty() {
-                by_space.insert(space_id.clone(), Value::Array(unique));
-            }
-        }
-        if !by_space.is_empty() {
-            normalized.insert(section_key.clone(), Value::Object(by_space));
-        }
-    }
-    Value::Object(normalized)
 }
 
 /// The collapsed collections a payload written before the scoped key existed carried: they lived
