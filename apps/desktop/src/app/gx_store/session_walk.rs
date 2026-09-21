@@ -223,7 +223,7 @@ impl GhostexGpuiApp {
     /// Scrolls the row into view. While the selection is still moving the scroll is instant (see
     /// `reveal_native_session_bounds`) and the landing row is revealed again at the settle, which
     /// flashes it as a reveal of a visible row always did; a single press animates at once.
-    fn gx_store_reveal_walk_row(&mut self, row_id: &str) {
+    pub(super) fn gx_store_reveal_walk_row(&mut self, row_id: &str) {
         self.native_sidebar.scroll_animation = None;
         self.native_sidebar.pending_reveal = Some(NativeSidebarRevealRequest {
             session_id: row_id.to_string(),

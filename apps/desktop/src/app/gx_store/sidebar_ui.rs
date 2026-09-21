@@ -331,6 +331,39 @@ impl GhostexGpuiApp {
         intent: SidebarUiIntent,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
+        let changed = self.gx_store_apply_sidebar_ui_intent_unbuilt(intent, cx);
+        if changed {
+            self.gx_store_sidebar_state_changed(cx);
+        }
+        changed
+    }
+
+    /// Applies several intents in order and rebuilds the list ONCE, after the last. Returns how
+    /// many of them moved the state. A reveal and a slot jump are several intents that the user
+    /// sees as one change, and a rebuild per intent was a full build of the list for each.
+    pub(crate) fn gx_store_apply_sidebar_ui_intents(
+        &mut self,
+        intents: Vec<SidebarUiIntent>,
+        cx: &mut gpui::Context<Self>,
+    ) -> usize {
+        let mut changed = 0;
+        for intent in intents {
+            if self.gx_store_apply_sidebar_ui_intent_unbuilt(intent, cx) {
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.gx_store_sidebar_state_changed(cx);
+        }
+        changed
+    }
+
+    /// One intent, its queueing before the stored state lands and its write, without the rebuild.
+    pub(super) fn gx_store_apply_sidebar_ui_intent_unbuilt(
+        &mut self,
+        intent: SidebarUiIntent,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
         let ui = &mut self.gx_store.sidebar_ui;
         ui.counters.intents += 1;
         if !ui.restored {
@@ -350,7 +383,6 @@ impl GhostexGpuiApp {
         if !ui.store.pending().is_empty() {
             self.gx_store_schedule_sidebar_ui_write(cx);
         }
-        self.gx_store_sidebar_state_changed(cx);
         true
     }
 

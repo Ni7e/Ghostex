@@ -2127,8 +2127,8 @@ impl GhostexGpuiApp {
                 CDXC:CommandPalette 2026-09-19 WHY:
                 Numbered session-slot rows are delegated to SidebarApp as nativeHotkey messages because its rendered sidebar row order resolves `focusSessionSlot1..9`. Previous/Next Session walk the native sidebar's rows in Rust (gx_store/session_walk.rs), which supersedes their delegation of 2026-06-26-23:20. Previous/Next Tab in Pane stays on GPUI tab-cycle routing, and jump-to-project ids must not enter this bounce path because SidebarApp forwards those back to native.
 
-                CDXC:Hotkeys 2026-06-26-23:42:
-                Project jump rows also depend on SidebarApp's rendered project order, but they must use the dedicated `gpuiProjectSlotHotkey` host message instead of `nativeHotkey` so SidebarApp resolves the slot locally without forwarding the same `jumpToProject*` id back to GPUI.
+                CDXC:Hotkeys 2026-09-21 WHY:
+                Project jump rows resolve against the drawn project order. With the store's list drawn the store resolves and performs the whole jump (gx_store/sidebar_slot_jump.rs); with the switch off they still go to SidebarApp as the dedicated `gpuiProjectSlotHotkey` host message, never `nativeHotkey`, which SidebarApp would forward back to GPUI. Supersedes the 2026-06-26-23:42 note that SidebarApp always resolved them.
                 */
                 if self.run_gpui_terminal_toolbar_hotkey_action(action_id, window, cx) {
                     return;
@@ -2379,17 +2379,18 @@ impl GhostexGpuiApp {
                 if let Some(slot_number) =
                     gpui_command_palette_project_slot_hotkey_number(action_id)
                 {
-                    // The store applies what the jump does to the sidebar's own state before the
-                    // message goes on, because the old runtime no longer writes that state and the
-                    // reveal that follows this jump is the store's (gx_store/sidebar_ui_paths.rs).
-                    self.gx_store_note_project_slot_hotkey(slot_number, cx);
-                    self.dispatch_gpui_sidebar_host_message(
-                        serde_json::json!({
-                            "type": "gpuiProjectSlotHotkey",
-                            "slotNumber": slot_number,
-                        }),
-                        cx,
-                    );
+                    // The store plans and performs the whole jump when its list is drawn; with the
+                    // switch off it applies the jump's state and the old page, which draws the
+                    // list, does the focus and the reveal (gx_store/sidebar_slot_jump.rs).
+                    if !self.gx_store_run_project_slot_hotkey(slot_number, cx) {
+                        self.dispatch_gpui_sidebar_host_message(
+                            serde_json::json!({
+                                "type": "gpuiProjectSlotHotkey",
+                                "slotNumber": slot_number,
+                            }),
+                            cx,
+                        );
+                    }
                     return;
                 }
                 let Some(modal) = gpui_app_modal_kind_for_hotkey_action_id(action_id) else {

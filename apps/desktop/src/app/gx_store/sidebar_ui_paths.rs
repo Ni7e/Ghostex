@@ -15,8 +15,9 @@
 //! - **`gpuiProjectSlotHotkey`.** A THIRD route, neither of the two sidebar-command envelopes. It
 //!   deletes the jumped-to project's collapsed flag and, with `showLessForExpandedProjectJumps` on,
 //!   its session list's expanded flag, and that second one fought the Rust reveal that follows the
-//!   same jump over one key on every cmd+1..9. The jump itself (the focus, the reveal request) is
-//!   still the old runtime's and the message is still forwarded; what moves here is the state.
+//!   same jump over one key on every cmd+1..9. What moves here is the state, in either position of
+//!   the list-source switch; the jump itself (the focus and the reveal) is `sidebar_slot_jump.rs`
+//!   with the store's list drawn, and the old page's with the switch off.
 //!
 //! **The counters that prove these fire** are `spaceMemoryWrites`, `spaceForgets` and `slotJumps`
 //! on `gxStore.sidebarUi`. A run in which the user pressed cmd+1 on a collapsed project and
@@ -93,19 +94,24 @@ impl GhostexGpuiApp {
         }
     }
 
-    /// A project slot hotkey, on its way to the old runtime. Applies the two deletions the jump
-    /// makes to this state; the message still goes on, because the focus and the reveal request it
-    /// produces are not this state's.
+    /// A project slot hotkey: the two deletions the jump makes to this state and the
+    /// multi-selection its selection clears, applied in one batch. Returns the plan, which
+    /// `sidebar_slot_jump.rs` performs the rest of when the store's list is drawn.
     ///
     /// The slot names the Nth drawn project, and the list it is resolved against is this store's
     /// whichever list the renderer installs: the two agree group for group (the sidebar shadow's
     /// standing gate), and this state is the only writer of the collapse key in either position of
     /// the switch, so answering only for one of them would silently stop storing the jump.
+    ///
+    /// The multi-selection is cleared by the SELECTION the jump makes, not by the jump, so a slot
+    /// naming a project with no drawn row leaves it alone (`ProjectSlotPlan::intents`). That is what
+    /// `runNativeProjectSlotHotkey` does, where `selectNativeSidebarSession` is inside
+    /// `if (session)`.
     pub(crate) fn gx_store_note_project_slot_hotkey(
         &mut self,
         slot_number: u8,
         cx: &mut gpui::Context<Self>,
-    ) {
+    ) -> Option<ghostex_gx_core::ProjectSlotPlan> {
         let plan = {
             let store = &self.gx_store;
             ghostex_gx_core::project_slot_plan(
@@ -114,33 +120,9 @@ impl GhostexGpuiApp {
                 &store.sidebar_list.last_inputs.settings,
                 u32::from(slot_number),
             )
-        };
-        let Some(plan) = plan else {
-            return;
-        };
+        }?;
         self.gx_store.sidebar_ui.counters.slot_jumps += 1;
-        // The multi-selection is cleared by the SELECTION the jump makes, not by the jump, so a
-        // slot naming a project with no drawn row leaves it alone. That is what
-        // `runNativeProjectSlotHotkey` does, where `selectNativeSidebarSession` is inside
-        // `if (session)`; clearing it unconditionally would have been a new difference in the
-        // course of closing declared difference 4.
-        if plan.has_session {
-            self.gx_store_apply_sidebar_ui_intent(
-                SidebarUiIntent::SetSelectedSessions {
-                    session_ids: Vec::new(),
-                },
-                cx,
-            );
-        }
-        if !plan.expand_group {
-            return;
-        }
-        self.gx_store_apply_sidebar_ui_intent(
-            SidebarUiIntent::ExpandProjectForSlotJump {
-                group_id: plan.group_id,
-                collapse_session_list_storage_id: plan.collapse_session_list_storage_id,
-            },
-            cx,
-        );
+        self.gx_store_apply_sidebar_ui_intents(plan.intents(), cx);
+        Some(plan)
     }
 }

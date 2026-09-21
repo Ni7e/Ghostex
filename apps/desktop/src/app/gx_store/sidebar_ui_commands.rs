@@ -392,6 +392,22 @@ impl GhostexGpuiApp {
         if !fresh {
             return;
         }
+        self.gx_store_apply_sidebar_reveal(sidebar_session_id, cx);
+    }
+
+    /// The reveal itself, for a request a publish carried and for the slot hotkey's jump, which
+    /// asks for it in the key's own frame. Returns how many changes to the sidebar's own state it
+    /// made, or `None` when there is no plan (the row is nowhere, or on a machine the store holds
+    /// no rows for).
+    ///
+    /// The plan and the changes it makes are gx-core's (`reveal_plan`, `SidebarRevealPlan::intents`),
+    /// applied in one batch so a reveal that opens a group, a heading and the full list rebuilds
+    /// the list once rather than three times. The count excludes the Space memory.
+    pub(crate) fn gx_store_apply_sidebar_reveal(
+        &mut self,
+        sidebar_session_id: &str,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<usize> {
         let now_ms = super::host::now_ms();
         let plan = {
             let store = &self.gx_store;
@@ -402,71 +418,35 @@ impl GhostexGpuiApp {
                 sidebar_session_id,
                 now_ms,
             )
-        };
-        let Some(plan) = plan else {
-            return;
-        };
-        let mut intents: Vec<SidebarUiIntent> = Vec::new();
-        // The machine before everything else: every other field of the plan is keyed by that
-        // machine's section, so applying the Space or a collapse first would write them under the
-        // section the user is leaving. `rememberNativeSidebarFocus` switches the tab the same way.
-        if let Some(machine_id) = plan.select_machine {
-            intents.push(SidebarUiIntent::SelectMachine { machine_id });
-        }
-        // The Space next: it decides which groups the section draws at all, which is what the
-        // TypeScript does by running `rememberNativeSidebarFocus` before everything else.
-        if let Some(space_id) = plan.select_space {
-            intents.push(SidebarUiIntent::SelectSpace { space_id });
-        }
-        if plan.show_hidden {
-            intents.push(SidebarUiIntent::ToggleShowHidden);
-        }
-        if plan.clear_tag_filters {
-            for tag in self
-                .gx_store
-                .sidebar_ui
-                .state()
-                .selected_tag_filters
-                .clone()
-            {
-                intents.push(SidebarUiIntent::ToggleTagFilter { tag });
+        }?;
+        let mut changed = 0;
+        for intent in plan.intents(self.gx_store.sidebar_ui.state()) {
+            if self.gx_store_apply_sidebar_ui_intent_unbuilt(intent, cx) {
+                changed += 1;
             }
-        }
-        if let Some(storage_id) = plan.collapsed_collection_storage_id {
-            intents.push(SidebarUiIntent::ToggleCollectionCollapsed { storage_id });
-        }
-        if plan.collapsed_group {
-            intents.push(SidebarUiIntent::ToggleGroupCollapsed {
-                group_id: plan.group_id.clone(),
-            });
-        }
-        if let Some(section) = plan.collapsed_section {
-            intents.push(SidebarUiIntent::ToggleSection {
-                storage_id: plan.storage_id.clone(),
-                section,
-            });
-        }
-        if plan.expand_list
-            && !self
-                .gx_store
-                .sidebar_ui
-                .state()
-                .collapse
-                .expanded_session_lists
-                .contains(&plan.storage_id)
-        {
-            intents.push(SidebarUiIntent::ToggleSessionListExpanded {
-                storage_id: plan.storage_id.clone(),
-            });
-        }
-        for intent in intents {
-            self.gx_store_apply_sidebar_ui_intent(intent, cx);
         }
         // `rememberNativeSidebarFocus` runs FIRST inside `applyNativeSidebarReveal` and remembers
         // the row under the Space it belongs to, whatever the follow setting says. The plan carries
-        // that Space, resolved from the same group the rest of the plan was built from.
+        // that Space, resolved from the same group the rest of the plan was built from. It is in
+        // the same batch, so a reveal with Spaces on does not rebuild the list a second time for
+        // a memory the list does not draw.
+        let mut remembered = false;
         if let Some(resolved) = plan.remember_space {
-            self.gx_store_remember_space_session(&resolved, sidebar_session_id, cx);
+            remembered = self.gx_store_apply_sidebar_ui_intent_unbuilt(
+                SidebarUiIntent::RememberSpaceSession {
+                    section_key: resolved.section_key,
+                    space_id: resolved.space_id,
+                    sidebar_session_id: sidebar_session_id.to_string(),
+                },
+                cx,
+            );
+            if remembered {
+                self.gx_store.sidebar_ui.counters.space_memory_writes += 1;
+            }
         }
+        if changed > 0 || remembered {
+            self.gx_store_sidebar_state_changed(cx);
+        }
+        Some(changed)
     }
 }

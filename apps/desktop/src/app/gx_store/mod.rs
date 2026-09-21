@@ -33,7 +33,8 @@
 //! key, the debounced push and the echo funnel for any client-owned document;
 //! `sidebar_ui_paths.rs` holds the three routes into the sidebar's own state that are NOT
 //! sidebar commands (the per-Space session memory, the Space-editor delete, and the project slot
-//! hotkey); `diagnostics.rs` writes the log lines.
+//! hotkey), and `sidebar_slot_jump.rs` the rest of that hotkey's jump, its focus and its reveal;
+//! `diagnostics.rs` writes the log lines.
 
 mod burst;
 mod client_document;
@@ -68,6 +69,7 @@ mod sidebar_scratch_compare;
 mod sidebar_shadow;
 mod sidebar_shadow_compare;
 mod sidebar_snapshot;
+mod sidebar_slot_jump;
 mod sidebar_snooze;
 mod sidebar_state_actions;
 mod sidebar_ui;

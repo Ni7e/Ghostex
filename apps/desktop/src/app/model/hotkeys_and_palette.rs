@@ -109,8 +109,8 @@ pub(crate) fn gpui_command_palette_sidebar_slot_hotkey_action_id(action_id: &str
 
 pub(crate) fn gpui_command_palette_project_slot_hotkey_number(action_id: &str) -> Option<u8> {
     /*
-    CDXC:Hotkeys 2026-06-26-23:42:
-    Project slot hotkeys are rendered-sidebar project commands. GPUI must delegate `jumpToProject1` through `jumpToProject9` to SidebarApp because Rust does not own the rendered project row order and must avoid the `nativeHotkey` bounce path that SidebarApp forwards back to native.
+    CDXC:Hotkeys 2026-09-21 WHY:
+    Project slot hotkeys are rendered-sidebar project commands. The store owns the rendered project order when its list is drawn and performs `jumpToProject1` through `jumpToProject9` itself (gx_store/sidebar_slot_jump.rs); with the switch off they are delegated to SidebarApp, never through the `nativeHotkey` bounce path it forwards back to native. Supersedes the 2026-06-26-23:42 note that Rust did not own that order.
     */
     match action_id {
         "jumpToProject1" => Some(1),
